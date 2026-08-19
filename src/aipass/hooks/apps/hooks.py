@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-08-11
+# Modified: 2026-08-18
 # =============================================
 
 """
@@ -207,7 +207,12 @@ def main() -> int:
     if handle_command(args[0], args[1:]):
         return 0
 
-    console.print(f"Unknown command: {args[0]}. Try: drone @hooks --help")
+    # Name what was actually rejected, not just args[0]. "hooksound sideways" used
+    # to report "Unknown command: hooksound" — and hooksound IS a known command, so
+    # the caller was told the wrong token was wrong. A renamed sub-verb read as a
+    # missing top-level command. Exit stays 1; only the wording was ever dishonest.
+    attempted = " ".join(args[:3])
+    console.print(f"Unknown command: {attempted}. Try: drone @hooks --help")
     return 1
 
 

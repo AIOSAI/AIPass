@@ -117,12 +117,17 @@ def _print_digest(inbox_data: Dict[str, Any], local_data: Dict[str, Any]) -> Non
         console.print("  Recently completed:  [dim]None[/dim]")
     console.print()
 
-    warning("ESCALATIONS NEEDED")
+    # Warn only when there is something to escalate. This header used to fire
+    # unconditionally, so every quiet digest wrote "ESCALATIONS NEEDED" to stderr
+    # above a stdout body reading "None - all clear" — a standing false alarm for
+    # anything capturing stderr.
     escalations = get_escalations(messages)
     if escalations:
+        warning("ESCALATIONS NEEDED")
         for msg in escalations:
             console.print(f"  ! {msg.get('from', 'unknown')}: {str(msg.get('subject', ''))[:50]}")
     else:
+        console.print("[bold cyan]ESCALATIONS[/bold cyan]")
         console.print("  [dim]None - all clear[/dim]")
     console.print()
 

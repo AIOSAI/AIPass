@@ -27,6 +27,7 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 
 def print_introspection():
@@ -89,6 +90,21 @@ def _display_rates(results: list, is_scan: bool) -> None:
     if flagged:
         console.print(f"  [yellow]Flagged: {len(flagged)}[/yellow]")
 
+    # A snapshot reports what an earlier scan measured. With no current
+    # samples every file reads 0 lines/min, which is pixel-identical to a
+    # genuinely quiet fleet — the zero has to name its own cause, or silence
+    # means two different things.
+    if not is_scan:
+        ages = [r["age_seconds"] for r in results if r.get("age_seconds") is not None]
+        if ages:
+            console.print(f"  [dim]Newest sample: {min(ages):.0f}s ago[/dim]")
+        else:
+            console.print(
+                "  [yellow]No recent measurements[/yellow] [dim]— the rates below are absent, "
+                "not zero. Run 'drone @prax log-health scan' for current numbers, or check that "
+                "Mission Control is running.[/dim]"
+            )
+
     if flagged:
         console.print()
         console.print("[yellow]Flagged files:[/yellow]")
@@ -149,7 +165,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # A dashed help flag ANYWHERE wins — asking about `scan` must not sweep
+    # system_logs/ or write an operation line. After the ownership check above,
+    # so this module cannot answer another's help (prax.py routes by trial).
+    if wants_help(args):
         print_help()
         return True
 
@@ -182,7 +201,7 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    if "--help" in sys.argv:
+    if wants_help(sys.argv[1:]):
         print_help()
         sys.exit(0)
 

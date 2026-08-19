@@ -21,9 +21,11 @@ Invoked via: drone @hooks verify
 """
 
 import json
+import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -216,9 +218,14 @@ def handle_command(command, args) -> bool:
         print_introspection()
         results = verify_wiring()
         _render_results(results)
+        if not results["ok"]:
+            # The --help below promises this. Returning True routes as "handled",
+            # which hooks.main() turns into exit 0 — a wiring break would print
+            # FAILED and still report success to anything reading the exit code.
+            sys.exit(1)
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks verify     Cross-check provider settings vs project config")

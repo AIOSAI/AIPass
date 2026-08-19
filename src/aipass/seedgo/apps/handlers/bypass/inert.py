@@ -48,6 +48,44 @@ _SHARED_IMPORT = "aipass.seedgo.apps.handlers.bypass.utils"
 _SHARED_NAMES = ("is_bypassed", "matching_rule")
 _SCOPE_ARG = {"line": "lines", "name": "functions"}
 
+# ---------------------------------------------------------------------------
+# The advisory declares its own unreliability, in the advisory.
+#
+# Three branches measured this list independently and it is wrong in BOTH
+# directions. @skills: 27 rules named dead, 6 of the 7 that were measurable were
+# LIVE. @aipass: told 41, a control run (re-audit with bypass_rules=[]) proved
+# 59 -- including 22 non-test rules this list structurally never mentions.
+# @spawn: told 21, measured 41, and one rule dead in both lanes appeared in
+# neither list. The cause is structural, not a typo: everything here is computed
+# in the AUDIT lane, which walks apps/ and never tests/, so a tests/* rule reads
+# as dead while it still suppresses findings in the CHECKLIST lane the edit hook
+# runs; and some standards are branch_level and report in prose through
+# checks[].message rather than a *_violations list, so a sweep over violation
+# RECORDS sees nothing and calls those rules dead too.
+#
+# Fixing that means simulating the checklist lane per rule. Until someone does,
+# the honest move is the one this branch applies to every filter and cap: the
+# limitation announces itself, in the output, where the conclusions are read --
+# a caveat kept in a plan file or a docstring is a caveat nobody was handed.
+# ---------------------------------------------------------------------------
+ADVISORY_CAVEAT = (
+    "UNVERIFIED — this bypass advisory is wrong in BOTH directions, so it cannot be pruned from on its "
+    "own. It calls LIVE rules dead: it is measured in the audit lane, which walks apps/ and never tests/, "
+    "so a tests/* rule reads as dead here while it still suppresses findings in the checklist lane the "
+    "edit hook runs; branch_level standards report in prose instead of violation records, so their live "
+    "rules read as dead too. And it is blind the other way: it never mentions dead rules outside the "
+    "shapes it can see. Measured on @skills, 6 of the 7 checkable 'dead' rules were live; @aipass was "
+    "told 41 and a control run proved 59.",
+    "Do not delete a rule because it is named below. Measure first: re-run the audit with the branch's "
+    "bypass rules disabled — that control run is the only evidence that a rule suppresses nothing — and "
+    "delete only what it proves dead. Treat the lines below as a place to start looking, not as findings.",
+)
+
+# Info lines are stored and re-rendered one at a time (audit artifact,
+# audit_display), so the doubt travels on each conclusion as well as at the head
+# of the block: a line quoted or read on its own must still arrive marked.
+_UNVERIFIED = "unverified: "
+
 
 def _argument(call: ast.Call, param: str) -> ast.expr | None:
     """The expression passed for one parameter, by keyword or by position."""
@@ -208,11 +246,15 @@ def out_of_scope_reason(rule: dict) -> str | None:
 
 
 def check_branch_info(branch_path: str) -> list[str]:
-    """Non-scored signpost lines naming every inert bypass rule in a branch.
+    """Non-scored signpost lines about a branch's bypass rules, led by their caveat.
 
-    A rule reported here is not suppressing anything and never was — deleting it
-    changes no score. Kept off the violation channel on purpose: bypass hygiene is
-    the branch's own housekeeping, not a standards failure.
+    Every conclusion here is a SUSPICION, not a finding: see ADVISORY_CAVEAT for
+    what this lane cannot see in either direction. The caveat is returned as the
+    first two lines whenever there is anything to report, so no renderer, quote
+    or artifact can carry the list without it.
+
+    Kept off the violation channel on purpose: bypass hygiene is the branch's own
+    housekeeping, not a standards failure.
     """
     bypass_file = Path(branch_path) / ".seedgo" / "bypass.json"
     if not bypass_file.exists():
@@ -240,9 +282,13 @@ def check_branch_info(branch_path: str) -> list[str]:
             continue
         scopes = " and ".join(f"'{key}'" for key in inert)
         verb = "never match" if len(inert) > 1 else "never matches"
+        # Parentheses, not brackets: audit_display renders every info line through
+        # Rich, which reads "[handlers]" as a style tag and deletes it. This line
+        # named a file and silently swallowed which standard it meant.
         lines.append(
-            f"{rule.get('file', '?')} [{standard}]: {scopes} {verb} — that checker gates file-wide "
-            f"and passes no line/name, so this rule is inert. Scope it file-wide or drop it."
+            f"{_UNVERIFIED}{rule.get('file', '?')} ({standard}): {scopes} {verb} — that checker gates "
+            f"file-wide and passes no line/name, so this rule looks inert. Widen it to file-wide, or "
+            f"confirm with a control run before dropping it."
         )
 
     # Out-of-scope rules are grouped by standard and NAMED. They were once only
@@ -256,15 +302,18 @@ def check_branch_info(branch_path: str) -> list[str]:
     if out_of_scope:
         total = sum(len(files) for files in out_of_scope.values())
         lines.append(
-            f"{total} bypass rules now suppress nothing — those standards no longer apply to that "
-            f"kind of file. Safe to delete at your next touch; no score depends on them:"
+            f"{_UNVERIFIED}{total} bypass rules may no longer suppress anything — those standards no "
+            f"longer apply to that kind of file in the audit lane. This is the direction that has "
+            f"misfired on live rules; confirm with a control run before deleting any of them:"
         )
         for standard, files in sorted(out_of_scope.items(), key=lambda item: (-len(item[1]), item[0])):
             lines.append(f"  {standard} ({len(files)}): {', '.join(sorted(files))}")
 
-    if lines:
-        json_handler.log_operation(
-            "inert_bypass_rules_found",
-            {"branch": str(branch_path), "count": len(lines), "standard": "bypass"},
-        )
-    return lines
+    if not lines:
+        return []
+
+    json_handler.log_operation(
+        "inert_bypass_rules_found",
+        {"branch": str(branch_path), "count": len(lines), "standard": "bypass"},
+    )
+    return [*ADVISORY_CAVEAT, *lines]

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 
 # =============================================================================
@@ -156,23 +157,17 @@ def save_branch_meta(branch_dir: Path, meta: dict) -> bool:
     try:
         spawn_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write to temp file first, then rename for atomicity
-        tmp_path = meta_path.with_suffix(".tmp")
-        tmp_path.write_text(
+        # Stage beside the target under a unique name, then swap it in.
+        # A fixed ".tmp" name let two concurrent writers stage over each other,
+        # and Path.rename cannot overwrite an existing destination on Windows —
+        # atomic_write_text uses mkstemp + os.replace and cleans up its own temp.
+        atomic_write_text(
+            meta_path,
             json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
-        tmp_path.rename(meta_path)
         return True
     except (IOError, TypeError, OSError) as exc:
         logger.error(f"Failed to save branch metadata: {exc}")
-        # Clean up temp file if it exists
-        tmp_path = meta_path.with_suffix(".tmp")
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError as e:
-                logger.warning(f"Failed to clean up temp file {tmp_path}: {e}")
         return False
 
 

@@ -1,0 +1,26 @@
+{
+  "description": "A toggle takes a bool. The string 'yes' is a different kind of value wearing the same meaning.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-wrong-typed-toggle-refuses",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "auto_compact_enabled": "yes"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

@@ -26,6 +26,7 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     revoke,
 )
 from aipass.hooks.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 COMMAND = "trust"
@@ -129,7 +130,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         if not args:
             print_introspection()
             return True
-        if args[0] in ("--help", "-h", "help"):
+        if wants_help(args):
             print_help()
             return True
         if args[0] == "--info":
@@ -139,7 +140,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             return _do_prune()
         return _do_trust(args)
     if command == _COMMAND_REVOKE:
-        if not args or args[0] in ("--help", "-h", "help"):
+        if not args or wants_help(args):
             print_help()
             return True
         return _do_revoke(args)

@@ -12,10 +12,11 @@ Thin orchestration layer - delegates to runner_handler for executing
 skill handlers and assembling markdown output.
 """
 
-from aipass.prax import logger  # noqa: F401
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.handlers.runner_handler import run_handler, run_markdown
+from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled
 from aipass.skills.apps.handlers.json import json_handler
 
 
@@ -88,6 +89,25 @@ def run_skill(name, action=None, args=None, config=None):
     """
     args = args or {}
     config = config or {}
+
+    # The off-switch's second door (DPLAN-0306). Stopping a skill's systemd
+    # units only quiets the machine; this path starts a skill's code IN-PROCESS
+    # with systemd never consulted, so the gate has to bite here too — and
+    # before load_skill, which imports the skill's handler.
+    try:
+        if not is_enabled(name):
+            return {
+                "success": False,
+                "output": "",
+                "error": (
+                    f"Skill '{name}' is switched OFF and will not run. Turn it back on with: drone @skills on {name}"
+                ),
+            }
+    except SwitchStateUnreadable as exc:
+        # Cannot tell what is off, so nothing runs. Answering "everything is on"
+        # here would start the very processes an operator switched off.
+        logger.error("Refusing to run '%s' — switch state unreadable: %s", name, exc)
+        return {"success": False, "output": "", "error": str(exc)}
 
     # Load the skill
     loaded = load_skill(name)

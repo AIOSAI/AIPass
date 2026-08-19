@@ -128,6 +128,7 @@ def print_help():
     console.print("  [cyan]monitor[/cyan]     Mission Control - unified real-time monitoring")
     console.print("  [cyan]status[/cyan]      Show PRAX system status")
     console.print("  [cyan]log-audit[/cyan]   Audit log file sizes and health")
+    console.print("  [cyan]log-health[/cyan]  Log growth rates (scan / snapshot)")
     console.print("  [cyan]dashboard[/cyan]   System dashboard")
     console.print()
 
@@ -189,11 +190,13 @@ Available Commands:
   monitor     Mission Control - unified real-time monitoring
   status      Show PRAX system status
   log-audit   Audit log file sizes and health
+  log-health  Log growth rates (scan / snapshot)
   dashboard   System dashboard
 
 Examples:
   drone @prax monitor run
   drone @prax status
+  drone @prax log-health scan
   drone @prax dashboard
         """,
     )
@@ -205,7 +208,7 @@ Examples:
     parser.add_argument("args", nargs="*", help="Arguments for the command")
 
     parser.add_argument("--help", "-h", action="store_true", dest="show_help", help="Show help information")
-    parser.add_argument("--version", "-V", action="version", version="PRAX v2.0.0")
+    parser.add_argument("--version", "-V", action="version", version="PRAX v2.4.0")
 
     parsed_args, remaining = parser.parse_known_args()
 

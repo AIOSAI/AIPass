@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.metadata import detect_profile
 from aipass.spawn.apps.handlers.registry import find_registry
 
 
@@ -56,7 +57,12 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
         "DATE": now.strftime("%Y-%m-%d"),
         "MODULE": lower,
         "EMAIL": f"@{lower}",
-        "PROFILE": overrides.get("profile", "AIPass Workshop"),
+        # PROFILE is the AIPass profile the citizen is registered under, and it is
+        # what a birth certificate records as metadata.template. The default is
+        # derived from the target path rather than hardcoded: update_ops calls this
+        # builder with no profile override, so a hardcoded "AIPass Workshop" would
+        # render the wrong profile into every /business/ branch it touched.
+        "PROFILE": overrides.get("profile") or detect_profile(target_dir),
         "ROLE": overrides.get("role", ""),
         "TRAITS": overrides.get("traits", ""),
         "PURPOSE_BRIEF": overrides.get("purpose", "New agent - purpose TBD"),

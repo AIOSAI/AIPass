@@ -226,7 +226,89 @@ def _resolve_reply_path() -> str:
     return ""
 
 
-def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str) -> bool:
+def _path_is_inside(candidate: Path, root: Path) -> bool:
+    """True when candidate sits within root.
+
+    Args:
+        candidate: Path to test.
+        root: Directory that must contain it.
+
+    Returns:
+        True if candidate is root or below it.
+    """
+    try:
+        resolved_candidate = Path(candidate).resolve()
+        resolved_root = Path(root).resolve()
+    except OSError as exc:
+        # Resolution itself failing is a real fault, unlike "simply not inside".
+        logger.warning("[delivery] could not resolve %s against %s: %s", candidate, root, exc)
+        return False
+
+    return resolved_candidate.is_relative_to(resolved_root)
+
+
+def _reply_proof_mailboxes(email_data: Optional[Dict], sender_root: Optional[Path]) -> List[Path]:
+    """Where a reply's proof may live, most reliable source first.
+
+    Two resolvers disagreed about which mailbox belongs to the sender, and that
+    disagreement was the @baud outage (2026-08-16). ``handle_reply`` locates the
+    original through ``_resolve_branch_path()`` — env, registry, fallback — so
+    the reply is built and sent; the boundary then re-derived the mailbox by
+    walking UP from ``AIPASS_CALLER_CWD``, which finds nothing unless the caller
+    is standing in the mailbox directory or below it. @baud's seat is four
+    levels below its project root, so a caller at the project root walked past
+    the mailbox and out of the project. Original found, proof not found, reply
+    refused.
+
+    ``reply.py`` already stamps ``reply_path`` on every reply, derived from
+    ``from_branch_path`` — the branch actually replying — precisely because the
+    CWD guess "can name the wrong branch entirely". This reads it.
+
+    The stamp travels with the message, so it is bounded: it only counts when it
+    lands inside the sender's own project. That keeps the fence exactly where it
+    was — a crafted ``reply_path`` cannot nominate a mailbox elsewhere on disk.
+
+    Args:
+        email_data: The outbound message, possibly carrying ``reply_path``.
+        sender_root: The sender's project root, or None when unknown.
+
+    Returns:
+        Candidate inbox paths, in order of trust, without duplicates.
+    """
+    candidates: List[Path] = []
+
+    stamped = str((email_data or {}).get("reply_path", "")).strip()
+    if stamped:
+        try:
+            resolved = Path(stamped).resolve()
+        except (OSError, ValueError) as exc:
+            logger.warning("[delivery] unusable reply_path %s: %s", stamped, exc)
+            resolved = None
+        if resolved is not None:
+            if sender_root is None or _path_is_inside(resolved, sender_root):
+                candidates.append(resolved)
+            else:
+                logger.warning(
+                    "[delivery] reply_path %s sits outside the sender's project %s - not accepted as proof",
+                    resolved,
+                    sender_root,
+                )
+
+    derived = _resolve_reply_path()
+    if derived:
+        candidates.append(Path(derived))
+
+    seen = set()
+    ordered: List[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            ordered.append(candidate)
+    return ordered
+
+
+def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str, sender_root: Optional[Path] = None) -> bool:
     """True when this outbound mail is a reply to something the recipient sent us.
 
     The return path (FPLAN-0401 phase 5b). A reply is answering, not initiating:
@@ -251,26 +333,26 @@ def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str) -> bool:
     if not in_reply_to or not to_branch:
         return False
 
-    caller_inbox = _resolve_reply_path()
-    if not caller_inbox:
-        return False
-
-    try:
-        with open(caller_inbox, "r", encoding="utf-8") as f:
-            messages = json.load(f).get("messages", [])
-    except Exception as exc:
-        logger.warning("[delivery] reply proof unreadable at %s: %s", caller_inbox, exc)
-        return False
-
     target = str(to_branch).strip().lower()
-    for msg in messages:
-        if not isinstance(msg, dict) or msg.get("id") != in_reply_to:
+    for caller_inbox in _reply_proof_mailboxes(email_data, sender_root):
+        try:
+            with open(caller_inbox, "r", encoding="utf-8") as f:
+                messages = json.load(f).get("messages", [])
+        except Exception as exc:
+            logger.warning("[delivery] reply proof unreadable at %s: %s", caller_inbox, exc)
             continue
-        sanctioned = {str(msg.get("from", "")).strip().lower(), str(msg.get("reply_to") or "").strip().lower()}
-        sanctioned.discard("")
-        return target in sanctioned
 
-    logger.warning("[delivery] reply proof not found: no message %s in the sender's mailbox", in_reply_to)
+        for msg in messages:
+            if not isinstance(msg, dict) or msg.get("id") != in_reply_to:
+                continue
+            sanctioned = {str(msg.get("from", "")).strip().lower(), str(msg.get("reply_to") or "").strip().lower()}
+            sanctioned.discard("")
+            if target in sanctioned:
+                return True
+            logger.warning("[delivery] reply proof %s does not name %s - refused", in_reply_to, target)
+            return False
+
+    logger.warning("[delivery] reply proof not found: no message %s in the sender's mailbox(es)", in_reply_to)
     return False
 
 
@@ -307,7 +389,7 @@ def _check_cross_project_boundary(
 
     # Everything below this line is a refusal — so this is where, and the only
     # place where, an exemption is worth the file reads. Both fail closed.
-    if _is_sanctioned_reply(email_data, to_branch):
+    if _is_sanctioned_reply(email_data, to_branch, sender_root=sender_root):
         logger.info("[delivery] cross-project boundary exempted for reply: %s -> %s", sender_email, to_branch)
         return False, ""
 
@@ -331,6 +413,71 @@ def _check_cross_project_boundary(
         f"Cross-project mail refused: {sender_name} (project: {sender_root.name}) "
         f"cannot send to this branch (project: {recipient_root.name}). "
         f"Use the feedback channel for cross-project communication."
+    )
+
+
+def _hosted_project_name(branch_path: str) -> str:
+    """Name the ``projects/<name>`` directory a hosted branch path sits under.
+
+    Args:
+        branch_path: Absolute path to a branch inside the projects tree.
+
+    Returns:
+        The project directory name, or "unknown" if the path sits elsewhere.
+    """
+    try:
+        rel = Path(branch_path).resolve().relative_to((_REPO_ROOT / "projects").resolve())
+        return rel.parts[0]
+    except (ValueError, OSError, IndexError) as exc:
+        # It came out of a projects/*/ registry, so not sitting under projects/
+        # means the registry's paths disagree with its own location.
+        logger.warning("[delivery] hosted branch path %s is not under projects/: %s", branch_path, exc)
+        return "unknown"
+
+
+def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
+    """Explain why an address did not resolve, without widening resolution.
+
+    An address can fail to resolve for two very different reasons, and saying
+    "unknown" for both is a lie in one of them. @baud is a registered citizen of
+    a hosted project; @devpulse reaches it through the admin lane. Telling @api
+    it did not exist sent them debugging an addressing bug that was not there
+    (2026-08-14), when the true answer is a policy: fleet-to-project initiation
+    is walled, replies only (DPLAN-0288).
+
+    This runs ONLY once delivery has already failed, so the extra registry read
+    costs nothing on any successful send. It returns a **string** and nothing
+    else — the caller's branch map is deliberately not updated, because the
+    whole point is to describe the wall, not open it.
+
+    Args:
+        to_branch: The address that failed to resolve.
+        known_count: How many branches were in scope for this caller.
+
+    Returns:
+        A refusal message stating the real reason.
+    """
+    fallback = f"Unknown branch email: {to_branch} (available: {known_count} branches)"
+
+    try:
+        from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+        hosted = get_project_tree_branches(_REPO_ROOT)
+    except Exception as exc:
+        logger.warning("[delivery] could not read hosted project registries to explain refusal: %s", exc)
+        return fallback
+
+    hosted_path = hosted.get(to_branch)
+    if not hosted_path:
+        return fallback
+
+    project = _hosted_project_name(hosted_path)
+    logger.info("[delivery] out-of-scope address refused: %s (hosted project: %s)", to_branch, project)
+    return (
+        f"Out of scope: {to_branch} is a citizen of hosted project '{project}', not the AIPass "
+        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only by "
+        f"ruling (DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an "
+        f"existing message from {to_branch}, or use the feedback channel."
     )
 
 
@@ -473,8 +620,9 @@ def deliver_email_to_branch(
             branches.update(get_project_tree_branches(_REPO_ROOT))
 
     if to_branch not in branches:
-        error_msg = f"Unknown branch email: {to_branch} (available: {len(branches)} branches)"
-        return False, error_msg
+        # Refusal is correct here; the STATED REASON is what was wrong. Explain
+        # the wall instead of denying the address — the map is not widened.
+        return False, _describe_unresolved_address(to_branch, len(branches))
 
     # Private branch inbound blocking: reject delivery to private branches
     # Self-send is allowed (private branch can send to itself)
@@ -558,6 +706,15 @@ def deliver_email_to_branch(
                     "auto_execute": email_data.get("auto_execute", False),
                     "priority": email_data.get("priority", "normal"),
                 }
+
+                # The sender's own id for this message, kept as a back-reference.
+                # The id above is minted fresh so it is unique in THIS mailbox;
+                # without this field the recipient's copy and the sender's sent/
+                # record share no identifier at all, and a delivered message
+                # cannot be proven to have arrived. That untraceability was read
+                # as a delivery outage on 2026-08-16 (@seedgo -> @devpulse).
+                if email_data.get("id"):
+                    message["sent_id"] = email_data["id"]
 
                 if email_data.get("reply_to"):
                     message["reply_to"] = email_data["reply_to"]
@@ -663,6 +820,12 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
 
             reply_id = str(uuid.uuid4())[:8]
             email_data = dict(email_data)
+            # This lane keeps the sender's id AS the message id, so correlation
+            # is already possible here. Stamp sent_id anyway: a reader must not
+            # have to know which lane delivered a message to know how to trace
+            # it. Both lanes answer "which sent record is this" the same way.
+            if email_data.get("id"):
+                email_data.setdefault("sent_id", email_data["id"])
             email_data.setdefault("id", reply_id)
             reply_id = email_data["id"]
 

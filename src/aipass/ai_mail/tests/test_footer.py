@@ -50,6 +50,20 @@ def test_get_footer_contains_checklist():
     assert "EMAIL SENDER" in result
 
 
+def test_close_your_plan_excludes_living_docs():
+    """The close line must not tell an APLAN owner to close a standing record.
+
+    This footer is appended to EVERY outgoing mail and has no plan context, so
+    it cannot read a plan-type prefix — the wording itself has to carry the
+    exception. Measured cost of leaving it implicit (DPLAN-0291 closeout):
+    4 branches stopped to ask which rule won, and @api closed its living audit
+    doc the day it was created, archiving the findings.
+    """
+    result = mod.get_footer()
+    close_line = next(line for line in result.splitlines() if "CLOSE YOUR PLAN" in line)
+    assert "APLAN" in close_line, "the close line must name the living-doc exception"
+
+
 # --- append_footer tests ---------------------------------------------
 
 

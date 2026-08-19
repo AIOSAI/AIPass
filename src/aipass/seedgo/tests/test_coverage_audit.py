@@ -746,6 +746,45 @@ class TestPrintBranchSummary:
         result = self._make_audit_result()
         print_branch_summary(result)
 
+    def test_post_check_crash_prints_even_at_a_perfect_score(self):
+        """A crashed post-check reaches the CONSOLE on a branch scoring 100.
+
+        Not red before the fix — audit_display already had the catch-all lane
+        this leans on — but the fix depends on it: the crash deliberately
+        leaves the file-lane score alone, so the standard usually still reads
+        100, and the score-driven renderer skips every standard at 100. The
+        catch-all violation lane is the only thing that prints it, so it is
+        pinned here rather than assumed.
+        """
+        import sys
+
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            print_branch_summary,
+        )
+
+        detail = (
+            "log_structure post-check crashed on branch test_branch (TypeError: check_branch_post() "
+            "got an unexpected keyword argument 'bypass_rules') — the branch's log_structure score "
+            "of 100 comes from the file lane only and does NOT include this check"
+        )
+        result = self._make_audit_result(
+            scores={"log_structure": 100},
+            average=100,
+            extra={
+                "log_structure_violations": [
+                    {"file": "log_structure post-check", "path": "/fake/path", "score": 100, "issues": [detail]}
+                ]
+            },
+        )
+        console = sys.modules["aipass.cli"].console
+        console.reset_mock()
+
+        print_branch_summary(result)
+
+        printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        assert "post-check crashed" in printed, "a 100 that excludes a check must say so on screen"
+        assert "TypeError" in printed
+
     def test_high_scores(self):
         """Scores >= 90 get check icon."""
         from aipass.seedgo.apps.handlers.audit.audit_display import (
@@ -965,6 +1004,28 @@ class TestPrintBranchSummary:
         )
         print_branch_summary(result)
 
+    def test_no_bypass_label_travels_with_the_branch_score(self):
+        """A --no-bypass summary says so — the score alone reads as a regression."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_branch_summary(self._make_audit_result(), no_bypass=True)
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" in printed
+
+    def test_normal_branch_summary_makes_no_bypass_claim(self):
+        """Control — the label appears only when bypasses really were disabled."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_branch_summary(self._make_audit_result())
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" not in printed
+
 
 class TestPrintSystemSummary:
     """Tests for print_system_summary."""
@@ -1079,6 +1140,28 @@ class TestPrintSystemSummary:
             ),
         ]
         print_system_summary(results)
+
+    def test_no_bypass_label_travels_with_the_fleet_average(self):
+        """The summary block is what gets copied out — it carries the label itself."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_system_summary([self._make_result("a", 95)], no_bypass=True)
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" in printed
+
+    def test_normal_system_summary_makes_no_bypass_claim(self):
+        """Control — a normal fleet summary carries no such label."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_system_summary([self._make_result("a", 95)])
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" not in printed
 
 
 # ===========================================================================
@@ -1681,6 +1764,26 @@ def _make_checker(
     return checker
 
 
+def _real_module_checker(**hooks) -> types.SimpleNamespace:
+    """A checker whose surface is REAL functions rather than MagicMocks.
+
+    A MagicMock answers to any call signature, so a mock-based test can never
+    pin the pipeline's actual calling convention: check_branch_post was called
+    with bypass_rules= against an implementation that took one positional
+    argument, and every mock in this file kept passing while the standard was
+    dead in production. Contract tests use this instead.
+    """
+    checker = types.SimpleNamespace(
+        AUDIT_SCOPE="entry_point",
+        FILE_FILTER=None,
+        INCLUDE_INIT_FILES=False,
+        check_module=lambda module_path, bypass_rules=None: {"passed": True, "score": 100, "checks": []},
+    )
+    for name, fn in hooks.items():
+        setattr(checker, name, fn)
+    return checker
+
+
 class TestAuditBranch:
     """Tests for audit_branch."""
 
@@ -1956,6 +2059,91 @@ class TestAuditBranch:
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 100
 
+    def test_post_check_crash_is_attributable_in_output(self, tmp_path, monkeypatch):
+        """A crashed post-check reaches the audit OUTPUT, naming checker, branch and error.
+
+        The lane used to swallow the exception into logger.info(): every audit
+        printed a clean score while a piece of the measurement had not run at
+        all, and nothing in the output said so. A failure only a log knows
+        about is indistinguishable from a success — that is what this pins.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+        checker = _make_checker(has_post=True)
+        checker.check_branch_post.side_effect = RuntimeError("boom")
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, [])
+
+        crashes = [v for v in result["naming_violations"] if "post-check" in v.get("message", "").lower()]
+        assert crashes, "a crashed post-check must surface in the audit output, not only in a log line"
+        message = crashes[0]["message"]
+        assert "naming" in message, "which checker crashed"
+        assert "mybranch" in message, "on which branch"
+        assert "RuntimeError" in message and "boom" in message, "with which error"
+        failed_checks = [c for c in result["results"]["naming"].get("checks", []) if not c.get("passed", True)]
+        assert any("post-check" in c.get("message", "").lower() for c in failed_checks), (
+            "same doctrine as the branch-level lane: the number arrives with its reason attached"
+        )
+
+    def test_post_check_contract_real_signature_is_invoked(self, tmp_path, monkeypatch):
+        """The pipeline's actual calling convention, pinned with a REAL function.
+
+        Every existing post-check test uses a MagicMock, which accepts any
+        signature — so none of them could ever catch the mismatch that killed
+        this lane in production. A real function object can.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, branch_path = _setup_branch(tmp_path)
+        seen: list = []
+
+        def check_branch_post(branch_path, bypass_rules=None):
+            seen.append((branch_path, bypass_rules))
+            return ([{"path": "/extra.py", "score": 0, "issues": ["Extra issue"]}], [50])
+
+        checker = _real_module_checker(check_branch_post=check_branch_post)
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, ["some-rule"])
+
+        assert seen == [(str(branch_path), ["some-rule"])], "branch path positionally, bypass_rules by keyword"
+        assert result["scores"]["naming"] == 75, "(100 + 50) / 2 — the post score blends"
+        assert len(result["naming_violations"]) == 1
+
+    def test_post_check_wrong_signature_fails_loudly(self, tmp_path, monkeypatch):
+        """The live defect reproduced: a post-check that does not accept bypass_rules.
+
+        log_structure_check shipped exactly this signature for months. The
+        pipeline raised TypeError on every branch on every run and the bare
+        except turned it into silence — the standard simply stopped running
+        and no audit ever said so.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+
+        def check_branch_post(branch_path):  # the pre-fix log_structure signature
+            return ([], [50])
+
+        checker = _real_module_checker(check_branch_post=check_branch_post)
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, [])
+
+        crashes = [v for v in result["naming_violations"] if "post-check" in v.get("message", "").lower()]
+        assert crashes, "a signature mismatch must be loud — it means the standard did not run"
+        assert "TypeError" in crashes[0]["message"]
+        assert "bypass_rules" in crashes[0]["message"], "the report must name the argument that did not fit"
+        assert result["scores"]["naming"] == 100, "a checker's own crash must not invent a number for the branch"
+
     def test_info_channel_collected_and_never_scored(self, tmp_path, monkeypatch):
         """check_branch_info lines reach output without touching the score."""
         from aipass.seedgo.apps.handlers.audit import branch_audit
@@ -1993,6 +2181,86 @@ class TestAuditBranch:
         result = branch_audit.audit_branch(branch, [])
         assert result["info_lines"] == []
         assert result["scores"]["naming"] == 100
+
+    def test_observe_lane_runs_with_bypass_rules_and_records(self, tmp_path, monkeypatch):
+        """check_branch_observe runs on every audit and its readings reach the output.
+
+        Driven by a REAL function, so the signature the pipeline uses is
+        pinned by execution rather than by a mock that accepts anything.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, branch_path = _setup_branch(tmp_path)
+        seen: list = []
+
+        def check_branch_observe(branch_path, bypass_rules=None):
+            seen.append((branch_path, bypass_rules))
+            return [{"standard": "naming", "would_be_score": 50, "observed_at": "2026-08-14T00:00:00"}]
+
+        checker = _real_module_checker(check_branch_observe=check_branch_observe)
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, ["some-rule"])
+
+        assert seen == [(str(branch_path), ["some-rule"])]
+        assert result["observations"] == [
+            {"standard": "naming", "would_be_score": 50, "observed_at": "2026-08-14T00:00:00"}
+        ]
+
+    def test_observe_lane_moves_no_score(self, tmp_path, monkeypatch):
+        """Same branch, audited with and without the observe lane — identical numbers.
+
+        This observation was de-scored because it reads live log files, so a
+        branch's number moved with no code change. Observe mode is only
+        honest if the lane's presence is invisible to every score.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        without = _real_module_checker()
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"log_structure": without})
+        baseline = branch_audit.audit_branch(branch, [])
+
+        def check_branch_observe(branch_path, bypass_rules=None):
+            return [{"standard": "log_structure", "would_be_score": 50, "local_logs": 3, "system_logs": 0}]
+
+        with_lane = _real_module_checker(check_branch_observe=check_branch_observe)
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"log_structure": with_lane})
+        observed = branch_audit.audit_branch(branch, [])
+
+        assert observed["observations"], "the lane really ran — otherwise this proves nothing"
+        assert observed["scores"] == baseline["scores"]
+        assert observed["scores"]["log_structure"] == baseline["scores"]["log_structure"]
+        assert observed["average"] == baseline["average"]
+        assert observed["log_structure_violations"] == baseline["log_structure_violations"]
+
+    def test_observe_lane_crash_is_attributable_and_still_scoreless(self, tmp_path, monkeypatch):
+        """A broken observe lane says so — and still cannot touch a score."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+
+        def check_branch_observe(branch_path, bypass_rules=None):
+            raise RuntimeError("observe boom")
+
+        checker = _real_module_checker(check_branch_observe=check_branch_observe)
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda pack_path=None: {"naming": checker})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, [])
+
+        errors = [o for o in result["observations"] if o.get("error")]
+        assert errors, "a crashed observe lane must be visible in the reading, not silently absent"
+        assert errors[0]["standard"] == "naming"
+        assert "RuntimeError" in errors[0]["error"] and "observe boom" in errors[0]["error"]
+        assert result["scores"]["naming"] == 100
+        assert result["average"] == 100
 
     def test_checker_without_info_hook_skipped(self, tmp_path, monkeypatch):
         """A checker with no check_branch_info contributes no info lines."""

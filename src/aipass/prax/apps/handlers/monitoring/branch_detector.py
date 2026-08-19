@@ -61,13 +61,41 @@ class BranchDetector:
         self._repo_root = Path.cwd()
         return self._repo_root
 
-    def _register_branch(self, branch: dict) -> None:
-        """Register a single branch entry into the lookup tables."""
+    def _register_branch(self, branch: dict, base: "Optional[Path]" = None) -> None:
+        """Register a single branch entry into the lookup tables.
+
+        Args:
+            branch: Registry entry with ``name`` and ``path``.
+            base: Directory a RELATIVE path is relative to — the registry's own
+                location. Defaults to the repo root. Without it, `Path.resolve()`
+                anchored relative entries to the process CWD, so the five
+                relative entries in AIPASS_REGISTRY.json mapped to
+                ``<cwd>/src/aipass/<name>`` whenever the monitor was launched
+                from anywhere but the repo root.
+        """
         branch_name = branch.get("name", "").upper()
         branch_path = branch.get("path", "")
         if not branch_name or not branch_path:
             return
-        path = Path(branch_path).resolve()
+
+        path = Path(branch_path)
+        if not path.is_absolute():
+            path = (base or self._find_repo_root()) / path
+        path = path.resolve()
+
+        # First registration wins: the main registry is loaded before the
+        # projects/* sweep, so a project cannot claim a name AIPass already uses.
+        if branch_name in self.known_branches and str(path) not in self.branch_map:
+            existing = {v for v in self.branch_map.values()}
+            if branch_name in existing:
+                logger.info(
+                    "[branch_detector] Branch labelling: %s is already registered; ignoring the later "
+                    "entry at %s. The first registration wins and nothing was changed on disk.",
+                    branch_name,
+                    path,
+                )
+                return
+
         self.branch_map[str(path)] = branch_name
         self.known_branches.add(branch_name)
         self.branch_map[str(path) + "/"] = branch_name
@@ -102,6 +130,8 @@ class BranchDetector:
             for branch in branches:
                 self._register_branch(branch)
 
+            self._load_project_registries()
+
             logger.info(f"Loaded {len(self.known_branches)} branches from registry")
 
         except json.JSONDecodeError as e:
@@ -118,6 +148,59 @@ class BranchDetector:
                 f"branches may be labelled UNKNOWN on screen. The registry file was not modified."
             )
             self._load_fallback_branches()
+
+    def _load_project_registries(self) -> None:
+        """Register in-repo citizens declared by ``projects/*/*_REGISTRY.json``.
+
+        AIPass hosts a third path shape besides ``src/aipass/*`` branches and
+        external Vera-class projects: citizens living at
+        ``projects/<project>/src/<module>/<name>``, each project carrying its own
+        registry. prax never learned it, so `monitor run baud` reported BAUD as
+        an unknown branch and BAUD's files were labelled AIPASS — the repo
+        directory name happens to match a real branch, and path-segment matching
+        cannot tell those apart.
+
+        Runs AFTER the main registry so a project cannot claim a name AIPass
+        already uses. Paths are resolved against each project's own directory.
+        Same shape as the watchdog fix (c247fce8).
+
+        One unreadable project registry must not cost us the rest, so failures
+        are logged per project and the sweep continues.
+        """
+        projects_dir = self._find_repo_root() / "projects"
+        if not projects_dir.is_dir():
+            return
+
+        try:
+            project_dirs = sorted(p for p in projects_dir.iterdir() if p.is_dir())
+        except OSError as exc:
+            logger.warning(
+                "[branch_detector] Branch labelling: could not list %s (%s), so in-repo project "
+                "citizens will not be resolvable by name. AIPass branches are unaffected and "
+                "nothing was changed on disk.",
+                projects_dir,
+                type(exc).__name__,
+            )
+            return
+
+        for project_dir in project_dirs:
+            for registry_file in sorted(project_dir.glob("*_REGISTRY.json")):
+                try:
+                    data = json.loads(registry_file.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning(
+                        "[branch_detector] Branch labelling: %s is unreadable (%s), so its citizens "
+                        "cannot be scoped or labelled by name. Every other project was still loaded "
+                        "and the file was not modified.",
+                        registry_file,
+                        type(exc).__name__,
+                    )
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                for branch in data.get("branches", []) or []:
+                    if isinstance(branch, dict):
+                        self._register_branch(branch, base=project_dir)
 
     def _load_fallback_branches(self):
         """Load fallback branch names when registry is unavailable"""
@@ -253,6 +336,43 @@ class BranchDetector:
         last = segments[-1].upper()
         if last in self.known_branches:
             return last
+        return None
+
+    def _detect_from_passport(self, path: Path) -> Optional[str]:
+        """Walk up to the nearest ``.trinity/passport.json`` and read its name.
+
+        Citizenship is what a passport declares, not what a path looks like.
+        This resolves citizens that no registry lists, and it stops the
+        path-segment fallbacks below from attributing a file to whichever
+        ancestor directory happens to share a branch name.
+
+        Stops at the repo root so a stray passport outside the tree cannot
+        capture unrelated files. Same approach as the statusline fix.
+
+        Args:
+            path: Absolute file path
+
+        Returns:
+            Uppercase branch name, or None when no passport governs the path.
+        """
+        repo_root = self._find_repo_root()
+        for parent in path.parents:
+            passport = parent / ".trinity" / "passport.json"
+            if passport.is_file():
+                try:
+                    data = json.loads(passport.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.info(
+                        "[branch_detector] Passport at %s is unreadable (%s); falling back to path "
+                        "matching for this file.",
+                        passport,
+                        type(exc).__name__,
+                    )
+                    return None
+                name = (data.get("branch_info", {}) or {}).get("branch_name", "")
+                return str(name).upper() or None
+            if parent == repo_root:
+                break
         return None
 
     def _detect_from_compound_parts(self, path_parts: list) -> Optional[str]:
@@ -425,6 +545,16 @@ class BranchDetector:
             if path.parent == repo_root or path.parent == repo_root / ".claude":
                 self.log_map[path_str] = "SYSTEM"
                 return "SYSTEM"
+
+            # Strategy 5.5: The citizen's own passport, before any path guessing.
+            # Everything below this point infers a name from path TEXT, which is
+            # how a BAUD file became AIPASS: the repo directory is named AIPass
+            # and AIPASS is a real branch. A passport is a declaration, so it
+            # outranks every guess — and it resolves citizens no registry lists.
+            result = self._detect_from_passport(path)
+            if result:
+                self.log_map[path_str] = result
+                return result
 
             # Strategy 6: Parse path for known branch names
             path_parts = path_str_fwd.lower().split("/")

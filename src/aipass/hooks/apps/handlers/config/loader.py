@@ -129,7 +129,7 @@ def trust_break_banner() -> str | None:
                     f"{search}/.aipass/hooks.json no longer matches its enrolled hash. "
                     "Every hook for this project (including this warning's own delivery "
                     "path) is silently skipped until a human re-enrolls.\n\n"
-                    "Fix: drone @hooks trust enroll (or: aipass init update)\n"
+                    f"Fix (re-enroll): aipass trust {search}\n"
                     "This does not auto-heal — re-enrollment is a deliberate human "
                     "checkpoint, not a bug."
                 )

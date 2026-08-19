@@ -455,6 +455,79 @@ class TestNeverUpdateGuard:
         assert result["success"] is True
         assert dashboard.read_text() == dashboard_before
 
+    def test_ai_mail_local_inbox_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """Update must never merge into .ai_mail.local/inbox.json — it is a branch's
+        live mailbox, runtime state in the same category as DASHBOARD.local.json
+        (APLAN-0007 open item 2, devpulse ruling: add .ai_mail.local/ to
+        _NEVER_UPDATE_PREFIXES). The template's inbox.json gains a new key the
+        live branch inbox doesn't have (a plausible real-world template schema
+        change) so a plain deep-merge would detectably touch the file even though
+        no message is ever lost — that touch itself is the thing being refused."""
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        mail_tpl = template_dir / ".ai_mail.local"
+        mail_tpl.mkdir(exist_ok=True)
+        (mail_tpl / "inbox.json").write_text(
+            json.dumps(
+                {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": [], "schema_version": 2},
+                indent=2,
+            )
+        )
+
+        mail_branch = branch_dir / ".ai_mail.local"
+        mail_branch.mkdir(exist_ok=True)
+        inbox = mail_branch / "inbox.json"
+        inbox.write_text(
+            json.dumps(
+                {
+                    "mailbox": "inbox",
+                    "total_messages": 3,
+                    "unread_count": 1,
+                    "messages": [{"id": "m1", "from": "@someone", "subject": "hi"}],
+                },
+                indent=2,
+            )
+        )
+        inbox_before = inbox.read_text()
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            result = update_branch("test_branch")
+
+        assert result["success"] is True
+        assert inbox.read_text() == inbox_before
+
+    def test_scaffold_test_never_re_added(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """tests/test_scaffold.py is create-only — a branch that deleted it never gets it back.
+
+        The .py skip only guards files that already exist; a missing .py still lands via
+        the addition branch. Once a branch has a real suite the scaffold smoke test can
+        only ever skip, so re-adding it re-creates a permanently-inert test (@seedgo
+        ruling, DPLAN-0291 wave 2).
+        """
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        tests_tpl = template_dir / "tests"
+        tests_tpl.mkdir(exist_ok=True)
+        (tests_tpl / "test_scaffold.py").write_text("def test_scaffold(): pass\n")
+
+        branch_tests = branch_dir / "tests"
+        branch_tests.mkdir(exist_ok=True)
+        (branch_tests / "test_real_suite.py").write_text("def test_real(): pass\n")
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            result = update_branch("test_branch")
+
+        assert result["success"] is True
+        assert not (branch_tests / "test_scaffold.py").exists()
+        added = [a["template_path"] for a in result.get("additions_detail", [])]
+        assert "tests/test_scaffold.py" not in added
+
     def test_zero_renames_always(self, tmp_path, template_dir, branch_dir, mock_registry):
         """P1 engine never proposes renames."""
         from aipass.spawn.apps.handlers.update_ops import update_branch
@@ -574,6 +647,27 @@ class TestHandleUpdate:
 
         result = handle_update([])
         assert result == 1
+
+    def test_failed_dry_run_prints_no_raw_markup(self, capsys, tmp_path, template_dir, mock_registry):
+        """The failure line must not leak literal Rich tags.
+
+        error() writes plain text, so the dry-run mode marker built for console.print()
+        surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
+        """
+        from aipass.spawn.apps.modules.update import handle_update
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            handle_update(["@no_such_branch"])
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "Update FAILED" in combined
+        assert "[dim]" not in combined
+        assert "[/dim]" not in combined
+        assert "(dry-run)" in combined
 
     def test_single_branch_arg(self, tmp_path, template_dir, branch_dir, mock_registry):
         """@branch arg should call update_branch."""

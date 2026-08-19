@@ -321,15 +321,21 @@ def test_deliver_private_branch_self_send_allowed(tmp_path, repo_root, noop_inbo
 
 
 def test_deliver_auto_provisions_inbox(tmp_path, repo_root, noop_inbox_lock):
-    """Delivery auto-creates inbox.json if missing (self-healing)."""
+    """Delivery auto-creates inbox.json if missing (self-healing).
+
+    Directory and email deliberately match — a mismatched pair here
+    (path .../newbranch, email @new) once left a "new" row in the live
+    contacts.json that read as a truncated key when it was only ever an
+    inconsistent fixture (found live, 2026-08-16, @devpulse).
+    """
     branch_path = tmp_path / "branches" / "newbranch"
     branch_path.mkdir(parents=True)
-    branches = [{"name": "NEW", "path": str(branch_path), "email": "@new"}]
+    branches = [{"name": "NEWBRANCH", "path": str(branch_path), "email": "@newbranch"}]
 
     with patch.object(delivery_mod, "get_all_branches", return_value=branches):
         success, error = deliver_email_to_branch(
-            "@new",
-            _make_email_data(recipient="@new"),
+            "@newbranch",
+            _make_email_data(recipient="@newbranch"),
         )
 
     assert success is True

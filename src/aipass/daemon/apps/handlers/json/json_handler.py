@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON Auto-Creating Handler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2025-11-21
-# Modified: 2026-01-29
+# Modified: 2026-08-18
 # =============================================
 
 """
@@ -15,6 +15,8 @@ Provides auto-creating JSON file management with templates.
 import json
 import os
 import sys
+import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -33,6 +35,78 @@ from aipass.prax import logger
 _DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 MAX_LOG_ENTRIES = 100  # Default FIFO limit for log_operation (overridable via config)
+
+
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
+def _atomic_write_json(target_path: Path, data: Any) -> None:
+    """
+    Write a JSON document so a reader sees either the old one or the new one.
+
+    Args:
+        target_path: The document to replace.
+        data: What to write.
+
+    Raises:
+        OSError: The staged file could not be written or moved into place.
+
+    Note:
+        Opening the target with "w" truncates it BEFORE the new content lands,
+        so every concurrent reader in that window gets an empty or partial
+        file. In this handler that is not merely a bad read: ensure_json_exists
+        answers an unreadable document by writing a fresh template over it, so
+        a torn read becomes permanent data loss. As the scheduler, @daemon
+        reads configs while branches write them - measured on the unfixed
+        handler with 2 writers and 2 readers, 12,117 of 13,103 reads (92.5%)
+        came back empty or unparseable. os.replace is atomic on POSIX and
+        Windows, so the window does not exist. On Windows it can still raise PermissionError while a
+        reader holds the target open, so the move goes through
+        _replace_with_retry — bounded, then raises (proven by the Windows CI
+        hang of 2026-08-18). The staged file MUST live in the
+        target's own directory or the rename becomes a cross-device copy.
+        Mirrors the helper @api, @cli, @commons, @flow, @drone and @prax carry.
+    """
+    descriptor, temporary = tempfile.mkstemp(dir=str(target_path.parent), prefix=target_path.stem, suffix=".tmp")
+    succeeded = False
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+        _replace_with_retry(temporary, str(target_path))
+        succeeded = True
+    finally:
+        if not succeeded and Path(temporary).exists():
+            # A failed write must not leave a partial document in the directory
+            # this handler reads from.
+            os.unlink(temporary)
 
 
 def _get_caller_module_name() -> str:
@@ -122,8 +196,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     template = _default_template(json_type, module_name)
 
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(template, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(json_path, template)
     return True
 
 
@@ -148,8 +221,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
     if json_type == "data" and isinstance(data, dict):
         data["last_updated"] = datetime.now().date().isoformat()
 
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _atomic_write_json(json_path, data)
     return True
 
 

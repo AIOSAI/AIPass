@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -186,52 +186,24 @@ def update_section(
     section_data["last_updated"] = datetime.now().isoformat()
     dashboard["sections"][section_name] = section_data
 
-    # Recalculate quick status
-    dashboard["quick_status"] = calculate_status_func(dashboard["sections"], branch_path)
+    # Recalculate quick status, merged so this write cannot delete another
+    # service's key (e.g. @flow's commons_mentions).
+    from .status import merge_quick_status
+
+    dashboard["quick_status"] = merge_quick_status(
+        dashboard.get("quick_status"), calculate_status_func(dashboard["sections"], branch_path)
+    )
 
     return save_dashboard(branch_path, dashboard)
-
-
-def _read_todo_count(branch_path: Path) -> int:
-    """Read todos[] length from .trinity/local.json."""
-    local_path = branch_path / ".trinity" / "local.json"
-    if not local_path.exists():
-        return 0
-    try:
-        data = json.loads(local_path.read_text())
-        return len(data.get("todos", []))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read todos from %s: %s", local_path, exc)
-        return 0
-
-
-def _read_mail_counts(branch_path: Path) -> tuple:
-    """Read new/opened mail counts from .ai_mail.local/inbox.json."""
-    inbox_path = branch_path / ".ai_mail.local" / "inbox.json"
-    if not inbox_path.exists():
-        return (0, 0)
-    try:
-        data = json.loads(inbox_path.read_text())
-        new_mail = 0
-        opened_mail = 0
-        for msg in data.get("messages", []):
-            status = msg.get("status", "")
-            if status == "new" or (not status and not msg.get("read", False)):
-                new_mail += 1
-            elif status == "opened":
-                opened_mail += 1
-        return (new_mail, opened_mail)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read inbox from %s: %s", inbox_path, exc)
-        return (0, 0)
 
 
 def _calculate_quick_status_standalone(sections: Dict, branch_path: Path) -> Dict:
     """
     Calculate quick_status from branch data sources.
 
-    Self-contained version used by write_section(). Sources counts
-    directly from local files (inbox.json, local.json).
+    Thin delegate to the single implementation in status.py. This copy was the
+    only one carrying the list-shape guard; keeping three copies is what let the
+    other two ship without it (@flow, DPLAN-0290 item 4).
 
     Args:
         sections: All dashboard sections dict
@@ -240,34 +212,9 @@ def _calculate_quick_status_standalone(sections: Dict, branch_path: Path) -> Dic
     Returns:
         Quick status dict with summary, action flags, and counts
     """
-    flow = sections.get("flow", {})
+    from .status import calculate_quick_status
 
-    new_mail, opened_mail = _read_mail_counts(branch_path)
-    active_plans_raw = flow.get("active_plans", 0)
-    todo_count = _read_todo_count(branch_path)
-
-    active_plans = len(active_plans_raw) if isinstance(active_plans_raw, list) else int(active_plans_raw or 0)
-
-    action_required = new_mail > 0 or active_plans > 0
-
-    parts = []
-    if new_mail > 0:
-        parts.append(f"{new_mail} new emails")
-    if opened_mail > 0:
-        parts.append(f"{opened_mail} opened")
-    if active_plans > 0:
-        parts.append(f"{active_plans} active plans")
-    if todo_count > 0:
-        parts.append(f"{todo_count} todos")
-
-    return {
-        "new_mail": new_mail,
-        "opened_mail": opened_mail,
-        "active_plans": active_plans,
-        "todo_count": todo_count,
-        "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear",
-    }
+    return calculate_quick_status(sections, branch_path)
 
 
 def _load_or_create_dashboard(dashboard_path: Path, branch_path: Path) -> Dict:
@@ -329,8 +276,14 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         # Write ONLY the named section, preserve everything else
         dashboard["sections"][section_name] = section_data
 
-        # Recalculate quick_status from live data
-        dashboard["quick_status"] = _calculate_quick_status_standalone(dashboard["sections"], branch_path)
+        # Recalculate quick_status from live data, merged so a write-through
+        # caller cannot delete a key another service owns.
+        from .status import merge_quick_status
+
+        dashboard["quick_status"] = merge_quick_status(
+            dashboard.get("quick_status"),
+            _calculate_quick_status_standalone(dashboard["sections"], branch_path),
+        )
 
         # Save
         saved = save_dashboard(branch_path, dashboard)

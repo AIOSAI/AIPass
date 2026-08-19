@@ -6,54 +6,9 @@
   },
   "bypass": [
     {
-      "file": "tests/test_bootstrap.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by pytest convention — not subject to the 3-layer apps/ structure rule."
-    },
-    {
-      "file": "tests/test_init_provisioning.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by pytest convention — not subject to the 3-layer apps/ structure rule."
-    },
-    {
-      "file": "tests/test_bootstrap.py",
-      "standard": "encapsulation",
-      "reason": "Tests must import handlers directly to unit-test private functions (_sanitize_name, init_project). Using a module entry point would prevent unit testing."
-    },
-    {
-      "file": "tests/test_bootstrap.py",
-      "standard": "help_text",
-      "reason": "python3 reference is inside a pytest assertion string describing expected hook behavior — not help text, it is a test assertion message."
-    },
-    {
-      "file": "tests/test_bootstrap.py",
-      "standard": "meta",
-      "reason": "Test files use pytest docstring convention instead of AIPass META block headers."
-    },
-    {
-      "file": "setup.py",
-      "standard": "architecture",
-      "reason": "Repo-root cross-platform installer — not a branch module, intentionally lives outside apps/ structure."
-    },
-    {
-      "file": "setup.py",
-      "standard": "debug_print",
-      "reason": "All print() calls are intentional CLI installer output, not debug prints."
-    },
-    {
-      "file": "setup.py",
-      "standard": "documentation",
-      "reason": "main() is documented via the module-level docstring; installer entry points follow script convention."
-    },
-    {
-      "file": "setup.py",
-      "standard": "error_handling",
-      "reason": "except OSError: pass in step_secrets() is documented best-effort chmod on non-POSIX filesystems (Windows)."
-    },
-    {
-      "file": "setup.py",
-      "standard": "help_text",
-      "reason": "python3 reference on line 59 is a user-facing PATH instruction string printed to the terminal, not internal help text."
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate — no I/O, no state, no logging. It runs before EVERY cli command, so json_handler logging here would write 'a help flag was looked for' on every invocation and bury the operation log it is meant to serve. Same bypass @seedgo carries on its own reference implementation of this helper."
     },
     {
       "file": "apps/modules/display.py",
@@ -70,16 +25,6 @@
       "standard": "naming",
       "pattern": "__all__",
       "reason": "Python dunder convention — __all__ controls public API exports, not a constant to uppercase"
-    },
-    {
-      "file": "drone_adapter.py",
-      "standard": "unused_function",
-      "reason": "get_help() and get_introspective() are external API — called by drone, not from within CLI branch"
-    },
-    {
-      "file": "drone_adapter.py",
-      "standard": "silent_catch",
-      "reason": "Drone adapter cannot import prax (circular: drone_adapter → cli.main → prax → cli). Catches return graceful fallbacks."
     },
     {
       "file": "apps/modules/display.py",
@@ -102,14 +47,9 @@
       "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
     },
     {
-      "file": "system_logs",
-      "standard": "log_structure",
-      "reason": "Prax branch detection bug — CLI logs land as unknown_branch. Prax confirmed known limitation (2026-03-23), fix pending on prax side."
-    },
-    {
       "file": "__init__.py",
       "standard": "unused_function",
-      "reason": "cli_entry() is the console_scripts entry point — called by pyproject.toml [project.scripts] aipass = 'aipass.cli:cli_entry', not from within the codebase"
+      "reason": "cli_entry() is a legacy console_scripts entry point. pyproject.toml now maps `aipass` to aipass.aipass.apps.aipass:main, so nothing in-tree calls it — retained as published API pending a keep-or-retire decision (APLAN-0002)."
     }
   ],
   "notes": {

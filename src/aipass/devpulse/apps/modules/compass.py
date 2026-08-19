@@ -132,6 +132,15 @@ def print_introspection() -> None:
     console.print()
 
 
+def _wants_help(args: List[str]) -> bool:
+    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
+
+    Bare word 'help' counts only at position 0 — later positions may be free text
+    (a compass note can legitimately contain the word).
+    """
+    return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """Route compass subcommands to the storage handler.
 
@@ -151,7 +160,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if _wants_help(args):
         console.print(HELP_TEXT)
         return True
 

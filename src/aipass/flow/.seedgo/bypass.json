@@ -36,12 +36,6 @@
       "reason": "Lock file .unlink() is infrastructure (process locking), not a business state change"
     },
     {
-      "file": "apps/modules/dplan_post_close_runner.py",
-      "standard": "trigger",
-      "category": "internal_ops",
-      "reason": "Lock file .unlink() is infrastructure (process locking), not a business state change"
-    },
-    {
       "file": "apps/handlers/mbank/process.py",
       "standard": "handlers",
       "category": "architectural",
@@ -88,24 +82,6 @@
       "standard": "handlers",
       "category": "architectural",
       "reason": "Cross-handler import of load_registry \u2014 display needs registry data for plan status formatting"
-    },
-    {
-      "file": "apps/handlers/plan/create.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of load_registry \u2014 create needs registry to register new plans"
-    },
-    {
-      "file": "apps/handlers/plan/validate.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler import of load_registry \u2014 validate needs registry data to check plan existence"
-    },
-    {
-      "file": "apps/handlers/mbank/restore_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler imports of load_registry, plan_type_loader \u2014 restore needs registry and type resolution to recover archived plans"
     },
     {
       "file": "apps/handlers/registry/load_registry.py",
@@ -162,34 +138,16 @@
       "reason": "Local variables in close operation functions, not constants"
     },
     {
-      "file": "apps/handlers/plan/create.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in plan creation functions, not constants"
-    },
-    {
       "file": "apps/handlers/plan/display.py",
       "standard": "naming",
       "category": "false_positive",
       "reason": "Local variables in display formatting functions, not constants"
     },
     {
-      "file": "apps/handlers/plan/validate.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in validation functions, not constants"
-    },
-    {
       "file": "apps/handlers/mbank/process.py",
       "standard": "naming",
       "category": "false_positive",
       "reason": "Local variables in plan processing functions, not constants"
-    },
-    {
-      "file": "apps/handlers/mbank/restore_ops.py",
-      "standard": "naming",
-      "category": "false_positive",
-      "reason": "Local variables in restore operations, not constants"
     },
     {
       "file": "apps/handlers/registry/monitor_ops.py",
@@ -216,12 +174,6 @@
       "reason": "list_plans_impl has docstring \u2014 checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
     },
     {
-      "file": "apps/handlers/plan/create.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "create_registry_entry has docstring \u2014 checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
-    },
-    {
       "file": "apps/modules/create_plan.py",
       "standard": "documentation",
       "category": "false_positive",
@@ -235,12 +187,6 @@
     },
     {
       "file": "apps/handlers/mbank/process.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/mbank/restore_ops.py",
       "standard": "documentation",
       "category": "false_positive",
       "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
@@ -282,12 +228,6 @@
       "reason": "Handler imports trigger module \u2014 restore_ops fires trigger events when plans are restored"
     },
     {
-      "file": "apps/handlers/summary/summary_ops.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "Cross-handler imports \u2014 summary_ops needs plan type loader and registry for summarization"
-    },
-    {
       "file": "apps/handlers/plan/calculate_relative_path.py",
       "standard": "naming",
       "category": "false_positive",
@@ -322,12 +262,6 @@
       "standard": "naming",
       "category": "false_positive",
       "reason": "Local variables in aggregation functions, not constants"
-    },
-    {
-      "file": "apps/handlers/config/load_config.py",
-      "standard": "handlers",
-      "category": "architectural",
-      "reason": "module_name parameter is intentional DI pattern \u2014 callers inject module name, auto-detection not needed"
     },
     {
       "file": "apps/handlers/plan/resolve_location.py",
@@ -408,36 +342,6 @@
       "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
-      "file": "*",
-      "standard": "test_quality",
-      "category": "deferred",
-      "reason": "Deferred per devpulse dispatch \u2014 test infrastructure not yet in place for flow branch"
-    },
-    {
-      "file": "tests/test_monitor_registry.py",
-      "standard": "architecture",
-      "category": "false_positive",
-      "reason": "Test files live in tests/ by convention, not in the apps/ 3-layer structure"
-    },
-    {
-      "file": "tests/test_monitor_registry.py",
-      "standard": "encapsulation",
-      "category": "false_positive",
-      "reason": "Unit tests import handlers directly to test implementation functions in isolation"
-    },
-    {
-      "file": "tests/test_heal_registry.py",
-      "standard": "architecture",
-      "category": "false_positive",
-      "reason": "Test files live in tests/ by convention, not in the apps/ 3-layer structure"
-    },
-    {
-      "file": "tests/test_heal_registry.py",
-      "standard": "encapsulation",
-      "category": "false_positive",
-      "reason": "Unit tests import handlers directly to test implementation functions in isolation"
-    },
-    {
       "file": "tests/*",
       "standard": "architecture",
       "category": "false_positive",
@@ -448,6 +352,12 @@
       "standard": "encapsulation",
       "category": "false_positive",
       "reason": "Unit tests import handlers directly to test implementation functions in isolation"
+    },
+    {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "category": "architectural",
+      "reason": "Pure predicate \u2014 one question over a token list, no I/O and no state. It is called before every command in 5 modules (9 call sites), so a log_operation() here would record 'a help flag was looked for' on every single invocation and drown the operations log in non-events; it would also make the help gate depend on the JSON layer it is meant to run ahead of. The callers that ACT on the answer already log what they did. Same file, same call and same reasoning as @drone, @trigger and @memory carry for their identical helper (DPLAN-0291 rule E, 2026-08-13)."
     }
   ],
   "notes": {

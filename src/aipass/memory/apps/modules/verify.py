@@ -33,6 +33,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -89,8 +90,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_introspection()
             return True
 
-        # --help / -h / help -> full help
-        if args[0] in ("--help", "-h", "help"):
+        # --help / -h / help -> full help. Bare `help` only counts in the
+        # first slot — a plan label is free text.
+        if wants_help(args):
             print_help()
             return True
 

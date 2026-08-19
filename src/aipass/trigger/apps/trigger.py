@@ -37,6 +37,12 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
+# Branch version reported by `drone @trigger --version`.
+# Kept in step with the README header by test_trigger_entry.py — this string sat
+# at 2.2.0 through four documented feature releases (found by the APLAN-0008
+# audit), so the two are now pinned to each other rather than to a human's memory.
+__version__ = "2.6.0"
+
 # =============================================================================
 # MODULE DISCOVERY
 # =============================================================================
@@ -214,7 +220,7 @@ def main():
 
     # Show version
     if args[0] in ["--version", "-V"]:
-        console.print("TRIGGER v2.2.0")
+        console.print(f"TRIGGER v{__version__}")
         return 0
 
     # Show help for explicit help flags
@@ -238,8 +244,14 @@ def main():
     if route_command(command, remaining_args, modules):
         return 0
     else:
+        # Name the whole invocation, not just the first word. No module claimed
+        # `medic nonsense`, so this branch reported "Unknown command: medic" —
+        # naming a command that plainly exists and hiding the word that did not
+        # (APLAN-0008). Routing cannot tell us which half was wrong; printing
+        # both is the honest answer.
+        attempted = " ".join([command, *remaining_args])
         console.print()
-        error(f"Unknown command: {command}", suggestion="Run 'drone @trigger --help' for available commands")
+        error(f"Unknown command: {attempted}", suggestion="Run 'drone @trigger --help' for available commands")
         console.print()
         return 1
 

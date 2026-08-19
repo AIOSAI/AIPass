@@ -607,3 +607,59 @@ class TestRetroactiveOwner:
         entries = {b["name"]: b for b in reg_data["branches"]}
         assert entries["AGENT_X"].get("owner") is True
         assert entries["AGENT_Y"].get("owner") is not True
+
+
+# =============================================================================
+# BIRTH CERTIFICATE SCHEMA TESTS
+# =============================================================================
+
+
+class TestBirthCertificateSchema:
+    """Every mint must be born on the current cert schema.
+
+    The fleet's birth certificates carry ``metadata.template`` — the AIPass
+    profile the citizen was registered under. They used to carry
+    ``metadata.citizen_class`` instead, holding the value ``builder``, a class
+    that was retired when the fleet migrated builder -> aipass_framework (see
+    the legacy path in ``sync_registry_ops``). The two keys are different
+    concepts, not a rename: the passport is the authoritative home for
+    citizen_class, and a birth record repeating a retired class value preserves
+    stale data forever.
+
+    ``artifacts/birth_certificate.json`` is on the never-update list, so a
+    template that mints the old shape cannot be corrected later by an update —
+    every citizen born from it carries the old schema for life. That makes this
+    a template-level canary rather than a data check.
+    """
+
+    @pytest.mark.parametrize("class_name", ["aipass_framework", "project_agent"])
+    def test_mint_carries_metadata_template(self, tmp_path, class_name):
+        """A real create must render metadata.template with the detected profile."""
+        from aipass.spawn.apps.handlers.metadata import detect_profile
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / f"cert_{class_name}"
+        result = _spawn_agent(str(target), citizen_class=class_name)
+        assert result["success"] is True, result
+
+        cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
+
+        assert cert["metadata"]["template"] == detect_profile(target)
+        assert "citizen_class" not in cert["metadata"], (
+            f"{class_name} mints a retired citizen_class into the birth record: {cert['metadata']}"
+        )
+
+    @pytest.mark.parametrize("class_name", ["aipass_framework", "project_agent"])
+    def test_mint_description_matches_metadata(self, tmp_path, class_name):
+        """The prose must name the same template the metadata records."""
+        from aipass.spawn.apps.handlers.metadata import detect_profile
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / f"desc_{class_name}"
+        result = _spawn_agent(str(target), citizen_class=class_name)
+        assert result["success"] is True, result
+
+        cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
+
+        assert f"registered using '{detect_profile(target)}' template" in cert["description"]
+        assert "class." not in cert["description"], cert["description"]

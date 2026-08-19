@@ -1863,8 +1863,22 @@ class BaseBot:
         only — plain messages still require an existing live session. One
         session per branch (compass #106 occupancy doctrine): never spawns
         a second if aipass-<branch> is already running.
+
+        A BARE /start spawns nothing. Telegram sends /start with no argument
+        whenever a client opens the chat, so it is a greeting, not a command —
+        it used to default to @aipass and start an interactive session in that
+        branch's home, whose ghost then blocked @aipass's real headless wake.
         """
-        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        branch = branch_arg.strip().lstrip("@").lower()
+        if not branch:
+            self.send_message(
+                chat_id,
+                "Usage: /start <branch> — wakes that branch's terminal agent.\n"
+                "Opening this chat does not start anything on its own.\n"
+                "Use /status to see which sessions are running.",
+            )
+            logger.info("Control /start: bare greeting, no branch named — nothing spawned")
+            return
         session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
 
         try:
@@ -1905,8 +1919,17 @@ class BaseBot:
         self.send_message(chat_id, f"woke {branch}")
 
     def _handle_control_kill(self, chat_id: int, branch_arg: str) -> None:
-        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling)."""
-        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling).
+
+        A destructive verb never picks its own target: a bare /kill shared the
+        same `or "aipass"` default as /start and would have killed @aipass's
+        live session.
+        """
+        branch = branch_arg.strip().lstrip("@").lower()
+        if not branch:
+            self.send_message(chat_id, "Usage: /kill <branch> — name the branch to kill. Nothing killed.")
+            logger.info("Control /kill: no branch named — refused, nothing killed")
+            return
         session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
 
         try:
@@ -2179,74 +2202,6 @@ class BaseBot:
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to settle pending on /stop: %s", e)
 
-    def _resolve_graphical_session(self) -> Optional[str]:
-        """
-        Find this user's active graphical logind session id, or None.
-
-        The bot runs as a `systemd --user` service, outside the graphical
-        session scope — it has no XDG_SESSION_ID, so `loginctl lock-session`
-        with no argument has no ambient session to resolve and may refuse.
-        Naming the session explicitly makes the call work from any context.
-        """
-        try:
-            listed = subprocess.run(
-                ["loginctl", "list-sessions", "--no-legend"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            logger.warning("Could not list logind sessions: %s", e)
-            return None
-
-        our_uid = str(os.getuid())
-        for line in listed.stdout.splitlines():
-            parts = line.split()
-            if not parts:
-                continue
-            session_id = parts[0]
-            try:
-                shown = subprocess.run(
-                    ["loginctl", "show-session", session_id, "-p", "Type", "-p", "State", "-p", "User"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            except (FileNotFoundError, subprocess.CalledProcessError) as e:
-                logger.info("Could not inspect session %s, skipping it: %s", session_id, e)
-                continue
-            props = dict(p.split("=", 1) for p in shown.stdout.splitlines() if "=" in p)
-            if (
-                props.get("Type") in ("wayland", "x11")
-                and props.get("State") == "active"
-                and props.get("User") == our_uid
-            ):
-                return session_id
-        return None
-
-    def _lock_via_dbus(self) -> bool:
-        """Fallback lock via the GNOME ScreenSaver session-bus method. True if it succeeded."""
-        try:
-            subprocess.run(
-                [
-                    "gdbus",
-                    "call",
-                    "--session",
-                    "--dest",
-                    "org.gnome.ScreenSaver",
-                    "--object-path",
-                    "/org/gnome/ScreenSaver",
-                    "--method",
-                    "org.gnome.ScreenSaver.Lock",
-                ],
-                check=True,
-                capture_output=True,
-            )
-            return True
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            logger.warning("D-Bus screensaver lock failed: %s", e)
-            return False
-
     def _handle_control_lock(self, chat_id: int) -> None:
         """
         /lock — password-lock the screen, leave everything running.
@@ -2256,28 +2211,22 @@ class BaseBot:
         sudoers grant, no polkit rule, and nothing sleeps — so unlike /suspend
         there is no wake, grace-window or reachability story to get wrong.
         Patrick's ruling #217 retired suspend from daily use in favour of this.
+
+        The verb itself lives in the `screen_lock` skill (DPLAN-0300) so the host
+        API can lock without importing this bot; we are its first consumer and
+        own only the phrasing. Lazy import — the skill stays off bot startup.
         """
-        session_id = self._resolve_graphical_session()
-        target = ["loginctl", "lock-session"] + ([session_id] if session_id else [])
+        from aipass.skills.lib.screen_lock import handler as screen_lock
 
-        try:
-            subprocess.run(target, check=True, capture_output=True)
-            logger.info("Screen locked via loginctl (session=%s)", session_id or "ambient")
-            self.send_message(chat_id, "🔒 Locked — agents stay awake.")
-            return
-        except FileNotFoundError:
-            logger.warning("loginctl not found, trying the D-Bus screensaver fallback")
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
-            logger.warning("loginctl lock refused (%s), trying the D-Bus fallback", stderr or e)
+        result = screen_lock.lock_screen()
 
-        if self._lock_via_dbus():
-            logger.info("Screen locked via the GNOME ScreenSaver D-Bus fallback")
+        if result["locked"]:
+            logger.info("Control /lock: locked via %s (session=%s)", result["method"], result["session"] or "ambient")
             self.send_message(chat_id, "🔒 Locked — agents stay awake.")
             return
 
-        logger.error("/lock failed: neither loginctl nor the D-Bus fallback could lock the screen")
-        self.send_message(chat_id, "Could not lock the screen — loginctl and the D-Bus fallback both failed.")
+        logger.error("Control /lock failed: %s", result["error"])
+        self.send_message(chat_id, result["error"])
 
     def _suspend_heartbeat_seconds(self) -> int:
         """

@@ -58,7 +58,7 @@ def print_introspection() -> None:
     console.print()
 
     console.print("[yellow]Connected Handlers:[/yellow]")
-    console.print("  [cyan]handlers/standards/[/cyan]")
+    console.print("  [cyan]handlers/readme/[/cyan]")
     console.print("    [dim]- readme_ops.py (load_generator, resolve_targets, SECTION_NAMES)[/dim]")
     console.print()
     console.print("  [cyan]handlers/json/[/cyan]")

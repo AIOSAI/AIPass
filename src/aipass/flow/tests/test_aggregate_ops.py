@@ -1,6 +1,7 @@
 """Tests for aggregate_ops -- helper functions and aggregation implementation."""
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -548,3 +549,113 @@ class TestAggregateCentralImpl:
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert saved["generated_at"] != ""
         assert "T" in saved["generated_at"]
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. total_closed must not count its own cap
+# ═══════════════════════════════════════════════════════════
+
+
+class TestTotalClosedIsNotTruncated:
+    """Reported by @prax 2026-08-16, reproduced before fixing.
+
+    push_central computes the real closed count per branch, then aggregate
+    read its closed universe back out of the already-capped recently_closed
+    window and republished len(window) as total_closed. Live central at the
+    time: all 44 branches reported total_closed <= 5 (max anywhere exactly 5)
+    while flow's registry held 336 closed plans for devpulse alone, 699 across
+    the tree against a published 126.
+    """
+
+    @staticmethod
+    def _central(tmp_path, *, real_total, window=5):
+        """A branch push_central already measured honestly, capped to `window`."""
+        central_dir = tmp_path / ".ai_central"
+        central_dir.mkdir(exist_ok=True)
+        central_file = central_dir / "PLANS.central.json"
+        closed = [
+            {"plan_id": f"FPLAN-{n:04d}", "subject": f"Closed {n}", "closed": f"2026-08-{n:02d}T09:00:00+00:00"}
+            for n in range(1, window + 1)
+        ]
+        data = {
+            "generated_at": "",
+            "active_plans": [],
+            "recently_closed": [],
+            "statistics": {},
+            "branches": {
+                "busy": {
+                    "branch_path": str(tmp_path / "busy"),
+                    "active_plans": [],
+                    "recently_closed": closed,
+                    # what push_central wrote: the REAL count, uncapped
+                    "statistics": {"active_count": 0, "total_closed": real_total, "recently_closed_included": window},
+                }
+            },
+            "global_statistics": {},
+        }
+        central_file.write_text(json.dumps(data), encoding="utf-8")
+        return central_file, central_dir
+
+    def test_branch_total_survives_the_window_cap(self, tmp_path):
+        """104 closed plans behind a 5-row window still report 104."""
+        aggregate_central_impl = _import("aggregate_central_impl")
+        central_file, central_dir = self._central(tmp_path, real_total=104)
+
+        with patch(f"{_MOD}.trigger", create=True):
+            assert aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir) is True
+
+        stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
+        assert stats["total_closed"] == 104
+        assert stats["recently_closed_included"] == 5
+
+    def test_total_closed_is_not_merely_the_window_size(self, tmp_path):
+        """The tell @prax named: total_closed == recently_closed_included on every branch."""
+        aggregate_central_impl = _import("aggregate_central_impl")
+        central_file, central_dir = self._central(tmp_path, real_total=104)
+
+        with patch(f"{_MOD}.trigger", create=True):
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+
+        stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
+        assert stats["total_closed"] != stats["recently_closed_included"]
+
+    def test_top_level_total_is_not_a_sum_of_caps(self, tmp_path):
+        """Top level summed the per-branch caps — 126 published against 699 real."""
+        aggregate_central_impl = _import("aggregate_central_impl")
+        central_file, central_dir = self._central(tmp_path, real_total=104)
+
+        with patch(f"{_MOD}.trigger", create=True):
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+
+        saved = json.loads(central_file.read_text(encoding="utf-8"))
+        assert saved["statistics"]["total_closed"] == 104
+        assert saved["global_statistics"]["total_closed"] == 104
+        assert saved["statistics"]["recently_closed_included"] == 5
+
+    def test_run_twice_is_stable(self, tmp_path):
+        """Idempotency: re-aggregating must not re-truncate what it just fixed."""
+        aggregate_central_impl = _import("aggregate_central_impl")
+        central_file, central_dir = self._central(tmp_path, real_total=104)
+
+        with patch(f"{_MOD}.trigger", create=True):
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+            first = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+            second = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
+
+        assert first["total_closed"] == second["total_closed"] == 104
+
+    def test_missing_upstream_total_warns_instead_of_publishing_silently(self, tmp_path, caplog):
+        """No upstream count = we cannot know the real total. Say so, don't invent one."""
+        aggregate_central_impl = _import("aggregate_central_impl")
+        central_file, central_dir = self._central(tmp_path, real_total=104)
+        data = json.loads(central_file.read_text(encoding="utf-8"))
+        del data["branches"]["busy"]["statistics"]["total_closed"]
+        central_file.write_text(json.dumps(data), encoding="utf-8")
+
+        with patch(f"{_MOD}.trigger", create=True), caplog.at_level(logging.WARNING):
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
+
+        stats = json.loads(central_file.read_text(encoding="utf-8"))["branches"]["busy"]["statistics"]
+        assert stats["total_closed"] == 5  # the window, honestly labelled as a floor
+        assert "total_closed" in caplog.text

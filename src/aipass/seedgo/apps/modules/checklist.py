@@ -54,6 +54,9 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+
 
 # =============================================================================
 # PATH HELPERS
@@ -264,9 +267,28 @@ def _format_failure(result: Dict) -> str:
 # OUTPUT FORMATTING
 # =============================================================================
 
+# The token a script counts findings by. This lane is consumed by machines as
+# much as by people (edit hooks, sweeps over a whole branch), and until now the
+# only thing marking a finding was the em dash below -- decoration, not a
+# contract. @spawn scripted against it by grepping for a cross, got zero hits
+# across all 18 files of a branch, and nearly deleted 41 bypass rules on that
+# "proof". Plain ASCII, one per finding, never on a pass.
+FINDING_MARKER = "[FAIL]"
+
+# ...and the same token spelled for Rich. The leading bracket MUST be escaped:
+# unescaped, Rich reads "[FAIL]" as a style tag and deletes it at render time,
+# leaving output that looks clean while the recorded call argument still reads
+# perfectly right. That is the exact failure mode this marker exists to end.
+_FINDING_MARKUP = "[red]\\[FAIL][/red]"
+
 
 def _print_results(results: List[Dict], file_path: str) -> None:
-    """Print concise pass/fail output for hook consumption."""
+    """Print concise pass/fail output for hook consumption.
+
+    Each finding carries :data:`FINDING_MARKER` so a caller can count findings
+    with a literal grep. The em dash stays where it was: it is the human
+    layout, and a marker is an addition to it, not a replacement for it.
+    """
     p = Path(file_path)
     console.print(f"[dim]{p.name}[/dim]")
 
@@ -279,9 +301,9 @@ def _print_results(results: List[Dict], file_path: str) -> None:
             all_passed = False
             detail = r.get("detail", "")
             if detail:
-                console.print(f"  \u2014 {std}: {detail}")
+                console.print(f"  {_FINDING_MARKUP} \u2014 {std}: {detail}")
             else:
-                console.print(f"  \u2014 {std}")
+                console.print(f"  {_FINDING_MARKUP} \u2014 {std}")
 
     if all_passed:
         console.print(f"[green]All {len(results)} standards passed[/green]")
@@ -315,8 +337,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # --help
-    if args[0] in ["--help", "-h", "help"]:
+    # A help flag ANYWHERE means explain: `checklist <file> --help` used to run
+    # the full per-file audit it was being asked to describe.
+    if wants_help(None, args):
         print_help()
         return True
 
@@ -448,8 +471,14 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]OUTPUT FORMAT:[/yellow]")
-    console.print("  [green]\u2713[/green] standard_name                         [dim]# Passed[/dim]")
-    console.print("  \u2014 standard_name: failure detail           [dim]# Failed with reason[/dim]")
+    console.print("  [green]\u2713[/green] standard_name                              [dim]# Passed[/dim]")
+    console.print(f"  {_FINDING_MARKUP} \u2014 standard_name: failure detail   [dim]# Failed with reason[/dim]")
+    console.print()
+    console.print(
+        f"  Every finding carries the literal marker {_FINDING_MARKUP} \u2014 one per finding, never on a pass."
+    )
+    console.print("  [dim]Count findings with: drone @seedgo checklist <file> | grep -c '\\[FAIL]'[/dim]")
+    console.print("  [dim]Do not count the em dash: it is layout, not a contract.[/dim]")
     console.print()
 
     console.print("[yellow]SCOPE RULES:[/yellow]")

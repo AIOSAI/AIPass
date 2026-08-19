@@ -208,7 +208,7 @@ def diagnose_key(provider: str = "openrouter") -> str:
 
     if not key:
         secrets_path = Path.home() / ".secrets" / "aipass" / ".env"
-        return f"API key for {provider} not found. Expected at {secrets_path}. Run drone @api setup to configure."
+        return f"API key for {provider} not found. Expected at {secrets_path}. Run drone @api init to configure."
 
     key = key.strip()
     rules = get_validation_rules(provider)

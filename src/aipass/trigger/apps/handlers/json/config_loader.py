@@ -34,7 +34,7 @@ import json
 import os
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, trail_logger
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, replace_with_retry, trail_logger
 
 CONFIG_PATH = TRIGGER_JSON_DIR / "custom_config" / "trigger.config.json"
 
@@ -119,7 +119,7 @@ def _write_config_file(config: dict[str, Any]) -> bool:
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp_path, CONFIG_PATH)
+        replace_with_retry(str(tmp_path), str(CONFIG_PATH))
         return True
     except OSError as exc:
         logger.error(f"failed to write {CONFIG_PATH}: {exc}")

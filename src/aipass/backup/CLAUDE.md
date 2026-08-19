@@ -4,7 +4,7 @@
 
 On any greeting, silently read these files and run the commands — no narration, no announcing steps. Just do it and respond with the status.
 
-**Read:** `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`, `STATUS.local.md`
+**Read:** `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`, `DASHBOARD.local.json`
 **Check:** If `.ai_mail.local/inbox.json` exists, read it. Process any mail.
 **Run:** `git status`
 

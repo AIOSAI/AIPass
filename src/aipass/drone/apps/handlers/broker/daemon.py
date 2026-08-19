@@ -39,6 +39,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
+from aipass.drone.apps.handlers import deletion_log
 
 _DEFAULT_SOCKET_DIR = ".ai_central"
 _SOCKET_NAME = "drone_broker.sock"
@@ -268,6 +269,14 @@ class BrokerDaemon:
                 )
                 self._audit(audit_entry)
                 logger.warning("broker: denied delete %s: %s", resolved, deny_reason)
+                deletion_log.record_deletion(
+                    lane=deletion_log.LANE_BROKER,
+                    outcome=deletion_log.OUTCOME_REFUSED,
+                    requested=req.path,
+                    resolved=resolved,
+                    reason=deny_reason,
+                    caller=identity,
+                )
                 return BrokerResponse(
                     ok=False,
                     message=deny_reason,
@@ -284,12 +293,24 @@ class BrokerDaemon:
                     base=str(base),
                 )
                 self._audit(audit_entry)
+                deletion_log.record_deletion(
+                    lane=deletion_log.LANE_BROKER,
+                    outcome=deletion_log.OUTCOME_REFUSED,
+                    requested=req.path,
+                    resolved=resolved,
+                    reason=reason,
+                    caller=identity,
+                )
                 return BrokerResponse(
                     ok=False,
                     message=reason,
                     request_id=req.request_id,
                     error_code="ROOT_DELETE",
                 )
+
+            # Before the delete, for the same reason rm measures early: a tree
+            # cannot be sized once it is gone.
+            measurement = deletion_log.measure(resolved)
 
             try:
                 if resolved.is_symlink():
@@ -307,6 +328,15 @@ class BrokerDaemon:
                     base,
                     identity,
                 )
+                deletion_log.record_deletion(
+                    lane=deletion_log.LANE_BROKER,
+                    outcome=deletion_log.OUTCOME_DELETED,
+                    requested=req.path,
+                    resolved=resolved,
+                    reason=f"Deleted: {resolved}",
+                    measurement=measurement,
+                    caller=identity,
+                )
                 return BrokerResponse(
                     ok=True,
                     message=f"Deleted: {resolved}",
@@ -321,6 +351,15 @@ class BrokerDaemon:
                 )
                 self._audit(audit_entry)
                 logger.error("broker: delete failed %s: %s", resolved, exc)
+                deletion_log.record_deletion(
+                    lane=deletion_log.LANE_BROKER,
+                    outcome=deletion_log.OUTCOME_FAILED,
+                    requested=req.path,
+                    resolved=resolved,
+                    reason=f"Delete failed: {exc}",
+                    measurement=measurement,
+                    caller=identity,
+                )
                 return BrokerResponse(
                     ok=False,
                     message=f"Delete failed: {exc}",
@@ -331,6 +370,14 @@ class BrokerDaemon:
         audit_entry.update(result="REFUSED", reason="Path not under any allowed base for this identity")
         self._audit(audit_entry)
         logger.warning("broker: no allowed base matched for %s (identity=%s)", req.path, identity)
+        deletion_log.record_deletion(
+            lane=deletion_log.LANE_BROKER,
+            outcome=deletion_log.OUTCOME_REFUSED,
+            requested=req.path,
+            resolved=req.path,
+            reason="Path not under any allowed base for this identity",
+            caller=identity,
+        )
         return BrokerResponse(
             ok=False,
             message=f"Path not permitted for identity '{identity}': {req.path}",

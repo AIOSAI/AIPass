@@ -486,6 +486,128 @@ class TestExtractAssistantResponse:
 
 
 # ===========================================================================
+# Cursor ahead of transcript (devpulse c361b355)
+# ===========================================================================
+
+
+class TestCursorAheadOfTranscript:
+    """A cursor past the end of the transcript is a stuck delivery, not a quiet one.
+
+    Live evidence, 2026-08-14: 117 'no user message found' WARNINGs in the current
+    log, ALL from one session (ec388200), ALL at the identical start_line=10409,
+    over ten hours - against a transcript 2544 lines long. The cursor sat 7865 lines
+    past the end, so every Stop sliced an empty window and found no user message,
+    forever. extract_mirror_turn already clamps this exact case; the non-mirror path
+    did not.
+    """
+
+    def _transcript(self, tmp_path, extra_turns: int = 0):
+        transcript = tmp_path / "transcript.jsonl"
+        lines = [_jsonl_line("user", "Question"), _jsonl_line("assistant", "Answer")]
+        for i in range(extra_turns):
+            lines.append(_jsonl_line("user", f"Follow-up {i}"))
+            lines.append(_jsonl_line("assistant", f"Reply {i}"))
+        transcript.write_text("\n".join(lines), encoding="utf-8")
+        return transcript
+
+    def test_cursor_ahead_of_transcript_still_delivers(self, tmp_path):
+        """The live failure: 4x-past-the-end cursor must not swallow the reply."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = self._transcript(tmp_path)
+
+        with patch(LOGGER_PATCH):
+            result = extract_assistant_response(str(transcript), start_line=10409)
+
+        assert result == "Answer"
+
+    def test_the_clamp_delivers_the_latest_turn_not_the_whole_history(self, tmp_path):
+        """Clamping to the last real user message, same rule the mirror path uses."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = self._transcript(tmp_path, extra_turns=3)
+
+        with patch(LOGGER_PATCH):
+            result = extract_assistant_response(str(transcript), start_line=9999)
+
+        assert result == "Reply 2"
+        assert "Answer" not in result
+
+    def test_the_clamp_names_both_numbers(self, tmp_path):
+        """The log line has to carry the cursor AND the length — that pair is what
+        turned 117 identical WARNINGs into a diagnosis."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = self._transcript(tmp_path)
+
+        with patch(LOGGER_PATCH) as mock_logger:
+            extract_assistant_response(str(transcript), start_line=10409)
+
+        warned = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        assert "cursor ahead" in warned
+        assert "10409" in warned
+        assert "2" in warned
+
+    def test_a_cursor_inside_the_transcript_is_untouched(self, tmp_path):
+        """The clamp must only fire past the end — a normal cursor still slices."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = self._transcript(tmp_path, extra_turns=1)
+
+        with patch(LOGGER_PATCH) as mock_logger:
+            result = extract_assistant_response(str(transcript), start_line=2)
+
+        assert result == "Reply 0"
+        warned = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        assert "cursor ahead" not in warned
+
+    def test_a_transcript_with_no_user_message_at_all_still_warns(self, tmp_path):
+        """@devpulse asked for a guard: the genuinely-broken sub-case stays loud.
+
+        Clamping cannot invent a user message. When one truly is not there, the
+        WARNING is the only evidence a Telegram reply was dropped."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(_jsonl_line("assistant", "Orphan"), encoding="utf-8")
+
+        with patch(LOGGER_PATCH) as mock_logger:
+            result = extract_assistant_response(str(transcript), start_line=500)
+
+        assert result is None
+        warned = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        assert "no user message found" in warned
+
+    def test_the_benign_sibling_stays_info(self, tmp_path):
+        """Guard against a blanket reclass: 'no assistant text' is the quiet case and
+        was already INFO. It fired 0 times in the live log while the -1 case fired 117."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_assistant_response
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(_jsonl_line("user", "Question"), encoding="utf-8")
+
+        with patch(LOGGER_PATCH) as mock_logger:
+            result = extract_assistant_response(str(transcript))
+
+        assert result is None
+        mock_logger.warning.assert_not_called()
+        info = " ".join(str(call) for call in mock_logger.info.call_args_list)
+        assert "no assistant text after last user msg" in info
+
+    def test_the_mirror_path_still_clamps(self, tmp_path):
+        """Canary: the mirror clamp existed first and must survive being shared."""
+        from aipass.hooks.apps.handlers.notification.telegram_response import extract_mirror_turn
+
+        transcript = self._transcript(tmp_path)
+
+        with patch(LOGGER_PATCH):
+            result = extract_mirror_turn(str(transcript), start_line=10409)
+
+        assert result is not None
+        assert "Answer" in result
+
+
+# ===========================================================================
 # chunk_text
 # ===========================================================================
 

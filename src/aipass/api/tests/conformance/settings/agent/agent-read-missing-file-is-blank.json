@@ -1,0 +1,24 @@
+{
+  "description": "A branch that has never been configured is not a fault. Every dial sits at absent.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": null
+    }
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "missing"
+  },
+  "id": "agent-read-missing-file-is-blank",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

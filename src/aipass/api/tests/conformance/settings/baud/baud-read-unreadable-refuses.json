@@ -1,0 +1,27 @@
+{
+  "description": "Unreadable is a fault on both documents, for the same reason on both. PLATFORM: same unconstructable-state rule as the agent case — verify, then skip with the reason named.",
+  "document": "baud",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "content": {
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "unreadable"
+  },
+  "id": "baud-read-unreadable-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "platform": {
+    "requires": [
+      "unreadable_files"
+    ]
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

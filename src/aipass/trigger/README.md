@@ -5,17 +5,25 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-08
+**Last Updated:** 2026-08-19
 
 ## Quick Start
 
 ```bash
-drone @trigger status                        # Event bus + medic state
+drone @trigger medic status                  # Medic state + live watcher + mutes
 drone @trigger errors list                   # View tracked errors
-drone @trigger medic status                  # Check dispatch gating
+drone @trigger status                        # Branch log watcher state (see note)
 drone @trigger escalation status             # Repeat-signature digest lane
 drone @trigger fire error_detected branch=api error_type=ImportError
 ```
+
+> **`status` reports this process, not the daemon.** `drone @trigger status`
+> prints the branch log watcher belonging to the CLI process you just started —
+> which has none — so it always says `Active: False` even while the systemd
+> watcher runs. For the live answer use `drone @trigger medic status`, which
+> reads the service, or `systemctl --user status trigger-log-watcher`. Recorded
+> in APLAN-0008 as an open item; the README used to claim this command showed
+> "event bus + medic state", which it never did.
 
 ## Commands
 
@@ -25,9 +33,9 @@ drone @trigger --help                       # Full command listing
 drone @trigger --version                    # Version string
 
 # Event bus
-drone @trigger fire <event> [key=val ...]   # Fire an event with optional data
+drone @trigger fire <event> [key=val ...]   # Fire an event; reports handlers run/failed
 drone @trigger list                         # List all registered events + handlers
-drone @trigger status                       # Event bus and medic state
+drone @trigger status                       # Branch log watcher state (see note)
 
 # Error registry
 drone @trigger errors list                  # View tracked errors
@@ -67,7 +75,10 @@ drone @trigger log_events --help            # System watcher help
 from aipass.trigger.apps.modules.core import Trigger
 
 # Fire an event — all registered handlers run
-Trigger.fire("plan_file_created", path="/path/to/FPLAN-0042.md")
+result = Trigger.fire("plan_file_created", path="/path/to/FPLAN-0042.md")
+# {'event': 'plan_file_created', 'handlers': 1, 'ran': 1, 'failed': 0}
+# A nested fire (one issued from inside a handler) is queued, and says so:
+# {'event': 'inner', 'deferred': True}
 
 # Register a handler
 def on_plan_created(**data):
@@ -78,6 +89,38 @@ Trigger.on("plan_file_created", on_plan_created)
 # Remove a handler
 Trigger.off("plan_file_created", on_plan_created)
 ```
+
+**Handler failures are isolated, not hidden.** A handler that raises never
+propagates to the caller and never stops the other handlers — that isolation is
+the point of a bus. But isolation used to be indistinguishable from silence:
+`drone @trigger fire` printed a green `Fired event:` whether every handler ran,
+every handler crashed, or the event name was a typo nothing listened to. Firing
+`plan_file_moved` with the wrong kwargs during the APLAN-0008 audit crashed the
+handler and still reported success; the only trace was an ERROR line that the log
+watcher later re-reported as a medic error. `fire()` now returns the counts above
+and the CLI prints them, so a wrong-key or wrong-name fire is visible where it is
+typed. Handler exceptions are still logged, still counted toward the
+consecutive-failure auto-disable, and still never raised at the caller.
+
+**A help flag anywhere explains; it never executes.** `--help` and `-h` are
+matched exactly at *any* position in the argument sequence, so
+`medic mute @branch --help` describes muting instead of performing it. Every
+module's `handle_command` gates on `handlers/cli/help_flags.wants_help()`
+before doing any work — but *after* checking that the module owns the command,
+since a module that claimed any invocation carrying `--help` would hijack every
+other module's help at the entry point. The bare word `help` is deliberately
+positional (position 0 only): trigger's own commands take it as a legitimate
+value — `errors suppress <id> help` is a reason and `fire evt message=help` is
+event payload. Matching is exact for the same reason, so `message=--help` stays
+a payload too. The fleet-wide version of this bug (seedgo `help_flag_safety`,
+2026-08-13) performed a 17-branch config reset and a real backup run from
+commands that were asked to describe themselves; trigger's own worst case was
+a 24-hour medic mute with no unmute.
+
+**Event data contracts are per-handler and are not published here.** Sibling
+events do not share key names — `plan_file_created` and `plan_file_deleted` take
+`path`, while `plan_file_moved` takes `src_path` and `dest_path`. Read the
+handler in `apps/handlers/events/` before firing one by hand.
 
 ```python
 from aipass.trigger.apps.modules.errors import report_error
@@ -98,7 +141,7 @@ result = report_error(
 
 | Event | Handler | Trigger | Action |
 |-------|---------|---------|--------|
-| `startup` | `startup.py` | Branch session starts | Error catch-up scan across log files, memory rollover check |
+| `startup` | `startup.py` | First prax log call in **any** process (`prax/apps/modules/logger.py:116`) | Error catch-up scan over `system_logs/` — that is the whole handler (`startup.py:369-377`). It does **not** check memory rollover; this table claimed it did until 2026-08-14 |
 | `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 8-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
 | `error_logged` | `error_logged.py` | System log error (fallback path) | Monitor-only: logs the event, no dispatch |
 | `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |
@@ -152,12 +195,67 @@ A content mute means "expect error lines from me while I build" — it says noth
 
 Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` field (`suppressed` / `delivered`), so suppressed-by-design and delivered-by-bypass are distinguishable. Entries predating that field are all suppressions.
 
-**Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Starts both branch and system watchers, handles SIGTERM/SIGINT for clean shutdown.
+**Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Handles SIGTERM/SIGINT for clean shutdown.
+
+**`system_logs/` has exactly one owner: the branch watcher** (Patrick's ruling,
+2026-08-14). Both watchers used to register the directory.
+`watchers/log_watcher.start_log_watcher()` now declines and returns `None`
+(`SYSTEM_LOGS_OWNER` names the owner in the code); the rest of that module stays live,
+because it is still the reader the startup catch-up scan uses. The ruling ends the
+duplicate, not the watching — the branch watcher globs `system_logs/*.log` alongside the
+per-branch logs and carries the branch mapping, the parsing and the staleness handling.
+`drone @trigger log_events start` says so rather than reporting a failure.
+
+**One line is counted once, even though prax writes it twice.** Every prax call
+lands in *two* files: `src/aipass/<branch>/logs/<module>.log` and
+`system_logs/<branch>_<module>.log`. The branch watcher globs both trees, so a single
+warning became two escalation signatures — and the two disagreed about who wrote it,
+because the branch copy is attributed by the directory it sits in while the
+`system_logs` copy is attributed by guessing at its filename. The reported pair
+(2026-08-14) was `0249c13b4d64` `HOOKS` and `690de8d87cdc` `UNKNOWN`, the same three
+sample lines, consecutive sequence numbers 8514/8515 — one reader, two files, not two
+readers. `_should_process()` now drops a `system_logs` file when
+`_system_log_branch_twin()` finds the branch copy that already covers it: measured
+across the tree, 230 of 243 `system_logs` files are twin-backed and 229 of those twins
+were written within one second of their system copy. The 13 with no twin
+(`telegram-bot-*`, external projects) keep being watched — that is the only reason the
+directory is still read at all.
+
+**Branch attribution comes from the live tree, not a list.** `_known_branch_names()`
+reads the branch directories (60s TTL) instead of trusting a hardcoded roster. The
+roster held 11 names against 17 branches, so every `system_logs` file belonging to
+@hooks, @backup, @commons, @daemon, @skills or @aipass was reported as `UNKNOWN` — the
+fault was the list, not the log. The static list survives as a floor for when the tree
+cannot be read. `UNKNOWN` now means what it says: nobody in the tree owns this log.
+
+**Path classification is separator-agnostic.** `_classify_log_path()` matches on
+`PurePath.parts` — `"aipass" in parts and "logs" in parts` for a branch log,
+`"system_logs" in parts` for a system log — not on `"/logs/" in path`. The string
+form only ever matched forward slashes, so on Windows every branch log classified
+as foreign and was silently skipped: the watcher would have run, reported healthy,
+and processed nothing. Pinned on both platforms from either one with
+`PureWindowsPath` and `PurePosixPath` (2026-08-18, reported by @devpulse from
+Windows CI).
 
 ```bash
 systemctl --user status trigger-log-watcher    # Check watcher service
 systemctl --user restart trigger-log-watcher   # Restart watcher
 ```
+
+**The service reloads itself when handler code changes** (`handlers/reload_sentinel.py`). It is a long-running process that imports trigger's handlers once and holds them for its whole life, so a fix shipped to disk does nothing until it restarts. That gap cost this branch 25 hours of a signature fix reported live while the old code was still running, twice mistaken for the fix being incomplete. Remembering to restart after shipping is a human remembering something — the mechanism that already failed — so the process now notices for itself.
+
+Every 30s it compares the mtimes of `apps/handlers/**.py` and `apps/modules/**.py` against the snapshot taken when it started. On a change it exits `75` (`EX_TEMPFAIL`) and systemd's `Restart=on-failure` brings up a fresh interpreter that imports everything from disk. Deliberately a restart, not `importlib.reload()`: handlers register callbacks on the event bus, and reloading in place leaves the bus holding the old function objects.
+
+Two guards keep it from making things worse:
+
+| Guard | Behaviour |
+|---|---|
+| **Settle** | A change is ignored until its mtime has been still for 15s, so an editor mid-save cannot restart the service into a half-written module |
+| **Supervision** | A process with no `INVOCATION_ID` (run by hand, not by systemd) **never exits** — it logs loudly that it is running stale code instead. Exiting there would stop log watching entirely, trading a stale watcher for no watcher |
+
+Reloads are recorded in `logs/reload_sentinel.jsonl` with the files that triggered them, so a restart is never indistinguishable from a crash. Tests and JSON state are not watched — only code the process actually imports.
+
+Note the exit code is coupled to the unit: `Restart=on-failure` means exiting `0` would be read as a completed job and the watcher would stay down. If the unit ever moves to `Restart=always`, `RELOAD_EXIT_CODE` should become `0`; a test pins the two together.
 
 ## Escalation Digest
 
@@ -241,6 +339,8 @@ trigger/
 │       ├── escalation.py           # Repeat-signature counting + digest email
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
 │       ├── medic_state.py          # Medic state persistence (medic_state.json)
+│       ├── cli/
+│       │   └── help_flags.py       # wants_help(): a help flag anywhere explains, never executes
 │       ├── json/
 │       │   ├── json_handler.py     # JSON structure logging
 │       │   └── config_loader.py    # Operator config loader (S193 self-heal doctrine)
@@ -257,8 +357,8 @@ trigger/
 │       │   ├── pr_status_sync.py   # PR → prax status sync (decommissioned TDPLAN-0007)
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
-│           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 898 tests across 23 modules
+│           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
+├── tests/                          # 1068 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -296,8 +396,14 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Data Safety
 
-- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then `os.replace()` for atomic rename. No partial writes on crash.
-- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` using `fcntl.flock` with `.lock` sidecar files. Prevents concurrent corruption from watcher + CLI.
+- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.
+  The rename goes through `config.replace_with_retry()`, not a bare `os.replace()`: on Windows an antivirus scanner or the search indexer can hold a transient handle on the destination and `os.replace` raises `PermissionError`. 40 attempts, 5ms apart, `PermissionError` only — any other `OSError` propagates on the first attempt, and exhaustion raises rather than reporting a write that did not happen. Fleet-canonical shape, matching `@commons`.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. Prevents concurrent corruption from watcher + CLI. Both arms are pinned: the win32 one by an injected fake, the POSIX one by measurement (4 threads x 60 entries, peak 1 holder — `flock` takes a fresh open file description per call, so it conflicts even inside one process).
+  This line said "all" from the day it was written and was **not true until 2026-08-16**: `json_handler`'s own `log_operation`, `increment_counter` and `update_data_metrics` read a document, changed it in memory and wrote it back with no lock at all. Atomic is not serialised — `atomic_write_json` stops a *torn* file, not a *lost* one, and having the atomic helper is exactly what made the gap look closed. Measured on the unfixed handler across 4 processes: **100 appends asked, 62 on disk, 38 lost silently, every call returning `True`.** After the fix, 100 of 100. Found by checking my own paths against a defect @api reported in theirs (`6cd8f22c`), not by anyone auditing this claim.
+- **The Windows lock was a silent no-op until 2026-08-18.** `json_file_lock` carried `if sys.platform == "win32": yield` with the comment "single-user typical" — on Windows the context manager returned having taken *nothing*, and every caller ran unserialised while the code read as locked. Windows has no blocking `flock`, so the fix polls: `msvcrt.locking(..., LK_NBLCK, 1)` on one byte of the sidecar, 100 attempts 50ms apart, and the final attempt is deliberately unguarded so the caller gets the OS's own `OSError` instead of running unlocked. The sidecar opens `"a+"`, not `"w"` — truncating a file another process byte-locks is a sharing violation on Windows. Proven **from Linux** by a fake `msvcrt` injected into `sys.modules` with `sys.platform` patched: acquires and releases, retries-then-succeeds (exactly 3 waits, 4 lock calls), and refuses rather than yielding unlocked. A source-inspection test pins that the words "single-user typical" never come back.
+
+- **The read side was the other half, and it was the one that lost data (2026-08-18).** `os.replace` was hardened against the Windows sharing window; every *reader* was left exposed to the identical transient. `ensure_json_exists` caught `OSError` alongside decode errors and answered both by writing a fresh template over the document — so a 5ms timing event was read as corruption and the file was thrown away. Windows CI counted it: **98 of 100** concurrent appends survived, the two lost being exactly the two on disk when one read was refused. Reproduced on Linux in three lines. Reads now go through `config.read_text_with_retry` (the mirror of `replace_with_retry`), **unreadable is no longer treated as corrupt**, and `log_operation` refuses rather than writing `[]` over a document it could not read. The lock was never involved — the destructive write lived outside the critical section, where no lock could reach it.
+- **"Ensure this exists" is not "write this", and the difference was a lost entry (2026-08-19).** `ensure_json_exists` implemented create-if-missing as a replacing write, and it runs outside every lock — so two callers that both find a document missing both stage an empty template, and the loser's completes after a lock holder has written its first real entry. Linux CI counted **99 of 100**; reproduced locally at 3 losing runs in 400, with the instrumented write order naming the culprit outright (two empty-template writes staged first, one landing after a 1-entry write). No lock could have prevented it — the template write is outside every critical section by construction. Creation now goes through `config.atomic_create_json`: the staged file is **linked** into place, so a second creator is refused rather than overwriting, and the document is complete the instant it appears. 0 losses in 1500 runs after — with the same loop still losing when the replacing write is put back, so the loop has power. A filesystem without hard links degrades to the replacing write and says so in the log.
 - **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the Architecture section.
 
@@ -315,21 +421,30 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-898 tests across 23 test modules, all passing. Coverage: 100/100 public functions (100%).
+1068 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`
+Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`, `test_help_flags`
 
 ## Compliance
 
-Seedgo: 99% (43 standards). Zero type errors. The single remaining deduction is `handlers` on `handlers/escalation.py`: its five same-branch imports are all ALLOWED by the published handlers standard ("same-branch handler imports: ALLOWED, even across packages"), but `handlers_check` computes a handler's own package as the path part after `handlers/` — for a file sitting at the handlers root that is the *filename*, so the exemption can never match. Raised with @seedgo as a standards question rather than restructured around; the same check rejects the standard's own documented ALLOWED example.
+Seedgo: **100% with bypasses, 98% without** (46 standards). Zero type errors. Both
+numbers are published deliberately: 100% is the shielded score, and the 26 bypass
+rules behind it each suppress exactly one real violation — measured by running the
+audit with `bypass: []` and matching one rule to one surviving violation, with no
+violation left un-bypassed and no rule left dead (APLAN-0008). The registry
+holds **zero `tests/*` rules**, so the checklist-lane trap that bit other branches
+(a rule that reads dead in the audit lane while still suppressing findings in the
+PostToolUse hook) does not apply here.
+
+The largest single deduction is `handlers` on `handlers/escalation.py`: its five same-branch imports are all ALLOWED by the published handlers standard ("same-branch handler imports: ALLOWED, even across packages"), but `handlers_check` computes a handler's own package as the path part after `handlers/` — for a file sitting at the handlers root that is the *filename*, so the exemption can never match. Raised with @seedgo as a standards question rather than restructured around; the same check rejects the standard's own documented ALLOWED example.
 
 ---
 
-*Last Updated: 2026-08-08*
+*Last Updated: 2026-08-19*
 
 ---
 [← Back to AIPass](../../../README.md)

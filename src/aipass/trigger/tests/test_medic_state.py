@@ -46,13 +46,21 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json, json_file_lock, migrate_json_file
+    from aipass.trigger.apps.config import (
+        atomic_write_json,
+        json_file_lock,
+        migrate_json_file,
+        read_text_with_retry,
+    )
 
     config_mod = MagicMock()
     config_mod.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
     config_mod.TRIGGER_JSON_DIR = Path("/tmp/fake_trigger_root/trigger_json")
     config_mod.atomic_write_json = atomic_write_json
     config_mod.migrate_json_file = migrate_json_file
+    # Real, not a mock: read_config parses what this returns, and a MagicMock
+    # here reads as an unreadable file — the exact confusion this round is about.
+    config_mod.read_text_with_retry = read_text_with_retry
     # Real lock, not a mock: the write paths hold this lock while read_config
     # runs the migration underneath, and only the real flock proves that
     # nesting does not deadlock the process against itself.
@@ -1107,3 +1115,40 @@ class TestLegacyPathMigration:
         data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         assert [e["name"] for e in data["config"]["muted_branches"]] == ["seedgo"]
         assert not legacy.exists()
+
+
+# ---------------------------------------------------------------------------
+# a refused read must not blank the medic state
+# ---------------------------------------------------------------------------
+
+
+class TestARefusedReadDoesNotBlankTheState:
+    """read_config returns {} when it cannot read, and write_config persists
+    exactly what it is handed — so one refused read costs every mute and the
+    circuit-breaker state at once.
+
+    Same species as the json_handler loss on Windows CI (32167459635), with a
+    larger blast radius: there it was one document's entries, here it is the
+    whole operational state of medic. The read is retried now; a refusal that
+    never clears still blanks, and that residual is a recorded todo.
+    """
+
+    def test_a_transient_refusal_does_not_cost_the_mutes(self, state_mod):
+        state_mod.mute_branch("flow")
+        assert state_mod.get_muted_branches() == ["flow"]
+
+        real = Path.read_text
+        seen = []
+
+        def read_text(self_path, *args, **kwargs):
+            if str(self_path) == str(state_mod.MEDIC_STATE_FILE) and not seen:
+                seen.append(1)
+                raise PermissionError(13, "used by another process")
+            return real(self_path, *args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", read_text)
+            state_mod.mute_branch("seedgo")
+
+        assert seen, "fixture refused nothing — test is vacuous"
+        assert sorted(state_mod.get_muted_branches()) == ["flow", "seedgo"]

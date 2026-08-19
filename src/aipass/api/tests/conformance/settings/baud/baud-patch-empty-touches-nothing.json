@@ -1,0 +1,29 @@
+{
+  "description": "A legal no-op, not a wipe.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "theme": "dark"
+    },
+    "file": {
+      "theme": "dark"
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "content": {
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-patch-empty-touches-nothing",
+  "operation": {
+    "kind": "patch",
+    "patch": {}
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

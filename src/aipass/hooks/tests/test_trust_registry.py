@@ -441,7 +441,60 @@ class TestTrustBreakBanner:
             banner = trust_break_banner()
         assert banner is not None
         assert "TRUST BREAK" in banner
-        assert "trust enroll" in banner
+        assert f"aipass trust {project}" in banner
+
+    def test_banner_never_names_a_command_that_does_not_exist(self, temp_test_dir, mock_logger):
+        """This banner is the ONLY message shown while every hook is dark.
+
+        It used to say `drone @hooks trust enroll` — no trust verb exists on
+        @hooks, and `aipass trust` has no enroll subcommand, so it was wrong
+        twice. It also offered `aipass init update`, which re-enrolls only
+        when its union-merge happens to rewrite hooks.json
+        (aipass/apps/handlers/init/bootstrap.py:553-560) — for a hand-edit the
+        template does not touch, the merge is a no-op and nothing enrolls.
+        """
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "dark_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        hooks_file.write_text('{"hooks_enabled": true, "timeout": 90}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            banner = trust_break_banner()
+        assert banner is not None
+        assert "trust enroll" not in banner
+        assert "init update" not in banner
+
+    def test_banner_fix_line_matches_the_config_unavailable_reason_fix(self, temp_test_dir, mock_logger):
+        """Two code paths, one condition — they must not name different remedies."""
+        from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason
+
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "drifted_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        hooks_file.write_text('{"hooks_enabled": false}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            banner = trust_break_banner()
+            reason = config_unavailable_reason()
+        remedy = f"aipass trust {project}"
+        assert banner is not None
+        assert remedy in banner
+        assert reason is not None
+        assert remedy in reason
 
 
 class TestBootstrap:

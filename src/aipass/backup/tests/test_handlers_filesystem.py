@@ -8,6 +8,7 @@
 
 """Test filesystem handlers -- scan, ignore, path, copy, project."""
 
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -187,7 +188,7 @@ class TestBackupResult:
         with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
             from aipass.backup.apps.handlers.report.result import BackupResult
 
-            result = BackupResult(mode="snapshot", project_root="/tmp/test")
+            result = BackupResult(mode="snapshot", project_root=str(Path(tempfile.gettempdir()) / "test"))
             assert result.mode == "snapshot"
             assert result.files_copied == 0
 

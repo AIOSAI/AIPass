@@ -26,34 +26,34 @@ class TestHandleCommand:
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=False):
             assert handle_command("hooksound", []) is True
 
-    def test_off_creates_mute_flag(self):
+    def test_off_mutes_through_sound_module(self):
+        """The flag has ONE writer — this module asks sound.py, it does not touch it."""
         from aipass.hooks.apps.modules.hooksound import handle_command
 
-        with patch("aipass.hooks.apps.modules.hooksound.MUTE_FLAG") as mock_flag:
+        with patch("aipass.hooks.apps.modules.hooksound.mute") as mock_mute:
             result = handle_command("hooksound", ["off"])
 
         assert result is True
-        mock_flag.touch.assert_called_once()
+        mock_mute.assert_called_once_with()
 
-    def test_on_removes_mute_flag(self):
+    def test_on_unmutes_through_sound_module(self):
         from aipass.hooks.apps.modules.hooksound import handle_command
 
-        with patch("aipass.hooks.apps.modules.hooksound.MUTE_FLAG") as mock_flag:
-            mock_flag.exists.return_value = True
+        with patch("aipass.hooks.apps.modules.hooksound.unmute") as mock_unmute:
             result = handle_command("hooksound", ["on"])
 
         assert result is True
-        mock_flag.unlink.assert_called_once()
+        mock_unmute.assert_called_once_with()
 
-    def test_on_noop_when_not_muted(self):
+    def test_on_is_idempotent_when_already_unmuted(self):
+        """unmute() owns the missing-flag case now, so the verb never has to check."""
         from aipass.hooks.apps.modules.hooksound import handle_command
 
-        with patch("aipass.hooks.apps.modules.hooksound.MUTE_FLAG") as mock_flag:
-            mock_flag.exists.return_value = False
-            result = handle_command("hooksound", ["on"])
+        with patch("aipass.hooks.apps.modules.hooksound.unmute") as mock_unmute:
+            assert handle_command("hooksound", ["on"]) is True
+            assert handle_command("hooksound", ["on"]) is True
 
-        assert result is True
-        mock_flag.unlink.assert_not_called()
+        assert mock_unmute.call_count == 2
 
     def test_status_shows_muted(self):
         from aipass.hooks.apps.modules.hooksound import handle_command

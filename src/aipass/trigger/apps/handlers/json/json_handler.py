@@ -16,7 +16,13 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import inspect
 
-from aipass.trigger.apps.config import atomic_write_json, trail_logger
+from aipass.trigger.apps.config import (
+    atomic_create_json,
+    atomic_write_json,
+    json_file_lock,
+    read_text_with_retry,
+    trail_logger,
+)
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -123,19 +129,35 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = json.loads(read_text_with_retry(json_path))
 
             if validate_json_structure(data, json_type):
                 return True
-            # If corrupted, fall through to regenerate
+            # Known bad: it parsed and the shape is wrong. Regenerate.
+        except OSError as exc:
+            # COULD NOT READ is not KNOWN BAD. Windows refuses an open while
+            # another writer's os.replace is in flight, and regenerating here
+            # threw away whole documents: 2 concurrent appends on disk, one
+            # refused open, both gone (Windows CI 32167459635, 98 of 100).
+            # The file exists; leave it exactly as it is and let the caller's
+            # own read — inside the lock — decide.
+            logger.warning(f"ensure_json_exists could not read {module_name}_{json_type}, NOT regenerating: {exc}")
+            return True
         except Exception as exc:
-            # If unreadable, fall through to regenerate
-            logger.warning(f"ensure_json_exists failed for {module_name}_{json_type}: {exc}")
+            # Undecodable bytes: genuinely corrupt, regenerate.
+            logger.warning(f"ensure_json_exists found {module_name}_{json_type} corrupt, regenerating: {exc}")
 
-    template = _get_default_template(json_type, module_name)
+        # A document we READ and judged bad: replacing it is the whole point.
+        atomic_write_json(json_path, _get_default_template(json_type, module_name), ensure_ascii=False)
+        return True
 
-    atomic_write_json(json_path, template, ensure_ascii=False)
+    # Missing: CREATE, never overwrite — and decide that from what we observed
+    # above, not from a second exists() check, which is the same check-then-act
+    # race one line further down. Two callers can both arrive here with the
+    # document still absent, and this runs outside every lock, so a replacing
+    # write lets the slower one bury whatever a lock holder has written since.
+    # Linux CI 32228159169: 99 of 100. Reproduced locally, 3 losses in 400.
+    atomic_create_json(json_path, _get_default_template(json_type, module_name), ensure_ascii=False)
     return True
 
 
@@ -150,17 +172,23 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        content = json_path.read_text(encoding="utf-8").strip()
+        content = read_text_with_retry(json_path).strip()
         if not content:
             logger.warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
             ensure_json_exists(module_name, json_type)
-            content = json_path.read_text(encoding="utf-8").strip()
+            content = read_text_with_retry(json_path).strip()
         return json.loads(content)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(f"load_json failed for {module_name}_{json_type}: {exc}")
+    except OSError as exc:
+        # Cannot-read is reported as cannot-read. Regenerating here would hand
+        # the caller an empty document that it would then save over the real
+        # one — the read failure laundered into data loss. See ensure_json_exists.
+        logger.warning(f"load_json could not read {module_name}_{json_type}, declining: {exc}")
+        return None
+    except json.JSONDecodeError as exc:
+        logger.warning(f"load_json found {module_name}_{json_type} corrupt, regenerating: {exc}")
         ensure_json_exists(module_name, json_type)
         try:
-            return json.loads(json_path.read_text(encoding="utf-8"))
+            return json.loads(read_text_with_retry(json_path))
         except Exception as regen_exc:
             # Regeneration itself came back unreadable — the caller still gets a
             # usable shape, but the disk is in a state somebody should know about.
@@ -212,61 +240,77 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
 
     ensure_module_jsons(module_name)
 
-    # Load config to get max_log_entries
-    config = load_json(module_name, "config")
-    max_entries = 100  # Default
-    if config and "config" in config:
-        max_entries = config["config"].get("max_log_entries", 100)
+    # The whole read-append-write cycle is one critical section. atomic_write_json
+    # already stops a torn file, but atomic is not serialised: two callers that
+    # each read this log, append their own entry and write the result back both
+    # succeed, and the second one's document has no trace of the first. Measured
+    # unlocked on this handler — 100 appends asked, 62 on disk, 38 lost silently
+    # with every call returning True. Not theoretical: prax fires `startup` on the
+    # first log call of every process, and startup_log.json takes ~14 writes a
+    # minute from concurrent short-lived processes.
+    with json_file_lock(get_json_path(module_name, "log")):
+        # Load config to get max_log_entries
+        config = load_json(module_name, "config")
+        max_entries = 100  # Default
+        if config and "config" in config:
+            max_entries = config["config"].get("max_log_entries", 100)
 
-    # Load existing log
-    log = load_json(module_name, "log")
-    if log is None:
-        log = []
+        # Load existing log. None means the read could not be performed —
+        # writing here would put a one-entry document over a full one, which
+        # is exactly how Windows CI lost two appends. increment_counter and
+        # update_data_metrics already refuse; this path did not.
+        log = load_json(module_name, "log")
+        if log is None:
+            return False
 
-    # Create new entry
-    entry = {"timestamp": datetime.now().isoformat(), "operation": operation}
+        # Create new entry
+        entry = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
-    if data:
-        entry["data"] = data  # type: ignore[assignment]
+        if data:
+            entry["data"] = data  # type: ignore[assignment]
 
-    # Add new entry
-    log.append(entry)
+        # Add new entry
+        log.append(entry)
 
-    # Rotate if exceeds max (keep most recent entries)
-    if len(log) > max_entries:
-        log = log[-max_entries:]
+        # Rotate if exceeds max (keep most recent entries)
+        if len(log) > max_entries:
+            log = log[-max_entries:]
 
-    return save_json(module_name, "log", log)
+        return save_json(module_name, "log", log)
 
 
 def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
     """Increment a counter in data JSON"""
     ensure_module_jsons(module_name)
 
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
+    # Read-modify-write — the classic lost update. See log_operation.
+    with json_file_lock(get_json_path(module_name, "data")):
+        data = load_json(module_name, "data")
+        if data is None:
+            return False
 
-    if counter_name not in data:
-        data[counter_name] = 0
+        if counter_name not in data:
+            data[counter_name] = 0
 
-    data[counter_name] += amount
+        data[counter_name] += amount
 
-    return save_json(module_name, "data", data)
+        return save_json(module_name, "data", data)
 
 
 def update_data_metrics(module_name: str, **metrics) -> bool:
     """Update data metrics"""
     ensure_module_jsons(module_name)
 
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
+    # Read-modify-write — two writers of DIFFERENT keys still lose one. See log_operation.
+    with json_file_lock(get_json_path(module_name, "data")):
+        data = load_json(module_name, "data")
+        if data is None:
+            return False
 
-    for key, value in metrics.items():
-        data[key] = value
+        for key, value in metrics.items():
+            data[key] = value
 
-    return save_json(module_name, "data", data)
+        return save_json(module_name, "data", data)
 
 
 if __name__ == "__main__":

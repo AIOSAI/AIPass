@@ -45,6 +45,22 @@ def _isolate_notification_feed(tmp_path, monkeypatch):
     monkeypatch.setattr(notify_mod, "FEED_PATH", tmp_path / "feed" / "notifications.jsonl")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_contacts_file(tmp_path, monkeypatch):
+    """Point CONTACTS_FILE at tmp_path for EVERY test.
+
+    deliver_email_to_branch() auto-registers every recipient (and cross-project
+    sender) in the address book as a side effect. Without this guard a test run
+    upserts real rows into the live .ai_mail.local/contacts.json — 6 tmp/pytest
+    and scratchpad-probe rows leaked in this way and were then trusted as
+    "verified" identity by branch_detection's contact lookup, serving a fixture
+    mailbox in place of a real one (found live, 2026-08-16, @devpulse).
+    """
+    import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
+
+    monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", tmp_path / "contacts" / "contacts.json")
+
+
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after"""

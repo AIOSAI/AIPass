@@ -269,3 +269,56 @@ def test_load_and_run_proof_working_scan(tmp_path):
     result = _load_and_run_proof(handler, tmp_path)
     assert result["passed"] is True
     assert result["summary"] == "All good"
+
+
+# ---------------------------------------------------------------------------
+# Tests — help-flag safety (help_flag_safety: a flag ANYWHERE explains)
+# ---------------------------------------------------------------------------
+
+
+def test_help_after_the_pack_name_does_not_run_the_pack(monkeypatch):
+    """`drone @seedgo proof aipass --help` ran the whole proof pack instead of describing it."""
+    from aipass.seedgo.apps.modules import seedgo_proof
+
+    run = MagicMock()
+    monkeypatch.setattr(seedgo_proof, "_run_proof_pack", run)
+    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", Path("/nowhere"), False)))
+    shown = MagicMock()
+    monkeypatch.setattr(seedgo_proof, "print_help", shown)
+
+    assert seedgo_proof.handle_command("proof", ["aipass", "--help"]) is True
+    assert run.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_proof_still_runs_without_a_help_flag(monkeypatch):
+    """The gate must not swallow the real command."""
+    from aipass.seedgo.apps.modules import seedgo_proof
+
+    run = MagicMock(
+        return_value={
+            "pack_name": "aipass",
+            "results": [],
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "total": 0,
+            "certified": True,
+        }
+    )
+    monkeypatch.setattr(seedgo_proof, "_run_proof_pack", run)
+    monkeypatch.setattr(seedgo_proof, "_validate_pack", MagicMock(return_value=("aipass", Path("/nowhere"), False)))
+    monkeypatch.setattr(seedgo_proof, "_display_proof_results", MagicMock())
+    monkeypatch.setattr(seedgo_proof, "print_help", MagicMock())
+
+    assert seedgo_proof.handle_command("proof", ["aipass"]) is True
+    assert run.call_count == 1
+
+
+def test_proof_does_not_answer_for_another_command(monkeypatch):
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import seedgo_proof
+
+    monkeypatch.setattr(seedgo_proof, "print_help", MagicMock())
+
+    assert seedgo_proof.handle_command("checklist", ["--help"]) is False

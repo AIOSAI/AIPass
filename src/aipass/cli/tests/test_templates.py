@@ -1,25 +1,18 @@
 """Tests for the CLI templates module — operation output templates."""
 
 import pytest
-from io import StringIO
 from unittest.mock import patch
-
-from rich.console import Console
 
 from aipass.cli.apps.modules import templates
 from aipass.cli.apps.modules import display
 
+from .conftest import make_capture_console
+
 
 @pytest.fixture
 def plain_console():
-    """Rich Console that writes plain text (no ANSI codes) for assertions."""
-    buf = StringIO()
-    cons = Console(file=buf, no_color=True, width=120)
-
-    def get_output() -> str:
-        return buf.getvalue()
-
-    return cons, get_output
+    """Console pinned against the environment; output stripped to visible chars."""
+    return make_capture_console(highlight=False)
 
 
 # ============================================================================
@@ -69,6 +62,35 @@ class TestHandleCommandRouting:
     def test_unknown_command_returns_false(self):
         result = templates.handle_command("unknown", [])
         assert result is False
+
+    # help_flag_safety — a help flag ANYWHERE means explain, never execute.
+    # run_demo is patched out in every case: a question must not reach a doing path.
+
+    @patch.object(templates, "run_demo")
+    @patch.object(templates, "print_help")
+    def test_help_flag_after_demo_prints_help(self, mock_help, mock_run_demo):
+        """`templates demo --help` — flag at args[1] must still be read."""
+        result = templates.handle_command("templates", ["demo", "--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(templates, "run_demo")
+    @patch.object(templates, "print_help")
+    def test_dash_h_after_demo_prints_help(self, mock_help, mock_run_demo):
+        result = templates.handle_command("templates", ["demo", "-h"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(templates, "run_demo")
+    @patch.object(templates, "print_help")
+    def test_demo_as_command_with_help_flag_prints_help(self, mock_help, mock_run_demo):
+        """`drone @cli demo --help` — verb arrives in command, flag in args."""
+        result = templates.handle_command("demo", ["--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
 
     def test_templates_unknown_subcommand_returns_false(self):
         result = templates.handle_command("templates", ["bogus"])

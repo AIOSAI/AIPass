@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-08-12
+# Modified: 2026-08-18
 # =============================================
 
 """Tests for handlers/security/edit_gate.py."""
@@ -323,6 +323,241 @@ class TestEditGateProjectBoundary:
         assert "inbox.json" in json.loads(result["stdout"])["reason"]
 
 
+@pytest.fixture
+def branch_tree(tmp_path: Path):
+    """A two-file branch plus an isolated diagnostics state file.
+
+    Shaped src/<pkg>/<branch>/... so _get_branch resolves, with no *_REGISTRY.json
+    anywhere so the project fence stays out of the way.
+    """
+    import importlib
+
+    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+    branch = tmp_path / "src" / "aipass" / "seedgo"
+    (branch / "tests").mkdir(parents=True)
+    (branch / "apps" / "modules").mkdir(parents=True)
+
+    red_test = branch / "tests" / "test_track_e.py"
+    red_test.write_text("from aipass.x import _is_live_inbox\n", encoding="utf-8")
+    impl = branch / "apps" / "modules" / "inbox_audit.py"
+    impl.write_text("x = 1\n", encoding="utf-8")
+
+    state_file = tmp_path / ".diagnostics_state.json"
+    with patch.object(ds, "STATE_FILE", state_file):
+        yield {
+            "branch": branch,
+            "red_test": red_test,
+            "impl": impl,
+            "state_file": state_file,
+            "ds": ds,
+            "write_state": lambda errors: state_file.write_text(
+                json.dumps({"file": str(red_test), "errors": errors}), encoding="utf-8"
+            ),
+        }
+
+
+UNKNOWN_SYMBOL = {"line": 1, "message": '"_is_live_inbox" is unknown import symbol'}
+MISSING_IMPORT = {"line": 1, "message": 'Import "aipass.x" could not be resolved'}
+LOCAL_ERROR = {"line": 4, "message": 'Argument of type "str" cannot be assigned to parameter of type "int"'}
+
+
+class TestEditGateDiagnosticsState:
+    """The block must be satisfiable, and must be a live fact rather than a remembered one.
+
+    Reported by @seedgo with a live repro: a red test importing a symbol that does
+    not exist yet is the mandated red-first shape, and the only edit that can clear
+    it is in another file — which is exactly what the gate blocked.
+    """
+
+    def _edit_other_file(self, tree: dict) -> dict:
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        return handle(
+            {
+                "tool_name": "Edit",
+                "cwd": str(tree["branch"]),
+                "tool_input": {"file_path": str(tree["impl"]), "old_string": "x", "new_string": "y"},
+            }
+        )
+
+    def test_cross_file_red_first_is_not_blocked(self, branch_tree: dict):
+        """The deadlock: the resolving edit lives in another file by definition."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[UNKNOWN_SYMBOL]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_unresolved_module_import_is_also_cross_file(self, branch_tree: dict):
+        branch_tree["write_state"]([MISSING_IMPORT])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[MISSING_IMPORT]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_local_error_still_blocks(self, branch_tree: dict):
+        """The gate keeps doing its job for errors the errored file can actually fix."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[LOCAL_ERROR]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+        assert "before editing other files" in json.loads(result["stdout"])["reason"]
+
+    def test_mixed_errors_still_block(self, branch_tree: dict):
+        """Every error must be cross-file; one locally-fixable error keeps the block."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL, LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[UNKNOWN_SYMBOL, LOCAL_ERROR]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+
+    def test_stale_state_is_dropped_when_the_file_is_clean_now(self, branch_tree: dict):
+        """Defect 2: a resolving write the hook never saw left a permanent block."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_stale_state_file_is_cleared_not_just_ignored(self, branch_tree: dict):
+        branch_tree["write_state"]([LOCAL_ERROR])
+        assert branch_tree["state_file"].exists()
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
+            self._edit_other_file(branch_tree)
+        assert not branch_tree["state_file"].exists()
+
+    def test_block_reports_the_revalidated_errors_not_the_recorded_ones(self, branch_tree: dict):
+        """If the file still fails, the reason should quote what is true now."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        fresh = [{"line": 9, "message": "A different error that exists right now"}]
+        with patch.object(branch_tree["ds"], "revalidate", return_value=fresh):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+        assert "A different error that exists right now" in json.loads(result["stdout"])["reason"]
+
+    def test_unverifiable_state_falls_back_to_the_recorded_errors(self, branch_tree: dict):
+        """pyright missing or timed out: keep the old behaviour for local errors."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=None):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+
+    def test_unverifiable_state_still_clears_the_deadlock(self, branch_tree: dict):
+        """Defect 1 is fixed even when the file cannot be re-checked."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=None):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_editing_the_errored_file_itself_is_still_allowed(self, branch_tree: dict):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        branch_tree["write_state"]([LOCAL_ERROR])
+        result = handle(
+            {
+                "tool_name": "Edit",
+                "cwd": str(branch_tree["branch"]),
+                "tool_input": {"file_path": str(branch_tree["red_test"]), "old_string": "a", "new_string": "b"},
+            }
+        )
+        assert result["exit_code"] == 0
+
+
+class TestDiagnosticsStateModule:
+    """apps/modules/diagnostics_state.py — one definition of what the state file means."""
+
+    def test_classifies_unknown_import_symbol_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(UNKNOWN_SYMBOL) is True
+
+    def test_classifies_unresolved_import_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(MISSING_IMPORT) is True
+
+    def test_does_not_classify_a_local_type_error_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(LOCAL_ERROR) is False
+
+    def test_all_cross_file_is_false_for_an_empty_list(self):
+        """No errors is not 'all resolvable elsewhere' — callers must not read it as allow."""
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.all_cross_file([]) is False
+
+    def test_revalidate_returns_none_when_pyright_is_unavailable(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", side_effect=FileNotFoundError()):
+            assert ds.revalidate(str(target)) is None
+
+    def test_revalidate_returns_none_on_timeout(self, tmp_path: Path):
+        import subprocess as sp
+
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", side_effect=sp.TimeoutExpired("pyright", 1)):
+            assert ds.revalidate(str(target)) is None
+
+    def test_revalidate_returns_empty_list_for_a_clean_file(self, tmp_path: Path):
+        """Real pyright, three-state honest.
+
+        revalidate has THREE outcomes: [] clean, [...] findings, None could-not-tell.
+        This used to assert == [] flatly, which conflates could-not-tell with clean —
+        the exact confusion the contract exists to prevent. On the Windows runner
+        pyright exceeded its 15s budget (0.82s locally, ~18x headroom), revalidate
+        correctly answered None, and the test called that a failure. A longer budget
+        would have masked a slow runner instead of fixing a dishonest assertion.
+        """
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x: int = 1\n", encoding="utf-8")
+        found = ds.revalidate(str(target))
+        if found is None:
+            pytest.skip("pyright could not answer here (missing or timed out) — a contract-legal outcome, not clean")
+        assert found == []
+
+    def test_revalidate_reports_a_real_type_error(self, tmp_path: Path):
+        """Same three-state honesty. This one hid the flaw better: `assert found and ...`
+        reads None as falsy, so a timeout failed here too, just without saying why."""
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "broken.py"
+        target.write_text('x: int = "not an int"\n', encoding="utf-8")
+        found = ds.revalidate(str(target))
+        if found is None:
+            pytest.skip("pyright could not answer here (missing or timed out) — a contract-legal outcome")
+        assert found and any("int" in e["message"] for e in found)
+
+    def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.revalidate(str(tmp_path / "gone.py")) is None
+
+    def test_load_returns_empty_dict_when_there_is_no_state(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
+            assert ds.load() == {}
+
+    def test_load_returns_empty_dict_on_corrupt_state(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{not json", encoding="utf-8")
+        with patch.object(ds, "STATE_FILE", corrupt):
+            assert ds.load() == {}
+
+    def test_clear_is_safe_when_the_file_is_already_gone(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
+            ds.clear()
+
+
 class TestEditGateExternalProject:
     """Verify edit gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 
@@ -380,3 +615,111 @@ class TestEditGateExternalProject:
                 }
             )
         assert result["exit_code"] == 0
+
+
+class TestCapGateStatesItsReach:
+    """RULING (third instance): this gate is PreToolUse Edit/Write only, so a write
+    made through Bash never reaches it. @baud drifted to 2529/300 for a week and
+    @api carried 12 sessions + 16 learnings over cap, both through that lane. It
+    cannot enforce there, so it must not imply it does — a gate with a documented
+    bypass that claims enforcement is what let the drift read as compliance."""
+
+    def _reason(self):
+        import json as _json
+        from unittest.mock import MagicMock
+
+        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
+
+        el = MagicMock()
+        el.changed_entries.return_value = [
+            {"entry_type": "sessions", "key": "s1", "length": 2529, "cap": 300, "over_by": 2229}
+        ]
+        block = _evaluate_limits({}, {}, {"enforce": True}, el)
+        assert block is not None
+        return _json.loads(block["stdout"])["reason"]
+
+    def test_message_names_the_unchecked_lane(self):
+        assert "Bash" in self._reason()
+
+    def test_message_names_the_lane_it_does_cover(self):
+        assert "Edit/Write" in self._reason()
+
+    def test_message_still_lists_the_offending_entries(self):
+        """GUARD: the honesty note must not displace the actual finding."""
+        reason = self._reason()
+        assert "2529/300" in reason
+        assert "sessions" in reason
+
+
+def _pyright_result(diagnostics: list[dict]) -> object:
+    """A fake completed pyright run carrying *diagnostics* in its real output shape."""
+    from unittest.mock import MagicMock
+
+    completed = MagicMock()
+    completed.stdout = json.dumps({"generalDiagnostics": diagnostics})
+    return completed
+
+
+def _diag(message: str, line: int = 0, severity: str = "error") -> dict:
+    return {"severity": severity, "message": message, "range": {"start": {"line": line}}}
+
+
+class TestRevalidateParsesPyrightOutput:
+    """The parsing is MY code and deterministic; pyright's wall-clock is not.
+
+    The two real-pyright tests above are honest but can only skip when the tool is
+    slow, so on a runner where pyright never answers they assert nothing. These pin
+    the same logic hermetically, so the coverage does not evaporate on the platform
+    where it is hardest to get — which is exactly where the Windows lane went red.
+    """
+
+    def _revalidate(self, tmp_path: Path, diagnostics: list[dict]):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", return_value=_pyright_result(diagnostics)):
+            return ds.revalidate(str(target))
+
+    def test_clean_file_is_empty_list_not_none(self, tmp_path: Path):
+        """[] and None are different answers — this is the distinction that broke."""
+        found = self._revalidate(tmp_path, [])
+        assert found == []
+        assert found is not None
+
+    def test_error_is_parsed_into_line_and_message(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag('Type "str" is not assignable to "int"', line=7)])
+        assert found == [{"line": 7, "message": 'Type "str" is not assignable to "int"'}]
+
+    def test_non_error_severities_are_dropped(self, tmp_path: Path):
+        """A warning is not a reason to keep blocking an edit."""
+        found = self._revalidate(
+            tmp_path,
+            [_diag("just a warning", severity="warning"), _diag("real problem", line=2)],
+        )
+        assert found == [{"line": 2, "message": "real problem"}]
+
+    def test_findings_are_capped_at_ten(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag(f"error {i}", line=i) for i in range(25)])
+        assert found is not None and len(found) == 10
+
+    def test_long_messages_are_truncated(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag("x" * 500)])
+        assert found is not None and len(found[0]["message"]) == 100
+
+    def test_missing_range_defaults_to_line_zero(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [{"severity": "error", "message": "no range given"}])
+        assert found == [{"line": 0, "message": "no range given"}]
+
+    def test_unparseable_output_is_could_not_tell(self, tmp_path: Path):
+        """Garbage on stdout must never read as clean."""
+        from unittest.mock import MagicMock
+
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        broken = MagicMock()
+        broken.stdout = "not json at all"
+        with patch.object(ds.subprocess, "run", return_value=broken):
+            assert ds.revalidate(str(target)) is None

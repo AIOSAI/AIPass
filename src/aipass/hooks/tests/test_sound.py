@@ -175,3 +175,64 @@ class TestPlay:
             mock_path.exists.return_value = True
 
             play(mock_path)
+
+
+class TestMuteWritePair:
+    """The write half of the door — exported so callers stop shelling out (@api ask)."""
+
+    def _isolated(self, tmp_path, monkeypatch):
+        flag = tmp_path / "aipass-hooks-muted"
+        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", flag)
+        return flag
+
+    def test_mute_creates_the_flag(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.sound import mute
+
+        flag = self._isolated(tmp_path, monkeypatch)
+        assert mute() is True
+        assert flag.exists()
+
+    def test_unmute_removes_the_flag(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.sound import unmute
+
+        flag = self._isolated(tmp_path, monkeypatch)
+        flag.touch()
+        assert unmute() is False
+        assert not flag.exists()
+
+    def test_unmute_is_idempotent_on_missing_flag(self, tmp_path, monkeypatch):
+        """Was a caller-side exists() check; missing_ok owns it now."""
+        from aipass.hooks.apps.sound import unmute
+
+        self._isolated(tmp_path, monkeypatch)
+        assert unmute() is False
+        assert unmute() is False
+
+    def test_mute_is_idempotent(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.sound import mute
+
+        flag = self._isolated(tmp_path, monkeypatch)
+        assert mute() is True
+        assert mute() is True
+        assert flag.exists()
+
+    def test_round_trip_agrees_with_is_muted(self, tmp_path, monkeypatch):
+        """@api flips then reads back through is_muted() — the two halves must agree."""
+        from aipass.hooks.apps.sound import is_muted, mute, unmute
+
+        self._isolated(tmp_path, monkeypatch)
+        assert mute() == is_muted() is True
+        assert unmute() == is_muted() is False
+
+    def test_writes_are_logged(self, tmp_path, monkeypatch):
+        """A state change nobody can audit left no trace before — hooksound imported
+        the logger and never called it."""
+        from unittest.mock import patch as _patch
+
+        from aipass.hooks.apps import sound
+
+        self._isolated(tmp_path, monkeypatch)
+        with _patch.object(sound, "logger") as mock_logger:
+            sound.mute()
+            sound.unmute()
+        assert len(mock_logger.info.call_args_list) == 2

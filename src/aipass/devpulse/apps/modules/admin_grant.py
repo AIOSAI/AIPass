@@ -105,6 +105,14 @@ def _cmd_mint() -> None:
         console.print(f"[yellow]REFUSED[/yellow] — {message}")
 
 
+def _wants_help(args: list[str]) -> bool:
+    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
+
+    Bare word 'help' counts only at position 0 — later positions may be values.
+    """
+    return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
+
+
 def handle_command(command: str, args: list[str]) -> bool:
     """Route admin_grant commands to handler functions.
 
@@ -124,7 +132,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if _wants_help(args):
         console.print(HELP_TEXT)
         return True
 

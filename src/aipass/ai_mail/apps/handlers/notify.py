@@ -22,6 +22,11 @@ Feed contract (ai_mail writes, BAUD reads):
 Append-only, one JSON object per line. Readers never write, and the feed
 carries no read flags — BAUD tracks read state locally.
 
+Locate the feed via ``aipass.ai_mail.feed_path()``, not by restating the path.
+Readers: the trim REPLACES the file, so the inode changes and line positions
+shift. Lines carry no id, so a cursor held as a line index or byte offset goes
+stale silently. Key on ``ts`` and flag gaps — full contract in the README.
+
 Concurrency: delivery, wake, dispatch_monitor and daemon append from separate
 processes. Each append is a single O_APPEND write; the trim is a
 read-modify-write. Both take the same advisory lock, so an append can never
@@ -59,7 +64,23 @@ else:
 NOTIFICATION_KINDS = ("mail", "wake", "dispatch", "system")
 DEFAULT_KIND = "system"
 
-FEED_PATH = find_repo_root() / ".aipass" / "notifications.jsonl"
+
+def feed_path() -> Path:
+    """Where the notification feed lives — the one place the path is built.
+
+    @api serves this file over /v1/feed and had restated the expression as
+    their own constant, because reaching into another branch's handlers is an
+    encapsulation violation. A duplicated path goes stale silently the day the
+    feed moves: a phone bell showing nothing, with no error anywhere. The door
+    is re-exported as ``aipass.ai_mail.feed_path``.
+
+    Prefer this over FEED_PATH in new code — it resolves at call time, while
+    the constant freezes the repo root at import.
+    """
+    return find_repo_root() / ".aipass" / "notifications.jsonl"
+
+
+FEED_PATH = feed_path()
 FEED_LOCK_NAME = ".notifications.lock"
 
 # Trim policy: once the feed passes FEED_MAX_LINES, keep only the newest
@@ -106,34 +127,39 @@ def _normalize_kind(kind: str) -> str:
     return DEFAULT_KIND
 
 
-def _append_event(feed_path: Path, event: Dict[str, str]) -> bool:
-    """Append *event* as one JSON line, then trim if the feed has outgrown its cap."""
+def _append_event(path: Path, event: Dict[str, str]) -> bool:
+    """Append *event* as one JSON line, then trim if the feed has outgrown its cap.
+
+    The parameter is *path*, not *feed_path*: that name belongs to the module
+    function above, and shadowing it here would make ``feed_path()`` inside
+    this body a TypeError on a Path.
+    """
     line = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
 
     try:
-        feed_path.parent.mkdir(parents=True, exist_ok=True)
-        with _feed_lock(feed_path):
-            fd = os.open(str(feed_path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _feed_lock(path):
+            fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
             try:
                 os.write(fd, line)
             finally:
                 os.close(fd)
-            _trim_feed(feed_path)
+            _trim_feed(path)
         return True
     except OSError as e:
-        logger.error("[notify] feed write failed for %s: %s", feed_path, e)
+        logger.error("[notify] feed write failed for %s: %s", path, e)
         return False
 
 
 @contextmanager
-def _feed_lock(feed_path: Path):
+def _feed_lock(path: Path):
     """Hold an exclusive advisory lock for the feed.
 
     The lock lives on a sibling .notifications.lock file, never on the feed
     itself — the trim replaces the feed inode, which would drop a lock held
     on it.
     """
-    lock_file = feed_path.parent / FEED_LOCK_NAME
+    lock_file = path.parent / FEED_LOCK_NAME
     lock_fd = None
 
     try:
@@ -156,34 +182,38 @@ def _feed_lock(feed_path: Path):
                 lock_fd.close()
 
 
-def _trim_feed(feed_path: Path) -> bool:
+def _trim_feed(path: Path) -> bool:
     """Drop the feed to its newest FEED_KEEP_LINES once past FEED_MAX_LINES.
 
     Caller must hold the feed lock — this is a read-modify-write, and an
     unlocked append landing between the read and the replace would be lost.
 
+    The os.replace below gives the feed a NEW INODE. Readers therefore cannot
+    hold a byte offset or line index across a trim; the reader contract in the
+    README says key on ``ts``.
+
     Returns:
         True if the feed was trimmed, False if it was already within cap
     """
     try:
-        with open(feed_path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except OSError as e:
-        logger.error("[notify] feed trim could not read %s: %s", feed_path, e)
+        logger.error("[notify] feed trim could not read %s: %s", path, e)
         return False
 
     if len(lines) <= FEED_MAX_LINES:
         return False
 
     kept = lines[-FEED_KEEP_LINES:]
-    temp_path = feed_path.with_name(feed_path.name + ".trim")
+    temp_path = path.with_name(path.name + ".trim")
 
     try:
         with open(temp_path, "w", encoding="utf-8") as f:
             f.writelines(kept)
-        os.replace(str(temp_path), str(feed_path))
+        os.replace(str(temp_path), str(path))
     except OSError as e:
-        logger.error("[notify] feed trim failed for %s: %s", feed_path, e)
+        logger.error("[notify] feed trim failed for %s: %s", path, e)
         temp_path.unlink(missing_ok=True)
         return False
 

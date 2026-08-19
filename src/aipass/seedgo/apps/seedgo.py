@@ -280,7 +280,7 @@ def main() -> int:
             print_introspection()
             return 0
 
-        # Help flag → full help with usage
+        # Help flag in the command slot → full branch help with usage
         if args[0] in ["--help", "-h", "help"]:
             print_help()
             return 0
@@ -292,7 +292,15 @@ def main() -> int:
         command = args[0]
         remaining = args[1:] if len(args) > 1 else []
 
-        if remaining and remaining[0] in ["--help", "-h"]:
+        # A help flag ANYWHERE after the command is a question about that
+        # command, not an instruction. Reading remaining[0] only meant
+        # `seedgo checklist <file> --help` routed and RAN. Scanned inline
+        # rather than through handlers/cli/help_flags.py: the encapsulation
+        # standard says an entry point uses modules, never handlers, and the
+        # modules below carry the shared predicate. The bare word is left to
+        # them too — it can be a legitimate value in a later slot, and each
+        # module already answers for it at position 0.
+        if any(arg in ("--help", "-h") for arg in remaining):
             for module in modules:
                 if module.handle_command(command, ["--help"]):
                     return 0

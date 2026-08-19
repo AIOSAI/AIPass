@@ -633,7 +633,7 @@ class TestHealRegistryDoctrineImpl:
         with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
 
-        assert set(result) == {"healed", "healed_count"}
+        assert set(result) == {"healed", "healed_count", "quarantined", "quarantined_count"}
         assert result["healed_count"] == len(result["healed"]) == 1
         assert result["healed"][0]["action"] == "registered_unregistered_file"
 
@@ -659,7 +659,8 @@ class TestHealRegistryDoctrineImpl:
         with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
 
-        assert result == {"healed": [], "healed_count": 0}
+        assert result["healed"] == []
+        assert result["healed_count"] == 0
         assert store.saves == []
 
     def test_missing_file_orphan_self_closes_on_scan_alone(self, tmp_path, quiet_cross_prefix):
@@ -703,7 +704,8 @@ class TestHealRegistryDoctrineImpl:
         ):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
 
-        assert result == {"healed": [], "healed_count": 0}
+        assert result["healed"] == []
+        assert result["healed_count"] == 0
 
     def test_per_type_heals_run_before_wrong_prefix_sweep(self, tmp_path, quiet_cross_prefix):
         """Case 1/2 first, then case 3 — so case 3 is left with ghost cleanup only."""
@@ -760,7 +762,8 @@ class TestHealRegistryDoctrineImpl:
         ):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
 
-        assert result == {"healed": [], "healed_count": 0}
+        assert result["healed"] == []
+        assert result["healed_count"] == 0
 
 
 # ═══════════════════════════════════════════════════════════
@@ -806,3 +809,318 @@ class TestNeverTouchesPlanFiles:
         for path, content in before.items():
             assert path.exists()
             assert path.read_text(encoding="utf-8") == content
+
+
+# ═══════════════════════════════════════════════════════════
+# Case 5 — orphan location (ghost paths + root/seat misfiles)
+# ═══════════════════════════════════════════════════════════
+
+
+def _seat(root: Path, rel: str) -> Path:
+    """Create a live citizen seat — a directory carrying a passport."""
+    seat = root / rel
+    (seat / ".trinity").mkdir(parents=True, exist_ok=True)
+    (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    return seat
+
+
+class TestHealOrphanLocations:
+    """Ruling of 2026-08-16 (Patrick, via @devpulse).
+
+    Stale paths are expected debris — we test and move things constantly — so
+    the answer is a healer that fixes the class, never a hand-edit of JSON.
+    A record whose location is not a live citizen seat is an orphan: it either
+    does not exist at all (ghost path from an old move) or it exists without a
+    passport (a project root holding records that belong to the seat beneath
+    it). Attribution is on evidence only; anything else is quarantined for a
+    human, never guessed and never dropped.
+    """
+
+    def test_ghost_path_heals_to_the_live_seat(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "old", "status": "closed", "location": str(ghost)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert len(actions) == 1
+        assert quarantined == []
+        assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(seat)
+
+    def test_existing_path_without_a_passport_is_an_orphan_too(self, tmp_path):
+        """The baud case: project root holds records, the seat lives beneath it."""
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "projects/baud/src/baud/baud")
+        root = tmp_path / "projects" / "baud"
+        assert root.exists(), "root exists on disk — it is not a ghost"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "early", "status": "closed", "location": str(root)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"baud": [seat]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert len(actions) == 1
+        assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(seat)
+
+    def test_unattributable_orphan_is_quarantined_not_guessed(self, tmp_path):
+        """A /tmp scratch dir matches no citizen — it waits for a human."""
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        scratch = tmp_path / "tmp" / "flow_audit_scratch"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "scratch", "status": "closed", "location": str(scratch)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert actions == []
+        assert len(quarantined) == 1
+        assert quarantined[0]["location"] == str(scratch)
+        assert quarantined[0]["reason"]
+        # never dropped — the row is still there, untouched
+        assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(scratch)
+
+    def test_same_name_in_a_different_repo_is_not_attributed(self, tmp_path):
+        """Name match alone is not evidence — the orphan must share the seat's repo."""
+        mod = _import_heal_registry()
+        (tmp_path / "RepoA" / ".git").mkdir(parents=True)
+        (tmp_path / "RepoB" / ".git").mkdir(parents=True)
+        seat = _seat(tmp_path, "RepoA/src/flow")
+        foreign = tmp_path / "RepoB" / "src" / "flow"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "foreign", "status": "closed", "location": str(foreign)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"flow": [seat]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert actions == []
+        assert len(quarantined) == 1
+
+    def test_ambiguous_name_with_two_live_seats_is_quarantined(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat_a = _seat(tmp_path, "src/a/twin")
+        seat_b = _seat(tmp_path, "src/b/twin")
+        ghost = tmp_path / "src" / "twin"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "twin", "status": "closed", "location": str(ghost)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"twin": [seat_a, seat_b]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert actions == []
+        assert len(quarantined) == 1
+
+    def test_file_path_is_re_rooted_with_the_location(self, tmp_path):
+        """A healed record must stay internally consistent, not half-moved."""
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {
+                        "0001": {
+                            "subject": "old",
+                            "status": "closed",
+                            "location": str(ghost),
+                            "file_path": str(ghost / "FPLAN-0001_x.md"),
+                        }
+                    },
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
+            mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+
+        row = store.registries["fplan_registry.json"]["plans"]["0001"]
+        assert row["location"] == str(seat)
+        assert row["file_path"] == str(seat / "FPLAN-0001_x.md")
+
+    def test_live_seats_are_left_alone(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "fine", "status": "open", "location": str(seat)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert actions == []
+        assert quarantined == []
+        assert store.saves == []
+
+    def test_running_twice_changes_nothing_the_second_time(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "old", "status": "closed", "location": str(ghost)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
+            first, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+            writes_after_first = len(store.saves)
+            second, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+
+        assert len(first) == 1
+        assert second == []
+        assert len(store.saves) == writes_after_first, "second run wrote to the registry"
+
+    def test_rows_with_no_location_are_left_for_a_human(self, tmp_path):
+        mod = _import_heal_registry()
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "homeless", "status": "closed", "location": ""}},
+                    "next_number": 2,
+                }
+            }
+        )
+        with patch.object(mod, "_citizen_seat_index", return_value={}):
+            actions, quarantined = mod._heal_orphan_locations(
+                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
+            )
+
+        assert actions == []
+        assert len(quarantined) == 1
+        assert store.saves == []
+
+
+class TestDoctrineSurfacesQuarantine:
+    """The doctrine result must carry the refusal lane, not just the heals."""
+
+    def test_impl_returns_quarantined_list(self, tmp_path):
+        mod = _import_heal_registry()
+        with (
+            patch.object(mod, "_load_template_registry", return_value={"types": {}}),
+            patch.object(mod, "_build_plan_file_index", return_value={}),
+            patch.object(mod, "_heal_wrong_prefix_rows", return_value=[]),
+            patch.object(mod, "_heal_orphan_locations", return_value=([], [{"location": "/gone", "reason": "x"}])),
+        ):
+            result = mod.heal_registry_doctrine_impl(ecosystem_root=tmp_path)
+
+        assert result["quarantined"] == [{"location": "/gone", "reason": "x"}]
+        assert result["quarantined_count"] == 1
+
+
+class TestOrphanDetectionIsNotOverBroad:
+    """Guard against burying the refusal lane in false positives.
+
+    A first dry run flagged 76 rows because the detector treated 'not a seat'
+    as 'orphan'. 28 of those were plans filed at the repo root and several more
+    were filed inside a citizen's own subdirectories — all normal filings. A
+    quarantine list that cries wolf 30 times is a list nobody reads, so
+    detection is two precise signals instead.
+    """
+
+    def test_repo_root_holding_many_seats_is_a_container_not_a_misfile(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seats = {
+            "alpha": [_seat(tmp_path, "src/alpha")],
+            "beta": [_seat(tmp_path, "src/beta")],
+        }
+
+        assert mod._is_orphan_location(tmp_path, seats) is False
+
+    def test_subdirectory_inside_a_citizen_is_left_alone(self, tmp_path):
+        """A plan filed in devpulse/docs.local is a filing, not debris."""
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/devpulse")
+        subdir = seat / "docs.local"
+        subdir.mkdir()
+
+        assert mod._is_orphan_location(subdir, {"devpulse": [seat]}) is False
+
+    def test_a_gone_path_is_still_an_orphan(self, tmp_path):
+        mod = _import_heal_registry()
+        assert mod._is_orphan_location(tmp_path / "vanished", {}) is True
+
+    def test_root_holding_exactly_one_seat_is_a_misfile(self, tmp_path):
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "projects/baud/src/baud/baud")
+
+        assert mod._is_orphan_location(tmp_path / "projects" / "baud", {"baud": [seat]}) is True
+
+    def test_a_live_seat_is_never_an_orphan(self, tmp_path):
+        mod = _import_heal_registry()
+        seat = _seat(tmp_path, "src/aipass/flow")
+        assert mod._is_orphan_location(seat, {"flow": [seat]}) is False
+
+    def test_containment_beats_a_name_that_does_not_match(self, tmp_path):
+        """The baud root is not named 'baud/src/baud/baud' — containment carries it."""
+        mod = _import_heal_registry()
+        (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "projects/thing/src/inner/seatname")
+        root = tmp_path / "projects" / "thing"
+
+        attributed, reason = mod._attribute_orphan(root, {"seatname": [seat]})
+        assert attributed == seat
+        assert reason == ""

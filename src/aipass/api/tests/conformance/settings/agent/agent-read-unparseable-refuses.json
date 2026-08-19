@@ -1,0 +1,20 @@
+{
+  "description": "A file that exists but is not JSON is an error, never a blank document.",
+  "document": "agent",
+  "expect": {
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "raw": "not json at all",
+    "state": "raw"
+  },
+  "id": "agent-read-unparseable-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

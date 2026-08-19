@@ -1,0 +1,28 @@
+{
+  "description": "A project with no document can still be configured.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "theme": "dark"
+    },
+    "file": {
+      "theme": "dark"
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "state": "missing"
+  },
+  "id": "baud-patch-creates-the-file-and-its-directory",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "theme": "dark"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

@@ -236,3 +236,43 @@ def test_print_system_summary_with_data():
         {"branch": "CLI", "total_errors": 3, "total_warnings": 0, "total_files": 8, "files_with_errors": 2},
     ]
     print_system_summary(results)
+
+
+# ---------------------------------------------------------------------------
+# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
+# ---------------------------------------------------------------------------
+
+
+def test_help_after_an_argument_prints_help_not_an_error(monkeypatch):
+    """`drone @seedgo diagnostics aipass --help` answered "Unknown argument" instead of explaining."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    shown = MagicMock()
+    monkeypatch.setattr(diagnostics_audit, "print_help", shown)
+    complained = MagicMock()
+    monkeypatch.setattr(diagnostics_audit, "error", complained)
+
+    assert diagnostics_audit.handle_command("diagnostics", ["aipass", "--help"]) is True
+    assert shown.call_count == 1
+    assert complained.call_count == 0
+
+
+def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
+    """The gate must not swallow the module's fail-loud behaviour."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
+    complained = MagicMock()
+    monkeypatch.setattr(diagnostics_audit, "error", complained)
+
+    assert diagnostics_audit.handle_command("diagnostics", ["aipass"]) is True
+    assert complained.call_count == 1
+
+
+def test_diagnostics_does_not_answer_for_another_command(monkeypatch):
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
+
+    assert diagnostics_audit.handle_command("checklist", ["--help"]) is False

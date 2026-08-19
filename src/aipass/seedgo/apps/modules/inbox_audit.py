@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-21
-# Modified: 2026-04-21
+# Modified: 2026-08-13
 # =============================================
 
 """Inbox ID validator for the drone @seedgo audit inbox-ids command.
@@ -24,8 +24,29 @@ from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, success
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
 _HEX8_RE = re.compile(r"^[0-9a-f]{8}$")
+
+# Trees whose inboxes are snapshots, not live mail: deleted-branch archives
+# and @backup's versioned store. A bad id in either is nobody's to fix.
+_DEAD_TREE_DIRS = frozenset({".backup", ".archive"})
+
+
+def _is_live_inbox(inbox_path: Path) -> bool:
+    """Return True if *inbox_path* is a live inbox a branch can actually act on.
+
+    Two un-actionable shapes are excluded. Anything under `.backup/` or
+    `.archive/` is a snapshot of mail that has already been delivered or of a
+    branch that no longer exists. And a *directory* named `inbox.json` is how
+    @backup's versioned store holds a file — the current copy, a dated baseline
+    and an `inbox.json_diffs/` sibling all sit inside a directory carrying the
+    original name. `read_text()` on one raises IsADirectoryError; that is not an
+    unreadable inbox, it is not an inbox.
+    """
+    if _DEAD_TREE_DIRS.intersection(inbox_path.parts):
+        return False
+    return inbox_path.is_file()
 
 
 def _find_repo_root() -> Path:
@@ -63,11 +84,15 @@ def _run_inbox_id_scan() -> int:
     """Scan all inbox.json files; return number of violations found."""
     json_handler.log_operation("inbox_audit_scan", {})
     repo_root = _find_repo_root()
-    inbox_files = list(repo_root.rglob(".ai_mail.local/inbox.json"))
+    matched = list(repo_root.rglob(".ai_mail.local/inbox.json"))
+    inbox_files = [p for p in matched if _is_live_inbox(p)]
+    skipped = len(matched) - len(inbox_files)
 
     console.print()
     header("SEEDGO — Inbox ID Validator")
-    console.print(f"[dim]Scanning {len(inbox_files)} inbox file(s) for non-8-hex message ids...[/dim]")
+    console.print(f"[dim]Scanning {len(inbox_files)} live inbox file(s) for non-8-hex message ids...[/dim]")
+    if skipped:
+        console.print(f"[dim]Skipped {skipped} archived/backed-up copy(ies) — not live mail.[/dim]")
     console.print()
 
     all_violations: List[dict] = []
@@ -111,12 +136,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         if not args:
             print_introspection()
             return True
-        if args[0] in ("--help", "-h", "help"):
+        if wants_help(None, args):
             print_introspection()
             return True
     if command not in ("audit", "standards_audit"):
         return False
     if not args or args[0] != "inbox-ids":
         return False
+    # Ownership is settled, so the help gate comes here: `audit inbox-ids
+    # --help` had args[0] == "inbox-ids", so the gate above never saw the flag
+    # and the scan rglob'd every inbox under the repo root to answer a question.
+    if wants_help(None, args):
+        print_introspection()
+        return True
     _run_inbox_id_scan()
     return True

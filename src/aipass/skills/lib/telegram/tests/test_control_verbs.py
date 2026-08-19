@@ -71,9 +71,46 @@ def _run(returncode=0, stdout="", stderr=b""):
 
 
 class TestControlStart:
-    def test_start_default_branch_is_aipass(self, tmp_path, _patch_base_bot_deps):
+    def test_bare_start_spawns_nothing(self, tmp_path, _patch_base_bot_deps):
+        """Every Telegram client sends a bare /start when a chat is opened.
+
+        It is a greeting, not a command. It previously defaulted to @aipass and
+        spawned an INTERACTIVE `claude -c || claude` in that branch's home; the
+        ghost then tripped wake.py's occupancy gate and @aipass's real headless
+        dispatch wake was REFUSED (6 measured occurrences, 07-29 to 08-11).
+        This test replaces test_start_default_branch_is_aipass, which pinned it.
+        """
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
-        branch_info = {"name": "aipass", "path": "/home/patrick/Projects/AIPass/src/aipass/aipass"}
+
+        with (
+            patch("subprocess.run", return_value=_run(returncode=1)) as mock_run,
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.validate_branch",
+                return_value={"name": "aipass", "path": "/tmp/aipass"},
+            ) as mock_validate,
+        ):
+            bot._handle_control_start(chat_id=1, branch_arg="")
+
+        mock_run.assert_not_called()  # no has-session, no new-session, no send-keys
+        mock_validate.assert_not_called()  # never even resolves a branch
+        sent = bot.send_message.call_args[0][1]  # type: ignore[union-attr]
+        assert "start" in sent.lower()
+        assert "aipass" not in sent.lower().replace("@aipass's", "")  # names no default target
+
+    def test_bare_start_does_not_name_a_default_branch(self, tmp_path, _patch_base_bot_deps):
+        """The reply must ask for a branch, not silently pick one."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", return_value=_run(returncode=1)):
+            bot._handle_control_start(chat_id=1, branch_arg="   ")
+
+        sent = bot.send_message.call_args[0][1]  # type: ignore[union-attr]
+        assert "<branch>" in sent or "branch" in sent.lower()
+
+    def test_explicit_start_still_spawns(self, tmp_path, _patch_base_bot_deps):
+        """The fix must not break the real verb: /start <branch> still wakes it."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        branch_info = {"name": "skills", "path": "/tmp/skills"}
 
         with (
             patch("subprocess.run", return_value=_run(returncode=1)) as mock_run,
@@ -82,20 +119,12 @@ class TestControlStart:
                 return_value=branch_info,
             ),
         ):
-            bot._handle_control_start(chat_id=1, branch_arg="")
+            bot._handle_control_start(chat_id=1, branch_arg="skills")
 
-        # has-session check, then new-session, then send-keys
         assert mock_run.call_count == 3
         new_session_call = mock_run.call_args_list[1]
-        assert new_session_call.args[0][:4] == ["tmux", "new-session", "-d", "-s"]
-        assert new_session_call.args[0][4] == f"{CONTROL_SESSION_PREFIX}aipass"
-        assert new_session_call.args[0][5:] == ["-c", branch_info["path"]]
-
-        send_keys_call = mock_run.call_args_list[2]
-        assert send_keys_call.args[0][:4] == ["tmux", "send-keys", "-t", f"{CONTROL_SESSION_PREFIX}aipass"]
-        assert "claude -c || " in send_keys_call.args[0][4] or send_keys_call.args[0][4].count("claude") == 2
-
-        bot.send_message.assert_called_once_with(1, "woke aipass")  # type: ignore[union-attr]
+        assert new_session_call.args[0][4] == f"{CONTROL_SESSION_PREFIX}skills"
+        bot.send_message.assert_called_once_with(1, "woke skills")  # type: ignore[union-attr]
 
     def test_start_already_running_does_not_spawn_second(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
@@ -163,13 +192,21 @@ class TestControlKill:
         assert mock_run.call_count == 1
         bot.send_message.assert_called_once_with(1, "'skills' is not running.")  # type: ignore[union-attr]
 
-    def test_kill_default_branch_is_aipass(self, tmp_path, _patch_base_bot_deps):
+    def test_bare_kill_kills_nothing(self, tmp_path, _patch_base_bot_deps):
+        """A destructive verb must never pick a target for you.
+
+        /kill shared the same `or "aipass"` default as /start, one line below it,
+        so a bare /kill would have killed @aipass's live session. Replaces
+        test_kill_default_branch_is_aipass, which pinned that.
+        """
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
 
-        with patch("subprocess.run", return_value=_run(returncode=0)):
+        with patch("subprocess.run", return_value=_run(returncode=0)) as mock_run:
             bot._handle_control_kill(chat_id=1, branch_arg="")
 
-        bot.send_message.assert_called_once_with(1, "killed aipass")  # type: ignore[union-attr]
+        mock_run.assert_not_called()
+        sent = bot.send_message.call_args[0][1]  # type: ignore[union-attr]
+        assert "branch" in sent.lower()
 
     def test_kill_branch_bot_not_intercepted(self, tmp_path, _patch_base_bot_deps):
         """On a branch bot, /kill is not a registered control verb or standard command."""
@@ -261,6 +298,12 @@ class TestControlBotAipassBranchName:
     """
 
     def test_start_wakes_on_aipass_branch_name(self, tmp_path, _patch_base_bot_deps):
+        """This class is about ROUTING: /start reaches the control handler here.
+
+        It used to assert that on a bare ("start", "") — which only passed
+        because bare /start spawned @aipass by default. Named the branch
+        explicitly so the test proves routing, not the removed default.
+        """
         bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="aipass")
         branch_info = {"name": "aipass", "path": "/home/patrick/Projects/AIPass/src/aipass/aipass"}
 
@@ -271,11 +314,21 @@ class TestControlBotAipassBranchName:
                 return_value=branch_info,
             ),
         ):
-            handled = bot._dispatch_command(chat_id=1, parsed=("start", ""))
+            handled = bot._dispatch_command(chat_id=1, parsed=("start", "aipass"))
 
         assert handled is True
         assert mock_run.call_count == 3
         bot.send_message.assert_called_once_with(1, "woke aipass")  # type: ignore[union-attr]
+
+    def test_bare_start_on_aipass_branch_name_spawns_nothing(self, tmp_path, _patch_base_bot_deps):
+        """Routing still happens on a bare /start — it just must not spawn."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="aipass")
+
+        with patch("subprocess.run", return_value=_run(returncode=1)) as mock_run:
+            handled = bot._dispatch_command(chat_id=1, parsed=("start", ""))
+
+        assert handled is True
+        mock_run.assert_not_called()
 
     def test_kill_works_on_aipass_branch_name(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="aipass")

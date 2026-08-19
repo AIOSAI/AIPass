@@ -161,6 +161,70 @@ class TestTemplateFlag:
         mock_error.assert_called_once()
 
 
+class TestCreateUnknownClassRefusal:
+    """`create <bare-token>` refuses when the lone positional is neither a
+    registered class nor path-shaped, instead of silently reading it as the
+    target path (APLAN-0007 open item 1; devpulse: general refusal in front
+    of the parser, not another special case)."""
+
+    def test_bare_unrecognized_token_refuses_no_branch_created(self, tmp_path, monkeypatch):
+        """`create wizard` (no path arg) must refuse — not silently create a
+        branch named WIZARD in ./wizard."""
+        from aipass.spawn.apps.spawn import handle_create
+
+        monkeypatch.chdir(tmp_path)
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        with patch("aipass.spawn.apps.spawn.error") as mock_error:
+            result = handle_create(["wizard", "--registry", str(registry)])
+
+        assert result == 1
+        mock_error.assert_called_once()
+        message = str(mock_error.call_args).lower()
+        assert "wizard" in message
+        assert "aipass_framework" in message
+        assert not (tmp_path / "wizard").exists()
+        assert not registry.exists()
+
+    def test_path_like_single_positional_still_creates(self, tmp_path):
+        """A token carrying a path marker is unaffected — still creates via the
+        default class exactly as before (legitimate `create <path>` usage)."""
+        from aipass.spawn.apps.spawn import handle_create
+
+        target = tmp_path / "legit_agent"
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        with patch("aipass.spawn.apps.spawn.console"):
+            result = handle_create([str(target), "--registry", str(registry)])
+
+        assert result == 0
+        assert target.exists()
+        assert (target / ".trinity" / "passport.json").exists()
+
+    def test_explicit_class_and_path_still_works(self, tmp_path):
+        """`create <class> <path>` — the two-positional form — is untouched."""
+        from aipass.spawn.apps.spawn import handle_create
+
+        target = tmp_path / "legit_agent2"
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        with patch("aipass.spawn.apps.spawn.console"):
+            result = handle_create(["aipass_framework", str(target), "--registry", str(registry)])
+
+        assert result == 0
+        assert target.exists()
+
+    def test_relative_dot_prefixed_token_still_creates(self, tmp_path, monkeypatch):
+        """An explicit relative-path marker ('./name') disambiguates and still creates."""
+        from aipass.spawn.apps.spawn import handle_create
+
+        monkeypatch.chdir(tmp_path)
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        with patch("aipass.spawn.apps.spawn.console"):
+            result = handle_create(["./dotted_agent", "--registry", str(registry)])
+
+        assert result == 0
+        assert (tmp_path / "dotted_agent").exists()
+
+
 class TestPrintHelp:
     """Tests for print_help output."""
 

@@ -16,6 +16,8 @@ from unittest.mock import patch
 import pytest
 
 from aipass.drone.apps.handlers.rm_handler import (
+    _detect_current_branch,
+    _find_branch_root,
     check_carveouts,
     check_containment,
     get_allowed_roots,
@@ -471,6 +473,91 @@ class TestCarveouts:
 
     def test_git_file_worktree_pointer(self, project_dir):
         """A .git FILE (worktree pointer) should protect the resolved gitdir."""
+        real_git = project_dir / "real_git_dir"
+        real_git.mkdir()
+        git_file = project_dir / ".git"
+        git_file.write_text(f"gitdir: {real_git}")
+        resolved = git_file.resolve()
+        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        assert blocked is True
+        assert ".git" in reason
+
+
+# ---------------------------------------------------------------------------
+# Template skeletons are not citizens — outermost .trinity wins
+#
+# @spawn ships a full branch skeleton under templates/, .trinity/ and all, so
+# shape-based branch detection reads it as a citizen. The innermost-wins walk
+# named that skeleton in refusals ("sibling branch aipass_framework/") and —
+# worse — locked @spawn out of its own templates, because the skeleton's name
+# never matches the branch you are standing in. The same mimicry sent the
+# commit gate running pytest inside the template (fixed there in e934099f with
+# outermost-citizen-wins); this is that rule, applied to the delete guard.
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateSkeletonIsNotACitizen:
+    @pytest.fixture()
+    def project_with_template(self, project_dir):
+        """A citizen (spawn) whose templates/ holds a full branch skeleton."""
+        spawn = project_dir / "src" / "aipass" / "spawn"
+        (spawn / ".trinity").mkdir(parents=True)
+        skeleton = spawn / "templates" / "aipass_framework"
+        (skeleton / ".trinity").mkdir(parents=True)
+        (skeleton / ".pytest_cache").mkdir()
+        drone = project_dir / "src" / "aipass" / "drone"
+        (drone / ".trinity").mkdir(parents=True)
+        return project_dir
+
+    def test_find_branch_root_returns_the_outermost_citizen(self, project_with_template):
+        """Two .trinity ancestors: the citizen wins, not the skeleton."""
+        stray = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework" / ".pytest_cache"
+        root = _find_branch_root(stray.resolve(), project_with_template.resolve())
+        assert root is not None
+        assert root.name == "spawn"
+
+    def test_refusal_names_the_citizen_not_the_skeleton(self, project_with_template, monkeypatch):
+        """@devpulse's report: the refusal named a thing that is not a citizen."""
+        monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
+        stray = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework" / ".pytest_cache"
+        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        assert blocked is True
+        assert "spawn" in reason
+        assert "aipass_framework" not in reason
+
+    def test_a_citizen_can_clean_inside_its_own_templates(self, project_with_template, monkeypatch):
+        """Innermost-wins locked @spawn out of its own tree — nobody reported this."""
+        spawn = project_with_template / "src" / "aipass" / "spawn"
+        monkeypatch.chdir(spawn)
+        stray = spawn / "templates" / "aipass_framework" / ".pytest_cache"
+        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        assert blocked is False, f"spawn refused inside its own tree: {reason}"
+
+    def test_standing_in_a_template_is_standing_in_the_citizen(self, project_with_template, monkeypatch):
+        """CWD detection uses the same walk — it has to agree with the guard."""
+        skeleton = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework"
+        monkeypatch.chdir(skeleton)
+        assert _detect_current_branch(project_with_template.resolve()) == "spawn"
+
+    def test_ordinary_branch_path_is_unchanged(self, project_with_template):
+        """The fix must not over-reach: a normal branch still maps to itself."""
+        target = project_with_template / "src" / "aipass" / "drone" / "build"
+        root = _find_branch_root(target.resolve(), project_with_template.resolve())
+        assert root is not None
+        assert root.name == "drone"
+
+    def test_sibling_protection_still_holds_for_real_citizens(self, project_with_template, monkeypatch):
+        """Outermost-wins must not accidentally unprotect anything."""
+        monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
+        target = project_with_template / "src" / "aipass" / "spawn"
+        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        assert blocked is True
+        assert "spawn" in reason
+
+
+class TestGitWorktreePointerUnchanged:
+    def test_git_file_worktree_pointer_still_protected(self, project_dir):
+        """Pinned separately so the walk change cannot quietly weaken it."""
         real_git = project_dir / "real_git_dir"
         real_git.mkdir()
         git_file = project_dir / ".git"

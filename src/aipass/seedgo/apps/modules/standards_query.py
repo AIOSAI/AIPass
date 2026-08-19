@@ -40,6 +40,9 @@ from aipass.cli.apps.modules import error, warning
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+
 # =============================================================================
 # COMMAND NAMES
 # =============================================================================
@@ -272,7 +275,9 @@ def _handle_alias(args: List[str]) -> bool:
         _show_all_standards()
         return True
 
-    if args[0] in ["--help", "-h", "help"]:
+    # A help flag ANYWHERE means explain: `standard cli --help` used to print
+    # the whole standard instead of the alias help.
+    if wants_help(None, args):
         print_alias_help()
         return True
 
@@ -327,7 +332,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ["--help", "-h", "help"]:
+    # A help flag ANYWHERE means explain: `standards_query <pack> --help` used
+    # to look up a standard named '--help'.
+    if wants_help(None, args):
         print_help()
         return True
 

@@ -1,0 +1,219 @@
+"""Durability tests for json_handler writes — a reader must never see a torn file.
+
+THE DEFECT (fleet-wide, error 90c9e40d): every write site opened the target with
+"w", which TRUNCATES before the new content lands. A concurrent reader in that
+window gets an empty file, and this handler answers an unreadable file by
+regenerating a fresh template over it — so the race does not merely fail a read,
+it destroys the live document.
+
+These tests are written against the OBSERVABLE contract: at every instant, the
+file on disk parses as JSON and holds either the old document or the new one.
+"""
+
+import json
+import re
+import threading
+import time
+
+import pytest
+
+from aipass.cli.apps.handlers.json import json_handler
+
+# A truncating write: open(..., <w|a|w+|wb|...>) in either quote style, or
+# Path.write_text. Case-insensitive so "W" cannot smuggle one past.
+_TRUNCATING_WRITE = re.compile(
+    r"""\bopen\s*\([^)]*['"][waWA]\+?b?['"]|\.write_text\s*\(""",
+)
+
+
+@pytest.fixture
+def json_dir(tmp_path, monkeypatch):
+    """Point the handler at a temp directory — never touch the real cli_json/."""
+    target = tmp_path / "cli_json"
+    target.mkdir()
+    monkeypatch.setattr(json_handler, "JSON_DIR", target)
+    return target
+
+
+class TestAtomicWriteHelper:
+    """_atomic_write_json is the single write primitive every site must use."""
+
+    def test_replaces_content(self, json_dir):
+        path = json_dir / "thing.json"
+        json_handler._atomic_write_json(path, {"v": 1})
+        json_handler._atomic_write_json(path, {"v": 2})
+        assert json.loads(path.read_text(encoding="utf-8")) == {"v": 2}
+
+    def test_creates_missing_file(self, json_dir):
+        path = json_dir / "fresh.json"
+        json_handler._atomic_write_json(path, [1, 2, 3])
+        assert json.loads(path.read_text(encoding="utf-8")) == [1, 2, 3]
+
+    def test_leaves_no_temp_files_behind(self, json_dir):
+        path = json_dir / "clean.json"
+        json_handler._atomic_write_json(path, {"v": 1})
+        assert list(json_dir.glob("*.tmp")) == []
+
+    def test_failed_write_leaves_original_intact(self, json_dir, monkeypatch):
+        """A write that blows up must not truncate the live document."""
+        path = json_dir / "keep.json"
+        json_handler._atomic_write_json(path, {"v": "original"})
+
+        def exploding_dump(*args, **kwargs):
+            raise RuntimeError("serialisation failed")
+
+        monkeypatch.setattr(json_handler.json, "dump", exploding_dump)
+        with pytest.raises(RuntimeError):
+            json_handler._atomic_write_json(path, {"v": "replacement"})
+
+        assert json.loads(path.read_text(encoding="utf-8")) == {"v": "original"}
+
+    def test_failed_write_cleans_up_temp_file(self, json_dir, monkeypatch):
+        """No partial document may survive in the directory the handler globs."""
+        path = json_dir / "keep.json"
+        json_handler._atomic_write_json(path, {"v": "original"})
+
+        def exploding_dump(*args, **kwargs):
+            raise RuntimeError("serialisation failed")
+
+        monkeypatch.setattr(json_handler.json, "dump", exploding_dump)
+        with pytest.raises(RuntimeError):
+            json_handler._atomic_write_json(path, {"v": "replacement"})
+
+        assert list(json_dir.glob("*.tmp")) == []
+
+    def test_temp_file_staged_in_target_directory(self, json_dir, monkeypatch):
+        """Staging elsewhere would make os.replace a cross-device copy, not atomic."""
+        seen = {}
+        real_mkstemp = json_handler.tempfile.mkstemp
+
+        def recording_mkstemp(*args, **kwargs):
+            seen["dir"] = kwargs.get("dir")
+            return real_mkstemp(*args, **kwargs)
+
+        monkeypatch.setattr(json_handler.tempfile, "mkstemp", recording_mkstemp)
+        json_handler._atomic_write_json(json_dir / "staged.json", {"v": 1})
+        assert seen["dir"] == str(json_dir)
+
+
+class TestWriteSitesAreAtomic:
+    """Every write site must route through the helper — including regenerate."""
+
+    def test_save_json_uses_atomic_write(self, json_dir, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            json_handler,
+            "_atomic_write_json",
+            lambda path, data: calls.append(path),
+        )
+        json_handler.save_json("mod", "log", [{"entry": 1}])
+        assert calls == [json_dir / "mod_log.json"]
+
+    def test_regenerate_path_uses_atomic_write(self, json_dir, monkeypatch):
+        """ensure_json_exists overwrites LIVE data when it judges a file corrupt."""
+        corrupt = json_dir / "mod_config.json"
+        corrupt.write_text("{ not json", encoding="utf-8")
+
+        calls = []
+        monkeypatch.setattr(
+            json_handler,
+            "_atomic_write_json",
+            lambda path, data: calls.append(path),
+        )
+        json_handler.ensure_json_exists("mod", "config")
+        assert calls == [corrupt]
+
+    def test_no_write_site_truncates_with_mode_w(self, json_dir):
+        """Guard: a future edit reintroducing a truncating write re-opens the race.
+
+        The first version of this guard matched the literal '"w"' and so let
+        single-quoted open(path, 'w') straight through — a guard with a hole the
+        exact shape of the bug it guards. Matches BOTH quote styles, the w/a/w+
+        family case-insensitively, and Path.write_text (which truncates too).
+        os.fdopen is exempt: that IS the atomic helper writing its own staged
+        temp file, which is the fix, not the defect.
+        """
+        source = json_handler.__file__
+        with open(source, "r", encoding="utf-8") as handle:
+            body = handle.read()
+
+        offenders = [
+            line.strip() for line in body.splitlines() if _TRUNCATING_WRITE.search(line) and "fdopen" not in line
+        ]
+        assert offenders == [], f"non-atomic write site(s): {offenders}"
+
+
+class TestConcurrentReadsStayParseable:
+    """The defect as the fleet measured it: readers racing a writer."""
+
+    def test_readers_never_observe_a_torn_document(self, json_dir):
+        path = json_dir / "race_log.json"
+        json_handler._atomic_write_json(path, [{"entry": 0}])
+
+        stop = threading.Event()
+        unparseable = []
+        empty = []
+        reads = []
+        failures = []
+
+        def writer(worker):
+            # A writer that dies silently leaves the content assertions below
+            # passing vacuously. On Windows an exhausted os.replace retry raises
+            # here, and that must read as a probe failure, not as a clean race.
+            try:
+                for round_number in range(60):
+                    if stop.is_set():
+                        return
+                    json_handler.save_json("race", "log", [{"entry": round_number, "worker": worker}] * 40)
+            except Exception as error:  # noqa: BLE001 - surfaced through failures below
+                failures.append(error)
+
+        def reader():
+            while not stop.is_set():
+                # Yield between polls — Windows share-mode semantics, not tuning.
+                # A zero-delay spin-reader holds the target open at near-100% duty
+                # cycle, and Python opens files without FILE_SHARE_DELETE, so on
+                # Windows an os.replace onto a handle a reader holds fails with
+                # WinError 5. Two spinning readers can then collide with every one
+                # of the writer's bounded retry attempts and starve a correct retry
+                # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
+                # models a real reader — no fleet workload spin-reads a config file
+                # — and weakens no content check below. At the top of the pass so
+                # the `continue` paths yield too: a refused open means a replace is
+                # in flight, exactly when re-spinning hurts most.
+                time.sleep(0.001)
+                try:
+                    raw = path.read_text(encoding="utf-8")
+                except PermissionError:
+                    # Windows refuses the open while a concurrent os.replace is
+                    # in flight. A refused open is share-mode semantics — not a
+                    # torn document, and not counted as a read.
+                    continue
+                except FileNotFoundError:
+                    continue
+                reads.append(1)
+                if raw == "":
+                    empty.append(1)
+                    continue
+                try:
+                    json.loads(raw)
+                except json.JSONDecodeError:
+                    unparseable.append(raw[:40])
+
+        # save_json writes race_log.json — point the readers at that same file.
+        threads = [threading.Thread(target=writer, args=(n,)) for n in range(2)]
+        threads += [threading.Thread(target=reader) for _ in range(2)]
+        for thread in threads[2:]:
+            thread.start()
+        for thread in threads[:2]:
+            thread.start()
+        for thread in threads[:2]:
+            thread.join()
+        stop.set()
+        for thread in threads[2:]:
+            thread.join()
+
+        assert failures == [], f"a writer died mid-race: {failures[0]!r}"
+        assert reads, "readers never observed the document — the race proves nothing"
+        assert unparseable == [], f"{len(unparseable)} torn reads: {unparseable[:3]}"
+        assert empty == [], f"{len(empty)} reads saw a truncated (empty) file"

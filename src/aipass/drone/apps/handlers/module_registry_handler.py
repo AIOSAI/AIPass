@@ -78,15 +78,6 @@ def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
 _EXTERNAL_MODULES: dict[str, _ExternalModuleConfig] = _load_external_modules()
 
 
-def refresh_external_modules() -> None:
-    """Reload external module declarations from routing_config.json.
-
-    Call after modifying routing_config.json at runtime.
-    """
-    global _EXTERNAL_MODULES
-    _EXTERNAL_MODULES = _load_external_modules()
-
-
 @dataclass
 class ModuleInfo:
     """Metadata about a registered module."""
@@ -226,8 +217,3 @@ def get_module_introspective(name: str) -> str:
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_introspective: failed for module '%s': %s", name, exc)
         return ""
-
-
-def register_module(name: str, adapter_path: str) -> None:
-    """Register a new internal module dynamically."""
-    _INTERNAL_MODULES[name] = adapter_path

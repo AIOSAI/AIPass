@@ -1,0 +1,28 @@
+{
+  "description": "The broken-tree case, on the second document. PLATFORM DIVERGENCE, same measured rule as the agent case: where the OS reports a path through a file as merely missing, this read answers an empty document.",
+  "document": "baud",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "state": "parent_is_a_file"
+  },
+  "id": "baud-read-parent-is-a-file-refuses",
+  "notes": "Divergence 2, second document.",
+  "operation": {
+    "kind": "read"
+  },
+  "platform": {
+    "expect_without": {
+      "parent_is_a_file_is_distinguishable": {
+        "document": {},
+        "outcome": "ok"
+      }
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

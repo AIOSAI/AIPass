@@ -178,13 +178,17 @@ def handle_command(command: str, args: list) -> bool:
     """
     from aipass.cli.apps.modules import console, error
 
+    from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+
     if command != "errors":
         return False
 
     if not args:
         print_introspection()
         return True
-    if args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence gate: `errors detail <fp> --help` must describe, never
+    # run. `help` counts only at position 0 — later it is a suppress reason.
+    if wants_help(args):
         print_help()
         return True
 

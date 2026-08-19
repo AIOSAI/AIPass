@@ -22,6 +22,7 @@ from aipass.drone.apps.handlers.registry_handler import (
     set_registry_path,
     reset_registry_path,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = ["get_registry_path", "set_registry_path", "reset_registry_path"]
 
@@ -69,7 +70,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
     json_handler.log_operation("handle_command", {"module": "config", "command": command})

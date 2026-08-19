@@ -9,14 +9,14 @@
       "file": "apps/drone.py",
       "standard": "cli",
       "lines": [
-        267,
-        269,
-        385,
-        387,
-        506,
-        508,
-        625,
-        627
+        270,
+        272,
+        388,
+        390,
+        546,
+        548,
+        665,
+        667
       ],
       "reason": "Raw passthrough of routed command stdout/stderr — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
@@ -24,7 +24,7 @@
       "file": "apps/modules/router.py",
       "standard": "cli",
       "lines": [
-        61
+        62
       ],
       "reason": "Raw passthrough of routed command stdout — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
@@ -89,99 +89,9 @@
       "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     },
     {
-      "file": "apps/plugins/hook_sounds/hook_sounds_plugin.py",
-      "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ — deliberately outside 3-layer structure (same pattern as devpulse_ops)."
-    },
-    {
-      "file": "apps/plugins/hook_sounds/hook_sounds_plugin.py",
-      "standard": "naming",
-      "reason": "Plugin filename convention: {plugin_name}_plugin.py inside {plugin_name}/ directory."
-    },
-    {
-      "file": "apps/plugins/hook_sounds/hook_sounds_plugin.py",
-      "standard": "trigger",
-      "reason": "Simple toggle plugin — creates/removes a flag file. No state changes that warrant trigger events."
-    },
-    {
-      "file": "tests/test_devpulse_plugins.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
       "file": "tests/test_devpulse_plugins.py",
       "standard": "deep_nesting",
       "reason": "Test mock side_effect closures are necessarily nested inside test methods. Refactoring to top-level breaks test locality."
-    },
-    {
-      "file": "tests/test_devpulse_plugins.py",
-      "standard": "documentation",
-      "reason": "Test methods and mock helpers in this file are pre-existing without docstrings. Class docstrings describe intent; per-method docs would be noise."
-    },
-    {
-      "file": "tests/test_git_module.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_git_access.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_git_access.py",
-      "standard": "encapsulation",
-      "reason": "Test file imports handlers directly to test their public interface. Unit tests require direct access to implementation components."
-    },
-    {
-      "file": "tests/test_git_access.py",
-      "standard": "documentation",
-      "reason": "Test class docstrings describe intent; per-method docstrings would be noise for assertion-named test methods."
-    },
-    {
-      "file": "tests/test_system_pr.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_rm.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_rm.py",
-      "standard": "encapsulation",
-      "reason": "Test file imports rm_handler directly to test its public interface. Unit tests require direct access to implementation components."
-    },
-    {
-      "file": "tests/test_rm.py",
-      "standard": "documentation",
-      "reason": "Test class docstrings describe intent; per-method docstrings would be noise for assertion-named test methods."
-    },
-    {
-      "file": "tests/test_rm.py",
-      "standard": "meta",
-      "reason": "Test file — META blocks are for production source files, not test suites."
-    },
-    {
-      "file": "tests/test_rm.py",
-      "standard": "trigger",
-      "reason": "Test file exercises .unlink() to verify deletion behavior — not a production file operation requiring trigger events."
-    },
-    {
-      "file": "tests/test_broker.py",
-      "standard": "architecture",
-      "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_broker.py",
-      "standard": "encapsulation",
-      "reason": "Test file imports broker handlers directly to test their public interface. Unit tests require direct access to implementation components."
-    },
-    {
-      "file": "tests/test_broker.py",
-      "standard": "trigger",
-      "reason": "Test file exercises .unlink() to clean up test symlinks — not a production file operation requiring trigger events."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
@@ -224,11 +134,6 @@
       "reason": "Standalone acceptance demo runner — helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
     },
     {
-      "file": "CLAUDE.md",
-      "standard": "architecture",
-      "reason": "Template builder expects CLAUDE.md — drone uses .aipass/aipass_local_prompt.md for branch context instead. Not a missing file."
-    },
-    {
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "unused_function",
       "functions": [
@@ -243,7 +148,7 @@
       "functions": [
         "create_pr"
       ],
-      "reason": "create_pr() is deprecated per FPLAN-0210 — pr command blocked at auth tier. Handler kept for backwards compatibility; still tested in test_git_module.py."
+      "reason": "create_pr() has no production caller — the `pr` command is owner-tier and live, but _handle_pr() in git_module.py dispatches to dev_pr_handler.create_branch_pr(), not here. Its only callers are 7 sites in tests/test_git_module.py. Kept pending a removal decision (APLAN-0003); this bypass documents orphaned code, it does not defend it."
     },
     {
       "file": "apps/modules/git_module.py",
@@ -260,6 +165,29 @@
         "start_background"
       ],
       "reason": "Threaded broker entrypoint, exercised by tests/test_broker.py; production uses blocking start(); intentionally not called in shipped non-test code."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/auth.py",
+      "standard": "encapsulation",
+      "lines": [
+        27
+      ],
+      "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py — drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose — auth.py is the git authority gate and any OTHER direct handler import in it must still be reported."
+    },
+    {
+      "file": "apps/handlers/git/repo_context.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate — one constant and one boolean over the filesystem, no operation to log. A log_operation() call here would fire on every git command to record 'a question was asked'; the callers that ACT on the answer (tag_handler, auth) log their own outcomes. Wiring json_handler in to satisfy the checker would be scaffolding, not logging."
+    },
+    {
+      "file": "apps/handlers/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate — one question over a token list, no I/O and no state. It is called before every command in ten modules, so a log_operation() here would record 'a help flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer already log what they did. Same shape and same reasoning as the repo_context.py rule."
+    },
+    {
+      "file": "apps/handlers/json_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate — one question over a token list, no I/O and no state. The literal twin of help_flags.py, which carries this same rule for the same reason: it runs before every git read command, so a log_operation() here would record 'a --json flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer (status, log, show, remote) already log their own outcomes. Adding json_handler to satisfy a checker that keys on the directory, not on whether the file touches JSON data, would be scaffolding rather than logging."
     }
   ],
   "notes": {

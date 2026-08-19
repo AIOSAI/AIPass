@@ -6,48 +6,57 @@
     "presence_gate": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.presence_gate.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "persistent_alert": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.persistent_alert.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "identity_injector": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.identity.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "email_notification": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.notification.email.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "branch_prompt": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.branch_loader.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "tier0_kernel": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.tier0_kernel.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "navmap": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.navmap.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "compass_recall": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.compass_recall.handle",
       "matcher": "",
-      "max_per_session": 10
+      "max_per_session": 10,
+      "timeout": 90
     },
     "feedback_pulse": {
       "enabled": false,
       "handler": "aipass.hooks.apps.handlers.prompt.feedback_pulse.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "auto_process": {
       "enabled": true,
@@ -59,17 +68,19 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.context_gauge.handle",
       "matcher": "",
-      "timeout": 30
+      "timeout": 90
     },
     "temporal": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.temporal.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "user_message_relay": {
       "enabled": true,
       "handler": "aipass.skills.lib.telegram.apps.handlers.user_message_relay.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     }
   },
 

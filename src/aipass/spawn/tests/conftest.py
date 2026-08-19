@@ -26,14 +26,18 @@ def _find_registry_path() -> Path:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _protect_registry():
+def _protect_registry(tmp_path_factory):
     """Backup AIPASS_REGISTRY.json before the test session, restore after.
 
     Prevents tests that call spawn_agent/grant_passport without a
     registry_path override from permanently polluting the real registry.
+
+    The backup lives under pytest's tmp dir, never beside the real registry:
+    writing it into the repo root meant a crashed or killed suite orphaned an
+    AIPASS_REGISTRY.json.test_backup there (flagged by @backup, APLAN-0007).
     """
     reg = _find_registry_path()
-    backup = reg.with_suffix(".json.test_backup")
+    backup = tmp_path_factory.mktemp("registry_backup") / "AIPASS_REGISTRY.json.test_backup"
 
     if reg.exists():
         shutil.copy2(reg, backup)

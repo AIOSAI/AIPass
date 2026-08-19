@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: telegram_response.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Telegram response delivery on Stop event (ported from Dev-Pass)
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-06-15
-# Modified: 2026-06-29
+# Modified: 2026-08-14
 # =============================================
 
 """Telegram response delivery on Stop event.
@@ -159,7 +159,10 @@ def extract_assistant_response(transcript_path: str, start_line: int = 0) -> str
     if not all_lines:
         return None
 
-    lines = all_lines[start_line:] if start_line > 0 else all_lines
+    lines = _window_from_cursor(all_lines, start_line)
+    if not lines:
+        logger.info("[HOOKS] telegram: nothing new since cursor %d — nothing to deliver", start_line)
+        return None
 
     last_user_idx = _find_last_real_user_message(lines)
 
@@ -175,6 +178,31 @@ def extract_assistant_response(transcript_path: str, start_line: int = 0) -> str
 
     result = "\n\n".join(text_parts).strip()
     return result if result else None
+
+
+def _window_from_cursor(all_lines: list[str], start_line: int) -> list[str]:
+    """Slice the transcript at the delivery cursor, healing a cursor past the end.
+
+    _advance_pending records the cursor as a line count, and a transcript can shrink
+    under a live cursor (compaction rewrites the file). Once the cursor is past the
+    end, every later slice is empty, no user message is ever found, and the pending
+    file retries forever: 117 identical WARNINGs from one session at one start_line
+    over ten hours, 2026-08-14, against a transcript a quarter that length. Clamping
+    to the last real user message lets the next Stop deliver instead of retrying.
+
+    An empty window with the cursor exactly at the end is the opposite case - nothing
+    new since the last delivery - and is left silent for the caller to handle.
+    """
+    lines = all_lines[start_line:] if start_line > 0 else all_lines
+    if not lines and start_line > len(all_lines):
+        logger.warning(
+            "[HOOKS] telegram: cursor ahead of transcript (%d > %d) — clamping to deliver latest",
+            start_line,
+            len(all_lines),
+        )
+        clamped = _find_last_real_user_message(all_lines)
+        lines = all_lines[max(0, clamped) :]
+    return lines
 
 
 def _find_last_real_user_message(lines: list[str]) -> int:
@@ -312,15 +340,7 @@ def extract_mirror_turn(transcript_path: str, start_line: int = 0) -> str | None
     if not all_lines:
         return None
 
-    lines = all_lines[start_line:] if start_line > 0 else all_lines
-    if not lines and start_line > len(all_lines):
-        logger.warning(
-            "[HOOKS] telegram: cursor ahead of transcript (%d > %d) — clamping to deliver latest",
-            start_line,
-            len(all_lines),
-        )
-        clamped = _find_last_real_user_message(all_lines)
-        lines = all_lines[max(0, clamped) :]
+    lines = _window_from_cursor(all_lines, start_line)
     if not lines:
         return None
 

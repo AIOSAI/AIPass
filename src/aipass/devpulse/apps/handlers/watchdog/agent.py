@@ -109,6 +109,16 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         if result is not None:
             return result
 
+        # In-repo project citizens (projects/<name>/<NAME>_REGISTRY.json) —
+        # same sweep ai_mail's admin lane uses, and deliberately AFTER the
+        # main registry so a local branch always wins a name collision.
+        # Live miss 2026-08-12: watchdog agent @baud said agent-not-found
+        # minutes after the admin lane's first dispatch reached that seat.
+        for reg in sorted((repo_root / "projects").glob("*/*_REGISTRY.json")):
+            result = _search_registry(reg, target)
+            if result is not None:
+                return result
+
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     search_roots = []
     if caller_cwd:

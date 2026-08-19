@@ -1,0 +1,32 @@
+{
+  "description": "Same three-state null as the other document, so one rule covers both faces.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "zoom": 1
+    },
+    "file": {
+      "zoom": 1
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "content": {
+      "theme": "dark",
+      "zoom": 1
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-patch-null-removes",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "theme": null
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

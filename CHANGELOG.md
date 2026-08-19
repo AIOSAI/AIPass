@@ -9,6 +9,290 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-19] — v2.7.17: one-brain enforced, first green board, fleet perf night, phone file explorer
+
+**fix(ci)** — the PR #734 green campaign: six owner rounds to the first fully
+green 21/21 board. The Windows lane's first complete runs unmasked platform
+assumptions suite by suite (a bare `os.geteuid()` in a decorator killing a whole
+file at collection, POSIX-mode skips made honest, the parent-is-a-file corpus
+divergence, @trigger's reader-clobber where a refused read became a destructive
+write over the whole log). The last two reds were each one test and neither was
+the code lying: @prax's size pin compared `len('y = 2\n')` to the 7 bytes
+Windows actually holds after CRLF translation (production recorded the truth;
+the pin now asserts the file's own `stat().st_size`, plus an explicit-CRLF pin
+run by name from the Linux lane), and @trigger's Linux 3.12 flake was a third
+door — `ensure_json_exists` created missing files as a REPLACING write outside
+every lock, so two racers could bury a lock-holder's entry (the fcntl lock was
+measured innocent). Cure: `atomic_create_json` — stage to temp, `os.link` into
+place, create-or-fail; 0 losses in 1500 stress runs, and the zero is evidence
+because restoring the old write makes the same loop lose again. Also declared:
+httpx in the dev extra; `.claude/settings.local.json` files ship tracked
+(tested settings are shared; only memories and local work files stay home).
+
+**fix(fleet)** — DPLAN-0310: one brain, enforced. Never two live interactive
+sessions on one branch again. The presence gate flips from observe to enforce,
+sourcing truth from CC-native session files (resume-aware, exit-aware): one
+INTERACTIVE brain per branch, background jobs never gate (a job is not a seat),
+and the incumbent-by-start-time tiebreak refuses exactly one of two competing
+seats — without it both refuse each other and the branch bricks. The boot
+picker now lists conversations (transcripts, with your actual last message)
+instead of anonymous PIDs, so Ctrl+C recovery returns to the chat you were in.
+The CLI auto-updater that self-ran mid-session (2.1.234→235, the drift that
+started the night) is pinned: tracked `provider_manifest.json` version, symlink
+install, boot-time drift warning. Live-verified across laptop and phone: second
+seat refused with the occupant named, held-chat pick attaches, cross-device
+one-brain-two-windows, Ctrl+C round-trip clean.
+
+**perf(fleet)** — DPLAN-0305: the lag named and cured. One unguarded stat —
+prax's logger lazy-started an ecosystem-wide recursive filesystem observer
+(~1413 inotify watches) in EVERY process that logged, watchdog's dispatcher
+thread died on any handler exception, and the unbounded event queue then grew
+forever in processes that thought they were healthy: six of them held 13.7GB,
+12.8GB came back the moment they stopped. The watcher now guards the whole
+handler body, the observer never self-starts in importing processes, and the
+monitor runs on request only. @api unblocks its event loop in the same train:
+18 no-await route handlers made sync, snapshot TTL + per-key single-flight,
+and the attach lane's silent ninth-terminal hang fixed with a named thread
+pool behind a bounded semaphore.
+
+**feat(api)** — FPLAN-0443: the fence gains ROOTS and the phone leaves
+agent-land. File explorer + copy-path, accepted on the S24 the same afternoon.
+Four root kinds (branch/home/project/aipass) under the same containment;
+`GET /v1/roots` publishes the roster from the census, answers carry `floor` so
+copy-path yields a real pasteable location. The home arm's openness is on the
+record with its cheap reversal written down.
+
+**feat(fleet)** — DPLAN-0303 server side + DPLAN-0302 day 3: the one-terminal
+arc goes live on the phone — server lanes for the phone face, spawn birth-cert
+repair round, devpulse watchdog refit riding the same trains.
+
+**chore(git)** — APLAN-*.md joins the gitignore: living audit records are
+working papers; they stay home with the branch that keeps them.
+
+**feat(host)** — DPLAN-0300: the phone becomes a terminal — attach lane, photo
+lane, verb doors (@api server-side; @baud's client lands in the BAUD repo).
+`WS /v1/room/attach` spawns a PTY running the desktop's exact attach-or-create
+tmux command (SIGHUP = detach, rooms survive close); the bearer rides
+`Sec-WebSocket-Protocol` and the server echoes only the sentinel, never the
+token; binary frames are keystrokes/output forwarded unchanged, text frames are
+control (resize — refused-not-clamped, never fatal). The pump waits
+FIRST_COMPLETED with hangup-first (gather-both deadlocked on quiet rooms,
+leaking a thread + an undetached tmux client per closed sheet). The fix that
+mattered most: the PTY child now ACQUIRES its controlling terminal (login_tty,
+setsid+TIOCSCTTY fallback for 3.10) and the PTY is born at a real 80x24 —
+before this, TIOCSWINSZ's SIGWINCH had no recipient, so the tmux client read
+0x0 at startup, fell back to 80x24, and stayed deaf to every resize any client
+would ever send. That deafness painted 80 columns into a ~46-column phone:
+mangled lines and the stacking status bar, root-caused live by reading stty and
+tmux list-clients link by link until they disagreed. Rooms are stamped `mouse
+on` + `window-size smallest` on EVERY attach, each chained tmux command with
+its own `-t`. `POST /v1/files/upload` (operate, multipart field `image`): the
+server names the file — the client filename is never read; magic-byte sniffing
+with an offset table (WebP/HEIC put size before brand), 25MB refused not
+truncated and checked twice, 0600 via os.open, lands in ~/Pictures/BAUD beside
+the desktop's screenshots. Kill/wake/lock verb doors, phone face serving, and
+FastAPI validation errors normalized into the documented error envelope
+("image: Field required" in words, not a naked 422 shape). pyproject grows
+python-multipart in `[host]`; `tests/.archive/` whitelisted so the superseded
+capture-lane tests ship revivable (`--capture-room` stays parked as the future
+look-don't-touch lane for read-scope room viewing). ~1002 api tests green
+incl. mutation-checked resize guards that caught the genuinely-untested 3.10
+fallback. Riding along: @skills screen_lock v1.0.0 (loginctl password-lock,
+every agent keeps running — the walking-away-from-the-desk piece) and
+devpulse's dispatch-protocol prompt lines (S248: mail reaches an awake agent
+only at hook boundaries — long briefs now carry re-check-inbox-before-done).
+Live-accepted by Patrick from his S24 through the real stack — attach, type
+directly into the TUI, photo, finger-scroll: "this is usable rn."
+
+**feat(fleet)** — DPLAN-0291 audit wave, morning completions. @spawn S118
+closes all 4 open items: `create <unknown-class>` refused red-first (the repro
+created WIZARD on disk before the fix), `.ai_mail.local/` never-update
+exclusion, `sync-templates` retired outright (template_owners.json empty twice
+running) — 434 green, seedgo 100%, APLAN-0007 signed GREEN. @daemon hardens
+memory_health per APLAN-0015 (3 fixes, not 1). @skills telegram base_bot +
+suspend tests. @aipass APLAN-0018 stamped.
+
+**feat(host)** — DPLAN-0300 Stage 0: the host API lands (@api, FPLAN-0411).
+The fleet's first phone-ready surface: loopback-only FastAPI behind
+sha256-hashed bearer tokens (compare_digest, read|operate scopes, file-edit
+revocation effective next request). `/v1/feed` reads notifications.jsonl
+through a ts cursor clamped both ends with an explicit gap flag and
+at-least-once boundary delivery; `/v1/files` + `/v1/diff` take branch NAMES
+never paths (512KB cap refuses rather than trims, diff goes through drone
+@git); `/v1/fleet` + `/v1/rooms` consume `baud --snapshot` so "which agents
+are alive" has exactly one implementation — binary resolution prefers the
+deployed release build over any PATH copy, and SNAPSHOT_READY survives as an
+operational kill switch (closed = 503 with a reason, never a synthesized
+fleet). 713 tests, live-verified on a running server including post-revoke
+401 and the exit-1 envelope path. pyproject grows the `[host]` extra
+(fastapi, uvicorn). Riding along: @ai_mail's fleet→project refusal now tells
+the truth (replies-only by ruling DPLAN-0288 — the outer wall said "Unknown
+branch" and sent @api hunting a phantom; wall stays shut, test pins it shut,
+1083 green), the morning riders (hooks TG relay cursor clamp, @memory vector
+embedder parked to .archive, skills TG start/kill control-verb fixes), and
+README/APLAN truth-ups. Patrick live-verified the whole chain same day:
+dev-window click-through, release rebuild, his own --snapshot run, /v1/fleet
+200 on real data. CI hardening rider: the bind-refusal test inherited fastapi
+from the local venv (green at home, red on every runner); both
+availability-dependent tests now pin `is_available` explicitly, a new guard
+asserts a valid port actually reaches serve (its neighbor test had been
+passing on CI for the wrong reason), and ci.yml + setup.sh now install the
+`[host]` extra — before this, CI had never made a single HTTP request against
+AIPass's first network-listening service; the auth/scope/traversal tests ran
+only on developer machines.
+
+**feat(fleet)** — night shift DPLAN-0295: the prompt-lane sweep (Patrick's
+ruling, compass #272 — the agent never waits for the system) plus four ruled
+queue items, all 10 roster items landed. auto_process relocated off the first
+prompt: @memory built a fire-and-forget detached child (single-flight lock in
+the child, live-proven on real rollover work), @hooks swapped the shell —
+handler returns in 0.7s where the lane used to block 78–120s. Full UPS sweep:
+11 injectors legitimate, user_message_relay flagged relocation candidate #1
+(blocking Telegram POST per prompt, zero stdout in 18/18). @prax measured the
+same species in its own hottest path: the FIRST log call in any process costs
+0.60s (watcher start + fleet event that imports ai_mail) on every drone
+command — relocation proposals filed for ruling. Severity reclass per compass
+#273: the 17/15 over-budget class (16% of all escalation mail ever sent)
+reclassed WARNING→INFO at the emitter with a guard pinning the genuinely-loud
+advisory. system_logs double-watching ended — root cause was ONE reader and
+TWO FILES (prax dual-writes; watcher globbed both trees), fixed with twin
+detection + live-tree branch names, UNKNOWN-attribution mystery solved
+(hardcoded 11-name list vs 17 branches). seedgo's log_structure check proven
+NEVER to have run in any commit (signature mismatch swallowed by a bare
+except; mocks accept any kwarg so the suite stayed green) — crashed checkers
+now surface attributably, observe-mode shipped with an honest negative
+verdict. drone subprocess default 30s→60s referenced from one constant across
+all three layers; --drone-timeout placement tested and documented. prax
+Mission Control now resolves projects/* citizens from registries and
+passports (BAUD scopes; misattribution-as-AIPASS and CWD-relative registry
+bugs found and fixed beneath it). Four branches corrected their own published
+diagnoses when evidence arrived — amendment-before-hardening held fleet-wide
+with nobody watching (compass #276). Suites: memory 1011/823, hooks 1469/1483,
+trigger 1029, seedgo 1662, drone 1118, prax 1322 — all green, all audits 100%.
+
+**feat(fleet)** — morning round 2026-08-14: deletion record + fragments park
+(Patrick's rulings). Every deletion now leaves a record: drone rm logs every
+outcome — deletes, refusals, failures, not-found attempts — to
+.ai_central/deletions.jsonl plus a prax INFO line (passport-resolved caller,
+2MB rotation, env override deliberately cannot silence the audit trail;
+first-run-green tests distrusted and proven by mutation), and hooks' rm gate
+records every raw rm it allows or blocks (command as-typed, ~10ms only on the
+rm lane, measured). Bonus fix: the sibling-branch guard resolved ownership by
+INNERMOST .trinity, so template skeletons masqueraded as citizens — @spawn
+could never delete inside its own templates/; outermost-citizen-wins now,
+matching e934099f. The symbolic fragments tier is PARKED, revivable
+(.archive/parked_symbolic_20260814 + numbered revival README): the Agent
+Memory Atlas external review (first code-grounded outside review of AIPass —
+praised surfacing governance as the standout mechanism of its corpus) flagged
+the AUDN Delete verdict as unauditable, and the tier was unused — Compass is
+the active curated-truth piece, and every disable point says so. @memory's
+verification caught that "unwired ≠ unloaded": handlers/__init__ imported the
+whole symbolic package on every live call. Loud stubs answer the entire old
+API with the ruling; 4 legacy suites skip-annotated, live lane proven
+untouched by a real detached rollover run. Surfacing governance confirmed
+LIVE meanwhile — it gates compass recall on every prompt (engine.log entries
+match the injected lessons), with one actionable found: the five governance
+constants are unoverridable without a code change (queued). New CPLAN plan
+type registered in flow (capture_plans): records wearing the plan lifecycle,
+born to close, vectorized on close — CPLAN-0001 captures the Atlas review
+whole. Captured in DPLAN-0295's run log end to end.
+
+**fix(hooks)** — UserPromptSubmit timeout seatbelt, DPLAN-0285 items 1+2
+(Patrick present, live-verified same evening). A timed-out UserPromptSubmit
+hook is cancelled and its context silently discarded — the model quietly loses
+its operating instructions and carries on. The real regression: auto_process
+carried timeout 120 only in deployed settings, never in the manifest; a
+reconcile ~08-02 silently wiped it, and its legitimate 78–120s first-prompt
+run (@memory vectorize + rollover) started dying at the 30s default. Timeouts
+predate BAUD by weeks — the transcripts (205k lines back to 07-09) acquit it.
+Fix: timeout 90 (auto_process 120) stamped in ALL layers the same breath —
+.aipass/hooks.json (inner), provider manifest (source of truth), init template
+(the aipass init update union-merge would silently wipe live-only values) —
+plus 3 config-pinning tests and an engine test proving values >30 reach
+worker.join uncapped. Trust re-enrolled with the edit (an @hooks probe showed
+editing hooks.json breaks its trust hash and takes every gate dark). Stale
+README single-dispatch claims fixed (3 sentences, wrong for 73+ days). Suite
+1454 green. Follow-up queued: DPLAN-0294 relocates auto_process off the
+prompt lane entirely (Patrick's ruling, compass #272 — system housekeeping
+never blocks the prompt).
+
+**feat(fleet)** — the fleet audit round: every citizen audits itself
+(DPLAN-0291, Patrick's directive, waves of 2). All 17 branches created living
+APLANs — standing per-branch health records that future audits UPDATE, never
+recreate — and ran full self-audits: live command probes, full suites, seedgo,
+README truth pass, bypass-registry measurement (control-first: pull the rule,
+audit, restore — cli 21→8, drone 48→29, flow 74→58, ai_mail 51→17 accumulated
+fiction cleared). Six branches had tests PINNING broken behaviour, found only
+by running the real path. Round closed with the full-fleet proof: 17/17
+branches at 100%, all 45 standards at 100%, 0 type errors.
+
+**fix(fleet)** — a help flag anywhere must explain, never execute (DPLAN-0291
+rule E, all 17 branches). Fleet-wide idiom gated help at args[0] only, so
+`verb sub --help` EXECUTED the verb: live detonations included @memory's
+rollover push running a 17-branch reset, @backup running a real snapshot, and
+@drone's `rm notes.md --help` deleting the file. Every branch fixed red-first
+with a whole-sequence wants_help predicate inside its own handle_command
+(after the ownership check — routers try modules in turn), bare word `help`
+position-0 only, opt-outs pinned for genuine help verbs. @seedgo encoded it
+the same day as the help_flag_safety standard (AST-based), recalibrated three
+times on fleet evidence: router exemption removed (standalone `__main__`
+paths), value-slot-only trigger widened (flow/hooks false negatives), and
+log_structure DE-SCORED after it proved to read live runtime state — a score
+that moves on its own is worse than a wrong one.
+
+**feat(drone)** — the tag verb learns external repos (by @drone, FPLAN-0403,
+DPLAN-0290 night shift). Two lanes chosen by the repo the command runs in:
+external seats (projects/*) tag their own repo's current HEAD and push to
+their own origin — names validated by `git check-ref-format`, duplicate guard
+kept both sides, and a new `ls-remote` exit-code guard so an unreachable
+remote can't read as "no such tag" and stamp over a live release. The AIPass
+lane is untouched and argv-pinned by regression test. New
+`handlers/git/repo_context.py` owns "is this AIPass's repo". 17 tests
+red-first, 1019 green, live-proven from the real baud seat.
+
+**feat(trigger)** — reload sentinel: the watcher notices its own code change
+(by @trigger, FPLAN-0404, DPLAN-0290). Every 30s the service compares handler
+and module mtimes against its startup snapshot; on change it exits 75 and
+systemd restarts it onto the new code. Settle guard (15s) refuses mid-save
+restarts; an unsupervised process logs loudly instead of exiting (a stale
+watcher beats no watcher). Live-fired three times the same night unprompted.
+Also: `Trigger.on()` is now idempotent — double-registration had been pinned
+as a feature by two tests asserting `call_count == 2`, delivering every event
+twice and walking medic gate 3 on single occurrences. 957 green, audit 100%.
+
+**fix(memory)** — auto-compact snapshots drain past the date valve (by
+@memory, DPLAN-0283/0290). The v2 extractor's snapshot rule existed; the
+skip-loop was DPLAN-0278's safety valve refusing any tail entry "dated
+today" — and snapshots are machine-written same-day by nature, so every
+candidate was refused forever. New `date_guard` param: the auto-compact lane
+trusts ordering over dates; the conservative rule stays everywhere it still
+discriminates (above-head and numberless entries refused in both lanes).
+Skip loop proven to terminate on a sandbox copy; 6 tests (3 red-first,
+3 protection), 1063 green. No live rollover run — the rule is dark until one.
+
+**fix(flow, prax)** — quick_status stops clobbering itself (by @flow
+FPLAN-0405 + @prax off @flow's dispatch, DPLAN-0290; the bug behind
+Patrick's "zero todos" BAUD card). Two writers replaced the whole
+`quick_status` block with different schemas — every plan close wiped
+`todo_count` off the cards, every prax refresh wiped `commons_mentions`, and
+flow's push also flipped mail counts from a stale mirror. Flow now merges by
+ownership class (OWNED recomputed / MIRROR preserved / DERIVED recomputed
+over all counters including foreign / foreign verbatim); prax fixed the
+mirror in BOTH copies of its calculator — the second one, on the live
+refresh path, was the one outside code-reading's reach. Live-proven from
+both directions: `todo_count` and `commons_mentions` now coexist through
+either writer. 787 + 1240 green, both audits 100%.
+
+**fix(devpulse)** — watchdog resolves projects/* citizens (todo #132,
+DPLAN-0290 night shift item 0). `watchdog agent @baud` reported
+agent-not-found minutes after the admin lane's first dispatch reached that
+seat: the resolver checked the main registry and external `~/Projects` roots
+but never descended into `<repo>/projects/*/` where project citizens live.
+New sweep of `projects/*/*_REGISTRY.json` mirrors ai_mail's admin-lane scan
+and runs AFTER the main registry so a local branch always wins a name
+collision (tested both ways, red-first, world pinned to tmp_path). Suite 488
+green; live-proven against the exact failing command.
+
 ## [2026-08-12] — v2.7.16: admin grant lane live, cross-project bridge, BAUD product night, telegram blip fix
 
 **fix(trigger tests)** — signature-fragmentation tests pin their own registry

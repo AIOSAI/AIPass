@@ -106,6 +106,55 @@ class TestSimpleFrontmatterParse:
         assert result["requires"]["bins"] == ["gh"]
         assert result["requires"]["config"] == ["MY_TOKEN"]
 
+    def test_nested_block_list(self):
+        # The no-yaml fallback silently answered "" here, so a skill's declared
+        # systemd units read as empty on any runner without PyYAML. That is the
+        # CI red of 2026-08-19 (run 32222871212), not a machine-state problem.
+        text = "switch:\n  systemd_user:\n    - telegram-bot@api\n    - telegram-bot@base"
+        result = _simple_frontmatter_parse(text)
+        assert result["switch"]["systemd_user"] == ["telegram-bot@api", "telegram-bot@base"]
+
+    def test_top_level_block_list(self):
+        # Same defect one level up, and already live: screen_lock and github
+        # both declare when_to_use this way, and both parsed to {} without yaml.
+        text = 'when_to_use:\n  - "lock the screen"\n  - "walking away"'
+        result = _simple_frontmatter_parse(text)
+        assert result["when_to_use"] == ["lock the screen", "walking away"]
+
+    def test_a_block_list_does_not_leak_into_the_next_key(self):
+        # The items must land under the key they follow. An earlier draft of
+        # this test put no "- " line AFTER the second key, so a parser that
+        # never closed the open list still passed it — the leak needs a later
+        # item to steal before it is visible.
+        # The open list has to be a NESTED inline one: only that branch arms the
+        # list cursor, so only that shape can leak. Two earlier drafts of this
+        # test used a top-level list and passed against a parser that never
+        # closed the cursor at all.
+        text = "requires:\n  pip: [praw]\nwhen_to_use:\n  - stolen-if-broken\nversion: 3"
+        result = _simple_frontmatter_parse(text)
+
+        assert result["requires"]["pip"] == ["praw"]
+        assert result["when_to_use"] == ["stolen-if-broken"]
+        assert result["version"] == 3
+
+    def test_an_empty_nested_key_swallows_nothing_from_its_siblings(self):
+        # Reaches the undecided-nested-key branch for real: "pip:" carries no
+        # value and no list follows, so the parser must leave it empty and let
+        # the sibling keys parse normally.
+        text = "requires:\n  pip:\n  bins: [gh]\n  config: [TOKEN]"
+        result = _simple_frontmatter_parse(text)
+
+        assert not result["requires"]["pip"]
+        assert result["requires"]["bins"] == ["gh"]
+        assert result["requires"]["config"] == ["TOKEN"]
+
+    def test_an_empty_nested_key_still_takes_its_own_block_list(self):
+        text = "switch:\n  systemd_user:\n    - one\n  other: [x]"
+        result = _simple_frontmatter_parse(text)
+
+        assert result["switch"]["systemd_user"] == ["one"]
+        assert result["switch"]["other"] == ["x"]
+
     def test_integer_value(self):
         text = "version: 42"
         result = _simple_frontmatter_parse(text)

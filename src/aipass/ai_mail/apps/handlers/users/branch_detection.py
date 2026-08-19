@@ -59,6 +59,14 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
             return None
         inbox_path = Path(contact["inbox"])
         branch_path = inbox_path.parent.parent  # .ai_mail.local -> branch root
+        if not branch_path.is_dir():
+            # A row whose branch root no longer exists on disk is stale — a
+            # dead pytest tmp_path or a cleaned-up scratchpad probe. Trusting
+            # it here handed callers a "verified" identity backed by a dead
+            # path (found live, 2026-08-16, @devpulse: an unisolated test
+            # suite's poisoned rows were served as real contacts). Fall
+            # through to the next resolution strategy instead.
+            return None
         name_key = branch_name.lstrip("@").lower()
         return {
             "name": name_key.upper(),

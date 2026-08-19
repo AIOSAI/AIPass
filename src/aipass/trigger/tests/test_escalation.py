@@ -1436,3 +1436,41 @@ class TestTrailLogger:
         lane.logger.warning("something the trail could not keep")
 
         assert lane.get_stats()["trail_writes_dropped"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# help_flag_safety canary — a help flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+def test_help_flag_after_a_level_operand_does_not_list(monkeypatch: pytest.MonkeyPatch, cli) -> None:
+    """`escalation list warning --help` must describe, never run the listing.
+
+    The escalation lane is a live surface — its subcommands read and report
+    the operator digest state. The subcommand target is mocked, so a missing
+    gate shows up as a call that should not have happened.
+    """
+    ran = MagicMock()
+    monkeypatch.setattr(cli.module, "_handle_list", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(cli.module, "print_help", printed)
+
+    result = cli.module.handle_command("escalation", ["list", "warning", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()
+
+
+def test_short_help_flag_after_subcommand_does_not_run_status(monkeypatch: pytest.MonkeyPatch, cli) -> None:
+    """`escalation status extra -h` — same gate, short form, read-only verb."""
+    ran = MagicMock()
+    monkeypatch.setattr(cli.module, "_handle_status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(cli.module, "print_help", printed)
+
+    result = cli.module.handle_command("escalation", ["status", "extra", "-h"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()

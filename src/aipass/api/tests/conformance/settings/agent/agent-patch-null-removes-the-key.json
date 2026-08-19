@@ -1,0 +1,34 @@
+{
+  "description": "Three-state: absent touches nothing, null REMOVES, a value sets. This is the null.",
+  "document": "agent",
+  "expect": {
+    "file": {
+      "autoCompactWindow": 40000
+    },
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": 40000,
+      "model": null
+    }
+  },
+  "given": {
+    "content": {
+      "autoCompactWindow": 40000,
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-null-removes-the-key",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "model": null
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

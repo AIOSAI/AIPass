@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import List, NamedTuple
 
 from aipass.cli.apps.modules import console, success
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -162,7 +163,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         json_handler.log_operation("doctor_wire_usage", {"command": command})
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         console.print("[dim]Helper module — use: aipass doctor (auto-wire runs when needed)[/dim]")
         json_handler.log_operation("doctor_wire_help", {"command": command})
         return True

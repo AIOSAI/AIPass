@@ -1,0 +1,20 @@
+{
+  "description": "A project with no BAUD document reads as an empty one.",
+  "document": "baud",
+  "expect": {
+    "document": {},
+    "outcome": "ok"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "state": "missing"
+  },
+  "id": "baud-read-missing-file-is-empty",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

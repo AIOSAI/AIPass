@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Auto-Creating JSON Handler
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-18
 # =============================================
 
 """
@@ -14,6 +14,9 @@ Never manually create JSONs - they build themselves.
 """
 
 import json
+import os
+import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -27,6 +30,97 @@ _BRANCH_ROOT = Path(__file__).resolve().parents[3]
 
 # Constants
 SKILLS_JSON_DIR = _BRANCH_ROOT / "skills_json"
+
+
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
+def _atomic_write_json(target_path: Path, data: Any) -> None:
+    """
+    Write a JSON document so a reader sees either the old one or the new one.
+
+    Args:
+        target_path: The document to replace.
+        data: What to write.
+
+    Raises:
+        OSError: The staged file could not be written or moved into place.
+
+    Note:
+        Opening the target with "w" truncates it BEFORE the new content lands,
+        so every concurrent reader in that window gets an empty or partial
+        file. Here that is not merely a bad read: ensure_json_exists answers an
+        unreadable document by writing a fresh template over it, so a torn read
+        becomes permanent data loss. Measured on this handler unfixed, with 2
+        writers and 2 readers, three runs: 86.9%, 90.2% and 91.4% of concurrent
+        reads came back empty or unparseable. os.replace is atomic on POSIX and
+        Windows, so the window does not exist. On Windows it can still raise PermissionError while a
+        reader holds the target open, so the move goes through
+        _replace_with_retry — bounded, then raises (proven by the Windows CI
+        hang of 2026-08-18). The staged file MUST live in the
+        target's own directory or the rename becomes a cross-device copy.
+        Mirrors the helper @api, @cli, @commons and @daemon carry.
+    """
+    descriptor, temporary = tempfile.mkstemp(dir=str(target_path.parent), prefix=target_path.stem, suffix=".tmp")
+    succeeded = False
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+        _replace_with_retry(temporary, str(target_path))
+        succeeded = True
+    finally:
+        if not succeeded and Path(temporary).exists():
+            # A failed write must not leave a partial document in the directory
+            # this handler reads from.
+            os.unlink(temporary)
+
+
+def atomic_write_json(target_path: Path, data: Any) -> None:
+    """
+    Public entry to this branch's single atomic JSON writer.
+
+    Callers that own a bespoke document (one outside the config/data/log
+    trio) write through here rather than growing a second writer. The
+    torn-write measurement and the Windows sharing-violation retry in
+    _atomic_write_json apply to every caller, so there is exactly one
+    place where write durability is true or false for @skills.
+
+    Args:
+        target_path: The document to replace.
+        data: What to write.
+
+    Raises:
+        OSError: The staged file could not be written or moved into place.
+    """
+    _atomic_write_json(target_path, data)
 
 
 def _get_caller_module_name() -> str:
@@ -125,11 +219,14 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         return False
 
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(template, f, indent=2, ensure_ascii=False)
+        # Atomic like every write here: this is the REGENERATE path, the one
+        # that replaces a document other modules may be reading right now. A
+        # torn read lands here and gets answered with a template, so a partial
+        # write would turn a bad read into permanent data loss.
+        _atomic_write_json(json_path, template)
         return True
-    except Exception:
-        logger.error(f"Failed to write JSON file: {json_path}")
+    except Exception as e:
+        logger.error(f"Failed to write JSON file: {json_path}: {e}")
         return False
 
 
@@ -159,11 +256,10 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = datetime.now().date().isoformat()
 
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(json_path, data)
         return True
-    except Exception:
-        logger.error(f"Failed to save JSON for {module_name}/{json_type}")
+    except Exception as e:
+        logger.error(f"Failed to save JSON for {module_name}/{json_type}: {e}")
         return False
 
 

@@ -37,6 +37,7 @@ from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps, save_timestamps
 from aipass.backup.apps.modules.display import (
     build_progress_bar,
+    refuse_missing_root,
     show_backups_now,
     show_last_backups,
     show_result_summary,
@@ -135,10 +136,15 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
     """Run a full snapshot backup for a project."""
     start = time.time()
 
+    # create_backup_dir refuses a non-directory by returning None. Respect that
+    # refusal here: the rest of the pipeline would otherwise mkdir the whole
+    # tree and "back up" the .backupignore it had just written.
+    if create_backup_dir(project_root) is None:
+        return refuse_missing_root("snapshot", project_root, show_panels)
+
     if show_panels:
         show_last_backups()
 
-    create_backup_dir(project_root)
     config = load_project_config(project_root)
 
     spec = load_spec(project_root)
@@ -215,7 +221,12 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # Screen the WHOLE sequence, not just args[0]. This module has a
+    # standalone __main__ entry that never reaches the router's help
+    # normalisation, so a trailing flag used to fall through and run the
+    # verb for real. Bare "help" stays first-position-only: later
+    # positions are user values (filenames), not flags.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
 

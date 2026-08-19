@@ -31,9 +31,19 @@ def get_branch_status(branch_dir: Path) -> dict:
 
     Returns:
         Dict with ok (bool — False when git itself failed), files (list of
-        {status, path}), total (int), and message (str). Callers must check
-        ``ok``: an error return is otherwise indistinguishable from a clean
-        empty tree, which false-greened `drone @git status` for months.
+        {status, path, index, worktree}), total (int), and message (str).
+        Callers must check ``ok``: an error return is otherwise
+        indistinguishable from a clean empty tree, which false-greened
+        `drone @git status` for months.
+
+        ``status`` carries porcelain's TWO COLUMNS VERBATIM — index first, then
+        worktree. It used to be stripped here, which made ``M `` (staged) and
+        `` M`` (unstaged) the same answer, so every consumer downstream read a
+        staged modification as an unstaged one. Stripping is a rendering
+        choice and now lives in the renderer that wants it; this function
+        reports what git said. ``index`` and ``worktree`` carry the columns
+        split, because that split is what consumers actually branch on and
+        re-slicing a padded string is where they get it wrong.
     """
     repo_root = find_repo_root()
 
@@ -72,10 +82,17 @@ def get_branch_status(branch_dir: Path) -> dict:
     for line in result.stdout.splitlines():
         if len(line) < 4:
             continue
-        status_code = line[:2].strip()
+        status_code = line[:2]
         file_path = line[3:]
         if show_all or file_path.startswith(rel_prefix) or file_path == str(rel_dir):
-            files.append({"status": status_code, "path": file_path})
+            files.append(
+                {
+                    "status": status_code,
+                    "path": file_path,
+                    "index": status_code[0],
+                    "worktree": status_code[1],
+                }
+            )
 
     total = len(files)
     message = f"{total} file(s) changed under {rel_dir}"

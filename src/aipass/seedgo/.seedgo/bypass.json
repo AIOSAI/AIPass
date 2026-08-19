@@ -41,7 +41,7 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
-      "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
+      "reason": "Display handler is an exception to the handler-no-console rule \u2014 its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
@@ -61,42 +61,42 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_generator.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
-      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
+      "reason": "scan() depth 6 \u2014 state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
-      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"
+      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) \u2014 deep AST traversal with isinstance chains inherent to pattern detection"
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
-      "reason": "print_branch_summary() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
+      "reason": "print_branch_summary() depth 6 \u2014 full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
     },
     {
       "file": "_content.py",
@@ -122,13 +122,14 @@
       "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
-      "file": "tests/test_coverage_arch_checklist.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and test functions omit docstrings by pytest convention. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
-      "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
+      "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
+    },
+    {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate \u2014 wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import \u2014 add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
     },
     {
       "file": "tests/test_checkers_batch10.py",
@@ -137,7 +138,7 @@
     {
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
-      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead — it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
     }
   ],
   "notes": {

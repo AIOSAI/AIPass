@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success, warning
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -137,7 +138,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         print_help()
         return True
 

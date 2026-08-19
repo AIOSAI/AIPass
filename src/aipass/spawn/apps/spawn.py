@@ -47,7 +47,6 @@ def print_help():
     console.print("  [green]update[/green] <class> --all --apply  Update all branches of a class")
     console.print("  [green]delete[/green] <@branch>              Archive and deregister branch")
     console.print("  [green]sync-registry[/green]                 Repair registry against filesystem")
-    console.print("  [green]sync-templates[/green]                Pull managed files from source")
     console.print("  [green]regenerate-registry[/green]           Regenerate template registry hashes")
     console.print(
         "  [green]repair[/green] <project_path>           Scan project structure — paths/registry/pollution (read-only)"
@@ -68,14 +67,15 @@ def print_help():
     console.print()
     console.print("[bold cyan]OPTIONS:[/bold cyan]")
     console.print()
-    warning("--role", details="Agent role description")
-    warning("--traits", details="Agent personality traits")
-    warning("--purpose", details="Agent purpose (brief)")
-    warning("--template", details="Template class name (aipass_framework) or custom directory path")
-    warning("--registry", details="Path to AIPASS_REGISTRY.json")
-    warning("--apply", details="Execute changes (update/repair are preview-only by default)")
-    warning("--dry-run", details="Preview changes without modifying files (default for update/repair)")
-    warning("--trace", details="Enable verbose logging")
+    # Requested help is stdout, never warning() — see tests/test_output_streams.py
+    console.print("  [green]--role[/green]      Agent role description")
+    console.print("  [green]--traits[/green]    Agent personality traits")
+    console.print("  [green]--purpose[/green]   Agent purpose (brief)")
+    console.print("  [green]--template[/green]  Template class name (aipass_framework) or custom directory path")
+    console.print("  [green]--registry[/green]  Path to AIPASS_REGISTRY.json")
+    console.print("  [green]--apply[/green]     Execute changes (update/repair are preview-only by default)")
+    console.print("  [green]--dry-run[/green]   Preview changes without modifying files (default for update/repair)")
+    console.print("  [green]--trace[/green]     Enable verbose logging")
     console.print()
     console.print("[yellow]Examples:[/yellow]")
     console.print()
@@ -103,10 +103,63 @@ def _class_candidates(args):
             yield args[i + 1]
 
 
+# create's known flags, used only to find the lone class-or-path positional
+# when flags follow it — see _create_positionals().
+_CREATE_VALUE_FLAGS = ("--role", "--traits", "--purpose", "--template", "--registry")
+_CREATE_BARE_FLAGS = ("--dry-run",)
+
+# A bare positional counts as path-shaped only when it carries an explicit
+# marker — every documented single-positional create example does (a
+# separator, home-dir '~', relative '.'/'..', or '@' branch-address shorthand
+# like README's `create @existing`, normally pre-resolved by drone before
+# spawn ever sees the literal token).
+_PATH_PREFIXES = ("~", ".", "@")
+
+
+def _create_positionals(args):
+    """Positional tokens in create's argv, with known flags (and their values)
+    filtered out — an accurate count regardless of how many `--role`/
+    `--purpose`/etc. flags follow the class-or-path slot.
+    """
+    positionals = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token in _CREATE_VALUE_FLAGS and i + 1 < len(args):
+            i += 2
+        elif token in _CREATE_BARE_FLAGS:
+            i += 1
+        else:
+            positionals.append(token)
+            i += 1
+    return positionals
+
+
+def _looks_like_path(token):
+    """True when a bare positional reads as a path rather than a class name.
+
+    Pure syntax check, no filesystem I/O — the same "refuse in front of the
+    parser" shape as the admin fence (DPLAN-0288). A bare identifier with none
+    of the markers below (e.g. "wizard") reads exactly as plausibly as a
+    mistyped class as it does a path, so it does NOT count as path-like —
+    the caller must disambiguate (see handle_create's unknown-class refusal).
+    """
+    if not token:
+        return False
+    if "/" in token or "\\" in token:
+        return True
+    return token.startswith(_PATH_PREFIXES)
+
+
 def handle_create(args):
     """Handle the create command with optional citizen class."""
     from aipass.spawn.apps.modules.core import _spawn_agent as spawn_agent
-    from aipass.spawn.apps.modules.core import validate_class, get_default_class, refuse_forbidden_class
+    from aipass.spawn.apps.modules.core import (
+        validate_class,
+        get_default_class,
+        get_available_classes,
+        refuse_forbidden_class,
+    )
 
     if not args:
         error("target path required", suggestion="drone @spawn create [class] <target_path> [--role ...]")
@@ -133,6 +186,23 @@ def handle_create(args):
         remaining_args = args[1:]
         if not remaining_args:
             error("target path required after class name")
+            return 1
+    else:
+        # General unknown-class refusal (APLAN-0007 open item 1; devpulse
+        # ruling: refuse in front of the parser, not another special case).
+        # A lone positional that is neither a registered class nor
+        # path-shaped is refused here — not silently read as the target
+        # path. Without this, `create wizard` (typo'd class, no path arg)
+        # silently created a branch named WIZARD in ./wizard.
+        positionals = _create_positionals(args)
+        if len(positionals) == 1 and not _looks_like_path(positionals[0]):
+            token = positionals[0]
+            available = ", ".join(get_available_classes())
+            error(
+                f"'{token}' is not a registered citizen class (available: {available}) "
+                "and does not look like a target path.",
+                suggestion=f"Use a valid class name, or make the path explicit (e.g. './{token}').",
+            )
             return 1
 
     dry_run = "--dry-run" in remaining_args
@@ -241,7 +311,6 @@ def print_introspection():
     console.print("    [dim]- update.py (handle_update — single/all branch updates)[/dim]")
     console.print("    [dim]- delete.py (handle_delete — archive and deregister branch)[/dim]")
     console.print("    [dim]- sync_registry.py (handle_sync_registry — registry repair)[/dim]")
-    console.print("    [dim]- sync_templates.py (handle_sync_templates — template synchronization)[/dim]")
     console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
     console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
@@ -289,11 +358,6 @@ def main():
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
         return handle_sync_registry(remaining)
-
-    if command == "sync-templates":
-        from aipass.spawn.apps.modules.sync_templates import handle_sync_templates
-
-        return handle_sync_templates(remaining)
 
     if command == "regenerate-registry":
         from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry

@@ -324,7 +324,7 @@ class TestMain:
 
         result = trigger.main()
         assert result == 0
-        _mock_console.print.assert_any_call("TRIGGER v2.2.0")
+        _mock_console.print.assert_any_call(f"TRIGGER v{trigger.__version__}")
 
     def test_version_short_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The -V short flag prints version string and returns 0."""
@@ -334,7 +334,7 @@ class TestMain:
 
         result = trigger.main()
         assert result == 0
-        _mock_console.print.assert_any_call("TRIGGER v2.2.0")
+        _mock_console.print.assert_any_call(f"TRIGGER v{trigger.__version__}")
 
     def test_help_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The --help flag calls print_help and returns 0."""
@@ -411,3 +411,45 @@ class TestMain:
         args, kwargs = _mock_error.call_args
         assert "xyzzy" in args[0]
         assert "suggestion" in kwargs
+
+
+class TestVersionString:
+    """`--version` and the README header must never drift apart again."""
+
+    def test_cli_version_matches_readme_header(self) -> None:
+        """The version printed by the CLI is the version the README publishes.
+
+        These were 2.2.0 (CLI) and 2.6.0 (README) when APLAN-0008 measured them:
+        four documented releases — the escalation lane and the reload sentinel
+        among them — shipped without the string moving. Nothing enforced the
+        pairing, so it drifted silently and `--version` misreported the branch.
+        """
+        import re
+
+        from aipass.trigger.apps.trigger import __version__
+
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        match = re.search(r"^\*\*Version:\*\*\s*(\S+)", readme, re.MULTILINE)
+        assert match, "README must publish a **Version:** header"
+        assert __version__ == match.group(1), (
+            f"CLI reports {__version__}, README publishes {match.group(1)} — bump both"
+        )
+
+
+class TestUnknownCommandMessage:
+    """An unroutable invocation must name the words that failed."""
+
+    def test_unknown_subcommand_names_full_invocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`medic nonsense` reports both words, not just `medic`.
+
+        Found live in APLAN-0008: `drone @trigger medic nonsense` printed
+        "Unknown command: medic". The medic module exists — the subcommand did
+        not — so the message accused the one word that was valid.
+        """
+        trigger = _import_trigger()
+        monkeypatch.setattr(sys, "argv", ["trigger", "medic", "nonsense"])
+        monkeypatch.setattr(trigger, "discover_modules", lambda: [])
+
+        assert trigger.main() == 1
+        printed = [str(c) for c in _mock_error.call_args_list]
+        assert any("medic nonsense" in p for p in printed), printed

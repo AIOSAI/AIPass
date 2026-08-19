@@ -28,6 +28,7 @@ from aipass.drone.apps.handlers.git import (
     sync_handler,
     diff_handler,
     log_handler,
+    show_handler,
     commit_handler,
     checkout_handler,
     dev_pr_handler,
@@ -35,7 +36,10 @@ from aipass.drone.apps.handlers.git import (
     delete_branch_handler,
     close_pr_handler,
     tag_handler,
+    remote_handler,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
 DRONE_MODULE = {
     "name": "git",
@@ -47,6 +51,8 @@ _COMMANDS = (
     "status",
     "diff",
     "log",
+    "show",
+    "remote",
     "lock",
     "branches",
     "issue",
@@ -143,7 +149,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return {"stdout": "", "stderr": "", "exit_code": 0}
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
@@ -175,6 +181,10 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_diff(args)
     if command == "log":
         return _handle_log(args)
+    if command == "show":
+        return _handle_show(args)
+    if command == "remote":
+        return _handle_remote(args)
     if command == "lock":
         return _handle_lock()
     if command == "branches":
@@ -460,18 +470,45 @@ def _handle_fix(args: list[str], caller: str) -> dict:
     }
 
 
+def _json_document(payload: dict, *, ok: bool) -> dict:
+    """Render *payload* as the one JSON document a machine caller reads.
+
+    Args:
+        payload: The document body. ``ok`` is stamped into it here so every
+            machine answer on every read door carries the same verdict field.
+        ok: Whether the door answered the question.
+
+    Returns:
+        A routing result whose stdout is the document. A refusal travels on
+        stdout too — a caller that asked for JSON must be able to parse what
+        comes back, including the reason it failed — while the exit code still
+        goes non-zero so a shell script reading only that is told the truth.
+    """
+    return {
+        "stdout": json.dumps({"ok": ok, **payload}, indent=2),
+        "stderr": "",
+        "exit_code": 0 if ok else 1,
+    }
+
+
 def _handle_status(args: list[str] | None = None) -> dict:
-    """Handle the status subcommand (global tier). --all for repo-wide."""
+    """Handle the status subcommand (global tier). --all for repo-wide, --json for machines."""
     args = args or []
+    as_json = wants_json(args)
+    args = strip_json_flag(args)
     show_all = "--all" in args
 
     detected = _detect_branch_dir()
     if detected is None:
-        return {
-            "stdout": "",
-            "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
-            "exit_code": 1,
-        }
+        message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        if as_json:
+            # This refusal fires BEFORE the branch is known, which is how a
+            # machine caller ends up parsing a bare sentence. Every exit from a
+            # --json call is a document, early ones included.
+            return _json_document(
+                {"branch": "", "scope": "branch", "files": [], "total": 0, "message": message}, ok=False
+            )
+        return {"stdout": "", "stderr": message, "exit_code": 1}
 
     _, branch_dir = detected
 
@@ -486,6 +523,21 @@ def _handle_status(args: list[str] | None = None) -> dict:
     else:
         result = status_handler.get_branch_status(branch_dir)
 
+    if as_json:
+        # The scope footer and the header sentence are prose. A machine caller
+        # asked for facts, so it gets the scope as a field instead of a line it
+        # would have to recognise and strip.
+        return _json_document(
+            {
+                "branch": branch_name,
+                "scope": "repo" if show_all else "branch",
+                "files": result["files"],
+                "total": result["total"],
+                "message": result["message"],
+            },
+            ok=result.get("ok", True),
+        )
+
     if not result.get("ok", True):
         # a failed git status must FAIL the command — exit 0 here false-greened
         # scripts and CI into reading an error as a clean tree
@@ -493,7 +545,11 @@ def _handle_status(args: list[str] | None = None) -> dict:
 
     lines = [result["message"]]
     for f in result["files"]:
-        lines.append(f"  {f['status']:>2} {f['path']}")
+        # STRIPPED FOR THE SCREEN ONLY. The handler now reports porcelain's two
+        # columns verbatim; this rendering has always shown one right-aligned
+        # letter and keeps doing so, byte for byte, so every current reader of
+        # this surface is untouched. Machine callers take --json and get both.
+        lines.append(f"  {f['status'].strip():>2} {f['path']}")
 
     if not show_all:
         lines.append(f"(showing {branch_name} scope — use --all for full repo)")
@@ -533,11 +589,31 @@ def _handle_diff(args: list[str]) -> dict:
     return {"stdout": output, "stderr": "", "exit_code": 0}
 
 
+def _split_log_entry(entry: str) -> dict:
+    """Split one ``--oneline`` row into its sha and its subject.
+
+    Args:
+        entry: A row as git prints it — a short sha, a space, the subject.
+
+    Returns:
+        {sha, subject}. Split ONCE on the first space: a subject contains
+        spaces of its own, and splitting on all of them is how a consumer ends
+        up rebuilding the message it was handed. A row with no subject keeps
+        its sha and reports an empty one rather than vanishing.
+    """
+    sha, _, subject = entry.strip().partition(" ")
+    return {"sha": sha, "subject": subject.strip()}
+
+
 def _handle_log(args: list[str]) -> dict:
     """Handle the log subcommand (global tier).
 
     Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`.
     """
+    as_json = wants_json(args)
+    # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
+    # fails, and logs a bogus "Invalid log count argument" on every call.
+    args = strip_json_flag(args)
     count = 10
     for arg in args:
         if arg in _LOG_COUNT_FLAGS:
@@ -552,13 +628,22 @@ def _handle_log(args: list[str]) -> dict:
             continue
 
     if count < 1:
-        return {
-            "stdout": "",
-            "stderr": f"Invalid log count {count}: must be 1 or greater",
-            "exit_code": 1,
-        }
+        message = f"Invalid log count {count}: must be 1 or greater"
+        if as_json:
+            return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
+        return {"stdout": "", "stderr": message, "exit_code": 1}
 
     result = log_handler.get_git_log(count=count)
+
+    if as_json:
+        return _json_document(
+            {
+                "commits": [_split_log_entry(entry) for entry in result["entries"]],
+                "count": result["count"],
+                "message": result["message"],
+            },
+            ok=True,
+        )
 
     if result["entries"]:
         return {
@@ -571,6 +656,71 @@ def _handle_log(args: list[str]) -> dict:
         "stderr": "",
         "exit_code": 0,
     }
+
+
+def _handle_show(args: list[str]) -> dict:
+    """Handle the show subcommand (global tier).
+
+    `show <ref>` shows the commit; `show <ref> <path>` reads that file AT the
+    commit. Repo-wide by design — see show_handler for why it is not scoped to
+    the caller's own branch.
+    """
+    as_json = wants_json(args)
+    # Stripped BEFORE args[0] is read as the ref: left in, `show --json HEAD`
+    # hands `--json` to show_object, which refuses it as a flag-shaped ref.
+    args = strip_json_flag(args)
+
+    if not args:
+        message = "Usage: drone @git show <ref> [path]"
+        if as_json:
+            return _json_document({"ref": "", "path": None, "content": "", "message": message}, ok=False)
+        return {"stdout": "", "stderr": message, "exit_code": 1}
+
+    ref = args[0]
+    path = args[1] if len(args) > 1 else None
+    result = show_handler.show_object(ref, path)
+
+    if as_json:
+        return _json_document(
+            {"ref": ref, "path": path, "content": result["content"], "message": result["message"]},
+            ok=result["success"],
+        )
+
+    if result["success"]:
+        return {"stdout": result["content"], "stderr": "", "exit_code": 0}
+    return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+
+def _handle_remote(args: list[str]) -> dict:
+    """Handle the remote subcommand (global tier) — where this repository points.
+
+    Read-only: it lists what is configured and changes nothing. Credentials are
+    redacted in the handler, before any value reaches this rendering.
+    """
+    as_json = wants_json(args)
+    result = remote_handler.list_remotes()
+
+    if as_json:
+        return _json_document(
+            {"remotes": result["remotes"], "count": result["count"], "message": result["message"]},
+            ok=result["ok"],
+        )
+
+    if not result["ok"]:
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+    if not result["remotes"]:
+        return {"stdout": result["message"], "stderr": "", "exit_code": 0}
+
+    lines = [result["message"]]
+    for entry in result["remotes"]:
+        lines.append(f"  {entry['name']}  {entry['fetch']} (fetch)")
+        # Push is printed only when it DIFFERS. Two identical rows is what git
+        # itself prints, and it reads as two remotes at a glance.
+        if entry["push"] and entry["push"] != entry["fetch"]:
+            lines.append(f"  {entry['name']}  {entry['push']} (push)")
+
+    return {"stdout": "\n".join(lines), "stderr": "", "exit_code": 0}
 
 
 def _handle_commit(args: list[str]) -> dict:
@@ -773,9 +923,16 @@ def get_help(command: str | None = None) -> str:
             "git tag <vX.Y.Z> — Create and push an annotated release tag [owner]\n"
             "git tag --list    — List all tags (newest first) [global]\n"
             "\n"
-            "Safety guards:\n"
-            "  Version guard   Tags on origin/main only after verifying pyproject.toml\n"
-            "                  and __init__.py both match the tag version.\n"
+            "In AIPass:\n"
+            "  Tags origin/main. Version guard — refuses unless pyproject.toml and\n"
+            "  __init__.py on origin/main both match the tag version.\n"
+            "\n"
+            "In an external project (projects/*, any other repo):\n"
+            "  Tags that repo's current HEAD and pushes to its own origin. No version\n"
+            "  guard — your manifests and release cadence are yours. Any name git\n"
+            "  accepts as a tag works, not just vX.Y.Z.\n"
+            "\n"
+            "Both:\n"
             "  Exists guard    Refuses if tag already exists locally or on remote.\n"
         )
 
@@ -785,9 +942,10 @@ def get_help(command: str | None = None) -> str:
         "  status                 Show git status for your branch\n"
         "  diff [--staged]        Show git diff for your branch\n"
         "  log [count]            Show recent git log (default: 10)\n"
+        "  show <ref> [path]      Show a commit, or a file's contents at it\n"
+        "  remote                 List remotes and their urls (credentials redacted)\n"
         "  lock                   Check lock status\n"
         "  branches               List remote branches\n"
-        "  prune-temp             Delete merged citizen/* temp branches\n"
         "  tag --list             List all tags (newest first)\n"
         "  issue [args]           Passthrough to gh issue\n"
         "  run [args]             Passthrough to gh run\n"
@@ -798,6 +956,7 @@ def get_help(command: str | None = None) -> str:
         "  pr <desc>              Push current branch and create PR to main\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"
         "  delete-branch <name>   Delete a remote branch\n"
+        "  prune-temp             Delete merged citizen/* temp branches\n"
         "  close-pr <number>      Close a PR\n"
         "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
@@ -805,6 +964,15 @@ def get_help(command: str | None = None) -> str:
         "  unlock --force         Force-release the PR lock\n"
         "  tag <vX.Y.Z>           Create and push release tag\n"
         "  fix [--dry-run]        Fix broken git states\n"
+        "\n"
+        "--json — THE MACHINE SURFACE:\n"
+        "  status, log, show and remote take --json in ANY slot; it is stripped\n"
+        "  before positional parsing, so `log --json 20` parses like `log 20`.\n"
+        "  One JSON document on stdout, every one carrying an `ok` verdict — a\n"
+        "  refusal is a document too, so a caller can parse why it failed.\n"
+        "  A help flag OUTRANKS it: `status --help --json` prints this page.\n"
+        "  status --json reports git's TWO porcelain columns ('M ' staged vs\n"
+        "  ' M' unstaged) which the rendered view collapses to one letter.\n"
     )
 
 
@@ -814,15 +982,36 @@ def get_introspective() -> str:
         "@git — Tier-based git workflow, dev branch model (v3.0.0)\n"
         "Connected Handlers:\n"
         "  handlers/git/\n"
-        "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py\n"
-        "    - commit_handler.py, checkout_handler.py, sync_handler.py\n"
+        "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
+        "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
         "  plugins/devpulse_ops/\n"
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
-        "Tiers: global (status,diff,log,lock,branches,prune-temp,tag --list,issue,run,workflow)"
-        " | owner (pr,commit,checkout,dev-pr,delete-branch,close-pr,sync,unlock,merge,smart-sync,fix,tag)\n"
+        "Machine surface: --json on status, log, show, remote\n"
+        "Tiers: global (status,diff,log,show,remote,lock,branches,tag --list,issue,run,workflow)"
+        " | owner (pr,commit,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,unlock,merge,smart-sync,fix,tag)\n"
     )
+
+
+def _tier_commands(tier: str) -> list[str]:
+    """The commands a tier actually grants, read from the gate itself.
+
+    Args:
+        tier: "global" or "owner".
+
+    Returns:
+        The tier's command list, or an empty list if the gate cannot be
+        imported — an introspection line is not worth failing a command over,
+        and an empty tier reads as unknown rather than as a confident lie.
+    """
+    try:
+        from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
+
+        return list(GIT_ACCESS_TIERS[tier]["commands"])
+    except (ImportError, KeyError) as exc:
+        logger.warning("Could not read git access tiers for introspection: %s", exc)
+        return []
 
 
 def _get_console():
@@ -846,7 +1035,8 @@ def print_introspection() -> None:
     c.print("  [cyan]handlers/git/[/cyan]")
     c.print(
         "    - [cyan]lock_handler.py[/cyan], [cyan]status_handler.py[/cyan],"
-        " [cyan]diff_handler.py[/cyan], [cyan]log_handler.py[/cyan]"
+        " [cyan]diff_handler.py[/cyan], [cyan]log_handler.py[/cyan],"
+        " [cyan]show_handler.py[/cyan], [cyan]remote_handler.py[/cyan]"
     )
     c.print("    - [cyan]commit_handler.py[/cyan], [cyan]checkout_handler.py[/cyan], [cyan]sync_handler.py[/cyan]")
     c.print(
@@ -860,11 +1050,16 @@ def print_introspection() -> None:
         " [cyan]sync_plugin.py[/cyan], [cyan]fix_plugin.py[/cyan]"
     )
     c.print("  [dim]gh passthrough: issue, run, workflow[/dim]")
+    c.print("  [dim]machine surface: --json on status, log, show, remote[/dim]")
+    # Read off GIT_ACCESS_TIERS rather than retyped: this line had drifted from
+    # the gate it describes — it advertised prune-temp as global (it is owner)
+    # and omitted show entirely. A surface that miseducates its own agent is the
+    # species @spawn caught in their branch prompt; a copy cannot drift.
     c.print(
         "[yellow]Tiers:[/yellow] [dim]global[/dim]"
-        " [dim](status,diff,log,lock,branches,prune-temp,tag --list,issue,run,workflow)[/dim]"
+        f" [dim]({','.join(_tier_commands('global'))})[/dim]"
         " | [dim]owner[/dim]"
-        " [dim](pr,commit,checkout,dev-pr,delete-branch,close-pr,sync,unlock,merge,smart-sync,fix,tag)[/dim]"
+        f" [dim]({','.join(_tier_commands('owner'))})[/dim]"
     )
     c.print()
 

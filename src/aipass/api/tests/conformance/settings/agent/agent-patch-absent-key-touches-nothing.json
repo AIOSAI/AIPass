@@ -1,0 +1,31 @@
+{
+  "description": "The third state. An empty patch is a legal no-op, not an error and not a wipe.",
+  "document": "agent",
+  "expect": {
+    "file": {
+      "model": "opus"
+    },
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": "opus"
+    }
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-absent-key-touches-nothing",
+  "operation": {
+    "kind": "patch",
+    "patch": {}
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

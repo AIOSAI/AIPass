@@ -569,3 +569,82 @@ class TestRenderAllMetaTabs:
 
         assert "keep 15" in tabs["KEY_LEARNINGS_META"]
         assert "keep 15" in tabs["SESSIONS_META"]
+
+
+# ===========================================================================
+# 8. The tab must state what the ENGINE enforces (DPLAN-0302 finding 2)
+# ===========================================================================
+
+
+class TestTabAgreesWithTheEngine:
+    """The banner is written INTO an agent's memory file, where it reads as an
+    instruction about that agent's own limits. A tab that names a number the
+    engine does not enforce is a lie in the one place an agent trusts.
+
+    render_tab used to carry its own lookup: a per-branch-DICT fallback rather
+    than the per-FILE-KEY rule detector._should_rollover applies, plus a
+    hard-coded ``count`` default of 15. Both are pinned dead here, with
+    config_loader.resolve_limits — the shared resolver, itself pinned against
+    the detector in test_config_verbs.py — as the oracle.
+    """
+
+    @staticmethod
+    def _engine_count(rollover_cfg, branch, section):
+        from aipass.memory.apps.handlers.json.config_loader import resolve_limits
+
+        return resolve_limits(rollover_cfg, branch)[section]["count"]
+
+    def test_per_branch_entry_missing_its_file_block_falls_back_like_the_engine(self):
+        """A per_branch entry with no ``local`` block must inherit the DEFAULT,
+        not a hard-coded 15 — the drift that made this class necessary."""
+        mod = _get_module()
+        cfg = {
+            "defaults": {
+                "local": {"sessions": {"count": 25, "auto_compact_cap": 3}, "key_learnings": {"count": 25}},
+                "observations": {"observations": {"count": 25}},
+            },
+            # Entry exists, but carries no "local" block at all.
+            "per_branch": {"victim": {"observations": {"observations": {"count": 25}}, "_note": "x"}},
+        }
+        tab = mod.render_tab("sessions", cfg, SAMPLE_ENTRY_LIMITS_CFG, "victim")
+
+        assert self._engine_count(cfg, "victim", "sessions") == 25
+        assert "keep 25" in tab
+        assert "keep 15" not in tab
+
+    def test_no_limit_anywhere_names_no_number(self):
+        """When nothing is configured the engine enforces nothing, so the tab
+        must not invent a count."""
+        mod = _get_module()
+        cfg = {
+            "defaults": {"observations": {"observations": {"count": 15}}},
+            "per_branch": {"victim": {"observations": {"observations": {"count": 15}}}},
+        }
+        tab = mod.render_tab("sessions", cfg, SAMPLE_ENTRY_LIMITS_CFG, "victim")
+
+        assert self._engine_count(cfg, "victim", "sessions") is None
+        assert "no entry limit configured" in tab
+        assert "keep" not in tab
+
+    @pytest.mark.parametrize("section", ["sessions", "key_learnings", "observations"])
+    def test_override_matches_the_engine(self, section):
+        mod = _get_module()
+        tab = mod.render_tab(section, SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "devpulse")
+        assert f"keep {self._engine_count(SAMPLE_ROLLOVER_CFG, 'devpulse', section)}" in tab
+
+    @pytest.mark.parametrize("section", ["sessions", "key_learnings", "observations"])
+    def test_unconfigured_branch_matches_the_engine(self, section):
+        """A branch with no per_branch entry at all — the common case for a
+        freshly spawned citizen before the first push."""
+        mod = _get_module()
+        tab = mod.render_tab(section, SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "newborn")
+        assert f"keep {self._engine_count(SAMPLE_ROLLOVER_CFG, 'newborn', section)}" in tab
+
+    def test_renderer_holds_no_count_literal_of_its_own(self):
+        """Guard the fix itself: the resolution belongs to config_loader now.
+        A re-introduced ``count`` fallback in this file is the bug coming back."""
+        import inspect
+
+        src = inspect.getsource(_get_module().render_tab)
+        assert 'get("count", ' not in src
+        assert "resolve_limits" in src

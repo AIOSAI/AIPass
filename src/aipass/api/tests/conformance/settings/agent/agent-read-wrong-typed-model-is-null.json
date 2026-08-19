@@ -1,0 +1,27 @@
+{
+  "description": "A dial cannot show a value it does not understand, and null is the honest position for it.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": null
+    }
+  },
+  "given": {
+    "content": {
+      "model": 42
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-read-wrong-typed-model-is-null",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

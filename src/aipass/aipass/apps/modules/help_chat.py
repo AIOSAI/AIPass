@@ -32,6 +32,7 @@ from pathlib import Path
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.readme_map import get_readme_path, list_branches, read_readme_lines
 from aipass.cli.apps.modules import console, error, header
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 # =============================================================================
@@ -311,7 +312,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_help()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args, allow_bare_word=False):
         print_help()
         return True
 

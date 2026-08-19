@@ -4,7 +4,7 @@
 **Module:** `aipass.backup`
 **Version:** 1.0.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-08-08
+**Last Updated:** 2026-08-13
 
 ---
 
@@ -32,10 +32,10 @@ apps/
 ├── modules/
 │   ├── all.py             # Snapshot + versioned orchestration
 │   ├── display.py         # Rich CLI rendering (used by snapshot/versioned/all)
-│   ├── drive_clear.py     # Drive clear (stub — DPLAN-003)
-│   ├── drive_stats.py     # Drive stats (stub — DPLAN-003)
-│   ├── drive_sync.py      # Drive sync (stub — DPLAN-003)
-│   ├── drive_check.py     # Drive check (stub — DPLAN-003)
+│   ├── drive_clear.py     # Clears the LOCAL Drive sync tracker
+│   ├── drive_stats.py     # Drive tracker statistics
+│   ├── drive_sync.py      # Uploads the backup store to Google Drive
+│   ├── drive_check.py     # Drive connectivity check via @api gateway
 │   ├── register.py        # Project registration + @name resolution
 │   ├── restore.py         # Version discovery + file restoration
 │   ├── settings.py        # Settings UI (stub)
@@ -45,8 +45,8 @@ apps/
 │   └── versioned.py       # Incremental timestamped backup
 └── handlers/
     ├── copy/              # File copying (snapshot + versioned)
-    ├── diff/              # Diff generation (stub)
-    ├── drive/             # Google Drive handlers (stubs)
+    ├── diff/              # Diff generation + restore from the versioned store
+    ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
     ├── ignore/            # .backupignore patterns + whitelist
     ├── json/              # JSON persistence, atomic writes, ops log
     ├── path/              # Backup path building + caller-CWD resolution
@@ -54,7 +54,7 @@ apps/
     ├── report/            # Result formatting
     ├── scan/              # Directory walking + filtering
     ├── state/             # Changelog, metadata, timestamps
-    └── ui/                # Settings window (stub)
+    └── ui/                # Settings window (archived — see ui/.archive/)
 ```
 
 ---
@@ -69,15 +69,23 @@ backup all <path|@name>                  # Snapshot + versioned + drive
 backup status <path|@name>              # Show backup info and history
 backup restore <path|@name> list <file>  # List available versions of a file
 backup restore <path|@name> file <f> <o> # Restore a file version to output path
-backup settings <path|@name>             # Settings UI (stub)
-backup drive_sync <path|@name>           # Google Drive sync (stub — DPLAN-003)
-backup drive_check <path|@name>          # Drive connectivity check (stub — DPLAN-003)
-backup drive_stats <path|@name>          # Drive storage stats (stub — DPLAN-003)
-backup drive_clear <path|@name>          # Clear Drive sync state (stub — DPLAN-003)
+backup settings <path|@name>             # NOT IMPLEMENTED — settings UI deferred
+backup drive_sync <path|@name>           # Upload the backup store to Google Drive
+backup drive_check <path|@name>          # Drive connectivity check
+backup drive_stats <path|@name>          # Drive tracker statistics
+backup drive_clear <path|@name> --force  # Clear the LOCAL tracker (remote files untouched)
 backup share <file> [--public]           # Upload one file to Drive, return share link
 ```
 
 All 12 commands are auto-discovered by the entry point router.
+
+**A `--help` anywhere in the arguments prints help and runs nothing** — `drone
+@backup snapshot @myapp --help` is a safe probe, not a backup.
+
+**Drive commands need credentials.** They authenticate through the @api gateway;
+without Google API libraries or credentials they fail loudly rather than
+pretending to sync. `drive_clear` only clears the local dedup tracker — it never
+deletes anything already uploaded to Drive.
 
 **Relative paths resolve where you are.** Backup runs as an installed entry
 point, so its process CWD is its own branch directory. Drone exports

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.7.16"
+version = "2.7.17"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -62,6 +62,18 @@ drive = [
 bluesky = [
     "atproto>=0.0.69",
 ]
+# Host API (FPLAN-0411) — the Stage 0 server for the BAUD phone face.
+# Optional: @api guards these imports and fails with install instructions,
+# so a machine that never serves the phone lane needs none of them.
+host = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    # Multipart parsing for POST /v1/files/upload. FastAPI needs it to read a
+    # form body at all, and raises at app-creation time when it is missing, so
+    # the server guards the import and answers 503 with this hint rather than
+    # failing to start.
+    "python-multipart>=0.0.9",
+]
 seedgo = []
 dev = [
     "pytest>=9.0.3",
@@ -72,6 +84,14 @@ dev = [
     "coverage",
     "pyright",
     "Pygments>=2.20.0",
+    # starlette's TestClient (the host-lane test suites) imports httpx at setup
+    # but starlette does not declare it — it is an optional extra there. Every
+    # green run before this line was riding a transitive install (chromadb →
+    # httpx on the setup.sh lanes, a hand-installed copy in the local venv);
+    # the ubuntu CI job installs only .[dev,host] and had neither, which is
+    # exactly the env-inherited-test-deps species from 1b56b5ce. Declared here
+    # because it is a test-time dependency, not a server runtime one.
+    "httpx>=0.28",
 ]
 
 [project.scripts]

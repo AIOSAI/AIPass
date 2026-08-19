@@ -468,6 +468,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
     # Walk the body of main to find conditionals
     no_args_line = None
     help_check_line = None
+    known_names = collect_help_predicate_names(tree)
 
     for node in ast.walk(main_func):
         if isinstance(node, ast.If):
@@ -477,7 +478,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
                     no_args_line = node.lineno
 
             # Check if this conditional is a help flag check
-            if _is_help_check(node):
+            if _is_help_check(node, known_names):
                 if help_check_line is None:
                     help_check_line = node.lineno
 
@@ -677,18 +678,134 @@ def _is_no_args_check(node: ast.If) -> bool:
     return False
 
 
-def _is_help_check(node: ast.If) -> bool:
+# Names that stand for the caller's argument list. A delegated help predicate
+# must be asked about the arguments — `wants_help(args)` guards a command,
+# `_contains_help_string(node)` inspects a syntax tree and guards nothing.
+_ARGUMENT_NAMES = frozenset(
+    {
+        "arg",
+        "args",
+        "argument",
+        "arguments",
+        "argv",
+        "cmd",
+        "command",
+        "flags",
+        "extra",
+        "opts",
+        "options",
+        "params",
+        "remaining",
+        "rest",
+        "tokens",
+    }
+)
+
+
+def _has_help_token(name: str) -> bool:
+    """
+    Report whether a snake_case name carries `help` as a whole word.
+
+    Accepts: wants_help, is_help, is_help_flag, should_show_help, _help_requested.
+    Rejects: helper, _has_credential_helper, unhelpful — `help` is only a
+    substring there, and a substring match would read unrelated predicates
+    as help guards.
+    """
+    return "help" in name.lower().split("_")
+
+
+def collect_help_predicate_names(tree: ast.Module) -> frozenset:
+    """
+    Collect every function name this module defines or imports.
+
+    A delegated help predicate only counts when the module actually owns the
+    name — locally defined or explicitly imported. This keeps an arbitrary
+    attribute chain (`ctx.cli.wants_help(args)`) from passing as a guard.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+    return frozenset(names)
+
+
+def _call_targets_arguments(call: ast.Call) -> bool:
+    """
+    Report whether a call is asked about the caller's argument list.
+
+    A predicate taking no arguments reads argv itself, so there is nothing to
+    inspect and it is accepted. A predicate that IS handed something must be
+    handed the arguments (`wants_help(args)`, `wants_help(args[1:])`), not an
+    unrelated object.
+    """
+    supplied = list(call.args) + [kw.value for kw in call.keywords]
+    if not supplied:
+        return True
+
+    for value in supplied:
+        for sub in ast.walk(value):
+            if isinstance(sub, ast.Name) and sub.id.lower() in _ARGUMENT_NAMES:
+                return True
+            if isinstance(sub, ast.Attribute) and sub.attr == "argv":
+                return True
+    return False
+
+
+def _is_help_predicate_call(call: ast.Call, known_names: frozenset) -> bool:
+    """Report whether a call delegates the help decision to a help predicate."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        name = root = func.id
+    elif isinstance(func, ast.Attribute):
+        # module-qualified call: help_flags.wants_help(args)
+        if not isinstance(func.value, ast.Name):
+            return False
+        name, root = func.attr, func.value.id
+    else:
+        return False
+
+    if not _has_help_token(name):
+        return False
+    if root not in known_names:
+        return False
+    return _call_targets_arguments(call)
+
+
+def _is_help_check(node: ast.If, known_names: frozenset | None = None) -> bool:
     """
     Detect if an If node is checking for --help or -h flags.
 
-    Patterns detected:
+    Literal patterns detected:
     - '--help' in args
     - '-h' in args
     - args[0] == '--help'
     - args[0] in ('--help', '-h')
     - Comparisons involving the string '--help' or '-h'
+
+    Delegated patterns detected (when known_names is supplied):
+    - wants_help(args)
+    - wants_help(args, allow_bare_word=True)
+    - help_flags.wants_help(args)
+
+    A module that routes help through a shared predicate holds no '--help'
+    literal of its own, so literal-only detection reports the modules that
+    guard correctly and stays silent on the ones that do not.
     """
-    return _ast_contains_help_string(node.test)
+    if _ast_contains_help_string(node.test):
+        return True
+
+    if known_names:
+        for sub in ast.walk(node.test):
+            if isinstance(sub, ast.Call) and _is_help_predicate_call(sub, known_names):
+                return True
+
+    return False
 
 
 def _ast_contains_help_string(node: ast.AST) -> bool:
@@ -724,6 +841,8 @@ def check_correct_dispatch(tree: ast.Module, filename: str) -> Optional[Dict]:
     if main_func is None:
         return None
 
+    known_names = collect_help_predicate_names(tree)
+
     # Walk ALL conditionals in main (including nested ones in command routing)
     for node in ast.walk(main_func):
         if not isinstance(node, ast.If):
@@ -744,7 +863,7 @@ def check_correct_dispatch(tree: ast.Module, filename: str) -> Optional[Dict]:
                 }
 
         # Check --help block — look for help strings in the condition
-        if _is_help_check(node):
+        if _is_help_check(node, known_names):
             calls = _get_function_calls_in_block(node.body)
             # Calls introspection-related functions instead of print_help
             introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
@@ -854,9 +973,11 @@ def check_module_help_interception(tree: ast.Module, filename: str) -> Optional[
     if handle_cmd is None:
         return None  # No handle_command — skip
 
-    # Look for --help check in handle_command()
+    # Look for --help check in handle_command() — a literal flag comparison or
+    # a delegated predicate this module defines or imports
+    known_names = collect_help_predicate_names(tree)
     for node in ast.walk(handle_cmd):
-        if isinstance(node, ast.If) and _is_help_check(node):
+        if isinstance(node, ast.If) and _is_help_check(node, known_names):
             return {
                 "name": "Module help interception",
                 "passed": True,

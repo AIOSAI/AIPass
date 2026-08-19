@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-08-18
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1048 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1123 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -110,6 +110,36 @@ both work. The outcome comes back as `email_data["upsert_action"]`
 (`"created"` / `"updated"`), so a caller can log the difference without
 re-reading the inbox.
 
+## Message Ids: Two Names, One Message
+
+A delivered message has **two ids**, and they are not the same string:
+
+| Field | Whose | Where it lives |
+|-------|-------|----------------|
+| `id` | the recipient's | minted at delivery, unique in *their* mailbox |
+| `sent_id` | the sender's | copied from the sender's `sent/` record |
+
+`id` is authoritative — it is what `inbox` lists, what `view` prints back, and
+what `reply`/`close` expect. `sent_id` is a back-reference so the two sides can
+be matched.
+
+**Why both.** The recipient's id must be unique within their inbox no matter
+what any sender chose, so delivery mints it. But without `sent_id` the two
+copies shared no identifier at all: holding a sender's id, you could not prove
+their message ever arrived. On 2026-08-16 that untraceability was read as a
+delivery outage — @seedgo's reply (`de0cef3e` in their `sent/`) was sitting in
+@devpulse's inbox as `361cefd6`, correctly delivered and unfindable.
+
+**Both ids resolve.** `view`, `reply` and `close` accept either, through one
+shared resolver (`inbox_ops.find_message`) rather than a fallback per command.
+Inbox ids are checked before any `sent_id`, so a sender cannot shadow a
+recipient's message with a colliding id, and resolution never depends on
+message order. `view` prints `sender's id: <sent_id>` when present.
+
+`sent_id` is omitted, never invented, when a producer stamps no id — some
+callers (`@trigger`) deliver directly without a `sent/` record, and a
+placeholder would point at a sent record that does not exist.
+
 ## Notification Feed
 
 Desktop toasts are retired (Patrick's ruling, 2026-08-11) — no D-Bus, no
@@ -137,6 +167,45 @@ line : {"ts": ISO8601, "kind": "mail"|"wake"|"dispatch"|"system",
 - **Fail honest** — a failed feed write is logged and returns `False`. Nothing
   falls back to a toast.
 
+### Locating the feed
+
+```python
+from aipass.ai_mail import feed_path   # callable, resolves at call time
+from aipass.ai_mail import FEED_PATH   # the import-time value, for existing callers
+```
+
+Import these from the package, never from `apps.handlers.notify` — reaching
+into another branch's handlers layer is an encapsulation violation, and
+restating the path as your own constant is worse: it goes stale the day the
+feed moves, and the symptom is a bell showing nothing with no error logged
+anywhere. Both names resolve lazily, so `import aipass.ai_mail` costs no prax
+import. `FEED_PATH` reads through to the live module attribute, so a consumer's
+test suite can redirect the feed the same way this branch's conftest does.
+
+### Reading the feed: cursors go stale, key on `ts`
+
+The trim is a read-modify-write that **replaces the file**, and lines carry no
+id. Two consequences for every reader:
+
+- **A line's position is not its identity.** After a trim, line 5 is a different
+  event than the line 5 you last read. Any cursor held as a line index or byte
+  offset silently points at the wrong place — no error, just wrong or skipped
+  events. Byte offsets fare worse: the inode is new, so a `seek()` past the new
+  end yields nothing at all and the feed looks permanently empty.
+- **Resume on `ts`, and say when you lost ground.** Keep the last `ts` you
+  served, re-open the file by path each poll, and take lines newer than it.
+  If that `ts` is older than the feed's own first line the trim ate the gap;
+  serve what remains and flag it rather than implying continuity. @api's
+  `/v1/feed` does exactly this — ts-cursor clamped both ends with a gap flag.
+
+Timestamps: every line `notify.py` writes is offset-aware
+(`datetime.now().astimezone().isoformat()`), and all 216 lines in the live feed
+were offset-aware when last measured (2026-08-16). But the contract says only
+ISO8601, which does not require an offset, and hand-seeded lines have been naive
+before — S130 filled this file from two writers with different shapes. Parse
+defensively; comparing a naive `ts` against an aware one raises, and a reader
+that crashes on the cursor comparison stops serving the feed entirely.
+
 Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: four
 call sites write feed lines as a side effect, and an unguarded suite run
 appends fake dispatch events to the real feed BAUD renders.
@@ -160,6 +229,50 @@ refused_at      : when the refusal was recorded
   "it's in my sent folder" as proof it arrived.
 - **Broadcasts** carry one record for N recipients: refused only when *zero* were
   delivered. A partial broadcast is a real send.
+
+A failed send also auto-dispatches an `[ERROR] Send failed to ...` report to `@drone`
+(`error_dispatch.build_error_report()`). That report is **from `@ai_mail`, and replies to it
+come back to `@ai_mail`**. It carried `reply_to: "@devpulse"` until 2026-08-13, so @drone's
+reply to a message reading `From: ai_mail` landed on the dispatcher instead (reported by
+@drone/@devpulse, live-reproduced and fixed in APLAN-0006). `reply.py` routes to
+`reply_to or from`, so those two fields together decide where an answer goes: whoever the
+From line names has to be who receives the reply. The branch whose send failed stays named
+in the body, as evidence, not as a route.
+
+## Help Flags — Explain, Never Execute
+
+A help flag anywhere in the argument list means *describe this command*, and all three
+modules check for it as the first statement in `handle_command`, before anything routes.
+
+They used to gate help at `args[0]` only, so a flag one position later was discarded and
+the command ran instead. On a messaging branch that is not a cosmetic bug:
+`dispatch @target "Subject" "Body" --help` fell through to `_orchestrate_dispatch_send`
+and would have **sent the mail and woken the branch** it was asked to describe. `email`,
+`close all` and `reply` had the same shape against the mailbox. (Seedgo standard
+`help_flag_safety`, DPLAN-0291 rule E — the router cannot fix this for us, because the
+standalone `__main__` path calls `handle_command` with raw argv and never touches it.)
+
+`apps/handlers/cli/help_flags.py` holds the whole check — `wants_help(args)`, a pure
+predicate with no I/O and no imports beyond typing, so it can run ahead of every layer:
+
+| Token | Counts as help | Why |
+|---|---|---|
+| `--help`, `-h` | anywhere in the sequence, **exact match** | unambiguous wherever they appear |
+| `help` | position 0 only | a bare word is legitimate message content |
+
+- **Exact match is what keeps real mail intact.** A body reading `run --help for usage`
+  arrives as one quoted argument and is not that token, so it still sends. A body that is
+  *exactly* `--help` explains instead — nonsense input, and explain-over-execute is the
+  ruling.
+- **Position 0 for the bare word**, because on this branch a subject or body can plausibly
+  be the single word "help". None of the three modules owns a genuine `help` verb, so that
+  slot is free; `allow_bare_word=False` exists for a module that ever does.
+- **Tests assert both halves** — help printed *and* the send/wake target never called.
+  Asserting only the first would pass on code that explains itself after sending the mail.
+- The handler carries a documented `json_structure` bypass: the standard wants a
+  `log_operation()` call, which would make the help gate depend on the JSON layer it must
+  run in front of, and would log a non-event on every invocation. @memory, @trigger and
+  @drone bypassed the identical file the same day.
 
 ## Exit Codes
 
@@ -187,6 +300,23 @@ and replays **stdout first**. A progress line printed before an operation theref
 surfaces *below* the failure it preceded. Announce outcomes, not intent, on any path
 that can fail — `dispatch` no longer prints `Sending dispatch email to ...` ahead of a
 send that the fence may refuse.
+
+The same rule still reads wrong on one path: `dispatch wake`'s failure line says "see the
+step status **above**", and the steps replay below it. Tracked in APLAN-0006.
+
+### Interactive send needs a terminal
+
+`email` / `send` with no arguments means interactive mode. That is a human-only path, and
+it now refuses up front when `sys.stdin` is not a TTY — usage to stderr, exit 2, no branch
+list printed first.
+
+Under `drone` the routed subprocess inherits an **open but silent** stdin pipe, so
+`input()` does not raise `EOFError`; it blocks until drone's 30s routing timeout kills the
+command. `EOFError` handling alone cannot cover this, because once you are waiting on the
+first read, "no input yet" and "no input ever" are the same thing. The check has to happen
+before the first prompt, and it lives in both halves — `send.collect_interactive_input()`
+refuses, and `email_send._send_interactive()` refuses ahead of it so the listing never
+prints and the exit code is right.
 
 ## Email Lifecycle
 
@@ -313,6 +443,41 @@ FPLAN-0401 puts one door in each — openable only with the grant:
   boundary refuses with the same wording as before. Vera-Studio (a separate repo)
   is out of scope — this reads the projects the repo already hosts, and is not a
   multi-root discovery layer.
+
+### Out-of-Scope Addresses Are Explained, Not Denied
+
+An address can fail to resolve for two different reasons, and reporting both as
+"unknown" is a lie in one of them. `@baud` is a registered citizen of `projects/baud`
+that @devpulse reaches through the admin lane; telling a fleet branch it does not exist
+sent @api hunting an addressing bug that did not exist and left two stray pings in
+@baud's inbox (2026-08-14).
+
+```
+Out of scope: @baud is a citizen of hosted project 'baud', not the AIPass fleet
+(17 branches in scope). Fleet-to-project mail is replies-only by ruling
+(DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an
+existing message from @baud, or use the feedback channel.
+```
+
+- **The refusal is unchanged — only the reason is now true.** Fleet→project initiation
+  stays walled for every non-admin caller, exit `2`, sent record stamped `refused`.
+- **`_describe_unresolved_address()` runs on the failure path only**, so a successful
+  send never pays for the registry read.
+- **Explaining the wall must not open it.** The diagnostic returns a *string*; the branch
+  map is never updated from it. A test asserts delivery still fails and no inbox is
+  written — that is the load-bearing test in this fix, not the wording ones.
+- **Exact match**, so `@bau` is still an honest "unknown", not a near-miss guess.
+- A hosted registry that is missing or unreadable falls back to the plain unknown
+  message; a refusal never becomes a crash.
+
+Naming the project is not a disclosure: `projects/` is in the same public repo, and the
+caller can list it. What was secret was the *policy*, which is exactly what a wall should
+say out loud.
+
+**Two walls, and they used to disagree.** Resolution is the outer wall;
+`_check_cross_project_boundary()` is the inner one. The inner wall already named both
+projects and said "cross-project mail refused". Anyone stopped by the outer wall never
+learned a policy existed at all.
 
 ### Reply Return Path
 
@@ -445,29 +610,34 @@ ai_mail/
 │       │   ├── footer.py       # Email footer
 │       │   ├── purge.py        # Auto-purge sent/deleted folders
 │       │   ├── error_dispatch.py # Error reporting via email
-│       │   └── dashboard_sync.py # Dashboard integration
+│       │   └── dashboard_sync(disabled).py # Dashboard integration — retired, kept per house rule
 │       ├── dispatch/
 │       │   ├── daemon.py       # Polls inboxes, spawns agents for dispatch emails
 │       │   ├── wake.py         # Wakes branches via claude subprocess
-│       │   ├── dispatch_monitor.py # Wraps claude process (bounce + lock cleanup)
+│       │   ├── dispatch_monitor.py # Wraps claude process (bounce, lock cleanup, sandbox, broker fd)
 │       │   ├── status.py       # Dispatch log I/O
 │       │   └── test_token.py   # AIPASS-TEST ping protocol (auto-ack)
+│       ├── cli/
+│       │   └── help_flags.py   # wants_help() — whole-sequence help detection, pure predicate
 │       ├── registry/
 │       │   └── read.py         # Registry reading + get_all_branches()
 │       ├── users/
 │       │   ├── branch_detection.py # CWD/env-based branch identity detection
+│       │   ├── verified_caller.py  # Verified-caller rail + 5-leg admin verdict
 │       │   └── user.py         # Current user detection (get_current_user)
 │       ├── json_utils/
-│       │   └── json_handler.py # Auto-creating JSON system
+│       │   └── json_handler.py # Auto-creating JSON system (the implementation)
+│       ├── json/
+│       │   └── json_handler.py # Re-export shim — seedgo's architecture standard
+│       │                       # requires apps/handlers/json/json_handler.py by name
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1034 tests across 35 test files
+└── tests/                      # 1123 tests across 41 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
     ├── test_dispatch_status.py # Log I/O, age calculation
-    ├── test_dispatch_watchdog.py # Watchdog auto-spawn
     ├── test_wake.py            # Branch resolution, PID checks, lock files
     ├── test_wake_blocklist.py  # Wake protection for @devpulse
     ├── test_delivery.py        # Inbox migration, private branches, pipeline
@@ -482,6 +652,11 @@ ai_mail/
     ├── test_json_handler.py    # JSON I/O helpers
     ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
+    ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)
+    ├── test_cross_scope_addressing.py # Honest refusal of hosted-project addresses (8 tests)
+    ├── test_public_surface.py  # Package-level feed_path door + lazy import (12 tests)
+    ├── test_message_correlation.py # sent_id back-reference + shared id resolver (12 tests)
+    ├── test_live_mailbox_hygiene.py # Guard: no test fixtures in real mailboxes (4 tests)
     └── test_paths.py           # find_repo_root() utility
 ```
 
@@ -501,11 +676,43 @@ ai_mail/
 - **trigger branch** — `deliver_email_to_branch()` imported directly for event-driven delivery
 - **BAUD** — `.aipass/notifications.jsonl` feed for delivery, wake, dispatch events
 
+## Bypass Registry
+
+`.seedgo/bypass.json` holds **18** rules — 17 survivors of the prune below, plus one added
+the same day *with* `cli/help_flags.py` and measured live (99% with it off, 100% on), which
+is the opposite of a prune candidate.
+
+It held 51 until the 2026-08-13 audit measured
+every one of them in **both** lanes — the audit lane (`audit aipass @ai_mail --full`, walks
+`apps/`) and the checklist lane (`checklist <file>`, what the PostToolUse hook runs) — with
+the registry emptied. 34 suppressed nothing in either lane and were removed; the score is
+100% before and after, which is the proof. Each dead class had a cause, not just an absence:
+
+| Class | n | Why it went dead |
+|---|---|---|
+| `handlers`, same-branch | 12 | The standard now flags only **cross-branch** handler imports and handler→modules. The imports the reasons describe are still in the code and now pass. |
+| `documentation` | 8 | The AST detector's multiline-signature miss was fixed upstream; the signatures are unchanged. |
+| `deep_nesting`, depth 4 | 8 | The limit is now 5. Every surviving rule names a depth-5+ function. |
+| `naming`, local variables | 5 | Plain locals are no longer read as module constants. Lazy-import *function references* still are — those 4 rules stayed. |
+| `modules` | 1 | A helper module without `handle_command()` no longer violates. |
+| file no longer exists | 1 | `email/identity.py`, gone from the tree with no archive and no references. |
+
+Measured, not assumed: this branch has **zero `tests/*` rules**, which is the class that
+made the naive audit-lane-only signal wrong 5 times in 6 for @seedgo. Here the two lanes
+agreed on every rule. Do not reuse that conclusion for a branch that has `tests/*` rules —
+re-measure per lane.
+
 ## Known Issues
 
 - **DPLAN-0138**: Inbox backdoor audit identified 2 write path classes — ad-hoc direct writes (detectable by non-UUID ID format) and `_deliver_via_reply_path()` bypass (no lock, no notification). Fix pending.
 - **Caller detection**: `BRANCH DETECTION FAILED` when callers don't set `AIPASS_CALLER_BRANCH` (low severity, caller-side fix — use `--from` flag)
 - **Cross-branch writes**: ai_mail not in trusted cross-writers list for `system-pr`
+- **No per-subcommand help**: `view --help`, `reply --help`, `close --help`, `sent --help`,
+  `contacts --help` and `inbox --help` all print the same email-module help. The
+  `subcommand_help` standard scores 100% on it. Open in APLAN-0006.
+- **`--from` is undocumented in `email --help`** — it is in this README and in the code, but
+  not in the module's own FLAGS block. Open in APLAN-0006.
+- **`--model` help names retired models** ("Claude Opus 4.6", "Sonnet 4.6"). Open in APLAN-0006.
 
 ---
 

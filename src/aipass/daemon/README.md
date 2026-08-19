@@ -5,8 +5,8 @@
 **Purpose:** Cron-triggered task scheduler with plugin system. Routes commands to modules for scheduled tasks, activity reports, action management, and status digests.
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
-**Citizen Class:** builder
-**Last Updated:** 2026-04-07
+**Citizen Class:** aipass_framework
+**Last Updated:** 2026-08-16
 
 ---
 
@@ -28,14 +28,14 @@ drone @daemon install-timer             # Enable systemd 2-min timer
 
 ## Overview
 
-Builder citizen -- full 3-layer architecture with identity and memory. DAEMON serves as the background orchestration branch: it discovers modules at startup, routes CLI commands to them, and provides introspection and help output via Rich console.
+Framework citizen -- full 3-layer architecture with identity and memory. DAEMON serves as the background orchestration branch: it discovers modules at startup, routes CLI commands to them, and provides introspection and help output via Rich console.
 
 ### What I Do
-- Route CLI commands to discovered modules (update, schedule, activity_report, actions)
-- Manage scheduled follow-ups with CRUD operations and due-date processing
+- Route CLI commands to discovered modules (update, run, queue, activity_report, rotation, inbox_sweep)
+- Fire the decentralized scheduler: discover every citizen's `.daemon/schedule.json`, wake due owners
 - Generate activity reports across all branches (24h summary, detailed, per-branch)
-- Run action registry (list, toggle, set reminder/schedule, migrate plugins)
-- Auto-discover and dispatch plugins (community_rotation, daily_audit, heartbeat)
+- Run the fleet inbox sweep — wake branches sitting on mail unread past 24h
+- Run the nightly steward rotation — one citizen a night gets a maintenance turn
 - Detect red flags (code changes without memory updates, stale branches)
 - Produce status digests (inbox, actionable items, escalations)
 
@@ -51,32 +51,36 @@ daemon/
 ├── apps/
 │   ├── daemon.py              # Entry point (CLI) — module discovery + command routing
 │   ├── daemon_wakeup.py       # Wakeup / cron trigger
-│   ├── scheduler_cron.py      # Cron scheduler
+│   ├── .archive/              # scheduler_cron (archived — superseded by run.py)
 │   ├── modules/
 │   │   ├── update.py          # Status digest module — summarizes DAEMON activity
-│   │   ├── schedule.py        # Scheduled follow-ups — fire-and-forget task management
+│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones
+│   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
-│   │   ├── actions.py         # Action registry CLI — list, toggle, info, reminders
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
 │   │   ├── rotation.py        # Steward rotation — wake policy + status surface
-│   │   ├── scheduler_ops.py   # Scheduler cron operations facade
-│   │   └── wakeup_ops.py      # Wake-up cron operations facade
+│   │   ├── timer_install.py   # systemd user timer install/uninstall
+│   │   ├── schedule.py        # (retired) prints migration notice only
+│   │   ├── actions.py         # (retired) prints migration notice only
+│   │   ├── wakeup_ops.py      # ORPHANED — imported by nothing, unroutable (see Known Issues)
+│   │   └── .archive/          # scheduler_ops (archived)
 │   ├── handlers/
 │   │   ├── actions/
-│   │   │   └── actions_registry.py   # Action registry implementation
+│   │   │   └── .archive/             # actions_registry, action_processor (archived)
 │   │   ├── json/
 │   │   │   └── json_handler.py       # JSON data operations
 │   │   ├── monitoring/
 │   │   │   ├── activity_collector.py  # Collects branch activity data
 │   │   │   ├── inbox_scanner.py       # Cross-branch stale unread-mail detection
-│   │   │   ├── memory_health.py       # Memory health checks
-│   │   │   └── red_flag_detector.py   # Detects anomalies / red flags
+│   │   │   ├── memory_health.py       # Memory health: files, structure, freshness
+│   │   │   ├── red_flag_detector.py   # Detects anomalies / red flags
+│   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
 │   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
-│   │   │   ├── task_registry.py       # Task registry for scheduled items
-│   │   │   └── .archive/             # assistant_notifier, telegram_notifier (archived)
+│   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
+│   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
 │   │   │   └── .archive/             # assistant_chat (archived)
 │   │   └── update/
@@ -84,10 +88,9 @@ daemon/
 │   ├── extensions/             # Extension point for additional capabilities
 │   ├── json_templates/         # JSON template definitions
 │   └── plugins/
-│       ├── community_rotation.py      # Community rotation plugin
-│       ├── daily_audit.py             # Daily audit plugin
-│       ├── heartbeat.py               # Heartbeat / liveness plugin
-│       └── .archive/                  # botfather_reminder, devpulse_monitor (archived)
+│       ├── __init__.py                # discover_plugins() — ORPHANED, no live caller
+│       └── .archive/                  # ALL plugins archived: heartbeat, daily_audit,
+│                                      # community_rotation, botfather_reminder, dev_central_monitor
 ├── daemon_json/                # JSON tracking data
 ├── docs/                       # Documentation
 ├── dropbox/                    # Incoming file drops
@@ -142,10 +145,10 @@ drone @daemon <command> --help
 | `update` | Status digest of DAEMON activity | *(partial)* — reads inbox/sessions but data_loader paths return empty |
 | `queue` | Unified job queue view — Rich table or `--json` (frozen schema for @skills bot) | Operational |
 | `schedule` | *(retired)* Fire-and-forget follow-ups — superseded by `.daemon/schedule.json` | Retired |
-| `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` | Operational |
+| `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` (the last also renders entry health via @memory) | Operational |
 | `actions` | *(retired)* Action registry — superseded by `.daemon/schedule.json` | Retired |
-| `scheduler_ops` | Scheduler cron operations facade for scheduler_cron.py | Operational |
-| `wakeup_ops` | Wake-up cron operations facade for daemon_wakeup.py | Operational |
+| `scheduler_ops` | *(archived)* Scheduler cron facade — went to `.archive/` with scheduler_cron.py | Archived |
+| `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
 | `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
@@ -217,6 +220,49 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ---
 
+## Memory Entry Health (via @memory)
+
+`branch-health <BRANCH>` closes with an entry-health block sourced from @memory's public API,
+`get_branch_health(branch_name)` — entry-count (is a `.trinity` file over its rollover trigger)
+and entry-size (is any entry over its character cap).
+
+The call lives in `apps/modules/activity_report.py`, never in `apps/handlers/monitoring/memory_health.py`
+— seedgo blocks handler-to-other-branch imports, so the module layer is the only legal caller.
+
+Caps are **not** re-encoded on this side. They live in @memory's `memory.config.json`, where defaults
+are deep-merged with per-branch overrides; a copy here would be a snapshot that drifts.
+
+| Fact | Severity | Rendered |
+|------|----------|----------|
+| `should_rollover: True` | INFO — rollover being due is not a fault; it auto-fires at the next PreCompact | `[PENDING]` |
+| `total_violations > 0` | WARNING — a write got past the character-cap gate | `[!] WARNING` |
+| memory file absent | skipped, not an error | `[SKIP]` |
+| unknown branch / @memory not importable | named reason, never an empty section | `[!]` |
+
+Markers are uppercase deliberately: `console.print()` parses Rich markup, so a lowercase tag like
+`[ok]` reads as a style name and is silently swallowed — the marker vanishes on screen while a test
+asserting on the returned string still passes. `TestMarkersSurviveRichMarkup` renders through Rich
+to pin this.
+
+Those render-through-Rich tests name `force_terminal` **and** `color_system` explicitly, and strip
+ANSI before asserting. Both are load-bearing, and each was paid for:
+
+- Rich decides whether to emit escape codes from `is_terminal`, and `FORCE_COLOR` in the environment
+  makes even a `StringIO` count as one. `ReprHighlighter` then wraps every bracket and number in
+  **bold**, so a plain-substring assert fails while the marker is plainly visible. `no_color=True`
+  does not help — it strips colour, not attributes. This suite was green in the morning and red the
+  same evening on byte-identical code, and the reds blocked a fleet commit train.
+- `force_terminal=True` alone is still not deterministic: under `TERM=dumb` Rich resolves no colour
+  system and emits plain text regardless. An early draft of the fix passed under `FORCE_COLOR` and
+  failed under `TERM=dumb` — the same defect, one layer along.
+
+The suite is verified green under `FORCE_COLOR=3`, `TERM=dumb`, `NO_COLOR=1`, and
+`TERM=xterm-256color`. `TestSharedConsoleContract` separately pins the hazard behaviourally against
+the real `aipass.cli` console: it asserts a lowercase tag is still swallowed there, so a cli change
+surfaces here rather than blanking this report.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -232,21 +278,55 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Plugins
 
-| Plugin | Target | Schedule | Status |
-|--------|--------|----------|--------|
-| `community_rotation` | @rotating | every 4h | Operational — requires AIPASS_WAKE_SCRIPT env var |
-| `daily_audit` | @seed | daily 04:00 | *(not operational)* — targets @seed (renamed to @seedgo) |
-| `heartbeat` | @vera | every 4h | *(not operational)* — @vera not in branch registry |
+**The plugin system is retired.** All three plugins are in `apps/plugins/.archive/`, and the
+`discover_plugins()` entry point in `apps/plugins/__init__.py` has no live caller — its only
+remaining import is from an archived file. Scheduling is now decentralized: each citizen owns
+`<branch>/.daemon/schedule.json` and the daemon discovers and fires. See **Scheduling Jobs** above.
+
+| Plugin | Target | Status |
+|--------|--------|--------|
+| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `fleet-steward` job |
+| `daily_audit` | @seed | Archived — targeted @seed, renamed to @seedgo years prior |
+| `heartbeat` | @vera | Archived — @vera was never in the branch registry |
 
 ---
 
 ## Known Issues
 
-- `update` command shows empty data (0 sessions, no focus) — data_loader reads from different paths than .trinity/local.json
-- `daily_audit` plugin targets `@seed` which was renamed to `@seedgo`
-- `heartbeat` plugin targets `@vera` which is not registered in the branch registry
-- All plugins require `AIPASS_WAKE_SCRIPT` env var to dispatch — without it, plugins discover but can't execute
-- `drone @daemon activity_report` (underscore) fails — use `activity`, `activity-report`, or `branch-health` instead
+*Verified live 2026-08-13 (APLAN-0015). Items are listed only if reproduced this session.*
+
+- **`update` digest reads empty** (0 messages, 0 sessions, no focus) even with live mail and 30+
+  recorded sessions — `data_loader` reads different paths than `.trinity/local.json`. Long-standing.
+- **`apps/modules/wakeup_ops.py` is orphaned.** Not in the router's module list, so
+  `drone @daemon wakeup-ops` returns "Unknown command"; `daemon_wakeup.py` names it only inside a
+  print string. Its 9 tests are the only thing importing it.
+- **`apps/plugins/discover_plugins()` is orphaned** — its sole caller is an archived file.
+
+### Resolved
+
+- ~~Torn writes in `json_handler`~~ (2026-08-16, fleet defect 90c9e40d axis 1) — every write opened
+  the target with `"w"`, truncating it before the new bytes landed; worse, `ensure_json_exists`
+  answers an unreadable document by writing a template over it, so a torn read became permanent
+  data loss. Measured here first, unfixed, 2 writers + 2 readers over 13,103 reads: **74.6% empty,
+  17.9% unparseable, 92.5% unusable**. Now every write site routes through `_atomic_write_json`
+  (staged via `tempfile.mkstemp` in the *target's own* directory, then `os.replace`; the staged
+  file is unlinked on failure and the helper raises rather than swallowing). Same probe after:
+  **0 of 1,410 reads unusable**. `tests/test_json_durability.py` holds the guards, including a
+  source check that no truncating `open()` returns — mutation-checked against `"w"`, `"a"` and
+  `"w+"` reintroductions.
+- ~~Memory health is fleet-wide noise~~ (2026-08-15) — `validate_memory_structure()` demanded a
+  `limits` field that schema 3.0.0 dropped, so **0 of 17** branches passed and every one read
+  WARNING forever. Per @memory's schema call the check now asks whether the file is *usable*:
+  a metadata section, a readable `schema_version`, and the entry containers for its filename
+  (`sessions`/`key_learnings`/`todos` in `local.json`, `observations` in `observations.json`).
+  Caps stay @memory's — they live in `memory.config.json` as defaults deep-merged with per-branch
+  overrides, and a copy here would drift. Measured after: **17 of 17 clean**, while a real
+  pre-3.0.0 file (`projects/speakeasy`) is still flagged with three concrete reasons. Tests now
+  pin the live `.trinity` files, not just a fixture — that pin immediately caught this branch's
+  own `local.json` carrying a `todos_meta` line with no `todos` container.
+- ~~`drone @daemon activity_report` (underscore) fails~~ — works; an explicit alias branch handles it.
+- ~~A trailing `--help` could execute the verb~~ — the router now scans every remaining arg, not
+  just the first. `inbox-sweep --hours 48 --help` used to run a real sweep and wake branches.
 
 ---
 
@@ -261,11 +341,11 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Test Suite
 
-- **406 tests** across 18 test files
-- 10/10 modules covered, 44/50 public functions tested
-- Seedgo audit: **100%** across all standards
+- **454 tests** across 19 test files
+- 10/10 modules covered, 46/50 public functions tested
+- Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-16*
 
 ---
 [← Back to AIPass](../../../README.md)

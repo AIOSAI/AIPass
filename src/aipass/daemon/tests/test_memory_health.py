@@ -6,6 +6,7 @@
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-08-15): limits-field tests -> container/schema_version tests + real .trinity pin
 #   - v1.0.0 (2026-03-24): Initial creation - memory health tests
 #
 # CODE STANDARDS:
@@ -38,15 +39,29 @@ def _write_json(path: Path, data: dict) -> None:
         json.dump(data, f)
 
 
-def _valid_memory_json() -> dict:
-    """Return a valid memory file structure with metadata and limits."""
+def _valid_local_json() -> dict:
+    """Return a valid local.json: metadata with schema_version + all three containers."""
     return {
         "document_metadata": {
             "document_type": "session_history",
             "version": "1.0.0",
-            "limits": {"max_lines": 600},
+            "schema_version": "3.0.0",
         },
         "sessions": [],
+        "key_learnings": [],
+        "todos": [],
+    }
+
+
+def _valid_observations_json() -> dict:
+    """Return a valid observations.json: metadata with schema_version + observations."""
+    return {
+        "document_metadata": {
+            "document_type": "observations",
+            "version": "1.0.0",
+            "schema_version": "3.0.0",
+        },
+        "observations": [],
     }
 
 
@@ -56,8 +71,8 @@ def _setup_full_branch(tmp_path: Path) -> Path:
     trinity = branch / ".trinity"
     trinity.mkdir(parents=True)
 
-    _write_json(trinity / "local.json", _valid_memory_json())
-    _write_json(trinity / "observations.json", _valid_memory_json())
+    _write_json(trinity / "local.json", _valid_local_json())
+    _write_json(trinity / "observations.json", _valid_observations_json())
     (branch / "README.md").write_text("# Test", encoding="utf-8")
     _write_json(branch / "DASHBOARD.local.json", {"status": "ok"})
 
@@ -163,19 +178,31 @@ class TestCheckMemoryFilesExist:
 class TestValidateMemoryStructure:
     """Tests for validate_memory_structure()."""
 
-    def test_valid_structure_with_document_metadata(self, tmp_path: Path) -> None:
-        """Valid file with document_metadata and limits passes."""
-        f = tmp_path / "valid.json"
-        _write_json(f, _valid_memory_json())
+    def test_valid_local_json(self, tmp_path: Path) -> None:
+        """local.json with metadata, schema_version and all containers passes."""
+        f = tmp_path / "local.json"
+        _write_json(f, _valid_local_json())
 
         result = mh.validate_memory_structure(str(f))
 
         assert result["valid"] is True
         assert result["has_metadata"] is True
-        assert result["has_limits"] is True
+        assert result["schema_version"] == "3.0.0"
+        assert result["missing_containers"] == []
+        assert result["containers"] == {"sessions": True, "key_learnings": True, "todos": True}
         assert result["issues"] == []
         assert "document_type" in result["metadata_fields"]
-        assert "limits" in result["metadata_fields"]
+
+    def test_valid_observations_json(self, tmp_path: Path) -> None:
+        """observations.json requires only the observations container."""
+        f = tmp_path / "observations.json"
+        _write_json(f, _valid_observations_json())
+
+        result = mh.validate_memory_structure(str(f))
+
+        assert result["valid"] is True
+        assert result["containers"] == {"observations": True}
+        assert result["issues"] == []
 
     def test_valid_structure_with_metadata_key(self, tmp_path: Path) -> None:
         """File using 'metadata' key (instead of 'document_metadata') is valid."""
@@ -185,7 +212,7 @@ class TestValidateMemoryStructure:
             {
                 "metadata": {
                     "version": "1.0.0",
-                    "limits": {"max_entries": 100},
+                    "schema_version": "3.0.0",
                 },
             },
         )
@@ -194,27 +221,82 @@ class TestValidateMemoryStructure:
 
         assert result["valid"] is True
         assert result["has_metadata"] is True
-        assert result["has_limits"] is True
+        assert result["schema_version"] == "3.0.0"
 
-    def test_missing_limits_field(self, tmp_path: Path) -> None:
-        """Metadata present but no limits field should report issue."""
-        f = tmp_path / "no_limits.json"
-        _write_json(
-            f,
-            {
-                "document_metadata": {
-                    "document_type": "session_history",
-                    "version": "1.0.0",
-                },
-            },
-        )
+    def test_limits_field_is_no_longer_required(self, tmp_path: Path) -> None:
+        """Schema 3.0.0 dropped 'limits'; its absence must NOT make a file invalid.
+
+        Regression guard for APLAN-0015: the old check demanded a metadata
+        'limits' field that 0 of 17 real branches carry, so every branch read
+        WARNING forever. Caps live in @memory's config, not in each file.
+        """
+        f = tmp_path / "local.json"
+        data = _valid_local_json()
+        assert "limits" not in data["document_metadata"]
+
+        _write_json(f, data)
+        result = mh.validate_memory_structure(str(f))
+
+        assert result["valid"] is True
+        assert not any("limits" in issue for issue in result["issues"])
+
+    def test_missing_entry_container(self, tmp_path: Path) -> None:
+        """local.json without a todos container is structurally broken."""
+        f = tmp_path / "local.json"
+        data = _valid_local_json()
+        del data["todos"]
+        _write_json(f, data)
 
         result = mh.validate_memory_structure(str(f))
 
         assert result["valid"] is False
-        assert result["has_metadata"] is True
-        assert result["has_limits"] is False
-        assert any("limits" in issue for issue in result["issues"])
+        assert result["missing_containers"] == ["todos"]
+        assert any("todos" in issue for issue in result["issues"])
+
+    def test_container_of_wrong_type_is_missing(self, tmp_path: Path) -> None:
+        """A container that is not a list does not count as present."""
+        f = tmp_path / "local.json"
+        data = _valid_local_json()
+        data["sessions"] = {"not": "a list"}
+        _write_json(f, data)
+
+        result = mh.validate_memory_structure(str(f))
+
+        assert result["valid"] is False
+        assert result["containers"]["sessions"] is False
+
+    def test_missing_schema_version(self, tmp_path: Path) -> None:
+        """Metadata without a readable schema_version reports an issue."""
+        f = tmp_path / "local.json"
+        data = _valid_local_json()
+        del data["document_metadata"]["schema_version"]
+        _write_json(f, data)
+
+        result = mh.validate_memory_structure(str(f))
+
+        assert result["valid"] is False
+        assert result["schema_version"] is None
+        assert any("schema_version" in issue for issue in result["issues"])
+
+    def test_unknown_filename_checks_no_containers(self, tmp_path: Path) -> None:
+        """A file outside the known .trinity names is only metadata-checked."""
+        f = tmp_path / "something_else.json"
+        _write_json(f, {"document_metadata": {"schema_version": "3.0.0"}})
+
+        result = mh.validate_memory_structure(str(f))
+
+        assert result["valid"] is True
+        assert result["containers"] == {}
+
+    def test_explicit_expected_containers_override(self, tmp_path: Path) -> None:
+        """Callers can name the containers to require."""
+        f = tmp_path / "something_else.json"
+        _write_json(f, {"document_metadata": {"schema_version": "3.0.0"}})
+
+        result = mh.validate_memory_structure(str(f), expected_containers=["entries"])
+
+        assert result["valid"] is False
+        assert result["missing_containers"] == ["entries"]
 
     def test_no_metadata_section(self, tmp_path: Path) -> None:
         """File with no metadata section at all."""
@@ -225,7 +307,7 @@ class TestValidateMemoryStructure:
 
         assert result["valid"] is False
         assert result["has_metadata"] is False
-        assert result["has_limits"] is False
+        assert result["schema_version"] is None
         assert any("metadata" in issue.lower() for issue in result["issues"])
 
     def test_invalid_json(self, tmp_path: Path) -> None:
@@ -394,7 +476,7 @@ class TestGetMemoryHealthStatus:
         branch = tmp_path / "NOOPT"
         trinity = branch / ".trinity"
         trinity.mkdir(parents=True)
-        _write_json(trinity / "local.json", _valid_memory_json())
+        _write_json(trinity / "local.json", _valid_local_json())
         (branch / "README.md").write_text("# Test", encoding="utf-8")
         # No observations.json, no DASHBOARD.local.json
 
@@ -439,7 +521,7 @@ class TestGetMemoryHealthStatus:
 
         # Write local.json with no metadata (invalid structure)
         _write_json(trinity / "local.json", {"sessions": []})
-        _write_json(trinity / "observations.json", _valid_memory_json())
+        _write_json(trinity / "observations.json", _valid_observations_json())
         (branch / "README.md").write_text("# Test", encoding="utf-8")
         _write_json(branch / "DASHBOARD.local.json", {"status": "ok"})
 
@@ -453,7 +535,7 @@ class TestGetMemoryHealthStatus:
         branch = tmp_path / "MINIMAL"
         trinity = branch / ".trinity"
         trinity.mkdir(parents=True)
-        _write_json(trinity / "local.json", _valid_memory_json())
+        _write_json(trinity / "local.json", _valid_local_json())
         (branch / "README.md").write_text("# Test", encoding="utf-8")
 
         result = mh.get_memory_health_status(str(branch), "MINIMAL")
@@ -492,3 +574,54 @@ class TestGetMemoryHealthStatus:
         assert isinstance(result["overall_status"], str)
         assert result["overall_status"] in ("OK", "WARNING", "RED")
         assert isinstance(result["branch_name"], str)
+
+
+# =============================================
+# REAL .trinity TESTS (production truth, not fixtures)
+# =============================================
+
+
+class TestRealTrinityFiles:
+    """Validate against @daemon's OWN live .trinity files.
+
+    The limits check survived for months because the fixture carried a field no
+    real branch had. A synthetic fixture cannot fail the way production failed,
+    so these tests read the real files on disk (@memory's call, 2026-08-13).
+    """
+
+    BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+    def test_real_local_json_is_structurally_valid(self) -> None:
+        """The live .trinity/local.json passes the structure check."""
+        local_file = self.BRANCH_ROOT / ".trinity" / "local.json"
+        if not local_file.exists():
+            pytest.skip("no live .trinity/local.json in this checkout")
+
+        result = mh.validate_memory_structure(str(local_file))
+
+        assert result["valid"] is True, f"real local.json flagged: {result['issues']}"
+        assert result["schema_version"] is not None
+        assert result["missing_containers"] == []
+
+    def test_real_observations_json_is_structurally_valid(self) -> None:
+        """The live .trinity/observations.json passes the structure check."""
+        obs_file = self.BRANCH_ROOT / ".trinity" / "observations.json"
+        if not obs_file.exists():
+            pytest.skip("no live .trinity/observations.json in this checkout")
+
+        result = mh.validate_memory_structure(str(obs_file))
+
+        assert result["valid"] is True, f"real observations.json flagged: {result['issues']}"
+        assert result["containers"]["observations"] is True
+
+    def test_real_branch_reports_no_structure_issues(self) -> None:
+        """Full health status on the real branch surfaces no structure issues.
+
+        Freshness and optional-file status are free to vary; a structure issue
+        on a healthy, actively-updated branch is the noise this replaced.
+        """
+        with patch.object(mh.json_handler, "log_operation"):
+            result = mh.get_memory_health_status(str(self.BRANCH_ROOT), "DAEMON")
+
+        for check in result["structure_checks"].values():
+            assert check["valid"] is True, f"real branch structure issue: {check['issues']}"

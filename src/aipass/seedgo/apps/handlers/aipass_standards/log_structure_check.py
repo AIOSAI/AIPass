@@ -17,6 +17,7 @@ No hardcoded absolute log paths.
 """
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 from aipass.prax import logger
@@ -163,44 +164,153 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": passed, "checks": checks, "score": score, "standard": "LOG_STRUCTURE"}
 
 
-def check_branch_post(branch_path: str) -> tuple:
-    """Branch-level log structure post-checks. Called by audit pipeline after file-level checks.
+# Written into every dispatched branch's logs/ by @ai_mail's dispatch machinery,
+# not by the branch. Counting them made the audit's own delivery mechanism
+# manufacture the observation: @cli was reported as having 3 local logs on the
+# night it was dispatched, when it has none of its own.
+_MAIL_LANE_LOG_PREFIX = "dispatch_"
+
+
+def _is_mail_lane_artifact(log_file: Path) -> bool:
+    """Return True if *log_file* belongs to @ai_mail's lane rather than the branch."""
+    return log_file.name.startswith(_MAIL_LANE_LOG_PREFIX)
+
+
+def _system_log_dir(branch_path: Path) -> Path | None:
+    """The repo's system_logs/ directory, or None when there is nothing to read.
+
+    Same resolution check_branch_info() uses: walk up to the repo root (the
+    directory holding AIPASS_REGISTRY.json) and require system_logs/ to exist.
+    Outside a repo — a tmp tree, a fresh clone — the two-tier model has no
+    second tier to compare against.
+    """
+    repo = next(
+        (p for p in [branch_path] + list(branch_path.parents) if (p / "AIPASS_REGISTRY.json").is_file()),
+        None,
+    )
+    if repo is None:
+        return None
+    sd = repo / "system_logs"
+    return sd if sd.is_dir() else None
+
+
+def check_branch_observe(branch_path: str, bypass_rules: list | None = None) -> list[dict]:
+    """Observe-only system-log reading. Gathers the data, moves no score.
+
+    The de-scored branch-level observation, running as a live instrument: it
+    takes the same reading the old check_branch_post took and reports the
+    score it WOULD have given, on a channel branch_audit keeps away from
+    scores by construction (see _collect_branch_observations — nothing here
+    is merged into scores[] or into the average). Flipping it back to live
+    scoring is a ruling on the data, not a decision this function makes.
+
+    Two properties are load-bearing:
+
+    * It accepts ``bypass_rules``. The pipeline calls branch-level hooks as
+      ``hook(path, bypass_rules=...)``; the old check_branch_post took one
+      positional argument, so every call raised TypeError into a bare except
+      and the observation was dead for months with no audit ever saying so.
+    * Every record carries ``observed_at``. The reading counts live .log
+      files — runtime state that appears and rotates with no code change —
+      so an undated reading is not evidence of anything. Dated and
+      accumulated across runs, "this never fires" becomes provable.
+
+    A reading is emitted on EVERY audit, including the healthy one, for that
+    second reason: a channel that only speaks when it fires cannot tell
+    "never fired" apart from "never ran".
+
+    Args:
+        branch_path: Branch root to observe.
+        bypass_rules: Rules from .seedgo/bypass.json. A branch that bypasses
+            log_structure is recorded as bypassed and carries no would-be
+            score — the same answer check_module() gives it.
+
+    Returns:
+        A single-item list holding this branch's reading.
+    """
+    bp = Path(branch_path)
+    record: dict = {
+        "standard": "log_structure",
+        "branch": bp.name,
+        "observed_at": datetime.now().isoformat(timespec="seconds"),
+        "bypassed": False,
+        "observable": False,
+        "local_logs": 0,
+        "system_logs": 0,
+        "would_be_score": None,
+    }
+
+    if is_bypassed(str(bp), "log_structure", bypass_rules=bypass_rules):
+        record["bypassed"] = True
+        return [record]
+
+    local_logs = [f for f in bp.rglob("*.log") if f.parent.name == "logs" and not _is_mail_lane_artifact(f)]
+    record["local_logs"] = len(local_logs)
+
+    sd = _system_log_dir(bp)
+    if sd is None:
+        # The old check appended no score at all in this case, and neither
+        # does this — a reading with nothing to read is not a 100.
+        return [record]
+
+    record["observable"] = True
+    record["system_logs"] = len(list(sd.glob(f"{bp.name}_*.log")))
+    record["would_be_score"] = 50 if (local_logs and record["system_logs"] == 0) else 100
+    return [record]
+
+
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored signpost lines for the log structure standard.
 
     Two-tier model:
       - system_logs/ at repo root is managed by prax (runtime dispatch).
-        Having many system logs and few local logs is normal.
-      - logs/ at branch root holds local-only logs. Flat placement is
-        fine — the standard does not prescribe internal organisation.
+      - logs/ at branch root holds local-only logs.
+
+    "Local logs, no system logs" used to be a branch-level VIOLATION worth 50.
+    It is reported here instead, and the reasons are two:
+
+    1. It is not always a defect. @cli's modules cannot import prax at all
+       (circular: prax depends on cli), so every prax call site lives in cli.py
+       and every one of them is a failure path — logger.error on module-load
+       failure, logger.warning on KeyboardInterrupt, logger.error on an
+       unhandled exception. A HEALTHY @cli emits zero system logs BY
+       CONSTRUCTION: the zero is the success case, not a symptom.
+
+    2. It was not a function of the CODE. The count comes from live log files,
+       so a branch's score moved when logs rotated or were cleared with nothing
+       edited — @cli read 100% one morning and 50% the same evening with the
+       structural facts about their code identical on both days. A score that
+       moves on its own is worse than a wrong score, because nobody can act on
+       it. Everything else this standard checks reads the source and stays
+       scored.
+
+    Returns plain strings on the audit's info channel (see
+    architecture_check.check_branch_info for the pattern), so it can never
+    reach a score by construction.
+
+    Args:
+        branch_path: Branch root to inspect.
 
     Returns:
-        Tuple of (violations_list, scores_list)
+        List of info lines, empty when there is nothing to signpost.
     """
     bp = Path(branch_path)
-    violations: list[dict] = []
-    scores: list[int] = []
-
-    in_dirs = [f for f in bp.rglob("*.log") if f.parent.name == "logs"]
+    local_logs = [f for f in bp.rglob("*.log") if f.parent.name == "logs" and not _is_mail_lane_artifact(f)]
+    if not local_logs:
+        return []
 
     repo = next(
         (p for p in [bp] + list(bp.parents) if (p / "AIPASS_REGISTRY.json").is_file()),
         None,
     )
-    if repo and (repo / "system_logs").is_dir():
-        sd = repo / "system_logs"
-        system_count = len(list(sd.glob(f"{bp.name}_*.log")))
-        if in_dirs and system_count == 0:
-            scores.append(50)
-            violations.append(
-                {
-                    "file": "(branch-level)",
-                    "path": str(sd),
-                    "score": 50,
-                    "issues": [
-                        f"Branch has {len(in_dirs)} local log(s) but 0 system logs — prax dispatch may be misconfigured"
-                    ],
-                }
-            )
-        else:
-            scores.append(100)
+    if repo is None or not (repo / "system_logs").is_dir():
+        return []
 
-    return violations, scores
+    sd = repo / "system_logs"
+    if list(sd.glob(f"{bp.name}_*.log")):
+        return []
+    return [
+        f"{bp.name}: {len(local_logs)} local log(s) under logs/, 0 system log(s) in {sd}/ — "
+        "prax writes a system log only when something calls it, so a branch whose prax call sites "
+        "are all failure paths shows zero here by design. Runtime observation, not scored."
+    ]

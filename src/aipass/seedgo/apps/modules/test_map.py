@@ -36,6 +36,9 @@ from aipass.cli.apps.modules import error
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+
 # Handler (implementation)
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
@@ -83,7 +86,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # A help flag ANYWHERE means explain: `test_map @flow --help` used to scan
+    # every function in @flow.
+    if wants_help(None, args):
         print_help()
         return True
 

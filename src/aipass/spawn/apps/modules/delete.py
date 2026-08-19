@@ -80,7 +80,7 @@ def handle_delete(args: list[str]) -> int:
     """
     # Intercept --help before processing (argparse has add_help=False)
     if "--help" in args or "-h" in args:
-        warning("Usage: drone @spawn delete <@branch> [--yes] [--dry-run]")
+        console.print("[bold cyan]Usage:[/bold cyan] drone @spawn delete <@branch> [--yes] [--dry-run]")
         console.print()
         console.print("  [green]@branch[/green]    Branch to archive and deregister")
         console.print("  [green]--yes[/green]      Skip confirmation prompt")
@@ -134,11 +134,12 @@ def _print_summary(result: dict, dry_run: bool) -> None:
     """Print a rich summary of the delete operation."""
     branch = result.get("branch", "unknown")
     success = result.get("success", False)
-    mode = "[dim](dry-run)[/dim] " if dry_run else ""
+    mode = "(dry-run) " if dry_run else ""
 
     console.print()
     if success:
-        console.print(f"[green]Delete {mode}{branch}[/green]")
+        # console.print renders markup; error() writes plain text, so it gets mode bare.
+        console.print(f"[green]Delete [dim]{mode}[/dim]{branch}[/green]" if mode else f"[green]Delete {branch}[/green]")
     else:
         error(f"Delete FAILED {mode}{branch}")
 

@@ -127,21 +127,23 @@ class TestRegistryHandleCommand:
 
         assert handle_command("anything", ["stuff"]) is False
 
-    @patch("aipass.api.apps.modules.registry.console")
-    @patch("aipass.api.apps.modules.registry.header")
-    def test_help_shows_introspection(self, _mock_header, _mock_console):
-        """--help triggers introspection but still returns False."""
+    def test_help_stays_silent(self, capsys):
+        """A --help probe for another module's command prints nothing here."""
         from aipass.api.apps.modules.registry import handle_command
 
-        assert handle_command("registry", ["--help"]) is False
+        assert handle_command("validate", ["--help"]) is False
+        assert capsys.readouterr().out == ""
 
-    @patch("aipass.api.apps.modules.registry.console")
-    @patch("aipass.api.apps.modules.registry.header")
-    def test_no_args_shows_introspection(self, _mock_header, _mock_console):
-        """No args triggers introspection but still returns False."""
+    def test_no_args_stays_silent(self, capsys):
+        """Registry owns no commands — it must not prepend its banner to theirs.
+
+        Registry is discovered before google_client, so anything printed here
+        leaks into the output of the commands that module owns.
+        """
         from aipass.api.apps.modules.registry import handle_command
 
-        assert handle_command("registry", []) is False
+        assert handle_command("validate", []) is False
+        assert capsys.readouterr().out == ""
 
 
 class TestPrintIntrospection:

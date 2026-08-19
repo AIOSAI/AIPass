@@ -28,6 +28,7 @@ from rich.markup import escape
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
+from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.create import load_email_file
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
 from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox
@@ -140,7 +141,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     valid = ["send", "email", "inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
     if command not in valid:
         return False
-    if args and args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence: a flag after the first argument would otherwise reach
+    # handle_send/handle_close/handle_reply and mutate a mailbox.
+    if wants_help(args):
         print_help()
         return True
 
@@ -255,10 +258,16 @@ def handle_view(args: List[str]) -> bool:
         # primary read surface: it must survive any content a sender can type.
         console.print(f"\n{email_data.get('message', '')}", markup=False)
         console.print("=" * 70)
-        console.print(f"[dim]Status: opened | ID: {args[0]}[/dim]")
-        console.print(f'[dim]To reply: drone @ai_mail reply {args[0]} "your message"[/dim]')
-        console.print(f"[dim]To close: drone @ai_mail close {args[0]}[/dim]")
-        json_handler.log_operation("email_viewed", {"message_id": args[0]})
+        # Echo the message's OWN id, never args[0] — `view latest` printed
+        # "ID: latest", and a lookup by sent_id would otherwise print the
+        # sender's id back as though it were this mailbox's name for it.
+        resolved_id = email_data.get("id", message_id)
+        sent_id = email_data.get("sent_id")
+        origin = f" | sender's id: {sent_id}" if sent_id else ""
+        console.print(f"[dim]Status: opened | ID: {resolved_id}{origin}[/dim]")
+        console.print(f'[dim]To reply: drone @ai_mail reply {resolved_id} "your message"[/dim]')
+        console.print(f"[dim]To close: drone @ai_mail close {resolved_id}[/dim]")
+        json_handler.log_operation("email_viewed", {"message_id": resolved_id})
         return True
     except BrokenPipeError as e:
         logger.warning("[email] view broken pipe: %s", e)

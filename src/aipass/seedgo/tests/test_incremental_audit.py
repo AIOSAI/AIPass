@@ -237,12 +237,78 @@ def check_branch_post(branch_path, bypass_rules=None):
 """
 
 
+_BYPASS_AWARE_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "all_files"
+
+
+def check_module(path, bypass_rules=None):
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write(path + "\\n")
+    if bypass_rules:
+        return {"passed": True, "score": 100, "checks": []}
+    with open(path, encoding="utf-8") as fh:
+        content = fh.read()
+    score = 40 if "BAD" in content else 100
+    passed = score >= 75
+    checks = [] if passed else [{"passed": False, "message": "Contains BAD marker"}]
+    return {"passed": passed, "score": score, "checks": checks}
+"""
+
+
+def _write_bypass_aware_checker(pack_dir: Path, call_log: Path) -> None:
+    """Write an all_files checker whose verdict depends on the bypass rules.
+
+    Any rule at all makes the BAD marker vanish -- the one-line stand-in for
+    what a real .seedgo/bypass.json rule does to a violation. Same filename as
+    _write_checker's so it replaces it in the pack.
+    """
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    escaped = str(call_log).replace("\\", "\\\\")
+    (pack_dir / "naming_check.py").write_text(
+        _BYPASS_AWARE_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+    )
+
+
 def _write_post_check_checker(pack_dir: Path, call_log: Path) -> None:
     """Write an all_files checker that also implements check_branch_post()."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "postcheck_check.py").write_text(
         _POST_CHECK_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+    )
+
+
+_OBSERVE_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "all_files"
+
+
+def check_module(path, bypass_rules=None):
+    return {"passed": True, "score": 100, "checks": []}
+
+
+def check_branch_observe(branch_path, bypass_rules=None):
+    import pathlib
+
+    log = pathlib.Path(CALL_LOG)
+    taken = len([ln for ln in log.read_text(encoding="utf-8").splitlines() if ln]) if log.exists() else 0
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write("reading\\n")
+    return [{"standard": "observing", "branch": pathlib.Path(branch_path).name, "reading": taken + 1}]
+"""
+
+
+def _write_observe_checker(pack_dir: Path, call_log: Path) -> None:
+    """Write an all_files checker exposing an observe-only branch hook.
+
+    Each reading is numbered, so a replayed one is distinguishable from a
+    fresh one — the whole point of the lane is that it reads runtime state.
+    """
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    escaped = str(call_log).replace("\\", "\\\\")
+    (pack_dir / "observing_check.py").write_text(
+        _OBSERVE_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
     )
 
 
@@ -534,6 +600,42 @@ class TestEquivalence:
         assert incremental_result == full_result
         assert incremental_result["scores"]["postcheck"] == full_result["scores"]["postcheck"]
 
+    def test_cache_hit_takes_a_fresh_observation(self, tmp_path, monkeypatch):
+        """A cached audit still takes a FRESH observe reading, and still scores identically.
+
+        Observe readings are of live runtime state — log files that appear and
+        rotate with nothing edited — so a replayed one is a reading of a
+        moment that has passed, presented as if current. Same reasoning that
+        recomputes _deprecated_patterns on every cache hit. The scores, by
+        contrast, must be exactly the cached ones: an observation is evidence,
+        never a number.
+        """
+        branch_audit, _cache, branch, _path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        observe_log = tmp_path / "observe_calls.log"
+        _write_observe_checker(pack_dir, observe_log)
+        logged: list = []
+        monkeypatch.setattr(
+            branch_audit.json_handler,
+            "log_operation",
+            lambda op, data=None, module_name=None: logged.append((op, data, module_name)) or True,
+        )
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        assert second["_cache_hit"] is True, "the point of this test is the cached path"
+        assert first["observations"][0]["reading"] == 1
+        assert second["observations"][0]["reading"] == 2, "a cache hit must re-read, not replay"
+        assert second["scores"] == first["scores"]
+        assert second["average"] == first["average"]
+        observed_writes = [entry for entry in logged if entry[0] == "branch_observation"]
+        assert len(observed_writes) == 2, "every reading is persisted, including the one taken on a cache hit"
+        assert {entry[2] for entry in observed_writes} == {"branch_observe"}, (
+            "readings go to their own module log — audit traffic would evict them from a shared one"
+        )
+
     def test_entry_point_checker_reruns_when_other_file_changes(self, tmp_path, monkeypatch):
         """Blocker 2 regression: an entry_point-scope checker must re-run
         on the entry file whenever the branch is dirty, even if the entry
@@ -561,6 +663,91 @@ class TestEquivalence:
         full_result = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
         assert incremental_result.pop("_cache_hit") is False
         assert incremental_result == full_result
+
+
+class TestNoBypassCacheIsolation:
+    """A --no-bypass run and a normal run must never share a cached result.
+
+    The cache stamp fingerprints the bypass.json FILE, not whether the rules
+    in it were applied -- so both runs read the same tree, the same pack and
+    the same (unmodified) bypass.json. Without the bypass STATE in the stamp,
+    whichever runs second is served the other one's answer: the honest score
+    published as the normal one, or the bypassed score published as honest.
+    """
+
+    RULES = [{"file": "apps/good.py", "standard": "naming", "reason": "test rule"}]
+
+    def _prepare_bypass_aware(self, tmp_path, monkeypatch):
+        branch_audit, cache, branch, branch_path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('BAD')\n"}
+        )
+        _write_bypass_aware_checker(pack_dir, call_log)
+        return branch_audit, cache, branch, branch_path, pack_dir, call_log
+
+    def test_no_bypass_run_is_not_served_the_bypassed_result(self, tmp_path, monkeypatch):
+        """Normal run first, then --no-bypass: the honest score must be recomputed."""
+        branch_audit, _cache, branch, _path, pack_dir, _log = self._prepare_bypass_aware(tmp_path, monkeypatch)
+
+        bypassed = branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir)
+        assert bypassed["average"] == 100  # the rule hides the BAD marker
+
+        honest = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir, no_bypass=True)
+        assert honest["_cache_hit"] is False
+        assert honest["average"] < 100, "a --no-bypass run was served the bypassed cached score"
+
+    def test_normal_run_is_not_served_the_no_bypass_result(self, tmp_path, monkeypatch):
+        """--no-bypass first, then a normal run: the bypassed score must come back."""
+        branch_audit, _cache, branch, _path, pack_dir, _log = self._prepare_bypass_aware(tmp_path, monkeypatch)
+
+        honest = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir, no_bypass=True)
+        assert honest["average"] < 100
+
+        bypassed = branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir)
+        assert bypassed["_cache_hit"] is False
+        assert bypassed["average"] == 100, "a normal run was served the --no-bypass cached score"
+
+    def test_no_bypass_ignores_rules_handed_to_it(self, tmp_path, monkeypatch):
+        """no_bypass=True means no rules, whatever the caller passed alongside it.
+
+        The flag and the rule list cannot disagree — otherwise the stamp says
+        'no bypasses' while the audit under it applied them.
+        """
+        branch_audit, _cache, branch, _path, pack_dir, _log = self._prepare_bypass_aware(tmp_path, monkeypatch)
+
+        result = branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir, no_bypass=True)
+        assert result["average"] < 100
+
+    def test_repeat_no_bypass_run_hits_its_own_cache(self, tmp_path, monkeypatch):
+        """Two --no-bypass runs in a row: the second is a cache hit, zero checks."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = self._prepare_bypass_aware(tmp_path, monkeypatch)
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir, no_bypass=True)
+        call_log.write_text("", encoding="utf-8")
+
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir, no_bypass=True)
+        assert _read_calls(call_log) == []
+        assert second.pop("_cache_hit") is True
+        assert first.pop("_cache_hit") is False
+        assert first == second
+
+    def test_no_bypass_run_does_not_evict_the_normal_cache(self, tmp_path, monkeypatch):
+        """A --no-bypass run must not cost the next normal run a full re-scan.
+
+        Publishing both numbers is routine (every APLAN carries them), so the
+        two runs keep separate cache entries rather than overwriting each
+        other's — a shared key would mean a guaranteed full fleet re-scan
+        every single time either number is refreshed.
+        """
+        branch_audit, _cache, branch, _path, pack_dir, call_log = self._prepare_bypass_aware(tmp_path, monkeypatch)
+
+        branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir, no_bypass=True)
+        call_log.write_text("", encoding="utf-8")
+
+        again = branch_audit.audit_branch_incremental(branch, self.RULES, pack_path=pack_dir)
+        assert _read_calls(call_log) == []
+        assert again["_cache_hit"] is True
+        assert again["average"] == 100
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +844,24 @@ class TestStamps:
         # and two writes inside one filesystem timestamp tick are indistinguishable.
         (machinery / "utils.py").write_text("x = 1  # changed\n", encoding="utf-8")
         assert incremental_cache.current_stamp(branch_path, pack_dir) != stamp1
+
+    def test_current_stamp_differs_when_bypasses_are_disabled(self, tmp_path):
+        """Suppressing the rules is an input change, exactly like editing them.
+
+        compute_bypass_stamp() fingerprints the bypass.json FILE, which is
+        byte-identical across a normal and a --no-bypass run — so the stamp
+        itself has to carry whether those rules were applied.
+        """
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        branch_path = tmp_path / "branch"
+        branch_path.mkdir()
+
+        normal = incremental_cache.current_stamp(branch_path, pack_dir)
+        no_bypass = incremental_cache.current_stamp(branch_path, pack_dir, no_bypass=True)
+        assert normal != no_bypass
 
     def test_current_stamp_stable_when_nothing_changes(self, tmp_path):
         from aipass.seedgo.apps.handlers.audit import incremental_cache

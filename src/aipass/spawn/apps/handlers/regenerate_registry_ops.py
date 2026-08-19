@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.meta_ops import compute_file_hash, load_template_registry
 
 # =============================================================================
@@ -27,8 +28,9 @@ from aipass.spawn.apps.handlers.meta_ops import compute_file_hash, load_template
 _SPAWN_DIR = ".spawn"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 
-# Directories to skip entirely during scan
-_SKIP_DIRS = {"__pycache__", ".git"}
+# Directories to skip entirely during scan — must mirror file_ops.SKIP_NAMES,
+# or the registry tracks artifacts the copy engine refuses to copy.
+_SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
 
 # Files to skip within .spawn/ (tracking files that shouldn't be in the registry)
 _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
@@ -85,12 +87,13 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     registry_path = spawn_dir / _TEMPLATE_REGISTRY_FILE
 
     try:
-        tmp_path = registry_path.with_suffix(".tmp")
-        tmp_path.write_text(
+        # Staged under a unique mkstemp name rather than a fixed ".tmp": two
+        # concurrent regenerations used to share one staging path, and a failed
+        # write left that path orphaned beside the registry.
+        atomic_write_text(
+            registry_path,
             json.dumps(registry, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-            encoding="utf-8",
         )
-        tmp_path.replace(registry_path)
     except (IOError, OSError) as exc:
         logger.error(f"Failed to write template registry: {exc}")
         return {"error": f"Failed to write registry: {exc}"}

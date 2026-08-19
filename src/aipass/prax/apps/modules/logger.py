@@ -55,7 +55,11 @@ from aipass.prax.apps.handlers.logging.setup import (
 )
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 from aipass.prax.apps.handlers.logging.override import is_override_active
-from aipass.prax.apps.handlers.discovery.watcher import start_file_watcher, is_file_watcher_active
+from aipass.prax.apps.handlers.discovery.watcher import (
+    start_file_watcher,
+    is_file_watcher_active,
+    check_file_watcher_liveness,
+)
 from aipass.prax.apps.handlers.registry.load import load_module_registry
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir, get_module_logs_dir, PRAX_JSON_DIR
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
@@ -93,8 +97,17 @@ class SystemLogger:
     _watcher_lock = threading.Lock()
 
     def _ensure_watcher(self):
-        """Lazy-start file watchers on first logger use"""
+        """Lazy-start file watchers on first logger use, then keep them honest.
+
+        `_watcher_started` is set once and never reset, so everything below the
+        early return runs exactly ONCE in the life of a process. That is correct
+        for *starting* the watcher and was wrong for *trusting* it: the watcher
+        can die at any moment afterwards (DPLAN-0305 — it did, in six processes
+        at once, and no one found out for 15 hours). The throttled liveness call
+        is the only thing here that runs after startup.
+        """
         if SystemLogger._watcher_started:
+            check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
             return
         with SystemLogger._watcher_lock:
             if SystemLogger._watcher_started:

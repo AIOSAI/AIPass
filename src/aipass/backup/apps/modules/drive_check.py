@@ -80,7 +80,11 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # Screen the WHOLE sequence, not just args[0]. The default branch
+    # below runs the check for ANY unrecognised first arg, so
+    # 'drive_check foo --help' made a live Drive auth call (proven
+    # 2026-08-13). Bare "help" stays first-position-only.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
 

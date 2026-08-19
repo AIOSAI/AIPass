@@ -51,6 +51,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
 # CLI services for display
@@ -286,8 +287,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag
-    if args[0] in ["--help", "-h", "help"]:
+    # Handle help flag ANYWHERE in the sequence -- a help question must never
+    # create a plan. Bare 'help' counts at position 0 only, so a subject
+    # containing the word stays a subject.
+    if wants_help(args):
         print_help()
         return True
 

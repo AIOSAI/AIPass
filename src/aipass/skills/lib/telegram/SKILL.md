@@ -8,6 +8,13 @@ requires:
   bins: [tmux, claude]
   config: []
   aipass: [api, prax, hooks, cli]
+switch:
+  systemd_user:
+    - telegram-bot@api
+    - telegram-bot@base
+    - telegram-bot@devpulse
+    - telegram-bot@prax_monitor
+    - telegram-bot@scheduler
 has_handler: true
 ---
 

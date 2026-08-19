@@ -16,6 +16,22 @@ storage, retriever).  We mock those handler modules via ``sys.modules`` so
 the tests stay lightweight and never touch real ChromaDB / filesystem.
 """
 
+# ---------------------------------------------------------------------------
+# PARKED 2026-08-14 — Patrick's ruling. The symbolic fragments tier is disabled
+# (unused; the Agent Memory Atlas review flagged the AUDN deduplicator for acting
+# on an LLM Delete verdict with no record of what was removed). These tests are
+# KEPT, not deleted: they document the feature for revival.
+# Active curated-truth piece: Compass — drone @devpulse compass.
+# Revive: tests/parked/symbolic_20260814/README.md
+# ---------------------------------------------------------------------------
+import pytest as _parked
+
+_parked.skip(
+    "symbolic fragments tier PARKED 2026-08-14 (Patrick's ruling) — "
+    "active piece is Compass; revive via tests/parked/symbolic_20260814/README.md",
+    allow_module_level=True,
+)
+
 import sys
 import types
 import pytest

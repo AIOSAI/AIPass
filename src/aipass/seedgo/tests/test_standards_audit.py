@@ -8,6 +8,8 @@
 # Modified: 2026-03-24
 # =============================================
 
+import time
+
 import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
@@ -31,6 +33,13 @@ def _mock_infrastructure(monkeypatch):
     # Build lightweight stand-ins
     mock_logger = MagicMock()
     mock_console = MagicMock()
+    # Rich's Progress does real arithmetic on the console clock and branches on
+    # its terminal flags. A bare MagicMock makes it compare MagicMock with
+    # MagicMock (TypeError on the second task update) and warn about Jupyter,
+    # so the audit's progress bar needs these three answered honestly.
+    mock_console.get_time = time.monotonic
+    mock_console.is_jupyter = False
+    mock_console.is_terminal = False
     mock_header = MagicMock()
     mock_error = MagicMock()
     mock_warning = MagicMock()
@@ -78,6 +87,14 @@ def _mock_infrastructure(monkeypatch):
 
     audit_display_mod = MagicMock()
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.audit_display", audit_display_mod)
+
+    # The audit package itself is a MagicMock above, so this submodule cannot be
+    # imported for real — without a stand-in the module only imports when some
+    # other test file happened to load artifact.py first. Also keeps every test
+    # in this file off the real .seedgo/ artifact on disk.
+    artifact_mod = MagicMock()
+    artifact_mod.write_audit_artifact = MagicMock(return_value=Path("/tmp/last_audit.json"))
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.artifact", artifact_mod)
 
     # -- bypass handler -----------------------------------------------------
     bypass_mod = MagicMock()
@@ -230,6 +247,126 @@ def test_handle_command_output_capture(capsys):
     _captured = capsys.readouterr()
 
 
+# ---------------------------------------------------------------------------
+# --no-bypass -- the honest score, every bypass rule switched off
+# ---------------------------------------------------------------------------
+
+# What load_bypass_rules() hands back on a normal run. A --no-bypass run must
+# audit with [] instead -- never with these.
+_LOADED_RULES = [{"file": "apps/flow.py", "standard": "cli", "reason": "legacy"}]
+
+
+def _wire_branches(monkeypatch, *names):
+    """Point the mocked discovery/bypass/audit handlers at fake branches.
+
+    Returns the audit_branch_incremental mock, so a test can read back the
+    bypass_rules each branch was actually audited with — the only place the
+    flag's effect is observable.
+    """
+    import sys
+
+    discover = MagicMock(
+        return_value=[
+            {"name": n, "path": f"/tmp/{n.lower()}", "entry_file": f"/tmp/{n.lower()}/apps/{n.lower()}.py"}
+            for n in names
+        ]
+    )
+    monkeypatch.setattr(sys.modules["aipass.seedgo.apps.handlers.audit.discovery"], "discover_branches", discover)
+    monkeypatch.setattr(
+        sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"],
+        "load_bypass_rules",
+        MagicMock(return_value=list(_LOADED_RULES)),
+    )
+    audit_mock = MagicMock(return_value={"branch": {"name": names[0]}, "scores": {"cli": 100}, "average": 100})
+    monkeypatch.setattr(
+        sys.modules["aipass.seedgo.apps.handlers.audit.branch_audit"], "audit_branch_incremental", audit_mock
+    )
+    return audit_mock
+
+
+def _rules_per_branch(audit_mock):
+    """The bypass_rules argument every audited branch was given, in order."""
+    return [call.args[1] for call in audit_mock.call_args_list]
+
+
+def _console_text():
+    """Everything the module printed this test, as one string."""
+    import sys
+
+    mock_console = sys.modules["aipass.cli"].console
+    return "\n".join(str(c.args[0]) if c.args else "" for c in mock_console.print.call_args_list)
+
+
+def test_no_bypass_after_branch_arg_disables_every_rule(monkeypatch):
+    """'audit aipass @flow --no-bypass' audits with an empty rule set."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"]) is True
+    assert _rules_per_branch(audit_mock) == [[]]
+
+
+def test_no_bypass_before_branch_arg_disables_every_rule(monkeypatch):
+    """Reverse order — 'audit aipass --no-bypass @flow' must not swallow the flag.
+
+    Unknown flags are dropped silently by the arg loop, so a flag that is not
+    really parsed still produces a normal-looking audit. Both orders are
+    asserted because only one of them could ever be the one that works.
+    """
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "--no-bypass", "@flow", "--no-artifact"]) is True
+    assert _rules_per_branch(audit_mock) == [[]]
+
+
+def test_no_bypass_applies_to_every_branch_of_a_fleet_run(monkeypatch):
+    """'audit aipass --no-bypass' (no branch arg) disables rules fleet-wide."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "--no-bypass", "--no-artifact"]) is True
+    assert _rules_per_branch(audit_mock) == [[], []]
+
+
+def test_normal_run_still_applies_the_loaded_bypass_rules(monkeypatch):
+    """Control — without the flag the branch's own rules are still passed through."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "@flow", "--no-artifact"]) is True
+    assert _rules_per_branch(audit_mock) == [_LOADED_RULES]
+
+
+def test_no_bypass_run_announces_itself(monkeypatch):
+    """A suppressed-rules run says so — no reader may mistake it for a normal one."""
+    _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"])
+    text = _console_text().upper()
+    assert "BYPASS" in text and "DISABLED" in text, "A --no-bypass run must declare that bypasses are off"
+
+
+def test_normal_run_makes_no_bypass_claim(monkeypatch):
+    """Control — the declaration is not printed on a normal run."""
+    _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["aipass", "@flow", "--no-artifact"])
+    assert "BYPASSES DISABLED" not in _console_text().upper()
+
+
+def test_help_documents_the_no_bypass_flag():
+    """--help lists --no-bypass — help text must match runtime behaviour."""
+    import sys
+    from aipass.seedgo.apps.modules.standards_audit import print_help
+
+    sys.modules["aipass.cli"].console.reset_mock()
+    print_help()
+    assert "--no-bypass" in _console_text()
+
+
 def test_help_text_at_prefix_consistency():
     """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
 
@@ -286,3 +423,26 @@ def test_help_text_at_prefix_consistency():
     assert not violations, f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
         violations
     )
+
+
+def test_artifact_flag_does_not_swallow_a_help_token(monkeypatch):
+    """'audit aipass --artifact --help' must explain, not run and write to '--help'.
+
+    The arg loop scans the whole list for help, but the --artifact branch
+    consumes the NEXT token before that check is reached, so the flag became a
+    destination path and a full audit ran. A help flag anywhere means explain.
+    """
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "--artifact", "--help"]) is True
+    assert audit_mock.call_count == 0
+
+
+def test_artifact_flag_still_takes_a_real_destination(monkeypatch):
+    """Control — a genuine path after --artifact is still consumed as the path."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "@flow", "--artifact", "out.json"]) is True
+    assert audit_mock.call_count == 1

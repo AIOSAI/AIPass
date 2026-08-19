@@ -73,6 +73,14 @@ def print_introspection() -> None:
     console.print()
 
 
+def _wants_help(args: list[str]) -> bool:
+    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
+
+    Bare word 'help' counts only at position 0 — later positions may be values.
+    """
+    return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
+
+
 def handle_command(command: str, args: list[str]) -> bool:
     """Route feedback commands to handler functions.
 
@@ -91,7 +99,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     # Open verbs (no owner gate): help + `send`. `send` is the inbound channel
     # any agent uses to drop feedback into the owner's mailbox. Everything else
     # reads or manages that mailbox -> owner-only (#681).
-    if args and args[0] in ("--help", "-h", "help"):
+    if _wants_help(args):
         console.print(HELP_TEXT)
         return True
 

@@ -44,6 +44,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
 # CLI services for display
@@ -206,8 +207,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_introspection()
             return True
 
-        # Intercept help before arg parsing
-        if args[0] in ["--help", "-h", "help"]:
+        # Intercept help ANYWHERE in the sequence, before arg parsing
+        if wants_help(args):
             print_help()
             return True
 
@@ -223,6 +224,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # ---- register ----
     if command == "register":
+        # Help gate BEFORE the arity check -- otherwise `register --help` is
+        # just a short arg list and prints a usage error instead of help
+        if wants_help(args):
+            print_help()
+            return True
+
         if not args or len(args) < 2:
             error("Usage: drone @flow register <dir> <PREFIX>")
             console.print()
@@ -262,6 +269,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # ---- unregister ----
     if command == "unregister":
+        # Help gate BEFORE the arity check -- `unregister --help` previously
+        # reached remove_type() with '--help' as the type name
+        if wants_help(args):
+            print_help()
+            return True
+
         if not args:
             error("Usage: drone @flow unregister <dir>")
             console.print()
@@ -290,6 +303,10 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # ---- scan ----
     if command == "scan":
+        if wants_help(args):
+            print_help()
+            return True
+
         # Log the operation
         json_handler.log_operation(
             "templates_scanned",

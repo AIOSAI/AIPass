@@ -24,6 +24,7 @@ from aipass.drone.apps.handlers.registry_handler import (
     get_all_branches,
     get_branch_by_name,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 # The registry's public contract. get_registry_path and the error types belong
 # here alongside the readers: a caller that has to say WHICH registry refused it,
@@ -83,7 +84,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
     json_handler.log_operation("handle_command", {"module": "registry", "command": command})

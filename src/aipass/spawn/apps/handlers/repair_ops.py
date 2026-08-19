@@ -89,8 +89,8 @@ def update_registry_path(registry_path, branch_name, new_path):
         return save_registry(registry_path, registry)
     finally:
         if lock_fd is not None:
-            import fcntl
-
+            # fcntl is already bound: lock_fd is only ever assigned in the
+            # sys.platform != "win32" branch above, which imports it there.
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
 

@@ -47,11 +47,14 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json
+    from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
+    # Real, not a mock: _load_registry parses what this returns, and a MagicMock
+    # here reads as an unreadable registry — which is now a distinct outcome.
+    mock_config.read_text_with_retry = read_text_with_retry
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
     # Force re-import so the module picks up mocked sys.modules
@@ -1371,3 +1374,46 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
     er.get_dispatch_count("read_only_fp")
 
     assert "read_only_fp" not in er._fingerprint_dispatch_count
+
+
+# ---------------------------------------------------------------------------
+# a refused read must not blank the registry
+# ---------------------------------------------------------------------------
+
+
+def _refuse_once(mp, target: Path):
+    """Refuse ONE read of target with a Windows sharing violation.
+
+    The same transient os.replace already retries for, seen from the reading
+    side. json_handler lost whole documents to it on Windows CI (32167459635)
+    and _load_registry has the identical shape: a refused read returns a blank
+    registry, and every caller writes that blank straight back.
+    """
+    real = Path.read_text
+    state = {"left": 1, "seen": 0}
+
+    def read_text(self_path, *args, **kwargs):
+        if str(self_path) == str(target) and state["left"]:
+            state["left"] -= 1
+            state["seen"] += 1
+            raise PermissionError(13, "used by another process")
+        return real(self_path, *args, **kwargs)
+
+    mp.setattr(Path, "read_text", read_text)
+    return state
+
+
+def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
+    """A sharing violation mid-write must not cost the whole registry."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    er.report(error_type="ImportError", message="first", component="FLOW")
+    assert len(json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]) == 1
+
+    with pytest.MonkeyPatch.context() as mp:
+        state = _refuse_once(mp, er.REGISTRY_FILE)
+        er.report(error_type="ValueError", message="second", component="FLOW")
+
+    assert state["seen"] == 1, "fixture refused nothing — test is vacuous"
+    errors = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]
+    assert len(errors) == 2, f"registry was blanked by a transient refusal: {list(errors)}"

@@ -124,7 +124,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     try:
-        if args and args[0] in ("--help", "-h", "help"):
+        # Help gate — a help flag ANYWHERE means "explain", never "dispatch".
+        # api.py's guard only inspects the first arg after the command, so
+        # `integrations call publish_devto --help` arrives with args[0] == "call";
+        # dispatching that ran a live publishing driver from a help probe.
+        # Bare "help" is only a flag in first position, so it stays usable as a
+        # contract argument.
+        if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 

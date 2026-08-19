@@ -232,34 +232,6 @@ def _import_line_counter(monkeypatch):
     }
 
 
-def _import_manager(monkeypatch):
-    """Import manager with mocked infrastructure dependencies."""
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    mock_memory_files = MagicMock()
-    mock_memory_files.read_memory_file_data = MagicMock(return_value=None)
-    mock_memory_files.write_memory_file_simple = MagicMock()
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
-
-    sys.modules.pop("aipass.memory.apps.handlers.learnings.manager", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.learnings")
-    if parent is not None and hasattr(parent, "manager"):
-        delattr(parent, "manager")
-
-    from aipass.memory.apps.handlers.learnings import manager
-
-    return manager, {
-        "json_handler": mock_json_handler,
-        "memory_files": mock_memory_files,
-    }
-
-
 # ===========================================================================
 # Tests: orchestrator.store_vectors_subprocess
 # ===========================================================================
@@ -892,6 +864,151 @@ class TestAutoCompactSnapshotBudget:
         assert "regular newest" in remaining_summaries
 
 
+class TestAutoCompactSameDaySnapshots:
+    """DPLAN-0290 item 3 — the snapshot lane must drain even when every snapshot is dated today.
+
+    Snapshots are machine-written several times in one day, so at cap the oldest
+    one is essentially always dated today. The safety valve's date rule refused
+    exactly those entries, so the detector re-fired on the same file forever
+    while the extractor archived nothing: the skip loop.
+    """
+
+    @staticmethod
+    def _setup(ext, mocks, tmp_path, sessions, cap=3, count=10):
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": sessions,
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {tmp_path.name.lower(): {"local": {"sessions": {"count": count, "auto_compact_cap": cap}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+        return file_path, data
+
+    def test_same_day_snapshots_drain_at_cap(self, monkeypatch, tmp_path):
+        """3 snapshots, all written today, cap 3 -> the oldest one archives."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 25, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 22, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True, "snapshot lane skipped — the file cannot drain"
+        assert {e["summary"] for e in result["extracted"]} == {"AUTO-COMPACT SNAPSHOT: a"}
+        assert "regular newest" in {e["summary"] for e in data["sessions"]}
+
+    def test_skip_loop_terminates(self, monkeypatch, tmp_path):
+        """Repeated runs must reach a steady state below the cap, not re-trigger forever."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [{"number": 40, "date": today, "summary": "regular newest", "status": "completed"}]
+        sessions += [
+            {"number": 30 - i, "date": today, "summary": f"snap-{i}", "status": "auto-compact"} for i in range(5)
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        # The write path is mocked here, so `data` (mutated in place by each run)
+        # is what the next run would read on a live system.
+        archived_total = 0
+        snapshots = [e for e in sessions if e.get("status") == "auto-compact"]
+        for _ in range(5):
+            result = ext.extract_items(file_path)
+            assert result["success"] is True
+            archived_total += len(result.get("extracted", []))
+            snapshots = [e for e in data["sessions"] if e.get("status") == "auto-compact"]
+            if len(snapshots) < 3:
+                break
+
+        assert archived_total > 0, "nothing ever archived — the skip loop is live"
+        assert len(snapshots) == 2, f"snapshot lane never drained below cap: {len(snapshots)} left"
+
+    def test_snapshot_numbered_above_head_is_still_refused(self, monkeypatch, tmp_path):
+        """Relaxing the date rule must not relax the ordering rule."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 28, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 99, "date": today, "summary": "misplaced-high-number", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "misplaced-high-number" not in archived
+        assert "misplaced-high-number" in {e["summary"] for e in data["sessions"]}
+
+    def test_snapshot_without_a_number_keeps_the_date_guard(self, monkeypatch, tmp_path):
+        """When ordering cannot decide, the conservative date rule still applies."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 28, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"date": today, "summary": "numberless-fresh-snapshot", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "numberless-fresh-snapshot" not in archived
+        assert "numberless-fresh-snapshot" in {e["summary"] for e in data["sessions"]}
+
+    def test_regular_session_dated_today_is_still_refused(self, monkeypatch, tmp_path):
+        """DPLAN-0278 protection for the regular lane is untouched by the snapshot relaxation."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 4, "date": "2026-01-04", "summary": "regular newest", "status": "completed"},
+            {"number": 3, "date": "2026-01-03", "summary": "regular second", "status": "completed"},
+            {"number": 9, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: fresh", "status": "auto-compact"},
+            {"number": 1, "date": today, "summary": "fresh-write-at-tail", "status": "completed"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions, cap=3, count=2)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "fresh-write-at-tail" not in archived
+        assert "fresh-write-at-tail" in {e["summary"] for e in data["sessions"]}
+
+    def test_is_misplaced_entry_date_guard_matrix(self, monkeypatch):
+        """Pin the helper directly: what each guard mode decides."""
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        fresh_today = {"number": 5, "date": today}
+        above_head = {"number": 99, "date": "2020-01-01"}
+        numberless = {"date": today}
+
+        # Date guard on (regular lanes) — unchanged behaviour
+        assert ext._is_misplaced_entry(fresh_today, 10) is True
+        assert ext._is_misplaced_entry(above_head, 10) is True
+        assert ext._is_misplaced_entry(numberless, 10) is True
+
+        # Date guard off (snapshot lane) — ordering decides, date does not
+        assert ext._is_misplaced_entry(fresh_today, 10, date_guard=False) is False
+        assert ext._is_misplaced_entry(above_head, 10, date_guard=False) is True
+        # ...unless ordering cannot decide, then the date rule still protects
+        assert ext._is_misplaced_entry(numberless, 10, date_guard=False) is True
+
+
 class TestNewestFirstOrderingGuard:
     """Rollover must not trust stored order — the tail is only 'oldest' if the array is newest-first."""
 
@@ -1378,96 +1495,94 @@ class TestUpdateAllMemoryFiles:
 
 
 # ===========================================================================
-# Tests: manager.process_all_branches
+# The safety valve must not become a runaway log (incident 2026-08-16)
 # ===========================================================================
 
 
-class TestProcessAllBranches:
-    """Test process_all_branches iterates registry branches."""
+class TestValveLoggingIsBounded:
+    """@trigger raised memory_extractor.log CRITICAL at 634 lines/min.
 
-    def test_returns_error_when_registry_not_found(self, monkeypatch):
-        mgr, _ = _import_manager(monkeypatch)
-        with patch.object(mgr, "_find_repo_root", return_value=Path("/nonexistent")):
-            result = mgr.process_all_branches()
-        assert result["success"] is False
-        assert "not found" in result["error"]
+    The valve was correct — it was refusing entries an external branch had
+    written at the wrong end of the array — but it logged one WARNING per
+    refused entry, each carrying the entire entry (~800 bytes). One rollover
+    pass over one file produced 97 warning lines in a single second.
 
-    def test_processes_branches_with_local_files(self, monkeypatch, tmp_path):
-        mgr, mocks = _import_manager(monkeypatch)
+    A refusal is normal and can be routine at scale, so it gets ONE summary
+    line per array per run. The per-entry detail drops to DEBUG, where it is
+    recoverable while debugging without flooding a routine run.
+    """
 
-        # Create branch with local file
-        branch_dir = tmp_path / "branch"
-        branch_dir.mkdir()
+    @staticmethod
+    def _run(entries, limit, head):
+        """Substitute the extractor's logger and read the calls off it.
 
-        local_data = {
-            "document_metadata": {
-                "limits": {"max_learnings": 100, "max_recently_completed": 20},
-                "status": {},
-            },
-            "key_learnings": {"item1": "test learning [2026-01-01]"},
-            "recently_completed": [],
-        }
-        local_file = branch_dir / "TEST.local.json"
-        local_file.write_text(json.dumps(local_data, indent=2), encoding="utf-8")
+        Neither caplog nor a real logging.Handler works here: the suite runs
+        with prax mocked, so `extractor.logger` is not a live Logger and
+        addHandler silently does nothing — a capture-based assertion would
+        pass vacuously, reading zero emitted lines as zero warnings. Replacing
+        the logger measures the calls the code actually made.
+        """
+        from unittest.mock import MagicMock, patch
 
-        # Mock read_memory_file_data to return the data
-        mocks["memory_files"].read_memory_file_data.return_value = local_data
+        from aipass.memory.apps.handlers.rollover import extractor
 
-        registry = {"branches": [{"name": "TEST", "path": str(branch_dir)}]}
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
+        fake = MagicMock()
+        with patch.object(extractor, "logger", fake):
+            kept = extractor._extract_tail_excess(entries, limit, head, "key_learnings", "victim")
 
-        with patch.object(mgr, "_find_repo_root", return_value=tmp_path):
-            result = mgr.process_all_branches()
+        warnings = [c.args[0] for c in fake.warning.call_args_list]
+        debugs = [c.args[0] for c in fake.debug.call_args_list]
+        return kept, warnings, debugs
 
-        assert result["success"] is True
-        assert result["processed"] >= 1
+    @staticmethod
+    def _misplaced(n):
+        """n entries that all trip the valve: dated today, numbered above head."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        return [{"number": 1000 + i, "date": today, "value": "x" * 800} for i in range(n)]
 
-    def test_skips_branches_without_local_file(self, monkeypatch, tmp_path):
-        mgr, _ = _import_manager(monkeypatch)
+    def test_one_warning_per_array_not_one_per_entry(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert len(warnings) == 1
 
-        # Create branch dir without local file
-        branch_dir = tmp_path / "empty_branch"
-        branch_dir.mkdir()
+    def test_the_refused_count_is_in_the_summary(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert "82 of 82" in warnings[0]
 
-        registry = {"branches": [{"name": "EMPTY", "path": str(branch_dir)}]}
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    def test_per_entry_detail_survives_at_debug(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, _warnings, debugs = self._run(entries, 15, 65)
+        assert len(debugs) == 82
 
-        with patch.object(mgr, "_find_repo_root", return_value=tmp_path):
-            result = mgr.process_all_branches()
+    def test_nothing_drained_names_the_skip_loop(self):
+        """The alarm worth having: over limit + nothing archivable = the
+        detector re-fires on this file forever. It used to be invisible,
+        buried in the very wall of lines it produced."""
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert "NOTHING DRAINED" in warnings[0]
 
-        assert result["success"] is True
-        assert result["skipped"] >= 1
-        assert result["processed"] == 0
+    def test_a_partial_refusal_is_not_called_a_skip_loop(self):
+        """Some drained means the lane still moves — warn, but do not alarm."""
+        old = [{"number": 60 - i, "date": "2026-01-01", "value": "old"} for i in range(40)]
+        # Misplaced entries at the very END so they land inside the candidate
+        # tail alongside genuinely-old ones — the mixed case.
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + old + self._misplaced(5)
+        kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert kept
+        assert len(warnings) == 1
+        assert "NOTHING DRAINED" not in warnings[0]
 
-    def test_skips_branches_with_nonexistent_paths(self, monkeypatch, tmp_path):
-        mgr, _ = _import_manager(monkeypatch)
+    def test_no_refusals_logs_nothing(self):
+        entries = [{"number": 100 - i, "date": "2026-01-01", "value": "v"} for i in range(40)]
+        kept, warnings, debugs = self._run(entries, 15, 100)
+        assert kept
+        assert not warnings
+        assert not debugs
 
-        registry = {
-            "branches": [
-                {"name": "MISSING", "path": str(tmp_path / "no_such_dir")},
-            ]
-        }
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
-
-        with patch.object(mgr, "_find_repo_root", return_value=tmp_path):
-            result = mgr.process_all_branches()
-
-        assert result["success"] is True
-        assert result["skipped"] >= 1
-        assert result["processed"] == 0
-
-    def test_handles_read_registry_failure(self, monkeypatch, tmp_path):
-        mgr, _ = _import_manager(monkeypatch)
-
-        # Create a malformed registry
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text("not json", encoding="utf-8")
-
-        with patch.object(mgr, "_find_repo_root", return_value=tmp_path):
-            result = mgr.process_all_branches()
-
-        assert result["success"] is False
-        assert "error" in result
+    def test_the_valve_still_holds_every_misplaced_entry_back(self):
+        """Log volume changed; the protection must not have."""
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        kept, _warnings, _debugs = self._run(entries, 15, 65)
+        assert kept == []

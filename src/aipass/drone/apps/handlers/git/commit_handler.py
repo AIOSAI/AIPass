@@ -17,17 +17,25 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
+# Per-branch pytest budget. The largest suite in the fleet (@api, 1298 tests)
+# runs ~202s — a cap below a green suite's real runtime turns the gate into a
+# false red that blocks every commit touching that branch.
+TEST_GATE_TIMEOUT = 600
+
 
 def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | None:
     """Find which branch a changed file belongs to by walking up to .trinity/."""
     abs_path = (repo_root / filepath).resolve()
     root = repo_root.resolve()
+    # Templates ship full branch skeletons incl. .trinity/, so nested hits are
+    # template trees, not citizens. Citizens never nest: outermost hit wins.
+    found: tuple[str, Path] | None = None
     for parent in [abs_path.parent, *abs_path.parent.parents]:
         if not parent.is_relative_to(root):
             break
         if (parent / ".trinity").is_dir():
-            return parent.name, parent
-    return None
+            found = (parent.name, parent)
+    return found
 
 
 def _run_test_gate(repo_root: Path) -> dict | None:
@@ -62,11 +70,11 @@ def _run_test_gate(repo_root: Path) -> dict | None:
                 capture_output=True,
                 text=True,
                 cwd=str(repo_root),
-                timeout=120,
+                timeout=TEST_GATE_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
-            logger.warning("pytest timed out for branch %s (120s limit)", branch_name)
-            failed_branches.append((branch_name, "pytest timed out (120s)"))
+            logger.warning("pytest timed out for branch %s (%ss limit)", branch_name, TEST_GATE_TIMEOUT)
+            failed_branches.append((branch_name, f"pytest timed out ({TEST_GATE_TIMEOUT}s)"))
             continue
         if test_result.returncode != 0:
             failed_branches.append((branch_name, test_result.stdout.strip()))

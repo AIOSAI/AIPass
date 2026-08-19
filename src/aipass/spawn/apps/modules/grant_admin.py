@@ -21,7 +21,7 @@ There is deliberately NO branch argument: the seat is a constant.
 from aipass.prax import logger
 
 # CLI service: from cli.apps.modules import console (via aipass namespace)
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error
 
 from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin
 from aipass.spawn.apps.handlers.json import json_handler
@@ -76,7 +76,7 @@ def handle_command(command: str, args: list) -> bool:
 
 def _print_usage() -> None:
     """Print the ceremony usage block."""
-    warning("Usage: drone @spawn grant-admin [--registry <path>]")
+    console.print("[bold cyan]Usage:[/bold cyan] drone @spawn grant-admin [--registry <path>]")
     console.print()
     console.print(f"  [dim]Writes admin:true onto the {ADMIN_BRANCH} entry of the root registry.[/dim]")
     console.print("  [green]--registry[/green]  Path to AIPASS_REGISTRY.json [dim](default: discover from CWD)[/dim]")

@@ -15,7 +15,7 @@ All implementation logic lives in apps/handlers/sync_registry_ops.py.
 from aipass.prax import logger
 
 # CLI service: from cli.apps.modules import console (via aipass namespace)
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, err_console, error, warning
 
 from aipass.spawn.apps.handlers.sync_registry_ops import (
     sync_registry,
@@ -91,7 +91,10 @@ def handle_sync_registry(args: list[str]) -> int:
     Returns exit code (0=success/clean, 1=failure/issues).
     """
     if args and args[0] in ["--help", "-h"]:
-        warning("Usage: drone @spawn sync-registry [project-path] [--fix|--check] [--json] [--dry-run]")
+        console.print(
+            "[bold cyan]Usage:[/bold cyan] drone @spawn sync-registry "
+            "\\[project-path] [--fix|--check] [--json] [--dry-run]"
+        )
         console.print()
         console.print("  [green](no args)[/green]      Report mismatches between registry and filesystem")
         console.print("  [green]--fix[/green]          Auto-repair: stale/unregistered + owner/identity reconcile")
@@ -217,19 +220,19 @@ def _print_summary(result: dict) -> None:
         for name in sorted(healthy):
             console.print(f"    {name}")
 
-    # Stale
+    # Stale — names follow their header onto stderr, or stdout files them under Healthy
     if stale:
         error(f"Stale ({len(stale)}): registered but missing/invalid")
         for name in sorted(stale):
-            console.print(f"    {name}")
+            err_console.print(f"    {name}")
     else:
         console.print("  [green]No stale entries[/green]")
 
-    # Unregistered
+    # Unregistered — same rule as stale
     if unregistered:
         warning(f"Unregistered ({len(unregistered)}): on disk but not in registry")
         for name in sorted(unregistered):
-            console.print(f"    {name}")
+            err_console.print(f"    {name}")
     else:
         console.print("  [green]No unregistered branches[/green]")
 

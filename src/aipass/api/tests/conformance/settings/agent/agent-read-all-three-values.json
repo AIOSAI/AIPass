@@ -1,0 +1,29 @@
+{
+  "description": "The ordinary case: three owned keys, on disk in claude's own camelCase, out in this house's snake_case.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": true,
+      "auto_compact_window": 40000,
+      "model": "opus"
+    }
+  },
+  "given": {
+    "content": {
+      "autoCompactEnabled": true,
+      "autoCompactWindow": 40000,
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-read-all-three-values",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

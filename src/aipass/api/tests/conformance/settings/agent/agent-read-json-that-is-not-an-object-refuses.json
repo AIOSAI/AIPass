@@ -1,0 +1,20 @@
+{
+  "description": "Valid JSON, wrong shape. A settings document is an object; an array is somebody else's file.",
+  "document": "agent",
+  "expect": {
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "raw": "[1, 2, 3]",
+    "state": "raw"
+  },
+  "id": "agent-read-json-that-is-not-an-object-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

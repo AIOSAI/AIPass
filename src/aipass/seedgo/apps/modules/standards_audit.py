@@ -46,6 +46,7 @@ from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
+from aipass.seedgo.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 
 # Drone services for @ resolution
 from aipass.drone.apps.modules import normalize_branch_arg
@@ -157,11 +158,19 @@ def print_introspection() -> None:
     console.print()
 
 
-def _emit_artifact(audit_results: List[dict], artifact_path, pack_name: str, specific_branch: str | None):
+def _emit_artifact(
+    audit_results: List[dict], artifact_path, pack_name: str, specific_branch: str | None, no_bypass: bool = False
+):
     """Write the complete-violation-set artifact and announce its path.
 
     The display truncates by design; this file does not. Telling the user where
     it landed is what makes it discoverable — one dim line, never a banner.
+
+    The line names the SCOPE as well as the path. Naming only the path invites a
+    consumer to read a single-branch document as if it covered the fleet, which
+    is the same silent-and-plausible failure the artifact exists to end. A
+    --no-bypass run is the same hazard one step further on — same tree, same
+    pack, lower numbers — so it says so here and lands in its own file.
 
     A write failure is reported loudly and never re-raised: the artifact is a
     side channel, so a full-disk or bad --artifact path must not swallow the
@@ -169,7 +178,11 @@ def _emit_artifact(audit_results: List[dict], artifact_path, pack_name: str, spe
     """
     try:
         written = write_audit_artifact(
-            audit_results, output_path=artifact_path, pack=pack_name, specific_branch=specific_branch
+            audit_results,
+            output_path=artifact_path,
+            pack=pack_name,
+            specific_branch=specific_branch,
+            no_bypass=no_bypass,
         )
     except Exception as e:
         logger.error("[standards_audit] Audit artifact write failed for %s: %s", artifact_path, e)
@@ -178,7 +191,10 @@ def _emit_artifact(audit_results: List[dict], artifact_path, pack_name: str, spe
             suggestion="Audit results above are still valid. Check the path is writable, or pass --no-artifact.",
         )
         return None
-    console.print(f"[dim]Complete violation set (untruncated): {written}[/dim]")
+    scope = f"single-branch: {specific_branch}" if specific_branch else "full-fleet"
+    if no_bypass:
+        scope += ", BYPASSES DISABLED"
+    console.print(f"[dim]Complete violation set (untruncated, {scope}): {written}[/dim]")
     console.print()
     return written
 
@@ -215,6 +231,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     pack_name = None
     specific_branch = None
     show_bypasses = False
+    no_bypass = False
     force_full = False
     write_artifact = True
     artifact_path = None
@@ -222,12 +239,21 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     positional = []
     for arg in args:
+        # Before the value slots, never after: a flag consumed as a destination
+        # path is a flag nobody reads. '--artifact --help' wrote the artifact to
+        # a file named '--help' and ran the whole audit to fill it.
+        if arg in DASHED_HELP_TOKENS:
+            print_help()
+            return True
         if expect_artifact_path:
             artifact_path = arg
             expect_artifact_path = False
             continue
         if arg in ["--show-bypasses", "--bypasses", "-b"]:
             show_bypasses = True
+            continue
+        if arg == "--no-bypass":
+            no_bypass = True
             continue
         if arg == "--full":
             force_full = True
@@ -311,6 +337,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     header(f"{pack_name.upper()} BRANCH STANDARDS AUDIT")
     console.print()
 
+    # Any suppression announces itself, and this one inverts the meaning of every
+    # number below it — an unlabelled --no-bypass run reads as a branch that just
+    # got worse. Said here, again next to the scores in the summary, and recorded
+    # in the artifact's metadata, because each of those is copied out on its own.
+    if no_bypass:
+        console.print("[bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — every rule ignored[/dim]")
+        console.print("[dim]Raw scores. Not comparable with a normal audit; expect them to read lower.[/dim]")
+        console.print()
+
     branches = discover_branches(include_private=_include_private)
 
     if specific_branch:
@@ -348,11 +383,14 @@ def handle_command(command: str, args: List[str]) -> bool:
             branch_name = branch["name"]
             progress.update(task, description=f"[cyan]{branch_name}[/cyan]")
 
-            # Load bypass rules for this branch
-            bypass_rules = load_bypass_rules(branch["path"])
+            # Load bypass rules for this branch — unless --no-bypass, where the
+            # whole point is to score the branch as if it had none.
+            bypass_rules = [] if no_bypass else load_bypass_rules(branch["path"])
 
             branch_start = time.monotonic()
-            result = audit_branch_incremental(branch, bypass_rules, pack_path=pack_path, force_full=force_full)
+            result = audit_branch_incremental(
+                branch, bypass_rules, pack_path=pack_path, force_full=force_full, no_bypass=no_bypass
+            )
             branch_elapsed = time.monotonic() - branch_start
 
             result["elapsed"] = branch_elapsed
@@ -386,15 +424,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Print results — detailed for single branch, skip for full audit
     if not is_compact:
         for result in audit_results:
-            print_branch_summary(result, system_averages, overall_system_avg)
+            print_branch_summary(result, system_averages, overall_system_avg, no_bypass=no_bypass)
 
     # Print system summary (full audit only)
     if is_compact:
-        print_system_summary(audit_results)
+        print_system_summary(audit_results, no_bypass=no_bypass)
 
     # Machine-readable complete result set (no display budget)
     if write_artifact:
-        _emit_artifact(audit_results, artifact_path, pack_name, specific_branch)
+        _emit_artifact(audit_results, artifact_path, pack_name, specific_branch, no_bypass)
 
     # Log completion
     json_handler.log_operation(
@@ -422,6 +460,7 @@ def print_help():
     console.print("  [green]drone @seedgo audit[/green]                      [dim]Show available packs[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]               [dim]All branches, aipass pack[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]         [dim]Single branch[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --no-bypass[/green]   [dim]Score with rules OFF[/dim]")
     console.print("  [green]drone @seedgo audit aipass --full[/green]        [dim]Force full re-scan[/dim]")
     console.print("  [green]drone @seedgo audit aipass --artifact <path>[/green]  [dim]Artifact destination[/dim]")
     console.print("  [green]drone @seedgo audit aipass --no-artifact[/green]      [dim]Skip the artifact[/dim]")
@@ -435,6 +474,10 @@ def print_help():
     console.print("  [dim]# Audit specific branch[/dim]")
     console.print("  [green]drone @seedgo audit aipass @spawn[/green]")
     console.print()
+    console.print("  [dim]# The honest score: same audit, every bypass rule switched off[/dim]")
+    console.print("  [green]drone @seedgo audit aipass @flow --no-bypass[/green]")
+    console.print()
+
     console.print("  [dim]# Force a full re-scan, bypassing the incremental fingerprint cache[/dim]")
     console.print("  [green]drone @seedgo audit aipass --full[/green]")
     console.print()
@@ -447,7 +490,16 @@ def print_help():
     console.print("  Pack name is REQUIRED. Auto-discovers checkers from pack's handler directory.")
     console.print("  Shows per-branch scores, system-wide metrics, and top issues.")
     console.print()
-    console.print("  Every run also writes .seedgo/last_audit.json — the COMPLETE result set as JSON.")
+    console.print("  --no-bypass runs the identical audit with an EMPTY rule set: no .seedgo/")
+    console.print("  bypass.json rule applies, so the score is the branch's raw compliance — the")
+    console.print("  second number every APLAN publishes. Flag order does not matter. The run")
+    console.print("  labels itself on screen, caches separately from a normal run (neither can")
+    console.print("  ever be served the other's score), and writes its own *_no_bypass.json")
+    console.print("  artifact rather than overwriting the normal one.")
+    console.print()
+    console.print("  Every run also writes the COMPLETE result set as JSON: a fleet run writes")
+    console.print("  .seedgo/last_audit.json, a scoped run writes .seedgo/last_audit_{branch}.json")
+    console.print("  so it cannot overwrite the fleet document with one branch's results.")
     console.print("  The console display truncates (10 files, 3 diagnostics, 5 violations, 60-char")
     console.print("  messages); the artifact never does. Violations carry branch, standard and a")
     console.print("  branch-relative file path, so they join straight onto .seedgo/bypass.json rules.")

@@ -319,7 +319,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     if dead_files:
         dead_list = ", ".join(dead_files[:10])
         suffix = f" (+{len(dead_files) - 10} more)" if len(dead_files) > 10 else ""
-        message = f"{len(dead_files)}/{total_files} files unreferenced: {dead_list}{suffix}"
+        # This names the frontier, not the closure: removing a file can strip the
+        # only reference to another and expose a new one. Measured by @memory --
+        # archiving one named file took their branch 95 -> 100 in two rounds.
+        message = (
+            f"{len(dead_files)}/{total_files} files unreferenced: {dead_list}{suffix}"
+            " -- re-run after removing any of these: each removal can expose its own referents"
+        )
     else:
         message = f"All {total_files} files referenced -- no dead code"
 

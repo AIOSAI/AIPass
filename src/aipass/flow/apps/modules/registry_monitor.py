@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2025-11-21
-# Modified: 2026-07-29
+# Modified: 2026-08-16
 # =============================================
 
 """
@@ -16,7 +16,9 @@ Features:
 - Scan and heal registry (orphaned entries, missing files)
 - Duplicate plan detection with auto-renumbering
 - Registry doctrine self-heal (number collisions, unregistered files,
-  wrong-prefix rows) applied directly on every scan
+  wrong-prefix rows, orphaned locations) applied directly on every scan
+- Quarantine list for locations the healer refuses to guess at, surfaced
+  by `status` for a human ruling
 - Registry status reporting
 
 Usage:
@@ -51,6 +53,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
 # CLI services for display
@@ -66,7 +69,10 @@ from aipass.flow.apps.handlers.registry.monitor_ops import (
 )
 
 # Registry doctrine self-heal (number collisions / unregistered files / wrong-prefix rows)
-from aipass.flow.apps.handlers.registry.heal_registry import heal_registry_doctrine_impl
+from aipass.flow.apps.handlers.registry.heal_registry import (
+    find_quarantined_locations,
+    heal_registry_doctrine_impl,
+)
 
 # =============================================
 # CONFIGURATION
@@ -156,8 +162,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag
-    if args[0] in ["--help", "-h", "help"]:
+    # Handle help flag ANYWHERE in the sequence -- `registry scan --help`
+    # reached scan_plan_files(), which WRITES to the registry
+    if wants_help(args):
         print_help()
         return True
 
@@ -209,6 +216,25 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Total plans: {status['total_plans']}")
         console.print(f"  • Open plans: {status['open_plans']}")
         console.print(f"  • Ignored folders: {status['ignore_folders']}")
+
+        # Refusal lane: rows the healer would not guess at. Surfaced here so a
+        # human can rule on them — never auto-corrected, never dropped.
+        quarantined = find_quarantined_locations()
+        console.print()
+        if quarantined:
+            warning(f"{len(quarantined)} plan row(s) quarantined — location not attributable to a live citizen")
+            by_location: Dict[str, List[str]] = {}
+            for row in quarantined:
+                by_location.setdefault(f"{row['location'] or '<none>'} — {row['reason']}", []).append(row["plan_id"])
+            for label, plan_ids in sorted(by_location.items(), key=lambda kv: -len(kv[1])):
+                shown = ", ".join(plan_ids[:4]) + (f" +{len(plan_ids) - 4} more" if len(plan_ids) > 4 else "")
+                console.print(f"    [yellow]•[/yellow] {label}")
+                console.print(f"      [dim]{shown}[/dim]")
+            console.print()
+            console.print("[dim]These await a human ruling — the healer refuses to guess an owner.[/dim]")
+        else:
+            console.print("[dim]No quarantined plan locations[/dim]")
+
         console.print()
         console.print("[dim]Commands: scan | status[/dim]")
         console.print()

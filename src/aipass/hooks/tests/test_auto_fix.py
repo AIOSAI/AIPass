@@ -363,6 +363,39 @@ class TestAutoFixSubprocessChecks:
         assert violations == []
 
 
+class TestRetiredLoggerDebugRule:
+    """logger.debug() is supported by prax's SystemLogger — the rule is retired.
+
+    The rule told the fleet the opposite of what @seedgo teaches, on the same
+    line of code, for as long as both existed. These pin the retirement so it
+    cannot be re-added by reflex.
+    """
+
+    def test_logger_debug_rule_is_gone_from_the_pattern_table(self):
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import PYTHON_PATTERNS
+
+        assert "logger_debug" not in PYTHON_PATTERNS
+
+    def test_no_pattern_rule_targets_logger_debug(self):
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import PYTHON_PATTERNS
+
+        assert not [c for c in PYTHON_PATTERNS.values() if "logger.debug" in c["pattern"]]
+
+    def test_a_file_calling_logger_debug_reports_no_violation(self, temp_test_dir):
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = temp_test_dir / "uses_debug.py"
+        target.write_text('logger.debug("hello")\n', encoding="utf-8")
+
+        assert _check_patterns(str(target)) == []
+
+    def test_prax_system_logger_really_has_debug(self):
+        """The premise the retirement rests on — asserted, not assumed."""
+        from aipass.prax.apps.modules.logger import system_logger
+
+        assert callable(getattr(system_logger, "debug", None))
+
+
 class TestAutoFixPatterns:
     def test_check_line_pattern_matches(self):
         from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_line_pattern

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_central.py
 # Description: Aggregate Central Plans Module
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2025-11-30
-# Modified: 2026-08-11
+# Modified: 2026-08-16
 # =============================================
 
 """
@@ -51,9 +51,11 @@ from aipass.cli.apps.modules import console, error
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
 # Implementation handler
+from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_all_branch_dashboards
 from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 
 # =============================================
@@ -116,6 +118,9 @@ def print_introspection():
     console.print("  [cyan]handlers/plan/[/cyan]")
     console.print("    [dim]- aggregate_ops.py (aggregate_central_impl — aggregation and healing logic)[/dim]")
     console.print()
+    console.print("  [cyan]handlers/dashboard/[/cyan]")
+    console.print("    [dim]- push_branch_dashboard.py (push_flow_to_all_branch_dashboards — --sweep-cards)[/dim]")
+    console.print()
 
     console.print("[dim]Run 'drone @flow aggregate --help' for usage[/dim]")
     console.print()
@@ -130,12 +135,17 @@ def print_help():
     console.print("  drone @flow aggregate \\[options]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
-    console.print("  --heal      Auto-close missing plans [dim](default)[/dim]")
-    console.print("  --no-heal   Validation only")
+    console.print("  --heal          Auto-close missing plans [dim](default)[/dim]")
+    console.print("  --no-heal       Validation only")
+    console.print("  --sweep-cards   Re-push the flow section to every branch dashboard")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [dim]drone @flow aggregate[/dim]                 # Aggregate with healing (default)")
     console.print("  [dim]drone @flow aggregate --no-heal[/dim]       # Validation only")
+    console.print("  [dim]drone @flow aggregate --sweep-cards[/dim]   # Heal every branch card at once")
+    console.print()
+    console.print("[dim]Cards are written on plan events, so a branch that files no plan keeps[/dim]")
+    console.print("[dim]whatever shape it last received. --sweep-cards lands a change fleet-wide.[/dim]")
     console.print()
 
 
@@ -161,8 +171,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag
-    if args[0] in ["--help", "-h", "help"]:
+    # Handle help flag ANYWHERE in the sequence
+    if wants_help(args):
         print_help()
         return True
 
@@ -180,6 +190,17 @@ def handle_command(command: str, args: List[str]) -> bool:
     else:
         logger.error("[aggregate_central] Central plans aggregation failed")
         error("Central plans aggregation failed")
+
+    # Branch cards are written on plan events, so a quiet branch keeps whatever
+    # shape it last received. --sweep-cards re-pushes every one of them.
+    if "--sweep-cards" in args:
+        counts = push_flow_to_all_branch_dashboards()
+        console.print(
+            f"[green]Card sweep:[/green] {counts['pushed']} pushed, "
+            f"{counts['skipped']} skipped (no dashboard), {counts['failed']} failed"
+        )
+        result = result and counts["failed"] == 0
+
     return result
 
 

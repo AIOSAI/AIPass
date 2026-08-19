@@ -653,8 +653,10 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
     lines = inert.check_branch_info(str(tmp_path))
 
-    assert len(lines) == 1
-    assert "apps/x.py" in lines[0] and "handlers" in lines[0] and "inert" in lines[0]
+    # Two caveat lines ride ahead of every conclusion (ADVISORY_CAVEAT), then the rule.
+    conclusions = lines[len(inert.ADVISORY_CAVEAT) :]
+    assert len(conclusions) == 1
+    assert "apps/x.py" in conclusions[0] and "handlers" in conclusions[0] and "inert" in conclusions[0]
 
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
@@ -687,11 +689,12 @@ def test_out_of_scope_rules_are_named_and_grouped_by_standard(tmp_path):
     )
 
     lines = inert.check_branch_info(str(tmp_path))
+    header, *groups = lines[len(inert.ADVISORY_CAVEAT) :]
 
-    assert "3 bypass rules now suppress nothing" in lines[0]
+    assert "3 bypass rules may no longer suppress anything" in header
     # Every file is recoverable from the output -- the whole point of the ask.
-    assert lines[1] == "  architecture (2): tests/test_a.py, tests/test_b.py"
-    assert lines[2] == "  documentation (1): tests/test_c.py"
+    assert groups[0] == "  architecture (2): tests/test_a.py, tests/test_b.py"
+    assert groups[1] == "  documentation (1): tests/test_c.py"
 
 
 def test_out_of_scope_listing_is_not_capped(tmp_path):
@@ -703,10 +706,11 @@ def test_out_of_scope_listing_is_not_capped(tmp_path):
     )
 
     lines = inert.check_branch_info(str(tmp_path))
+    header, *groups = lines[len(inert.ADVISORY_CAVEAT) :]
 
-    assert "12 bypass rules now suppress nothing" in lines[0]
+    assert "12 bypass rules may no longer suppress anything" in header
     for n in range(12):
-        assert f"tests/test_{n}.py" in lines[1]
+        assert f"tests/test_{n}.py" in groups[0]
 
 
 def test_in_scope_rules_are_never_listed_as_out_of_scope(tmp_path):
@@ -830,6 +834,98 @@ def test_a_functions_rule_on_a_name_blind_standard_is_still_reported():
 
     name_blind = next(s for s, kinds in inert.scope_support().items() if "functions" not in kinds)
     assert inert.inert_scopes({"file": "a.py", "standard": name_blind, "functions": ["f"]}) == ("functions",)
+
+
+# The advisory is WRONG IN BOTH DIRECTIONS and must say so where it is read.
+#
+# Three branches measured it independently this week. @skills: 27 rules called
+# dead, 6 of the 7 that were checkable were LIVE. @aipass: told 41, a control
+# run (re-audit with bypass_rules=[]) proved 59 -- including 22 non-test rules
+# the advisory structurally cannot mention. @spawn: told 21, measured 41, and
+# one rule was dead in both lanes and named by neither. The cause is structural:
+# this list is computed in the audit lane, which walks apps/ and never tests/,
+# and reads violation RECORDS, which branch_level standards do not produce. A
+# branch pruning on it alone deletes live rules AND keeps dead ones.
+
+
+def _advisory(tmp_path, rules):
+    """The bypass advisory for a branch whose bypass.json holds *rules*."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    _write_bypass(tmp_path, rules)
+    return inert.check_branch_info(str(tmp_path))
+
+
+_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "handlers", "lines": [7]}
+_OUT_OF_SCOPE_RULE = {"file": "tests/test_a.py", "standard": "architecture", "reason": "r"}
+
+
+def test_advisory_leads_with_its_own_unreliability(tmp_path):
+    """The caveat comes before the conclusions, not after them or elsewhere."""
+    lines = _advisory(tmp_path, [_INERT_SCOPE_RULE])
+
+    head = " ".join(lines[:2]).lower()
+    assert "unverified" in head, lines
+    assert "live" in head, "it must name the false-dead direction"
+    assert "never mentions" in head or "blind" in head, "and the rules it cannot see at all"
+    assert "do not delete" in head, "it must say what not to do"
+    assert "control" in head, "and what to do instead -- measure with bypasses disabled"
+    assert "apps/x.py" not in " ".join(lines[:2]), "no conclusion may precede the caveat"
+
+
+def test_the_caveat_reaches_the_out_of_scope_block_too(tmp_path):
+    """The grouped delete-list is the part branches act on -- it needs it most."""
+    lines = _advisory(tmp_path, [_OUT_OF_SCOPE_RULE])
+
+    assert "unverified" in " ".join(lines[:2]).lower(), lines
+
+
+def test_no_advisory_line_promises_a_rule_is_safe_to_delete(tmp_path):
+    """It used to say 'Safe to delete at your next touch'. It could not know that."""
+    lines = _advisory(tmp_path, [_INERT_SCOPE_RULE, _OUT_OF_SCOPE_RULE])
+
+    assert "safe to delete" not in " ".join(lines).lower(), lines
+
+
+def test_every_conclusion_carries_the_doubt_on_its_own_line(tmp_path):
+    """Info lines are stored and re-rendered one at a time (audit artifact,
+    audit_display); a conclusion read alone must still arrive marked."""
+    lines = _advisory(tmp_path, [_INERT_SCOPE_RULE, _OUT_OF_SCOPE_RULE])
+
+    conclusions = [line for line in lines[2:] if not line.startswith("  ")]
+    assert len(conclusions) == 2, lines
+    assert all(line.startswith("unverified:") for line in conclusions), conclusions
+
+
+def test_a_branch_with_nothing_to_report_gets_no_caveat(tmp_path):
+    """The caveat rides with conclusions -- it is never noise on its own."""
+    assert _advisory(tmp_path, [{"file": "apps/x.py", "standard": "architecture", "reason": "r"}]) == []
+
+
+def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
+    """audit_display prints every info line as f"  [dim]ⓘ {message}[/dim]".
+
+    Rich eats "[handlers]" as a style tag at render time, so the standard name
+    in "apps/x.py [handlers]:" never reached the reader -- the advisory named a
+    file and swallowed which rule it meant. Asserted on rendered bytes: a
+    warning Rich deletes is a warning nobody was given.
+    """
+    import io
+
+    from rich.console import Console
+
+    lines = _advisory(tmp_path, [_INERT_SCOPE_RULE])
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, force_terminal=False, width=400)
+    for message in lines:
+        console.print(f"  [dim]ⓘ {message}[/dim]")
+    rendered = buffer.getvalue()
+
+    assert "UNVERIFIED" in rendered, rendered
+    assert "control" in rendered, rendered
+    assert "handlers" in rendered, "the standard name must survive rendering"
+    assert "apps/x.py" in rendered, rendered
 
 
 def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees():

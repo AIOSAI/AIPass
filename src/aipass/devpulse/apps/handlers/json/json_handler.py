@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for devpulse data files
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-08-18
 # =============================================
 
 """JSON auto-creating handler for devpulse data files.
@@ -18,6 +18,7 @@ import inspect
 import json
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -46,13 +47,50 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
 def _atomic_write_json(path: Path, data: Any) -> None:
+    """Stage, then swap — a reader sees the whole old file or the whole new one.
+
+    The rename goes through _replace_with_retry: on Windows a reader holding
+    the target open turns the move into a PermissionError, and one stuck move
+    starved a whole CI run (2026-08-18). Bounded, then it raises honestly.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".json_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, str(path))
+        _replace_with_retry(tmp_path, str(path))
     except BaseException as exc:
         logger.warning("_atomic_write_json: failed for %s: %s", path, exc)
         try:

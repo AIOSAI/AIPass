@@ -400,39 +400,6 @@ class TestHandleCommandUnknown:
 
 
 # ===========================================================================
-# 7. refresh_external_modules (handler-level)
-# ===========================================================================
-
-
-class TestRefreshExternalModules:
-    """refresh_external_modules() reloads from routing_config.json."""
-
-    def test_refresh_reloads_config(self) -> None:
-        """After refresh, _EXTERNAL_MODULES reflects current config."""
-        import aipass.drone.apps.handlers.module_registry_handler as mrh
-
-        original = dict(mrh._EXTERNAL_MODULES)
-        with patch.object(mrh, "_load_external_modules", return_value={}):
-            mrh.refresh_external_modules()
-            assert mrh._EXTERNAL_MODULES == {}
-        mrh._EXTERNAL_MODULES = original
-
-    def test_refresh_picks_up_new_module(self) -> None:
-        """A module added to config appears after refresh."""
-        import aipass.drone.apps.handlers.module_registry_handler as mrh
-        from aipass.drone.apps.handlers.module_registry_handler import (
-            _ExternalModuleConfig,
-        )
-
-        original = dict(mrh._EXTERNAL_MODULES)
-        fake = {"newmod": _ExternalModuleConfig("newmod", "some.entry", "New", "1.0")}
-        with patch.object(mrh, "_load_external_modules", return_value=fake):
-            mrh.refresh_external_modules()
-            assert "newmod" in mrh._EXTERNAL_MODULES
-        mrh._EXTERNAL_MODULES = original
-
-
-# ===========================================================================
 # 8. route_module_command (handler-level)
 # ===========================================================================
 
@@ -672,48 +639,5 @@ class TestGetModuleHelp:
             ):
                 result = mrh.get_module_help("broken")
             assert result == ""
-        finally:
-            mrh._INTERNAL_MODULES = original_int
-
-
-# ===========================================================================
-# 10. register_module (handler-level)
-# ===========================================================================
-
-
-class TestRegisterModule:
-    """register_module() adds internal modules dynamically."""
-
-    def test_register_adds_to_internal(self) -> None:
-        """register_module makes the module available."""
-        import aipass.drone.apps.handlers.module_registry_handler as mrh
-
-        original_int = dict(mrh._INTERNAL_MODULES)
-        try:
-            mrh.register_module("dynamic", "aipass.dynamic.mod")
-            assert mrh._INTERNAL_MODULES["dynamic"] == "aipass.dynamic.mod"
-        finally:
-            mrh._INTERNAL_MODULES = original_int
-
-    def test_register_overwrites_existing(self) -> None:
-        """Registering an existing name overwrites the adapter path."""
-        import aipass.drone.apps.handlers.module_registry_handler as mrh
-
-        original_int = dict(mrh._INTERNAL_MODULES)
-        try:
-            mrh.register_module("overwrite", "path.v1")
-            mrh.register_module("overwrite", "path.v2")
-            assert mrh._INTERNAL_MODULES["overwrite"] == "path.v2"
-        finally:
-            mrh._INTERNAL_MODULES = original_int
-
-    def test_registered_module_appears_in_list(self) -> None:
-        """A dynamically registered module appears in list_modules()."""
-        import aipass.drone.apps.handlers.module_registry_handler as mrh
-
-        original_int = dict(mrh._INTERNAL_MODULES)
-        try:
-            mrh.register_module("newdyn", "aipass.newdyn.mod")
-            assert "newdyn" in mrh.list_modules()
         finally:
             mrh._INTERNAL_MODULES = original_int

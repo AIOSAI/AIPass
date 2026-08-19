@@ -1,0 +1,20 @@
+{
+  "description": "Zero bytes, same answer, and still not a parse failure.",
+  "document": "baud",
+  "expect": {
+    "document": {},
+    "outcome": "ok"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "state": "empty"
+  },
+  "id": "baud-read-empty-file-is-empty",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

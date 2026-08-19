@@ -310,3 +310,87 @@ class TestIntrospection:
 
     def test_handle_command_unknown(self):
         assert cc_sessions.handle_command("unknown", []) is False
+
+
+class TestOccupantSelectionIsKindAware:
+    """The seam named by @devpulse when the gate was flipped on 2026-08-18:
+    find_occupant returned the FIRST non-self match, so a bg occupant could
+    shadow a live interactive seat behind it — and a caller that skips bg
+    (ruling a) would then ALLOW what it should have blocked."""
+
+    @staticmethod
+    def _live(*sessions):
+        return patch.object(cc_sessions, "find_live_for_cwd", return_value=list(sessions))
+
+    @staticmethod
+    def _s(pid, kind, started_ms):
+        return {"pid": pid, "kind": kind, "startedAt": started_ms, "cwd": "/tmp/branch"}
+
+    def test_a_seat_behind_a_job_is_not_shadowed(self):
+        job = self._s(1, "bg", 1_000_000_000_000)
+        seat = self._s(2, "interactive", 1_000_000_500_000)
+        with self._live(job, seat):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+
+    def test_order_on_disk_does_not_decide(self):
+        """Session files are read in directory order — the answer must not be."""
+        job = self._s(1, "bg", 1_000_000_000_000)
+        seat = self._s(2, "interactive", 1_000_000_500_000)
+        for ordering in ((job, seat), (seat, job)):
+            with self._live(*ordering):
+                assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+
+    def test_a_job_is_still_returned_when_it_is_the_only_occupant(self):
+        """Ranking, not filtering — a bg-only branch stays answerable."""
+        with self._live(self._s(1, "bg", 1_000_000_000_000)):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 1
+
+    def test_background_spelling_ranks_as_a_job_too(self):
+        job = self._s(1, "background", 1_000_000_000_000)
+        seat = self._s(2, "interactive", 1_000_000_500_000)
+        with self._live(job, seat):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+
+    def test_the_oldest_seat_is_the_incumbent(self):
+        """Callers rank themselves against 'the occupant' — that must be the
+        incumbent, or the newest arrival could pass as one."""
+        older = self._s(1, "interactive", 1_000_000_000_000)
+        newer = self._s(2, "interactive", 1_000_000_900_000)
+        with self._live(newer, older):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 1
+
+    def test_three_sessions_job_first_still_names_the_oldest_seat(self):
+        job = self._s(1, "bg", 999_000_000_000)
+        newer_seat = self._s(2, "interactive", 1_000_000_900_000)
+        older_seat = self._s(3, "interactive", 1_000_000_000_000)
+        with self._live(job, newer_seat, older_seat):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 3
+
+    def test_unknown_start_never_displaces_a_seat_whose_age_is_known(self):
+        undated = {"pid": 1, "kind": "interactive", "cwd": "/tmp/branch"}
+        dated = self._s(2, "interactive", 1_000_000_900_000)
+        with self._live(undated, dated):
+            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+
+    def test_our_own_pid_is_still_excluded(self):
+        seat = self._s(2, "interactive", 1_000_000_500_000)
+        with self._live(self._s(1, "bg", 1_000_000_000_000), seat):
+            assert cc_sessions.find_occupant("/tmp/branch", exclude_pid=2)["pid"] == 1
+
+    def test_free_branch_is_none(self):
+        with self._live():
+            assert cc_sessions.find_occupant("/tmp/branch") is None
+
+
+class TestSessionStart:
+    def test_epoch_milliseconds(self):
+        assert cc_sessions.session_start({"startedAt": 1_000_000_000_000}) == 1_000_000_000.0
+
+    def test_iso_string(self):
+        assert cc_sessions.session_start({"startedAt": "2026-08-18T12:00:00Z"}) is not None
+
+    def test_missing_is_none_not_zero(self):
+        assert cc_sessions.session_start({}) is None
+
+    def test_garbage_is_none(self):
+        assert cc_sessions.session_start({"startedAt": "not a time"}) is None

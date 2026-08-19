@@ -50,12 +50,21 @@ drone @git diff                  # Show git diff for your branch
 drone @git diff --staged         # Show staged changes
 drone @git log                   # Show recent git log (default: 10)
 drone @git log 20                # Show last 20 commits
+drone @git show <ref>            # Show a commit
+drone @git show <ref> <path>     # Read a file's contents AT that commit
+drone @git remote                # List remotes + urls (credentials redacted)
 drone @git lock                  # Check lock status
 drone @git tag --list            # List all tags (newest first)
 drone @git issue list            # Passthrough to gh issue list
 drone @git issue view 42         # Passthrough to gh issue view 42
 drone @git run list              # Passthrough to gh run list
 drone @git workflow list         # Passthrough to gh workflow list
+
+# Git read doors — machine output (--json rides in ANY slot)
+drone @git status --json         # {ok, branch, scope, files[], total, message}
+drone @git log 20 --json         # {ok, commits[{sha, subject}], count, message}
+drone @git show <ref> --json     # {ok, ref, path, content, message}
+drone @git remote --json         # {ok, remotes[{name,fetch,push,redacted}], count}
 
 # Git workflow — owner tier (the project's registry-declared owner)
 drone @git commit "message"      # Commit whatever is already staged
@@ -72,9 +81,9 @@ drone @git branches              # List remote branches
 drone @git sync                  # Pull latest (branch-aware: main or dev)
 drone @git sync --autostash      # Sync with autostash for dirty trees
 drone @git smart-sync            # Fetch + detect divergence + rebase
+drone @git prune-temp            # Delete merged citizen/* temp branches
 drone @git unlock --force        # Force-release the PR lock
-drone @git system-pr "desc"      # DEPRECATED — returns error message
-drone @git tag v2.6.1            # Create + push annotated release tag
+drone @git tag v2.6.1            # Create + push annotated release tag (see Tag lanes)
 drone @git fix                   # Auto-fix stuck rebase / detached HEAD
 drone @git fix --dry-run         # Detect issues without fixing
 
@@ -85,6 +94,9 @@ drone list                       # List registered custom command shortcuts
 drone remove <name>              # Remove a custom command shortcut
 
 # Utilities
+drone rm <path> [<path>...]      # Contained safe-delete (project + tmp only)
+drone @flow list --drone-timeout 90   # Override subprocess timeout (default 60s)
+                                      # Must come AFTER @target — anywhere after it works
 drone --version                  # Show version (v1.1.0)
 drone --help                     # Show usage information
 ```
@@ -155,8 +167,9 @@ drone/
 │   │   ├── module_registry.py     # Internal module routing
 │   │   ├── registry.py            # Registry query operations
 │   │   ├── commands.py            # Custom command shortcut orchestrator
-│   │   ├── git_module.py          # Git workflow (tier-based access, 16 commands)
+│   │   ├── git_module.py          # Git workflow (tier-based access, 22 commands)
 │   │   ├── scan.py                # Branch command scanning
+│   │   ├── rm.py                  # Contained safe-delete orchestrator
 │   │   └── broker.py             # Broker daemon orchestrator (sandbox delete)
 │   ├── handlers/                  # Implementation details
 │   │   ├── executor.py            # Safe subprocess execution (timeout, no shell)
@@ -166,6 +179,8 @@ drone/
 │   │   ├── discovery_handler.py   # Discovery implementation + help parsing
 │   │   ├── module_registry_handler.py  # Module loading (internal + external)
 │   │   ├── generic_adapter.py     # StringIO capture for external modules
+│   │   ├── help_flags.py          # wants_help() — whole-sequence help detection (rule E)
+│   │   ├── rm_handler.py          # Path containment checks + deletion
 │   │   ├── routing_config.json    # External module declarations
 │   │   ├── broker/
 │   │   │   ├── daemon.py          # Broker daemon (unix socket, openat2, audit)
@@ -182,11 +197,11 @@ drone/
 │   │   │   ├── lookup.py          # Greedy multi-word matching
 │   │   │   └── formatters.py      # Rich output for command lists
 │   │   └── git/
-│   │       ├── auth.py                      # Tier-based access (verify_git_access)
 │   │       ├── lock_handler.py              # Atomic lockfile (O_CREAT|O_EXCL)
-│   │       ├── pr_handler.py                # DEPRECATED — returns error message
+│   │       ├── pr_handler.py                # ORPHANED — superseded by dev_pr_handler, no production caller
 │   │       ├── diff_handler.py              # Scoped git diff (--staged support)
 │   │       ├── log_handler.py               # Scoped git log (configurable count)
+│   │       ├── show_handler.py              # Read history at a commit (repo-wide, NOT branch-scoped)
 │   │       ├── commit_handler.py            # Commit changes (--all, selective files, or pre-staged)
 │   │       ├── checkout_handler.py          # Branch switching (main/dev guard)
 │   │       ├── dev_pr_handler.py            # Push dev and create PR to main
@@ -195,26 +210,27 @@ drone/
 │   │       ├── close_pr_handler.py          # Close PR by number (gh pr close)
 │   │       ├── status_handler.py            # Scoped git status (subprocess)
 │   │       ├── sync_handler.py              # Safe main sync (--autostash support)
-│   │       └── tag_handler.py               # Release tagging (version + exists guards)
+│   │       ├── repo_context.py              # Which repo is underfoot — AIPass's own or external
+│   │       └── tag_handler.py               # Release tagging (two lanes: AIPass main, external HEAD)
 │   └── plugins/
 │       ├── devpulse_ops/          # Privileged git operations (auth-gated)
 │       │   ├── auth.py            # Passport-based identity gate (owner tier earned per-repo)
-│       │   ├── pr_plugin.py       # System-wide PR (git add -A, system/ branches)
 │       │   ├── merge_plugin.py    # PR merge (--merge) + local sync
 │       │   ├── sync_plugin.py     # Smart sync (fetch, divergence detect, rebase)
 │       │   └── fix_plugin.py      # Auto-fix stuck rebase / detached HEAD
 │       └── hook_sounds/                   # DISABLED — moved to hooks branch (drone @hooks hooksound on/off)
+│           ├── __init__.py.disabled
 │           └── hook_sounds_plugin.py.disabled
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1002 tests across 25 test files
+└── tests/                         # 1019 tests across 25 test files
 ```
 
 ### Routing Flow
 
 1. **CLI input** → `drone.py:main()`
-2. **Built-in commands** checked first: `systems`, `scan`, `activate`, `list`, `remove`
+2. **Built-in commands** checked first: `systems`, `scan`, `activate`, `list`, `remove`, `rm`
 3. **`@target` routing** → branch resolution via `AIPASS_REGISTRY.json` → subprocess dispatch
 4. **Module fallback** → if branch not found but is a registered module, routes internally
 5. **Bare module names** → auto-discovered from `apps/modules/*.py`, routed via `importlib`
@@ -261,11 +277,131 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 
 | Tier | Who | Commands |
 |------|-----|----------|
-| **Global** | All branches | `status`, `diff`, `log`, `lock`, `branches`, `tag --list`, `issue`, `run`, `workflow` |
-| **Owner** | `devpulse` only | `pr`, `commit`, `checkout`, `dev-pr`, `delete-branch`, `close-pr`, `sync`, `unlock`, `system-pr`, `merge`, `smart-sync`, `fix`, `tag` |
+| **Global** | All branches | `status`, `diff`, `log`, `show`, `remote`, `lock`, `branches`, `tag --list`, `issue`, `run`, `workflow` |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | `pr`, `commit`, `checkout`, `dev-pr`, `delete-branch`, `prune-temp`, `close-pr`, `sync`, `unlock`, `merge`, `smart-sync`, `fix`, `tag` |
 
 - Auth is checked once at the top of `git_module.handle_command()` before any handler is called
-- Unauthorized commands return a clear "Access denied" message with the caller's tier
+- Unauthorized commands are refused with a message naming the caller, its `citizen_class`, and the tier required
+- **A command in neither tier is unreachable, not merely ungated** — `verify_git_access()` refuses anything it cannot find in a tier as `Unknown git command`, so registering a verb in `_COMMANDS` and wiring it to a handler does not make it callable. `prune-temp` shipped that way and no caller could reach it (found in the APLAN-0003 audit, tier ruled by @devpulse). `test_every_registered_command_holds_a_tier` now asserts the rule rather than the instance
+
+### Subprocess timeouts
+
+Routed commands run with a timeout resolved in this order — **explicit flag > per-command policy > default**:
+
+| Layer | Value | Where |
+|-------|-------|-------|
+| Default | **60s** | `DEFAULT_TIMEOUT` in `apps/handlers/executor.py` |
+| Per-command policy | e.g. `memory process-plans` 120s, `memory rollover` 100s, `flow close` 90s | `TIMEOUT_OVERRIDES` in the same file |
+| Explicit | whatever you pass | `--drone-timeout <n>` |
+
+The default was raised 30 → 60 on 2026-08-13 (Patrick's ruling): two known runners finish around 31s and were tripping the old default. A per-command policy is a decision, not a floor — it wins even if it is *lower* than the default.
+
+The signature defaults of `execute_command()` and `execute_branch_command()` reference `DEFAULT_TIMEOUT` rather than restating the number, so the layers cannot silently disagree. `tests/test_executor.py::TestDefaultTimeoutValue` pins the number itself and asserts all three layers agree.
+
+**Where `--drone-timeout` goes:** anywhere **after** the `@target`, including after the routed command and its arguments. It is stripped from the argument list before routing, so the target branch never sees it.
+
+```bash
+drone @flow list --drone-timeout 90     # ✅ after the command
+drone @flow --drone-timeout 90 list     # ✅ between target and command
+drone --drone-timeout 90 @flow list     # ❌ before the target — drone: unknown command '--drone-timeout'
+```
+
+### Help flags — explain, never execute
+
+A help flag **anywhere** in a command means explain, never execute (DPLAN-0291 rule E). Every module's `handle_command()` calls `wants_help()` from `apps/handlers/help_flags.py` before dispatching:
+
+- `--help` / `-h` — exact match, honoured in **any** position, including the subcommand slot
+- bare `help` — position 0 only, since later positions are legitimate values (a path to delete, a branch to look up)
+
+Modules that own `help` as a real verb pass `bare_help=False`; `discovery` does, so `drone @discovery help @seedgo` keeps working while `... help @seedgo --help` still explains.
+
+The check lives **inside** each `handle_command()`, not in the router, because every module also has a standalone `__main__` path that takes raw argv and never touches the router. One predicate, ten call sites — the gate previously existed as ten copies of the same two lines, which is how ten modules drifted into the same bug at once.
+
+Why it mattered: the old gate read only `command` or `args[0]`, so `drone rm notes.md --help` **deleted notes.md** and then tried to delete a file named `--help`. `tests/test_help_flag_safety.py` mocks every dispatch target and asserts it was never called — no live verb is fired to prove the trap.
+
+### Reading history — `show`
+
+`show` sits at global tier because reading history is not a write. It is deliberately **not** scoped to the caller's branch directory the way `status`, `diff` and `log` are: those scope for convenience, hiding other branches' noise, whereas scoping `show` would refuse the case it exists for — one citizen auditing another's past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
+
+Both the ref and the optional path are refused before any argv is built if git would read them as a flag (empty or leading `-`), the same guard the tag lanes use.
+
+### Machine output — `--json` on the read doors
+
+`status`, `log`, `show` and `remote` answer in prose by default and in one JSON document with `--json`. The flag rides in **any slot** and is stripped before positional parsing, so `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is still a question.
+
+Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can parse why it failed rather than getting a bare sentence it has to guess at. The exit code still goes non-zero, so a shell script reading only `$?` is told the same truth.
+
+Consumers were previously scraping the rendered output (@api's host lane carried ~385 lines of it, keyed on the *shape* of a status row). Prose output is unchanged by design — every existing reader keeps working — but new callers should take the document.
+
+**`status --json` reports git's two porcelain columns, which the rendered view cannot.** The columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M` an unstaged one. The rendered row shows one right-aligned letter and always has, so those two collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
+
+```json
+{"status": "M ", "path": "src/x.py", "index": "M", "worktree": " "}
+```
+
+### Where a repository points — `remote`
+
+`remote` is global tier: listing remotes writes nothing. It exists because there was no door for the question at all — @api's host lane read `.git/config` as an INI file and hand-rolled its own worktree-following to locate it. Shelling the question through git resolves a worktree's common directory for free.
+
+**Credentials never travel.** An `http(s)` URL configured with credentials is answered with its *entire* userinfo component replaced by `***`, and the raw value reaches no return, no log line and no audit record. The whole component goes, not just a password: the common personal-access-token form is `https://<TOKEN>@host/path`, where the secret sits in the username slot.
+
+SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
+
+A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error — two projects in the live tree have none.
+
+### Deleting — every delete leaves a record
+
+`drone rm` is the fleet's only sanctioned delete path (raw recursive `rm` is gate-blocked), which makes it the choke point where the record belongs. Patrick's ruling: *"if something deletes, there should be a record of it."*
+
+Two channels, written by `handlers/deletion_log.py`:
+
+| Channel | Where | What it is for |
+|---|---|---|
+| JSONL store | `<project>/.ai_central/deletions.jsonl` | machine-readable, findable months later |
+| prax line | normal logs, **INFO** | flows through observability without knowing this file exists |
+
+The prax line is emitted **first**. If the store write fails it is reported at ERROR and the delete still proceeds — losing the log must not turn into losing the delete, and the event has already reached the logs either way.
+
+A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed), `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`.
+
+Four things worth knowing:
+
+ - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the guard just said that tree is off-limits, so nothing goes and reads inside it.
+ - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than paying an unbounded walk.
+ - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
+ - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
+
+Both of drone's delete lanes feed it: `rm` (`handlers/rm_handler.py`) and `broker` (`handlers/broker/daemon.py`, which deletes on behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading its own cwd). The broker's protocol audit log is unchanged — that records requests and error codes; this records deletions.
+
+`AIPASS_DELETION_LOG` relocates the store (tests, containers). It cannot silence the prax line.
+
+Bounded at 2 MB with one rotation, because a delete log that grows forever becomes the runaway log the monitoring lane exists to catch.
+
+### Sibling-branch guard — outermost `.trinity` wins
+
+The guard refuses deletes inside another citizen's tree, and it finds the owning citizen by walking up for `.trinity/`. It takes the **outermost** hit within the project, not the innermost, because `.trinity/` is not proof of a citizen: @spawn ships a complete branch skeleton under `templates/`, passport and all.
+
+Innermost-wins produced two bugs from one mimicry — refusals named `aipass_framework`, which is a template with no mailbox to appeal to, and @spawn was locked out of its own `templates/` because a skeleton's name never matches the branch you are standing in. Same mimicry sent the commit gate running pytest inside the template; outermost-citizen-wins is the mapping that fixed it there (`e934099f`), applied here.
+
+Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the project boundary.
+
+### Tag lanes — AIPass vs an external repo
+
+`tag` is one verb with two release lanes, chosen by the repo the command will actually run in (`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it doesn't). The gate that used to refuse `tag` from a `projects/*` seat is gone: it now translates.
+
+| | AIPass repo | External project seat |
+|---|---|---|
+| What gets tagged | `origin/main` | that repo's current **HEAD**, any branch |
+| Version guard | `pyproject.toml` + `src/aipass/__init__.py` on origin/main must both match | **none** — manifests and cadence belong to the repo owner |
+| Name rule | `vX.Y.Z` | anything `git check-ref-format` accepts (`v0.1.0-rc1`, `2026.08.1`, …) |
+| Duplicate guard | refuses if the tag exists locally or on the remote | same, and the remote check's exit code is verified — an unreachable remote refuses instead of tagging blind |
+| Push | `git push origin <tag>` | same, to that repo's own origin |
+
+Both lanes create **annotated** tags. Names that git would read as a flag (empty, leading `-`) are refused before any argv is built.
+
+Why no version guard outside AIPass: an external repo has its own manifests (baud carries three) and its own release lane. Reading ours out of someone else's tree would be an invented rule, so version discipline stays with the repo owner (DPLAN-0290 item 1, Patrick's ruling).
+
+Both lanes are covered by `tests/test_tag_handler.py`, where `TestAipassSeatUnchanged` pins the AIPass lane argv-for-argv so translation elsewhere cannot move it. The external lane was additionally proven end to end against a throwaway repo with a real bare origin — real tag, real push, both duplicate halves — by a local acceptance script in `artifacts/` (that directory is git-ignored, so it is not in a clone).
 
 ### gh Passthrough Rendering
 
@@ -318,6 +454,7 @@ Commands in the interactive tuple bypass capture and inherit the terminal direct
 | Branch   | Reason                                        |
 |----------|-----------------------------------------------|
 | `cli`    | User-facing CLI with Rich formatted output    |
+| `backup` | Snapshot/restore progress needs a live terminal |
 
 To add: edit `INTERACTIVE_COMMANDS` or `INTERACTIVE_BRANCHES` in `apps/drone.py`.
 
@@ -333,7 +470,6 @@ Auth-gated operations for system administration. `auth.py` walks CWD for `.trini
 
 | Plugin | Command | Purpose |
 |--------|---------|---------|
-| `pr_plugin` | `system-pr` | System-wide PR across all tracked changes |
 | `merge_plugin` | `merge` | Straight-merge a PR and sync local main |
 | `sync_plugin` | `smart-sync` | Fetch + detect divergence + rebase |
 | `fix_plugin` | `fix` | Auto-fix stuck rebase / detached HEAD |
@@ -378,17 +514,20 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1002 tests across 25 test files, covering all layers:
+1123 tests collected across 28 test files (1118 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-14:
 
 | Area | Files | Tests |
 |------|-------|-------|
-| Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py` | ~128 |
-| Git operations | `test_git_module.py`, `test_system_pr.py`, `test_devpulse_plugins.py`, `test_git_access.py`, `test_tag_handler.py` | ~187 |
-| Handlers | `test_executor.py`, `test_registry_handler.py`, `test_discovery.py` | ~99 |
-| Infrastructure | `test_generic_adapter.py`, `test_module_registry.py`, `test_config.py` | ~66 |
-| Features | `test_commands.py`, `test_scan.py`, `test_json_handler.py`, `test_rm.py` | ~181 |
-| Broker | `test_broker.py` | ~55 |
-| Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py` | ~21 |
+| Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 183 |
+| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 335 |
+| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 125 |
+| Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
+| Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
+| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 185 |
+| Deletion record | `test_deletion_log.py` | 26 |
+| Broker | `test_broker.py` | 60 |
+| Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 93 |
+| Help-flag safety | `test_help_flag_safety.py` | 36 |
 
 Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
@@ -396,13 +535,16 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ## Known Issues
 
+- `pr_handler.py` is orphaned — `create_pr()` has no production caller (superseded by `dev_pr_handler.create_branch_pr()`); its 7 callers are all in `tests/test_git_module.py`
 - `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
+- Piping drone output into a truncating reader (`| head`) yields inconsistent exit codes (0, 1, or 243) — no BrokenPipe handling anywhere in the tree. Cosmetic, but blocks `drone ... | head` inside `set -e` scripts
+- Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
 - Pyright warns about `json` package name shadowing stdlib — works at runtime
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1002 pass, 5 skip | **Last Updated:** 2026-08-12
+**Seedgo:** 100% | **Tests:** 1118 pass, 5 skip | **Last Updated:** 2026-08-14
 
 ---
 [← Back to AIPass](../../../README.md)

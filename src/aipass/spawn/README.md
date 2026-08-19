@@ -13,7 +13,7 @@
 - Create new branches from class-scoped templates (aipass_framework)
 - Update branches from templates (single or batch by class, with --dry-run)
 - Delete branches (archive + deregister)
-- Sync registry and templates against filesystem
+- Sync registry against filesystem
 - Regenerate template registries with fresh file hashes
 - Replace all `{{PLACEHOLDER}}` patterns with branch-specific values
 - Register new citizens in `AIPASS_REGISTRY.json`
@@ -44,7 +44,16 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 | Class | Template | What It Creates |
 |-------|----------|-----------------|
-| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ |
+| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ — 45 files, 23 dirs |
+| `project_agent` | `templates/project_agent/` | Minimal citizen for an external project: .trinity/, .aipass/, apps/ (modules/ + handlers/), artifacts/, logs/ — 17 files, 9 dirs |
+
+`admin` is permanently refused as a class or `--template` value — see Grant Admin below.
+
+**Class is resolved from the passport, not guessed.** A leading positional is read
+as a target path only when it is either a known class (`create <class> <path>`) or
+carries an explicit path marker (a separator, `~`, `.`/`..`, or `@`). A bare token
+with neither — `create wizard` — refuses by name instead of silently making a
+branch called WIZARD in `./wizard` (APLAN-0007, fixed).
 
 ---
 
@@ -76,15 +85,28 @@ drone @spawn update @branch_name --dry-run                     # Explicit previe
 ### Delete
 
 ```bash
-drone @spawn delete @branch_name                               # Archive + deregister
+drone @spawn delete @branch_name --dry-run                     # Preview
+drone @spawn delete @branch_name --yes                         # Archive + deregister
 ```
+
+**Delete refuses protected branches, and every live citizen is protected.**
+`is_protected()` guards three layers, any one sufficient: the hardcoded floor
+(spawn, devpulse, drone), a registry entry carrying `owner: true`, and a passport
+with `citizenship.registered: true`. Since `create` writes `registered: true`, a
+branch is protected from the moment it exists. There is no `--force` — retiring a
+citizen means clearing that passport flag first.
+
+Verified live 2026-08-13 (APLAN-0007): the `infrastructure (devpulse, drone, spawn)`
+and `active citizen` refusals both fire and exit 1. The `registry owner` layer is
+**unreachable in the live fleet** — `devpulse` is the only entry carrying
+`owner: true` and it short-circuits at layer 1, so no branch can reach layer 2.
+It is covered by unit tests against a synthetic registry, not by live behaviour.
 
 ### Sync and Regenerate
 
 ```bash
 drone @spawn sync-registry                                     # Report healthy/stale/unregistered
 drone @spawn sync-registry --fix                               # Rebuild .spawn/ tracking + fix passport registry_ids
-drone @spawn sync-templates                                    # Pull managed files from sources (partial — see Known Issues)
 drone @spawn regenerate-registry                               # Regenerate aipass_framework template hashes
 drone @spawn regenerate-registry --all                         # All template classes
 
@@ -149,7 +171,6 @@ spawn/
 │   │   ├── update.py                    # Update CLI — single/batch by class
 │   │   ├── delete.py                    # Delete CLI — archive + deregister
 │   │   ├── sync_registry.py             # Registry repair CLI
-│   │   ├── sync_templates.py            # Template sync CLI
 │   │   ├── regenerate_registry.py       # Template registry regeneration CLI
 │   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   └── handlers/
@@ -162,14 +183,13 @@ spawn/
 │       ├── update_ops.py                # Update workflow (Phase 0 snapshot → detect → execute)
 │       ├── delete_ops.py                # Delete workflow (resolve → archive → cleanup → deregister)
 │       ├── sync_registry_ops.py         # Registry sync (CWD-aware, external project support)
-│       ├── sync_templates_ops.py        # Template sync implementation
 │       ├── regenerate_registry_ops.py   # Template registry hash regeneration
 │       ├── json_ops.py                  # JSON deep merge, backup utilities
 │       └── json/
 │           └── json_handler.py          # Standard JSON I/O, operation logging, 7 API functions
 ├── templates/
 │   └── aipass_framework/                # Full scaffold template (44 files, 23 dirs)
-├── tests/                               # 19 test files, 403 tests
+├── tests/                               # 20 test files, 456 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -193,8 +213,10 @@ spawn/
 3. **Copy** — Recursive copy of class template to target (skips `__pycache__`)
 4. **Rename** — Replace `{{BRANCH}}` in directory and file names
 5. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal)
-6. **Registry** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not), register in the target project's own `AIPASS_REGISTRY.json`
-7. **Validate** — Scan for any remaining `{{...}}` patterns
+6. **Meta** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not)
+7. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only
+8. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`
+9. **Validate** — Scan for any remaining `{{...}}` patterns
 
 ### Update (class-aware, Phase 0)
 
@@ -213,7 +235,9 @@ spawn/
 
 ## Tests
 
-**403 tests | 1 skipped | 0 failed** across 18 test files (410 collected — parametrized cases expand):
+**434 passed | 1 skipped | 0 failed** across 19 test files (435 collected — parametrized cases expand).
+The one skip is `test_scaffold.py`: the shipped scaffold smoke test skips by design once a
+branch has a real conftest (see Known Issues).
 
 | File | Focus |
 |------|-------|
@@ -230,9 +254,15 @@ spawn/
 | `test_error_resilience.py` | Error handling and edge cases |
 | `test_check_fix_identity.py` | Owner/identity check and fix (DPLAN-0239 P4) |
 | `test_admin_fence.py` | Admin grant ceremony + permanent admin-class refusal (DPLAN-0288) |
+| `test_owner_resolver.py` | Owner resolution + `is_protected()` protection layers |
+| `test_passport_drift.py` | Fleet passport drift canary |
+| `test_template_hygiene.py` | Template content invariants |
+| `test_output_streams.py` | stdout/stderr routing |
+| `test_repair.py` | Structural repair + relocation |
+| `test_scaffold.py` | Shipped scaffold smoke test (skips once a real conftest exists) |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 57 total, 57 tested (100%)
+**Public functions:** 55 total, 55 tested (100%)
 
 ---
 
@@ -253,21 +283,21 @@ spawn/
 
 ## Known Issues
 
-- `sync-templates` is a no-op — `template_owners.json` has no entries (template IS source of truth, not downstream consumer)
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
+- `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291
 
 ---
 
 ## Metrics
 
-- **Seedgo:** 100%
-- **Tests:** 409 passed, 1 skipped, 0 failed
+- **Seedgo:** 100% with bypasses, 98% without (15 live bypass rules, all measured 2026-08-13)
+- **Tests:** 434 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
-- **Template registry:** 44 files, 23 dirs (aipass_framework)
-- **Battle test:** 17/17 commands pass (2026-04-22)
+- **Template registry:** 45 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
+- **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
 ---
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-13*
 
 [← Back to AIPass](../../../README.md)

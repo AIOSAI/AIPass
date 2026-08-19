@@ -1,0 +1,26 @@
+{
+  "description": "Same rule from the other side of zero.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-negative-window-refuses",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "auto_compact_window": -5
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

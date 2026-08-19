@@ -11,6 +11,7 @@
 import signal
 import sys
 import threading
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -98,7 +99,7 @@ class TestMain:
         # Make stop_event.wait() return immediately
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         # Both start functions return True (already the default from fixture)
         mod.start_branch_watcher = MagicMock(return_value=True)
@@ -120,7 +121,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=None)
@@ -140,7 +141,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         mod.start_branch_watcher = MagicMock(return_value=None)
         mod.start_system_watcher = MagicMock(return_value=True)
@@ -159,7 +160,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         mod.start_branch_watcher = MagicMock(return_value=None)
         mod.start_system_watcher = MagicMock(return_value=None)
@@ -175,7 +176,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
@@ -200,7 +201,7 @@ class TestMain:
         # Use a real Event but do NOT pre-set it; we will trigger it via
         # the signal handler that main() installs.
         real_event = threading.Event()
-        monkeypatch.setattr(threading, "Event", lambda: real_event)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: real_event))
 
         # Capture the signal handler that main() registers (no-op stub
         # avoids calling real signal.signal which fails in threads).
@@ -250,7 +251,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         installed_signals: list[int] = []
         original_signal = signal.signal
@@ -277,7 +278,7 @@ class TestMain:
 
         pre_set = threading.Event()
         pre_set.set()
-        monkeypatch.setattr(threading, "Event", lambda: pre_set)
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
         mod.start_branch_watcher = MagicMock(return_value=False)
         mod.start_system_watcher = MagicMock(return_value=False)
@@ -287,3 +288,69 @@ class TestMain:
 
         captured = capsys.readouterr()
         assert "Both watchers failed" in captured.err
+
+
+class TestReloadExit:
+    """How the process leaves decides whether it comes back.
+
+    The systemd unit ships `Restart=on-failure`. A reload that exited 0 would
+    be read as a completed job and the watcher would simply stay down — the
+    stale-code problem replaced by a missing-watcher problem.
+    """
+
+    def test_a_requested_reload_exits_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reload requested -> exit RELOAD_EXIT_CODE so the supervisor restarts us."""
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        monkeypatch.setattr(mod.reload_sentinel, "start", lambda _stop: lambda: True)
+
+        mod.start_branch_watcher = MagicMock(return_value=True)
+        mod.start_system_watcher = MagicMock(return_value=True)
+        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit) as exit_info:
+            mod.main()
+
+        assert exit_info.value.code == mod.reload_sentinel.RELOAD_EXIT_CODE
+
+    def test_an_ordinary_shutdown_does_not_exit_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A SIGTERM must still look like a clean stop, not a failed unit."""
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        monkeypatch.setattr(mod.reload_sentinel, "start", lambda _stop: lambda: False)
+
+        mod.start_branch_watcher = MagicMock(return_value=True)
+        mod.start_system_watcher = MagicMock(return_value=True)
+        captured: list[str] = []
+        monkeypatch.setattr("builtins.print", lambda *a, **kw: captured.append(str(a)))
+
+        mod.main()  # must not raise SystemExit
+
+        assert "Stopped" in " ".join(captured)
+
+    def test_the_watchers_are_stopped_before_the_reload_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inotify watches must be released, or the restarted process inherits the leak."""
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        monkeypatch.setattr(mod.reload_sentinel, "start", lambda _stop: lambda: True)
+
+        mod.start_branch_watcher = MagicMock(return_value=True)
+        mod.start_system_watcher = MagicMock(return_value=True)
+        mod.stop_branch_watcher = MagicMock()
+        mod.stop_system_watcher = MagicMock()
+        monkeypatch.setattr("builtins.print", lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit):
+            mod.main()
+
+        assert mod.stop_branch_watcher.called
+        assert mod.stop_system_watcher.called

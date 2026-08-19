@@ -39,6 +39,12 @@ from aipass.trigger.apps.handlers.json import json_handler
 # System logs directory (package-relative via config)
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 
+# Sole owner of the system_logs directory (Patrick's ruling, 2026-08-14).
+# Named here so the ownership is readable in the code rather than only in a
+# commit message — see start_log_watcher() for what the ruling cost to leave
+# unmade.
+SYSTEM_LOGS_OWNER = "branch_log_events"
+
 # How far down the rotation chain ('<name>.log.1' .. '.N') to look for a
 # rotated-out file. Matches prax RotatingFileHandler backup_count.
 MAX_BACKUP_CHAIN_DEPTH = 3
@@ -428,21 +434,34 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
 
 def start_log_watcher() -> Any:
     """
-    Start the centralized log watcher.
+    Decline to start — `branch_log_events` owns system_logs.
+
+    Patrick ruled on 2026-08-14 that double-watching this directory is wasted
+    CPU and, worse, duplicate signal: both watchers registered it, so one
+    condition minted two escalation signatures with different attribution. The
+    branch watcher resolved the owning branch from the filename, this one
+    reported UNKNOWN, and the operator got the same repeat warning twice under
+    two names — measured at 4 of 14 digests in 24h (APLAN-0008).
+
+    The branch watcher keeps the coverage: it globs `system_logs/*.log`
+    alongside the per-branch logs and carries the parsing, the branch mapping
+    and the staleness handling this module never had. The ruling ends the
+    duplicate, not the watching.
+
+    Everything else here stays live and tested — position tracking, parsing,
+    `stop_log_watcher`, `is_log_watcher_active` — because this module remains
+    the system_logs reader that `initialize_positions` and the catch-up scan
+    use. Only the observer registration is withdrawn.
 
     Returns:
-        Observer instance (caller must keep alive)
+        None, always. Kept as the documented start contract so callers that
+        check for an observer take their existing not-started path.
     """
-    global _log_observer
-
-    if not WATCHDOG_AVAILABLE:
-        return None
-
-    if _log_observer and _log_observer.is_alive():
-        stop_log_watcher()
-
-    if not SYSTEM_LOGS_DIR.exists():
-        return None
+    logger.info(
+        "[TRIGGER] system_logs is watched by %s — centralized observer not started (Patrick's ruling, 2026-08-14)",
+        SYSTEM_LOGS_OWNER,
+    )
+    return None
 
     watcher = LogFileWatcher()
     watcher.initialize_positions()

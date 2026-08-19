@@ -1,10 +1,41 @@
 """Tests for session boot wrapper (menu-based attach/start/close)."""
 
+import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from aipass.hooks.apps.handlers.lifecycle import session_boot
+from aipass.hooks.apps.modules import cc_transcripts
 
 _MOD = "aipass.hooks.apps.handlers.lifecycle.session_boot"
+
+# Classes that test the tmux lookups themselves — they must see the real thing.
+_TMUX_OWN_TESTS = {
+    "TestFindTmux",
+    "TestTmuxSessionExists",
+    "TestFindTmuxSessionForPid",
+    "TestTmuxLookupsSurviveAMachineWithoutTmux",
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tmux_lookup(request):
+    """Keep the MENU tests off a real subprocess.
+
+    Rendering the multi-session menu describes each live process, which asks
+    tmux where that process lives. That is a real `tmux list-panes` call: it
+    raises WinError 2 on the Windows runner (6 CI failures, 2026-08-18) and is
+    slow everywhere else. Whether [Enter] continues the last chat is not a
+    platform question, so the lookup is stubbed for every test except the ones
+    whose subject IS the lookup.
+    """
+    if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
+        yield
+        return
+    with patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None):
+        yield
 
 
 class TestResolveClaudeBinary:
@@ -508,6 +539,34 @@ class TestPermissionModeDedupe:
         assert "acceptEdits" in cmd
 
 
+def make_transcript(projects_root, cwd, session_id, title, messages, age_seconds=0):
+    """Write a CC-shaped transcript so the picker has a real chat to find."""
+    import json as _json
+    import os as _os
+    import re as _re
+
+    directory = projects_root / _re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd).resolve()))
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{session_id}.jsonl"
+    lines = [_json.dumps({"type": "ai-title", "aiTitle": title, "sessionId": session_id})]
+    for i in range(messages):
+        lines.append(_json.dumps({"type": "user", "message": {"content": f"turn {i}"}}))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if age_seconds:
+        stamp = path.stat().st_mtime - age_seconds
+        _os.utime(path, (stamp, stamp))
+    return path
+
+
+@pytest.fixture
+def fake_projects(tmp_path, monkeypatch):
+    """Point the transcript reader at a throwaway projects root."""
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", root)
+    return root
+
+
 class TestMultipleLiveSessions:
     def test_close_all(self, tmp_path):
         live = [
@@ -527,7 +586,11 @@ class TestMultipleLiveSessions:
         assert result["action"] == "closed_all"
         mock_stop.assert_called_once()
 
-    def test_pick_by_number_interactive(self, tmp_path):
+    def test_pick_a_chat_held_by_a_seat_attaches(self, tmp_path, fake_projects):
+        """Numbers address CHATS now. Picking one a live seat holds must ATTACH —
+        spawning --resume against a held sessionId is what put two PIDs on one
+        sessionId on 2026-08-18."""
+        make_transcript(fake_projects, tmp_path, "abc", "Held chat", 4)
         live = [
             {"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"},
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "interactive"},
@@ -544,7 +607,8 @@ class TestMultipleLiveSessions:
             session_boot.boot(cwd=str(tmp_path))
         mock_exec.assert_called_once_with("tmux", ["tmux", "attach-session", "-t", "hooks"])
 
-    def test_pick_bg_triggers_takeover(self, tmp_path):
+    def test_pick_a_chat_held_by_bg_triggers_takeover(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "def", "Bg chat", 3)
         live = [
             {"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"},
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
@@ -554,7 +618,7 @@ class TestMultipleLiveSessions:
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
-            patch.object(session_boot, "_read_choice", return_value="2"),
+            patch.object(session_boot, "_read_choice", return_value="1"),
             patch.object(
                 session_boot, "_takeover_bg", return_value={"exit_code": 0, "action": "takeover"}
             ) as mock_take,
@@ -563,10 +627,15 @@ class TestMultipleLiveSessions:
         mock_take.assert_called_once()
         assert result["action"] == "takeover"
 
-    def test_enter_without_pick_rejected(self, tmp_path):
+    def test_enter_continues_last_chat(self, tmp_path, fake_projects):
+        """DEFECT A2, inverted. This test used to assert Enter was REJECTED — it
+        pinned the missing continue-last path as if it were the contract. Single
+        and no-live menus both offered it; only the >=2 menu had no way back to
+        the conversation."""
+        make_transcript(fake_projects, tmp_path, "newest", "Newest chat", 9)
         live = [
-            {"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"},
-            {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 1234, "sessionId": "held", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
             patch.dict("os.environ", {}, clear=True),
@@ -574,9 +643,14 @@ class TestMultipleLiveSessions:
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
             patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
         ):
             result = session_boot.boot(cwd=str(tmp_path))
-        assert result["exit_code"] == 1
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        assert "--resume" in cmd and "newest" in cmd
 
     def test_n_stops_stoppable_then_starts(self, tmp_path):
         live = [
@@ -921,7 +995,8 @@ class TestExtraArgsThreading:
         assert "--permission-mode" in cmd
         assert "plan" in cmd
 
-    def test_multi_session_pick_threads_extra_args(self, tmp_path):
+    def test_multi_session_pick_threads_extra_args(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "abc", "Orphaned window chat", 5)
         live = [
             {"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"},
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "interactive"},
@@ -1103,3 +1178,253 @@ class TestAutoNamer:
         assert "--name" in cmd
         idx = cmd.index("--name")
         assert cmd[idx + 1] == "hooks-abc12345"
+
+
+class TestPickerOffersChatsNotProcesses:
+    """The 2026-08-18 loss: Ctrl+C removes the dead chat's session file, so the
+    conversation Patrick wanted was the one thing a PID list could not show —
+    while three bg leftovers were offered as if they were his chats."""
+
+    def _boot(self, tmp_path, live, choice, projects_root=None):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_warn_on_version_drift", return_value=""),
+            patch.object(session_boot, "_read_choice", return_value=choice),
+            patch.object(session_boot, "_exec_in_tmux", return_value={"exit_code": 0}) as mock_exec,
+            patch.object(session_boot, "_stop_session", return_value="stopped"),
+            patch.object(session_boot, "_daemon_stop", return_value={"ok": True}),
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        return result, mock_exec
+
+    def test_menu_lists_chats_from_transcripts(self, tmp_path, fake_projects, capsys):
+        make_transcript(fake_projects, tmp_path, "aaaaaaaa-1", "Context weight", 109)
+        live = [
+            {"pid": 1, "sessionId": "live-1", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 2, "sessionId": "live-2", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        self._boot(tmp_path, live, "q")
+        out = capsys.readouterr().err
+        assert "Context weight" in out
+        assert "109 msgs" in out
+
+    def test_a_dead_chat_is_still_offered(self, tmp_path, fake_projects, capsys):
+        """The whole point: no live process holds it, and it must still be pickable."""
+        make_transcript(fake_projects, tmp_path, "dead-chat", "The one he wanted", 61)
+        live = [
+            {"pid": 1, "sessionId": "bg-a", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        result, mock_exec = self._boot(tmp_path, live, "1")
+        cmd = mock_exec.call_args[0][3]
+        assert "--resume" in cmd and "dead-chat" in cmd
+
+    def test_bg_leftovers_are_named_leftovers_not_chats(self, tmp_path, fake_projects, capsys):
+        make_transcript(fake_projects, tmp_path, "real-chat", "A real chat", 5)
+        live = [
+            {"pid": 773292, "sessionId": "bg-a", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 773293, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        self._boot(tmp_path, live, "q")
+        out = capsys.readouterr().err
+        assert "bg leftover" in out
+        assert "not chats" in out
+
+    def test_enter_continues_the_newest_chat(self, tmp_path, fake_projects):
+        make_transcript(fake_projects, tmp_path, "older", "Older", 3, age_seconds=9000)
+        make_transcript(fake_projects, tmp_path, "newest", "Newest", 4)
+        live = [
+            {"pid": 1, "sessionId": "bg-a", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        result, mock_exec = self._boot(tmp_path, live, "")
+        cmd = mock_exec.call_args[0][3]
+        assert "newest" in cmd
+
+    def test_a_held_chat_attaches_it_does_not_spawn_a_second_brain(self, tmp_path, fake_projects):
+        """One-brain at the one place a hand can break it: --resume against a
+        held sessionId is exactly what put two PIDs on e4cd682a."""
+        make_transcript(fake_projects, tmp_path, "held-chat", "Held", 12)
+        live = [
+            {"pid": 4242, "sessionId": "held-chat", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 4243, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        with patch.object(session_boot, "_resume_session", return_value={"exit_code": 0}) as mock_resume:
+            result, mock_exec = self._boot(tmp_path, live, "1")
+        mock_resume.assert_called_once()
+        assert mock_resume.call_args[0][0]["pid"] == 4242
+        mock_exec.assert_not_called()
+
+    def test_a_live_seats_chat_outside_the_window_is_still_reachable(self, tmp_path, fake_projects, capsys):
+        """Showing the process while hiding the only door into it would repeat
+        the defect in miniature."""
+        make_transcript(fake_projects, fake_projects.parent, "x", "unrelated", 1)
+        make_transcript(fake_projects, tmp_path, "ancient-held", "Ancient held chat", 8, age_seconds=999999)
+        for i in range(session_boot._CHAT_LIMIT):
+            make_transcript(fake_projects, tmp_path, f"recent-{i}", f"Recent {i}", 2, age_seconds=i)
+        live = [
+            {"pid": 9, "sessionId": "ancient-held", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 10, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        self._boot(tmp_path, live, "q")
+        assert "Ancient held chat" in capsys.readouterr().err
+
+    def test_no_transcripts_still_offers_continue_last(self, tmp_path, fake_projects):
+        """--continue is the fallback, never a dead end."""
+        live = [
+            {"pid": 1, "sessionId": "bg-a", "cwd": str(tmp_path), "kind": "bg"},
+            {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        result, mock_exec = self._boot(tmp_path, live, "")
+        assert "--continue" in mock_exec.call_args[0][3]
+
+
+class TestChatLine:
+    def test_untitled_chat_says_so(self):
+        assert "(untitled)" in session_boot._chat_line({"title": "", "messages": 3, "modified": 0})
+
+    def test_minutes_under_an_hour(self):
+        assert session_boot._chat_age(time.time() - 300) == "5m ago"
+
+    def test_hours_and_minutes(self):
+        assert session_boot._chat_age(time.time() - 7500).startswith("2h")
+
+    def test_days(self):
+        assert session_boot._chat_age(time.time() - 200000) == "2d ago"
+
+
+class TestVersionDrift:
+    """The auto-updater self-ran from a process that started before
+    DISABLE_AUTOUPDATER was set and moved 234 -> 235 under us. Drift is silent
+    by nature; this is the line that makes it not."""
+
+    def test_warns_when_running_differs_from_pinned(self, capsys):
+        with (
+            patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
+            patch.object(session_boot, "_running_cli_version", return_value="2.1.235"),
+        ):
+            got = session_boot._warn_on_version_drift("/usr/local/bin/claude")
+        err = capsys.readouterr().err
+        assert got == "2.1.235"
+        assert "2.1.228" in err and "2.1.235" in err
+        assert "DRIFT" in err.upper()
+
+    def test_names_the_repin_command(self, capsys):
+        """A warning that does not say how to fix it gets ignored twice."""
+        with (
+            patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
+            patch.object(session_boot, "_running_cli_version", return_value="2.1.235"),
+        ):
+            session_boot._warn_on_version_drift("/usr/local/bin/claude")
+        assert "ln -sfn" in capsys.readouterr().err
+
+    def test_silent_when_versions_match(self, capsys):
+        with (
+            patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
+            patch.object(session_boot, "_running_cli_version", return_value="2.1.228"),
+        ):
+            assert session_boot._warn_on_version_drift("/usr/local/bin/claude") == ""
+        assert capsys.readouterr().err == ""
+
+    def test_no_pin_means_no_opinion(self, capsys):
+        """An unpinned repo must not nag — and must not call the binary."""
+        with (
+            patch.object(session_boot, "_pinned_cli_version", return_value=""),
+            patch.object(session_boot, "_running_cli_version") as mock_run,
+        ):
+            assert session_boot._warn_on_version_drift("/usr/local/bin/claude") == ""
+        mock_run.assert_not_called()
+        assert capsys.readouterr().err == ""
+
+    def test_unreadable_binary_is_silence_not_a_false_alarm(self, capsys):
+        with (
+            patch.object(session_boot, "_pinned_cli_version", return_value="2.1.228"),
+            patch.object(session_boot, "_running_cli_version", return_value=""),
+        ):
+            assert session_boot._warn_on_version_drift("/usr/local/bin/claude") == ""
+        assert capsys.readouterr().err == ""
+
+    def test_running_version_strips_the_trailing_words(self):
+        """`claude --version` answers '2.1.228 (Claude Code)'."""
+        completed = MagicMock(stdout="2.1.228 (Claude Code)\n")
+        with patch.object(session_boot.subprocess, "run", return_value=completed):
+            assert session_boot._running_cli_version("/usr/local/bin/claude") == "2.1.228"
+
+    def test_missing_binary_is_empty_not_an_exception(self):
+        with patch.object(session_boot.subprocess, "run", side_effect=OSError("no such file")):
+            assert session_boot._running_cli_version("/nope/claude") == ""
+
+    def test_pin_lives_in_the_tracked_manifest(self):
+        """The pin must ship with a clone — a personal settings file could not
+        be reviewed and would not travel."""
+        manifest = session_boot._find_manifest()
+        assert manifest is not None, "provider_manifest.json not found from this file"
+        assert manifest.parts[-2:] == (".claude", "provider_manifest.json")
+        assert session_boot._pinned_cli_version() != ""
+
+    def test_broken_manifest_is_no_pin_not_a_crash(self, tmp_path, monkeypatch):
+        broken = tmp_path / "provider_manifest.json"
+        broken.write_text("{ not json", encoding="utf-8")
+        monkeypatch.setattr(session_boot, "_find_manifest", lambda: broken)
+        assert session_boot._pinned_cli_version() == ""
+
+    def test_boot_warns_before_the_menu(self, tmp_path):
+        """The line must land where a human is already looking."""
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_warn_on_version_drift", return_value="2.1.235") as mock_warn,
+            patch.object(session_boot, "_read_choice", return_value="q"),
+        ):
+            session_boot.boot(cwd=str(tmp_path))
+        mock_warn.assert_called_once()
+
+
+class TestTmuxLookupsSurviveAMachineWithoutTmux:
+    """A missing tmux is a fact about the world, not a crash. _describe_process
+    put _find_tmux_session_for_pid on the menu render path, so an unguarded
+    call took the whole menu down on every host without tmux."""
+
+    def test_find_session_for_pid_answers_none_when_tmux_is_absent(self):
+        with patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")):
+            assert session_boot._find_tmux_session_for_pid(1234) is None
+
+    def test_session_exists_answers_false_when_tmux_is_absent(self):
+        with patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")):
+            assert session_boot._tmux_session_exists("hooks") is False
+
+    def test_a_hung_tmux_does_not_hang_the_menu(self):
+        with patch.object(
+            session_boot.subprocess, "run", side_effect=session_boot.subprocess.TimeoutExpired("tmux", 5)
+        ):
+            assert session_boot._find_tmux_session_for_pid(1234) is None
+            assert session_boot._tmux_session_exists("hooks") is False
+
+    def test_the_menu_still_renders_without_tmux(self, tmp_path, fake_projects, capsys):
+        """The failure that mattered: the whole menu, not one label."""
+        make_transcript(fake_projects, tmp_path, "chat-1", "A chat", 4)
+        live = [
+            {"pid": 1, "sessionId": "s1", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 2, "sessionId": "s2", "cwd": str(tmp_path), "kind": "interactive"},
+        ]
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            # tmux resolves (boot requires it) but every tmux CALL fails —
+            # the shape of a host where the binary is stale or sandboxed away.
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_warn_on_version_drift", return_value=""),
+            patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
+            patch.object(session_boot, "_read_choice", return_value="q"),
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        out = capsys.readouterr().err
+        assert result["action"] == "quit"
+        assert "A chat" in out
+        assert "no tmux" in out

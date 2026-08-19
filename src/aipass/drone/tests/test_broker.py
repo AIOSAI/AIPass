@@ -853,3 +853,97 @@ class TestRmBrokerRouting:
         assert not target.exists()
 
         client_sock.close()
+
+
+# ---------------------------------------------------------------------------
+# The broker is drone's OTHER delete lane — it feeds the same deletion record
+#
+# Patrick's ruling was "if something deletes, there should be a record of it",
+# not "if drone rm deletes". The broker performs its own rmtree/unlink, so a
+# record wired only into rm_handler would have a hole exactly the size of the
+# sandboxed lane. Its protocol audit log stays as it was: that records requests
+# and error codes, this records deletions, and they are not the same question.
+# ---------------------------------------------------------------------------
+
+
+class TestBrokerFeedsDeletionRecord:
+    @staticmethod
+    def _records() -> list[dict]:
+        from aipass.drone.apps.handlers import deletion_log
+
+        log = deletion_log.deletion_log_path()
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def test_broker_delete_is_recorded(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        target = repo_root / "src" / "aipass" / "testbranch" / "deleteme.txt"
+        resp = _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(op="delete", path="deleteme.txt", request_id="rec1"),
+        )
+        assert resp.ok is True
+        assert not target.exists()
+
+        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        assert len(deletions) == 1
+        assert deletions[0]["lane"] == "broker"
+        assert deletions[0]["path"] == str(target.resolve())
+
+    def test_broker_record_names_the_authenticated_requester(
+        self, running_broker: BrokerDaemon, repo_root: Path
+    ) -> None:
+        """Not the daemon's cwd — the broker deletes on someone else's behalf."""
+        _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(op="delete", path="deleteme.txt", request_id="rec2"),
+        )
+
+        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        assert deletions[0]["caller"] == "testbranch"
+
+    def test_broker_measures_before_deleting(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        target = repo_root / "src" / "aipass" / "testbranch" / "deleteme.txt"
+        expected = target.stat().st_size
+
+        _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(op="delete", path="deleteme.txt", request_id="rec3"),
+        )
+
+        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        assert deletions[0]["kind"] == "file"
+        assert deletions[0]["size_bytes"] == expected
+
+    def test_broker_denylist_refusal_is_recorded(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        resp = _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(op="delete", path=".trinity", request_id="rec4"),
+        )
+        assert resp.ok is False
+
+        refusals = [r for r in self._records() if r["outcome"] == "refused"]
+        assert refusals, "a blocked broker delete left no record"
+        assert refusals[-1]["lane"] == "broker"
+        assert refusals[-1]["caller"] == "testbranch"
+
+    def test_broker_out_of_scope_refusal_is_recorded(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        """Sibling branch: allowed for nobody but devpulse, and still recorded."""
+        resp = _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(
+                op="delete",
+                path=str(repo_root / "src" / "aipass" / "sibling" / "important.txt"),
+                request_id="rec5",
+            ),
+        )
+        assert resp.ok is False
+
+        refusals = [r for r in self._records() if r["outcome"] == "refused"]
+        assert refusals, "an out-of-scope broker delete left no record"
+        assert refusals[-1]["caller"] == "testbranch"

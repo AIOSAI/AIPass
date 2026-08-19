@@ -298,6 +298,59 @@ class TestMain:
         assert result == 0
         mod.handle_command.assert_called_once_with("help", [])
 
+    def test_trailing_help_after_positional_shows_help(self) -> None:
+        """`aipass trust <path> --help` prints help — it must NOT run the verb.
+
+        Regression (APLAN-0018): the guard only inspected args[0] of the
+        remainder, so a trailing --help fell through to the module and
+        executed a write — `trust <dir> --help` enrolled the directory.
+        """
+        mod = MagicMock()
+        mod.handle_command.return_value = True
+        mod.__name__ = "aipass.aipass.apps.modules.trust"
+        mod.COMMAND = "trust"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "trust", "/some/path", "--help"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        assert result == 0
+        mod.handle_command.assert_called_once_with("trust", ["--help"])
+
+    def test_trailing_h_after_positional_shows_help(self) -> None:
+        """The short `-h` form is intercepted in the same position-free way."""
+        mod = MagicMock()
+        mod.handle_command.return_value = True
+        mod.__name__ = "aipass.aipass.apps.modules.init_flow"
+        mod.COMMAND = "init"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "init", "agent", "-h"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        assert result == 0
+        mod.handle_command.assert_called_once_with("init", ["--help"])
+
+    def test_help_between_flags_shows_help(self) -> None:
+        """--help wins from any position, not just first or last."""
+        mod = MagicMock()
+        mod.handle_command.return_value = True
+        mod.__name__ = "aipass.aipass.apps.modules.new_project"
+        mod.COMMAND = "new"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "new", "app", "--help", "--template", "python"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        assert result == 0
+        mod.handle_command.assert_called_once_with("new", ["--help"])
+
+    def test_trailing_help_unknown_command_reports_unknown(self) -> None:
+        """A trailing --help on an unroutable command still errors, not silently 0."""
+        mod = MagicMock()
+        mod.handle_command.return_value = False
+        mod.__name__ = "aipass.aipass.apps.modules.trust"
+        mod.COMMAND = "trust"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "nosuch", "arg", "--help"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                with patch("aipass.aipass.apps.aipass.console"):
+                    result = main()
+        assert result == 1
+
     def test_introspection_shows_public_commands(self) -> None:
         """Introspection lists modules with COMMAND in _PUBLIC_COMMANDS."""
         mod = types.ModuleType("aipass.aipass.apps.modules.help_chat")

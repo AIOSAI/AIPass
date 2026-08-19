@@ -8,7 +8,7 @@
     "cli": {
       "entry_point": "aipass.cli.apps.cli",
       "description": "Universal Display & Output Service Provider",
-      "version": "2.0.0"
+      "version": "2.1.0"
     },
     "spawn": {
       "entry_point": "aipass.spawn.apps.spawn",

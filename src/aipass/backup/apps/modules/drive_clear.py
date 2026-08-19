@@ -83,7 +83,12 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # Screen the WHOLE sequence, not just args[0]. This module has a
+    # standalone __main__ entry that never reaches the router's help
+    # normalisation, so a trailing flag used to fall through and run the
+    # verb for real. Bare "help" stays first-position-only: later
+    # positions are user values (filenames), not flags.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
 

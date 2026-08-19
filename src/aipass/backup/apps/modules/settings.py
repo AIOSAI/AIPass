@@ -22,7 +22,7 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, warning
 from aipass.backup.apps.handlers.json import json_handler
 
 
@@ -56,8 +56,12 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    logger.info(f"[backup] {MODULE_NAME} stub invoked with args={args} — awaiting Phase 3")
+    # Say it out loud. Logging to file and exiting 0 reads as success to the
+    # caller, which is the one thing a deferred command must never do.
+    logger.warning(f"[backup] {MODULE_NAME} stub invoked with args={args} — awaiting Phase 3")
     json_handler.log_operation(f"{MODULE_NAME}_stub_invoked", {"args": args})
+    warning(f"{PRIMARY_COMMAND} is not implemented — the settings UI is deferred (Phase 3)")
+    console.print("[dim]Edit .backup/config.json in the project directly for now.[/dim]")
     return True
 
 

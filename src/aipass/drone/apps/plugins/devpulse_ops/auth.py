@@ -24,6 +24,7 @@ from typing import NamedTuple
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
 from aipass.drone.apps.modules.registry import (
     RegistryMismatchError,
     get_registry_path,
@@ -32,7 +33,19 @@ from aipass.drone.apps.modules.registry import (
 
 GIT_ACCESS_TIERS: dict[str, dict] = {
     "global": {
-        "commands": ["status", "diff", "log", "lock", "issue", "run", "workflow", "branches", "tag-list"],
+        "commands": [
+            "status",
+            "diff",
+            "log",
+            "show",
+            "remote",
+            "lock",
+            "issue",
+            "run",
+            "workflow",
+            "branches",
+            "tag-list",
+        ],
         "description": "Read-only — available to all branches",
     },
     "owner": {
@@ -48,6 +61,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "pr",
             "close-pr",
             "delete-branch",
+            "prune-temp",
             "tag",
         ],
         "description": "Write operations — the project's own manager only",
@@ -76,12 +90,13 @@ _AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
 # Owner-tier verbs that encode AIPass's OWN dev→PR→main flow: they assume a `dev`
 # branch, our PR conventions, or pyproject versioning. Against an arbitrary project
 # repo they would half-run and leave a mess, so they refuse honestly until
-# translated (DPLAN-0281 P1 scope is commit + sync working for a manager at home).
-_AIPASS_FLOW_VERBS = frozenset({"dev-pr", "pr", "close-pr", "merge", "smart-sync", "fix", "tag", "delete-branch"})
+# translated. `commit` and `sync` translated in DPLAN-0281 P2; `tag` in DPLAN-0290
+# item 1 — an external seat tags its own HEAD, so it is no longer on this list.
+_AIPASS_FLOW_VERBS = frozenset({"dev-pr", "pr", "close-pr", "merge", "smart-sync", "fix", "delete-branch"})
 
-# The framework repo's own registry filename. A repo whose registry is named
-# anything else is an external project consuming AIPass as a service.
-_AIPASS_REGISTRY_NAME = "AIPASS_REGISTRY.json"
+# Verbs that DO work from an external seat, named in the refusal so a manager who
+# hits one of the above learns what they can use instead of guessing.
+_TRANSLATED_VERBS = "'commit', 'sync' and 'tag'"
 
 
 # Real git verbs drone deliberately does not expose — staging and remote work are
@@ -274,10 +289,10 @@ def _owner_tier_refusal(command: str, caller: Caller) -> str | None:
             f"binds that name to {recorded} — a passport outside its recorded home proves nothing"
         )
 
-    if registry_path.name != _AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
+    if registry_path.name != AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
         return (
             f"'{command}' encodes AIPass's own dev→PR→main flow and is not translated for "
-            f"external repos yet — 'commit' and 'sync' work here today (DPLAN-0281 P2)"
+            f"external repos yet — {_TRANSLATED_VERBS} work here today (DPLAN-0281 P2, DPLAN-0290)"
         )
 
     return None

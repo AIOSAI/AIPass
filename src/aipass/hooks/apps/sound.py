@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Shared sound utilities — Piper TTS and WAV playback with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-08-18
 # =============================================
 
 """Shared sound functions for hook handlers. Checks mute flag before playing."""
@@ -37,6 +37,35 @@ def print_introspection():
 def is_muted() -> bool:
     """Check whether hook sounds are currently muted."""
     return MUTE_FLAG.exists()
+
+
+def mute() -> bool:
+    """Mute all hook sounds. Idempotent.
+
+    Returns:
+        The resulting muted state — always True, so a caller can flip and
+        verify in one call instead of writing then reading back.
+
+    Note:
+        Exported so callers stop shelling out to `drone @hooks hooksound off`
+        just to flip a flag (@api asked; their words were "I would rather that
+        than shell out"). This module owns MUTE_FLAG, so the write belongs
+        beside the read that already lived here.
+    """
+    MUTE_FLAG.touch()
+    logger.info("[HOOKS] sound: muted")
+    return True
+
+
+def unmute() -> bool:
+    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted.
+
+    Returns:
+        The resulting muted state — always False, mirroring mute().
+    """
+    MUTE_FLAG.unlink(missing_ok=True)
+    logger.info("[HOOKS] sound: unmuted")
+    return False
 
 
 def speak(text: str) -> None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-29
-# Modified: 2026-07-29
+# Modified: 2026-08-16
 # =============================================
 
 """
@@ -29,6 +29,14 @@ never again require a manual JSON edit:
    create_plan_impl) — so a type with no recent creates could sit on a
    stale open row indefinitely. Now every scan closes these directly,
    for every registered type, regardless of create activity.
+5. Orphan location — a row whose recorded location is not where its
+   citizen lives: a ghost path left by an old branch move, or a project
+   root holding records that belong to the seat inside it. Ruling of
+   2026-08-16 (Patrick, via @devpulse): stale paths are expected debris
+   because branches get tested and moved constantly, so hand-editing the
+   JSON is the wrong fix — it does not stick while code still writes the
+   stale value. The healer handles the class instead, and a row it cannot
+   attribute on evidence is quarantined for a human rather than guessed.
 
 Guarantees:
 - On-disk .md files are NEVER renamed, moved or deleted here. Only
@@ -44,7 +52,8 @@ Usage:
     )
 
     result = heal_registry_doctrine_impl(ecosystem_root=REPO_ROOT)
-    # result -> {"healed": [...], "healed_count": 3}
+    # result -> {"healed": [...], "healed_count": 3,
+    #            "quarantined": [...], "quarantined_count": 0}
 """
 
 import os
@@ -437,6 +446,295 @@ def _heal_wrong_prefix_rows(
 # =============================================
 
 
+# =============================================
+# CASE 5 — ORPHAN LOCATION (ghost paths, root/seat misfiles)
+# =============================================
+
+
+def _find_repo_root() -> Path:
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
+def _is_citizen_seat(path: Path) -> bool:
+    """A seat is a directory carrying a passport. Nothing else is a citizen."""
+    return (path / ".trinity" / "passport.json").is_file()
+
+
+def _project_root(path: Path) -> Path | None:
+    """Nearest ancestor holding a .git directory, or None."""
+    for parent in [path] + list(path.parents):
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _citizen_seat_index() -> Dict[str, List[Path]]:
+    """Index live citizen seats by directory name.
+
+    Two sources, both evidence rather than assumption: the ecosystem registry
+    (authoritative for AIPass citizens) and the locations already recorded in
+    the plan registries (which is how citizens living in other repos — vera,
+    baud, speakeasy — are known at all). A path only counts once it carries a
+    passport, so a project root that merely contains a citizen never qualifies.
+
+    Returns:
+        Mapping of directory name -> list of live seat paths with that name
+    """
+    repo_root = _find_repo_root()
+    candidates: set[Path] = set()
+
+    registry_file = repo_root / "AIPASS_REGISTRY.json"
+    if registry_file.is_file():
+        try:
+            import json
+
+            data = json.loads(registry_file.read_text(encoding="utf-8"))
+            for branch in data.get("branches", []):
+                rel = branch.get("path", "")
+                if rel:
+                    candidates.add((repo_root / rel).resolve())
+        except Exception as exc:
+            logger.warning(f"[{MODULE_NAME}] Could not read ecosystem registry for seat index: {exc}")
+
+    types = _load_template_registry().get("types", {})
+    for config in types.values():
+        prefix = config.get("prefix", "")
+        if not prefix:
+            continue
+        try:
+            registry = load_registry(f"{prefix.lower()}_registry.json")
+        except Exception as exc:
+            # A seat index built from fewer registries can only under-attribute,
+            # which quarantines rather than mis-heals — but say so out loud.
+            logger.warning(
+                f"[{MODULE_NAME}] Could not read '{prefix.lower()}_registry.json' for the seat index; "
+                f"citizens known only from it may be quarantined this run: {exc}"
+            )
+            continue
+        for row in registry.get("plans", {}).values():
+            location = row.get("location", "")
+            if location:
+                candidates.add(Path(location))
+
+    index: Dict[str, List[Path]] = {}
+    for path in candidates:
+        if _is_citizen_seat(path):
+            index.setdefault(path.name, []).append(path)
+    return index
+
+
+def _seats_beneath(location: Path, seats: Dict[str, List[Path]]) -> List[Path]:
+    """Live citizen seats living strictly below a directory."""
+    return [seat for group in seats.values() for seat in group if location in seat.parents]
+
+
+def _is_orphan_location(location: Path, seats: Dict[str, List[Path]]) -> bool:
+    """Decide whether a recorded location is orphaned.
+
+    Two precise signals, deliberately not "anything that is not a seat" — a
+    plan filed at the repo root or in a subdirectory of a citizen is a normal
+    filing, not debris, and sweeping those into the refusal lane would bury the
+    real orphans in 30 rows of noise nobody reads.
+
+      1. The path is gone from disk — a ghost left by an old move.
+      2. The path exists, is not itself a seat, and holds exactly ONE citizen
+         seat beneath it — records filed at a project root that belong to the
+         seat inside it (the baud root/seat pair). A directory holding several
+         seats is a container, not a misfile, and is left alone.
+
+    Args:
+        location: Location recorded on the plan row
+        seats: Live seat index from _citizen_seat_index()
+
+    Returns:
+        True when the row needs re-attribution or a human ruling
+    """
+    if not location.exists():
+        return True
+    if _is_citizen_seat(location):
+        return False
+    return len(_seats_beneath(location, seats)) == 1
+
+
+def _attribute_orphan(location: Path, seats: Dict[str, List[Path]]) -> Tuple[Path | None, str]:
+    """Decide which live citizen an orphaned location belongs to.
+
+    Heals only on evidence: exactly one live seat shares the orphan's directory
+    name, AND the orphan sits inside that seat's repository. A bare name match
+    across repos is a coincidence, not an identity, so it is refused.
+
+    Args:
+        location: The orphaned location recorded on the plan row
+        seats: Live seat index from _citizen_seat_index()
+
+    Returns:
+        (seat, "") when attributable, else (None, reason for quarantine)
+    """
+    # Containment is the strongest evidence there is: a directory holding
+    # exactly one seat is that citizen's own ground, whatever it is called.
+    enclosed = _seats_beneath(location, seats)
+    if len(enclosed) == 1:
+        return enclosed[0], ""
+
+    matches = seats.get(location.name, [])
+    if not matches:
+        return None, f"no live citizen named '{location.name}'"
+    if len(matches) > 1:
+        return None, f"{len(matches)} live citizens named '{location.name}' — ambiguous"
+
+    seat = matches[0]
+    root = _project_root(seat)
+    if root is None:
+        return None, f"cannot establish the repository of seat '{seat}'"
+    if root not in location.parents and location != root:
+        return None, f"orphan lies outside the repository of citizen '{location.name}'"
+    return seat, ""
+
+
+def _heal_orphan_locations(
+    types: Dict[str, Any],
+    load_registry_fn: Callable[..., Dict[str, Any]],
+    save_registry_fn: Callable[..., bool],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Re-attribute plan rows whose location is not a live citizen seat.
+
+    Stale paths are expected debris — branches get moved and re-seated — so
+    this heals the class rather than the instance (ruling 2026-08-16). An
+    orphan is a row whose location is not a seat: either gone from disk (a
+    ghost path from an old move) or present without a passport (a project root
+    holding records that belong to the seat beneath it).
+
+    Rows are never deleted and locations are never guessed. Anything that
+    cannot be attributed on evidence is returned for quarantine so a human can
+    rule on it, and stays exactly where it is meanwhile.
+
+    Args:
+        types: Registered plan types from the template registry
+        load_registry_fn: Registry loader (injected)
+        save_registry_fn: Registry saver (injected)
+
+    Returns:
+        (heal actions, quarantined rows)
+    """
+    seats = _citizen_seat_index()
+    actions: List[Dict[str, Any]] = []
+    quarantined: List[Dict[str, Any]] = []
+
+    for _type_key, config in sorted(types.items()):
+        prefix = config.get("prefix", "")
+        if not prefix:
+            continue
+        registry_file = f"{prefix.lower()}_registry.json"
+        registry = load_registry_fn(registry_file)
+        plans = registry.get("plans", {})
+        dirty = False
+
+        for number, row in plans.items():
+            plan_id = f"{prefix}-{str(number).zfill(4)}"
+            raw_location = row.get("location", "")
+            if not raw_location:
+                quarantined.append(
+                    {"plan_id": plan_id, "registry": registry_file, "location": "", "reason": "no location recorded"}
+                )
+                continue
+
+            location = Path(raw_location)
+            if not _is_orphan_location(location, seats):
+                continue
+
+            seat, reason = _attribute_orphan(location, seats)
+            if seat is None:
+                quarantined.append(
+                    {"plan_id": plan_id, "registry": registry_file, "location": raw_location, "reason": reason}
+                )
+                continue
+
+            row["location"] = str(seat)
+            # Keep the row internally consistent — a half-moved record is worse
+            # than an un-moved one.
+            for key in ("file_path", "relative_path"):
+                value = row.get(key, "")
+                if value and str(value).startswith(raw_location):
+                    row[key] = str(value).replace(raw_location, str(seat), 1)
+            dirty = True
+            actions.append(
+                {
+                    "action": "orphan_location_reattributed",
+                    "plan_id": plan_id,
+                    "prefix": prefix,
+                    "number": str(number).zfill(4),
+                    "registry": registry_file,
+                    "from": raw_location,
+                    "to": str(seat),
+                }
+            )
+            logger.info(f"[{MODULE_NAME}] {plan_id}: location re-attributed {raw_location} -> {seat}")
+
+        if dirty:
+            save_registry_fn(registry, registry_file)
+
+    if quarantined:
+        logger.warning(
+            f"[{MODULE_NAME}] {len(quarantined)} plan row(s) quarantined — location not attributable to any "
+            f"live citizen. Surfaced by 'drone @flow registry status'; nothing was written for these."
+        )
+
+    return actions, quarantined
+
+
+def find_quarantined_locations(
+    load_registry_fn: Callable[..., Dict[str, Any]] = load_registry,
+) -> List[Dict[str, Any]]:
+    """List plan rows whose location cannot be attributed to a live citizen.
+
+    Read-only by construction — status output must never write, so this shares
+    the attribution rule with the healer but not its registry writes.
+
+    Args:
+        load_registry_fn: Registry loader (injected, defaults to the real one)
+
+    Returns:
+        Quarantined row descriptors awaiting a human ruling
+    """
+    seats = _citizen_seat_index()
+    types = _load_template_registry().get("types", {})
+    quarantined: List[Dict[str, Any]] = []
+
+    for _type_key, config in sorted(types.items()):
+        prefix = config.get("prefix", "")
+        if not prefix:
+            continue
+        registry_file = f"{prefix.lower()}_registry.json"
+        try:
+            registry = load_registry_fn(registry_file)
+        except Exception as exc:
+            logger.warning(f"[{MODULE_NAME}] Could not read '{registry_file}' for quarantine list: {exc}")
+            continue
+
+        for number, row in registry.get("plans", {}).items():
+            plan_id = f"{prefix}-{str(number).zfill(4)}"
+            raw_location = row.get("location", "")
+            if not raw_location:
+                quarantined.append(
+                    {"plan_id": plan_id, "registry": registry_file, "location": "", "reason": "no location recorded"}
+                )
+                continue
+            location = Path(raw_location)
+            if not _is_orphan_location(location, seats):
+                continue
+            seat, reason = _attribute_orphan(location, seats)
+            if seat is None:
+                quarantined.append(
+                    {"plan_id": plan_id, "registry": registry_file, "location": raw_location, "reason": reason}
+                )
+
+    return quarantined
+
+
 def heal_registry_doctrine_impl(
     ecosystem_root: Path,
     load_registry_fn: Callable[..., Dict[str, Any]] = load_registry,
@@ -487,6 +785,13 @@ def heal_registry_doctrine_impl(
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Wrong-prefix sweep failed: {e}")
 
+    quarantined: List[Dict[str, Any]] = []
+    try:
+        orphan_actions, quarantined = _heal_orphan_locations(types, load_registry_fn, save_registry_fn)
+        actions.extend(orphan_actions)
+    except Exception as e:
+        logger.error(f"[{MODULE_NAME}] Orphan-location sweep failed: {e}")
+
     by_action: Dict[str, int] = {}
     for entry in actions:
         name = entry.get("action", "unknown")
@@ -500,8 +805,14 @@ def heal_registry_doctrine_impl(
         {
             "total_heals": len(actions),
             "by_action": by_action,
+            "quarantined": len(quarantined),
             "success": True,
         },
     )
 
-    return {"healed": actions, "healed_count": len(actions)}
+    return {
+        "healed": actions,
+        "healed_count": len(actions),
+        "quarantined": quarantined,
+        "quarantined_count": len(quarantined),
+    }

@@ -48,6 +48,7 @@ from aipass.prax.apps.handlers.monitoring.telegram_relay import (
     is_relay_enabled_by_env,
 )
 from aipass.prax.apps.handlers.monitoring.pid_cache import get_pid_for_branch as _get_pid_for_branch
+from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 import json as _json
 
@@ -165,8 +166,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Help intercept
-    if args[0] in ("--help", "-h", "help"):
+    # Help intercept. A dashed flag ANYWHERE wins: `run -h` reached _dispatch_run
+    # and STARTED a live Mission Control — a question must never start or stop a
+    # monitor. The bare word is deliberately position-0 only, because branch
+    # names are free text and `run help` scopes to a branch called help.
+    # After the ownership check above — prax.py tries modules in turn, so a
+    # top-of-function scan would let monitor answer log-audit's --help.
+    if wants_help(args):
         print_help()
         return True
 
@@ -782,6 +788,12 @@ if __name__ == "__main__":
     # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
+        sys.exit(0)
+
+    # Screened before argparse: add_help=False declares only --help, so `-h`
+    # fell through to parse_known_args' passthrough and reached the run path.
+    if wants_help(sys.argv[1:]):
+        print_help()
         sys.exit(0)
 
     # Parse command line arguments

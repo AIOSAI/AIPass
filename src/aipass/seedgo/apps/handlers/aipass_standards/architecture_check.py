@@ -37,6 +37,9 @@ PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> seedgo/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
 
+# Template subtrees that are local-only and therefore never scored — see _is_local_only()
+LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
+
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
@@ -348,6 +351,26 @@ def _should_ignore(item: Path, ignore_config: Dict) -> bool:
     return False
 
 
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored signpost lines for the architecture standard.
+
+    The template baseline needs .trinity/passport.json to resolve a citizen
+    class, and .trinity/ is permanently gitignored — so in a clean checkout or
+    in CI the baseline cannot run at all. Announcing that on the audit's info
+    channel keeps a skipped check visible instead of letting it vanish, while
+    never failing a branch whose checkout is legitimately clean. Returns plain
+    strings on the info channel, so it can never reach a score by construction.
+    """
+    passport = Path(branch_path) / ".trinity" / "passport.json"
+    if passport.exists():
+        return []
+    return [
+        f"{Path(branch_path).name}: template baseline skipped — .trinity/passport.json absent "
+        "(expected in a clean checkout / CI). Branch structure was not compared against its "
+        "spawn template."
+    ]
+
+
 def _get_citizen_class(branch_path: Path) -> Optional[str]:
     """Read citizen_class from branch's .trinity/passport.json"""
     passport = branch_path / ".trinity" / "passport.json"
@@ -386,6 +409,19 @@ def _scan_template(template_path: Path) -> Dict:
             structure["files"].append(relative)
 
     return structure
+
+
+def _is_local_only(template_relative: str) -> bool:
+    """True when a template path belongs to a gitignored, local-only subtree.
+
+    .trinity/ is permanently gitignored — agent memory is local-only and never
+    shipped. Scoring its contents would demand a branch commit exactly what it
+    must not. The directory itself is excluded too: the baseline only runs once
+    .trinity/passport.json has been read, so a ".trinity/ exists" check could
+    never fail and would only pad the denominator with a guaranteed pass.
+    """
+    parts = Path(template_relative).parts
+    return bool(parts) and parts[0] in LOCAL_ONLY_TEMPLATE_ROOTS
 
 
 def _transform_path(template_relative: str, branch_name: str) -> str:
@@ -487,6 +523,8 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
 
     # Check directories
     for template_dir in template_structure["directories"]:
+        if _is_local_only(template_dir):
+            continue
         expected = _transform_path(template_dir, branch_name)
         full = branch_path / expected
 
@@ -508,6 +546,8 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
 
     # Check files
     for template_file in template_structure["files"]:
+        if _is_local_only(template_file):
+            continue
         expected = _transform_path(template_file, branch_name)
         full = branch_path / expected
 

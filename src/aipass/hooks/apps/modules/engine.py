@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-08-04
+# Modified: 2026-08-16
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
 
 CONSOLE = err_console
@@ -385,6 +386,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         # Exit code 2: crash vs intentional block
         if result["exit_code"] == 2:
             is_intentional_block = False
+            decision: dict = {}
             try:
                 decision = json.loads(result["stdout"]) if result["stdout"].strip() else {}
                 is_intentional_block = decision.get("decision") == "block"
@@ -393,7 +395,27 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
             if is_intentional_block:
                 total_ms = (time.monotonic() - total_start) * 1000
-                logger.warning("[HOOKS] %s BLOCKED by %s (%dms)", event_type, hook_name, total_ms)
+                # INFO, not WARNING: a gate that blocks is the gate WORKING — the branch
+                # above is literally is_intentional_block, and the crash case below is the
+                # one that signals something wrong. Measured before reclassing: 373 blocks
+                # spread over all 10 logged days, every working day, not one stuck session.
+                # INFO still lands in the log file, so the record survives; it just stops
+                # escalating into @trigger digests. The reason rides along because neither
+                # severity is diagnostic without knowing WHAT was blocked.
+                #
+                # "dispatch", not "gate": total_start is set before the whole hook loop, so
+                # this is every PreToolUse hook that ran up to the block, summed — NOT this
+                # gate's cost. Measured: pre_edit_gate's own elapsed_ms is median 4ms / p90
+                # 123ms, while total here is median 1076ms / p90 4045ms. The old wording
+                # read as gate latency and sent a 3305ms sample to the wrong owner.
+                block_reason = str(decision.get("reason", "")).strip().splitlines()
+                logger.info(
+                    "[HOOKS] %s blocked by %s (%dms dispatch): %s",
+                    event_type,
+                    hook_name,
+                    total_ms,
+                    block_reason[0][:160] if block_reason else "no reason given",
+                )
                 _log(
                     {
                         "ts": time.time(),
@@ -481,6 +503,12 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "log":
+        if wants_help(args):
+            CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
+            CONSOLE.print()
+            CONSOLE.print("  drone @hooks log       Tail recent hook activity")
+            return True
+
         lines = tail_log(20)
         if not lines:
             CONSOLE.print("No engine log found")

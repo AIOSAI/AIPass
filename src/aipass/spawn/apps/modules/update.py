@@ -89,7 +89,9 @@ def handle_update(args: list[str]) -> int:
     """
     # Intercept --help before processing (argparse has add_help=False)
     if "--help" in args or "-h" in args:
-        warning("Usage: drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]")
+        console.print(
+            "[bold cyan]Usage:[/bold cyan] drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]"
+        )
         console.print()
         console.print("  [green]@branch[/green]           Update a single branch (uses its own class)")
         console.print("  [green]aipass_framework --all[/green]  Update all aipass_framework-class branches")
@@ -174,11 +176,12 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
     """Print a rich summary for a single branch update."""
     branch = result.get("branch", "unknown")
     success = result.get("success", False)
-    mode = "[dim](dry-run)[/dim] " if dry_run else ""
+    mode = "(dry-run) " if dry_run else ""
 
     console.print()
     if success:
-        console.print(f"[green]Update {mode}{branch}[/green]")
+        # console.print renders markup; error() writes plain text, so it gets mode bare.
+        console.print(f"[green]Update [dim]{mode}[/dim]{branch}[/green]" if mode else f"[green]Update {branch}[/green]")
     else:
         error(f"Update FAILED {mode}{branch}")
 

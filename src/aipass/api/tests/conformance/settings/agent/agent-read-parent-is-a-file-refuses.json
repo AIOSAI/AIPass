@@ -1,0 +1,32 @@
+{
+  "description": "A FILE standing where the parent directory belongs is a broken tree, not a fresh branch. Reading it blank would invite a patch to write into a path that cannot hold a document. PLATFORM DIVERGENCE, recorded rather than papered: this refusal depends on the OS reporting a path-through-a-file as something other than a missing file. Where the OS reports it as merely missing, the missing-file-reads-blank rule cannot tell the two apart and the read answers blank. The runner MEASURES which world it is in instead of reading a platform string, and asserts the matching answer either way.",
+  "document": "agent",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "parent_is_a_file"
+  },
+  "id": "agent-read-parent-is-a-file-refuses",
+  "notes": "Divergence 2. Rust already refused; python read it blank until this corpus ruled on it.",
+  "operation": {
+    "kind": "read"
+  },
+  "platform": {
+    "expect_without": {
+      "parent_is_a_file_is_distinguishable": {
+        "outcome": "ok",
+        "view": {
+          "auto_compact_enabled": null,
+          "auto_compact_window": null,
+          "model": null
+        }
+      }
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

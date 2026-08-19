@@ -369,6 +369,64 @@ class TestCheckTemplateBaseline:
         assert result[0]["passed"] is False
         assert "citizen_class" in result[0]["message"]
 
+    def test_trinity_files_are_not_scored(self, tmp_path, monkeypatch):
+        """Files under .trinity/ are local-only memory — never scored.
+
+        .trinity/ is permanently gitignored, so requiring its contents in a
+        clone-facing structural score asks a branch to ship what it must not.
+        """
+        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+
+        templates = tmp_path / "templates"
+        template = templates / "aipass_framework"
+        (template / ".trinity").mkdir(parents=True)
+        (template / ".trinity" / "README.md").write_text("memory guide\n", encoding="utf-8")
+        (template / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        (template / "apps").mkdir()
+        (template / "apps" / "{{BRANCH}}.py").write_text('"""Entry."""\n', encoding="utf-8")
+        monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates)
+
+        branch = tmp_path / "mybranch"
+        apps_dir = branch / "apps"
+        apps_dir.mkdir(parents=True)
+        entry = apps_dir / "mybranch.py"
+        entry.write_text('"""Entry."""\n', encoding="utf-8")
+        trinity = branch / ".trinity"
+        trinity.mkdir()
+        # Branch deliberately has NO .trinity/README.md — it must not be penalised.
+        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "aipass_framework"}}', encoding="utf-8")
+
+        result = architecture_check.check_template_baseline(str(entry))
+        names = [c["name"] for c in result]
+
+        assert not any(".trinity/README.md" in n for n in names)
+        assert not any(".trinity/passport.json" in n for n in names)
+        assert all(c["passed"] for c in result), [c for c in result if not c["passed"]]
+
+    def test_skipped_baseline_announced_on_info_channel(self, tmp_path):
+        """A baseline that cannot run says so — it never vanishes silently."""
+        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+
+        branch = tmp_path / "mybranch"
+        (branch / "apps").mkdir(parents=True)
+
+        lines = architecture_check.check_branch_info(str(branch))
+        assert len(lines) == 1
+        assert "passport.json" in lines[0]
+        assert "emplate baseline" in lines[0]
+
+    def test_info_channel_silent_when_passport_present(self, tmp_path):
+        """Nothing to announce when the baseline can actually run."""
+        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+
+        branch = tmp_path / "mybranch"
+        (branch / "apps").mkdir(parents=True)
+        trinity = branch / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "aipass_framework"}}', encoding="utf-8")
+
+        assert architecture_check.check_branch_info(str(branch)) == []
+
 
 # ===========================================================================
 # 2. cli_check sub-functions

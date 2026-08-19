@@ -932,3 +932,63 @@ class TestHandleCommandNoneArgs:
         printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
         has_module = any("errors Module" in text for text in printed_texts)
         assert has_module, "Expected introspection output when args is None"
+
+
+# ---------------------------------------------------------------------------
+# help_flag_safety canary — a help flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+class TestHelpFlagSafety:
+    """A help flag past position 0 must describe, never run the subcommand."""
+
+    def test_help_flag_after_subcommand_does_not_run_it(self, monkeypatch):
+        """`errors list --help` must not execute the list query.
+
+        `list` is the read-only probe. The route target is mocked, so a
+        missing gate surfaces as a call that should not have happened.
+        """
+        from aipass.trigger.apps.modules import errors
+
+        ran = MagicMock()
+        monkeypatch.setattr(errors, "_cmd_list", ran)
+        printed = MagicMock()
+        monkeypatch.setattr(errors, "print_help", printed)
+
+        result = errors.handle_command("errors", ["list", "--help"])
+
+        assert result is True
+        printed.assert_called_once()
+        ran.assert_not_called()
+
+    def test_short_flag_after_subcommand_and_operand(self, monkeypatch):
+        """`errors list --branch api -h` — the flag is last, still explains."""
+        from aipass.trigger.apps.modules import errors
+
+        ran = MagicMock()
+        monkeypatch.setattr(errors, "_cmd_list", ran)
+        printed = MagicMock()
+        monkeypatch.setattr(errors, "print_help", printed)
+
+        result = errors.handle_command("errors", ["list", "--branch", "api", "-h"])
+
+        assert result is True
+        printed.assert_called_once()
+        ran.assert_not_called()
+
+    def test_bare_word_help_as_an_operand_is_not_a_help_request(self, monkeypatch):
+        """`errors suppress <id> help` — a reason, not a request for the manual."""
+        from aipass.trigger.apps.modules import errors
+
+        ran = MagicMock()
+        monkeypatch.setattr(errors, "_cmd_suppress", ran)
+        printed = MagicMock()
+        monkeypatch.setattr(errors, "print_help", printed)
+
+        errors.handle_command("errors", ["suppress", "abc123", "help"])
+
+        # handle_command returns the subcommand's own result here, so the
+        # proof is the call itself: the reason text was not read as a flag.
+        ran.assert_called_once()
+        assert ran.call_args[0][1] == ["abc123", "help"]
+        printed.assert_not_called()

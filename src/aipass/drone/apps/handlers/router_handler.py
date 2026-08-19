@@ -21,7 +21,7 @@ from typing import List, NamedTuple, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
-from .executor import CommandResult, execute_command
+from .executor import DEFAULT_TIMEOUT, CommandResult, execute_command
 from aipass.drone.apps.handlers.json import json_handler
 
 logger = system_logger
@@ -279,7 +279,7 @@ def execute_branch_command(
     branch_name: str,
     command: Optional[str] = None,
     args: Optional[List[str]] = None,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
     interactive: bool = False,
 ) -> CommandResult:
     """Execute a command against a branch's entry point via subprocess.

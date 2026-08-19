@@ -106,6 +106,66 @@ class TestEmptyContent:
         assert result == {}
 
 
+class TestMissingProjectRoot:
+    """A project path that does not exist must be refused, never scaffolded.
+
+    Regression: create_backup_dir already refused a non-directory (returns
+    None), but run_snapshot/run_versioned ignored that refusal and the rest of
+    the pipeline created the tree anyway -- a typo'd path produced a full
+    .backup/ scaffold plus a backup of the .backupignore it had just written,
+    and reported success.
+    """
+
+    def test_snapshot_refuses_missing_root(self, tmp_path: Path) -> None:
+        """run_snapshot on a missing path errors and writes nothing."""
+        from aipass.backup.apps.modules.snapshot import run_snapshot
+
+        missing = tmp_path / "no_such_project"
+
+        result = run_snapshot(str(missing), show_panels=False)
+
+        assert result.errors, "expected an honest error, got a clean result"
+        assert result.files_copied == 0
+        assert not missing.exists(), "refused path must not be scaffolded"
+
+    def test_versioned_refuses_missing_root(self, tmp_path: Path) -> None:
+        """run_versioned on a missing path errors and writes nothing."""
+        from aipass.backup.apps.modules.versioned import run_versioned
+
+        missing = tmp_path / "no_such_project"
+
+        result = run_versioned(str(missing), show_panels=False)
+
+        assert result.errors
+        assert result.files_copied == 0
+        assert not missing.exists()
+
+    def test_snapshot_refuses_file_as_root(self, tmp_path: Path) -> None:
+        """A file (not a directory) passed as the project root is refused."""
+        from aipass.backup.apps.modules.snapshot import run_snapshot
+
+        a_file = tmp_path / "notadir.txt"
+        a_file.write_text("x", encoding="utf-8")
+
+        result = run_snapshot(str(a_file), show_panels=False)
+
+        assert result.errors
+        assert result.files_copied == 0
+
+    def test_existing_project_still_runs(self, tmp_path: Path) -> None:
+        """Guard does not block a real project -- normal snapshot still works."""
+        from aipass.backup.apps.modules.snapshot import run_snapshot
+
+        project = tmp_path / "real_project"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
+
+        result = run_snapshot(str(project), show_panels=False)
+
+        assert not result.errors
+        assert result.files_copied >= 1
+
+
 class TestSaveErrors:
     """Error paths for save operations -- pytest.raises tokens."""
 

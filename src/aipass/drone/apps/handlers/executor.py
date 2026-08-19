@@ -21,7 +21,13 @@ from .exceptions import CommandExecutionError
 from aipass.drone.apps.handlers.json import json_handler
 
 
-DEFAULT_TIMEOUT = 30
+# Raised 30 -> 60 on 2026-08-13 (Patrick's ruling). Two known runners finish
+# around 31s and were tripping the old default. The evening before showed
+# fleet-wide what a quiet default costs: a 30s UserPromptSubmit timeout
+# discarded a hooks context for weeks because the real work legitimately took
+# longer (DPLAN-0285). A default that kills work at N when work takes N+1 fails
+# silently, which is the expensive way to fail.
+DEFAULT_TIMEOUT = 60
 
 TIMEOUT_OVERRIDES: dict[str, dict[str, int]] = {
     "memory": {"process-plans": 120, "rollover": 100},
@@ -59,7 +65,7 @@ def execute_command(
     executable: str,
     args: List[str],
     cwd: str,
-    timeout: int = 30,
+    timeout: int = DEFAULT_TIMEOUT,
     env: dict | None = None,
     interactive: bool = False,
 ) -> CommandResult:

@@ -43,6 +43,11 @@ CRITICAL_SUSTAINED_INTERVALS = 6  # 6 * 10s = 1 min
 _RATE_HISTORY_SIZE = 30
 _WINDOW_INTERVALS = 6
 
+# A running tracker holds at most _RATE_HISTORY_SIZE samples one SCAN_INTERVAL
+# apart, so anything older than that product is a sample it would already have
+# evicted. Restored state is trimmed to the same horizon.
+_RATE_STALE_AFTER = _RATE_HISTORY_SIZE * SCAN_INTERVAL
+
 _DATA_FILE = "rate_tracker"
 
 
@@ -69,10 +74,16 @@ class FileRateState:
         self.fired_critical: bool = False
 
     def to_dict(self) -> dict:
-        """Serialize to a dict for disk persistence."""
+        """Serialize to a dict for disk persistence.
+
+        The rate history goes with it: the CLI runs in its own process, so
+        anything left out here is simply not knowable to `log-health
+        snapshot`, which exists to report what the last scan measured.
+        """
         return {
             "last_offset": self.last_offset,
             "last_check": self.last_check,
+            "rates": [[ts, rate] for ts, rate in self.rates],
             "warning_sustained": self.warning_sustained,
             "critical_sustained": self.critical_sustained,
             "fired_warning": self.fired_warning,
@@ -81,8 +92,37 @@ class FileRateState:
 
     @classmethod
     def from_dict(cls, d: dict) -> "FileRateState":
-        """Restore from a persisted dict."""
+        """Restore from a persisted dict, discarding samples too old to be current.
+
+        A tracker running without interruption would already have evicted
+        anything older than the deque's own horizon. Restoring such samples
+        after a long downtime would let the threshold window raise a runaway
+        alarm out of history rather than out of what is happening now.
+        """
         state = cls(d.get("last_offset", 0), d.get("last_check", 0.0))
+        cutoff = time.time() - _RATE_STALE_AFTER
+        malformed = 0
+        for sample in d.get("rates", []):
+            try:
+                ts, rate = sample[0], sample[1]
+            except (TypeError, IndexError):
+                # Per-sample detail on demand only; the summary below is what an
+                # operator sees, so a corrupt file cannot flood the logs this
+                # tracker itself measures.
+                logger.debug("[rate_tracker] Unreadable rate sample discarded: %r", sample)
+                malformed += 1
+                continue
+            if ts >= cutoff:
+                state.rates.append((ts, rate))
+        if malformed:
+            # Counted, not logged per sample: a corrupted file would otherwise
+            # emit one line per entry into the very logs this tracker measures.
+            logger.warning(
+                "[rate_tracker] Skipped %d unreadable rate sample(s) while restoring persisted state. "
+                "Growth measurement continues from the samples that did load; nothing was written back "
+                "and no log file is affected.",
+                malformed,
+            )
         state.warning_sustained = d.get("warning_sustained", 0)
         state.critical_sustained = d.get("critical_sustained", 0)
         state.fired_warning = d.get("fired_warning", False)
@@ -373,15 +413,18 @@ def get_snapshot() -> list:
     invocations can display rates collected by the monitor process.
     """
     _load_state()
+    now = time.time()
     results = []
     for file_key, state in _tracked.items():
         last_rate = state.rates[-1][1] if state.rates else 0.0
+        age = round(now - state.rates[-1][0], 1) if state.rates else None
         results.append(
             {
                 "file": Path(file_key).name,
                 "path": file_key,
                 "size_kb": round(_file_size(file_key) / 1024, 1),
                 "rate_lines_per_min": round(last_rate, 1),
+                "age_seconds": age,
                 "warning_sustained": state.warning_sustained,
                 "critical_sustained": state.critical_sustained,
                 "severity": _resolve_severity(state),

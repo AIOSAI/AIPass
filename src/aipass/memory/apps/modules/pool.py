@@ -29,6 +29,7 @@ from rich import box
 from aipass.prax import logger  # noqa: F401
 from aipass.cli.apps.modules import console, error
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 
 # =============================================================================
@@ -63,7 +64,9 @@ def handle_command(command: str, args: List[Any]) -> bool:
             print_introspection()
             return True
 
-        if args[0] in ("--help", "-h", "help"):
+        # A help flag ANYWHERE wins — asking about `process` must never process.
+        # No pool subcommand takes free text, so a bare `help` counts too.
+        if wants_help(args, allow_bare_word=True):
             print_help()
             return True
 
@@ -93,7 +96,7 @@ def handle_command(command: str, args: List[Any]) -> bool:
 
 def _run_process_command() -> None:
     """Execute pool processing + rollover check and display results."""
-    from ..handlers.intake.auto_process import auto_process
+    from aipass.memory.apps.handlers.intake.auto_process import auto_process
 
     console.print()
     console.print("[bold cyan]Processing memory pool...[/bold cyan]")
@@ -136,7 +139,7 @@ def _run_process_command() -> None:
 
 def _run_status_command() -> None:
     """Display memory pool status."""
-    from ..handlers.intake.pool_processor import get_pool_status
+    from aipass.memory.apps.handlers.intake.pool_processor import get_pool_status
 
     console.print()
 

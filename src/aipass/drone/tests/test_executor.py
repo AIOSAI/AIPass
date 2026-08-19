@@ -401,6 +401,84 @@ class TestShellSecurity:
 # ---------------------------------------------------------------------------
 
 
+class TestDefaultTimeoutValue:
+    """The default is 60s, pinned in every layer that can express it.
+
+    Patrick's ruling 2026-08-13: two known runners finish around 31s and were
+    tripping the old 30s default. The wider lesson came the evening before —
+    a UserPromptSubmit timeout of 30 silently discarded a hooks context for
+    weeks because the real work legitimately took longer (DPLAN-0285).
+
+    Every assertion here names the NUMBER, not the constant. The pre-existing
+    tests in TestResolveTimeout compare against DEFAULT_TIMEOUT itself, so they
+    stay green at any value — they prove resolution order, not the default.
+    """
+
+    def test_default_timeout_is_60(self):
+        assert DEFAULT_TIMEOUT == 60
+
+    def test_resolve_returns_60_when_nothing_overrides(self):
+        assert resolve_timeout("unknown", "whatever") == 60
+
+    def test_execute_command_signature_default_is_60(self):
+        """The signature default must not drift from the constant.
+
+        This layer hardcoded 30 while the constant said 30 — agreeing by
+        coincidence, not by reference. Raising the constant alone would have
+        left every caller relying on the signature default still at 30.
+        """
+        import inspect
+
+        sig = inspect.signature(execute_command)
+        assert sig.parameters["timeout"].default == 60
+
+    def test_execute_branch_command_signature_default_is_60(self):
+        """Same drift hazard one layer up, in router_handler."""
+        import inspect
+
+        from aipass.drone.apps.handlers.router_handler import execute_branch_command
+
+        sig = inspect.signature(execute_branch_command)
+        assert sig.parameters["timeout"].default == 60
+
+    def test_every_layer_agrees_with_the_constant(self):
+        """No layer may express the default as its own literal."""
+        import inspect
+
+        from aipass.drone.apps.handlers.router_handler import execute_branch_command
+
+        defaults = {
+            "DEFAULT_TIMEOUT": DEFAULT_TIMEOUT,
+            "execute_command": inspect.signature(execute_command).parameters["timeout"].default,
+            "execute_branch_command": inspect.signature(execute_branch_command).parameters["timeout"].default,
+        }
+        assert len(set(defaults.values())) == 1, f"layers disagree on the default: {defaults}"
+
+    def test_policy_overrides_are_untouched(self):
+        """Raising the default must not have moved any per-command policy."""
+        assert TIMEOUT_OVERRIDES["memory"]["process-plans"] == 120
+        assert TIMEOUT_OVERRIDES["memory"]["rollover"] == 100
+        assert TIMEOUT_OVERRIDES["flow"]["close"] == 90
+
+    def test_policy_below_new_default_still_wins(self):
+        """A policy value is a decision, not a floor — it wins even if lower.
+
+        Nothing is below 60 today, but the resolution order must not quietly
+        become max(policy, default) as the default rises.
+        """
+        from aipass.drone.apps.handlers import executor
+
+        original = executor.TIMEOUT_OVERRIDES.get("probe")
+        executor.TIMEOUT_OVERRIDES["probe"] = {"quick": 5}
+        try:
+            assert executor.resolve_timeout("probe", "quick") == 5
+        finally:
+            if original is None:
+                del executor.TIMEOUT_OVERRIDES["probe"]
+            else:
+                executor.TIMEOUT_OVERRIDES["probe"] = original
+
+
 class TestResolveTimeout:
     """Timeout resolution: explicit > policy > default."""
 

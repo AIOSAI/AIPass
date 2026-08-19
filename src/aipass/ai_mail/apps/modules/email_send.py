@@ -23,6 +23,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.trigger.apps.modules.core import trigger
 
+from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
 from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
@@ -94,7 +95,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not args:
         print_introspection()
         return True
-    if args[0] in ("--help", "-h", "help"):
+    # Whole-sequence: a flag after the first argument would otherwise reach
+    # handle_send and deliver the mail it was asked to describe.
+    if wants_help(args):
         print_introspection()
         return True
     return handle_send(args)
@@ -162,6 +165,14 @@ def handle_send(args: List[str]) -> bool:
 
 def _send_interactive() -> bool:
     """Interactive email sending with prompts."""
+    # Announce the outcome, not the branch list: without a terminal there is no
+    # interactive send to offer, and printing 17 branches before refusing reads as
+    # progress. The handler refuses too — this is the caller-side half, so the
+    # command exits 2 with usage instead of falling through as a plain cancel.
+    if not sys.stdin.isatty():
+        error('Interactive send needs a terminal. Use: email @recipient "Subject" "Message"')
+        return False
+
     branches = get_all_branches()
     console.print("\nAI_Mail - Send Email\n" + "=" * 50)
     console.print("\nSelect recipient:")

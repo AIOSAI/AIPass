@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-12
+# Modified: 2026-08-18
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -19,7 +19,6 @@ from typing import Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / ".diagnostics_state.json"
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 # A project root is the directory holding a *_REGISTRY.json — the same marker
@@ -173,6 +172,12 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
         lines = ["Over-limit .trinity entries (shorten before saving):"]
         for v in over:
             lines.append(f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})")
+        # Say what this gate can actually see. It is a PreToolUse hook on Edit/Write,
+        # so a write made through Bash (python -c, heredoc, sed) never reaches it and
+        # is not checked. Three branches have drifted over cap through that lane —
+        # @baud to 2529/300 for a week, @api to 12 sessions + 16 learnings. Claiming
+        # enforcement it does not have is what let the drift read as compliance.
+        lines.append("  (Edit/Write only — writes made through Bash are NOT checked. Caps are yours to keep there.)")
         return {
             "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
             "exit_code": 2,
@@ -223,14 +228,21 @@ def _is_auto_compact(entry: Any) -> bool:
     return isinstance(entry, dict) and entry.get("status") == "auto-compact"
 
 
-def _warn_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
+def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
     """Log one operator-facing line for a section over its rollover budget.
 
     Every clause is a claim the code keeps: the count is the number rollover
     itself counts, and @memory's detector marks the file ready at exactly this
     threshold, so the archival named here really does happen.
+
+    INFO, not WARNING (compass #273, Patrick 2026-08-14: severity follows design
+    intent). Over-budget is not wrong behaviour — it is behaviour we chose to
+    have, and the message itself says nothing is lost. As a WARNING this class
+    fed @trigger's escalation lane: 8 signatures, 579 occurrences, 10 of the 62
+    digests the lane has ever sent. The name says "note" so the level is not
+    re-raised to match a verb.
     """
-    logger.warning(
+    logger.info(
         "[HOOKS] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
         "The @memory rollover hook archives the %d oldest at the next PreCompact; "
         "nothing is lost — recall them with drone @memory search.",
@@ -257,7 +269,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
     if auto_cap is not None:
         snapshots = [e for e in entries if _is_auto_compact(e)]
         if len(snapshots) > auto_cap:
-            _warn_over_budget(branch, file_stem, "sessions (auto-compact snapshots)", len(snapshots), auto_cap)
+            _note_over_budget(branch, file_stem, "sessions (auto-compact snapshots)", len(snapshots), auto_cap)
 
     cap = section_cfg.get("count")
     if cap is not None:
@@ -265,7 +277,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
         # the regular count whether or not auto_compact_cap is configured.
         regular = [e for e in entries if not _is_auto_compact(e)]
         if len(regular) > cap:
-            _warn_over_budget(branch, file_stem, "sessions", len(regular), cap)
+            _note_over_budget(branch, file_stem, "sessions", len(regular), cap)
 
 
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
@@ -290,7 +302,7 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
 
             cap = section_cfg.get("count")
             if cap is not None and len(entries) > cap:
-                _warn_over_budget(branch, file_stem, section_name, len(entries), cap)
+                _note_over_budget(branch, file_stem, section_name, len(entries), cap)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
 
@@ -506,14 +518,8 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
-        if not STATE_FILE.exists():
-            return {"stdout": "", "exit_code": 0}
-
-        try:
-            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError) as exc:
-            logger.info("[HOOKS] edit_gate: diagnostics_state unreadable: %s", exc)
-            return {"stdout": "", "exit_code": 0}
+        ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+        state = ds.load()
 
         errored_file = state.get("file", "")
         errors = state.get("errors", [])
@@ -536,6 +542,27 @@ def handle(hook_data: dict) -> dict:
         if not errored_branch:
             return {"stdout": "", "exit_code": 0}
         if current_branch and errored_branch and current_branch != errored_branch:
+            return {"stdout": "", "exit_code": 0}
+
+        # The block must describe what is true now, not what was true when auto_fix
+        # last ran. Any resolving write the hook did not observe — a Bash heredoc, an
+        # external editor — used to leave the state behind and block forever.
+        fresh = ds.revalidate(errored)
+        if fresh is not None:
+            if not fresh:
+                ds.clear()
+                return {"stdout": "", "exit_code": 0}
+            errors = fresh
+
+        # An error that can only be fixed in another file cannot justify blocking edits
+        # to other files: that is the red-first deadlock, unsatisfiable by any allowed
+        # action. A single locally-fixable error among them keeps the block.
+        if ds.all_cross_file(errors):
+            logger.info(
+                "[HOOKS] edit_gate: %d cross-file error(s) in %s — not blocking (resolve elsewhere)",
+                len(errors),
+                Path(errored_file).name,
+            )
             return {"stdout": "", "exit_code": 0}
 
         error_summary = "\n".join(f"  L{e['line']}: {e['message']}" for e in errors[:5])

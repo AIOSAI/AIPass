@@ -107,7 +107,10 @@ def print_help() -> None:
     table.add_row("list", "List registered custom commands")
     table.add_row("remove <name>", "Remove a custom command")
     table.add_row("rm <path> [<path>...]", "Contained safe-delete (project + tmp)")
-    table.add_row("--drone-timeout <seconds>", "Override subprocess timeout (default 30s)")
+    table.add_row(
+        "@target ... --drone-timeout <n>",
+        "Override subprocess timeout, default 60s (must come AFTER @target)",
+    )
     table.add_row("--help", "Show this help")
     table.add_row("--version", "Show version")
 
@@ -406,24 +409,59 @@ def _read_inbox_message_id(inbox: Path, n: int) -> str | None:
     return None
 
 
-def _resolve_mail_index(n: int) -> str:
-    """Translate a 1-based inbox list index to a message ID.
+def _read_inbox_ids(inbox: Path) -> set[str]:
+    """Return every message ID present in inbox.json, or an empty set."""
+    import json as _json
 
-    Walks up from CWD to find the branch's .ai_mail.local/inbox.json,
-    returns the ID of the Nth message (1-based). Falls back to str(n)
-    if the inbox cannot be found or index is out of range.
+    try:
+        data = _json.loads(inbox.read_text(encoding="utf-8"))
+        return {m["id"] for m in data.get("messages", []) if "id" in m}
+    except Exception as exc:
+        logger.warning("Failed to read inbox IDs from %s: %s", inbox, exc)
+        return set()
+
+
+def _find_seat_inbox() -> Path | None:
+    """Walk up from CWD to the nearest citizen seat and return its inbox.json.
+
+    Stops at the first directory holding a passport — that seat's inbox is the
+    only one this caller may address, whether or not the file exists yet.
     """
     cwd = Path.cwd()
     for parent in [cwd] + list(cwd.parents):
         if not (parent / ".trinity" / "passport.json").exists():
             continue
         inbox = parent / ".ai_mail.local" / "inbox.json"
-        if inbox.exists():
-            msg_id = _read_inbox_message_id(inbox, n)
-            if msg_id is not None:
-                return msg_id
-        break
-    return str(n)
+        return inbox if inbox.exists() else None
+    return None
+
+
+def _resolve_mail_token(token: str) -> str:
+    """Resolve a `view` argument to a message ID — a real ID always wins.
+
+    ai_mail IDs are ``str(uuid.uuid4())[:8]``: 8 hex chars with no version
+    nibble, so (10/16)^8 = 2.3% of them contain no a-f and cannot be told from
+    an inbox index by shape. Reading the token as an index first made about one
+    message in 43 unopenable by the ID the inbox listing had just printed, and
+    — for an all-digit ID small enough to be a valid index — silently opened a
+    DIFFERENT message (@trigger, 2026-08-13).
+
+    So the ID set is consulted before the index is considered, which removes the
+    ambiguity class rather than narrowing it. On any failure the ORIGINAL token
+    is returned untouched: ``str(int("08532166"))`` drops the leading zero, and
+    a not-found error naming an ID the user never typed is its own bug.
+    """
+    inbox = _find_seat_inbox()
+
+    if inbox is not None and token in _read_inbox_ids(inbox):
+        return token
+
+    if token.isdigit() and inbox is not None:
+        msg_id = _read_inbox_message_id(inbox, int(token))
+        if msg_id is not None:
+            return msg_id
+
+    return token
 
 
 def _handle_target(args: List[str]) -> int:
@@ -477,9 +515,11 @@ def _handle_target(args: List[str]) -> int:
     command = rest[0]
     cmd_args = rest[1:]
 
-    # B3: translate numeric inbox index to message ID for @ai_mail view N
-    if module_name == "ai_mail" and command == "view" and cmd_args and cmd_args[0].isdigit():
-        cmd_args = [_resolve_mail_index(int(cmd_args[0]))] + cmd_args[1:]
+    # B3: translate an inbox display index to a message ID for @ai_mail view N.
+    # No .isdigit() guard here — an all-digit token can be a real message ID,
+    # so _resolve_mail_token decides by looking the token up, not by its shape.
+    if module_name == "ai_mail" and command == "view" and cmd_args:
+        cmd_args = [_resolve_mail_token(cmd_args[0])] + cmd_args[1:]
 
     # needs_interactive already computed above
     interactive = needs_interactive

@@ -8,14 +8,16 @@
 
 """Tests for the skills entry point CLI routing."""
 
+import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 skills_root = Path(__file__).resolve().parent.parent.parent
 if str(skills_root) not in sys.path:
     sys.path.insert(0, str(skills_root))
 
-from aipass.skills.apps.skills import handle_command, _parse_extra_args
+from aipass.skills.apps.skills import handle_command, _parse_extra_args  # noqa: E402
 
 
 class TestParseExtraArgs:
@@ -199,7 +201,77 @@ class TestOutputCapture:
         assert "SKILLS" in captured.out or "1.0.0" in captured.out
 
     def test_output_capture_unknown_command(self, capsys):
-        """output_capture: unknown command produces output."""
+        """output_capture: unknown command names itself and points at help."""
         handle_command("bogus_xyz")
         captured = capsys.readouterr()
-        assert "Unknown command" in captured.out or "unknown" in captured.out.lower() or len(captured.out) > 0
+        # The old assertion ended in `or len(captured.out) > 0`, which passes on
+        # any output at all — it could not fail. Pin the actual contract.
+        assert "Unknown command" in captured.out
+        assert "bogus_xyz" in captured.out
+        assert "--help" in captured.out
+
+
+class TestExitCodes:
+    """The process exit code is the only failure signal a caller can script on.
+
+    drone runs a branch command as a subprocess and propagates its return code,
+    so a discarded handle_command() result made every failure exit 0.
+    """
+
+    def _run(self, *args):
+        entry = Path(__file__).resolve().parent.parent / "apps" / "skills.py"
+        return subprocess.run(
+            [sys.executable, str(entry), *args],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    def test_success_exits_zero(self):
+        assert self._run("list").returncode == 0
+
+    def test_help_exits_zero(self):
+        assert self._run("--help").returncode == 0
+
+    def test_unknown_skill_exits_nonzero(self):
+        result = self._run("info", "definitely_not_a_skill_xyz")
+        assert result.returncode != 0
+
+    def test_unknown_command_exits_nonzero(self):
+        assert self._run("bogus_command_xyz").returncode != 0
+
+    def test_missing_required_argument_exits_nonzero(self):
+        assert self._run("info").returncode != 0
+
+    def test_failed_validate_exits_nonzero(self):
+        """`drone @skills validate x && next` must not run `next` on failure."""
+        assert self._run("validate", "definitely_not_a_skill_xyz").returncode != 0
+
+
+class TestRunHelpDoesNotDispatch:
+    """`run <skill> --help` must document the skill, not dispatch "--help".
+
+    branch_health and inbox_check treat an unrecognised action as a branch name,
+    so the old routing answered `run branch_health --help` with
+    "Branch '--help' not found" instead of help.
+    """
+
+    def test_run_help_is_not_passed_as_an_action(self):
+        with patch("aipass.skills.apps.skills._cmd_run") as mock_run:
+            with patch("aipass.skills.apps.skills._cmd_info", return_value=True) as mock_info:
+                handle_command("run", ["telegram", "--help"])
+        mock_run.assert_not_called()
+        mock_info.assert_called_once_with("telegram")
+
+    def test_run_h_short_flag_also_documents(self):
+        with patch("aipass.skills.apps.skills._cmd_run") as mock_run:
+            with patch("aipass.skills.apps.skills._cmd_info", return_value=True):
+                handle_command("run", ["telegram", "-h"])
+        mock_run.assert_not_called()
+
+    def test_real_action_still_dispatches(self):
+        """The guard must not swallow legitimate actions."""
+        with patch("aipass.skills.apps.skills._cmd_run", return_value=True) as mock_run:
+            handle_command("run", ["telegram", "status"])
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][1] == "status"

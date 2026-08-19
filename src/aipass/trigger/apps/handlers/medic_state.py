@@ -47,6 +47,7 @@ from aipass.trigger.apps.config import (
     atomic_write_json,
     json_file_lock,
     migrate_json_file,
+    read_text_with_retry,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -115,11 +116,17 @@ def read_config() -> dict:
 
     Returns:
         Parsed config dict, or empty dict on failure
+
+    Note:
+        Retried through read_text_with_retry — a refused read here becomes an
+        empty dict that write_config persists, taking every mute and the
+        circuit-breaker state with it. Same species as the json_handler loss
+        on Windows CI (32167459635). The never-clears residual is a todo.
     """
     migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
     try:
         if MEDIC_STATE_FILE.exists():
-            return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
+            return json.loads(read_text_with_retry(MEDIC_STATE_FILE))
     except Exception as exc:
         logger.warning("read_config failed: %s", exc)
         return {}

@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.broker.client import (
     is_sandboxed as _is_sandboxed,
     broker_delete as _broker_delete,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
@@ -58,7 +59,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
 
@@ -108,6 +109,12 @@ def print_help() -> None:
     console.print("  • Cannot delete the project root or temp root itself")
     console.print("  • Symlinks are resolved; refuses if target escapes allowed roots")
     console.print("  • Nonexistent paths produce a clean error")
+    console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
+    console.print()
+    console.print("[bold]Every delete is recorded:[/bold]")
+    console.print("  Successes AND refusals land in [cyan]<project>/.ai_central/deletions.jsonl[/cyan]")
+    console.print("  (timestamp, caller, cwd, resolved path, size/entries) and in the prax logs")
+    console.print("  at INFO. Nothing you delete through drone goes unwritten.")
     console.print()
     _tmp = tempfile.gettempdir()
     console.print("[bold]Examples:[/bold]")

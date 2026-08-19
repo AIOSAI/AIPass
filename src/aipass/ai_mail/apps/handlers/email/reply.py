@@ -52,10 +52,9 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
         with open(inbox_file, "r", encoding="utf-8") as f:
             inbox_data = json.load(f)
 
-        for msg in inbox_data.get("messages", []):
-            if msg.get("id") == message_id:
-                return msg
-        return None
+        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
+
+        return find_message(inbox_data.get("messages", []), message_id)
 
     except Exception as e:
         logger.warning("[reply] get_email_by_id(%s, %s) failed: %s", inbox_file, message_id, e)
@@ -155,6 +154,19 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
             return _deliver_via_reply_path(stored_reply_path, reply_email_data, from_branch_path, original_email)
         return False, f"Could not find branch for {reply_destination}", None
 
+    # Mint the id BEFORE delivering, not after.
+    #
+    # This used to be created further down, purely to name the sent/ file — so
+    # at delivery time the reply had no id at all, and the recipient's copy
+    # could not carry a sent_id pointing back here. The sender's sent/ record
+    # and the recipient's inbox copy ended up with two unrelated ids and no
+    # link between them, which on 2026-08-16 made a correctly delivered reply
+    # (@seedgo -> @devpulse) look like it had been eaten in flight.
+    #
+    # One id, minted once, used by both sides.
+    reply_id = str(uuid.uuid4())[:8]
+    reply_email_data["id"] = reply_id
+
     # Deliver the reply (pass email address, not path)
     success, error_msg = deliver_email_to_branch(reply_destination, reply_email_data)
     if not success:
@@ -164,8 +176,6 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
     sent_folder = from_branch_path / ".ai_mail.local" / "sent"
     sent_folder.mkdir(parents=True, exist_ok=True)
 
-    reply_id = str(uuid.uuid4())[:8]
-    reply_email_data["id"] = reply_id
     sent_file = sent_folder / f"{reply_id}.json"
     with open(sent_file, "w", encoding="utf-8") as f:
         json.dump(reply_email_data, f, indent=2)

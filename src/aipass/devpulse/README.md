@@ -58,7 +58,7 @@ src/aipass/devpulse/
 │   │   └── watchdog/            # Agent, timer, schedule, registry
 │   └── plugins/                 # Plugin extension point
 ├── devpulse_json/               # JSON handler storage (config, data, logs per module)
-├── tests/                       # 388 tests
+├── tests/                       # 448 tests
 ├── artifacts/                   # Birth certificate, reports
 ├── dropbox/                     # Received files, archived plans, install audit
 ├── docs/                        # Transition notes
@@ -136,6 +136,7 @@ Curated truth-store of rated decisions (`good` / `bad` / `impressive` / `interes
 | `compass stats` | Counts by rating / status |
 | `compass rate <id> <rating>` | Re-rate a decision |
 | `compass archive <id>` | Archive a decision |
+| `compass note <id> "text"` | Set a decision's note |
 | `compass review` | Surface one decision to review |
 
 ### Admin grant — birth-cert privilege ceremony (owner-only mint)
@@ -188,7 +189,7 @@ drone @git log                   # Recent commits
 
 All branches via dispatch orchestration. Watchdog monitoring for any dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
 
-*Last Updated: 2026-07-11*
+*Last Updated: 2026-08-16*
 
 ---
 

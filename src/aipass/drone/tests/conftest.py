@@ -38,6 +38,21 @@ def _clean_identity_dedupe() -> Generator[None, None, None]:
     router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
+    """Point the deletion record at tmp for every test.
+
+    Without this, any test that exercises a delete path writes a real record
+    into the live project's ``.ai_central/deletions.jsonl`` — the suite would
+    quietly forge entries in the fleet's audit trail, which is worse than the
+    usual test-pollution because the whole value of that file is that its
+    contents happened.
+    """
+    os.environ["AIPASS_DELETION_LOG"] = str(tmp_path / "deletions.jsonl")
+    yield
+    os.environ.pop("AIPASS_DELETION_LOG", None)
+
+
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after."""

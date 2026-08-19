@@ -35,6 +35,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 # Handler import (same package family — json handlers)
 from aipass.memory.apps.handlers.json.lint_handler import run_lint
@@ -73,8 +74,9 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    # Help
-    if args[0] in ("--help", "-h", "help"):
+    # Help — a flag ANYWHERE wins; lint takes no free-text arguments,
+    # so a bare `help` counts in any slot too
+    if wants_help(args, allow_bare_word=True):
         print_help()
         return True
 
@@ -130,6 +132,18 @@ def _execute_lint(branch_filter: str | None = None) -> None:
     if not branches:
         warning("No branches found in registry")
         return
+
+    # An unknown branch must not read as a clean bill of health. run_lint
+    # matches case-insensitively, so the guard has to as well.
+    if branch_filter:
+        known = {str(b.get("name", "")).lower() for b in branches}
+        if branch_filter.lower() not in known:
+            logger.warning(f"[lint] Unknown branch requested: {branch_filter}")
+            error(
+                f"Unknown branch: @{branch_filter}",
+                suggestion="Run 'drone systems' to list branches, or 'drone @memory lint run' to scan all",
+            )
+            return
 
     result = run_lint(branches, branch_filter=branch_filter)
 

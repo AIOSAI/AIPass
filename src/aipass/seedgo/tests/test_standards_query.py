@@ -279,3 +279,79 @@ def test_custom_config_guide_pointer_actually_resolves():
     packs = _discover_packs()
     assert pack_name in packs, f"Pointer cites unknown pack '{pack_name}'"
     assert standard_name in _discover_standards(packs[pack_name]), f"Pointer cites unknown standard '{standard_name}'"
+
+
+# ---------------------------------------------------------------------------
+# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
+# ---------------------------------------------------------------------------
+
+
+def test_help_after_the_pack_name_does_not_display_content(monkeypatch, tmp_path):
+    """`drone @seedgo standards_query aipass_standards --help` looked up a standard named '--help'."""
+    from aipass.seedgo.apps.modules import standards_query
+
+    monkeypatch.setattr(standards_query, "_discover_packs", MagicMock(return_value={"aipass_standards": tmp_path}))
+    display = MagicMock()
+    monkeypatch.setattr(standards_query, "_display_content", display)
+    monkeypatch.setattr(standards_query, "_show_pack_standards", MagicMock())
+    shown = MagicMock()
+    monkeypatch.setattr(standards_query, "print_help", shown)
+
+    assert standards_query.handle_command("standards_query", ["aipass_standards", "--help"]) is True
+    assert display.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_standards_query_still_displays_content_without_a_help_flag(monkeypatch, tmp_path):
+    """The gate must not swallow the real command."""
+    from aipass.seedgo.apps.modules import standards_query
+
+    monkeypatch.setattr(standards_query, "_discover_packs", MagicMock(return_value={"aipass_standards": tmp_path}))
+    monkeypatch.setattr(standards_query, "_discover_standards", MagicMock(return_value={"cli": tmp_path / "cli.md"}))
+    display = MagicMock()
+    monkeypatch.setattr(standards_query, "_display_content", display)
+    monkeypatch.setattr(standards_query, "print_help", MagicMock())
+
+    assert standards_query.handle_command("standards_query", ["aipass_standards", "cli"]) is True
+    assert display.call_count == 1
+
+
+def test_alias_help_after_the_standard_name_does_not_display_content(monkeypatch, tmp_path):
+    """`drone @seedgo standard cli --help` printed the whole standard instead of the alias help."""
+    from aipass.seedgo.apps.modules import standards_query
+
+    monkeypatch.setattr(
+        standards_query, "_resolve_standard", MagicMock(return_value=[("aipass_standards", tmp_path / "cli.md")])
+    )
+    display = MagicMock()
+    monkeypatch.setattr(standards_query, "_display_content", display)
+    shown = MagicMock()
+    monkeypatch.setattr(standards_query, "print_alias_help", shown)
+
+    assert standards_query.handle_command("standard", ["cli", "--help"]) is True
+    assert display.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_alias_still_displays_content_without_a_help_flag(monkeypatch, tmp_path):
+    """The gate must not swallow the real command."""
+    from aipass.seedgo.apps.modules import standards_query
+
+    monkeypatch.setattr(
+        standards_query, "_resolve_standard", MagicMock(return_value=[("aipass_standards", tmp_path / "cli.md")])
+    )
+    display = MagicMock()
+    monkeypatch.setattr(standards_query, "_display_content", display)
+    monkeypatch.setattr(standards_query, "print_alias_help", MagicMock())
+
+    assert standards_query.handle_command("standard", ["cli"]) is True
+    assert display.call_count == 1
+
+
+def test_standards_query_does_not_answer_for_another_command(monkeypatch):
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import standards_query
+
+    monkeypatch.setattr(standards_query, "print_help", MagicMock())
+
+    assert standards_query.handle_command("proof_query", ["--help"]) is False

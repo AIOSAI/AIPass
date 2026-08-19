@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-16
 # =============================================
 
 """
@@ -278,6 +278,39 @@ def validate_and_heal_branch(
     return valid_active, all_closed
 
 
+def _resolve_total_closed(branch_name: str, *, upstream_total: Any, healed_count: int, window_size: int) -> int:
+    """Resolve how many plans a branch has really closed.
+
+    Aggregation only ever sees the `recently_closed` WINDOW — five rows, capped
+    upstream. Counting that window was how `total_closed` came to report 5 for a
+    branch with 336 closed plans: the statistic measured its own cap, which is
+    why it equalled `recently_closed_included` on all 44 branches (@prax,
+    2026-08-16). The real count is measured by push_central from the full
+    registry, so we carry that number forward and only add what we healed —
+    healed plans move active -> closed during this run, so upstream has not
+    counted them yet.
+
+    Args:
+        branch_name: Branch being aggregated, for the warning
+        upstream_total: `statistics.total_closed` as push_central left it
+        healed_count: Plans auto-closed during this run
+        window_size: Size of the closed window, used only as a floor
+
+    Returns:
+        The real closed count, or the window size as an explicit floor
+    """
+    if isinstance(upstream_total, bool) or not isinstance(upstream_total, int):
+        logger.warning(
+            "[%s] No upstream total_closed for '%s' — publishing the recently-closed window (%d) as a FLOOR, "
+            "not a total. The real count comes from push_central; run a plan push to correct it.",
+            MODULE_NAME,
+            branch_name,
+            window_size,
+        )
+        return window_size
+    return upstream_total + healed_count
+
+
 def load_central(central_file: Path) -> Dict[str, Any]:
     """Load PLANS.central.json
 
@@ -398,8 +431,15 @@ def aggregate_central_impl(
         all_closed = []
 
         # Process each branch
+        total_closed_all_branches = 0
         for branch_name, branch_data in branches.items():
             logger.info(f"[{MODULE_NAME}] Processing branch: {branch_name}")
+
+            # The closed universe we can see is only the recently_closed WINDOW.
+            # Read the real count before validate_and_heal_branch, while the
+            # upstream statistic push_central measured is still on the branch.
+            window_before = len(branch_data.get("recently_closed", []))
+            upstream_total = branch_data.get("statistics", {}).get("total_closed")
 
             # Validate and heal
             valid_active, closed_plans = validate_and_heal_branch(branch_name, branch_data, heal)
@@ -411,10 +451,18 @@ def aggregate_central_impl(
             branch_recently_closed = sorted(closed_plans, key=lambda x: x.get("closed", ""), reverse=True)[:5]
             branch_data["recently_closed"] = branch_recently_closed
 
+            branch_total_closed = _resolve_total_closed(
+                branch_name,
+                upstream_total=upstream_total,
+                healed_count=len(closed_plans) - window_before,
+                window_size=len(closed_plans),
+            )
+            total_closed_all_branches += branch_total_closed
+
             # Update branch-level statistics to match validated arrays
             branch_data["statistics"] = {
                 "active_count": len(valid_active),
-                "total_closed": len(closed_plans),
+                "total_closed": branch_total_closed,
                 "recently_closed_included": len(branch_recently_closed),
             }
 
@@ -440,17 +488,19 @@ def aggregate_central_impl(
         central_data["active_plans"] = all_active
         central_data["recently_closed"] = recently_closed
 
-        # Update top-level statistics
+        # Update top-level statistics. total_closed sums the resolved per-branch
+        # totals — len(all_closed) would sum the per-branch WINDOWS instead, which
+        # is how the tree-wide figure came to read 126 against a real 699.
         central_data["statistics"] = {
             "active_count": len(all_active),
-            "total_closed": len(all_closed),
+            "total_closed": total_closed_all_branches,
             "recently_closed_included": len(recently_closed),
         }
 
         # Update global_statistics (aggregated from all branches)
         central_data["global_statistics"] = {
             "total_active": len(all_active),
-            "total_closed": len(all_closed),
+            "total_closed": total_closed_all_branches,
             "branches_reporting": len(
                 [b for b in branches.values() if b.get("active_plans") or b.get("recently_closed")]
             ),

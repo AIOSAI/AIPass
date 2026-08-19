@@ -15,6 +15,7 @@ Tests cover:
 """
 
 import json
+import threading
 from http.client import HTTPMessage
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
@@ -632,17 +633,23 @@ class TestSendMessageFailureClassification:
         bot = self._bot(tmp_path, _patch_base_bot_deps)
         exc = URLError(OSError("[Errno -2] Name or service not known"))
 
+        # Other bot threads alive in the suite share this patched time.sleep and
+        # can interleave at any point, so record only calls made on THIS thread.
+        me = threading.get_ident()
+        sleeps: list[float] = []
+
+        def record(delay):
+            if threading.get_ident() == me:
+                sleeps.append(delay)
+
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc) as mock_open,
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep,
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep", side_effect=record),
         ):
             bot.send_message(1, "hi")
 
         assert mock_open.call_count == 3
-        # Other bot threads alive in the suite share this patched time.sleep, so
-        # pin the backoff as a consecutive pair rather than the whole call list.
-        sleeps = [c[0][0] for c in mock_sleep.call_args_list]
-        assert any(sleeps[i : i + 2] == [1.0, 2.0] for i in range(len(sleeps)))
+        assert sleeps == [1.0, 2.0]
 
     def test_failure_is_still_counted_in_health(self, tmp_path, _patch_base_bot_deps):
         """Downgrading the log level must not hide the failure from health stats."""

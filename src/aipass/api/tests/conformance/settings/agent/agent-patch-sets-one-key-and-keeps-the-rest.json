@@ -1,0 +1,43 @@
+{
+  "description": "The surgical property: everything the operator keeps in that file survives untouched.",
+  "document": "agent",
+  "expect": {
+    "file": {
+      "model": "opus",
+      "permissions": {
+        "allow": [
+          "Bash"
+        ]
+      }
+    },
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": "opus"
+    }
+  },
+  "given": {
+    "content": {
+      "model": "sonnet",
+      "permissions": {
+        "allow": [
+          "Bash"
+        ]
+      }
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-sets-one-key-and-keeps-the-rest",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "model": "opus"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

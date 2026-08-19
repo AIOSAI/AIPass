@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -15,7 +15,7 @@ AIPASS owns all dashboards - services only maintain their central files.
 
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from aipass.prax.apps.modules.logger import get_direct_logger
@@ -24,6 +24,7 @@ logger = get_direct_logger()
 
 # Same-package imports allowed
 from .operations import create_fresh_dashboard, save_dashboard  # noqa: E402
+from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status  # noqa: E402
 
 # Cross-handler imports for central reader
 from ..central.reader import read_all_centrals  # noqa: E402
@@ -77,28 +78,157 @@ def _load_branch_paths() -> List[Path]:
     return paths
 
 
-def _extract_flow_section(centrals: Dict, branch_name: str) -> Dict:
-    """Extract flow section from PLANS.central.json"""
+# @flow's section contract, their module 2.0.0 (Patrick's ruling, 2026-08-16).
+# Mirrors flow/apps/handlers/dashboard/push_branch_dashboard.py::_build_section_data —
+# sections.flow has two writers and both assign it wholesale, so a shape either
+# side does not build is a shape the other side silently deletes.
+OPEN_RECENT_LIMIT = 5
+RECENTLY_CLOSED_LIMIT = 5
+
+# How recently a plan must have closed to appear. @flow's push applies the same
+# 7-day window (push_branch_dashboard.py::_filter_branch_plans); without it a prax
+# refresh republishes closures their push had already aged out.
+CLOSED_WINDOW_DAYS = 7
+
+# Contract keys prax has no honest source for. The only per-branch closed number
+# in PLANS.central.json is `branches.<name>.statistics.total_closed`, and that is
+# a truncation artifact: @flow's aggregate feeds the already-capped 5-entry
+# recently_closed list back in as the closed universe, so all 44 branches reported
+# <= 5 when measured (a branch with 104 closed plans said 5). prax carries @flow's
+# value through instead of deriving a number it knows to be wrong.
+FLOW_KEYS_PRAX_CANNOT_SOURCE = ("total_plans",)
+
+
+def _find_branch_block(plans_data: Dict, branch_name: str) -> Dict:
+    """Locate one branch's own block in the central file.
+
+    ``branches.<name>`` carries that branch's plans; the top-level arrays are the
+    FLEET-WIDE roll-up. Reading the roll-up is how every dashboard came to publish
+    other branches' closed plans.
+    """
+    branches = plans_data.get("branches", {})
+    if not isinstance(branches, dict):
+        return {}
+
+    target = branch_name.lower()
+    for key, block in branches.items():
+        if not isinstance(block, dict):
+            continue
+        if key.lower() == target or str(block.get("branch_name", "")).lower() == target:
+            return block
+    return {}
+
+
+def _branch_plan_rows(plans_data: Dict, branch_name: str) -> tuple:
+    """Return this branch's (open, closed) plan rows — never the fleet's.
+
+    Falls back to filtering the roll-up when the branch has no block of its own,
+    which still filters by branch rather than publishing everyone's rows.
+    """
+    block = _find_branch_block(plans_data, branch_name)
+    if block:
+        return (block.get("active_plans") or [], block.get("recently_closed") or [])
+
+    target = branch_name.lower()
+
+    def mine(rows: List) -> List:
+        """Keep only the rows this branch owns."""
+        return [p for p in rows if str(p.get("branch", "")).lower() == target]
+
+    return (mine(plans_data.get("active_plans") or []), mine(plans_data.get("recently_closed") or []))
+
+
+def _build_open_recent(open_rows: List[Dict]) -> List[Dict]:
+    """The bounded window of newest open plans, newest first.
+
+    Byte-identical to @flow's ``_build_open_recent``: the cap lives in the writer,
+    not the reader, and plans with no ``created`` sort last instead of raising.
+    """
+    newest_first = sorted(open_rows, key=lambda p: p.get("created") or "", reverse=True)
+    return [
+        {
+            "plan_id": plan.get("plan_id", ""),
+            "subject": plan.get("subject", ""),
+            "created": plan.get("created", ""),
+        }
+        for plan in newest_first[:OPEN_RECENT_LIMIT]
+    ]
+
+
+def _within_closed_window(plan: Dict, cutoff: datetime) -> bool:
+    """Whether a closed plan is recent enough to publish.
+
+    Mirrors @flow's ``_filter_branch_plans`` decision by decision: no timestamp
+    means it never ships, an unparseable one ships anyway rather than vanishing.
+    """
+    closed_ts = plan.get("closed", "")
+    if not closed_ts:
+        return False
+    try:
+        return datetime.fromisoformat(closed_ts) >= cutoff
+    except (ValueError, TypeError) as exc:
+        logger.warning(
+            "Unparseable closed timestamp '%s' for plan %s, including anyway: %s",
+            closed_ts,
+            plan.get("plan_id", ""),
+            exc,
+        )
+        return True
+
+
+def _build_recently_closed(closed_rows: List[Dict]) -> List[Dict]:
+    """Newest-first closed window in @flow's entry shape: {id, subject, closed}.
+
+    prax used to publish ``{plan_id, subject}`` here — the key naming a plan
+    changed depending on which service wrote the section last — and applied no age
+    window at all, so a refresh republished closures @flow's push had already aged
+    out. Live proof on 2026-08-16: @api's card went from 2 entries to 5, the oldest
+    from May, purely by changing writer.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CLOSED_WINDOW_DAYS)
+    recent = [plan for plan in closed_rows if _within_closed_window(plan, cutoff)]
+    newest_first = sorted(recent, key=lambda p: p.get("closed") or "", reverse=True)
+    return [
+        {
+            "id": plan.get("plan_id", ""),
+            "subject": plan.get("subject", ""),
+            "closed": plan.get("closed", ""),
+        }
+        for plan in newest_first[:RECENTLY_CLOSED_LIMIT]
+    ]
+
+
+def _extract_flow_section(centrals: Dict, branch_name: str, existing: "Dict | None" = None) -> Dict:
+    """Build the flow section from PLANS.central.json in @flow's five-key shape.
+
+    Args:
+        centrals: All central files as read by read_all_centrals()
+        branch_name: Uppercase branch name (central keys are lowercase)
+        existing: The flow section already on disk, for the keys prax cannot source
+
+    Returns:
+        Section dict matching @flow's published contract
+    """
+    carried = {key: (existing or {}).get(key, 0) for key in FLOW_KEYS_PRAX_CANNOT_SOURCE}
+
     plans_data = centrals.get("plans")
     if not plans_data:
-        return {"managed_by": "flow", "active_plans": 0, "recently_closed": []}
+        return {
+            "managed_by": "flow",
+            "active_plans": 0,
+            "open_recent": [],
+            "recently_closed": [],
+            **carried,
+        }
 
-    active_plans = plans_data.get("active_plans", [])
-
-    # Count plans for this branch (case-insensitive — centrals use lowercase, refresh uses uppercase)
-    branch_plans = [p for p in active_plans if p.get("branch", "").upper() == branch_name]
-
-    # Get recently_closed from top-level (already limited to 5 by push_central)
-    recently_closed_raw = plans_data.get("recently_closed", [])
-    # Simplify for dashboard display (just id and subject)
-    recently_closed = [
-        {"plan_id": p.get("plan_id", ""), "subject": p.get("subject", "")} for p in recently_closed_raw[:5]
-    ]
+    open_rows, closed_rows = _branch_plan_rows(plans_data, branch_name)
 
     return {
         "managed_by": "flow",
-        "active_plans": len(branch_plans),
-        "recently_closed": recently_closed,
+        "active_plans": len(open_rows),
+        "open_recent": _build_open_recent(open_rows),
+        "recently_closed": _build_recently_closed(closed_rows),
+        **carried,
         "last_updated": plans_data.get("generated_at", plans_data.get("last_updated", datetime.now().isoformat())),
     }
 
@@ -153,43 +283,13 @@ def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     return {"managed_by": "memory", "vectors_stored": local_vectors, "notes": {}, "last_updated": mb_last_updated}
 
 
-def _read_todo_count(branch_path: Path) -> int:
-    """Read todos[] length from .trinity/local.json."""
-    local_path = branch_path / ".trinity" / "local.json"
-    if not local_path.exists():
-        return 0
-    try:
-        data = json.loads(local_path.read_text())
-        return len(data.get("todos", []))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read todos from %s: %s", local_path, exc)
-        return 0
-
-
-def _read_mail_counts(branch_path: Path) -> tuple:
-    """Read new/opened mail counts from .ai_mail.local/inbox.json."""
-    inbox_path = branch_path / ".ai_mail.local" / "inbox.json"
-    if not inbox_path.exists():
-        return (0, 0)
-    try:
-        data = json.loads(inbox_path.read_text())
-        new_mail = 0
-        opened_mail = 0
-        for msg in data.get("messages", []):
-            status = msg.get("status", "")
-            if status == "new" or (not status and not msg.get("read", False)):
-                new_mail += 1
-            elif status == "opened":
-                opened_mail += 1
-        return (new_mail, opened_mail)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read inbox from %s: %s", inbox_path, exc)
-        return (0, 0)
-
-
 def _calculate_quick_status(sections: Dict, branch_path: Path) -> Dict:
     """
     Calculate quick_status from branch data sources.
+
+    Thin delegate to the single implementation in status.py. This was a full
+    copy until 2026-08-13; the copy never grew status.py's list-shape guard,
+    which is how one bug survived in two places (@flow, DPLAN-0290 item 4).
 
     Args:
         sections: All dashboard sections dict
@@ -198,32 +298,32 @@ def _calculate_quick_status(sections: Dict, branch_path: Path) -> Dict:
     Returns:
         Quick status dict with counts, action flag, and summary
     """
-    flow = sections.get("flow", {})
+    return calculate_quick_status(sections, branch_path)
 
-    new_mail, opened_mail = _read_mail_counts(branch_path)
-    active_plans = flow.get("active_plans", 0)
-    todo_count = _read_todo_count(branch_path)
 
-    action_required = new_mail > 0 or active_plans > 0
+def _read_existing_section(branch_path: Path, name: str) -> Dict:
+    """Read one section off the dashboard already on disk.
 
-    parts = []
-    if new_mail > 0:
-        parts.append(f"{new_mail} new emails")
-    if opened_mail > 0:
-        parts.append(f"{opened_mail} opened")
-    if active_plans > 0:
-        parts.append(f"{active_plans} active plans")
-    if todo_count > 0:
-        parts.append(f"{todo_count} todos")
-
-    return {
-        "new_mail": new_mail,
-        "opened_mail": opened_mail,
-        "active_plans": active_plans,
-        "todo_count": todo_count,
-        "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear",
-    }
+    The refresh path rebuilds each dashboard from the template, so a section's
+    previous contents are gone before it can be consulted. Sections owned by
+    another service can carry keys prax has no source for.
+    """
+    dashboard_path = Path(branch_path) / "DASHBOARD.local.json"
+    if not dashboard_path.exists():
+        return {}
+    try:
+        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning(
+            "Could not read the existing dashboard at %s (%s), so the '%s' section's "
+            "foreign keys cannot be carried forward on this refresh.",
+            dashboard_path,
+            type(exc).__name__,
+            name,
+        )
+        return {}
+    section = data.get("sections", {}).get(name, {})
+    return section if isinstance(section, dict) else {}
 
 
 def _prune_deprecated_sections(dashboard: Dict) -> None:
@@ -286,19 +386,28 @@ def refresh_all_dashboards() -> Dict:
         branch_name = branch_path.name.upper()
 
         try:
+            # Read @flow's section before the template rebuild drops it — it holds
+            # keys prax cannot source and must not delete.
+            existing_flow = _read_existing_section(branch_path, "flow")
+
             # Create fresh dashboard
             dashboard = create_fresh_dashboard(branch_path)
 
             # Populate sections from centrals
             dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
-            dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
+            dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name, existing_flow)
             dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
 
             _preserve_write_through_sections(dashboard, branch_path, branch_name)
             _prune_deprecated_sections(dashboard)
 
-            # Calculate quick status (ai_mail section still present for counts)
-            dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], branch_path)
+            # Calculate quick status (ai_mail section still present for counts).
+            # Merged over what is already on disk: the dashboard was rebuilt from
+            # the template, so other services' keys live only in the old file.
+            dashboard["quick_status"] = merge_quick_status(
+                read_existing_quick_status(branch_path),
+                _calculate_quick_status(dashboard["sections"], branch_path),
+            )
             dashboard["sections"].pop("ai_mail", None)
 
             # Save
@@ -354,16 +463,21 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
     branch_name = branch_path.name.upper()
 
     try:
+        existing_flow = _read_existing_section(branch_path, "flow")
+
         dashboard = create_fresh_dashboard(branch_path)
 
         dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
-        dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
+        dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name, existing_flow)
         dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
 
         _preserve_write_through_sections(dashboard, branch_path, branch_name)
         _prune_deprecated_sections(dashboard)
 
-        dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], branch_path)
+        dashboard["quick_status"] = merge_quick_status(
+            read_existing_quick_status(branch_path),
+            _calculate_quick_status(dashboard["sections"], branch_path),
+        )
         dashboard["sections"].pop("ai_mail", None)
 
         save_dashboard(branch_path, dashboard)

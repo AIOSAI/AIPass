@@ -356,3 +356,151 @@ def test_format_failure_multiple_failures():
         }
     )
     assert "+1 more" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests — a finding must be countable by a script (FPLAN, @spawn mail)
+#
+# Every assertion below is made against bytes read back out of a REAL Console.
+# The autouse fixture installs a MagicMock console, which records the arguments
+# -- those were always correct, that is not the defect -- and renders nothing.
+# The marker has to survive Rich's markup parser, and only rendered bytes can
+# prove that: an unescaped "[FAIL]" is eaten at render time and the recorded
+# call argument still looks perfect.
+# ---------------------------------------------------------------------------
+
+
+def _rendered_results(monkeypatch, results, file_path="/repo/branch/apps/thing.py"):
+    """_print_results output as a terminal actually receives it."""
+    import io
+
+    from rich.console import Console
+
+    from aipass.seedgo.apps.modules import checklist
+
+    buffer = io.StringIO()
+    monkeypatch.setattr(checklist, "console", Console(file=buffer, force_terminal=False, width=300))
+    checklist._print_results(results, file_path)
+    return buffer.getvalue()
+
+
+_MIXED_RESULTS = [
+    {"standard": "handlers", "passed": False, "detail": "3 functions outside handlers/"},
+    {"standard": "cli", "passed": True, "detail": None},
+    {"standard": "readme_quality", "passed": False, "detail": None},
+]
+
+
+def test_each_finding_carries_a_greppable_marker(monkeypatch):
+    """@spawn grepped this output for a cross, got zero hits across 18 files, and
+    nearly deleted 41 bypass rules on that 'proof'. The marker a script counts
+    must be a plain ASCII token that is present once per finding -- not a
+    decorative em dash a reader has to guess at.
+    """
+    from aipass.seedgo.apps.modules import checklist
+
+    rendered = _rendered_results(monkeypatch, _MIXED_RESULTS)
+
+    assert rendered.count("[FAIL]") == 2, f"one marker per finding, got: {rendered!r}"
+    # The published constant is the contract callers grep for, so it is pinned to
+    # the bytes that actually reach a terminal -- not to what was handed to Rich.
+    assert checklist.FINDING_MARKER == "[FAIL]"
+    assert rendered.count(checklist.FINDING_MARKER) == 2
+
+
+def test_the_marker_is_not_printed_on_passing_standards(monkeypatch):
+    """The other direction: a count that includes passes is as wrong as zero."""
+    rendered = _rendered_results(monkeypatch, _MIXED_RESULTS)
+
+    passing = [line for line in rendered.splitlines() if "cli" in line]
+    assert passing and all("[FAIL]" not in line for line in passing), rendered
+
+
+def test_the_marker_appears_on_a_detail_free_finding(monkeypatch):
+    """Both failure branches emit it -- a finding with no detail still counts."""
+    rendered = _rendered_results(monkeypatch, [{"standard": "readme_quality", "passed": False, "detail": None}])
+
+    assert rendered.count("[FAIL]") == 1, rendered
+
+
+def test_the_human_layout_survives_the_marker(monkeypatch):
+    """The em dash stays: this output is read by people between hook runs."""
+    rendered = _rendered_results(monkeypatch, _MIXED_RESULTS)
+
+    assert rendered.count("—") == 2, rendered
+    assert "✓ cli" in rendered, rendered
+    assert "3 functions outside handlers/" in rendered, rendered
+
+
+def test_help_documents_the_marker(monkeypatch):
+    """A signal scripts are meant to key on is only stable if it is published."""
+    import io
+
+    from rich.console import Console
+
+    from aipass.seedgo.apps.modules import checklist
+
+    buffer = io.StringIO()
+    monkeypatch.setattr(checklist, "console", Console(file=buffer, force_terminal=False, width=300))
+    checklist.print_help()
+
+    assert "[FAIL]" in buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
+# ---------------------------------------------------------------------------
+
+
+def test_help_after_the_file_path_does_not_run_the_checklist(monkeypatch):
+    """`drone @seedgo checklist <file> --help` ran a full per-file audit instead of describing one."""
+    from aipass.seedgo.apps.modules import checklist
+
+    run = MagicMock()
+    monkeypatch.setattr(checklist, "run_checklist", run)
+    monkeypatch.setattr(checklist, "_print_results", MagicMock())
+    shown = MagicMock()
+    monkeypatch.setattr(checklist, "print_help", shown)
+
+    assert checklist.handle_command("checklist", ["apps/modules/checklist.py", "--help"]) is True
+    assert run.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_help_after_a_pack_flag_does_not_run_the_checklist(monkeypatch):
+    """The flag can trail any operand — `checklist --pack aipass <file> -h` is still a question."""
+    from aipass.seedgo.apps.modules import checklist
+
+    run = MagicMock()
+    monkeypatch.setattr(checklist, "run_checklist", run)
+    monkeypatch.setattr(checklist, "_print_results", MagicMock())
+    shown = MagicMock()
+    monkeypatch.setattr(checklist, "print_help", shown)
+
+    assert checklist.handle_command("checklist", ["--pack", "aipass", "apps/modules/checklist.py", "-h"]) is True
+    assert run.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_checklist_still_runs_without_a_help_flag(monkeypatch, tmp_path):
+    """The gate must not swallow the real command."""
+    from aipass.seedgo.apps.modules import checklist
+
+    target = tmp_path / "thing.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    run = MagicMock(return_value=[])
+    monkeypatch.setattr(checklist, "run_checklist", run)
+    monkeypatch.setattr(checklist, "_print_results", MagicMock())
+    monkeypatch.setattr(checklist, "print_help", MagicMock())
+
+    assert checklist.handle_command("checklist", [str(target)]) is True
+    assert run.call_count == 1
+
+
+def test_checklist_does_not_answer_for_another_command(monkeypatch):
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import checklist
+
+    monkeypatch.setattr(checklist, "print_help", MagicMock())
+
+    assert checklist.handle_command("audit", ["--help"]) is False

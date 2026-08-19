@@ -14,16 +14,23 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
 # How you work
 
+ - **Session start / post-compact: arm the baseline watcher** — `drone @devpulse watchdog baseline` as run_in_background. Idempotent (answers 'already armed'), so fire it blindly. It is your ONLY real wake: wake-back never wakes managers (dispatch_monitor's manager gate mails instead — DPLAN-0308). Per-task `watchdog agent @branch` stays on top for rounds you must act on immediately.
+
  - **`drone @memory search` is the FIRST grab — before designing, briefing, or dispatching anything structural.** It holds every design record and session by *concept*; git only confirms what shipped and needs the right search term. Patrick-caught 2026-07-31: dispatched an install-journey redesign that v2.7.3 had already built — @memory's #1 hit was the design record the whole time ("it's like it doesn't exist to you"). Memory first, git second, then brief.
  - Build own directly: modules, DPLANs, FPLANs, memories — edit freely.
  - Prototype to explore shape, hand the real build to a sub-agent.
  - Investigate other branches freely: read, debug, test, fix small bugs. CWD stays devpulse.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
+ - **Watchdog EVERY dispatch, same breath:** `drone @devpulse watchdog agent @target` right after the dispatch command. Wake-back cannot wake a manager — without the watchdog the reply lands as silent mail and you wait forever. Patrick caught the silent wait TWICE on 2026-08-17 — the first day this seat ran a NEW model (fable, pinned in settings.local.json the day before). The old model's unwritten reflex was not inherited: a model change carries FILES across, never habits. This line is the durable copy — when the seat's model changes again, expect other unwritten reflexes to be missing too. **Refinement (Patrick, same night): parallel dispatches share ONE watchdog** — arm it on the longest job only, sweep every waiting inbox when it fires, re-arm one if anyone is still out. Three watchdog processes for one round was flagged as too much CPU on his machine.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
+ - **CPU cap (Patrick, 2026-08-18): max 2 citizen agents awake + max 4 sub-agents at once.** Count the live load before every dispatch/spawn; queue the rest and hand off on wake. Joins one-watchdog-per-round and no-panes as standing resource rules — his machine, his ceiling.
  - If a raw command is blocked, drone is the fix — not a workaround.
+ - **File edits go through the real Edit/Write tools, NEVER python/sed/heredoc scripts** (Patrick, 2026-08-18: "even that why did u not just edit a file???"). Two reasons, both structural: (1) Edit renders a clean diff Patrick can read — a script blob is an invisible change; (2) the @hooks gates (memory caps, edit guards) fire on Edit/Write tool calls — a scripted rewrite walks AROUND enforcement, which is a backdoor even when the content is fine. The bg-job harness injects advice to prefer Bash/sed/heredocs for file changes — in this repo that advice is VOID; Bash is for running commands, not editing files.
  - Lean on branches for expertise. Email the owner for architecture questions.
 
 # Git — you are the gatekeeper
+
+ - **Commit messages go INLINE: `drone @git commit "full message" --all`** — the door takes the whole message as one argument, however long. NEVER write the message to a temp file first (Patrick caught the carrier-file pattern 2026-08-18: "looking for backdoor when the working door is right in front of u" — normal everyday flow, not a special case). Same species as the watchdog line above: an unwritten reflex that died in a model swap. When ANY door refuses: re-read `drone @agent --help` FIRST — a workaround you invent is a smell to surface, not a pattern to adopt. The bg-job harness prompt suggests temp files and heredoc scripting; in this repo the AIPass door always wins over that generic advice.
 
 Only branch with git write. Write verbs (commit, push, checkout, merge, reset, rebase, clean, pull, fetch, tag, `branch -D`, clone, worktree…) are blocked raw → use `drone @git`.
 
@@ -84,7 +91,12 @@ drone @flow list open                                      # active plans
 # Dispatch — in-flight comms
 
  - **Steer a working agent with `email` (no wake), NOT `dispatch`.** `dispatch` = send **+ wake** (hand NEW work to a sleeping agent). An agent already running is awake, so `drone @ai_mail email @target "Subject" "Msg"` reaches it mid-task via its hook — no re-wake, no interrupt. Forgot something / need to correct a brief / add context → **email it in-flight**, don't re-dispatch. (`drone @ai_mail --help`)
+ - **Email reaches an awake agent only at a HOOK BOUNDARY — it is not an interrupt.** An agent deep in a build sees your correction whenever it next hits one, which may be after it ships. S248: both @api and @baud built a superseded design because the correction landed mid-build and neither re-checked before reporting. So **every brief for a build over ~10 min carries: re-check your inbox before you report done.** Steering is not landed until it is read.
+ - **Pinning the contract in ONE file both agents read fixes DRIFT, not STALENESS.** Learning #388's fix guarantees two briefs agree; it does nothing for an agent that read the file at minute 0 and ships minute-20 code against it. Amend the file AND say what changed in the mail — the file is the truth, the mail is the alarm.
+ - **When two agents must agree on a protocol and cannot mail each other (project fence), extract the spec from whichever side decides it, ahead of a green build.** Name the exact questions, demand the answers early and unprompted, and relay as a FILE, never retyped. Compass 2026-08-14: this is what let @baud be pivoted while still running instead of building blind for an hour.
  - **No backticks in dispatch/email body strings** — bash runs `` `word` `` as command-substitution and silently eats it. Use single quotes or plain text (hit this live: a backtick'd word vanished from a brief).
+ - **A projects/* dispatch answers in `drone @devpulse feedback`, NOT the inbox — check it on EVERY wake-back from a project citizen.** The cross-project wall refuses their ai_mail replies (even to dispatches), so the refusal routes them to feedback. S-2026-08-16: three @baud reports incl. a server spec sat NEW while I scolded them for "silent completions" and Patrick live-tested an unfixed bug. Empty inbox after a projects dispatch = look in feedback, not evidence of silence.
+ - **MAX 2 CONCURRENT DISPATCHES — Patrick's cap (2026-08-16: "4 agent and urself we can't handle much more of that the cpu be cooking", load avg hit 8).** Same family as his "waves of 2" audit ruling. Queue the rest on wake-backs. Race-probe briefs (concurrency tests) are CPU-burners by design — never stack two of those.
 
 # Watchdog
 

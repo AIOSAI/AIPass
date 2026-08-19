@@ -279,11 +279,45 @@ def test_send_to_broadcast_partial_failure():
 # ---- collect_interactive_input tests --------------------------
 
 
-def test_collect_interactive_input_cancelled_on_eof():
-    """Returns None when input raises EOFError (cancelled)."""
+def test_collect_interactive_input_refuses_without_a_terminal():
+    """No TTY means nobody can answer the prompt -- refuse instead of blocking.
+
+    `drone @ai_mail email` with no args reached this function through a routed
+    subprocess whose stdin is an open pipe nobody writes to, so input() blocked
+    until drone's 30s timeout killed it (measured live, APLAN-0006). EOFError
+    never came: the pipe was open, just silent. The guard has to be the terminal
+    check, because "no input yet" and "no input ever" are indistinguishable here.
+    """
     branches = [{"email": "@flow", "name": "FLOW"}]
 
-    with patch("builtins.input", side_effect=EOFError):
+    with patch("sys.stdin.isatty", return_value=False):
+        with patch("builtins.input", side_effect=AssertionError("must not prompt without a TTY")):
+            result = collect_interactive_input(branches)
+
+    assert result is None
+
+
+def test_collect_interactive_input_still_prompts_on_a_terminal():
+    """A real terminal is unaffected -- the guard must not disable interactive send."""
+    branches = [{"email": "@flow", "name": "FLOW"}]
+
+    with patch("sys.stdin.isatty", return_value=True):
+        with patch("builtins.input", side_effect=["1", "Subject", EOFError, "y"]):
+            result = collect_interactive_input(branches)
+
+    assert result is None or result["to"] == "@flow"
+
+
+def test_collect_interactive_input_cancelled_on_eof():
+    """Returns None when input raises EOFError (cancelled).
+
+    isatty is pinned True in these three: pytest's stdin is not a terminal, so
+    without it the no-TTY guard returns None first and each one would pass
+    without ever reaching the branch it names.
+    """
+    branches = [{"email": "@flow", "name": "FLOW"}]
+
+    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=EOFError):
         result = collect_interactive_input(branches)
 
     assert result is None
@@ -293,7 +327,7 @@ def test_collect_interactive_input_cancelled_on_keyboard_interrupt():
     """Returns None when input raises KeyboardInterrupt."""
     branches = [{"email": "@flow", "name": "FLOW"}]
 
-    with patch("builtins.input", side_effect=KeyboardInterrupt):
+    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=KeyboardInterrupt):
         result = collect_interactive_input(branches)
 
     assert result is None
@@ -303,7 +337,7 @@ def test_collect_interactive_input_invalid_selection():
     """Returns None when user enters non-numeric selection."""
     branches = [{"email": "@flow", "name": "FLOW"}]
 
-    with patch("builtins.input", return_value="abc"):
+    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="abc"):
         result = collect_interactive_input(branches)
 
     assert result is None

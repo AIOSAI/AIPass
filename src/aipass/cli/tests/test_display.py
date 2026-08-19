@@ -2,13 +2,13 @@
 
 import importlib
 import sys
-from io import StringIO
 from unittest.mock import patch, MagicMock
 
 import pytest
-from rich.console import Console
 
 from aipass.cli.apps.modules import display
+
+from .conftest import make_capture_console
 
 
 # =============================================================================
@@ -19,15 +19,10 @@ from aipass.cli.apps.modules import display
 def _make_capture_console():
     """Return (console, get_output) for capturing Rich output.
 
-    Uses no_color=True so assertions can match plain text without ANSI escapes.
+    Console pinned against FORCE_COLOR/NO_COLOR/TERM; get_output() returns only
+    the VISIBLE characters, so assertions never depend on the calling shell.
     """
-    buf = StringIO()
-    cons = Console(file=buf, no_color=True, width=120, highlight=False)
-
-    def get_output() -> str:
-        return buf.getvalue()
-
-    return cons, get_output
+    return make_capture_console(highlight=False)
 
 
 # =============================================================================
@@ -90,6 +85,43 @@ class TestHandleCommandRouting:
         result = display.handle_command("foobar", [])
         assert result is False
 
+    # help_flag_safety — a help flag ANYWHERE means explain, never execute.
+    # run_demo is patched out in every case: a question must not reach a doing path.
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_help_flag_after_demo_prints_help(self, mock_help, mock_run_demo):
+        """`display demo --help` — flag at args[1] must still be read."""
+        result = display.handle_command("display", ["demo", "--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_dash_h_after_demo_prints_help(self, mock_help, mock_run_demo):
+        result = display.handle_command("show", ["demo", "-h"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_demo_as_command_with_help_flag_prints_help(self, mock_help, mock_run_demo):
+        """`drone @cli demo --help` — verb arrives in command, flag in args."""
+        result = display.handle_command("demo", ["--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_help_flag_at_any_later_position_prints_help(self, mock_help, mock_run_demo):
+        result = display.handle_command("display", ["demo", "extra", "--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
     def test_display_unknown_subcommand_returns_false(self):
         result = display.handle_command("display", ["unknown_sub"])
         assert result is False
@@ -142,8 +174,27 @@ class TestHeader:
         ):
             display.header("Solo Title")
         output = get_output()
-        # Should have the title but not a key-value separator pattern
         assert "Solo Title" in output
+        # The OMISSION half — the behaviour this test is named for. Without it
+        # the name promised something no assertion checked. header() renders a
+        # detail as "  <key>: <value>", so with no details no such line exists.
+        detail_lines = [line for line in output.splitlines() if line.startswith("  ") and ":" in line]
+        assert detail_lines == [], f"header rendered detail rows with no details: {detail_lines}"
+
+    def test_header_with_details_renders_the_kv_rows(self):
+        """The positive control — proves the omission assert above can fail."""
+        cons, get_output = _make_capture_console()
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
+            display.header("Solo Title", {"Name": "feature", "Type": "module"})
+        output = get_output()
+        detail_lines = [line for line in output.splitlines() if line.startswith("  ") and ":" in line]
+        assert len(detail_lines) == 2
+        assert "Name: feature" in output
+        assert "Type: module" in output
 
     def test_header_fires_trigger_when_available(self):
         cons, _get_output = _make_capture_console()

@@ -8,31 +8,31 @@
     {
       "standard": "json_structure",
       "file": "devpulse_json/compass",
-      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 — db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
+      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
     },
     {
       "standard": "handlers",
       "file": "apps/handlers/owner/guard.py",
-      "reason": "Lazy-imports is_owner/get_owner from spawn.apps.handlers.registry inside _owner_decision() — is_owner is the frozen shared owner-capability contract (#191, TDPLAN-0012); spawn is its sole home, no modules re-export. Same authorized cross-branch primitive pattern as ai_mail dispatch_monitor. Import failure falls back to the legacy heuristic. #681."
+      "reason": "Lazy-imports is_owner/get_owner from spawn.apps.handlers.registry inside _owner_decision() \u2014 is_owner is the frozen shared owner-capability contract (#191, TDPLAN-0012); spawn is its sole home, no modules re-export. Same authorized cross-branch primitive pattern as ai_mail dispatch_monitor. Import failure falls back to the legacy heuristic. #681."
     },
     {
       "standard": "encapsulation",
       "file": "apps/handlers/owner/guard.py",
-      "reason": "Lazy cross-branch import of the is_owner/get_owner resolver from spawn.apps.handlers.registry — the frozen owner-capability contract consumed identically by hooks + ai_mail. No spawn modules-level re-export exists; this is the sanctioned entry point. #681."
+      "reason": "Lazy cross-branch import of the is_owner/get_owner resolver from spawn.apps.handlers.registry \u2014 the frozen owner-capability contract consumed identically by hooks + ai_mail. No spawn modules-level re-export exists; this is the sanctioned entry point. #681."
     },
     {
       "standard": "architecture",
-      "reason": "No 'manager' citizen_class template in spawn. Devpulse is the only manager branch."
+      "reason": "No 'manager' citizen_class template in spawn. Devpulse is the only manager branch. MEASURED 2026-08-13 (control-first, rule pulled + full audit): exactly 1 live finding (missing spawn/templates/manager), but NO file key = suppresses architecture on all 106 files. Over-broad by mechanism, not intent \u2014 seedgo finding, DPLAN-0291 follow-up. Dies when spawn ships a manager template; branch-level rule scope routed to @seedgo."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/compose.py",
-      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
+      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/inbox.py",
-      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
+      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
     },
     {
       "standard": "naming",
@@ -42,7 +42,7 @@
     {
       "standard": "imports",
       "file": "apps/handlers/feedback/compose.py",
-      "reason": "_AIPASS_ROOT fallback for ai_mail inbox resolution. Known gap — needs registry-based path resolution."
+      "reason": "_AIPASS_ROOT fallback for ai_mail inbox resolution. Known gap \u2014 needs registry-based path resolution."
     },
     {
       "standard": "unused_function",

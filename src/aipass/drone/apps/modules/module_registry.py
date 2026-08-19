@@ -26,9 +26,8 @@ from aipass.drone.apps.handlers.module_registry_handler import (
     route_module_command,
     get_module_help,
     get_module_introspective,
-    register_module,
-    refresh_external_modules,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = [
     "ModuleInfo",
@@ -38,8 +37,6 @@ __all__ = [
     "route_module_command",
     "get_module_help",
     "get_module_introspective",
-    "register_module",
-    "refresh_external_modules",
 ]
 
 
@@ -79,9 +76,6 @@ def print_introspection():
         "    - [cyan]module_registry_handler.py[/cyan]"
         " [dim](get_module_introspective — introspect module adapter)[/dim]"
     )
-    console.print(
-        "    - [cyan]module_registry_handler.py[/cyan] [dim](register_module — register a new module adapter)[/dim]"
-    )
     console.print()
 
 
@@ -100,7 +94,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
     json_handler.log_operation("handle_command", {"module": "module_registry", "command": command})

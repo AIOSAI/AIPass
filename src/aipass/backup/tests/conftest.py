@@ -167,7 +167,7 @@ def mock_json_handler() -> MagicMock:
     handler.save_json = MagicMock(return_value=True)
     handler.ensure_json_exists = MagicMock(return_value=True)
     handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
+    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler
