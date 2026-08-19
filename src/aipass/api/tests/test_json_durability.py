@@ -29,6 +29,7 @@ Kept in this branch's own file rather than test_json_handler.py, which is a
 seedgo universal template that gets re-synced.
 """
 
+import errno
 import importlib
 import json
 import sys
@@ -36,6 +37,7 @@ import threading
 import types
 from pathlib import Path
 from typing import Any, List
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -311,3 +313,272 @@ class TestConcurrentAppendsKeepEveryEntry:
         runner.join(timeout=5)
 
         assert overtook, "a write to 'second' waited on a write to 'first'"
+
+
+# ============================================================================
+# A create cannot bury an entry — the cross-process axis (@trigger, 2026-08-19)
+# ============================================================================
+
+
+class TestCreatingADocumentNeverOverwritesOne:
+    """
+    The third door, found on @trigger's tree and reported to mine.
+
+    Their Linux CI lost 1 of 100 concurrent appends overnight, and it was not
+    the reader-mid-write species or the two-writers species already pinned
+    above. `ensure_json_exists` implemented "create if missing" as a REPLACING
+    write: two callers both find the document absent, both stage an empty
+    template, and the slower one's template lands on top of whatever was
+    written in between. No corruption, no refused read, no unusual timing —
+    just two callers starting near each other with the file not yet there,
+    which is the normal shape of a module's first log call.
+
+    THIS BRANCH HAD HALF THE GUARD. `ensure_module_jsons` is called from
+    INSIDE log_operation's document lock, which closes the race between two
+    threads. But `_document_lock` is a threading.Lock and every `drone @api`
+    invocation is its own process, so across processes the create was wide
+    open — and load_json reaches ensure_json_exists with no lock at all.
+
+    The cure needs no lock, which is why it is worth having while the
+    cross-process axis still waits on a fleet ruling: stage to a temp file and
+    os.link it into place. Create-or-fail — a caller who loses writes NOTHING —
+    and a linked file is complete the instant it appears, so there is no empty
+    window for a reader to read as corruption.
+    """
+
+    def test_a_staged_create_does_not_bury_an_entry_written_meanwhile(
+        self,
+        isolate_json_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The race, run deterministically rather than hoped for.
+
+        The interleaving is forced at the seam where it really happens: one
+        caller has OBSERVED the document absent and is building its template
+        when a second caller creates the document and appends a real entry.
+        Against a replacing create, the first caller's empty template lands on
+        top and the entry is gone. Reproduced this way against the unfixed
+        handler before the fix was written.
+        """
+        staged = threading.Event()
+        appended = threading.Event()
+        real_default = json_handler._create_default
+
+        def _pause_between_observing_and_writing(json_type: str, module_name: str) -> Any:
+            template = real_default(json_type, module_name)
+            if json_type == "log" and not staged.is_set():
+                staged.set()
+                # Hold here: the document is absent as far as this caller knows,
+                # and its write has not happened yet. This is the whole window.
+                assert appended.wait(timeout=10)
+            return template
+
+        monkeypatch.setattr(json_handler, "_create_default", _pause_between_observing_and_writing)
+
+        loser: List[Any] = []
+
+        def _slow_creator() -> None:
+            loser.append(json_handler.ensure_json_exists("racer", "log"))
+
+        creator = threading.Thread(target=_slow_creator)
+        creator.start()
+        try:
+            assert staged.wait(timeout=10), "the slow creator never reached the window"
+
+            # The other caller, standing in for another process: it creates the
+            # document and writes a real entry while the first is still staging.
+            monkeypatch.setattr(json_handler, "_create_default", real_default)
+            assert json_handler.log_operation("kept", {"n": 1}, "racer") is True
+        finally:
+            appended.set()
+            creator.join(timeout=10)
+
+        entries = json.loads((isolate_json_dir / "racer_log.json").read_text(encoding="utf-8"))
+
+        assert loser == [True], "the losing create reported failure to a caller that did nothing wrong"
+        assert [entry["operation"] for entry in entries] == ["kept"], (
+            "the entry was buried by a create that arrived after it"
+        )
+
+    def test_the_loser_of_a_create_writes_nothing_at_all(
+        self,
+        isolate_json_dir: Path,
+    ) -> None:
+        """Create-or-fail, asked of the helper directly.
+
+        The distinction that matters: losing is not an error. A caller who
+        loses the race got what it wanted — the document exists — so it must
+        neither raise nor overwrite.
+        """
+        target = isolate_json_dir / "already_there.json"
+
+        assert json_handler.atomic_create_json(target, {"first": True}) is True
+        assert json_handler.atomic_create_json(target, {"second": True}) is False
+
+        assert json.loads(target.read_text(encoding="utf-8")) == {"first": True}
+
+    def test_a_created_document_is_complete_the_instant_it_appears(
+        self,
+        isolate_json_dir: Path,
+    ) -> None:
+        """No empty window. A reader sees the whole document or no file.
+
+        The reason this is a link rather than a truncate-and-write: this
+        handler answers an unreadable document by regenerating a template over
+        it, so an empty window is not a transient read failure, it is data
+        loss one recovery later.
+        """
+        target = isolate_json_dir / "complete.json"
+        payload = {"module_name": "x", "version": "1.0.0", "config": {"enabled": True}}
+
+        seen: List[Any] = []
+        stop = threading.Event()
+
+        def _watch() -> None:
+            while not stop.is_set():
+                if target.exists():
+                    try:
+                        seen.append(json.loads(target.read_text(encoding="utf-8")))
+                    except (ValueError, OSError):
+                        seen.append("UNREADABLE")
+                    return
+
+        watcher = threading.Thread(target=_watch)
+        watcher.start()
+        try:
+            json_handler.atomic_create_json(target, payload)
+        finally:
+            stop.set()
+            watcher.join(timeout=10)
+
+        assert "UNREADABLE" not in seen
+        assert seen in ([payload], []), f"a reader saw something other than the finished document: {seen}"
+
+    def test_no_temp_file_is_left_behind(self, isolate_json_dir: Path) -> None:
+        """The link leaves a SECOND name for the same bytes — unlink it.
+
+        Missed, this directory fills with temp files that the handler's own
+        glob-and-read paths would then find.
+        """
+        target = isolate_json_dir / "tidy.json"
+
+        json_handler.atomic_create_json(target, {"a": 1})
+        json_handler.atomic_create_json(target, {"b": 2})
+
+        assert sorted(path.name for path in isolate_json_dir.iterdir()) == ["tidy.json"]
+
+    def test_a_link_less_filesystem_degrades_and_says_so(
+        self,
+        isolate_json_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Degrade, never fail — and never silently.
+
+        A filesystem with no hard links still needs a working handler. It gets
+        the old replacing write and a log line saying the guarantee is reduced,
+        because a weaker guarantee nobody was told about is the one that gets
+        relied on.
+        """
+        warned: List[str] = []
+        monkeypatch.setattr(json_handler.logger, "warning", lambda *a, **k: warned.append(str(a)))
+        monkeypatch.setattr(
+            json_handler.os,
+            "link",
+            MagicMock(side_effect=OSError(errno.EPERM, "hard links not supported")),
+        )
+
+        target = isolate_json_dir / "no_links.json"
+
+        assert json_handler.atomic_create_json(target, {"a": 1}) is True
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
+        assert warned, "the filesystem degraded the guarantee and nothing said so"
+
+    def test_the_branch_follows_what_was_observed_not_a_second_look(
+        self,
+        isolate_json_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """@trigger's own first fix was wrong this way, and said so.
+
+        Choosing create-vs-regenerate with a SECOND exists() check is the same
+        check-then-act one line lower: the racing writer creates the file
+        inside that window, the branch takes the overwrite path, and the entry
+        dies exactly as before.
+
+        So this watches WHICH WRITER RAN, not what ended up on disk. The first
+        version of this test read the file afterwards and passed against the
+        unfixed handler — both writers leave the same empty template, so the
+        bytes cannot tell them apart. Every look after the first is forced to
+        answer "present", which is precisely what a racing writer would make
+        the world say.
+        """
+        target = isolate_json_dir / "observed_log.json"
+        looks: List[str] = []
+        real_exists = Path.exists
+
+        def _counted_exists(self: Path) -> bool:
+            if self == target:
+                looks.append("looked")
+                # Every look after the first says "present" — a second check
+                # would see the racing writer's file and switch branches.
+                if len(looks) > 1:
+                    return True
+            return real_exists(self)
+
+        monkeypatch.setattr(Path, "exists", _counted_exists)
+
+        used: List[str] = []
+        real_create = json_handler.atomic_create_json
+        real_replace = json_handler._atomic_write_json
+
+        def _spy_create(path: Path, data: Any) -> bool:
+            used.append("create-or-fail")
+            return real_create(path, data)
+
+        def _spy_replace(path: Path, data: Any) -> None:
+            used.append("replacing-write")
+            return real_replace(path, data)
+
+        monkeypatch.setattr(json_handler, "atomic_create_json", _spy_create)
+        monkeypatch.setattr(json_handler, "_atomic_write_json", _spy_replace)
+
+        json_handler.ensure_json_exists("observed", "log")
+
+        assert looks, "the seam moved — this test is no longer watching the decision"
+        assert used == ["create-or-fail"], (
+            f"a second look changed the branch after the document was observed absent: {used}"
+        )
+        assert json.loads(target.read_text(encoding="utf-8")) == []
+
+    def test_an_unreadable_document_is_still_regenerated_over(
+        self,
+        isolate_json_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The converse, without which the fix above is half a repair.
+
+        Create-or-fail is right for a document that is ABSENT and wrong for one
+        that is PRESENT and unusable — a corrupt file would win the link race
+        against its own replacement and stay corrupt forever. Two different
+        writes live in one function; this pins the other one.
+        """
+        target = isolate_json_dir / "corrupt_config.json"
+        target.write_text("{ this is not json", encoding="utf-8")
+
+        used: List[str] = []
+        real_replace = json_handler._atomic_write_json
+
+        def _spy_replace(path: Path, data: Any) -> None:
+            used.append("replacing-write")
+            return real_replace(path, data)
+
+        monkeypatch.setattr(json_handler, "atomic_create_json", MagicMock(name="must-not-be-used"))
+        monkeypatch.setattr(json_handler, "_atomic_write_json", _spy_replace)
+
+        assert json_handler.ensure_json_exists("corrupt", "config") is True
+
+        assert used == ["replacing-write"], f"the corrupt document was not replaced: {used}"
+        assert json_handler.atomic_create_json.call_count == 0, (
+            "create-or-fail was used on a document that exists — it would lose to the corruption"
+        )
+        assert json.loads(target.read_text(encoding="utf-8"))["module_name"] == "corrupt"

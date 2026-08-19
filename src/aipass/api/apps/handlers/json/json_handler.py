@@ -6,7 +6,14 @@
 # Modified: 2026-08-18
 # =============================================
 
-"""JSON auto-creating handler — read, write, and log structured data."""
+"""JSON auto-creating handler — read, write, and log structured data.
+
+Functions:
+    load_json()          - Read a module document, creating it if absent
+    save_json()          - Replace a module document atomically
+    log_operation()      - Append one entry under the document's lock
+    atomic_create_json() - Create a document only if nobody else already has
+"""
 
 import json
 import os
@@ -136,6 +143,89 @@ def _atomic_write_json(target_path: Path, data: Any) -> None:
             os.unlink(temporary)
 
 
+def atomic_create_json(target_path: Path, data: Any) -> bool:
+    """
+    Create a JSON document only if nobody else already has. Never overwrite.
+
+    Args:
+        target_path: The document to bring into existence.
+        data: What to write if this caller is the one that creates it.
+
+    Returns:
+        True when this call created the document, False when someone else did
+        and this caller wrote nothing. LOSING IS NOT AN ERROR — the loser got
+        what it asked for (the document exists), so it neither raises nor
+        overwrites.
+
+    Raises:
+        OSError: The temp file could not be written, or the move failed for a
+            reason other than the target already existing.
+
+    Note:
+        THE THIRD WAY A DOCUMENT IS LOST, found on @trigger's tree 2026-08-19
+        and reported here: "create if missing" implemented as a replacing write
+        is a check-then-act. Two callers both find the document absent, both
+        stage an empty template, and the slower one's template lands on top of
+        whatever was written in between — no corruption, no refused read, no
+        unusual timing. Their Linux CI lost 1 of 100 concurrent appends to it.
+
+        os.link is the whole mechanism, for two reasons rather than one. It
+        FAILS if the target exists, which makes create-or-fail atomic in the
+        filesystem rather than in a check one line earlier — and a linked file
+        is complete the instant the name appears, so there is no empty window
+        for a reader to catch, which matters here because this handler answers
+        an unreadable document by regenerating a template over it.
+
+        It needs no lock, which is why it is worth taking now: this branch's
+        _document_lock is a threading.Lock and every `drone @api` run is its
+        own process, so the create race is open across processes today. Being
+        lockless, it also does not pre-empt whatever the fleet standardises for
+        the cross-process axis (@devpulse's ruling, still open).
+    """
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=str(target_path.parent), prefix=target_path.stem, suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2, ensure_ascii=False)
+
+        try:
+            os.link(temporary, str(target_path))
+            return True
+        except FileExistsError:
+            # Someone else created it first. They win, and this caller writes
+            # NOTHING — which is the entire point of the exercise. DEBUG, not
+            # warning: losing is the normal, correct outcome of a race two
+            # healthy processes are allowed to enter. Logged at all because
+            # "who created this document" is otherwise unanswerable after the
+            # fact, and this is the only place that knows.
+            logger.debug("[json_handler] %s was created by another process first — writing nothing", target_path)
+            return False
+        except (OSError, AttributeError, NotImplementedError) as e:
+            # No hard links here (some network and container filesystems, and
+            # Windows outside NTFS). Degrade to the replacing write so the
+            # handler still works, and SAY SO — a guarantee that quietly got
+            # weaker is the one somebody keeps relying on.
+            logger.warning(
+                "[json_handler] %s cannot hard-link (%s) — falling back to a replacing create, "
+                "which can overwrite a document another process created first",
+                target_path.parent,
+                e,
+            )
+            _replace_with_retry(temporary, str(target_path))
+            return True
+    finally:
+        # The link leaves a SECOND name for the same bytes; the fallback moved
+        # the file and this is a no-op. Either way nothing is left in a
+        # directory the handler itself globs.
+        try:
+            os.unlink(temporary)
+        except OSError as e:
+            # Nothing to abort — the document itself is already correct. But a
+            # stranded .tmp sits in a directory this handler globs, so it gets
+            # named rather than swallowed.
+            logger.debug("[json_handler] could not remove the staging file %s: %s", temporary, e)
+
+
 def _get_caller_module_name() -> str:
     """
     Auto-detect calling module name from call stack
@@ -237,12 +327,37 @@ def get_json_path(module_name: str, json_type: str) -> Path:
 
 
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
-    """Ensure JSON file exists, create from template if missing"""
+    """
+    Ensure JSON file exists, create from template if missing.
+
+    Args:
+        module_name: Which module's document.
+        json_type: config, data or log.
+
+    Returns:
+        True — the document exists when this returns, whoever made it.
+
+    Note:
+        TWO DIFFERENT WRITES LIVE HERE and conflating them is the defect. A
+        document that is ABSENT is created with atomic_create_json, which
+        cannot overwrite: a second process arriving at the same moment writes
+        nothing rather than burying an entry the winner already appended. A
+        document that is PRESENT and unusable is regenerated, which genuinely
+        must replace what is there.
+
+        The branch follows what the FIRST read observed, deliberately. Deciding
+        create-vs-regenerate with a second exists() check is the same
+        check-then-act one line lower — the racing writer creates the file
+        inside that window, this call takes the overwrite path, and the entry
+        dies exactly as before. @trigger's own first cure had that shape and
+        their red-first pin caught it; this one follows the observation.
+    """
     API_JSON_DIR.mkdir(parents=True, exist_ok=True)
 
     json_path = get_json_path(module_name, json_type)
+    observed_present = json_path.exists()
 
-    if json_path.exists():
+    if observed_present:
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -254,12 +369,17 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         except Exception as e:
             logger.warning(f"Unreadable JSON at {json_path}, regenerating: {e}")
 
-    template = _create_default(json_type, module_name)
+        # REGENERATE. Atomic like every other write here: this fires on files a
+        # running server is already reading, so a reader must never catch it
+        # half-done. Still an unlocked overwrite of a live document — narrower
+        # than it was (it can no longer fire on a merely-absent file) but the
+        # cross-process axis still owns the rest of it.
+        _atomic_write_json(json_path, _create_default(json_type, module_name))
+        return True
 
-    # Atomic like every other write here: this path fires on files a running
-    # server is already reading, and it is the REGENERATE path — the one that
-    # replaces a live document, so a reader must never catch it half-done.
-    _atomic_write_json(json_path, template)
+    # CREATE. Observed absent, so this is create-or-fail: losing means somebody
+    # else made it, which is the outcome this function exists to reach.
+    atomic_create_json(json_path, _create_default(json_type, module_name))
     return True
 
 

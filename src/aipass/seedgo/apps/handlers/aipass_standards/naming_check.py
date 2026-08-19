@@ -153,10 +153,11 @@ def check_file_naming(module_path: str, path: Path) -> Dict:
 
         # Check if filename starts with parent directory name
         if filename.startswith(f"{parent_dir}_"):
+            suggested = filename.replace(f"{parent_dir}_", "")
             return {
                 "name": "File naming",
                 "passed": False,
-                "message": f"{filename}.py has redundant prefix (in {parent_dir}/ dir, use {filename.replace(f'{parent_dir}_', '')}.py)",
+                "message": f"{filename}.py has redundant prefix (in {parent_dir}/ dir, use {suggested}.py)",
             }
 
     # Check for standard verbs (informational)
@@ -213,10 +214,11 @@ def check_function_naming(content: str) -> Optional[Dict]:
             bad_functions.append(func_name)
 
     if bad_functions:
+        suffix = "..." if len(bad_functions) > 3 else ""
         return {
             "name": "Function naming",
             "passed": False,
-            "message": f"Non-snake_case functions: {', '.join(bad_functions[:3])}{'...' if len(bad_functions) > 3 else ''}",
+            "message": f"Non-snake_case functions: {', '.join(bad_functions[:3])}{suffix}",
         }
 
     return {
@@ -350,8 +352,8 @@ def check_class_naming(content: str) -> Optional[Dict]:
     # Check each class name
     bad_classes = []
     for class_name in classes:
-        # Check for PascalCase
-        if not re.match(r"^[A-Z][a-zA-Z0-9]*$", class_name):
+        # Check for PascalCase (PEP 8 sanctions a single leading underscore for internal classes)
+        if not re.match(r"^_?[A-Z][a-zA-Z0-9]*$", class_name):
             bad_classes.append(class_name)
 
     if bad_classes:

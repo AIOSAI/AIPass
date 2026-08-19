@@ -122,14 +122,21 @@ def store(tmp_path: Path):
 def quiet_module():
     """Silence the module's console output during CLI tests."""
     with (
-        patch(PATCH_MOD_CONSOLE),
+        patch(PATCH_MOD_CONSOLE) as mock_console,
         patch(PATCH_MOD_HEADER),
         patch(PATCH_MOD_ERROR) as mock_error,
         patch(PATCH_MOD_SUCCESS) as mock_success,
         patch(PATCH_MOD_WARNING) as mock_warning,
         patch(PATCH_MOD_JSON),
     ):
-        yield {"error": mock_error, "success": mock_success, "warning": mock_warning}
+        # `console` is handed back so a test can read what was PRINTED, not
+        # just what was refused — the S49 check needs the actual output.
+        yield {
+            "error": mock_error,
+            "success": mock_success,
+            "warning": mock_warning,
+            "console": mock_console,
+        }
 
 
 # =============================================
@@ -717,14 +724,134 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
 class TestIssueTokenCommand:
     """The CLI's issuance discipline."""
 
-    def test_refuses_without_out_flag(self, store: Path, quiet_module: dict) -> None:
-        """No raw secret to stdout — S49 precedent. A token in scrollback is a
-        token in the shell history file."""
+    def test_no_out_flag_lands_the_receipt_in_the_secrets_store(self, store: Path, quiet_module: dict) -> None:
+        """--out is OPTIONAL, and the default is where secrets already live.
+
+        This test used to pin the opposite — that --out was mandatory — and the
+        rule it was defending was never "make the caller name a file", it was
+        S49's "never print the raw value". The mandatory flag defended that
+        badly: its own example said `--out ~/pixel.token`, and on 2026-08-19
+        Patrick found three raw bearer receipts sitting in his home root
+        because of it. A default that lands beside the hashed store honours S49
+        and takes the home root off the table.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        quiet_module["error"].assert_not_called()
+
+        receipt = store / "host_api" / "pixel-8.token"
+        assert receipt.is_file(), "no receipt was written and nothing said so"
+        assert host_tokens.verify_token(receipt.read_text(encoding="utf-8")) is not None
+
+    def test_the_default_receipt_is_still_0600(self, store: Path, quiet_module: dict) -> None:
+        """The mode is the point of the file, not a property of --out."""
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        receipt = store / "host_api" / "pixel-8.token"
+        if sys.platform != "win32":
+            assert stat.S_IMODE(os.stat(receipt).st_mode) == 0o600
+            assert stat.S_IMODE(os.stat(receipt.parent).st_mode) == 0o700
+
+    def test_the_raw_value_is_still_never_printed(self, store: Path, quiet_module: dict) -> None:
+        """S49, checked against the console rather than assumed from the shape.
+
+        The whole reason --out was mandatory. Making it optional must not have
+        quietly reintroduced the thing it was defending against, so this reads
+        every line the command printed and looks for the secret in it.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        raw = (store / "host_api" / "pixel-8.token").read_text(encoding="utf-8")
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+
+        assert raw not in printed, "the raw token reached the console"
+
+    def test_an_existing_receipt_is_never_overwritten(self, store: Path, quiet_module: dict) -> None:
+        """Its token is still LIVE — truncating the file orphans a credential.
+
+        The failure this prevents is quiet and permanent: the raw value exists
+        exactly once, at mint time, so overwriting the receipt leaves a working
+        token in the store that nobody holds and nobody knows to revoke.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+        receipt = store / "host_api" / "pixel-8.token"
+        first = receipt.read_text(encoding="utf-8")
+
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         quiet_module["error"].assert_called_once()
-        assert "--out" in str(quiet_module["error"].call_args)
-        assert host_tokens.list_tokens() == []
+        assert receipt.read_text(encoding="utf-8") == first, "the first receipt was overwritten"
+        assert len(host_tokens.list_tokens()) == 1, "a second token was minted for a receipt that could not be written"
+
+    def test_an_existing_explicit_out_file_is_never_overwritten_either(
+        self,
+        store: Path,
+        tmp_path: Path,
+        quiet_module: dict,
+    ) -> None:
+        """Same rule when the caller names the path — the loss is identical."""
+        out = tmp_path / "device.token"
+        out.write_text("an-older-receipt", encoding="utf-8")
+
+        handle_command("host-api", ["issue-token", "pixel-8", "--out", str(out)])
+
+        quiet_module["error"].assert_called_once()
+        assert out.read_text(encoding="utf-8") == "an-older-receipt"
+        assert host_tokens.list_tokens() == [], "a token was minted that its caller can never read"
+
+    def test_a_label_that_is_a_path_is_refused_before_anything_is_minted(
+        self,
+        store: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The label becomes a FILENAME now, so it needs the name fence.
+
+        Nothing validated the label as a path component before, because nothing
+        ever built a path from it. The default receipt does.
+        """
+        handle_command("host-api", ["issue-token", "../escaped"])
+
+        quiet_module["error"].assert_called_once()
+        assert host_tokens.list_tokens() == [], "a token was minted for a label that could not be written"
+        assert not (store.parent / "escaped.token").exists()
+
+    def test_a_receipt_appearing_mid_mint_is_not_truncated(
+        self,
+        store: Path,
+        tmp_path: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The existence check is a good sentence; O_EXCL is the guarantee.
+
+        Found while mutating: swapping O_EXCL for O_TRUNC bit NOTHING, because
+        every overwrite test above is refused by the exists() check one screen
+        earlier — which is itself a check-then-act, the same shape as the
+        create race @trigger reported in json_handler on the same day. This
+        opens the window on purpose by creating the file DURING the mint, and
+        asks whether the older receipt survives.
+
+        The other half matters as much: the token was already minted when the
+        write failed, so the caller must be told to revoke it. A "could not
+        write" that reads like nothing happened leaves a live credential in the
+        store that nobody holds.
+        """
+        out = tmp_path / "device.token"
+        real_issue = host_tokens.issue_token
+
+        def _someone_else_gets_there_first(label: str, scope: str = "read") -> Any:
+            out.write_text("a receipt that arrived first", encoding="utf-8")
+            return real_issue(label, scope)
+
+        with patch.object(host_tokens, "issue_token", side_effect=_someone_else_gets_there_first):
+            handle_command("host-api", ["issue-token", "pixel-8", "--out", str(out)])
+
+        assert out.read_text(encoding="utf-8") == "a receipt that arrived first", (
+            "a receipt created inside the window was truncated"
+        )
+        quiet_module["error"].assert_called_once()
+        told = str(quiet_module["error"].call_args)
+        assert "revoke" in told.lower(), f"the token was minted and the operator was not told to revoke it: {told}"
 
     def test_missing_label_refused(self, store: Path, quiet_module: dict) -> None:
         """A label is required before anything is minted."""

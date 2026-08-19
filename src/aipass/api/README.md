@@ -5,8 +5,22 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1499 pass | **Functions:** 208 public (194 tested)
+**Seedgo:** 100% (45/45) | **Tests:** 1522 pass | **Functions:** 210 public (196 tested)
 **Last Updated:** 2026-08-19
+
+*`--out` became OPTIONAL, and that is a security fix rather than a
+convenience. The rule was never "make the caller name a file", it was S49's
+"never print the raw value" — and the mandatory flag defended it badly, because
+its own example said `--out ~/pixel.token`. Patrick found three raw bearer
+receipts sitting in his home root on 2026-08-19, 43 bytes each, put there by
+whoever read my help text and did what it said. The receipt lands beside the
+hashed store now (`~/.secrets/aipass/host_api/<label>.token`, dir 0700, file
+0600). That turns a free-form label into a FILENAME, which is the one thing it
+could never reach before, so the label now goes through the same two-gate name
+fence the routes use: refuse the sentence up front, check containment after
+resolving. Refusing an existing receipt is the other half — the token it names
+is still LIVE in the store, and truncating the file leaves a working credential
+nobody holds and nobody thinks to revoke.*
 
 *The name fence gained ROOTS (FPLAN-0443). It answered exactly one kind of
 word — a citizen name — which is why the phone could only ever stand in
@@ -126,7 +140,7 @@ drone @api stats
 | `integrations list` | List registered contracts |
 | `integrations call <contract> [args...]` | Call a registered contract |
 | `host-api serve [--host IP] [--port N]` | Run the host API (binds the configured address or refuses) |
-| `host-api issue-token <label> --out FILE` | Mint a bearer token (raw value never printed) |
+| `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
 | `host-api config` / `set-config` | Show / set the bind address (validated first) |
@@ -215,7 +229,7 @@ The server the BAUD phone face talks to. **Bound to the tailnet since 2026-08-14
 after the Phase 5 security review — the first network-listening service in AIPass.
 
 ```bash
-drone @api host-api issue-token pixel-8 --scope read --out ~/pixel.token
+drone @api host-api issue-token pixel-8 --scope read   # receipt -> ~/.secrets/aipass/host_api/
 drone @api host-api serve              # binds the configured address
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api revoke-token <id>  # effective next request, no restart
