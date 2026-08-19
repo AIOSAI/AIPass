@@ -76,7 +76,7 @@ memory/
 │   │   ├── pool.py              # Pool vectorization + auto-process
 │   │   ├── rollover.py          # Rollover orchestration, status, sync-lines
 │   │   ├── search.py            # Semantic query routing
-│   │   ├── symbolic.py          # PARKED 2026-08-14 — refusal stub (impl in .archive/)
+│   │   ├── symbolic.py          # PARKED 2026-08-14 — refusal stub (impl in tests/parked/)
 │   │   ├── templates.py         # Template push, diff, status
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
@@ -91,7 +91,7 @@ memory/
 │       ├── schema/              # normalize.py
 │       ├── search/              # query_executor.py
 │       ├── storage/             # chroma_subprocess.py
-│       ├── symbolic/            # PARKED 2026-08-14 — __init__ raises; impl in .archive/
+│       ├── symbolic/            # PARKED 2026-08-14 — __init__ raises; impl in tests/parked/
 │       ├── templates/           # pusher.py, differ.py, spawn_pusher.py
 │       ├── tracking/            # line_counter.py, tab_renderer.py
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
@@ -378,9 +378,47 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** 1081 passed, 0 failures, 5 skipped (2026-08-17). The 5 skips are the parked symbolic-fragments tier and its embedder — see `.archive/parked_symbolic_20260814/`. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (see below).
+- **Tests:** 1086 passed, 0 failures, 5 skipped (2026-08-18). The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/`. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (see below).
 - **Seedgo:** 100%. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
 - **Bypass registry:** 113 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+
+### A park in the disposal zone is not a park (2026-08-18)
+
+Patrick's ruling that night, fleet-wide: `.archive/` is always ignored, no
+exceptions, and it is his disposal zone — cleaned without warning. Both of this
+branch's parks lived there. `test_symbolic_parked.py` had nine pins asserting the
+parked implementation was still on disk, and they had been green on every dev
+machine and red on every fresh clone since the doctrine landed: 11 failures per
+CI run, `missing from the park: handlers/chroma_client.py`.
+
+The pins were not wrong about preservation. They were asking a question that
+cannot detect the failure: **asserting a file exists cannot tell a tracked home
+from a local one.** Both parks moved to `tests/parked/`, byte-identical (verified
+by sha256 before and after), and a new pin asserts the *home* instead — no
+component of the park's path may be `.archive`.
+
+Two things the move surfaced that the ruling did not mention:
+
+- **`(disabled)` does not stop pytest.** The suffix is the house convention for
+  code that is present but must not run, and it does disable dotted-path import
+  — `test_storage(disabled)` is not a valid identifier. But
+  `test_storage(disabled).py` still matches pytest's default `test_*.py` glob,
+  and four of the archived files in `unwired_handlers_20260813/` are the tests
+  that covered handlers which left the tree. First landing: **66 failed, 39
+  errors**, all of them parked tests running against absent code. The barrier is
+  a `conftest.py` in `tests/parked/` — deliberately *not* a `norecursedirs` line
+  in this branch's `pytest.ini`, because CI runs the whole repo from its root
+  where the root config is in force and this branch's ini is never read. A
+  conftest is loaded from its own directory whatever the rootdir, which is the
+  only property that holds on the lane that broke. Pinned by a real collection
+  run in a subprocess; emptying the conftest turns it red.
+- **"Archived not deleted" was quietly false for the second park.** Nothing
+  pinned `unwired_handlers_20260813/`, so CI never complained — but the README
+  claim that 105 tests were preserved alongside their code was true only of this
+  machine. It moved too.
+
+The `recovery_*` snapshots stay in `.archive/`. They are not parks and are meant
+to be disposable, which is what that directory is now for.
 
 ### A suite that needs this machine is not a suite (2026-08-17)
 
@@ -440,7 +478,7 @@ that names its reason is honest; a pass that needed this machine is not.
 Three handler files had no caller: `learnings/manager.py` (superseded by the
 rollover extractor), `search/vector_search.py` and `storage/chroma.py` (both
 in-process ChromaDB paths, superseded by `chroma_subprocess.py`). All three moved
-to `.archive/unwired_handlers_20260813/` together with the 105 tests that covered
+to `tests/parked/unwired_handlers_20260813/` together with the 105 tests that covered
 them — tests over unreachable code report coverage that does not exist.
 
 `chroma.py` was **not** in the original finding; it surfaced only after

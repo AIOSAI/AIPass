@@ -11,6 +11,32 @@ from aipass.hooks.apps.modules import cc_transcripts
 
 _MOD = "aipass.hooks.apps.handlers.lifecycle.session_boot"
 
+# Classes that test the tmux lookups themselves — they must see the real thing.
+_TMUX_OWN_TESTS = {
+    "TestFindTmux",
+    "TestTmuxSessionExists",
+    "TestFindTmuxSessionForPid",
+    "TestTmuxLookupsSurviveAMachineWithoutTmux",
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tmux_lookup(request):
+    """Keep the MENU tests off a real subprocess.
+
+    Rendering the multi-session menu describes each live process, which asks
+    tmux where that process lives. That is a real `tmux list-panes` call: it
+    raises WinError 2 on the Windows runner (6 CI failures, 2026-08-18) and is
+    slow everywhere else. Whether [Enter] continues the last chat is not a
+    platform question, so the lookup is stubbed for every test except the ones
+    whose subject IS the lookup.
+    """
+    if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
+        yield
+        return
+    with patch.object(session_boot, "_find_tmux_session_for_pid", return_value=None):
+        yield
+
 
 class TestResolveClaudeBinary:
     def test_found_on_path(self):
@@ -1357,3 +1383,48 @@ class TestVersionDrift:
         ):
             session_boot.boot(cwd=str(tmp_path))
         mock_warn.assert_called_once()
+
+
+class TestTmuxLookupsSurviveAMachineWithoutTmux:
+    """A missing tmux is a fact about the world, not a crash. _describe_process
+    put _find_tmux_session_for_pid on the menu render path, so an unguarded
+    call took the whole menu down on every host without tmux."""
+
+    def test_find_session_for_pid_answers_none_when_tmux_is_absent(self):
+        with patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")):
+            assert session_boot._find_tmux_session_for_pid(1234) is None
+
+    def test_session_exists_answers_false_when_tmux_is_absent(self):
+        with patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")):
+            assert session_boot._tmux_session_exists("hooks") is False
+
+    def test_a_hung_tmux_does_not_hang_the_menu(self):
+        with patch.object(
+            session_boot.subprocess, "run", side_effect=session_boot.subprocess.TimeoutExpired("tmux", 5)
+        ):
+            assert session_boot._find_tmux_session_for_pid(1234) is None
+            assert session_boot._tmux_session_exists("hooks") is False
+
+    def test_the_menu_still_renders_without_tmux(self, tmp_path, fake_projects, capsys):
+        """The failure that mattered: the whole menu, not one label."""
+        make_transcript(fake_projects, tmp_path, "chat-1", "A chat", 4)
+        live = [
+            {"pid": 1, "sessionId": "s1", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 2, "sessionId": "s2", "cwd": str(tmp_path), "kind": "interactive"},
+        ]
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            # tmux resolves (boot requires it) but every tmux CALL fails —
+            # the shape of a host where the binary is stale or sandboxed away.
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_warn_on_version_drift", return_value=""),
+            patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
+            patch.object(session_boot, "_read_choice", return_value="q"),
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        out = capsys.readouterr().err
+        assert result["action"] == "quit"
+        assert "A chat" in out
+        assert "no tmux" in out

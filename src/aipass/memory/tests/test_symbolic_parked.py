@@ -21,13 +21,20 @@ A park is only honest if it is loud. These tests pin the two halves:
 """
 
 import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from aipass.memory.apps.modules import symbolic
 
-_ARCHIVE = Path(__file__).resolve().parent.parent / ".archive" / "parked_symbolic_20260814"
+# The park's TRACKED home. It lived under .archive/ until 2026-08-18, when
+# Patrick ruled .archive/ always-ignored and named it his disposal zone -- at
+# which point these preservation pins started failing on every fresh clone,
+# because the files they pin no longer shipped. A park that CI cannot see is
+# not a park; see tests/parked/README.md.
+_PARK = Path(__file__).resolve().parent / "parked" / "symbolic_20260814"
 
 # Every subcommand the tier used to answer. All of them must now refuse.
 _SUBCOMMANDS = ["demo", "analyze", "extract", "bootstrap", "fragments", "hook-test"]
@@ -158,19 +165,48 @@ class TestRevivable:
     @pytest.mark.parametrize(
         "relative",
         [
-            "handlers/__init__.py",
-            "handlers/chroma_client.py",
-            "handlers/deduplicator.py",
-            "handlers/extractor.py",
-            "handlers/hook.py",
-            "handlers/retriever.py",
-            "handlers/storage.py",
-            "modules/symbolic.py",
-            "handlers_vector/embedder.py",
+            "handlers/__init__(disabled).py",
+            "handlers/chroma_client(disabled).py",
+            "handlers/deduplicator(disabled).py",
+            "handlers/extractor(disabled).py",
+            "handlers/hook(disabled).py",
+            "handlers/retriever(disabled).py",
+            "handlers/storage(disabled).py",
+            "modules/symbolic(disabled).py",
+            "handlers_vector/embedder(disabled).py",
         ],
     )
     def test_implementation_is_preserved(self, relative):
-        assert (_ARCHIVE / relative).is_file(), f"missing from the park: {relative}"
+        assert (_PARK / relative).is_file(), f"missing from the park: {relative}"
+
+    def test_the_park_is_not_in_the_disposal_zone(self):
+        """The failure this test class could not see, made visible.
+
+        These pins were green for four days while pointing into `.archive/` --
+        green on every dev machine and red on every runner, because the files
+        were there and untracked. Asserting a file EXISTS cannot tell a tracked
+        home from a local one. This asserts the home instead: no component of
+        the path may be `.archive`, which is the one directory Patrick's ruling
+        says is cleaned without warning.
+        """
+        assert ".archive" not in _PARK.parts, f"the park is back in the disposal zone: {_PARK}"
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "handlers/extractor(disabled).py",
+            "modules/symbolic(disabled).py",
+        ],
+    )
+    def test_parked_code_is_not_importable_by_dotted_path(self, relative):
+        """The `(disabled)` suffix is not decoration -- it is the disabling.
+
+        Parked code sitting under tests/ with its real name would be importable
+        and, for the four archived TEST files in the sibling park, collectable.
+        The suffix makes the stem an invalid identifier, so neither can happen.
+        """
+        stem = (_PARK / relative).stem
+        assert not stem.isidentifier(), f"{stem} is still a valid module name"
 
     def test_the_orphaned_embedder_left_the_live_tree(self):
         """Parked with the tier (devpulse's ruling) — its only importers were symbolic's."""
@@ -179,8 +215,45 @@ class TestRevivable:
         assert (vector_dir / "embed_subprocess.py").is_file(), "the live lane's script must stay"
 
     def test_the_park_documents_its_own_revival(self):
-        readme = _ARCHIVE / "README.md"
+        readme = _PARK / "README.md"
         assert readme.is_file()
         text = readme.read_text(encoding="utf-8")
         assert _names_the_ruling(text)
         assert "revive" in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# The park must be kept, and must never run
+# ---------------------------------------------------------------------------
+
+
+class TestParkIsNeverCollected:
+    """Kept is not the same as run, and the second half needs its own pin.
+
+    Four files in the sibling `unwired_handlers_20260813/` park are the TESTS
+    that covered handlers which left the tree. `test_storage(disabled).py`
+    still matches pytest's default `test_*.py` glob, so the first landing of
+    this park collected all of it and produced 66 failures and 39 errors
+    against code that is no longer there.
+
+    A real collection, in a subprocess, because that is the only thing that
+    answers the question. Asserting the conftest merely EXISTS would pass on a
+    conftest that had been emptied.
+    """
+
+    def test_collecting_the_park_finds_nothing(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", str(_PARK.parent)],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        combined = result.stdout + result.stderr
+        assert "error" not in combined.lower(), combined
+        collected = [ln for ln in result.stdout.splitlines() if "::" in ln]
+        assert collected == [], f"parked code was collected: {collected[:5]}"
+
+    def test_a_parked_test_file_would_otherwise_have_matched(self):
+        """Guard the guard: if no parked file looks like a test, the pin is vacuous."""
+        tempting = [p.name for p in _PARK.parent.rglob("test_*.py")]
+        assert tempting, "no parked file matches test_*.py — this pin no longer pins anything"

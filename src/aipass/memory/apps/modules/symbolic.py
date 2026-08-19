@@ -32,8 +32,8 @@ WHERE THE ACTIVE PIECE IS
     decide which Compass decisions may be shown.
 
 THE IMPLEMENTATION IS NOT GONE
-    All 1602 lines are at .archive/parked_symbolic_20260814/modules/symbolic.py,
-    the handlers at .archive/parked_symbolic_20260814/handlers/. That directory's
+    All 1602 lines are at tests/parked/symbolic_20260814/modules/symbolic(disabled).py,
+    the handlers at tests/parked/symbolic_20260814/handlers/. That directory's
     README.md has the revival steps. This stub stays in place so that anyone who
     invokes a parked surface is told what happened rather than met with a bare
     'unknown command'.
@@ -68,7 +68,7 @@ _PARKED_REASON = (
 
 _ACTIVE_PIECE = "Compass — @devpulse's curated-truth store (SQLite/FTS5): drone @devpulse compass"
 
-_ARCHIVE_HINT = "Code + revival steps: memory/.archive/parked_symbolic_20260814/README.md"
+_ARCHIVE_HINT = "Code + revival steps: memory/tests/parked/symbolic_20260814/README.md"
 
 
 class SymbolicTierParked(RuntimeError):

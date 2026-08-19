@@ -172,26 +172,49 @@ def _extract_frontmatter(content):
 def _simple_frontmatter_parse(text):
     """Simple YAML-like frontmatter parser (no yaml dependency).
 
-    Handles flat key: value pairs, simple lists with [] syntax,
-    and nested keys one level deep (e.g., requires.pip).
+    Handles flat key: value pairs, inline lists with [] syntax, block lists
+    written as "- item" lines, and nested keys one level deep (e.g.,
+    requires.pip).
 
     Args:
         text: Raw frontmatter text (without --- delimiters).
 
     Returns:
         dict: Parsed key-value pairs.
+
+    Note:
+        A key with an empty value is ambiguous until the NEXT line is read: it
+        opens either a block of nested keys (requires:) or a block list
+        (when_to_use:). It is therefore held as `pending` and materialised by
+        whichever arrives. Answering early is what broke this parser before -
+        an empty value was run through _parse_simple_value, whose int() attempt
+        failed through to the string "", so every block list silently read as
+        "" or {} instead of its items. Silent, because a wrong shape is not an
+        error until something downstream trusts it: shipped skills (screen_lock,
+        github) lost their when_to_use, and the telegram skill's declared units
+        read as empty on any runner without PyYAML - the CI red of 2026-08-19.
     """
     result = {}
     current_key = None
     current_list = None
+    # (container, key) for a key whose value has not been decided yet.
+    pending = None
 
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
 
-        # Check for list item under a nested key
-        if stripped.startswith("- ") and current_list is not None:
+        # Block list item: "- value"
+        if stripped.startswith("- "):
+            if current_list is None and pending is not None:
+                container, pending_key = pending
+                current_list = []
+                container[pending_key] = current_list
+                pending = None
+            if current_list is None:
+                # A stray item under no key belongs to nothing.
+                continue
             value = stripped[2:].strip().strip("'\"")
             if value:
                 current_list.append(value)
@@ -199,8 +222,9 @@ def _simple_frontmatter_parse(text):
 
         # Check for key: value
         if ":" in stripped:
-            # Reset list tracking
+            # A new key ends both the open list and any undecided key.
             current_list = None
+            pending = None
 
             colon_idx = stripped.index(":")
             key = stripped[:colon_idx].strip()
@@ -213,6 +237,11 @@ def _simple_frontmatter_parse(text):
                 # Nested key (e.g., pip: [] under requires:)
                 if not isinstance(result.get(current_key), dict):
                     result[current_key] = {}
+                if not value:
+                    # Undecided: a block list may follow on the next line.
+                    result[current_key][key] = {}
+                    pending = (result[current_key], key)
+                    continue
                 parsed_value = _parse_simple_value(value)
                 result[current_key][key] = parsed_value
                 if isinstance(parsed_value, list):
@@ -225,8 +254,10 @@ def _simple_frontmatter_parse(text):
                 if value:
                     result[key] = _parse_simple_value(value)
                 else:
-                    # Could be a nested block or empty value
+                    # Could be a nested block or a block list — decided by the
+                    # next line, not guessed at here.
                     result[key] = {}
+                    pending = (result, key)
 
     return result
 

@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1493 pass | **Functions:** 208 public (194 tested)
-**Last Updated:** 2026-08-18
+**Seedgo:** 100% (45/45) | **Tests:** 1499 pass | **Functions:** 208 public (194 tested)
+**Last Updated:** 2026-08-19
 
 *The name fence gained ROOTS (FPLAN-0443). It answered exactly one kind of
 word — a citizen name — which is why the phone could only ever stand in
@@ -33,6 +33,32 @@ while measuring: the socket pump used asyncio's default executor, which
 sizes itself to eight threads on this host — the ninth terminal connected,
 authenticated, and then silently never pumped. Its own pool now, and the cap
 is a sentence instead of a blank screen.*
+
+*The perf round's own tests then went red in CI, and three of the four were
+tests measuring their runner rather than their subject. The caller-detection
+pin demanded the name `test_host_perf` and got `conftest`, because the
+repo-root conftest WRAPS `log_operation` to keep parallel runs off shared
+files — so the caller of `log_operation` really is that wrapper. Measured
+before blaming the change: `inspect.stack()[2]` returns the same frame, so
+the old implementation named `conftest` too and this test was simply the
+first thing in the tree ever to look. It pins AGREEMENT between the two
+implementations now, plus the depth itself through a stand-in compiled under
+another filename — a stand-in defined in the test file put frames 1 and 2 in
+the same module, and the off-by-one mutation survived. The TTL test failed on
+Windows only because `time.monotonic` advances there in ~15.6ms steps, so two
+reads landed on one tick and `0.0 > 0.0` is false; it drives its own clock
+now and sleeps not at all. The pump's POSIX-only machinery patches the
+module-level `pty` name rather than an attribute on it (`pty` is None on
+Windows), and the one test that genuinely needs SIGHUP skips where SIGHUP
+does not exist — honestly, because `open_attach` refuses on that platform
+long before a session exists to hang up. Verified against a probe that hides
+`pty` and deletes `signal.SIGHUP`: 1463 pass, 36 POSIX skips, one of them
+mine.*
+
+*The park gained a real barrier on @memory's proof: `(disabled)` is a naming
+habit and dropping the `test_` prefix is what actually keeps a file out of
+collection — so `tests/parked/` now carries `collect_ignore_glob` and a pin
+that drops a deliberately `test_`-named intruder in to prove it holds.*
 
 *The gateway_boundary line is answered by a bypass entry with its own
 retirement clause (no owner door exists at @aipass yet, ruling pending), so

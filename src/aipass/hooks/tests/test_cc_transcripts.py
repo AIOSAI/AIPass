@@ -50,18 +50,94 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return projects
 
 
+class TestManglingRule:
+    """The rule, not the platform string.
+
+    A CI run on Windows read `D--home-p-...` where this test had hardcoded
+    `-home-p-...` — because Path.resolve() prepends a drive letter there, not
+    because the mangling differs. The rule below is transcribed from the
+    shipping CLI (2.1.228) and cross-checked against its own JavaScript:
+
+        dpo(e) = e.replace(/[^a-zA-Z0-9]/g, "-")
+        gv(e)  = dpo(e).length <= 200 ? dpo(e) : dpo(e).slice(0,200) + "-" + hash(e)
+        hash(e): t = 0; per UTF-16 unit c: t = (t<<5) - t + c | 0 -> abs(t).toString(36)
+
+    These vectors are the CLI's own answers, so they hold on every platform.
+    """
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "-home-patrick-Projects-AIPass-src-aipass-hooks"),
+            # A Windows path: the colon and both backslashes are just
+            # non-alphanumerics. There is NO drive-letter special case.
+            ("C:\\Users\\p\\ai_mail", "C--Users-p-ai-mail"),
+            ("", ""),
+            ("/tmp/é–ø/x", "-tmp-----x"),
+            # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.
+            ("/a/\U0001d518nicode/b", "-a---nicode-b"),
+        ],
+    )
+    def test_matches_the_cli(self, raw: str, expected: str):
+        assert cc_transcripts._mangle(raw) == expected
+
+    def test_underscore_becomes_dash(self):
+        """ai_mail is the branch that proves it — a naive '/'->'-' misses it."""
+        assert "_" not in cc_transcripts._mangle("/x/ai_mail")
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("/home/patrick/Projects/AIPass/src/aipass/hooks", "tmdi4s"),
+            ("C:\\Users\\p\\ai_mail", "htazyh"),
+            ("", "0"),
+            ("/tmp/é–ø/x", "cac2i8"),
+            ("/a/\U0001d518nicode/b", "u24wth"),
+            ("/x/" + "deep/" * 60 + "branch", "z99g94"),
+        ],
+    )
+    def test_hash_matches_the_cli(self, raw: str, expected: str):
+        """Int32 wraparound and base36 — a near-miss sends us to a directory
+        CC never created, and we would report 'no chats' instead of failing."""
+        assert cc_transcripts._cc_path_hash(raw) == expected
+
+
 class TestProjectDirFor:
-    """CC mangles the cwd into a directory name — verified against the live tree."""
-
-    def test_replaces_every_non_alphanumeric_with_a_dash(self, monkeypatch, tmp_path):
+    def test_mangles_the_resolved_path(self, monkeypatch, tmp_path):
+        """Exercised against a real path so it holds on any platform."""
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
-        got = cc_transcripts.project_dir_for("/home/p/Projects/AIPass/src/aipass/ai_mail")
-        assert got.name == "-home-p-Projects-AIPass-src-aipass-ai-mail"
+        target = tmp_path / "Projects" / "AIPass" / "ai_mail"
+        target.mkdir(parents=True)
+        got = cc_transcripts.project_dir_for(target)
+        assert got.name == cc_transcripts._mangle(str(target.resolve()))
+        assert got.parent == tmp_path
 
-    def test_underscore_becomes_dash_not_underscore(self, monkeypatch, tmp_path):
-        """ai_mail is the branch that proves the rule — a naive '/'->'-' misses it."""
+    def test_every_character_maps_one_to_one(self, monkeypatch, tmp_path):
+        """No run-collapsing: '/a//b' and '/a/b' are different directories."""
         monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
-        assert "_" not in cc_transcripts.project_dir_for("/x/ai_mail").name
+        target = tmp_path / "a_b" / "c-d"
+        target.mkdir(parents=True)
+        resolved = str(target.resolve())
+        name = cc_transcripts.project_dir_for(target).name
+        assert len(name) == len(resolved.encode("utf-16-le")) // 2
+        for got, src in zip(name, resolved):
+            assert got == (src if ("0" <= src <= "9" or "A" <= src <= "Z" or "a" <= src <= "z") else "-")
+
+    def test_long_path_is_truncated_and_hashed(self, monkeypatch, tmp_path):
+        """Over 200 chars CC truncates and appends a hash — without this we
+        would look in a directory that does not exist and report no chats."""
+        monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
+        raw = "/x/" + "deep/" * 60 + "branch"
+        name = cc_transcripts.project_dir_for(raw).name
+        assert len(name) > cc_transcripts._NAME_LIMIT
+        assert name.endswith("-" + cc_transcripts._cc_path_hash(str(Path(raw).resolve())))
+        assert name[: cc_transcripts._NAME_LIMIT] == cc_transcripts._mangle(str(Path(raw).resolve()))[:200]
+
+    def test_short_path_is_not_hashed(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cc_transcripts, "PROJECTS_ROOT", tmp_path)
+        target = tmp_path / "short"
+        target.mkdir()
+        assert cc_transcripts.project_dir_for(target).name == cc_transcripts._mangle(str(target.resolve()))
 
 
 class TestRecentChats:

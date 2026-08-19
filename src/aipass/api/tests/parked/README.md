@@ -4,9 +4,18 @@ Not an archive. `.archive/` is Patrick's disposal zone — always ignored,
 cleaned without warning (his ruling, 2026-08-18) — so nothing that must
 survive a clone may live there. This directory is TRACKED and ordinary.
 
-Files here carry the house `(disabled)` suffix rather than a `test_` name, so
-pytest's `python_files = test_*.py` never collects them. They are readable,
-revivable, and cannot be mistaken for a suite that runs.
+Files here carry the house `(disabled)` suffix INSTEAD OF a `test_` prefix.
+Note which half does the work: it is dropping the prefix that keeps them out of
+pytest's `python_files = test_*.py`, not adding the suffix. @memory proved that
+distinction the hard way on 2026-08-19 — a file keeping its `test_` prefix is
+collected whatever suffix it also carries, and theirs was.
+
+So the naming is a habit and `conftest.py` here is the rule: `collect_ignore_glob`
+answers zero for this directory no matter what anything in it is called.
+`../test_parked_is_not_collected.py` proves it by running collection, including
+against a deliberately `test_`-named intruder, rather than by trusting either.
+
+Files here are readable, revivable, and cannot be mistaken for a suite that runs.
 
 ## host_terminal_capture_lane(disabled).py
 

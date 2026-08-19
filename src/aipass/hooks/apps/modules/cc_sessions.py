@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.1.0
+# Version: 3.2.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-07-21
+# Modified: 2026-08-18
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -222,18 +222,61 @@ def find_live_for_cwd(cwd: str) -> list[dict]:
     return live
 
 
-def find_occupant(cwd: str, exclude_pid: int | None = None) -> dict | None:
-    """Find a live CC session occupying the given cwd, excluding our own PID.
+def session_start(session: dict) -> float | None:
+    """Epoch seconds a session began, or None when it cannot be told.
 
-    Returns the first occupant session dict, or None if the branch is free.
+    CC writes startedAt as epoch milliseconds; older files carry an ISO string.
+    An unreadable clock answers None so callers can decline to rank rather than
+    rank wrongly.
+    """
+    started = session.get("startedAt") or session.get("started", "")
+    if not started:
+        return None
+    try:
+        if isinstance(started, (int, float)):
+            return float(started) / 1000
+        from datetime import datetime
+
+        return datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OSError) as exc:
+        logger.info("[CC_SESSIONS] cannot read session start: %s", exc)
+        return None
+
+
+def _occupant_rank(session: dict) -> tuple[int, float]:
+    """Order occupants so the one that MATTERS is first: seats before jobs, oldest first.
+
+    A bg session is a job, not a seat (ruling a, DPLAN-0310). Returning one
+    ahead of a live interactive seat let a caller that skips bg allow what it
+    should have blocked — the shadowing seam. Ranking, not filtering, keeps a
+    bg-only branch answerable: the bg session is still returned when it is the
+    only occupant.
+    """
+    is_job = 1 if session.get("kind") in ("bg", "background") else 0
+    started = session_start(session)
+    # Unknown start sorts last within its kind — it can never displace a seat
+    # whose age is actually known.
+    return (is_job, started if started is not None else float("inf"))
+
+
+def find_occupant(cwd: str, exclude_pid: int | None = None) -> dict | None:
+    """Find the live CC session occupying the given cwd, excluding our own PID.
+
+    Returns the occupant that matters — the oldest interactive seat if any
+    exists, otherwise the oldest background job — or None if the branch is
+    free. Ordering is deliberate: a caller ranking itself against "the
+    occupant" is really asking about the incumbent, and a caller skipping jobs
+    must not be handed a job while a seat sits behind it.
+
     This is resume-aware: /resume keeps the same PID, so exclude_pid correctly
     identifies re-entry.
     """
-    for session in find_live_for_cwd(cwd):
-        if exclude_pid is not None and session.get("pid") == exclude_pid:
-            continue
-        return session
-    return None
+    candidates = [
+        session for session in find_live_for_cwd(cwd) if exclude_pid is None or session.get("pid") != exclude_pid
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=_occupant_rank)
 
 
 def _stop_session(session: dict) -> str:

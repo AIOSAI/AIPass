@@ -49,6 +49,7 @@ every exec is a counted fake.
 
 import contextlib
 import json
+import signal
 import sys
 import threading
 import time
@@ -447,14 +448,49 @@ class TestTheSnapshotIsCoalesced:
         counted_exec: list,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The TTL expires. Proven by shrinking it, never by sleeping 1.5s."""
-        monkeypatch.setattr(host_fleet, "SNAPSHOT_TTL_SECONDS", 0.0)
+        """The TTL expires — against a clock this test drives, not one it hopes for.
+
+        The first version shrank the TTL to 0.0 and slept 10ms, and went red on
+        Windows only: time.monotonic there advances in ~15.6ms steps, so the
+        two reads can land on the SAME tick, and `0.0 > 0.0` is false — the
+        entry was still fresh by its own arithmetic. Nothing was flaky about
+        it; the test was measuring the platform's timer instead of the rule.
+
+        Driving monotonic makes the real comparison run against a real elapsed
+        time, deterministically, on every platform and with no sleep at all.
+        """
+        # fleet's OWN `time` name, not the real module's attribute: patching
+        # time.monotonic globally would hand this fixed clock to pytest-timeout
+        # and to anything else running during the test. fleet reads monotonic
+        # and nothing else from it, so a two-field stand-in is the whole module
+        # it actually uses.
+        clock = [1000.0]
+        monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
         host_fleet.read_snapshot()
-        time.sleep(0.01)
+        clock[0] += host_fleet.SNAPSHOT_TTL_SECONDS + 0.001
         host_fleet.read_snapshot()
 
         assert len(counted_exec) == 2
+
+    def test_a_read_just_inside_the_ttl_still_does_not_exec(
+        self,
+        counted_exec: list,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The other side of the same boundary, on the same driven clock.
+
+        Without this the test above passes against a cache that expires
+        instantly, which is no cache at all.
+        """
+        clock = [1000.0]
+        monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+        host_fleet.read_snapshot()
+        clock[0] += host_fleet.SNAPSHOT_TTL_SECONDS - 0.001
+        host_fleet.read_snapshot()
+
+        assert len(counted_exec) == 1
 
     def test_rooms_and_fleet_share_one_exec(self, counted_exec: list) -> None:
         """The exact double-spawn a screen refresh used to pay."""
@@ -686,6 +722,21 @@ class TestTheRegistryIsPinnedAtBoot:
 # ==============================================
 
 
+# hangup() sends SIGHUP, which POSIX has and Windows does not. The attach lane
+# is POSIX-only by construction (open_attach refuses on PTY_AVAILABLE first),
+# so this is an honest platform skip and not a hole: there is no Windows
+# behaviour here being left untested, because there is no Windows behaviour.
+sighup_required = pytest.mark.skipif(
+    not hasattr(signal, "SIGHUP"),
+    reason="hangup detaches with SIGHUP, which this platform does not have",
+)
+
+# The filename a stand-in for log_operation is compiled under. It only has to
+# differ from this file's, so frame 1 and frame 2 name different modules and an
+# off-by-one in the depth is visible. No such file needs to exist — the detector
+# reads a frame's co_filename, which compile() sets from this string.
+ELSEWHERE = "elsewhere_than_this_test/stands_in_for_log_operation.py"
+
 # A `sys` with no _getframe, for driving the non-CPython fallback FROM CPython.
 # Nulling the real sys._getframe cannot be used: inspect.stack() calls it to
 # find the current frame, so the fallback would die on the way in.
@@ -703,18 +754,62 @@ class TestCallerDetectionFetchesOneFrame:
     cost was smallest exactly where it was measured and largest where it ran.
     """
 
-    def test_both_paths_attribute_a_real_log_to_this_file(
+    def test_the_detector_names_log_operations_caller_not_log_operation(self) -> None:
+        """The DEPTH, pinned hermetically — and the stand-in must live ELSEWHERE.
+
+        _getframe(2) and stack()[2] have to mean the same frame, and both have
+        to mean the caller of log_operation rather than log_operation itself.
+        Pinned through a stand-in rather than the real log_operation, because
+        the real one may be wrapped by whatever runs the suite and then frame 2
+        is the wrapper — correctly, which hides the arithmetic under test.
+
+        THE STAND-IN IS COMPILED UNDER ANOTHER FILENAME, and that is the whole
+        trick. A shim defined in this file put frames 1 and 2 in the same
+        module, so _getframe(1) and _getframe(2) answered identically and an
+        off-by-one mutation SURVIVED — measured, not guessed. Compiling under a
+        different name makes the two frames distinguishable, which is exactly
+        the situation in production (log_operation lives in json_handler.py).
+        """
+        namespace: dict = {"detector": json_handler._get_caller_module_name}
+        exec(  # noqa: S102 - a two-line module whose only variable is its FILENAME
+            compile("def stands_in_for_log_operation():\n    return detector()\n", ELSEWHERE, "exec"),
+            namespace,
+        )
+        stands_in_for_log_operation = namespace["stands_in_for_log_operation"]
+
+        fast = stands_in_for_log_operation()
+
+        with patch.object(json_handler, "sys", _NO_GETFRAME):
+            walked = stands_in_for_log_operation()
+
+        assert fast == walked == "test_host_perf", (
+            "the detector named the stand-in itself, not its caller — the frame arithmetic is off"
+        )
+
+    def test_both_paths_agree_on_whoever_the_caller_turns_out_to_be(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Driven through log_operation, because the DEPTH is the whole risk.
+        """End to end through the real log_operation, asserting AGREEMENT.
 
-        _getframe(2) and stack()[2] have to mean the same frame, and both have
-        to mean the caller of log_operation rather than log_operation itself.
-        Calling the detector directly would prove neither — it is one frame
-        shallower than every real use, so the arithmetic under test would not
-        be the arithmetic that runs.
+        WHICH module gets named is deliberately not asserted here, and that is
+        this test's whole finding. CI was red on an earlier version that
+        demanded 'test_host_perf': the repo-root conftest wraps log_operation
+        on every branch's json_handler to keep parallel runs off shared files,
+        so under the full-repo invocation the caller of log_operation IS that
+        wrapper and the trail is attributed to 'conftest'.
+
+        MEASURED, because the obvious reading is that the _getframe change
+        caused it: inspect.stack()[2] and sys._getframe(2) return the same
+        frame wrapped and unwrapped alike, so the old implementation named
+        'conftest' too. This test is simply the first thing in the tree that
+        ever looked. What it can honestly pin is that the two implementations
+        never disagree — which is the risk the change actually carries.
+
+        The production hazard it leaves on the record: ANY decorator placed
+        around log_operation silently re-attributes the entire audit trail to
+        the decorator's own file.
         """
         monkeypatch.setattr(json_handler, "API_JSON_DIR", tmp_path)
 
@@ -724,9 +819,9 @@ class TestCallerDetectionFetchesOneFrame:
             assert json_handler.log_operation("probe_walked") is True
 
         written = sorted(path.name for path in tmp_path.glob("*_log.json"))
-        assert written == ["test_host_perf_log.json"], f"the audit trail named the wrong module: {written}"
+        assert len(written) == 1, f"the two paths named different modules: {written}"
 
-        entries = json.loads((tmp_path / "test_host_perf_log.json").read_text(encoding="utf-8"))
+        entries = json.loads((tmp_path / written[0]).read_text(encoding="utf-8"))
         assert [entry["operation"] for entry in entries] == ["probe_fast", "probe_walked"]
 
     def test_the_detection_is_actually_cheaper(self) -> None:
@@ -856,18 +951,30 @@ class TestThePumpPoolIsBoundedOutLoud:
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
         host_attach._reserve_session("baud-first")
         spawned: list = []
-        monkeypatch.setattr(host_attach.pty, "openpty", lambda: spawned.append("pty") or (0, 0))
+        # The module-level NAME, not an attribute on the real pty module: pty
+        # is None on Windows (a PTY is a POSIX object), so patching through it
+        # is an AttributeError there. The subject of this test is the bound,
+        # not the terminal, so it should run on every platform.
+        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: spawned.append("pty") or (0, 0)))
 
         with pytest.raises(host_attach.AttachUnavailable):
             host_attach._spawn_pty(["true"], None, "baud-api")
 
         assert spawned == [], "a PTY was opened for a session that was then refused"
 
+    @sighup_required
     def test_a_hangup_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Otherwise the server refuses terminals while pumping none.
 
         Hung up TWICE on purpose — a socket that errors and then closes does
         exactly that, and a second release would over-credit the pool.
+
+        Skipped where SIGHUP does not exist rather than mocked into working:
+        hangup's whole meaning is the signal a detaching terminal sends, and a
+        platform without it cannot reach this code at all — open_attach refuses
+        on PTY_AVAILABLE long before a session exists to hang up. A mocked
+        signal module would make this pass on Windows while proving nothing
+        about Windows.
         """
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
         host_attach._reserve_session("baud-api")
@@ -888,7 +995,7 @@ class TestThePumpPoolIsBoundedOutLoud:
         leak that only ever shows up on the worst day.
         """
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        monkeypatch.setattr(host_attach.pty, "openpty", lambda: (-1, -1))
+        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-1, -1)))
         monkeypatch.setattr(host_attach, "set_winsize", lambda *a, **k: None)
         monkeypatch.setattr(host_attach.os, "close", lambda _fd: None)
         monkeypatch.setattr(host_attach.subprocess, "Popen", MagicMock(side_effect=OSError("no")))

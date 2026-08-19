@@ -124,7 +124,7 @@ from . import monitor  # noqa: F401, E402
 # imported on EVERY live call: any `handlers.json` import runs this package first.
 # The curated-truth piece that IS active is Compass — @devpulse, src/aipass/devpulse,
 # SQLite/FTS5, `drone @devpulse compass`. Revival: uncomment, and follow
-# .archive/parked_symbolic_20260814/README.md.
+# tests/parked/symbolic_20260814/README.md.
 # from . import symbolic  # noqa: F401, E402
 from . import rollover  # noqa: F401, E402
 from . import schema  # noqa: F401, E402

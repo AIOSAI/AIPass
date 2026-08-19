@@ -461,16 +461,44 @@ class TestRunnerGate:
 class TestDeclaredUnits:
     """A skill declares its own processes in SKILL.md frontmatter."""
 
-    def test_telegram_declares_its_five_bots(self):
-        units = sh.declared_units("telegram")
+    EXPECTED_TELEGRAM_UNITS = [
+        "telegram-bot@api",
+        "telegram-bot@base",
+        "telegram-bot@devpulse",
+        "telegram-bot@prax_monitor",
+        "telegram-bot@scheduler",
+    ]
 
-        assert sorted(units) == [
-            "telegram-bot@api",
-            "telegram-bot@base",
-            "telegram-bot@devpulse",
-            "telegram-bot@prax_monitor",
-            "telegram-bot@scheduler",
-        ]
+    def test_telegram_declares_its_five_bots(self):
+        assert sorted(sh.declared_units("telegram")) == self.EXPECTED_TELEGRAM_UNITS
+
+    def test_the_declaration_reads_the_same_without_pyyaml(self):
+        # THE CI RED OF 2026-08-19 (run 32222871212). This assertion passed on
+        # a developer machine and failed on every runner, and the difference was
+        # never machine-local STATE — every file it reads is tracked. PyYAML is
+        # not declared in pyproject.toml, so a runner falls back to the parser
+        # in discovery_handler, which silently answered "" for a block list.
+        # An environment-dependent pin proves nothing; this one names the
+        # environment and asserts both halves of it.
+        from aipass.skills.apps.handlers import discovery_handler as dh
+
+        with patch.object(dh, "yaml", None):
+            without_yaml = sh.declared_units("telegram")
+
+        assert sorted(without_yaml) == self.EXPECTED_TELEGRAM_UNITS
+        assert sorted(without_yaml) == sorted(sh.declared_units("telegram"))
+
+    def test_every_file_the_declaration_reads_is_tracked(self):
+        # The other half of the same lesson: if this skill's SKILL.md ever stops
+        # shipping, the pin above must fail LOUDLY here rather than quietly
+        # asserting against a file only this machine has.
+        from aipass.skills.apps.handlers.discovery_handler import get_search_paths
+
+        builtin = [path for path, source in get_search_paths() if source == "builtin"][0]
+        assert (builtin / "telegram" / "SKILL.md").exists(), (
+            "telegram's SKILL.md is missing from the built-in lib — the declaration "
+            "test above would be asserting against nothing"
+        )
 
     def test_a_skill_that_declares_nothing_gets_an_empty_list(self):
         # github is markdown-only - it owns no processes and must not fabricate any.

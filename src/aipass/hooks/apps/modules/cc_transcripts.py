@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cc_transcripts.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: CC-native transcript reader — the chats, not the processes
 # Branch: hooks
 # Layer: apps/modules
@@ -24,7 +24,6 @@ says a conversation exists, not that a brain is attached to it.
 """
 
 import json
-import re
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -35,16 +34,66 @@ CONSOLE = err_console
 
 PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 
-# CC mangles the project cwd into a directory name by replacing every character
-# that is not a letter or digit with a dash. Verified against the live tree for
-# ai_mail (underscore), devpulse, hooks, and a nested projects/ path.
-_MANGLE = re.compile(r"[^A-Za-z0-9]")
+# CC truncates a mangled name at 200 chars and appends a hash of the ORIGINAL
+# path. Read out of the shipping CLI (2.1.228), not inferred:
+#   dpo(e) = e.replace(/[^a-zA-Z0-9]/g, "-")
+#   gv(e)  = dpo(e).length <= 200 ? dpo(e) : dpo(e).slice(0,200) + "-" + hash(e)
+#   hash(e): t = 0; for each UTF-16 unit c: t = (t<<5) - t + c | 0
+#            -> Math.abs(t).toString(36)
+_NAME_LIMIT = 200
+
+
+def _mangle(path_text: str) -> str:
+    """CC's own path-to-dirname rule, applied to a raw path string.
+
+    Every non-alphanumeric becomes a dash — including the colon and backslashes
+    of a Windows path, which is why C:\\Users\\p becomes C--Users-p. There is no
+    drive-letter special case in the CLI, so there is none here.
+    """
+    # Walk UTF-16 code units, not Python code points. JavaScript's regex sees a
+    # non-BMP character as a SURROGATE PAIR and writes two dashes where Python
+    # would write one, so a path containing an emoji would otherwise resolve to
+    # a directory CC never created. Cross-checked against the CLI's own dpo().
+    units = path_text.encode("utf-16-le")
+    out = []
+    for i in range(0, len(units), 2):
+        char = chr(units[i] | (units[i + 1] << 8))
+        out.append(char if ("0" <= char <= "9" or "A" <= char <= "Z" or "a" <= char <= "z") else "-")
+    return "".join(out)
+
+
+def _cc_path_hash(path_text: str) -> str:
+    """Reproduce the CLI's 31-hash of a path: int32 wraparound, base36, unsigned.
+
+    Iterates UTF-16 code units, not Python code points, so a path containing a
+    non-BMP character hashes the way JavaScript hashes it rather than merely
+    close to it.
+    """
+    value = 0
+    units = path_text.encode("utf-16-le")
+    for i in range(0, len(units), 2):
+        code = units[i] | (units[i + 1] << 8)
+        value = (value * 31 + code) & 0xFFFFFFFF
+    if value >= 0x80000000:
+        value -= 0x100000000
+    value = abs(value)
+    if value == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while value:
+        value, rem = divmod(value, 36)
+        out = digits[rem] + out
+    return out
 
 
 def project_dir_for(cwd: str | Path) -> Path:
     """Return the transcript directory CC uses for *cwd*."""
     resolved = str(Path(cwd).resolve())
-    return PROJECTS_ROOT / _MANGLE.sub("-", resolved)
+    mangled = _mangle(resolved)
+    if len(mangled) > _NAME_LIMIT:
+        mangled = f"{mangled[:_NAME_LIMIT]}-{_cc_path_hash(resolved)}"
+    return PROJECTS_ROOT / mangled
 
 
 def _parse_record(line: str) -> dict | None:

@@ -21,19 +21,19 @@ All tests use mocks/tmp_path -- no live fastembed or ONNX access.
 # ---------------------------------------------------------------------------
 # PARKED 2026-08-14 — @devpulse's ruling, following Patrick's symbolic-tier park.
 # vector/embedder.py had exactly two importers, symbolic/storage.py and
-# symbolic/retriever.py, and both went into .archive/parked_symbolic_20260814/.
+# symbolic/retriever.py, and both went into tests/parked/symbolic_20260814/.
 # The live lane runs vector/embed_subprocess.py by path instead — it is
 # self-contained and imports nothing from the package. These tests are KEPT, not
 # deleted: they document the utility for revival.
 # Active curated-truth piece: Compass — drone @devpulse compass.
-# Revive: .archive/parked_symbolic_20260814/README.md
+# Revive: tests/parked/symbolic_20260814/README.md
 # ---------------------------------------------------------------------------
 import pytest as _parked
 
 _parked.skip(
     "vector/embedder.py PARKED 2026-08-14 with the symbolic fragments tier — "
     "its only importers were the parked handlers; the live lane runs embed_subprocess.py "
-    "by path. Revive via .archive/parked_symbolic_20260814/README.md",
+    "by path. Revive via tests/parked/symbolic_20260814/README.md",
     allow_module_level=True,
 )
 

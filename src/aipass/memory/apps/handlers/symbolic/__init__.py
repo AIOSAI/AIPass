@@ -7,7 +7,7 @@
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.0.0 (2026-08-14): PARKED by Patrick's ruling — implementation moved to
-#     .archive/parked_symbolic_20260814/, this package now refuses on import
+#     tests/parked/symbolic_20260814/, this package now refuses on import
 #   - v0.1.0 (2026-02-04): Initial version - Fragmented Memory Phase 1
 # =============================================
 
@@ -38,13 +38,13 @@ WHERE THE ACTIVE PIECE IS
 
 HOW TO REVIVE (a park, not a demolition)
     1. Move the seven files back:
-       .archive/parked_symbolic_20260814/handlers/*.py -> apps/handlers/symbolic/
+       tests/parked/symbolic_20260814/handlers/*(disabled).py -> apps/handlers/symbolic/
        (the original __init__.py is in there too and replaces this file)
-    2. Move .archive/parked_symbolic_20260814/modules/symbolic.py back over
+    2. Move tests/parked/symbolic_20260814/modules/symbolic(disabled).py back over
        apps/modules/symbolic.py
     3. Uncomment ``from . import symbolic`` in apps/handlers/__init__.py
     4. Drop the module-level skips at the top of tests/test_symbolic*.py
-    Full detail: .archive/parked_symbolic_20260814/README.md
+    Full detail: tests/parked/symbolic_20260814/README.md
 
 This file stays behind on purpose. A missing package raises ModuleNotFoundError,
 which says nothing about why; this one says who parked it, when, and what to use.
@@ -57,7 +57,7 @@ _PARKED_MESSAGE = (
     "          was removed or why. Parked, not removed.\n"
     "  Active: Compass — @devpulse's curated-truth store (SQLite/FTS5).\n"
     "          drone @devpulse compass\n"
-    "  Code:   memory/.archive/parked_symbolic_20260814/ (see its README to revive)"
+    "  Code:   memory/tests/parked/symbolic_20260814/ (see its README to revive)"
 )
 
 

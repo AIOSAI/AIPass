@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.1.0
+# Version: 4.2.0
 # Description: Boot wrapper — attach-first menu for Claude Code sessions
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -77,22 +77,43 @@ def _find_tmux() -> str | None:
 
 
 def _tmux_session_exists(name: str) -> bool:
-    """Check if a tmux session with the given name exists."""
-    result = subprocess.run(
-        ["tmux", "has-session", "-t", name],
-        capture_output=True,
-        text=True,
-    )
+    """Check if a tmux session with the given name exists.
+
+    No tmux on this machine is a fact about the world, not a failure: answer
+    "no session" rather than raising. Windows has no tmux at all, and the
+    binary can be absent on any host.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[SESSION_BOOT] tmux has-session unavailable: %s", exc)
+        return False
     return result.returncode == 0
 
 
 def _find_tmux_session_for_pid(pid: int) -> str | None:
-    """Find which tmux session hosts the given PID (as a descendant of a pane)."""
-    result = subprocess.run(
-        ["tmux", "list-panes", "-a", "-F", "#{pane_pid} #{session_name}"],
-        capture_output=True,
-        text=True,
-    )
+    """Find which tmux session hosts the given PID (as a descendant of a pane).
+
+    Reached while DESCRIBING a live process in the multi-session menu, so an
+    unguarded call here takes the whole menu down with it on any host without
+    tmux — Windows always, and any Linux box where it is not installed. No
+    tmux means no answer, which is exactly what None says.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "list-panes", "-a", "-F", "#{pane_pid} #{session_name}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[SESSION_BOOT] tmux list-panes unavailable: %s", exc)
+        return None
     if result.returncode != 0:
         return None
     for line in result.stdout.strip().splitlines():

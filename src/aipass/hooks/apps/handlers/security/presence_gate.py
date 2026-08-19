@@ -21,12 +21,18 @@ handle_stop is a no-op (Stop fires every turn, not just session end; CC-native
 session files handle cleanup on exit).
 
 Skips true sub-agents (Explore/general-purpose/Plan/etc.) and
-dispatched/daemon session types. Gates main sessions of every kind
-including background sessions with agent_type "claude".
+dispatched/daemon session types.
 
-Ships in OBSERVE-ONLY mode: logs would-block decisions to engine.jsonl
-but never actually blocks. Flip _OBSERVE_ONLY to False after soak period
-confirms zero false positives.
+ENFORCING since 2026-08-18 (Patrick: "flip it"). Ruling (a) rides with the
+flip: one brain means one INTERACTIVE brain, so a background occupant never
+gates — it is a job, not a seat, and there is no per-job bg stop in the CLI, so
+blocking on one would be unsatisfiable. _OBSERVE_ONLY remains as the switch
+back; when True the gate logs its would-blocks and allows.
+
+Exactly one of two competing seats is refused: the incumbent (older start)
+passes and the newer seat is told who holds the branch. Without that tiebreak
+each seat sees the other and enforcement refuses BOTH, which bricks the branch
+— the blocked prompt is the very thing that would run the remedy.
 
 Occupant PID claims are identity-checked, not just liveness-checked:
 cc_sessions.find_live_for_cwd() cross-verifies each session's recorded
