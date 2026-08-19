@@ -1478,10 +1478,18 @@ def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
     The PTY read blocks. On a single-worker uvicorn, a blocking read on the loop
     freezes every other request this server is serving — which is the whole
     phone, including the fleet card the operator is looking at.
-    """
-    source = Path(host_server.__file__).read_text(encoding="utf-8")
 
-    assert "run_in_executor(None, session.read)" in source
+    WHICH executor it runs on is deliberately not asserted here: it moved from
+    asyncio's default pool to the attach lane's own one (DPLAN-0305 Audit 2 —
+    the default sized itself to 8 threads on this host, and the 9th socket
+    silently never pumped). The property that matters is that the read is
+    handed to SOME executor, never called on the loop.
+    """
+    pump = server_source_of("_pump")
+
+    assert "run_in_executor(" in pump
+    assert "session.read" in pump
+    assert "await loop.run_in_executor(None" not in pump
 
 
 def test_the_pump_always_hangs_up() -> None:

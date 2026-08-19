@@ -27,6 +27,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import importlib
 import logging
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Generator
@@ -154,3 +155,54 @@ def mock_json_handler() -> MagicMock:
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler
+
+
+@pytest.fixture(autouse=True)
+def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
+    """
+    Clear the fleet snapshot cache around every test (DPLAN-0305).
+
+    read_snapshot caches @baud's envelope for ~1.5s and coalesces concurrent
+    callers onto one exec. That is right in a server and WRONG across tests: a
+    case that patches subprocess and counts execs would count the previous
+    case's cached answer instead, and pass while measuring nothing. Cleared
+    both sides so neither the test nor its neighbour can inherit one.
+
+    Silently skipped when the [host] extra is absent — this fixture is autouse
+    for the whole suite, so it must never be the reason a run cannot collect.
+    """
+    try:
+        from aipass.api.apps.handlers.host import fleet as _fleet
+    except Exception:  # pragma: no cover - only when the extra is missing
+        yield
+        return
+
+    _fleet.reset_snapshot_cache()
+    yield
+    _fleet.reset_snapshot_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_pump_reservations() -> Generator[None, None, None]:
+    """
+    Give the attach lane's thread count back after every test (DPLAN-0305).
+
+    The socket pump has a real cap now, and a spawned PTY holds one slot until
+    its session hangs up. Several tests in this suite spawn one and never do —
+    correctly, they are testing the spawn, not the lifecycle — so the count
+    only ever climbs across a run and would eventually refuse terminals to
+    tests that never took one. Measured: 5 slots held by the end of a full run.
+
+    PRODUCTION IS NOT PAPERED OVER BY THIS. The release is pinned where it
+    belongs — _pump's finally always hangs up (test_the_pump_always_hangs_up),
+    hangup always releases, and a failed spawn releases too, each proven by a
+    mutation. This only stops one test's leftovers from being another's cap.
+    """
+    try:
+        from aipass.api.apps.handlers.host import attach as _attach
+    except Exception:  # pragma: no cover - only when the extra is missing
+        yield
+        return
+
+    yield
+    _attach._PUMP_SLOTS = threading.BoundedSemaphore(_attach.PUMP_WORKERS)

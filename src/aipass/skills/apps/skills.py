@@ -37,6 +37,7 @@ def print_introspection():
     console.print("    [dim]- runner.py (run_skill — execute handler-based or markdown-only skills)[/dim]")
     console.print("    [dim]- creator.py (create_skill — scaffold new skills from templates)[/dim]")
     console.print("    [dim]- validator.py (validate_skill — check skill requirements)[/dim]")
+    console.print("    [dim]- switch.py (turn_on/turn_off — per-skill off-switch)[/dim]")
     console.print()
     console.print("[dim]Run 'drone @skills --help' for usage information[/dim]")
     console.print()
@@ -104,6 +105,9 @@ def handle_command(command, args=None):
             return False
         return _cmd_validate(args[0])
 
+    if command in ("on", "off", "switch"):
+        return _cmd_switch(command, args)
+
     console.print(f"  Unknown command: {command}")
     console.print("  Run 'skills --help' for available commands.")
     return False
@@ -124,6 +128,9 @@ def print_help():
     console.print("  create <name> --with-handler Scaffold with handler.py")
     console.print("  create <name> --full         Scaffold with full 3-layer structure")
     console.print("  validate <name>              Check if skill requirements are met")
+    console.print("  on <name>                    Reconnect a skill and start its processes")
+    console.print("  off <name> \\[reason]         Disconnect a skill and stop its processes")
+    console.print("  switch \\[name]               Show each skill's on/off state")
     console.print("  --help                       Show this help")
     console.print("  --version, -V                Show version")
     console.print()
@@ -142,13 +149,26 @@ def print_help():
     console.print()
     console.print("  [dim]# Create a new skill[/dim]")
     console.print("  [green]drone @skills create my-skill --with-handler[/green]")
+    console.print()
+    console.print("  [dim]# Disconnect a skill from AIPass (stops its processes, survives reboot)[/dim]")
+    console.print('  [green]drone @skills off telegram "retired 2026-08-18"[/green]')
 
 
 def _cmd_list():
     """List all discovered skills."""
+    from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, read_state
     from aipass.skills.apps.modules.discovery import discover_all
 
     skills = discover_all()
+
+    # A switched-off skill is still LISTED, marked. A dark skill you cannot see
+    # is a dark skill you cannot turn back on.
+    try:
+        switch_state = read_state()
+    except SwitchStateUnreadable as exc:
+        logger.error("Cannot list skills — switch state unreadable: %s", exc)
+        error(f"Error: {exc}")
+        return False
 
     if not skills:
         console.print("  No skills found.")
@@ -174,10 +194,14 @@ def _cmd_list():
         console.print(f"  \\[{label}]")
         for skill in source_skills:
             handler_tag = " \\[handler]" if skill["has_handler"] else ""
+            entry = switch_state.get(skill["name"])
+            off_tag = ""
+            if isinstance(entry, dict) and not entry.get("enabled", True):
+                off_tag = " [red]\\[OFF][/red]"
             tags = ""
             if skill.get("tags"):
                 tags = f" ({', '.join(skill['tags'])})"
-            console.print(f"    {skill['name']:<25} {skill['description']}{handler_tag}{tags}")
+            console.print(f"    {skill['name']:<25} {skill['description']}{handler_tag}{off_tag}{tags}")
         console.print()
 
     return True
@@ -309,6 +333,32 @@ def _cmd_validate(name):
             console.print(f"    Missing config/env: {', '.join(result['missing_config'])}")
 
     return result["valid"]
+
+
+def _cmd_switch(command, args):
+    """Route an off-switch command to the switch module.
+
+    Args:
+        command: One of on, off, switch.
+        args: Skill name, plus an optional reason for `off`.
+
+    Returns:
+        bool: True when the command succeeded.
+    """
+    from aipass.skills.apps.modules.switch import show_switch, switch_off, switch_on
+
+    if command == "switch":
+        return show_switch(args[0] if args else None)
+
+    if not args:
+        error(f"Error: skill name required. Usage: skills {command} <name>")
+        return False
+
+    if command == "on":
+        return switch_on(args[0])
+
+    reason = " ".join(args[1:]) if len(args) > 1 else None
+    return switch_off(args[0], reason)
 
 
 def _parse_extra_args(arg_list):

@@ -103,6 +103,26 @@ def _atomic_write_json(target_path: Path, data: Any) -> None:
             os.unlink(temporary)
 
 
+def atomic_write_json(target_path: Path, data: Any) -> None:
+    """
+    Public entry to this branch's single atomic JSON writer.
+
+    Callers that own a bespoke document (one outside the config/data/log
+    trio) write through here rather than growing a second writer. The
+    torn-write measurement and the Windows sharing-violation retry in
+    _atomic_write_json apply to every caller, so there is exactly one
+    place where write durability is true or false for @skills.
+
+    Args:
+        target_path: The document to replace.
+        data: What to write.
+
+    Raises:
+        OSError: The staged file could not be written or moved into place.
+    """
+    _atomic_write_json(target_path, data)
+
+
 def _get_caller_module_name() -> str:
     """
     Auto-detect calling module name from call stack.

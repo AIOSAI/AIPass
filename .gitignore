@@ -99,25 +99,12 @@ src/aipass/*/apps/integrations/**
 !src/aipass/spawn/templates/aipass_framework/.claude/
 !src/aipass/spawn/templates/aipass_framework/.claude/**
 
-# Host API superseded-capture-lane park (DPLAN-0300 Round 18, 2026-08-14). Same
-# species as the memory park below and caught the same way: @api saw the bare
-# .archive/ rule would make their archive README claim "kept" while a fresh
-# clone had nothing, and reported it rather than editing this file themselves.
-# Kept rather than dropped because --capture-room survives in @baud's binary for
-# a look-don't-touch view, and these are the tests that lane would start from.
-# Selective: only this park is tracked, the rest of api/tests/.archive stays local.
-!src/aipass/api/tests/.archive/
-src/aipass/api/tests/.archive/*
-!src/aipass/api/tests/.archive/test_host_terminal_superseded_capture_lane.py
-!src/aipass/api/tests/.archive/README.md
-
-# Memory fragments park exception (Patrick 2026-08-14: parked revivable, so the
-# archived copy must ship — fresh clones can't revive from one machine's disk).
-# Selective: only the park is tracked, the rest of memory/.archive stays local.
-!src/aipass/memory/.archive/
-src/aipass/memory/.archive/*
-!src/aipass/memory/.archive/parked_symbolic_20260814/
-!src/aipass/memory/.archive/parked_symbolic_20260814/**
+# .archive/ exceptions: NONE, ever (Patrick ruling 2026-08-18: .archive is the
+# disposal zone, cleaned without warning — nothing that must survive or ship may
+# live there; durable records belong in tracked homes). The ONLY ignored-dir
+# exceptions in this file are spawn's framework templates above, which exist so
+# the template ships complete. Two prior .archive parks (api tests capture-lane,
+# memory fragments) were stripped under this ruling.
 
 # DPLAN-0297 governance sample capture (2026-08-16, @devpulse-endorsed early
 # action): durable JSON record of the 28-day surfacing sample from

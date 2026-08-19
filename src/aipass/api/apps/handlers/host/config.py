@@ -37,10 +37,12 @@ Functions:
     load_config()   - Effective config, defaults merged under any stored values
     save_config()   - Persist config to the store
     validate_bind() - Enforce the bind rule; raises BindRefused
+    pin_registry()  - Take drone's registry fast path once, at boot
 """
 
 import ipaddress
 import socket
+from pathlib import Path
 from typing import Any, Dict
 
 from aipass.prax import logger
@@ -115,6 +117,51 @@ def save_config(config: Dict[str, Any]) -> str:
     path = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
     logger.info("[host_api] config saved to %s", path)
     return str(path)
+
+
+# ==============================================
+# LAUNCH ENVIRONMENT
+# ==============================================
+
+
+def pin_registry() -> Any:
+    """
+    Pin the citizen registry for the life of this process.
+
+    drone resolves the registry per lookup: walk up from CWD, glob each parent
+    for *_REGISTRY.json, and read the nearest passport to credential-check every
+    candidate. That is filesystem work on EVERY branch resolution, and this
+    server resolves branches on most of its read routes. drone already carries
+    the fast path — set_registry_path() takes priority over the AIPASS_REGISTRY
+    env var, which takes priority over the walk — so a long-lived server should
+    take it once at boot instead of paying the walk per request.
+
+    Pinning, not exporting: set_registry_path is drone's own public door and
+    covers every launch method (module, console script, uvicorn reload child),
+    while an env var only reaches processes this one spawns.
+
+    Returns:
+        The pinned path, or None when no registry was found (nothing pinned —
+        drone keeps its own resolution, which is what it does today).
+
+    Note:
+        Called from serve(), never from create_app(): the test suite builds
+        apps constantly and must not have its drone module mutated underneath it.
+        The measured saving is 0.73ms per lookup. The OTHER 10ms of a
+        get_branch_info lives in drone's own tree — an audit-log write and a
+        full re-read plus per-branch path resolve on every call — and is
+        reported, not reached into from here.
+    """
+    import aipass.drone as drone
+
+    found = Path(drone.get_registry_path())
+    if not found.is_file():
+        logger.warning("[host_api] no registry to pin at %s — drone keeps resolving per lookup", found)
+        return None
+
+    drone.set_registry_path(found)
+    logger.info("[host_api] registry pinned for this process: %s", found)
+    return found
 
 
 # ==============================================

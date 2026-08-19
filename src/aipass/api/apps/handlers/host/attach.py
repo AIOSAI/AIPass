@@ -93,6 +93,8 @@ import shutil
 import signal
 import struct
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -155,6 +157,26 @@ MAX_DIMENSION = 1000
 # socket writer.
 READ_CHUNK_BYTES = 65536
 
+# THE PUMP'S THREADS, NAMED AND BOUNDED (DPLAN-0305 Audit 2, finding 9).
+#
+# Every live socket parks ONE thread forever in a blocking os.read on its PTY.
+# The pump used to hand that to asyncio's DEFAULT executor, which sizes itself
+# to min(32, cpu_count + 4) — EIGHT on this 4-CPU host. The ninth socket
+# connected, authenticated, accepted, and then silently never pumped: its read
+# sat in the executor's queue behind eight threads that never return. A blank
+# terminal with no error, which is the exact failure shape this house refuses.
+#
+# So the lane gets its own pool, and the cap becomes a SENTENCE instead of a
+# hang: a session beyond it is refused in words the phone can render.
+PUMP_WORKERS = 16
+
+# A BOUNDED semaphore, not a counter: over-releasing raises instead of quietly
+# manufacturing capacity this server does not have. An accounting bug here
+# would otherwise reappear as the same silent hang, one release later.
+_PUMP_SLOTS = threading.BoundedSemaphore(PUMP_WORKERS)
+_PUMP_EXECUTOR: Any = None
+_EXECUTOR_GUARD = threading.Lock()
+
 
 class AttachRefused(Exception):
     """The caller asked for something invalid. Their fault, and they may know."""
@@ -162,6 +184,69 @@ class AttachRefused(Exception):
 
 class AttachUnavailable(Exception):
     """The attach could not happen for a reason that is not the caller's."""
+
+
+def pump_executor() -> Any:
+    """
+    The thread pool the socket pump reads on. One pool, built once.
+
+    Returns:
+        A ThreadPoolExecutor with PUMP_WORKERS threads, named so `ps -L` says
+        which lane a parked thread belongs to.
+
+    Note:
+        Its own pool rather than asyncio's default, because the default is
+        SHARED with anything else that ever calls run_in_executor(None, ...)
+        on this loop, and this lane's threads never come back — they are parked
+        for the life of a socket. A lane that permanently consumes a shared
+        pool is a lane that starves whatever borrows it next.
+    """
+    global _PUMP_EXECUTOR
+    with _EXECUTOR_GUARD:
+        if _PUMP_EXECUTOR is None:
+            _PUMP_EXECUTOR = ThreadPoolExecutor(max_workers=PUMP_WORKERS, thread_name_prefix="host-attach")
+        return _PUMP_EXECUTOR
+
+
+def _reserve_session(room: str) -> None:
+    """
+    Take one of the pump's threads, or refuse in words.
+
+    Args:
+        room: What to name in the refusal.
+
+    Raises:
+        AttachUnavailable: Every pump thread is already parked on a socket.
+
+    Note:
+        Non-blocking on purpose: WAITING for a slot is the silent hang wearing
+        a different hat — the socket would sit accepted and empty until some
+        other operator closed a terminal. Refused now, in a sentence the phone
+        can render.
+
+        Taken BEFORE the spawn, so two sockets arriving together cannot both
+        pass a cap with room for one. The slot is handed to the AttachSession
+        the caller builds next and released by its hangup — see the release in
+        _spawn_pty for what happens when no session is ever built.
+    """
+    if not _PUMP_SLOTS.acquire(blocking=False):
+        raise AttachUnavailable(
+            f"This server is already pumping {PUMP_WORKERS} terminals, which is its cap — "
+            f"close one before opening {room}"
+        )
+
+
+def _release_session() -> None:
+    """
+    Give a pump thread back.
+
+    Raises:
+        ValueError: More releases than reservations — the bounded semaphore
+            refusing to invent capacity. Loud rather than clamped: a slot
+            handed back twice is an accounting bug, and clamping it would
+            hide the bug and re-create the silent hang one socket later.
+    """
+    _PUMP_SLOTS.release()
 
 
 def is_available() -> bool:
@@ -495,6 +580,10 @@ class AttachSession:
             return
 
         self._closed = True
+        # The pump thread this session was holding is free the moment the
+        # descriptor closes below. Released here rather than in the socket
+        # handler because hangup is the ONE path every lane ends through.
+        _release_session()
 
         try:
             # SIGHUP, not SIGKILL: a hangup is what a detaching terminal sends,
@@ -633,6 +722,10 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
         AttachUnavailable: The spawn itself failed; both descriptors are
             closed before the error leaves.
     """
+    # Before anything is spawned: a terminal this server cannot pump must be
+    # refused, not opened. Held from here until the session hangs up.
+    _reserve_session(room)
+
     # openpty rather than fork: the child is a normal subprocess with the slave
     # as its three standard descriptors, so it can be signalled and waited on
     # like anything else. forkpty would hand back a bare pid and a fork this
@@ -669,6 +762,10 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
     except OSError as e:
         os.close(master)
         os.close(slave)
+        # No session will ever be built to own this reservation, so it goes back
+        # here. Without this, a machine that fails to spawn PUMP_WORKERS times
+        # refuses every terminal afterwards while pumping none.
+        _release_session()
         logger.error("[host_api] could not start a client for %s: %s", room, e)
         raise AttachUnavailable(f"Could not start a client for {room}: {e}") from e
     finally:

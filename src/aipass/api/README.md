@@ -5,7 +5,7 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1458 pass | **Functions:** 205 public (189 tested)
+**Seedgo:** 100% (45/45) | **Tests:** 1493 pass | **Functions:** 208 public (194 tested)
 **Last Updated:** 2026-08-18
 
 *The name fence gained ROOTS (FPLAN-0443). It answered exactly one kind of
@@ -16,6 +16,23 @@ holds rather than a list it guessed. The widening is the roster and not the
 rule: the client still sends a NAME, the server still resolves it, and the
 same containment runs under all four. A request that names no root gets the
 branch answer it always got, key for key.*
+
+*The read lane came OFF the event loop (DPLAN-0305). Every route was
+`async def` and none of them awaited anything, so each blocking body — a
+90ms `baud --snapshot`, a git exec, a registry walk — held the single
+worker's loop and the whole phone froze behind it, terminal socket included.
+The 18 routes that do work are plain `def` now and run in the threadpool;
+`/v1/ping` and `/v1/whoami` stay async because they hold no blocking work,
+and the write routes stay async DELIBERATELY — the loop is their only
+serialization until settings grows a lock. The snapshot is coalesced (one
+exec per question per 1.5s, and one exec per stampede, so `/v1/fleet` and
+`/v1/rooms` stop paying twice for the same read), the registry is pinned
+once at boot instead of re-walked per lookup, and the audit trail's caller
+detection fetches ONE frame rather than building the whole stack. The find
+while measuring: the socket pump used asyncio's default executor, which
+sizes itself to eight threads on this host — the ninth terminal connected,
+authenticated, and then silently never pumped. Its own pool now, and the cap
+is a sentence instead of a blank screen.*
 
 *The gateway_boundary line is answered by a bypass entry with its own
 retirement clause (no owner door exists at @aipass yet, ruling pending), so

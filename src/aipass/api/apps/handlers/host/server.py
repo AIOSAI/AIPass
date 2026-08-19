@@ -91,11 +91,6 @@ RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
                                      injection path — never a raw send-keys
                                      here. @baud reproduced the bare-slash trap
                                      twice live, once landing on /remote-env.
-    photo upload                   - later round, the one row that WIDENS this
-                                     surface: size cap enforced before the body
-                                     is read, content-type allowlist, and no
-                                     client-chosen filename or path
-    websocket                      - explicitly out of Stage 0
 
 Functions:
     is_available()  - Whether the [host] extra is installed
@@ -520,7 +515,7 @@ async def _pump(websocket: Any, session: Any) -> None:
         sequences and partial UTF-8 across chunk boundaries, and decoding
         here would corrupt both."""
         while not stop.is_set():
-            data = await loop.run_in_executor(None, session.read)
+            data = await loop.run_in_executor(host_attach.pump_executor(), session.read)
             if not data:
                 break
             await websocket.send_bytes(data)
@@ -758,6 +753,17 @@ def create_app() -> Any:
         logger.warning("[host_api] rejected a malformed request: %s", payload["error"]["message"])
         return JSONResponse(status_code=422, content=payload)
 
+    # `def`, NOT `async def`, on every route whose body blocks (DPLAN-0305).
+    # A handler declared async runs ON the event loop: while it shells out to
+    # drone or reads a registry, the single worker answers NOTHING — a 90ms
+    # snapshot froze /v1/ping for 90ms. Declared sync, FastAPI runs it in the
+    # anyio threadpool and the loop stays free. Only handlers that genuinely
+    # await (the socket lane) or do no blocking work at all (ping, whoami) stay
+    # async, and the routes that WRITE stay async on purpose — the loop is
+    # their only serialization until settings grows a lock (todo, AXIS 2).
+    # Pinned structurally in test_host_perf.py: a body with no await must not
+    # be async, and one slow route must not delay a fast one.
+
     # response_class + the Response return annotation keep FastAPI from
     # inferring a body model — 204 must not carry one.
     @app.get("/v1/ping", status_code=204, response_class=Response)
@@ -775,7 +781,7 @@ def create_app() -> Any:
         }
 
     @app.get("/v1/feed")
-    async def feed(
+    def feed(
         since: Optional[str] = None,
         limit: int = host_feed.DEFAULT_LIMIT,
         record: dict = Depends(require_scope("read")),
@@ -787,7 +793,7 @@ def create_app() -> Any:
             raise _deny(503, "feed_unavailable", str(e)) from e
 
     @app.get("/v1/roots")
-    async def roots(record: dict = Depends(require_scope("read"))) -> dict:
+    def roots(record: dict = Depends(require_scope("read"))) -> dict:
         """Every place the file lane may stand. 503 rather than a short list
         when the census is gone — reads.list_roots carries the reasoning."""
         try:
@@ -796,7 +802,7 @@ def create_app() -> Any:
             raise _deny(503, "roots_unavailable", str(e)) from e
 
     @app.get("/v1/files")
-    async def files(
+    def files(
         file: str,
         branch: str = "",
         project: str = "",
@@ -815,7 +821,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/dir")
-    async def dir_listing(
+    def dir_listing(
         branch: str = "",
         dir: str = "",
         project: str = "",
@@ -833,7 +839,7 @@ def create_app() -> Any:
     if MULTIPART_AVAILABLE:
 
         @app.post("/v1/files/upload")
-        async def files_upload(
+        def files_upload(
             image: UploadFile = File(...),
             record: dict = Depends(require_scope("operate")),
         ) -> dict:
@@ -872,7 +878,7 @@ def create_app() -> Any:
             raise _deny(503, "upload_unavailable", MULTIPART_HINT)
 
     @app.get("/v1/diff")
-    async def diff(
+    def diff(
         branch: str,
         staged: bool = False,
         project: str = "",
@@ -897,7 +903,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/git-changes")
-    async def git_changes(
+    def git_changes(
         branch: str,
         project: str = "",
         grain: str = "",
@@ -912,7 +918,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/git-log")
-    async def git_log(
+    def git_log(
         branch: str,
         project: str = "",
         limit: int = host_git.DEFAULT_LOG_COMMITS,
@@ -927,7 +933,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/git-remote")
-    async def git_remote(
+    def git_remote(
         branch: str,
         project: str = "",
         record: dict = Depends(require_scope("read")),
@@ -941,7 +947,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/commit")
-    async def commit(
+    def commit(
         branch: str,
         ref: str,
         project: str = "",
@@ -956,7 +962,7 @@ def create_app() -> Any:
             raise _deny(503, "read_unavailable", str(e)) from e
 
     @app.get("/v1/fleet")
-    async def fleet(
+    def fleet(
         project: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
@@ -967,7 +973,7 @@ def create_app() -> Any:
             raise _deny(503, "fleet_unavailable", str(e)) from e
 
     @app.get("/v1/projects")
-    async def projects(
+    def projects(
         record: dict = Depends(require_scope("read")),
     ) -> dict:
         """@baud's project census — the switcher menu's rows, unchanged."""
@@ -977,7 +983,7 @@ def create_app() -> Any:
             raise _deny(503, "fleet_unavailable", str(e)) from e
 
     @app.get("/v1/roster")
-    async def roster(
+    def roster(
         request: Request,
         record: dict = Depends(require_scope("read")),
     ) -> dict:
@@ -1010,7 +1016,7 @@ def create_app() -> Any:
             raise _deny(500, "roster_misuse", str(e)) from e
 
     @app.get("/v1/rooms")
-    async def rooms(
+    def rooms(
         project: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
@@ -1042,7 +1048,7 @@ def create_app() -> Any:
     # Patrick's configuration.
 
     @app.get("/v1/memory-config")
-    async def memory_config(
+    def memory_config(
         branch: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
@@ -1170,7 +1176,7 @@ def create_app() -> Any:
     # like the desktop's: the settings files live in THIS repo's branches.
 
     @app.get("/v1/agent-settings")
-    async def agent_settings_read(
+    def agent_settings_read(
         branch: str,
         record: dict = Depends(require_scope("read")),
     ) -> dict:
@@ -1204,7 +1210,7 @@ def create_app() -> Any:
             raise _deny(503, "settings_unavailable", str(e)) from e
 
     @app.get("/v1/baud-settings")
-    async def baud_settings_read(
+    def baud_settings_read(
         record: dict = Depends(require_scope("read")),
     ) -> dict:
         """BAUD's own document for the seat, whole and opaque."""
@@ -1232,7 +1238,7 @@ def create_app() -> Any:
             raise _deny(503, "settings_unavailable", str(e)) from e
 
     @app.get("/v1/hooks-sound")
-    async def hooks_sound_read(
+    def hooks_sound_read(
         record: dict = Depends(require_scope("read")),
     ) -> dict:
         """@hooks' mute switch, read live — the flag file is the only truth."""
@@ -1480,6 +1486,10 @@ def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
     bind_port = int(port if port is not None else config["port"])
 
     host_config.validate_bind(bind_host, bind_port)
+
+    # Once, here: a long-lived server must not re-walk the filesystem for the
+    # registry on every branch resolution. See config.pin_registry.
+    host_config.pin_registry()
 
     import uvicorn
 

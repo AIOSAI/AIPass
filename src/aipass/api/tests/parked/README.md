@@ -1,6 +1,14 @@
 # Parked tests
 
-## test_host_terminal_superseded_capture_lane.py
+Not an archive. `.archive/` is Patrick's disposal zone — always ignored,
+cleaned without warning (his ruling, 2026-08-18) — so nothing that must
+survive a clone may live there. This directory is TRACKED and ordinary.
+
+Files here carry the house `(disabled)` suffix rather than a `test_` name, so
+pytest's `python_files = test_*.py` never collects them. They are readable,
+revivable, and cannot be mistaken for a suite that runs.
+
+## host_terminal_capture_lane(disabled).py
 
 63 tests for the capture lane as briefed in DPLAN-0300 **Round 18**: poll
 `tmux capture-pane`, render the text on the phone, send keys back through a
@@ -33,9 +41,13 @@ refuse-never-trim on a scrollback cap, the `{ok, detail}` split between "the
 mechanism said no" and "the mechanism was never reached", and the D0
 source-reading check.
 
-Tracked deliberately: the root `.gitignore` swallows `.archive/` by default, and
-a selective whitelist was added so a fresh clone can revive this rather than find
-a README claiming files that are not there — same species as c48b3c65, where that
-bare rule recorded @memory's park as a pure deletion.
+Tracked deliberately, and that is the whole reason this moved. It lived in
+`tests/.archive/` behind a selective `.gitignore` whitelist so a fresh clone
+could revive it rather than find a README claiming files that are not there
+(same species as c48b3c65, where the bare rule recorded @memory's park as a
+pure deletion). Patrick's ruling of 2026-08-18 removed every `.archive/`
+exception fleet-wide, which left this park ignored and untracked — a README
+promising 63 tests nobody would receive. Rehomed here, tracked, same content,
+renamed only to stay out of collection.
 
-Parked 2026-08-14.
+Parked 2026-08-14. Rehomed 2026-08-18.

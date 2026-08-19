@@ -94,6 +94,43 @@ drone @skills info my-skill
 drone @skills validate my-skill
 ```
 
+## The Off-Switch
+
+A skill can be disconnected from AIPass and reconnected later. The setting
+persists across restarts and reboots (`skills_json/switch_state.json`).
+
+```bash
+drone @skills off telegram "retired 2026-08-18"   # disconnect
+drone @skills switch                              # who is on, who is off
+drone @skills on telegram                         # reconnect
+```
+
+**OFF** means three things, not one:
+
+1. Every systemd user unit the skill declares is **stopped**.
+2. Those units are **disabled and masked**, so nothing can respawn them — not a
+   manual `systemctl start`, not a dependency, not a script.
+3. `drone @skills run <name>` **refuses**, before the skill's handler is
+   imported. Stopping units only quiets the machine; this is what makes the
+   skill dark.
+
+**ON** reverses all three: unmask, enable, start. A unit that does not come back
+is reported rather than assumed — the switch never prints "dark" over a live
+process, or "running" over a dead one.
+
+A skill declares what belongs to it in its own SKILL.md frontmatter:
+
+```yaml
+switch:
+  systemd_user:
+    - telegram-bot@base
+```
+
+A skill that declares nothing still toggles; it simply owns no processes to
+stop. If `switch_state.json` is ever unreadable, skills **refuse to run** rather
+than defaulting to on — defaulting to on would restart exactly what someone
+deliberately switched off. Design record: `DPLAN-0306`.
+
 ## SKILL.md Format
 
 ```yaml
@@ -135,6 +172,9 @@ drone @skills create <name>                # Scaffold new skill (markdown only)
 drone @skills create <name> --with-handler # Scaffold with handler.py
 drone @skills create <name> --full         # Scaffold with full 3-layer structure
 drone @skills validate <name>              # Check if skill requirements are met
+drone @skills on <name>                    # Reconnect a skill and start its processes
+drone @skills off <name> [reason]          # Disconnect a skill and stop its processes
+drone @skills switch [name]                # Show each skill's on/off state
 drone @skills --help                       # Show help
 ```
 
@@ -152,16 +192,18 @@ src/aipass/skills/
       runner.py            # Execute skills
       creator.py           # Scaffold new skills
       validator.py         # Check skill requirements
+      switch.py            # Per-skill off-switch (on / off / switch)
     handlers/
       json/                # JSON handler (three-JSON pattern)
       creator_handler.py   # Skill creation logic (name validation, orchestration)
+      switch_handler.py    # Off-switch state, declaration parsing, systemd actuation
       registry.py          # Skill registry management
       validator.py         # Check requirements
       template.py          # Skill templates
     plugins/               # Plugin extensions
   lib/                     # Built-in skills (branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram)
   templates/               # Skill creation templates
-  skills_json/             # JSON tracking directory
+  skills_json/             # JSON tracking directory (incl. switch_state.json)
   dropbox/                 # External storage sync
   .trinity/                # Branch identity and memory
   tests/                   # Test suite

@@ -346,3 +346,402 @@ class TestDiscoveryWatcher:
         mock_obs.is_alive.return_value = False
         setattr(mod, "_observer", mock_obs)
         assert mod.is_file_watcher_active() is False
+
+
+# ============================================================================
+# DISCOVERY/WATCHER.PY - DISPATCHER SURVIVAL (DPLAN-0305)
+# ============================================================================
+#
+# These tests run against a REAL watchdog Observer on a REAL temp directory,
+# deliberately, and none of them may be converted to mocks.
+#
+# The bug they pin killed the machine on 2026-08-18: an unguarded stat() on a
+# file that vanished between event and handler raised FileNotFoundError, which
+# escaped on_created into watchdog's dispatcher loop. That loop catches only
+# queue.Empty (observers/api.py::EventDispatcher.run), so the dispatcher thread
+# died permanently and silently while the emitter kept filling an unbounded
+# queue — six long-running processes reached ~2.3GB each over 15 hours.
+#
+# A MagicMock dispatcher cannot die, so a mocked version of this test would pass
+# against the broken code. The thread has to be real for the assertion to mean
+# anything (prax observation, 2026-08-10: "a mocked output surface cannot fail").
+
+import time as _time
+
+import pytest
+
+
+class TestDispatcherSurvivesHandlerFailure:
+    """The discovery handler must never be able to kill its own dispatcher."""
+
+    def _real_watcher_module(self):
+        """Import the REAL discovery watcher, with only registry writes stubbed."""
+        import importlib
+
+        for key in list(sys.modules):
+            if key.startswith("aipass.prax.apps.handlers.discovery"):
+                sys.modules.pop(key, None)
+        return importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
+
+    def _start_real_observer(self, mod, root: Path):
+        """Start a real observer, or skip if this host cannot give us inotify."""
+        from watchdog.observers import Observer
+
+        handler = mod.PythonFileWatcher()
+        observer = Observer()
+        try:
+            observer.schedule(handler, str(root), recursive=True)
+            observer.start()
+        except OSError as e:  # inotify limit reached on a loaded CI box
+            pytest.skip(f"cannot start a real observer here: {e}")
+        return observer
+
+    def test_a_vanishing_file_does_not_kill_the_dispatcher(self, tmp_path, monkeypatch):
+        """THE regression pin: the exact 02:19 event, end to end, real threads.
+
+        Create a .py file and delete it in the same breath, so the handler's
+        stat() lands on a path that no longer exists. Before the guard this
+        killed the dispatcher thread outright.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+
+        observer = self._start_real_observer(mod, tmp_path)
+        try:
+            _time.sleep(0.3)
+            assert observer.is_alive(), "fixture broken: dispatcher was not alive to begin with"
+
+            victim = tmp_path / "probe.py"
+            victim.write_text("x = 1\n")
+            victim.unlink()  # gone before the handler can stat it
+            _time.sleep(1.0)
+
+            assert observer.is_alive(), (
+                "the dispatcher thread died on a vanishing file — this is the DPLAN-0305 leak: "
+                "the emitter keeps filling an unbounded queue that nobody drains again"
+            )
+        finally:
+            observer.stop()
+            observer.join(timeout=5)
+
+    def test_the_queue_still_drains_after_a_handler_failure(self, tmp_path, monkeypatch):
+        """Surviving is not enough — it has to keep CONSUMING.
+
+        An alive-but-stuck dispatcher leaks exactly like a dead one, so assert
+        against the queue itself rather than only the thread's liveness flag.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+
+        observer = self._start_real_observer(mod, tmp_path)
+        try:
+            _time.sleep(0.3)
+            victim = tmp_path / "probe.py"
+            victim.write_text("x = 1\n")
+            victim.unlink()
+            _time.sleep(0.5)
+
+            # Generate traffic the dispatcher must chew through.
+            for i in range(40):
+                (tmp_path / f"noise_{i}.txt").write_text("n")
+            _time.sleep(1.5)
+
+            assert observer.event_queue.qsize() == 0, (
+                f"{observer.event_queue.qsize()} events are stranded in the queue — "
+                "the dispatcher is no longer draining, which is the leak"
+            )
+        finally:
+            observer.stop()
+            observer.join(timeout=5)
+
+    def test_no_exception_of_any_type_escapes_on_created(self, tmp_path, monkeypatch):
+        """The guard must be `except Exception`, not `except FileNotFoundError`.
+
+        FileNotFoundError is only the failure we happened to hit. Any exception
+        reaching the dispatcher is equally fatal, so this raises something with
+        no relationship to the filesystem and asserts the same containment.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+
+        class _Boom(Exception):
+            pass
+
+        def _explode():
+            raise _Boom("registry is unreachable")
+
+        monkeypatch.setattr(mod, "load_module_registry", _explode)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"  # dispatch() routes on this
+        event.is_directory = False
+        event.src_path = str(tmp_path / "anything.py")
+
+        handler.dispatch(event)  # must not raise — the dispatcher calls it exactly like this
+
+    def test_a_swallowed_failure_is_still_reported(self, tmp_path, monkeypatch):
+        """Swallowing must not mean hiding — 15 silent hours is what made it costly."""
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+
+        def _explode():
+            raise RuntimeError("registry is unreachable")
+
+        monkeypatch.setattr(mod, "load_module_registry", _explode)
+
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"  # dispatch() routes on this
+        event.is_directory = False
+        event.src_path = str(tmp_path / "anything.py")
+        handler.dispatch(event)
+
+        assert errors, "the handler swallowed a failure without saying anything"
+        assert "anything.py" in errors[0], "the report must name the file that failed"
+        assert "RuntimeError" in errors[0], "the report must name the error type"
+
+    def test_a_healthy_created_file_is_still_registered(self, tmp_path, monkeypatch):
+        """The guard must not have turned discovery into a no-op.
+
+        A vacuity floor: if on_created silently stopped working, every test above
+        would still pass. This one fails if the handler no longer registers.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+
+        real_file = tmp_path / "keeper.py"
+        real_file.write_text("y = 2\n")
+
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"  # dispatch() routes on this
+        event.is_directory = False
+        event.src_path = str(real_file)
+        handler.dispatch(event)
+
+        assert "keeper" in saved, "a perfectly good new module was not registered"
+        assert saved["keeper"]["size"] == len("y = 2\n")
+
+    def test_the_file_is_stat_ed_once_not_twice(self, tmp_path, monkeypatch):
+        """Two stats are two chances to lose the same race the guard now catches.
+
+        The original built `size` and `modified_time` from separate stat() calls,
+        so a file could vanish between them and produce a torn description.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+
+        real_file = tmp_path / "counted.py"
+        real_file.write_text("z = 3\n")
+
+        calls = []
+        original_stat = Path.stat
+
+        def counting_stat(self, *args, **kwargs):
+            if self == real_file:
+                calls.append(1)
+            return original_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", counting_stat)
+
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"  # dispatch() routes on this
+        event.is_directory = False
+        event.src_path = str(real_file)
+        handler.dispatch(event)
+
+        assert len(calls) == 1, f"expected exactly one stat() on the target, got {len(calls)}"
+
+
+class TestWatcherLiveness:
+    """A liveness check that cannot fire after startup is not a liveness check.
+
+    `is_file_watcher_active()` existed and was even called — but only from
+    `SystemLogger._ensure_watcher`, whose body runs once per process behind a
+    `_watcher_started` flag that is never reset. It therefore answered at the one
+    moment the watcher could not yet have died, and never again. The dispatcher
+    died at 02:19 on 2026-08-18 and no process noticed for 15 hours.
+    """
+
+    def _fresh_module(self):
+        import importlib
+
+        for key in list(sys.modules):
+            if key.startswith("aipass.prax.apps.handlers.discovery"):
+                sys.modules.pop(key, None)
+        mod = importlib.import_module("aipass.prax.apps.handlers.discovery.watcher")
+        mod._LIVENESS.last_check = 0.0
+        mod._LIVENESS.death_reported = False
+        return mod
+
+    def _dead_observer(self):
+        obs = MagicMock()
+        obs.is_alive.return_value = False
+        obs.event_queue.qsize.return_value = 91234
+        return obs
+
+    def test_a_dead_watcher_is_reported_loudly(self, monkeypatch):
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        assert mod.check_file_watcher_liveness() is False
+        assert errors, "the watcher died and nothing was logged — this is the 15-hour silence"
+        assert "DEAD" in errors[0]
+
+    def test_the_death_report_carries_the_queue_depth(self, monkeypatch):
+        """The number that makes it actionable: how much memory is being retained."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        mod.check_file_watcher_liveness()
+        assert "91234" in errors[0], "the report should say how many events are stranded"
+
+    def test_the_death_is_reported_once_not_on_every_check(self, monkeypatch):
+        """prax owns the runaway-log detector; a health check must not flood."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        for _ in range(50):
+            mod.check_file_watcher_liveness(force=True)
+
+        assert len(errors) == 1, f"death reported {len(errors)} times — that is a log flood"
+
+    def test_a_live_watcher_reports_nothing(self, monkeypatch):
+        mod = self._fresh_module()
+        obs = MagicMock()
+        obs.is_alive.return_value = True
+        monkeypatch.setattr(mod, "_observer", obs)
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        assert mod.check_file_watcher_liveness() is True
+        assert not errors
+
+    def test_no_watcher_in_this_process_is_healthy_not_dead(self, monkeypatch):
+        """Most processes never start one; absence must not read as failure."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", None)
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        assert mod.check_file_watcher_liveness() is True
+        assert not errors
+
+    def test_the_check_is_throttled(self, monkeypatch):
+        """It sits on the logging path — it must not call is_alive() every time."""
+        mod = self._fresh_module()
+        obs = MagicMock()
+        obs.is_alive.return_value = True
+        monkeypatch.setattr(mod, "_observer", obs)
+
+        for _ in range(200):
+            mod.check_file_watcher_liveness()
+
+        assert obs.is_alive.call_count == 1, (
+            f"is_alive() ran {obs.is_alive.call_count} times for 200 log calls — throttle is not working"
+        )
+
+    def test_a_restarted_watcher_clears_the_latch(self, monkeypatch):
+        """A second death must be announced too, not suppressed by the first."""
+        mod = self._fresh_module()
+        dead = self._dead_observer()
+        monkeypatch.setattr(mod, "_observer", dead)
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
+        mod.check_file_watcher_liveness(force=True)
+        assert len(errors) == 1
+
+        alive = MagicMock()
+        alive.is_alive.return_value = True
+        monkeypatch.setattr(mod, "_observer", alive)
+        mod.check_file_watcher_liveness(force=True)  # recovery clears the latch
+
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        mod.check_file_watcher_liveness(force=True)
+        assert len(errors) == 2, "a second, distinct death went unreported"
+
+    def test_the_liveness_check_never_raises(self, monkeypatch):
+        """It is called BY the logger. A health check that breaks logging is worse."""
+        mod = self._fresh_module()
+        exploding = MagicMock()
+        exploding.is_alive.side_effect = RuntimeError("observer internals exploded")
+        monkeypatch.setattr(mod, "_observer", exploding)
+
+        assert mod.check_file_watcher_liveness(force=True) is True  # fails open
+
+    def test_a_failed_trigger_does_not_silence_the_log_line(self, monkeypatch):
+        """The log line is the primary report; trigger is the nice-to-have."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        monkeypatch.setattr(mod, "_HAS_TRIGGER", True)
+        broken = MagicMock()
+        broken.fire.side_effect = OSError("trigger bus unavailable")
+        monkeypatch.setattr(mod, "trigger", broken)
+
+        mod.check_file_watcher_liveness(force=True)
+        assert errors, "a broken trigger swallowed the death report"
+
+    def test_the_common_case_does_not_touch_the_lock(self, monkeypatch):
+        """The hot path must stay lock-free.
+
+        This runs on EVERY log call in the ecosystem. Throttling alone is not
+        enough: if the throttle check moves inside the lock, behaviour is
+        identical and every log call in every process starts serialising on a
+        single mutex. That regression is invisible to every other test here —
+        it changes cost, not answers — so it gets its own pin.
+        """
+        mod = self._fresh_module()
+        obs = MagicMock()
+        obs.is_alive.return_value = True
+        monkeypatch.setattr(mod, "_observer", obs)
+
+        acquisitions = {"n": 0}
+        real_lock = mod._LIVENESS.lock
+
+        class CountingLock:
+            def __enter__(self):
+                acquisitions["n"] += 1
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc):
+                return real_lock.__exit__(*exc)
+
+        monkeypatch.setattr(mod._LIVENESS, "lock", CountingLock())
+
+        for _ in range(200):
+            mod.check_file_watcher_liveness()
+
+        assert acquisitions["n"] == 1, (
+            f"the lock was taken {acquisitions['n']} times for 200 log calls — "
+            "the throttle check has moved inside the lock and every log call now contends"
+        )

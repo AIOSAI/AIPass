@@ -103,15 +103,20 @@ through rather than flattening it. @baud asked for exactly that, and they are
 right: "ended it" and "it was already gone" are different sentences on a phone.
 
 Functions:
-    snapshot_binary() - Locate the baud binary this host should exec
-    read_snapshot()   - The fleet envelope, exactly as BAUD produced it
-    read_rooms()      - The room projection of that same snapshot
-    end_room()        - End one named room in one named project, via --end-room
+    snapshot_binary()      - Locate the baud binary this host should exec
+    read_snapshot()        - The fleet envelope, exactly as BAUD produced it,
+                             coalesced and cached for SNAPSHOT_TTL_SECONDS
+    reset_snapshot_cache() - Forget it, after a verb that changed the fleet
+    read_rooms()           - The room projection of that same snapshot
+    end_room()             - End one named room in one project, via --end-room
 """
 
+import copy
 import json
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -138,6 +143,24 @@ SNAPSHOT_TIMEOUT_SECONDS = 30
 # session, with no 17-branch walk behind it. Its own constant rather than a
 # shared one, because the two verbs have no reason to move together.
 END_ROOM_TIMEOUT_SECONDS = 20
+
+# THE SNAPSHOT IS AN EXEC, AND THE PHONE POLLS (DPLAN-0305).
+#
+# One `baud --snapshot` costs 60-90ms and walks a 17-branch census off disk.
+# /v1/fleet and /v1/rooms are the same read — rooms is a projection of the
+# fleet envelope — so a face showing both cards paid for TWO process spawns per
+# refresh, and a poll loop paid for two more every cycle.
+#
+# 1.5s: long enough that the two cards of one refresh, and a double-tap, share
+# a single exec; short enough that nobody watching the screen sees a stale
+# fleet. Anything longer starts LYING about a room that just ended.
+SNAPSHOT_TTL_SECONDS = 1.5
+
+# Keyed by the project asked for ('' is the anchor, and is NOT the same key as
+# the anchor's own name — they are different requests even when they agree).
+_snapshot_cache: Dict[str, tuple] = {}
+_snapshot_flights: Dict[str, threading.Lock] = {}
+_snapshot_guard = threading.Lock()
 
 _NOT_READY = (
     "The fleet snapshot is switched off on this host (fleet.SNAPSHOT_READY is False). "
@@ -184,13 +207,110 @@ def snapshot_binary() -> str:
     )
 
 
+def reset_snapshot_cache() -> None:
+    """
+    Forget every cached snapshot.
+
+    Called after a verb that CHANGES the fleet (ending a room), and by the test
+    suite between cases. Public because a cache nobody can clear is a cache
+    that outlives its own truth.
+    """
+    with _snapshot_guard:
+        _snapshot_cache.clear()
+
+
+def _flight_lock(key: str) -> threading.Lock:
+    """
+    The lock that makes one key's refresh single-flight.
+
+    Args:
+        key: The project asked for.
+
+    Returns:
+        A lock unique to that key, created on first use. Per key, not global:
+        a slow anchor read must not queue a different project behind it.
+    """
+    with _snapshot_guard:
+        return _snapshot_flights.setdefault(key, threading.Lock())
+
+
+def _cached_snapshot(key: str) -> Optional[Dict[str, Any]]:
+    """
+    The cached envelope for one key, if it is still young enough.
+
+    Args:
+        key: The project asked for.
+
+    Returns:
+        A DEEP COPY of the envelope, or None when absent or expired.
+
+    Note:
+        The copy is the point. Handing out the cached object itself means the
+        first caller who edits their answer edits everyone's for the rest of
+        the TTL — silently, and only under load. Copying a 17-branch envelope
+        costs microseconds against a 90ms exec.
+    """
+    with _snapshot_guard:
+        entry = _snapshot_cache.get(key)
+    if entry is None:
+        return None
+
+    stored_at, envelope = entry
+    # monotonic, never wall clock: a clock step must not resurrect or expire a
+    # cache entry.
+    if time.monotonic() - stored_at > SNAPSHOT_TTL_SECONDS:
+        return None
+    return copy.deepcopy(envelope)
+
+
 def read_snapshot(project: str = "") -> Dict[str, Any]:
     """
-    Read the fleet snapshot from BAUD.
+    Read the fleet snapshot from BAUD, coalesced and briefly cached.
+
+    Fresh answers within SNAPSHOT_TTL_SECONDS are served from memory, and
+    concurrent callers asking for the same project share ONE exec: the first
+    arrival runs it, the rest wait on that flight and read its result. Both
+    matter — the TTL kills the poll cost, the single flight kills the stampede
+    a page-load of several cards makes.
+
+    A FAILURE IS NOT CACHED. Only a good envelope is stored, so a binary that
+    comes back works on the very next request instead of being refused for the
+    rest of the TTL. Concurrent callers still share the failed flight, which is
+    what stops ten requests each waiting out their own 30s timeout.
 
     Args:
         project: Optional project name. CASE-SENSITIVE — it is a key in BAUD's
             census, so it travels verbatim. Empty means the anchor project.
+
+    Returns:
+        @baud's snapshot envelope, unchanged.
+
+    Raises:
+        FleetUnavailable: The seam is gated, or BAUD could not produce a read.
+    """
+    cached = _cached_snapshot(project)
+    if cached is not None:
+        return cached
+
+    with _flight_lock(project):
+        # Asked again INSIDE the lock: whoever we queued behind has just filled
+        # it, and re-running the exec they already ran is the stampede itself.
+        cached = _cached_snapshot(project)
+        if cached is not None:
+            return cached
+
+        envelope = _read_snapshot_uncached(project)
+        with _snapshot_guard:
+            _snapshot_cache[project] = (time.monotonic(), copy.deepcopy(envelope))
+        return envelope
+
+
+def _read_snapshot_uncached(project: str = "") -> Dict[str, Any]:
+    """
+    Exec BAUD and return its envelope. The real read, every time.
+
+    Args:
+        project: Project name, verbatim. Empty means the anchor.
 
     Returns:
         @baud's snapshot envelope, unchanged.
@@ -589,6 +709,10 @@ def end_room(branch: str, project: str) -> Dict[str, Any]:
         command += ["--project", project]
 
     envelope = _run_headless(command, END_ROOM_TIMEOUT_SECONDS, "room kill")
+
+    # The fleet just CHANGED. Serving the pre-kill snapshot for another second
+    # would show the operator the room they just ended, still standing.
+    reset_snapshot_cache()
 
     json_handler.log_operation(
         "host_api_room_kill",

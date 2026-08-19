@@ -142,18 +142,35 @@ def _get_caller_module_name() -> str:
 
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
+
+    Note:
+        ONE frame is fetched, not the whole stack. inspect.stack() builds a
+        FrameInfo for every frame below this one — resolving each filename and
+        reading source lines through linecache — so its cost grows with how
+        deep the caller is. Measured 2026-08-18: 0.21ms two frames down, 1.77ms
+        at fifty, which is ordinary depth inside a FastAPI request, and the
+        host lane makes 37 auto-detecting calls. sys._getframe(2) is the same
+        answer for 0.006ms because it never touches the frames it is not asked
+        about (DPLAN-0305 Audit 2).
+
+        _getframe is a CPython implementation detail, so its absence falls back
+        to the old walk rather than to "unknown" — a different interpreter
+        should be slower here, never wrong.
     """
     try:
-        stack = inspect.stack()
         # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-        if len(stack) > 2:
-            caller_frame = stack[2]
-            caller_path = Path(caller_frame.filename)
-            module_name = caller_path.stem
+        getframe = getattr(sys, "_getframe", None)
+        if getframe is not None:
+            module_name = Path(getframe(2).f_code.co_filename).stem
+        else:
+            stack = inspect.stack()
+            if len(stack) <= 2:
+                return "unknown"
+            module_name = Path(stack[2].filename).stem
 
-            # Validate module name
-            if module_name and not module_name.startswith("_"):
-                return module_name
+        # Validate module name
+        if module_name and not module_name.startswith("_"):
+            return module_name
 
         # Fallback
         return "unknown"

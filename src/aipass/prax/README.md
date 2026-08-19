@@ -49,6 +49,27 @@ drone @prax monitor run --relay          # Mirror to Telegram (prax_monitor bot)
 drone @prax monitor --help               # Monitor usage
 ```
 
+**On request only — there is no monitor service.** Patrick's ruling, 2026-08-18:
+*"monitor should only be running on request when i call it. not in background.
+the logs are already running."* Mission Control is an operator console, and
+logging does not depend on it: `system_logs/` and the branch-local logs are
+written by the logging handlers whether or not a monitor is running. Start it
+when you want to watch, quit it when you are done.
+
+The `prax-monitor.service` systemd unit that used to run it always-on is
+**retired** — archived (not deleted) at
+`.archive/prax-monitor.service.retired-2026-08-18` with the reasoning beside it.
+(That archive is currently **local-only**: the root `.gitignore` ignores
+`.archive/`, so git records the move as a plain deletion and a fresh clone would
+have neither the unit nor the note. A selective un-ignore is owed — same
+exception @api and @memory already carry — and is reported to @devpulse rather
+than edited into the shared file unilaterally.)
+Its stated purpose was the Telegram relay, and Telegram is retired too (same
+day's ruling: BAUD is the surface going forward). It was also one of the six
+processes the DPLAN-0305 watcher leak grew to ~2.3GB. Any future always-on
+proposal has to answer log rotation and the ecosystem-observer question first —
+both written down in the archived note.
+
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
 - **Branch scoping** — `monitor run seedgo,cli` shows only those branches (see below)
@@ -205,6 +226,44 @@ drone @prax dashboard --help             # Dashboard usage
 silently ignores unknown flags, so `refresh --all --dry-run` is a real
 fleet-wide write, not a preview — there is no dry-run mode.
 
+### The discovery watcher cannot kill its own thread
+
+`PythonFileWatcher.on_created` guards its **whole body** with `except Exception`,
+and that breadth is deliberate. watchdog's dispatcher loop
+(`observers/api.py::EventDispatcher.run`) catches only `queue.Empty`, so any
+exception escaping a handler kills the dispatcher thread permanently and
+silently, while the emitter keeps filling an **unbounded** queue that nobody
+drains again. The process then retains every filesystem event in the ecosystem
+for as long as it lives.
+
+That happened. On 2026-08-18 at 02:19 an archived probe file
+(`api/apps/handlers/host/.archive/probe.py`) was created and deleted inside the
+same second; `stat()` on the vanished path raised `FileNotFoundError` from
+`on_created`; **six** long-running processes lost their dispatcher at the same
+instant and grew to ~2.3GB RSS each — 13.7 of 15GB with swap full — over the
+next 15 hours, with nothing logged. Diagnosed by @devpulse in DPLAN-0305.
+
+Two things came out of it, both pinned by tests that run against a **real**
+watchdog observer (a mocked dispatcher cannot die, so a mocked test would pass
+against the broken code):
+
+- **The guard.** Discovery is best-effort by nature — the file it describes is a
+  moving target — so a failure is reported and swallowed. Losing one module
+  registration is a rounding error next to losing the watcher.
+- **A liveness check that can actually fire.** `is_file_watcher_active()` already
+  existed *and was already called* — but only from `SystemLogger._ensure_watcher`,
+  whose body runs once per process behind a `_watcher_started` flag that is never
+  reset. It answered at the one moment the watcher could not yet have died, and
+  never again. `check_file_watcher_liveness()` runs throttled (~1 real check per
+  60s) on the logging path, reports a death loudly **once** with the stranded
+  queue depth, and fires `file_watcher_died` on the trigger bus. It never raises:
+  it is called by the logger, and a health check that breaks logging is worse
+  than the condition it detects.
+
+The check is throttled *and* lock-free in the common case, both pinned — the
+throttle moving inside the lock would change cost rather than answers, and would
+put every log call in the ecosystem on one mutex with nothing to catch it.
+
 ## Logging API
 
 ### Pattern A — Canonical (use this)
@@ -329,7 +388,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1323 tests across 34 files
+└── tests/                             # 1371 tests across 36 files
 ```
 
 ### Design Pattern
@@ -358,7 +417,7 @@ drone @prax monitor run
 
 ## Tests
 
-1323 tests across 34 files (1322 pass, 1 skipped), covering all major components:
+1371 tests across 36 files (1370 pass, 1 skipped), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -379,7 +438,7 @@ drone @prax monitor run
 | test_rate_tracker.py | 34 | Rate tracking, thresholds, persistence (incl. rate history), suppression |
 | test_discovery.py | 25 | Module scanning |
 | test_registry.py | 24 | Module registry |
-| test_watcher.py | 23 | File watcher behavior |
+| test_watcher.py | 39 | File watcher behavior; dispatcher survives handler failure (real observer), liveness reporting |
 | test_json_handler.py | 18 | JSON auto-creation |
 | test_central.py | 14 | Central reader |
 | test_log_audit.py | 13 | Log audit |
@@ -414,7 +473,7 @@ drone @prax monitor run
 
 ## Known Issues
 - **inotify exhaustion** — System often near `max_user_watches` limit. Monitor uses polling fallback (functional but slower).
-- **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches to a system already near the watch limit (above). Verified 2026-08-13 by launching five alongside the systemd service; none complained.
+- **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches to a system already near the watch limit (above). Verified 2026-08-13 by launching five alongside the then-live systemd service; none complained. That service is retired as of 2026-08-18 (monitor is on-request only), so the everyday risk is now several forgotten terminals rather than a daemon plus terminals — but the missing guard is unchanged.
 - **Error paths exit 0.** `monitor bogus`, `log-audit bogus`, `log-health bogus` and `dashboard refresh @nosuchbranch` all print an error and return exit code 0. `status` is worse: an unknown subcommand or unknown flag is dropped silently and the normal status block prints. Nothing scripted can detect a prax command failure from `$?`.
 - **No runtime filtering in Mission Control** — `_handle_interactive_cmd` dispatches
   only `help` and `status`; `watch` and `filter` fall through to "Unknown command". Branch
