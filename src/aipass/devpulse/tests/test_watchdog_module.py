@@ -103,6 +103,12 @@ def _patch_registry_imports(fake_registry, fake_timer=None):
             return fake_registry
         if name.endswith(".timer"):
             return timer
+        if name.endswith(".baseline"):
+            # status now prints the delivery-lag line off the real baseline
+            # path helpers; a rootless fake keeps the line quiet in tests.
+            fake_baseline = type(sys)("fake_baseline_paths")
+            fake_baseline.find_repo_root = lambda *a, **kw: None
+            return fake_baseline
         raise ImportError(f"unexpected import in test: {name}")
 
     return patch("importlib.import_module", side_effect=fake_import)
@@ -337,15 +343,26 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
 
 
 def _fake_baseline_module(result=None, recorder=None):
-    """Minimal fake baseline handler module for router-level tests."""
+    """Minimal fake handler module for router-level tests.
+
+    Serves BOTH doors the router lazily imports: ``arm_wire`` (the default,
+    wire.py) and ``watch_baseline`` (the ``--daemon`` detection role).
+    """
     fake = type(sys)("fake_baseline_mod")
 
-    def watch_baseline(once=False):
-        """Fake baseline watcher — records its arguments, returns a preset result."""
+    def arm_wire(once=False):
+        """Fake wire door — records its arguments, returns a preset result."""
         if recorder is not None:
             recorder["once"] = once
+        return result or {"state": "stopped", "replayed": 0, "delivered": 0, "ticks": 1, "session": "s"}
+
+    def watch_baseline(once=False, daemon=False):
+        """Fake daemon door — records the daemon flag."""
+        if recorder is not None:
+            recorder["daemon"] = daemon
         return result or {"state": "stopped", "handle": "baseline-abc123", "completions": 0, "ticks": 1, "elapsed": 0}
 
+    fake.arm_wire = arm_wire
     fake.watch_baseline = watch_baseline
     return fake
 
@@ -357,7 +374,7 @@ def test_baseline_is_a_known_subcommand():
 
 
 def test_baseline_subcommand_invokes_handler(capsys):
-    """`baseline` lazily imports and invokes watch_baseline in continuous mode."""
+    """Bare `baseline` lazily imports and invokes the wire arm door."""
     recorder = {}
     fake_module = _fake_baseline_module(
         result={"state": "stopped", "handle": "baseline-abc123", "completions": 2, "ticks": 9, "elapsed": 18},
@@ -399,15 +416,26 @@ def test_baseline_rejects_unknown_flag(capsys):
     assert "--forever" in combined or "unknown" in combined.lower()
 
 
-def test_baseline_already_armed_does_not_echo_a_summary(capsys):
-    """The handler already said 'already armed' — the router must not say it twice."""
-    fake_module = _fake_baseline_module(
-        result={"state": "already_armed", "handle": None, "completions": 0, "ticks": 0, "elapsed": 0, "pid": 4321}
-    )
+def test_baseline_daemon_flag_routes_to_detection(capsys):
+    """--daemon runs the detection role, never the wire door."""
+    recorder = {}
+    fake_module = _fake_baseline_module(recorder=recorder)
 
     with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["baseline"])
+        wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
 
+    assert recorder == {"daemon": True}
+
+
+def test_baseline_once_and_daemon_together_is_an_error(capsys):
+    """The two flags are different lifetimes — refused before any import."""
+    fake_module = _fake_baseline_module(recorder={})
+
+    with patch("importlib.import_module", return_value=fake_module) as imported:
+        result = wd_mod.handle_command("watchdog", ["baseline", "--once", "--daemon"])
+
+    assert result is True
+    imported.assert_not_called()
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "state=already_armed" not in combined
+    assert "lifetimes" in combined

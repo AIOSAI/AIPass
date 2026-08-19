@@ -687,7 +687,7 @@ def test_event_line_survives_a_multiline_subject(tmp_path):
     state.lock_stamp = time.time() - 5
     record = baseline._completion_record("alpha", tmp_path, state, "completed")
 
-    line = baseline._format_completion(record)
+    line = baseline.format_completion(record)
     assert "\n" not in line
     assert line.count('subject="') == 1
     assert "ship it 'now'" in line

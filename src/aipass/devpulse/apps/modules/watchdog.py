@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-08-19
 # =============================================
 
 """
@@ -26,6 +26,7 @@ See FPLAN-0186 for the build plan and DPLAN-0130 for the design record.
 """
 
 import importlib
+import json
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -43,7 +44,9 @@ HELP_TEXT = """\
 
 [bold]Usage:[/bold]
   watchdog agent <branch> [--timeout SECONDS]   Wake when dispatched agent exits
-  watchdog baseline \\[--once]                    Wake on ANY citizen completion
+  watchdog baseline                             Arm fleet watch: detection daemon + THIS session's wire
+  watchdog baseline --once                      Wire until the first delivered completion
+  watchdog baseline --daemon                    (internal) detection daemon — the arm door spawns this
   watchdog status                               List active watches
   watchdog timer <duration>                     Wake in N (5m, 30s, 2h, 1h30m)
   watchdog timer start <name>                   Start named duration timer
@@ -59,7 +62,8 @@ HELP_TEXT = """\
 [bold]Examples:[/bold]
   drone @devpulse watchdog agent @drone
   drone @devpulse watchdog agent @flow --timeout 600
-  drone @devpulse watchdog baseline            (via Monitor — one line per completion)
+  drone @devpulse watchdog baseline            (via Monitor, description "watchdog" — one line per completion,
+                                                replays events missed while no wire was up)
   drone @devpulse watchdog baseline --once     (via run_in_background — wake on first)
   drone @devpulse watchdog timer 5m
   drone @devpulse watchdog timer start build-phase-3
@@ -403,37 +407,50 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
 
 def _handle_baseline(sub_args: List[str]) -> bool:
-    """Route ``watchdog baseline [--once]`` through the baseline handler.
+    """Route ``watchdog baseline [--once|--daemon]`` (DPLAN-0308 round 2).
 
-    The call blocks: continuous by default (wrap it in the Monitor tool — each
-    stdout line is one completion notification, no re-arm between wakes), or
-    ``--once`` to return after the first completion batch the way a
-    ``run_in_background`` Bash wake does.
+    Default = the ARM DOOR (wire.py): ensure the detached detection daemon,
+    take the delivery wire for THIS session, replay anything missed, follow.
+    Run it via the Monitor tool with description "watchdog". ``--once`` wires
+    until the first delivered event (run_in_background style). ``--daemon`` is
+    the internal detection role the arm door spawns detached — not for hands.
     """
     once = False
+    daemon = False
     for arg in sub_args:
         if arg == "--once":
             once = True
             continue
-        error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once]")
+        if arg == "--daemon":
+            daemon = True
+            continue
+        error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once|--daemon]")
+        return True
+    if once and daemon:
+        error("--once and --daemon are different lifetimes", suggestion="Usage: watchdog baseline [--once|--daemon]")
+        return True
+
+    if daemon:
+        baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
+        result = baseline_mod.watch_baseline(daemon=True)
+        err_console.print(
+            f"[dim]watchdog baseline daemon: state={result.get('state', 'unknown')} "
+            f"completions={result.get('completions', 0)} elapsed={result.get('elapsed', 0)}s[/dim]"
+        )
         return True
 
     # stderr, never stdout: the Monitor tool reads every stdout line as a wake
     # event, so an arm-time banner there fires a spurious wake (same contract as
     # _handle_agent's reminder, #634).
-    err_console.print("[dim]watchdog baseline: invoke via Monitor tool (continuous) or --once in background[/dim]")
+    err_console.print("[dim]watchdog baseline: arming — daemon + wire (run via Monitor, description 'watchdog')[/dim]")
 
-    baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
-    result = baseline_mod.watch_baseline(once=once)
+    wire_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.wire")
+    result = wire_mod.arm_wire(once=once)
 
     state = result.get("state", "unknown")
-    if state == "already_armed":
-        # The handler already said so on stderr — one voice, no echo.
-        return True
-
     err_console.print(
-        f"[dim]watchdog baseline: state={state} completions={result.get('completions', 0)} "
-        f"ticks={result.get('ticks', 0)} elapsed={result.get('elapsed', 0)}s[/dim]"
+        f"[dim]watchdog baseline: state={state} replayed={result.get('replayed', 0)} "
+        f"delivered={result.get('delivered', 0)} ticks={result.get('ticks', 0)}[/dim]"
     )
     return True
 
@@ -459,7 +476,10 @@ def _format_status_line(watch: dict, format_human) -> str:
     if wtype == "agent":
         tail = f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
     elif wtype == "baseline":
-        tail = f"scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
+        role = meta.get("role") or "legacy"
+        tail = f"role={role} scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
+    elif wtype == "baseline_wire":
+        tail = f"session={meta.get('session') or 'NONE (fg)'} daemon_pid={meta.get('daemon_pid', '?')}"
     elif wtype == "timer":
         tail = f"duration={meta.get('duration', '?')}"
     elif wtype == "schedule":
@@ -502,7 +522,39 @@ def _handle_status() -> bool:
         console.print(f"[dim]Pruned {pruned} stale watch(es).[/dim]")
     else:
         console.print("[dim]No stale watches to prune.[/dim]")
+
+    _print_delivery_lag()
     return True
+
+
+def _print_delivery_lag() -> None:
+    """One line of baseline delivery truth: events written vs events delivered.
+
+    This is the ONLY observable for the silent failure a live-looking wire can
+    hide (e.g. continuous mode armed via run_in_background): the wire process
+    exists, the daemon detects, and nothing reaches the chat. Undelivered
+    bytes that keep growing while a wire shows 'live' = the wire is deaf.
+    """
+    try:
+        baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
+        root = baseline_mod.find_repo_root()
+        if root is None:
+            return
+        events = baseline_mod.events_file_for(root)
+        size = events.stat().st_size if events.exists() else 0
+        cursor_file = baseline_mod.cursor_file_for(root)
+        offset = 0
+        if cursor_file.exists():
+            offset = int(json.loads(cursor_file.read_text(encoding="utf-8")).get("offset", 0))
+        lag = max(0, size - offset)
+        if lag:
+            console.print(
+                f"[yellow]Baseline delivery lag: {lag} bytes undelivered[/yellow] (events={size} cursor={offset})"
+            )
+        else:
+            console.print(f"[dim]Baseline delivery: current (events={size} bytes, all delivered).[/dim]")
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        console.print(f"[dim]Baseline delivery lag unreadable: {exc}[/dim]")
 
 
 def _handle_list() -> bool:

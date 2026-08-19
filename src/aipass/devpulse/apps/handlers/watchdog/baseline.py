@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: baseline.py
 # Description: Watchdog Baseline Handler — one always-on watch over every citizen's dispatch lock
-# Version: 1.1.0
+# Version: 2.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-08-19
 # =============================================
 
 # Signal choice: the dispatch lock — the same doctrine agent.py polls, widened
@@ -33,15 +33,27 @@ plus every hosted project's ``projects/*/*_REGISTRY.json`` — and emits one
 stdout line per completion, which a Monitor-tool wrapper turns into a live
 notification.
 
+Round 2 (2026-08-19) split DETECTION from DELIVERY: a watcher whose stdout is a
+session's task file dies as a wake source the moment the session id churns —
+the process survives, the events land in a file nobody reads (witnessed live:
+@api 11:22 and @baud 12:34 delivered into a dead session). So detection now
+runs as a session-agnostic DAEMON (``daemon=True``) appending every completion
+to a durable events JSONL and heartbeating a statusline file, while delivery is
+wire.py's job — a cheap per-session follower that replays whatever the daemon
+recorded while no wire was up. Churn no longer loses events; it delays them.
+
 Public surface:
-  watch_baseline(once=False, ...) -> dict
+  watch_baseline(once=False, daemon=False, ...) -> dict
+  format_completion(record) -> str
+  find_repo_root(), devpulse_dir_for(), events_file_for(), cursor_file_for()
+  HEARTBEAT_FILE, HEARTBEAT_STALE_SECONDS
 
 Event line (one per completion, flushed, stdout only):
   COMPLETE @<branch> subject="<subject>" age=<seconds>s bounce=<yes|no>
   ...plus ``state=completed_crashed stale_lock_pid=<pid>`` when the monitor PID
   died with its lock still on disk.
 
-See DPLAN-0308 for the design record.
+See DPLAN-0308 for the design record (rounds 1 and 2).
 """
 
 import json
@@ -75,6 +87,50 @@ _SELF_BRANCH = "devpulse"
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 _LOCK_RELPATH = (".ai_mail.local", ".dispatch.lock")
 _BOUNCE_RELPATH = (".ai_mail.local", "last_bounce.json")
+
+# The daemon's durable side of the detection/delivery split (round 2).
+# Events are appended here one JSON per line; wire.py follows this file and a
+# byte-offset cursor next to it says how far delivery got. Both live under
+# devpulse_json/ — module state, never a prax-rotated log (rotation would
+# silently eat undelivered events).
+_EVENTS_RELPATH = ("devpulse_json", "baseline_events.jsonl")
+_CURSOR_RELPATH = ("devpulse_json", "baseline_cursor.json")
+
+# The statusline liveness signal: the daemon touches this every tick, and both
+# wire.py and ~/.claude/statusline.sh call the daemon hung once the mtime is
+# older than the stale window. The path predates this build — the statusline
+# has watched it since DPLAN-0106; the daemon is its first-ever writer.
+HEARTBEAT_FILE = Path("/tmp/aipass-watchdog-active")
+HEARTBEAT_STALE_SECONDS = 15.0
+
+
+def find_repo_root(start: Path | None = None) -> Path | None:
+    """Walk upward looking for AIPASS_REGISTRY.json. Returns None if not found."""
+    cur = (start or Path.cwd()).resolve()
+    for candidate in [cur, *cur.parents]:
+        if (candidate / _REGISTRY_FILENAME).exists():
+            return candidate
+    return None
+
+
+def devpulse_dir_for(repo_root: Path) -> Path:
+    """The devpulse branch dir under ``repo_root`` — or the root itself.
+
+    The fallback mirrors registry.py's resolver: a test tree that IS the branch
+    dir (no src/aipass/ above it) keeps everything under itself.
+    """
+    branch_dir = repo_root / "src" / "aipass" / "devpulse"
+    return branch_dir if branch_dir.exists() else repo_root
+
+
+def events_file_for(repo_root: Path) -> Path:
+    """The daemon's append-only events JSONL for this repo."""
+    return devpulse_dir_for(repo_root).joinpath(*_EVENTS_RELPATH)
+
+
+def cursor_file_for(repo_root: Path) -> Path:
+    """The wire's delivery cursor for this repo."""
+    return devpulse_dir_for(repo_root).joinpath(*_CURSOR_RELPATH)
 
 
 def _stderr(msg: str) -> None:
@@ -115,15 +171,6 @@ def _pid_alive(pid: int) -> bool:
     and treats a Linux zombie as dead.
     """
     return _registry.is_pid_alive(pid)
-
-
-def _find_repo_root(start: Path | None = None) -> Path | None:
-    """Walk upward looking for AIPASS_REGISTRY.json. Returns None if not found."""
-    cur = (start or Path.cwd()).resolve()
-    for candidate in [cur, *cur.parents]:
-        if (candidate / _REGISTRY_FILENAME).exists():
-            return candidate
-    return None
 
 
 def _read_registry_branches(registry_file: Path) -> list[tuple[str, Path]]:
@@ -455,8 +502,13 @@ def _completion_record(name: str, branch_path: Path, state: BranchState, kind: s
     }
 
 
-def _format_completion(record: dict) -> str:
-    """Render one completion as its stdout event line."""
+def format_completion(record: dict) -> str:
+    """Render one completion as its stdout event line.
+
+    Public: wire.py renders the daemon's JSONL records through the SAME
+    formatter, so a delivered line looks identical whether it came live off a
+    tick or replayed off the events file.
+    """
     age = f"{record['age']}s" if record["age"] is not None else "unknown"
     line = (
         f'COMPLETE @{record["branch"]} subject="{record["subject"]}" '
@@ -537,7 +589,35 @@ def _clear_branch_error(name: str, state: BranchState) -> None:
         state.error_reported = False
 
 
-def _arm(storage_path: Path | None, poll_interval: float) -> dict:
+def _touch_heartbeat() -> None:
+    """Refresh the statusline heartbeat. Display-only, so failure never kills
+    detection — but it is logged, because a permanently failing heartbeat means
+    the statusline shows a dead watchdog over a living one."""
+    try:
+        HEARTBEAT_FILE.touch(exist_ok=True)
+    except OSError as exc:
+        logger.warning("[watchdog.baseline] heartbeat touch failed %s: %s", HEARTBEAT_FILE, exc)
+
+
+def _append_event(events_file: Path, record: dict) -> None:
+    """Append one completion to the durable events JSONL.
+
+    One ``write()`` of one line — small appends are atomic enough on Linux that
+    the wire never sees a torn COMPLETE record with a trailing newline. An
+    OSError here propagates to the crash boundary on purpose: a daemon that
+    detects into nowhere is the silent half-dead watcher this profile refuses
+    to be.
+    """
+    stamped = dict(record)
+    stamped["epoch"] = time.time()
+    stamped["iso"] = datetime.now().isoformat(timespec="seconds")
+    events_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(events_file, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(stamped, separators=(",", ":"), default=str) + "\n")
+        fh.flush()
+
+
+def _arm(storage_path: Path | None, poll_interval: float, role: str | None = None) -> dict:
     """Claim the single baseline slot in watchdog_active.json.
 
     Idempotent by design (DPLAN-0308): session-start arming has to be safe to
@@ -564,9 +644,15 @@ def _arm(storage_path: Path | None, poll_interval: float) -> dict:
         logger.info("[watchdog.baseline] replaced stale entry handle=%s pid=%s", handle, pid)
         stale_replaced += 1
 
+    metadata: dict = {"scope": "all citizens", "tick_seconds": poll_interval}
+    if role is not None:
+        # wire.py's migration sweep tells a round-2 daemon from a legacy
+        # single-process watcher by exactly this key — a live baseline entry
+        # WITHOUT role="daemon" is a session-wired legacy to take over.
+        metadata["role"] = role
     handle = _registry.register(
         _WATCH_KIND,
-        metadata={"scope": "all citizens", "tick_seconds": poll_interval},
+        metadata=metadata,
         storage_path=storage_path,
     )
     return {"state": "armed", "handle": handle, "stale_replaced": stale_replaced}
@@ -579,8 +665,16 @@ def _run_loop(
     poll_interval: float,
     max_ticks: int | None,
     started_at: float,
+    events_file: Path | None = None,
+    heartbeat: bool = False,
 ) -> dict:
-    """The poll loop. Raises on anything unexpected — see the crash boundary."""
+    """The poll loop. Raises on anything unexpected — see the crash boundary.
+
+    ``events_file``/``heartbeat`` are the daemon face: every completion is
+    appended durably BEFORE the stdout line (an event that printed but never
+    persisted would vanish for every future wire), and the heartbeat is touched
+    every tick so the statusline can tell a hung daemon from a live one.
+    """
     roster = Roster(registry_file)
     roster.refresh(required=True)
     if not roster.branches:
@@ -595,7 +689,7 @@ def _run_loop(
     # projects=0 with a projects/ tree full of citizens is a visible wrong number.
     _stderr(
         f"watchdog baseline: armed handle={handle} {roster.summary()} "
-        f"tick={poll_interval}s mode={'once' if once else 'continuous'}"
+        f"tick={poll_interval}s mode={'daemon' if events_file is not None else 'once' if once else 'continuous'}"
     )
 
     states: dict[str, BranchState] = {}
@@ -604,6 +698,8 @@ def _run_loop(
 
     while True:
         ticks += 1
+        if heartbeat:
+            _touch_heartbeat()
         if roster.refresh():
             live = roster.names()
             states = {name: state for name, state in states.items() if name in live}
@@ -625,7 +721,9 @@ def _run_loop(
                 batch.append(record)
 
         for record in batch:
-            _stdout_event(_format_completion(record))
+            if events_file is not None:
+                _append_event(events_file, record)
+            _stdout_event(format_completion(record))
             logger.info(
                 "[watchdog.baseline] completion branch=%s state=%s age=%s bounce=%s",
                 record["branch"],
@@ -659,6 +757,7 @@ def _result(
 
 def watch_baseline(
     once: bool = False,
+    daemon: bool = False,
     poll_interval: float = POLL_INTERVAL_SECONDS,
     repo_root: Path | None = None,
     storage_path: Path | None = None,
@@ -668,9 +767,12 @@ def watch_baseline(
 
     Args:
         once: Return after the first tick that reports at least one completion
-            (the ``run_in_background`` Bash wake style). Default False = run
-            forever emitting event lines, which is what a Monitor-tool wrapper
-            consumes — one long-lived watcher, no re-arm after each wake.
+            (the ``run_in_background`` Bash wake style).
+        daemon: The round-2 detection role — additionally append every
+            completion to the durable events JSONL and touch the statusline
+            heartbeat each tick. This is what wire.py spawns detached; its
+            stdout is a log file, never a session wire, so session churn
+            cannot orphan it.
         poll_interval: Seconds between ticks. Default ``POLL_INTERVAL_SECONDS``.
         repo_root: Override the repo root holding AIPASS_REGISTRY.json.
         storage_path: Override the watch registry path.
@@ -689,14 +791,15 @@ def watch_baseline(
     """
     started_at = time.monotonic()
 
-    root = repo_root if repo_root is not None else _find_repo_root()
-    registry_file = (root / _REGISTRY_FILENAME) if root is not None else None
-    if registry_file is None or not registry_file.exists():
+    root = repo_root if repo_root is not None else find_repo_root()
+    if root is None or not (root / _REGISTRY_FILENAME).exists():
         _stdout_event(f"BASELINE DEAD: {_REGISTRY_FILENAME} not found — no roster, no coverage")
         logger.error("[watchdog.baseline] no registry found from root=%s", root)
         raise SystemExit(1)
+    registry_file = root / _REGISTRY_FILENAME
 
-    armed = _arm(storage_path, poll_interval)
+    events_file = events_file_for(root) if daemon else None
+    armed = _arm(storage_path, poll_interval, role="daemon" if daemon else None)
     if armed["state"] == "already_armed":
         _stderr(f"baseline already armed (pid {armed['pid']})")
         logger.info("[watchdog.baseline] already armed pid=%s", armed["pid"])
@@ -714,7 +817,16 @@ def watch_baseline(
     json_handler.log_operation("watch_baseline", {"handle": handle, "once": once})
 
     try:
-        return _run_loop(registry_file, handle, once, poll_interval, max_ticks, started_at)
+        return _run_loop(
+            registry_file,
+            handle,
+            once,
+            poll_interval,
+            max_ticks,
+            started_at,
+            events_file=events_file,
+            heartbeat=daemon,
+        )
     except KeyboardInterrupt:
         # An operator stopping the watcher is not a crash — it is still the end
         # of coverage, so it is announced, just not on the wake channel.

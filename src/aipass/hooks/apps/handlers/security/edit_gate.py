@@ -196,7 +196,19 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
 
 
 def _todos_count_advisory(after: dict, branch: str) -> str:
-    """Return advisory text if todos exceed rollover count limit, else empty string."""
+    """Return advisory text if todos exceed rollover count limit, else empty string.
+
+    Throttled to roughly one reminder per 10 turns (Patrick's ruling,
+    2026-08-19). Being over the cap is a STANDING condition — it stays true for
+    days and re-asserts on every local.json edit — so firing per edit turned a
+    correct advisory into 209 identical log lines and tripped @trigger's
+    repeat-signature escalation. The log line throttles with the stdout line,
+    not separately: escalation feeds on log repetition, so a silenced advisory
+    that still writes a warning would fix nothing.
+
+    Scope: only this count advisory softens. Hard entry-limit blocks and the
+    newest-first checks are unchanged.
+    """
     try:
         todos = after.get("todos")
         if not isinstance(todos, list):
@@ -210,6 +222,12 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         if count <= limit:
             return ""
         msg = f"todos over limit ({count}/{limit}) — todos do not auto-roll; prune completed ones."
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        if not cadence.should_fire_advisory("todos_count"):
+            # debug, not info: the condition is unchanged and already recorded
+            # by the emission that did fire. Volume is the defect here.
+            logger.debug("[HOOKS] edit_gate: %s (throttled)", msg)
+            return ""
         logger.warning("[HOOKS] edit_gate: %s", msg)
         return msg
     except Exception as exc:

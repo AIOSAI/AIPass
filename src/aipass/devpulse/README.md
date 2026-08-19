@@ -98,8 +98,19 @@ Default timeout is **600 s**; pass `--timeout <s>` for longer builds. Mid-watch 
 also emits `[watchdog.stall]` / `[watchdog.resumed]` events (no JSONL activity 120 s
 with no in-flight tool = probable stuck agent).
 
+**Baseline — the always-on wake (round 2, DPLAN-0308):** detection and delivery
+are separate lifetimes. A detached daemon polls every registry branch's dispatch
+lock and appends completions to a durable events file; a per-session *wire*
+(armed via the Monitor tool: `drone @devpulse watchdog baseline`) follows that
+file and turns each event into a wake. `/clear` or a new chat kills only the
+wire — the daemon keeps detecting, and re-arming replays anything missed as
+`MISSED` lines. The statusline shows `watchdog:on` (green) only when daemon and
+a wire for the *current* session are both live; anything red means re-arm.
+
 | Command | What it does |
 |---|---|
+| `watchdog baseline` | Arm the always-on wake: ensure the detection daemon, take the wire for this session |
+| `watchdog baseline --daemon` | Run the detection daemon itself (the wire spawns this — rarely run by hand) |
 | `watchdog agent @target [--timeout s]` | Wake when the dispatched agent exits (default 600 s) |
 | `watchdog timer <duration>` | Wake after duration (5m, 30s, 2h, 1h30m) |
 | `watchdog timer start/stop <name>` | Named duration tracking |
@@ -189,7 +200,7 @@ drone @git log                   # Recent commits
 
 All branches via dispatch orchestration. Watchdog monitoring for any dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
 
-*Last Updated: 2026-08-16*
+*Last Updated: 2026-08-19*
 
 ---
 
