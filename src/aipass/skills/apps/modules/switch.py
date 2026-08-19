@@ -16,6 +16,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.prax import logger
 from aipass.skills.apps.handlers.switch_handler import (
     SwitchStateUnreadable,
+    read_state as read_state,
     switch_rows,
     turn_off,
     turn_on,

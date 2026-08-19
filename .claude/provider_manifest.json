@@ -4,33 +4,146 @@
   "cli": {
     "claude": {
       "hooks": [
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:presence_gate", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:persistent_alert", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:tier0_kernel", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:navmap", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:branch_prompt", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:identity_injector", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:email_notification", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:compass_recall", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:feedback_pulse", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:auto_process", "event": "UserPromptSubmit", "timeout": 120},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:context_gauge", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:temporal", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:user_message_relay", "event": "UserPromptSubmit", "timeout": 90},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse", "event": "PreToolUse", "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PostToolUse", "event": "PostToolUse", "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SubagentStop", "event": "SubagentStop"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Stop", "event": "Stop"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Notification", "event": "Notification"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact", "event": "PreCompact", "matcher": "manual", "timeout": 60},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact", "event": "PreCompact", "matcher": "auto", "timeout": 60},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover", "event": "PreCompact", "matcher": "manual", "timeout": 120},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover", "event": "PreCompact", "matcher": "auto", "timeout": 120},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process", "event": "PreCompact", "matcher": "manual", "timeout": 120},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process", "event": "PreCompact", "matcher": "auto", "timeout": 120},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep", "event": "PreCompact", "matcher": "manual", "timeout": 30},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep", "event": "PreCompact", "matcher": "auto", "timeout": 30},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:cadence_reset", "event": "SessionStart", "timeout": 30}
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:presence_gate",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:persistent_alert",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:tier0_kernel",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:navmap",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:branch_prompt",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:identity_injector",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:email_notification",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:compass_recall",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:feedback_pulse",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:auto_process",
+          "event": "UserPromptSubmit",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:context_gauge",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:temporal",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:user_message_relay",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse",
+          "event": "PreToolUse",
+          "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PostToolUse",
+          "event": "PostToolUse",
+          "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SubagentStop",
+          "event": "SubagentStop"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Stop",
+          "event": "Stop"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Notification",
+          "event": "Notification"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact",
+          "event": "PreCompact",
+          "matcher": "manual",
+          "timeout": 60
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact",
+          "event": "PreCompact",
+          "matcher": "auto",
+          "timeout": 60
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover",
+          "event": "PreCompact",
+          "matcher": "manual",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover",
+          "event": "PreCompact",
+          "matcher": "auto",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process",
+          "event": "PreCompact",
+          "matcher": "manual",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process",
+          "event": "PreCompact",
+          "matcher": "auto",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep",
+          "event": "PreCompact",
+          "matcher": "manual",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep",
+          "event": "PreCompact",
+          "matcher": "auto",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:cadence_reset",
+          "event": "SessionStart",
+          "timeout": 30
+        }
       ],
       "env": {
         "AIPASS_HOME": "{{REPO_ROOT}}",
@@ -70,7 +183,8 @@
       },
       "commands": {
         "memo.md": ".claude/templates/memo.md"
-      }
+      },
+      "pinned_version": "2.1.228"
     },
     "codex": {
       "hooks": [],

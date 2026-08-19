@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.1.0
+# Version: 3.2.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -45,7 +45,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 _ALLOW = {"exit_code": 0, "stdout": ""}
 _NON_BLOCKING_SESSION_TYPES = frozenset({"dispatched", "daemon"})
 
-_OBSERVE_ONLY = True
+# Flipped 2026-08-18 on Patrick's ruling (DPLAN-0310, "flip it"): enforcement ON.
+# Ruling (a) rides with it below — one brain means one INTERACTIVE brain.
+_OBSERVE_ONLY = False
 
 _SUB_AGENT_TYPES = frozenset(
     {
@@ -95,6 +97,67 @@ def _format_session_age(session: dict) -> str:
         return ""
 
 
+def _session_start(session: dict) -> float | None:
+    """Epoch seconds this session began, or None when it cannot be told.
+
+    CC writes startedAt as epoch milliseconds; older files carry an ISO string.
+    A session whose start cannot be read is not guessed at — the caller treats
+    an unknown start as "cannot rank", never as "younger".
+    """
+    started = session.get("startedAt") or session.get("started", "")
+    if not started:
+        return None
+    try:
+        if isinstance(started, (int, float)):
+            return float(started) / 1000
+        from datetime import datetime
+
+        return datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OSError) as exc:
+        logger.info("[presence_gate] cannot read session start: %s", exc)
+        return None
+
+
+def _we_are_the_incumbent(ours: dict | None, occupant: dict) -> bool:
+    """True when OUR session predates the occupant — so we are not the intruder.
+
+    Without this, two live seats on one branch each see the OTHER as occupant
+    (verified: find_occupant returns the first non-self match, and nothing
+    breaks the tie), so enforcement refuses BOTH and the branch is bricked with
+    no in-band recovery — the blocked prompt is the very thing that would run
+    the remedy. Ranking by start time makes the refusal land on exactly one
+    side: the seat that arrived second. Unknown start ranks nobody, so an
+    unreadable clock can never silently promote us to incumbent.
+    """
+    if not ours:
+        return False
+    our_start = _session_start(ours)
+    their_start = _session_start(occupant)
+    if our_start is None or their_start is None:
+        return False
+    return our_start < their_start
+
+
+def _describe_arriver(session: dict | None, pid: int | None) -> str:
+    """Name the session the gate is judging — the half the soak log was missing.
+
+    496 would-blocks were recorded over five weeks and every line named only the
+    occupant, so "was this a real second brain or our own tooling?" could not be
+    answered from the evidence at all. A gate that observes must record BOTH
+    sides or the soak cannot rule on itself.
+    """
+    if not session:
+        return f"PID {pid}" if pid else "unknown arriver"
+    age = _format_session_age(session)
+    parts = [
+        f"PID {session.get('pid', pid)}",
+        str(session.get("sessionId", ""))[:8],
+        str(session.get("kind", "")),
+        f"{age} old" if age else "",
+    ]
+    return " · ".join(p for p in parts if p)
+
+
 def handle(hook_data: dict) -> dict:
     """UserPromptSubmit gate — enforce one live session per branch.
 
@@ -123,24 +186,44 @@ def handle(hook_data: dict) -> dict:
         if occupant is None:
             return _ALLOW
 
+        # Ruling (a), DPLAN-0310 (Patrick, 2026-08-18): one brain = one INTERACTIVE
+        # brain. A bg session is a job, not a seat — it never gates, because there is
+        # no per-job bg stop in the CLI and an unsatisfiable block only teaches
+        # routing around the gate. Known seam (owner to close): find_occupant returns
+        # the FIRST non-self match, so a bg occupant here can shadow a second
+        # interactive occupant behind it.
+        if occupant.get("kind") in ("bg", "background"):
+            logger.info(
+                "[presence_gate] %s: occupant PID %s is bg — a job, not a seat (ruling a, DPLAN-0310)",
+                branch,
+                occupant.get("pid"),
+            )
+            return _ALLOW
+
+        ours = next((s for s in cc_sessions.read_all_sessions() if s.get("pid") == our_pid), None)
+        if _we_are_the_incumbent(ours, occupant):
+            logger.info(
+                "[presence_gate] %s: we are the incumbent (PID %s) — the newer seat PID %s is the one to refuse",
+                branch,
+                our_pid,
+                occupant.get("pid"),
+            )
+            return _ALLOW
+
         occ_pid = occupant.get("pid", "?")
         occ_kind = occupant.get("kind", "unknown")
         occ_sid = str(occupant.get("sessionId", ""))[:8]
         age = _format_session_age(occupant)
         age_str = f" · {age} old" if age else ""
 
-        # bg sessions have no per-job stop in the CLI — cc_sessions._stop_session
-        # says so itself and refuses to SIGTERM them (the daemon respawns them).
-        # Offering `sessions reclaim` against a bg occupant names a remedy that
-        # provably cannot work, and a gate must be satisfiable by an action it
-        # permits, or it only teaches people to route around it.
-        if occ_kind in ("bg", "background"):
-            remedy = "  This is a background session — `sessions reclaim` cannot stop it (no per-job stop in the CLI)."
-        else:
-            remedy = f"  Attach to that session, or run: drone @hooks sessions reclaim @{branch}"
+        # bg occupants were skipped above (ruling a) — every occupant that reaches
+        # here is a stoppable, attachable seat, so the remedy is always satisfiable.
+        remedy = f"  Attach to that session, or run: drone @hooks sessions reclaim @{branch}"
 
+        arriver = _describe_arriver(ours, our_pid)
         reason = (
             f"{branch} is already live: PID {occ_pid} · {occ_sid} · {occ_kind}{age_str}\n"
+            f"  You are the newer session ({arriver}).\n"
             f"{remedy}\n"
             f"  To disable this gate: set presence_gate.enabled=false in .aipass/hooks.json"
         )
@@ -153,7 +236,7 @@ def handle(hook_data: dict) -> dict:
             # INFO is retained on disk (verified in S155), so the evidence survives;
             # it just stops escalating. The sound was worse than the log line — audio
             # for a decision the gate is not making.
-            logger.info("[presence_gate] OBSERVE-ONLY would-block: %s", reason)
+            logger.info("[presence_gate] OBSERVE-ONLY would-block: %s | arriver: %s", reason, arriver)
             return _ALLOW
 
         logger.warning("[presence_gate] BLOCKED: %s", reason)

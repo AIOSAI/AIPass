@@ -61,7 +61,7 @@ _observer: Any = None
 _LIVENESS_CHECK_INTERVAL_SEC = 60.0
 
 
-class _LivenessState:
+class LivenessState:
     """Mutable bookkeeping for the liveness check.
 
     A holder rather than three module-level names: these are mutable state, not
@@ -75,7 +75,7 @@ class _LivenessState:
         self.lock = threading.Lock()
 
 
-_LIVENESS = _LivenessState()
+_LIVENESS = LivenessState()
 
 
 class PythonFileWatcher(FileSystemEventHandler):

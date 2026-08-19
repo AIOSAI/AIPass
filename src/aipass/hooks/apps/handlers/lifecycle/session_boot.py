@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.0.0
+# Version: 4.1.0
 # Description: Boot wrapper — attach-first menu for Claude Code sessions
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-07-14
+# Modified: 2026-08-18
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -39,16 +39,19 @@ Entry points:
   drone @hooks boot [claude args...]
 """
 
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
+_CHAT_LIMIT = 5
 
 
 def _resolve_claude_binary() -> str:
@@ -278,6 +281,84 @@ def _exec_in_tmux(branch: str, session_id: str, claude_bin: str, claude_cmd: lis
     return {"exit_code": 0, "action": "started", "tmux_session": session_name}
 
 
+# =============================================================================
+# CLI VERSION LOCK (P0 residual — DPLAN-0310 lane C)
+# =============================================================================
+
+_MANIFEST_RELATIVE = Path(".claude") / "provider_manifest.json"
+
+
+def _find_manifest() -> Path | None:
+    """Walk up from this file to the repo root holding .claude/provider_manifest.json."""
+    search = Path(__file__).resolve()
+    for parent in search.parents:
+        candidate = parent / _MANIFEST_RELATIVE
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _pinned_cli_version() -> str:
+    """The CLI version this repo is pinned to, or "" when nothing is pinned.
+
+    Lives in .claude/provider_manifest.json under cli.claude.pinned_version —
+    the manifest is already this branch's to maintain, is tracked in the repo so
+    the pin ships with a clone, and is what doctor reads. A pin in a personal
+    settings file could not be reviewed and would not travel.
+    """
+    manifest = _find_manifest()
+    if manifest is None:
+        return ""
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        return str(data.get("cli", {}).get("claude", {}).get("pinned_version", ""))
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError) as exc:
+        logger.info("[SESSION_BOOT] cannot read pinned version: %s", exc)
+        return ""
+
+
+def _running_cli_version(claude_bin: str) -> str:
+    """Ask the binary what it is. Empty string when it cannot say."""
+    try:
+        result = subprocess.run(
+            [claude_bin, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[SESSION_BOOT] cannot read running version: %s", exc)
+        return ""
+    return (result.stdout or "").strip().split(" ")[0]
+
+
+def _warn_on_version_drift(claude_bin: str) -> str:
+    """One loud line per boot when the running CLI is not the pinned one.
+
+    The auto-updater self-ran on 2026-08-18 at 21:14 from a process that started
+    before DISABLE_AUTOUPDATER was set — env pins bind at process start, so a
+    long-lived session carried a live updater all day and moved 234 -> 235 under
+    us. The CLI changed the session lifecycle rules (background adoption,
+    /resume refusing) while the code below stayed still, which is why "we had
+    this working for a long time" was true and broken at once. Drift is silent
+    by nature; this is the line that makes it not.
+    """
+    pinned = _pinned_cli_version()
+    if not pinned:
+        return ""
+    running = _running_cli_version(claude_bin)
+    if not running or running == pinned:
+        return ""
+    message = (
+        f"  !! CLI VERSION DRIFT: running {running}, pinned {pinned}\n"
+        f"     The session lifecycle rules differ between versions. Re-pin with:\n"
+        f'     ln -sfn ~/.local/share/claude/versions/{pinned} "$(dirname "$(readlink -f "$(command -v claude)")")"\n'
+    )
+    logger.warning("[SESSION_BOOT] CLI version drift: running %s, pinned %s", running, pinned)
+    sys.stderr.write(message)
+    return running
+
+
 def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
     """Boot Claude Code — present menu when sessions exist.
 
@@ -314,10 +395,12 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
         logger.error("[SESSION_BOOT] tmux not found on PATH")
         return {"exit_code": 1, "error": "tmux not found — required for session hosting"}
 
+    _warn_on_version_drift(claude_bin)
+
     live = _find_live_sessions(cwd)
 
     if live:
-        return _menu_live(live, branch, claude_bin, defaults, extra_args)
+        return _menu_live(live, branch, claude_bin, defaults, extra_args, cwd)
     return _menu_no_live(branch, claude_bin, defaults, extra_args)
 
 
@@ -488,25 +571,159 @@ def _menu_single_close(session: dict, is_bg: bool, branch: str, claude_bin: str)
     return {"exit_code": 0, "action": "closed"}
 
 
-def _menu_live(
+def _transcripts():
+    """The CC transcript reader, imported on use.
+
+    Handlers stay independent of modules at import time — engine dispatches
+    handlers dynamically, and a top-level module import would make this file
+    unloadable wherever that module is not present.
+    """
+    import importlib
+
+    return importlib.import_module("aipass.hooks.apps.modules.cc_transcripts")
+
+
+def _chat_age(modified: float) -> str:
+    """Human age of a transcript's last write."""
+    try:
+        delta = time.time() - modified
+    except (TypeError, ValueError) as exc:
+        logger.info("[SESSION_BOOT] unreadable transcript timestamp %r: %s", modified, exc)
+        return ""
+    minutes = int(delta // 60)
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h{minutes % 60:02d}m ago"
+    return f"{hours // 24}d ago"
+
+
+def _chat_line(chat: dict) -> str:
+    """One chat, described the way the user thinks of it."""
+    title = chat.get("title") or "(untitled)"
+    return f"{title} · {chat.get('messages', 0)} msgs · {_chat_age(chat.get('modified', 0))}"
+
+
+def _live_by_session(live: list[dict]) -> dict[str, dict]:
+    """Index live processes by the sessionId they hold."""
+    return {str(s.get("sessionId", "")): s for s in live if s.get("sessionId")}
+
+
+def _open_chat(
+    chat: dict,
     live: list[dict],
     branch: str,
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
 ) -> dict:
+    """Open a chosen chat — ATTACH when a brain already holds it, never spawn a second.
+
+    This is the doctrine at the one place a user can violate it by hand: if a
+    live process owns this sessionId, the only correct move is to join that
+    process. Spawning `--resume` against a held sessionId is exactly what put
+    two PIDs on sessionId e4cd682a on 2026-08-18.
+    """
+    holder = _live_by_session(live).get(chat.get("session_id", ""))
+    if holder is not None:
+        logger.info(
+            "[SESSION_BOOT] Chat %s is held by PID %s — attaching", chat.get("session_id", "")[:8], holder.get("pid")
+        )
+        return _resume_session(holder, branch, claude_bin, defaults, extra_args)
+
+    session_id = chat.get("session_id", "")
+    logger.info("[SESSION_BOOT] Resuming transcript %s (no live holder)", session_id[:8])
+    nf = _name_flag(branch, session_id, extra_args)
+    cmd = [claude_bin] + defaults + ["--resume", session_id] + list(extra_args or []) + nf
+    return _exec_in_tmux(branch, session_id, claude_bin, cmd)
+
+
+def _describe_process(session: dict, branch: str) -> str:
+    """Name a live process for what it is — a seat or a leftover, never 'a chat'."""
+    pid = session.get("pid")
+    kind = session.get("kind", "unknown")
+    short = _session_short_id(session)
+    age = _format_age(session)
+    parts = [f"PID {pid}", short, age]
+    detail = " · ".join(p for p in parts if p)
+    if kind in ("bg", "background"):
+        return f"bg leftover  {detail}"
+    tmux_session = _find_tmux_session_for_pid(pid) if pid else None
+    where = f" (tmux {tmux_session})" if tmux_session else " (no tmux — orphaned window)"
+    return f"seat         {detail}{where}"
+
+
+def _menu_live(
+    live: list[dict],
+    branch: str,
+    claude_bin: str,
+    defaults: list[str],
+    extra_args: list[str] | None,
+    cwd: str | None = None,
+) -> dict:
     """Display menu when live session(s) exist."""
     if len(live) == 1:
         return _menu_single_session(live[0], branch, claude_bin, defaults, extra_args)
 
-    sys.stderr.write(f"\n{branch} — {len(live)} live sessions:\n")
-    for i, session in enumerate(live, 1):
-        label = _session_label(session, branch)
-        sys.stderr.write(f"  [{i}]  {label}\n")
-    sys.stderr.write("  [n]  start new chat\n")
-    sys.stderr.write("  [c]  close all and exit\n\n")
+    return _menu_multi(live, branch, claude_bin, defaults, extra_args, cwd)
+
+
+def _menu_multi(
+    live: list[dict],
+    branch: str,
+    claude_bin: str,
+    defaults: list[str],
+    extra_args: list[str] | None,
+    cwd: str | None = None,
+) -> dict:
+    """Two or more live processes — offer the CHATS, and name the processes separately.
+
+    The old menu listed live PIDs and called them the sessions. A chat whose
+    process was Ctrl+C'd has no session file, so the conversation the user wants
+    is precisely the one a PID list cannot contain, while background leftovers
+    are offered as though they were his chats. It also had no continue-last path
+    at all, which the single and no-live menus both carry.
+    """
+    branch_cwd = cwd or str(Path.cwd())
+    transcripts = _transcripts().recent_chats(branch_cwd, limit=_CHAT_LIMIT)
+
+    # A live seat may hold a chat older than the listed ones. Showing the process
+    # while hiding the only door into it would repeat the defect in miniature.
+    listed = {c.get("session_id") for c in transcripts}
+    for session in live:
+        sid = str(session.get("sessionId", ""))
+        if sid and sid not in listed:
+            held = _transcripts().chat_for(branch_cwd, sid)
+            if held:
+                transcripts.append(held)
+                listed.add(sid)
+
+    sys.stderr.write(f"\n{branch} — recent chats:\n")
+    if transcripts:
+        sys.stderr.write(f"  [Enter]  continue last chat  ({_chat_line(transcripts[0])})\n")
+        for i, chat in enumerate(transcripts, 1):
+            sys.stderr.write(f"  [{i}]      {_chat_line(chat)}\n")
+    else:
+        sys.stderr.write("  [Enter]  continue last chat\n")
+        sys.stderr.write("  (no transcripts found for this branch)\n")
+
+    sys.stderr.write(f"\n  {len(live)} live process(es) in this branch — not chats:\n")
+    for session in live:
+        sys.stderr.write(f"    {_describe_process(session, branch)}\n")
+
+    sys.stderr.write("\n  [n]  start new chat\n")
+    sys.stderr.write("  [c]  close all live processes and exit\n\n")
 
     choice = _read_choice()
+
+    if choice in ("", "r"):
+        if transcripts:
+            return _open_chat(transcripts[0], live, branch, claude_bin, defaults, extra_args)
+        logger.info("[SESSION_BOOT] Continuing last chat via --continue (no transcripts listed)")
+        nf = _name_flag(branch, extra_args=extra_args)
+        cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
+        return _exec_in_tmux(branch, "", claude_bin, cmd)
 
     if choice == "c":
         return _close_all(live, branch, claude_bin)
@@ -519,12 +736,12 @@ def _menu_live(
 
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(live):
-            return _resume_session(live[idx], branch, claude_bin, defaults, extra_args)
+        if 0 <= idx < len(transcripts):
+            return _open_chat(transcripts[idx], live, branch, claude_bin, defaults, extra_args)
     except (ValueError, IndexError):
         logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
 
-    sys.stderr.write("  Pick a number, 'n', or 'c'. Exiting.\n")
+    sys.stderr.write("  Pick a number, Enter, 'n', or 'c'. Exiting.\n")
     return {"exit_code": 1, "error": "unknown choice"}
 
 

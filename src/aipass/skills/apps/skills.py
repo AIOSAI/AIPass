@@ -156,7 +156,7 @@ def print_help():
 
 def _cmd_list():
     """List all discovered skills."""
-    from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, read_state
+    from aipass.skills.apps.modules.switch import SwitchStateUnreadable, read_state
     from aipass.skills.apps.modules.discovery import discover_all
 
     skills = discover_all()

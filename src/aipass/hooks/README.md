@@ -87,6 +87,7 @@ src/aipass/hooks/
 │   │   ├── diagnostics_state.py # What .diagnostics_state.json means — shared by auto_fix + edit_gate
 │   │   ├── hook_test.py         # Portable test runner (drone @hooks test)
 │   │   ├── cc_sessions.py       # CC-native session file reader (~/.claude/sessions/<pid>.json)
+│   │   ├── cc_transcripts.py    # CC-native transcript reader (~/.claude/projects/<cwd>/<sessionId>.jsonl)
 │   │   ├── engine.py            # Core dispatch — routes events to handlers
 │   │   ├── feedback.py          # Feedback pulse toggle (drone @hooks feedback on/off)
 │   │   ├── grounding_content.py # Shared kernel/navmap/branch/identity content loaders (DPLAN-0276)
@@ -139,7 +140,7 @@ src/aipass/hooks/
 │       └── diagnostics.py       # JSONL logging for hook execution
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1557 tests across 49 test files
+└── tests/                       # 1604 tests across 50 test files
 ```
 
 ## How It Works

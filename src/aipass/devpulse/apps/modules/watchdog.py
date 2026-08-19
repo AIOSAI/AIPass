@@ -11,6 +11,7 @@ Watchdog Module — devpulse's personal directed-wake system.
 
 Subcommands:
   agent <id>       Wake when a dispatched agent process exits (Phase 1)
+  baseline         Wake on ANY citizen completion — the always-on profile (DPLAN-0308)
   status           List active watches via watchdog_active.json registry (Phase 4)
   timer <args>     Wake-in-N or named duration timer (Phase 2)
   schedule <time>  Wake at wall-clock time, optionally run a command (Phase 3)
@@ -31,7 +32,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, err_console, error, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 
-_VALID_SUBCOMMANDS = ["agent", "timer", "schedule", "status", "cancel", "list"]
+_VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
 _NOT_IMPLEMENTED_MSG = "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
 # Phase 4 wired cancel + list for real. Left the map so future deferrals can reuse the shape.
@@ -42,6 +43,7 @@ HELP_TEXT = """\
 
 [bold]Usage:[/bold]
   watchdog agent <branch> [--timeout SECONDS]   Wake when dispatched agent exits
+  watchdog baseline \\[--once]                    Wake on ANY citizen completion
   watchdog status                               List active watches
   watchdog timer <duration>                     Wake in N (5m, 30s, 2h, 1h30m)
   watchdog timer start <name>                   Start named duration timer
@@ -57,6 +59,8 @@ HELP_TEXT = """\
 [bold]Examples:[/bold]
   drone @devpulse watchdog agent @drone
   drone @devpulse watchdog agent @flow --timeout 600
+  drone @devpulse watchdog baseline            (via Monitor — one line per completion)
+  drone @devpulse watchdog baseline --once     (via run_in_background — wake on first)
   drone @devpulse watchdog timer 5m
   drone @devpulse watchdog timer start build-phase-3
   drone @devpulse watchdog timer stop build-phase-3
@@ -102,12 +106,13 @@ def print_introspection() -> None:
     console.print()
     console.print("[yellow]Subcommands:[/yellow]")
     for sub in _VALID_SUBCOMMANDS:
-        marker = "active" if sub in ("agent", "status") else f"phase {_PHASE_BY_SUB.get(sub, '?')}"
+        marker = "active" if sub in ("agent", "baseline", "status") else f"phase {_PHASE_BY_SUB.get(sub, '?')}"
         console.print(f"  [cyan]{sub:<10}[/cyan] [dim]({marker})[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/watchdog/[/cyan]")
     console.print("    [dim]- agent.py (watch_agent — block until dispatched agent exits)[/dim]")
+    console.print("    [dim]- baseline.py (watch_baseline — report every citizen completion)[/dim]")
     console.print()
 
 
@@ -173,6 +178,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if subcommand == "agent":
         return _handle_agent(sub_args)
+
+    if subcommand == "baseline":
+        return _handle_baseline(sub_args)
 
     if subcommand == "status":
         return _handle_status()
@@ -394,6 +402,42 @@ def _handle_agent(sub_args: List[str]) -> bool:
     return True
 
 
+def _handle_baseline(sub_args: List[str]) -> bool:
+    """Route ``watchdog baseline [--once]`` through the baseline handler.
+
+    The call blocks: continuous by default (wrap it in the Monitor tool — each
+    stdout line is one completion notification, no re-arm between wakes), or
+    ``--once`` to return after the first completion batch the way a
+    ``run_in_background`` Bash wake does.
+    """
+    once = False
+    for arg in sub_args:
+        if arg == "--once":
+            once = True
+            continue
+        error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once]")
+        return True
+
+    # stderr, never stdout: the Monitor tool reads every stdout line as a wake
+    # event, so an arm-time banner there fires a spurious wake (same contract as
+    # _handle_agent's reminder, #634).
+    err_console.print("[dim]watchdog baseline: invoke via Monitor tool (continuous) or --once in background[/dim]")
+
+    baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
+    result = baseline_mod.watch_baseline(once=once)
+
+    state = result.get("state", "unknown")
+    if state == "already_armed":
+        # The handler already said so on stderr — one voice, no echo.
+        return True
+
+    err_console.print(
+        f"[dim]watchdog baseline: state={state} completions={result.get('completions', 0)} "
+        f"ticks={result.get('ticks', 0)} elapsed={result.get('elapsed', 0)}s[/dim]"
+    )
+    return True
+
+
 def _load_registry_module():
     """Lazy-import the watch registry. Keeps cold startup fast."""
     return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.registry")
@@ -414,6 +458,8 @@ def _format_status_line(watch: dict, format_human) -> str:
 
     if wtype == "agent":
         tail = f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
+    elif wtype == "baseline":
+        tail = f"scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
     elif wtype == "timer":
         tail = f"duration={meta.get('duration', '?')}"
     elif wtype == "schedule":

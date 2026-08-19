@@ -329,3 +329,85 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
     normalized = " ".join(combined.split())
     assert "Next: drone @ai_mail dispatch @drone" in normalized
     assert "state=completed" in normalized
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# baseline subcommand (DPLAN-0308)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _fake_baseline_module(result=None, recorder=None):
+    """Minimal fake baseline handler module for router-level tests."""
+    fake = type(sys)("fake_baseline_mod")
+
+    def watch_baseline(once=False):
+        """Fake baseline watcher — records its arguments, returns a preset result."""
+        if recorder is not None:
+            recorder["once"] = once
+        return result or {"state": "stopped", "handle": "baseline-abc123", "completions": 0, "ticks": 1, "elapsed": 0}
+
+    fake.watch_baseline = watch_baseline
+    return fake
+
+
+def test_baseline_is_a_known_subcommand():
+    """`baseline` routes instead of falling through to the unknown-subcommand error."""
+    assert "baseline" in wd_mod._VALID_SUBCOMMANDS
+    assert "baseline" in wd_mod.HELP_TEXT
+
+
+def test_baseline_subcommand_invokes_handler(capsys):
+    """`baseline` lazily imports and invokes watch_baseline in continuous mode."""
+    recorder = {}
+    fake_module = _fake_baseline_module(
+        result={"state": "stopped", "handle": "baseline-abc123", "completions": 2, "ticks": 9, "elapsed": 18},
+        recorder=recorder,
+    )
+
+    with patch("importlib.import_module", return_value=fake_module):
+        result = wd_mod.handle_command("watchdog", ["baseline"])
+
+    assert result is True
+    assert recorder == {"once": False}
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "baseline" in combined.lower()
+
+
+def test_baseline_once_flag_is_parsed():
+    """--once reaches the handler."""
+    recorder = {}
+    fake_module = _fake_baseline_module(recorder=recorder)
+
+    with patch("importlib.import_module", return_value=fake_module):
+        wd_mod.handle_command("watchdog", ["baseline", "--once"])
+
+    assert recorder == {"once": True}
+
+
+def test_baseline_rejects_unknown_flag(capsys):
+    """An unknown flag is a clean error — and never starts a watch."""
+    fake_module = _fake_baseline_module(recorder={})
+
+    with patch("importlib.import_module", return_value=fake_module) as imported:
+        result = wd_mod.handle_command("watchdog", ["baseline", "--forever"])
+
+    assert result is True
+    imported.assert_not_called()
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "--forever" in combined or "unknown" in combined.lower()
+
+
+def test_baseline_already_armed_does_not_echo_a_summary(capsys):
+    """The handler already said 'already armed' — the router must not say it twice."""
+    fake_module = _fake_baseline_module(
+        result={"state": "already_armed", "handle": None, "completions": 0, "ticks": 0, "elapsed": 0, "pid": 4321}
+    )
+
+    with patch("importlib.import_module", return_value=fake_module):
+        wd_mod.handle_command("watchdog", ["baseline"])
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "state=already_armed" not in combined
