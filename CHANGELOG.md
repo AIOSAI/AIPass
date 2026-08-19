@@ -9,7 +9,65 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-08-19] — v2.7.17: one-brain enforced, first green board, fleet perf night, phone file explorer
+
+**fix(ci)** — the PR #734 green campaign: six owner rounds to the first fully
+green 21/21 board. The Windows lane's first complete runs unmasked platform
+assumptions suite by suite (a bare `os.geteuid()` in a decorator killing a whole
+file at collection, POSIX-mode skips made honest, the parent-is-a-file corpus
+divergence, @trigger's reader-clobber where a refused read became a destructive
+write over the whole log). The last two reds were each one test and neither was
+the code lying: @prax's size pin compared `len('y = 2\n')` to the 7 bytes
+Windows actually holds after CRLF translation (production recorded the truth;
+the pin now asserts the file's own `stat().st_size`, plus an explicit-CRLF pin
+run by name from the Linux lane), and @trigger's Linux 3.12 flake was a third
+door — `ensure_json_exists` created missing files as a REPLACING write outside
+every lock, so two racers could bury a lock-holder's entry (the fcntl lock was
+measured innocent). Cure: `atomic_create_json` — stage to temp, `os.link` into
+place, create-or-fail; 0 losses in 1500 stress runs, and the zero is evidence
+because restoring the old write makes the same loop lose again. Also declared:
+httpx in the dev extra; `.claude/settings.local.json` files ship tracked
+(tested settings are shared; only memories and local work files stay home).
+
+**fix(fleet)** — DPLAN-0310: one brain, enforced. Never two live interactive
+sessions on one branch again. The presence gate flips from observe to enforce,
+sourcing truth from CC-native session files (resume-aware, exit-aware): one
+INTERACTIVE brain per branch, background jobs never gate (a job is not a seat),
+and the incumbent-by-start-time tiebreak refuses exactly one of two competing
+seats — without it both refuse each other and the branch bricks. The boot
+picker now lists conversations (transcripts, with your actual last message)
+instead of anonymous PIDs, so Ctrl+C recovery returns to the chat you were in.
+The CLI auto-updater that self-ran mid-session (2.1.234→235, the drift that
+started the night) is pinned: tracked `provider_manifest.json` version, symlink
+install, boot-time drift warning. Live-verified across laptop and phone: second
+seat refused with the occupant named, held-chat pick attaches, cross-device
+one-brain-two-windows, Ctrl+C round-trip clean.
+
+**perf(fleet)** — DPLAN-0305: the lag named and cured. One unguarded stat —
+prax's logger lazy-started an ecosystem-wide recursive filesystem observer
+(~1413 inotify watches) in EVERY process that logged, watchdog's dispatcher
+thread died on any handler exception, and the unbounded event queue then grew
+forever in processes that thought they were healthy: six of them held 13.7GB,
+12.8GB came back the moment they stopped. The watcher now guards the whole
+handler body, the observer never self-starts in importing processes, and the
+monitor runs on request only. @api unblocks its event loop in the same train:
+18 no-await route handlers made sync, snapshot TTL + per-key single-flight,
+and the attach lane's silent ninth-terminal hang fixed with a named thread
+pool behind a bounded semaphore.
+
+**feat(api)** — FPLAN-0443: the fence gains ROOTS and the phone leaves
+agent-land. File explorer + copy-path, accepted on the S24 the same afternoon.
+Four root kinds (branch/home/project/aipass) under the same containment;
+`GET /v1/roots` publishes the roster from the census, answers carry `floor` so
+copy-path yields a real pasteable location. The home arm's openness is on the
+record with its cheap reversal written down.
+
+**feat(fleet)** — DPLAN-0303 server side + DPLAN-0302 day 3: the one-terminal
+arc goes live on the phone — server lanes for the phone face, spawn birth-cert
+repair round, devpulse watchdog refit riding the same trains.
+
+**chore(git)** — APLAN-*.md joins the gitignore: living audit records are
+working papers; they stay home with the branch that keeps them.
 
 **feat(host)** — DPLAN-0300: the phone becomes a terminal — attach lane, photo
 lane, verb doors (@api server-side; @baud's client lands in the BAUD repo).
