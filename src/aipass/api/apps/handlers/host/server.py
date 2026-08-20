@@ -100,6 +100,7 @@ Functions:
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -112,6 +113,7 @@ from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import reads as host_reads
+from aipass.api.apps.handlers.host import statics as host_statics
 from aipass.api.apps.handlers.host import git_reads as host_git
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -137,7 +139,7 @@ class UnavailableHTTPException(Exception):
 try:
     from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket
     from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import FileResponse, JSONResponse, Response
+    from fastapi.responses import JSONResponse, Response
     from fastapi.security import HTTPBearer
     from fastapi.staticfiles import StaticFiles
 
@@ -160,7 +162,6 @@ except ImportError as e:
     WebSocket = None  # type: ignore[assignment, misc]
     JSONResponse = None  # type: ignore[assignment, misc]
     Response = None  # type: ignore[assignment, misc]
-    FileResponse = None  # type: ignore[assignment, misc]
     HTTPBearer = None  # type: ignore[assignment, misc]
     StaticFiles = None  # type: ignore[assignment, misc]
 
@@ -469,24 +470,10 @@ def socket_bearer(websocket: Any, required: str = "operate") -> dict:
 # ==============================================
 
 
-def _face_file_route(filename: str):
-    """
-    Build a route handler serving one file from the bundle root.
-
-    The name is bound at app-creation time from a directory listing, never taken
-    from the request, so there is no caller-supplied path here to fence.
-
-    Args:
-        filename: File name at the bundle root.
-
-    Returns:
-        An async route handler returning that file.
-    """
-
-    async def _serve_file() -> Any:
-        return FileResponse(host_face.face_root() / filename)
-
-    return _serve_file
+# The whole answer to a ping. A constant rather than a dump per frame: the
+# phone sends one every few seconds per open room, and this is the one shape
+# the client feature-detects on.
+PONG_FRAME = json.dumps({"type": "pong"})
 
 
 # THE PUMP AND ITS CONTROL FRAMES, at module level rather than inside the app
@@ -494,7 +481,7 @@ def _face_file_route(filename: str):
 # both take everything they touch as arguments, so there was no closure holding
 # them in — only the factory's indentation, which was also the branch's last
 # deep-nesting violation. Out here they read at their own depth.
-async def _pump(websocket: Any, session: Any) -> None:
+async def _pump(websocket: Any, session: Any) -> Optional[int]:
     """
     Run the bidirectional pump until either side goes away.
 
@@ -506,9 +493,15 @@ async def _pump(websocket: Any, session: Any) -> None:
     Args:
         websocket: The accepted connection.
         session: The live AttachSession.
+
+    Returns:
+        The close code the socket ended on, or None when the ROOM ended first
+        and the client never sent one. Returned rather than logged here so the
+        detach line sits beside the attach line it closes, at the same level.
     """
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
+    close_code: Optional[int] = None
 
     async def room_to_socket() -> None:
         """PTY output → client. Binary frames: the room emits escape
@@ -525,10 +518,13 @@ async def _pump(websocket: Any, session: Any) -> None:
         """Client input → PTY. Bytes forwarded UNCHANGED — the key bar
         sends real control bytes, exactly as a keyboard would, so there is
         nothing here to interpret."""
+        nonlocal close_code
+
         while not stop.is_set():
             message = await websocket.receive()
 
             if message.get("type") == "websocket.disconnect":
+                close_code = message.get("code")
                 break
 
             if message.get("bytes") is not None:
@@ -541,13 +537,14 @@ async def _pump(websocket: Any, session: Any) -> None:
                     # broken the contract, and pretending the bytes landed
                     # would be the silent fallback this house refuses.
                     logger.warning("[host_api] input refused on %s: %s", session.room, e)
+                    close_code = 1008
                     await websocket.close(code=1008, reason=str(e))
                     break
                 continue
 
             text = message.get("text")
             if text:
-                _handle_control(session, text)
+                await _handle_control(websocket, session, text)
         stop.set()
 
     tasks = [asyncio.ensure_future(room_to_socket()), asyncio.ensure_future(socket_to_room())]
@@ -578,8 +575,10 @@ async def _pump(websocket: Any, session: Any) -> None:
         # pending' at whoever reads the server log next.
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    return close_code
 
-def _handle_control(session: Any, text: str) -> None:
+
+async def _handle_control(websocket: Any, session: Any, text: str) -> None:
     """
     Handle a control frame from the client.
 
@@ -587,7 +586,16 @@ def _handle_control(session: Any, text: str) -> None:
     what lets a resize travel on the same socket without a resize message
     ever being mistaken for something the operator typed.
 
+    Two verbs: `resize`, and `ping` — which exists because a BROWSER cannot
+    send a protocol-level ping. The JS WebSocket API exposes no ping, so a
+    phone whose peer vanished without a FIN reads its socket as OPEN forever
+    and renders a corpse frame the operator believes is live (@baud's
+    FPLAN-0446 r5). uvicorn pings from this side, so the SERVER always notices
+    a dead phone; this is the same round-trip pointed the other way, and the
+    client is the half that had none.
+
     Args:
+        websocket: The accepted connection, for answering a ping.
         session: The live AttachSession.
         text: The JSON control message.
     """
@@ -597,7 +605,18 @@ def _handle_control(session: Any, text: str) -> None:
         logger.warning("[host_api] ignoring an unparseable control frame on %s", session.room)
         return
 
-    if not isinstance(message, dict) or message.get("type") != "resize":
+    verb = message.get("type") if isinstance(message, dict) else None
+
+    if verb == "ping":
+        # Text, like every other control frame — a pong on the BINARY channel
+        # would land in the room's output stream and paint JSON across the
+        # operator's terminal. Answered inline and not recorded: a liveness
+        # probe every few seconds is not an event, and logging it would bury
+        # the attach and detach lines that are.
+        await websocket.send_text(PONG_FRAME)
+        return
+
+    if verb != "resize":
         logger.warning("[host_api] ignoring an unknown control frame on %s", session.room)
         return
 
@@ -1398,7 +1417,23 @@ def create_app() -> Any:
 
         logger.info("[host_api] socket attached to %s for %s", session.room, target)
 
-        await _pump(websocket, session)
+        # ATTACH used to be the only half that was written down, which made a
+        # socket's LIFETIME unmeasurable: tonight's flap (13 attaches to one
+        # room in three minutes) left a log that could say a phone kept
+        # arriving and not that it kept leaving, or why. Duration and close
+        # code are the two facts that tell a reconnect loop (short, 1006) from
+        # an operator opening sheets (long, 1000, or 1001 on a locked screen).
+        opened = time.monotonic()
+        close_code = await _pump(websocket, session)
+        logger.info(
+            "[host_api] socket detached from %s after %.1fs (close %s)",
+            session.room,
+            time.monotonic() - opened,
+            # None is not "unknown" here — it is the room ending first, which
+            # is a different detach from any the client can cause, and a bare
+            # "None" in the log would read as a missing field.
+            "room ended" if close_code is None else close_code,
+        )
 
     def _audit_socket_refusal(websocket: Any, reason: str) -> None:
         """
@@ -1419,7 +1454,7 @@ def create_app() -> Any:
         )
 
     @app.get("/", include_in_schema=False)
-    async def face_entry() -> Any:
+    async def face_entry(request: Request) -> Any:
         """
         Serve @baud's phone face.
 
@@ -1429,7 +1464,7 @@ def create_app() -> Any:
         else. The data wall is on /v1/*, where the data is.
         """
         try:
-            return FileResponse(host_face.entry_file())
+            return host_statics.bundle_response(host_face.entry_file(), request.headers)
         except host_face.FaceUnavailable as e:
             raise _deny(503, "face_unavailable", str(e)) from e
 
@@ -1443,7 +1478,7 @@ def create_app() -> Any:
         for filename in host_face.root_files():
             app.add_api_route(
                 f"/{filename}",
-                _face_file_route(filename),
+                host_statics.face_file_route(filename),
                 methods=["GET"],
                 include_in_schema=False,
             )

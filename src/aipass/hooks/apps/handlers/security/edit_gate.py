@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.3.1
+# Version: 1.4.0
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-18
+# Modified: 2026-08-19
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""

@@ -78,6 +78,7 @@ from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
+from aipass.api.apps.handlers.host import refusals as host_refusals
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -2101,6 +2102,152 @@ class TestTheStatusDoorsVerdictIsHonoured:
         with patch.object(subprocess, "run", return_value=self._completed('{"ok": true, "files": [')):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_git_changes("demo")
+
+
+class TestARefusedRootIsNotReAskedEveryFiveSeconds:
+    """
+    The 5-second noise machine, measured by @trigger and reported 2026-08-19.
+
+    A phone polling the git lane hits it every 5 SECONDS. For a root that
+    cannot authenticate — an external project whose branch carries no
+    `.trinity/passport.json` — drone refuses the CALLER before the door ever
+    runs, so every one of those 720 polls an hour spawns a subprocess that was
+    never going to work and warns in THREE places: this branch's git_reads.log
+    plus @drone's auth.log and git_module.log. Trigger escalated it x10 in an
+    hour (signature d7605b500bbc).
+
+    The refusal is correct and stays. What was wrong was asking again.
+
+    WHAT IS REMEMBERED IS DRONE'S ANSWER, NOT DRONE'S RULE. Checking for a
+    passport file here would be this branch reimplementing another branch's
+    authentication and drifting from it the day they change it — and drifting
+    in the WORST direction, refusing work that would have succeeded. So the
+    door is asked once, its refusal is kept for a short window, and the window
+    expiring is what lets a root that gains a passport start working again with
+    nobody restarting anything.
+    """
+
+    def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
+        result = MagicMock()
+        result.stdout = stdout
+        result.stderr = stderr
+        result.returncode = returncode
+        return result
+
+    def _refused(self) -> Any:
+        """What drone's caller-verification refusal actually looks like: no
+        document at all, and the reason on stderr."""
+        return self._completed("", returncode=1, stderr="No .trinity/passport.json found (caller cwd: /x)")
+
+    def test_the_second_poll_does_not_spawn_a_second_subprocess(self, fake_repo: dict) -> None:
+        """The whole point: one refusal answers the polls that follow it."""
+        with patch.object(subprocess, "run", return_value=self._refused()) as ran:
+            for _ in range(12):
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo")
+
+        assert ran.call_count == 1, f"a minute of polling spawned {ran.call_count} subprocesses"
+
+    def test_the_remembered_refusal_still_says_what_drone_said(self, fake_repo: dict) -> None:
+        """A cached refusal that loses the reason is worse than the spam.
+
+        The operator reading the 503 needs the same sentence either way —
+        otherwise the second poll onwards is a mystery, and the reason it is a
+        mystery is the fix.
+        """
+        with patch.object(subprocess, "run", return_value=self._refused()):
+            with pytest.raises(host_reads.ReadUnavailable) as first:
+                host_git.read_git_changes("demo")
+            with pytest.raises(host_reads.ReadUnavailable) as second:
+                host_git.read_git_changes("demo")
+
+        assert "passport.json" in str(first.value)
+        assert str(second.value) == str(first.value)
+
+    def test_only_the_first_refusal_is_logged(self, fake_repo: dict) -> None:
+        """Two branches' logs stop filling. This is the reported symptom."""
+        with patch(PATCH_GIT_LOGGER) as log:
+            with patch.object(subprocess, "run", return_value=self._refused()):
+                for _ in range(12):
+                    with pytest.raises(host_reads.ReadUnavailable):
+                        host_git.read_git_changes("demo")
+
+        assert log.warning.call_count == 1, f"12 polls wrote {log.warning.call_count} warnings"
+
+    def test_the_root_recovers_on_its_own_when_the_window_passes(self, fake_repo: dict) -> None:
+        """A remembered refusal MUST expire, or a passport arriving is invisible.
+
+        This is why the answer is a short-lived memory rather than a permanent
+        deny-list: nobody should have to restart the server because they ran
+        spawn. Time is driven rather than slept — a real 60s wait in a suite is
+        not a test, it is a delay.
+        """
+        clock = [1000.0]
+
+        with patch.object(host_refusals.time, "monotonic", lambda: clock[0]):
+            with patch.object(subprocess, "run", return_value=self._refused()) as ran:
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo")
+
+                clock[0] += host_refusals.REFUSAL_TTL_SECONDS + 1
+
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo")
+
+        assert ran.call_count == 2, "the window expired and the door was still not re-asked"
+
+    def test_a_root_that_starts_working_is_answered_normally(self, fake_repo: dict) -> None:
+        """Recovery is not just a re-ask — it has to produce the real answer."""
+        clock = [1000.0]
+        document = status_document(((" M", "src/aipass/demo/hello.txt"),))
+
+        with patch.object(host_refusals.time, "monotonic", lambda: clock[0]):
+            with patch.object(subprocess, "run", return_value=self._refused()):
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo")
+
+            clock[0] += host_refusals.REFUSAL_TTL_SECONDS + 1
+
+            with patch.object(subprocess, "run", return_value=self._completed(document)):
+                result = host_git.read_git_changes("demo")
+
+        assert result["count"] == 1
+
+    def test_a_refusing_DOCUMENT_is_never_remembered(self, fake_repo: dict) -> None:
+        """
+        The split this must not blur.
+
+        `ok: false` means drone REACHED git and git answered — a live fact
+        about a working repository that can change with the next edit. Caching
+        it would freeze a real answer for a minute and tell a phone its tree is
+        broken after the operator fixed it. Only a no-document failure, where
+        the root could not be read at all, is worth remembering.
+        """
+        refusal = status_document((), ok=False, message="git status error: not a git repository")
+
+        with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)) as ran:
+            for _ in range(3):
+                with pytest.raises(host_reads.ReadRefused):
+                    host_git.read_git_changes("demo")
+
+        assert ran.call_count == 3, "a live git answer was cached as if the root were unreadable"
+
+    def test_one_lanes_silence_does_not_mute_another(self, fake_repo: dict) -> None:
+        """Memory is per (root, lane), not per root.
+
+        A root refused for the caller check fails every lane, so keying on the
+        root alone would kill the spam too. But a lane that breaks for its OWN
+        reason would then take three working lanes down with it — and telling
+        the two apart means reading drone's refusal TEXT, which this branch
+        does not do to another branch's words.
+        """
+        with patch.object(subprocess, "run", return_value=self._refused()) as ran:
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_changes("demo")
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_log("demo")
+
+        assert ran.call_count == 2
 
 
 class TestPerFileDiff:

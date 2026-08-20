@@ -56,6 +56,7 @@ from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import refusals as host_refusals
 
 # The resolution half of the read lane. One direction only: repository reads
 # lean on the name fence, never the other way round.
@@ -227,12 +228,34 @@ def _document(command: Any, root: Path, lane: str) -> Dict[str, Any]:
             caller-verification refusal takes, since that one never reaches the
             door at all and puts its sentence on stderr instead.
     """
+    remembered = host_refusals.remembered_refusal(root, lane)
+
+    if remembered is not None:
+        # Silent on purpose: the FIRST refusal logged this sentence, and the
+        # only thing repeating it would add is the noise this exists to stop.
+        raise ReadUnavailable(remembered)
+
     result = _ran(list(command) + [JSON_FLAG], root, lane)
-    document = _parsed(result, lane)
+
+    try:
+        document = _parsed(result, lane)
+    except ReadUnavailable as e:
+        # No document at all: this root could not be READ, which is a fact
+        # about the root and stays true for the next poll five seconds from
+        # now. A refusing DOCUMENT is not remembered — see below.
+        host_refusals.remember_refusal(root, lane, str(e))
+        raise
 
     if not document.get(OK_KEY):
         # D0: their sentence, verbatim. This server owns the pipe, never the
         # meaning, and a refusal is the half of the meaning most worth keeping.
+        #
+        # NOT remembered, and the distinction is load-bearing: `ok: false` means
+        # drone REACHED git and git answered — a live fact about a working
+        # repository that changes with the next edit. Caching it would tell a
+        # phone the tree is still broken for a minute after the operator fixed
+        # it. Only a no-document failure describes the ROOT rather than its
+        # contents.
         raise ReadRefused(_sentence(document, lane))
 
     return document

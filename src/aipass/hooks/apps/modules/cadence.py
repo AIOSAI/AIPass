@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-08-07
+# Modified: 2026-08-19
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.

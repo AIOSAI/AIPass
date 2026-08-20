@@ -81,9 +81,11 @@ import pytest
 
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
+from aipass.api.apps.modules import host_serve as host_serve_module
 
 
 # Patch targets
@@ -103,6 +105,17 @@ PATCH_MOD_SUCCESS = "aipass.api.apps.modules.host_api.success"
 PATCH_MOD_WARNING = "aipass.api.apps.modules.host_api.warning"
 PATCH_MOD_JSON = "aipass.api.apps.modules.host_api.json_handler"
 PATCH_MOD_HELP = "aipass.api.apps.modules.host_api.print_help"
+
+# The serve/status/stop commands moved to host_serve.py on 2026-08-19 (host_api
+# hit its size cap). They import console and friends by NAME, so silencing only
+# host_api would leave their output loose in the suite AND leave every
+# assertion about it reading an untouched mock.
+PATCH_SRV_CONSOLE = "aipass.api.apps.modules.host_serve.console"
+PATCH_SRV_HEADER = "aipass.api.apps.modules.host_serve.header"
+PATCH_SRV_ERROR = "aipass.api.apps.modules.host_serve.error"
+PATCH_SRV_SUCCESS = "aipass.api.apps.modules.host_serve.success"
+PATCH_SRV_WARNING = "aipass.api.apps.modules.host_serve.warning"
+PATCH_SRV_JSON = "aipass.api.apps.modules.host_serve.json_handler"
 
 # An address in TEST-NET-3 (RFC 5737). Guaranteed not to be a real interface.
 UNHELD_ADDRESS = "203.0.113.7"
@@ -128,6 +141,12 @@ def quiet_module():
         patch(PATCH_MOD_SUCCESS) as mock_success,
         patch(PATCH_MOD_WARNING) as mock_warning,
         patch(PATCH_MOD_JSON),
+        patch(PATCH_SRV_CONSOLE, new=mock_console),
+        patch(PATCH_SRV_HEADER),
+        patch(PATCH_SRV_ERROR, new=mock_error),
+        patch(PATCH_SRV_SUCCESS, new=mock_success),
+        patch(PATCH_SRV_WARNING, new=mock_warning),
+        patch(PATCH_SRV_JSON),
     ):
         # `console` is handed back so a test can read what was PRINTED, not
         # just what was refused — the S49 check needs the actual output.
@@ -670,7 +689,7 @@ class TestCommandRouting:
         'cleanup 30 --help' run a real cleanup (S58) and leaked key material (S59)."""
         with (
             patch(PATCH_MOD_HELP) as mock_help,
-            patch.object(host_api_module, "_cmd_serve") as mock_serve,
+            patch.object(host_serve_module, "cmd_serve") as mock_serve,
             patch.object(host_api_module, "_cmd_revoke_token") as mock_revoke,
             patch.object(host_api_module, "_cmd_issue_token") as mock_issue,
         ):
@@ -714,7 +733,7 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
 
     def test_the_help_gate_still_covers_the_alias(self, quiet_module: dict) -> None:
         """A second spelling must not become a second, ungated door."""
-        with patch(PATCH_MOD_HELP) as helped, patch.object(host_api_module, "_cmd_serve") as served:
+        with patch(PATCH_MOD_HELP) as helped, patch.object(host_serve_module, "cmd_serve") as served:
             assert handle_command("host_api", ["serve", "--help"]) is True
 
         helped.assert_called_once()
@@ -880,6 +899,196 @@ class TestIssueTokenCommand:
         assert host_tokens.list_tokens()[0]["scope"] == "operate"
 
 
+class TestDetachStatusAndStop:
+    """
+    The CLI half of the serve-flap fix (@baud/@devpulse, 2026-08-19).
+
+    A serve routed through drone is a child of drone's exec timeout, and the
+    tailnet server was dying on a twelve-hour schedule and restarting into a
+    pane whose scrollback then ate a day of access history. `--detach` gives
+    the process its own session and its output a file; `status` and `stop`
+    exist because shipping the first without them would just be a nicer way to
+    create orphans.
+    """
+
+    @pytest.fixture
+    def detachable(self):
+        """The lifetime handler, stubbed — this is about the CLI's wiring."""
+        with patch.object(host_serve_module, "host_lifetime") as lifetime:
+            lifetime.LifetimeError = host_lifetime.LifetimeError
+            yield lifetime
+
+    def test_serve_without_detach_still_runs_in_this_process(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """Detaching is opt-in. Every existing caller keeps what it had."""
+        with patch.object(host_server, "serve") as served:
+            handle_command("host-api", ["serve"])
+
+        served.assert_called_once()
+        detachable.serve_detached.assert_not_called()
+
+    def test_detach_never_runs_the_server_in_this_process(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """The point of the flag: drone times a launcher, not a server."""
+        detachable.serve_detached.return_value = {"pid": 42, "host": "127.0.0.1", "port": 8790, "log": "/x.log"}
+
+        with patch.object(host_server, "serve") as served:
+            handle_command("host-api", ["serve", "--detach"])
+
+        served.assert_not_called()
+        detachable.serve_detached.assert_called_once()
+
+    def test_detach_passes_the_parsed_bind_through(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """--host and --port must reach the child, not be silently dropped."""
+        detachable.serve_detached.return_value = {"pid": 42, "host": "127.0.0.1", "port": 9001, "log": "/x.log"}
+
+        handle_command("host-api", ["serve", "--detach", "--host", "127.0.0.1", "--port", "9001"])
+
+        assert detachable.serve_detached.call_args.kwargs == {"host": "127.0.0.1", "port": 9001}
+
+    def test_a_bad_port_is_refused_before_anything_detaches(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """The existing gate must not be skipped by the new path."""
+        handle_command("host-api", ["serve", "--detach", "--port", "eighty"])
+
+        detachable.serve_detached.assert_not_called()
+        quiet_module["error"].assert_called_once()
+
+    def test_a_refused_bind_is_reported_by_the_command_that_was_told_no(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """D1 across the detach seam.
+
+        A refusal that happens inside a detached child is a refusal the
+        operator reads about in a log file, if at all — so it surfaces here.
+        """
+        detachable.serve_detached.side_effect = host_config.BindRefused("wildcards are refused")
+
+        handle_command("host-api", ["serve", "--detach"])
+
+        quiet_module["error"].assert_called_once()
+
+    def test_an_unknown_subcommand_still_reaches_the_error(
+        self,
+        store: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The delegation must not swallow anything.
+
+        host_api offers every host-api call to host_serve first. A router that
+        returned True for things it does not implement would turn every typo
+        into a silent success — so it declines, and this is what notices if it
+        ever stops.
+        """
+        handle_command("host-api", ["serv"])
+
+        quiet_module["error"].assert_called_once()
+
+    def test_host_serve_declines_commands_that_are_not_host_api(self) -> None:
+        """It answers for `host-api` subcommands and nothing else."""
+        assert host_serve_module.handle_command("issue-token", ["serve"]) is False
+        assert host_serve_module.handle_command("host-api", ["list-tokens"]) is False
+
+    def test_a_help_flag_anywhere_explains_rather_than_serves(self, quiet_module: dict) -> None:
+        """`serve --help` must never start a server.
+
+        host_api's own gate catches this first today. The pin is on THIS
+        router because a sub-router that is only safe given its current caller
+        is a trap for the next one — and the failure mode here is starting a
+        long-running process somebody was asking a question about.
+        """
+        with patch.object(host_serve_module, "cmd_serve") as served:
+            assert host_serve_module.handle_command("host-api", ["serve", "--help"]) is True
+
+        served.assert_not_called()
+
+    def test_status_says_where_to_read_a_server_that_is_not_running(
+        self,
+        store: Path,
+        quiet_module: dict,
+        detachable,
+    ) -> None:
+        """A dead server stays dead and SAYS SO — no restart, and no silence.
+
+        The log path is the useful half: the operator's next question is always
+        why it went, and the answer is in a file they should not have to find
+        by reading this source.
+        """
+        detachable.running.return_value = None
+        detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
+
+        handle_command("host-api", ["status"])
+
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+
+        assert "host_api_serve.log" in printed
+        quiet_module["error"].assert_not_called()
+
+    def test_status_reports_a_running_server(self, store: Path, quiet_module: dict, detachable) -> None:
+        """pid, bind and log — the three things an operator asks for next."""
+        detachable.running.return_value = {
+            "pid": 4242,
+            "host": "127.0.0.1",
+            "port": 8790,
+            "log": "/tmp/host_api_serve.log",
+            "started": "2026-08-19 18:00:00",
+        }
+
+        handle_command("host-api", ["status"])
+
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+
+        assert "4242" in printed
+        assert "8790" in printed
+
+    def test_stopping_nothing_is_not_an_error(self, store: Path, quiet_module: dict, detachable) -> None:
+        """Running `stop` twice must be safe — the second has nothing to do."""
+        detachable.stop.return_value = None
+
+        handle_command("host-api", ["stop"])
+
+        quiet_module["error"].assert_not_called()
+
+    def test_a_server_that_will_not_stop_is_reported_not_swallowed(
+        self,
+        store: Path,
+        quiet_module: dict,
+        detachable,
+    ) -> None:
+        """Never silently escalated, never silently given up on."""
+        detachable.stop.side_effect = host_lifetime.LifetimeError("did not exit within 10.0s")
+
+        handle_command("host-api", ["stop"])
+
+        quiet_module["error"].assert_called_once()
+
+
 @pytest.fixture
 def extra_present():
     """
@@ -996,19 +1205,19 @@ class TestFlagParsing:
 
     def test_absent_flag_returns_none(self) -> None:
         """A flag nobody passed has no value."""
-        assert host_api_module._flag_value(["serve"], "--host") is None
+        assert host_serve_module.flag_value(["serve"], "--host") is None
 
     def test_flag_at_end_without_value_returns_none(self) -> None:
         """A dangling flag is not a value, and must not read past the list."""
-        assert host_api_module._flag_value(["serve", "--host"], "--host") is None
+        assert host_serve_module.flag_value(["serve", "--host"], "--host") is None
 
     def test_flag_followed_by_another_flag_returns_none(self) -> None:
         """'--host --port 80' has no host — reading '--port' as one would bind junk."""
-        assert host_api_module._flag_value(["serve", "--host", "--port", "80"], "--host") is None
+        assert host_serve_module.flag_value(["serve", "--host", "--port", "80"], "--host") is None
 
     def test_returns_the_value(self) -> None:
         """The ordinary case."""
-        assert host_api_module._flag_value(["serve", "--host", "127.0.0.1"], "--host") == "127.0.0.1"
+        assert host_serve_module.flag_value(["serve", "--host", "127.0.0.1"], "--host") == "127.0.0.1"
 
 
 class TestIntrospection:

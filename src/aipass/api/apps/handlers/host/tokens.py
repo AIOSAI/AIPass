@@ -182,6 +182,27 @@ def store_path() -> Path:
     return secrets_store.SECRETS_BASE / TOKEN_PROVIDER / f"{TOKEN_SLUG}.json"
 
 
+def prepare_receipt_dir(target: Path) -> None:
+    """
+    Make sure a receipt's directory exists and is owner-only.
+
+    Args:
+        target: The receipt file that is about to be written.
+
+    Raises:
+        OSError: The directory could not be created or secured.
+
+    Note:
+        Here rather than in the CLI because a secret's directory mode is part
+        of the store's contract, not part of how a command prints things — and
+        0700 is the same promise SECRETS_BASE already makes.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.name == "posix":
+        os.chmod(target.parent, 0o700)
+
+
 def receipt_path(label: str) -> Path:
     """
     Where a freshly minted token's raw value belongs, given its label.

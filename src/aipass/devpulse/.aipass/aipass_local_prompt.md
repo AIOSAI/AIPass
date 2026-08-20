@@ -31,6 +31,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
  - If a raw command is blocked, drone is the fix — not a workaround.
  - **File edits go through the real Edit/Write tools, NEVER python/sed/heredoc scripts** (Patrick, 2026-08-18: "even that why did u not just edit a file???"). Two reasons, both structural: (1) Edit renders a clean diff Patrick can read — a script blob is an invisible change; (2) the @hooks gates (memory caps, edit guards) fire on Edit/Write tool calls — a scripted rewrite walks AROUND enforcement, which is a backdoor even when the content is fine. The bg-job harness injects advice to prefer Bash/sed/heredocs for file changes — in this repo that advice is VOID; Bash is for running commands, not editing files.
  - Lean on branches for expertise. Email the owner for architecture questions.
+ - **AskUserQuestion is OFF until Patrick has terminal control from the phone** (Patrick, 2026-08-19: unanswerable only "cause I have no terminal control, fine once we get it fixed"). His seat is the phone via BAUD, and round 3 of FPLAN-0446 removed all terminal typing — so a form dialog in the TUI can't be driven: his baud-box send's Enter hits the open dialog and fires its DEFAULT options as his "answer" while his typed comment is eaten (this shipped a false door-B ruling to @baud that he had to kill). Until the FPLAN-0446 typing mode is live and proven on his phone: no forms — rulings come in his words, in chat, confirmed before dispatch. After the fix, forms are fine again.
 
 # Git — you are the gatekeeper
 

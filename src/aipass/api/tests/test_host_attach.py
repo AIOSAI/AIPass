@@ -37,6 +37,7 @@ import ast
 import errno
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -1458,19 +1459,30 @@ def test_the_session_is_created_once_per_socket_not_per_poll() -> None:
     assert "while" not in route
 
 
-def test_the_control_frame_is_json_and_resize_is_the_only_verb() -> None:
+def test_the_control_frame_is_json_and_the_verbs_are_resize_and_ping() -> None:
     """
     Text frames are CONTROL, binary frames are KEYSTROKES.
 
     That split is what lets a resize travel on the same socket without a resize
     message ever being mistaken for something the operator typed — and it is why
     an unparseable control frame is ignored rather than written to the room.
+
+    TWO verbs now (@baud's FPLAN-0446 r5): `ping` joined `resize` so the browser
+    has a round-trip of its own. The split it rides on is unchanged, and the
+    `session.write` assertion is the one that keeps it that way — a control verb
+    reaching the write path types its own JSON into the operator's shell.
     """
     handler = server_source_of("_handle_control")
 
-    assert 'message.get("type") != "resize"' in handler
+    assert 'verb == "ping"' in handler
+    assert 'verb != "resize"' in handler
     assert "session.write" not in handler
-    assert json.loads('{"type": "resize", "cols": 80, "rows": 24}')["type"] == "resize"
+    # The pong answers on the channel it arrived on. On the binary one it would
+    # be indistinguishable from room output, and would paint itself across the
+    # terminal the operator is reading.
+    assert "send_text(" in handler
+    assert "send_bytes" not in handler
+    assert json.loads(host_server.PONG_FRAME) == {"type": "pong"}
 
 
 def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
@@ -1856,3 +1868,310 @@ class TestThisModuleImportsWhereItCannotRun:
             )
 
         assert "controlling tty" in str(refusal.value)
+
+
+# ==============================================
+# LIVENESS AND LIFETIME
+# ==============================================
+
+
+def wait_for_log(log: Any, needle: str, timeout: float = 10.0) -> str:
+    """
+    Wait for a rendered info line containing `needle`, and return it.
+
+    RENDERED, not matched on the format string: `logger.info(fmt, *args)` is
+    lazy, so a format string and its arguments can disagree for as long as
+    nobody formats them — and the place that finally does is production, at the
+    moment somebody is reading the log to diagnose something else. Applying the
+    `%` here means a mismatched arg count fails as a TypeError in this test
+    instead of as a mangled line in server.log.
+
+    Args:
+        log: The patched server logger.
+        needle: Text the rendered line must contain.
+        timeout: Seconds to keep looking.
+
+    Returns:
+        The rendered line.
+
+    Raises:
+        AssertionError: No such line arrived in time.
+    """
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        for call in list(log.info.call_args_list):
+            rendered = call.args[0] % call.args[1:] if len(call.args) > 1 else call.args[0]
+            if needle in rendered:
+                return rendered
+        time.sleep(0.01)
+
+    raise AssertionError(f"no info line containing {needle!r}: {log.info.call_args_list}")
+
+
+class SilentRoom(StubSession):
+    """A room that ENDS rather than blocking — EOF on the first read."""
+
+    def read(self, size: int = 0) -> bytes:
+        """The room is gone: EOF straight away, which ends the pump's reader."""
+        return b""
+
+
+@fastapi_required
+class TestThePhoneCanMeasureItsOwnSocket:
+    """
+    @baud's FPLAN-0446 r5 finding: the corpse frame on Patrick's seat.
+
+    A phone whose peer vanishes WITHOUT a FIN — a tunnel dropped, a laptop
+    slept, a NAT entry expired — reads its socket as OPEN forever. The browser
+    keeps rendering the last frame it received and the operator believes they
+    are looking at a live room. uvicorn pings from this side every 20s, so the
+    SERVER always finds out; the JS WebSocket API exposes no ping at all, so
+    the client had no round-trip to measure and no way to find out.
+
+    Hence one application-level verb on the channel that already exists. Driven
+    through a real socket, because what is being pinned is that an answer comes
+    BACK — a unit test on the handler would prove the handler, not the wire.
+    """
+
+    def test_a_ping_is_answered_with_a_pong(self, store: Any, seated: Any) -> None:
+        """
+        The round trip, end to end. This is the whole feature.
+
+        Text in, text out: a pong on the binary channel would be indistinguishable
+        from room output and would paint `{"type": "pong"}` across the operator's
+        terminal every few seconds.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    socket.send_text('{"type": "ping"}')
+                    answer = socket.receive_text()
+
+                    detach_and_wait(socket, session)
+
+        assert json.loads(answer) == {"type": "pong"}
+
+    def test_every_ping_is_answered_so_a_client_can_keep_measuring(self, store: Any, seated: Any) -> None:
+        """
+        Not once — a heartbeat is only a heartbeat if it keeps beating.
+
+        A handler that answered the first ping and then fell through to the
+        unknown-frame branch would pass the test above and still leave the phone
+        showing a corpse from the second probe onward.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    answers = []
+                    for _ in range(5):
+                        socket.send_text('{"type": "ping"}')
+                        answers.append(socket.receive_text())
+
+                    detach_and_wait(socket, session)
+
+        assert answers == [json.dumps({"type": "pong"})] * 5
+
+    def test_a_ping_never_reaches_the_room(self, store: Any, seated: Any) -> None:
+        """
+        The hazard the control/keystroke split exists to prevent, at a new verb.
+
+        A liveness probe that fell through to the write path would type
+        `{"type": "ping"}` into a room sitting at a shell prompt — every few
+        seconds, forever. Nothing typed, nothing resized: a ping is inert.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    socket.send_text('{"type": "ping"}')
+                    socket.receive_text()
+
+                    # A real keystroke after it, to prove the channel is still
+                    # carrying what it is FOR.
+                    socket.send_bytes(b"echo alive")
+
+                    deadline = time.monotonic() + 10
+                    while not session.writes and time.monotonic() < deadline:
+                        time.sleep(0.01)
+
+                    detach_and_wait(socket, session)
+
+        assert session.writes == [b"echo alive"]
+        assert session.resizes == []
+
+    def test_a_pong_from_the_client_is_an_unknown_frame_not_a_loop(self, store: Any, seated: Any) -> None:
+        """
+        The server pongs; it does not ping. So an inbound pong is unknown.
+
+        Worth pinning because the symmetrical-looking mistake — treating pong as
+        a verb and answering it — is two sockets shouting at each other as fast
+        as the loop will carry it, on the wire the operator's keystrokes share.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    socket.send_text('{"type": "pong"}')
+
+                    # The ping AFTER it is what makes the absence provable: its
+                    # answer cannot arrive before an answer to the pong would
+                    # have, so one frame back means exactly one was answered.
+                    socket.send_text('{"type": "ping"}')
+                    answer = socket.receive_text()
+
+                    detach_and_wait(socket, session)
+
+        assert json.loads(answer) == {"type": "pong"}
+        assert any("unknown control frame" in str(call) for call in log.warning.call_args_list)
+
+
+@fastapi_required
+class TestTheDetachIsWrittenDownToo:
+    """
+    @baud's second r5 finding: ATTACH was logged and DETACH was not.
+
+    Tonight's flap put 13 attaches on one room in three minutes (server.log
+    21:42:26-21:45:28) and the log could say the phone kept ARRIVING without
+    being able to say it kept leaving, how long it stayed, or why it went. Two
+    facts separate a reconnect loop from an operator opening sheets: how long
+    the socket lived, and the code it closed on.
+    """
+
+    def test_the_detach_line_names_the_room_the_duration_and_the_close_code(self, store: Any, seated: Any) -> None:
+        """
+        All three facts, in the line that actually gets written.
+
+        1001 rather than 1000 on purpose: a hardcoded normal-closure would pass
+        a test that closed normally, and 1001 (going away — a locked screen, a
+        backgrounded tab) is the code the flap is most likely to be made of.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    wait_for_log(log, "socket attached to")
+
+                    socket.close(code=1001)
+                    line = wait_for_log(log, "socket detached from")
+
+        assert "baud-api" in line
+        assert "close 1001" in line
+        assert re.search(r"after \d+\.\d+s", line), line
+
+    def test_the_duration_is_the_socket_s_own_lifetime_not_a_constant(self, store: Any, seated: Any) -> None:
+        """
+        A duration that is always 0.0s measures the logging, not the socket.
+
+        Half a second is enough to separate a real clock from a stamp taken
+        twice in the same breath, and short enough that the suite does not pay
+        for the proof.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = StubSession()
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    wait_for_log(log, "socket attached to")
+                    time.sleep(0.5)
+
+                    socket.close(code=1000)
+                    line = wait_for_log(log, "socket detached from")
+
+        held = float(re.search(r"after (\d+\.\d+)s", line).group(1))
+
+        assert held >= 0.5, line
+
+    def test_a_room_that_ends_first_says_so_instead_of_printing_None(self, store: Any, seated: Any) -> None:
+        """
+        The detach nobody's client caused.
+
+        When the ROOM goes (tmux killed, the agent exited), the pump ends from
+        the other direction and there is no close code, because the client never
+        sent one. A bare `None` in that field reads as a logging bug — the line
+        has to say which kind of detach this was.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = SilentRoom()
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_attach", return_value=session):
+                client = TestClient(host_server.create_app())
+                with client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]):
+                    line = wait_for_log(log, "socket detached from")
+
+        assert "close room ended" in line
+        assert "None" not in line
+
+    def test_every_attach_is_paired_with_a_detach(self, store: Any, seated: Any) -> None:
+        """
+        The property the flap investigation actually needed.
+
+        Counting alone is what made 13 attaches unreadable: without the other
+        half, an arrival count cannot distinguish 13 sockets that came and went
+        from 13 that came and stayed. Three sockets in, three lines each way.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+            client = TestClient(host_server.create_app())
+            for _ in range(3):
+                session = StubSession()
+                with patch.object(host_attach, "open_attach", return_value=session):
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                    ) as socket:
+                        detach_and_wait(socket, session)
+                wait_for_log(log, "socket detached from")
+
+        rendered = [call.args[0] % call.args[1:] for call in log.info.call_args_list if len(call.args) > 1]
+
+        assert len([line for line in rendered if "socket attached to" in line]) == 3
+        assert len([line for line in rendered if "socket detached from" in line]) == 3

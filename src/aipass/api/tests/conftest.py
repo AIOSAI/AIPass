@@ -183,6 +183,33 @@ def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _no_remembered_git_refusals_between_tests() -> Generator[None, None, None]:
+    """
+    Forget every remembered git refusal around each test (@trigger, 2026-08-19).
+
+    The git lane keeps a could-not-read answer for 60s so a phone polling every
+    5 seconds stops re-spawning drone at a root that cannot authenticate. Right
+    in a server and WRONG across tests, for the same reason as the fleet cache
+    above and then some: 60s outlives an entire suite run, so ONE test that
+    provokes a refusal would silence every later test on that lane — and they
+    would pass, because a remembered refusal raises exactly what a fresh one
+    does. Cleared both sides.
+
+    Silently skipped when the [host] extra is absent — this fixture is autouse
+    for the whole suite, so it must never be the reason a run cannot collect.
+    """
+    try:
+        from aipass.api.apps.handlers.host import refusals as _refusals
+    except Exception:  # pragma: no cover - only when the extra is missing
+        yield
+        return
+
+    _refusals._reset_refusals()
+    yield
+    _refusals._reset_refusals()
+
+
+@pytest.fixture(autouse=True)
 def _no_leaked_pump_reservations() -> Generator[None, None, None]:
     """
     Give the attach lane's thread count back after every test (DPLAN-0305).

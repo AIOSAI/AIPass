@@ -15,6 +15,9 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from aipass.hooks.apps.handlers.security import edit_gate
+from aipass.hooks.apps.modules import cadence
+
 
 _TEST_LIMITS_WARN = {
     "enabled": True,
@@ -122,9 +125,17 @@ _ROLLOVER_CONFIG_FLEET = {
 }
 
 
+# Captured BEFORE any patch: the routers below fall through to the real
+# importer, and calling importlib.import_module by name there re-enters the
+# patch and recurses until the stack dies ("maximum recursion depth exceeded"
+# surfacing as a fail-open advisory). Any module the handler imports that the
+# router does not name would hit it.
+_REAL_IMPORT_MODULE = importlib.import_module
+
+
 def _mock_importlib_modules(limits, rollover_cfg=None):
     """Return a side_effect for importlib.import_module supporting both modules."""
-    el_real = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    el_real = _REAL_IMPORT_MODULE("aipass.memory.apps.handlers.json.entry_limits")
 
     entry_limits_mock = MagicMock()
     entry_limits_mock.load_entry_limits.return_value = limits
@@ -140,7 +151,7 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
             return entry_limits_mock
         if "config_loader" in name:
             return config_loader_mock
-        return importlib.import_module(name)
+        return _REAL_IMPORT_MODULE(name)
 
     return side_effect
 
@@ -1993,3 +2004,83 @@ class TestSectionCountWording:
         assert result["exit_code"] == 0
         assert "todos do not auto-roll" in result["stdout"]
         assert "over the rollover budget" not in caplog.text
+
+
+class TestTodosAdvisoryIsThrottled:
+    """Patrick's ruling 2026-08-19: a GENTLE reminder roughly every 10 turns,
+    not one per qualifying edit. Being over the cap is a standing condition, so
+    per-edit emission wrote 209 identical lines from one seat and tripped
+    @trigger's repeat-signature escalation."""
+
+    @staticmethod
+    def _over_cap():
+        return {"todos": [{"task": f"todo {i}"} for i in range(12)]}
+
+    def _advisory(self, turn):
+        with (
+            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+            patch.object(cadence, "current_turn", return_value=turn),
+        ):
+            return edit_gate._todos_count_advisory(self._over_cap(), "hooks")
+
+    def test_first_edit_still_advises(self):
+        assert "todos over limit" in self._advisory(1)
+
+    def test_the_next_edit_in_the_same_turn_is_silent(self):
+        self._advisory(1)
+        assert self._advisory(1) == ""
+
+    def test_twenty_edits_in_one_turn_produce_one_advisory(self):
+        """The measured shape of the defect."""
+        emitted = [self._advisory(4) for _ in range(20)]
+        assert sum(1 for e in emitted if e) == 1
+
+    def test_it_returns_after_about_ten_turns(self):
+        self._advisory(1)
+        assert self._advisory(1 + cadence.ADVISORY_PERIOD) != ""
+
+    def test_the_log_line_throttles_with_the_stdout_line(self, caplog):
+        """Escalation feeds on log repetition — silencing only stdout fixes
+        nothing, which is why the warning lives behind the same gate."""
+        self._advisory(1)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            assert self._advisory(2) == ""
+        assert "todos over limit" not in caplog.text
+
+    def test_the_warning_is_still_emitted_when_it_does_fire(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            assert self._advisory(1) != ""
+        assert "todos over limit" in caplog.text
+
+    def test_under_cap_is_silent_and_spends_no_throttle(self):
+        """A quiet branch must not burn its one emission on nothing — the next
+        real over-cap edit has to advise immediately."""
+        with (
+            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+            patch.object(cadence, "current_turn", return_value=1),
+        ):
+            assert edit_gate._todos_count_advisory({"todos": [{"task": "one"}]}, "hooks") == ""
+        assert "todos over limit" in self._advisory(1)
+
+
+class TestThrottleScopeGuard:
+    """ONLY the todos count advisory softens. Hard blocks stay hard."""
+
+    def test_entry_limit_block_is_not_throttled(self, tmp_path):
+        """A block that goes quiet on the second edit would let over-cap
+        entries through — the opposite of what the ruling asked for."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"todos": [{"task": "x" * 500}]})
+
+        results = []
+        for turn in (1, 2, 3):
+            with (
+                patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)),
+                patch.object(cadence, "current_turn", return_value=turn),
+            ):
+                results.append(handle(_hook_data(file_path, content, cwd=cwd)))
+        assert all(r["exit_code"] == 2 for r in results), "a hard block went quiet under the throttle"
