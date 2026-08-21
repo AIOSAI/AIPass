@@ -29,6 +29,7 @@ from typing import Optional, Tuple, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 
 
 def _find_claude_bin() -> str:
@@ -774,35 +775,48 @@ def wake_branch(
         "work after 600s with no reply sent."
     )
 
+    base_args = [
+        "-p",
+        prompt,
+        "--model",
+        resolved_model,
+        "--max-turns",
+        str(max_turns),
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
+    ]
+
+    # Which session this dispatch lands in is decided by a written record, not
+    # by a file mtime. `-c` means "continue the most recently MODIFIED transcript
+    # in this directory", so a --fresh run, a late-flushing dispatch or a human
+    # opening a terminal here silently re-points the NEXT wake into somebody
+    # else's thread. session_pointer names the session instead; the -c branch
+    # below stays as the fallback for branches that have no usable pointer yet.
     if fresh:
-        claude_cmd = [
-            _CLAUDE_BIN,
-            "-p",
-            prompt,
-            "--model",
-            resolved_model,
-            "--max-turns",
-            str(max_turns),
-            "--permission-mode",
-            "bypassPermissions",
-            "--output-format",
-            "json",
-        ]
+        session_id = session_pointer.mint_session_id()
+        # Written BEFORE the spawn on purpose: the CLI accepts the id we hand it
+        # and returns that same id, so there is no window in which a crash
+        # leaves a live session nobody recorded.
+        if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):
+            # Never fatal. A branch whose pointer cannot be written must still
+            # wake — the next non-fresh dispatch simply falls back to -c.
+            logger.warning("[wake] %s pointer write failed for session %s — spawning anyway", email, session_id)
+        logger.info("[wake] %s fresh session %s", email, session_id)
+        status.ok("session", f"fresh session {session_id[:8]}")
+        claude_cmd = [_CLAUDE_BIN, *base_args, "--session-id", session_id]
     else:
-        claude_cmd = [
-            _CLAUDE_BIN,
-            "-c",
-            "-p",
-            prompt,
-            "--model",
-            resolved_model,
-            "--max-turns",
-            str(max_turns),
-            "--permission-mode",
-            "bypassPermissions",
-            "--output-format",
-            "json",
-        ]
+        resume_id, reason = session_pointer.resolve_resume_target(branch_path)
+        # Verbatim: this reason string is the only trace left when an agent
+        # wakes somewhere unexpected.
+        logger.info("[wake] %s session decision: %s", email, reason)
+        if resume_id:
+            status.ok("session", f"resuming {resume_id[:8]} (pointer)")
+            claude_cmd = [_CLAUDE_BIN, "--resume", resume_id, *base_args]
+        else:
+            status.info("session", "no pointer — continuing newest transcript (-c)")
+            claude_cmd = [_CLAUDE_BIN, "-c", *base_args]
 
     # Step 7: Spawn via dispatch_monitor
     log_dir = branch_path / "logs"

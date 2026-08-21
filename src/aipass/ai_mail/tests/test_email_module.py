@@ -538,6 +538,72 @@ class TestHandleReply:
         assert result is True
         assert any("Delivery failed" in e for e in errors)
 
+    def test_reply_unrecognized_flag_warns_not_silent(self, tmp_path, monkeypatch):
+        """An unconsumed --flag in the message args warns instead of vanishing
+        silently into the literal body (@cli, ef49d937: --body-file was sent
+        as text with no signal it wasn't a real flag)."""
+        original = {"id": "msg1", "from": "@sender", "subject": "test"}
+        sent_message = {}
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.get_email_by_id",
+            lambda inbox_file, msg_id: original,
+        )
+
+        def _fake_send_reply(bp, orig, msg):
+            sent_message["body"] = msg
+            return (True, "Reply sent to @sender", "reply_001")
+
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.send_reply",
+            _fake_send_reply,
+        )
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.warning",
+            lambda msg, *a, **kw: warnings.append(msg),
+        )
+        _write_inbox(tmp_path)
+
+        from aipass.ai_mail.apps.modules.email import handle_reply
+
+        result = handle_reply(["msg1", "--body-file", "/tmp/reply.txt"])
+        assert result is True
+        assert any("--body-file" in w for w in warnings)
+        # The literal-text behavior is unchanged — only the silence is fixed.
+        assert sent_message["body"] == "--body-file /tmp/reply.txt"
+
+    def test_reply_ordinary_message_no_warning(self, tmp_path, monkeypatch):
+        """A normal reply with no '--' tokens triggers no warning."""
+        original = {"id": "msg1", "from": "@sender", "subject": "test"}
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.get_email_by_id",
+            lambda inbox_file, msg_id: original,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.send_reply",
+            lambda bp, orig, msg: (True, "Reply sent to @sender", "reply_001"),
+        )
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.warning",
+            lambda msg, *a, **kw: warnings.append(msg),
+        )
+        _write_inbox(tmp_path)
+
+        from aipass.ai_mail.apps.modules.email import handle_reply
+
+        result = handle_reply(["msg1", "Thanks, all good."])
+        assert result is True
+        assert warnings == []
+
 
 # ===========================================================================
 # handle_sent

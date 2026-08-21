@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2025-12-02
-# Modified: 2026-08-12
+# Modified: 2026-08-20
 # =============================================
 
 """
@@ -27,7 +27,7 @@ from typing import List
 from rich.markup import escape
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.create import load_email_file
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
@@ -333,6 +333,15 @@ def handle_reply(args: List[str]) -> bool:
             error(f"Message not found: {args[0]}")
             return True
         reply_message = " ".join(args[1:])
+        flag_like = [a for a in args[1:] if a.startswith("--")]
+        if flag_like:
+            # reply has no flag parsing — args[1:] is joined verbatim as the message body.
+            # An unrecognized flag (e.g. --body-file) is not consumed, not rejected, and
+            # not substituted — it ships as literal text with no signal it happened
+            # (@cli, ef49d937: a --body-file typo silently became the sent message).
+            warning(
+                f"reply takes no flags — {', '.join(flag_like)} sent as literal message text.",
+            )
         success, message, reply_id = send_reply(branch_path, original, reply_message)
         if success:
             console.print(f"[green]{escape(message)}[/green]")

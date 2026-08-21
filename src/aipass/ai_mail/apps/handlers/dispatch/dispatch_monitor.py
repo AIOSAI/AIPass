@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-02
-# Modified: 2026-08-04
+# Modified: 2026-08-20
 # =============================================
 
 """
@@ -36,9 +36,11 @@ import sys
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 
 # Startup timeout: if zero stdout after this many seconds, kill and retry
 STARTUP_TIMEOUT = 90
@@ -124,7 +126,15 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         # sender="" terminates the wake-back chain. It also means the @daemon
         # exception inside the manager gate can never apply here — a wake-back is
         # never a daemon-scheduled self-wake — so managers always hit the skip path.
-        wake_status, success = wake_branch(sender, auto=True, sender="")
+        # custom_message names the completed target: wake_branch's DEFAULT_PROMPT
+        # ("Check inbox, process new emails") describes a mail-triggered wake, but a
+        # wake-back fires on dispatch completion, not on mail — an empty inbox there
+        # is normal, not a signal something is wrong (@daemon, 077cd1cf).
+        wake_back_message = (
+            f"{branch_email} finished (exit {exit_code}). Check its reply in your inbox, "
+            "verify what it did, and continue."
+        )
+        wake_status, success = wake_branch(sender, custom_message=wake_back_message, auto=True, sender="")
 
         # Must precede the success check: the manager gate returns True having woken
         # nothing, so trusting the bool alone logged "woken" for a wake that never
@@ -254,9 +264,169 @@ def _check_rate_limited(stderr_log: str) -> bool:
     return "rate_limit" in lower or "429" in content or "overloaded" in lower or "529" in content
 
 
+# Every way a claude command can be bound to an existing conversation.
+# --resume/-r name a session explicitly; -c picks whichever transcript in the
+# directory was modified last.
+RESUME_FLAGS = ("--resume", "-r")
+SESSION_ID_FLAG = "--session-id"
+
+
+def _has_resume(claude_cmd: list) -> bool:
+    """True when the command continues an existing conversation.
+
+    Drives the attempt "mode" label and the strike-3 fresh switch. Checking
+    only "-c" was correct until wake.py started emitting --resume <id>: a
+    pointer-resumed run would then be labelled fresh in every log line AND
+    would never get its strike-3 fresh switch, which is the recovery path for
+    a session that has gone bad.
+    """
+    return "-c" in claude_cmd or any(flag in claude_cmd for flag in RESUME_FLAGS)
+
+
+def _session_id_in(claude_cmd: list) -> Optional[str]:
+    """Return the value passed to --session-id, or None when absent.
+
+    A flag with nothing after it reads as "no id" rather than raising: there
+    is no id to be had either way, and a malformed command is not worth
+    failing a dispatch over — it is worth a log line, which is what it gets.
+    """
+    if SESSION_ID_FLAG not in claude_cmd:
+        return None
+    value_index = claude_cmd.index(SESSION_ID_FLAG) + 1
+    if value_index >= len(claude_cmd):
+        logger.warning("[monitor] %s passed with no value — treating as no session id", SESSION_ID_FLAG)
+        return None
+    return claude_cmd[value_index]
+
+
 def _make_fresh_cmd(claude_cmd: list) -> list:
-    """Remove -c flag from claude command to force fresh start."""
-    return [arg for arg in claude_cmd if arg != "-c"]
+    """Strip every session binding so the command starts a brand-new session.
+
+    -c, --resume/-r and --session-id each tie the run to a specific thread.
+    The two value-carrying flags must be removed as a PAIR: dropping --resume
+    while leaving its uuid behind would hand the CLI a bare uuid as a
+    positional argument, i.e. as the prompt.
+    """
+    fresh = []
+    skip_value = False
+    for arg in claude_cmd:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "-c":
+            continue
+        if arg in RESUME_FLAGS or arg == SESSION_ID_FLAG:
+            skip_value = True
+            continue
+        fresh.append(arg)
+    return fresh
+
+
+def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
+    """Build the command for one attempt of the 3-strike loop. Returns (cmd, mode).
+
+    Attempts 1 and 2 used to re-run the identical command. Harmless for -c,
+    fatal for --session-id: the CLI refuses an id that already exists
+    ("Session ID <id> is already in use", verified on CLI 2.1.228) and the run
+    produces no output at all. Re-sending a consumed id would turn a real
+    3-strike recovery into three instant failures — a worse regression than
+    the mtime bug the pointer exists to fix. So each attempt is built for
+    wherever the previous one left the session.
+    """
+    has_resume = _has_resume(claude_cmd)
+    session_id = _session_id_in(claude_cmd)
+    default_mode = "resume" if has_resume else "fresh"
+
+    if attempt == 1:
+        return list(claude_cmd), default_mode
+
+    if attempt == 2:
+        # A transcript for our minted id means attempt 1 got far enough to
+        # create the session, so the id is spent. Continue it instead of
+        # asking for it again. No transcript = nothing was consumed, and the
+        # command stands as built.
+        stripped = _make_fresh_cmd(claude_cmd) if session_id else []
+        if session_id and stripped and _transcript_exists(branch_path, session_id):
+            logger.info("[monitor] Attempt 2: session %s already exists — retrying as --resume", session_id)
+            # Rebuilt in wake.py's shape — `--resume <id>` straight after the
+            # binary — rather than swapped where --session-id sat. A swap in
+            # place would leave the flag trailing AFTER `-p <prompt>`, a
+            # position never tested against the CLI; the leading form is the
+            # one that is. A retry is the least-exercised path in this file and
+            # the worst place to find out an argument order does not parse.
+            return [stripped[0], RESUME_FLAGS[0], session_id, *stripped[1:]], "resume"
+        return list(claude_cmd), default_mode
+
+    # Strike 3: abandon the bound session entirely. Minting a NEW id (rather
+    # than dropping the flag) keeps the final attempt recorded, so a run that
+    # crashes here still leaves the branch pointing somewhere real.
+    if not has_resume and session_id is None:
+        return list(claude_cmd), "fresh"
+
+    fresh_cmd = _make_fresh_cmd(claude_cmd)
+    new_id = session_pointer.mint_session_id()
+    fresh_cmd += [SESSION_ID_FLAG, new_id]
+    if not session_pointer.write_pointer(branch_path, new_id, "monitor-retry-fresh"):
+        logger.warning("[monitor] Strike-3 pointer write failed for %s — running fresh anyway", new_id)
+    return fresh_cmd, "fresh"
+
+
+def _transcript_exists(branch_path: Path, session_id: str) -> bool:
+    """True when a transcript file exists for this session in this branch."""
+    try:
+        return session_pointer.transcript_file(branch_path, session_id).is_file()
+    except OSError as e:
+        # Unknown beats wrong here: a stat failure must not make us re-send an
+        # id that may already be taken.
+        logger.warning("[monitor] Cannot stat transcript for session %s: %s", session_id, e)
+        return False
+
+
+def _aimed_at_a_session(claude_cmd: list) -> bool:
+    """True when WE chose the session, rather than letting mtime choose it.
+
+    --session-id and --resume both name a specific thread. Bare -c does not: it
+    means "whichever transcript in this directory was modified last", which is
+    a guess, not a decision.
+    """
+    return _session_id_in(claude_cmd) is not None or any(flag in claude_cmd for flag in RESUME_FLAGS)
+
+
+def _reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
+    """Record the session the CLI actually used, when it differs from the pointer.
+
+    Only runs when we AIMED at a session (--session-id or --resume). On the bare
+    -c fallback the landing spot was picked by file mtime, and writing that down
+    would promote a guess into a durable record — the next dispatch would then
+    resume it deliberately, forever. That turns an occasional wrong landing into
+    a permanent one: a branch whose newest transcript happened to be a human's
+    chat would be married to that chat (Patrick's ruling, 2026-08-20).
+
+    Branches on -c therefore keep behaving exactly as they do today until
+    something dispatches them --fresh, which mints a pointer properly. Several
+    callers already default fresh=True (daemon rotation, inbox_sweep), so the
+    fleet fills in on its own without ever adopting a guess.
+
+    On the aimed paths this is a cheap confirmation that we landed where we
+    meant to, and the one place a strike-3 remint gets written down. Never
+    fatal: a pointer that cannot be written costs the next dispatch its
+    precision, not its wake.
+    """
+    if not _aimed_at_a_session(claude_cmd):
+        logger.info(
+            "[monitor] %s ran on -c — not adopting the landed session as a pointer (mtime is a guess)",
+            branch_path,
+        )
+        return
+    actual = _parse_result_json(stdout_log).get("session_id")
+    if not isinstance(actual, str) or not actual.strip():
+        return
+    actual = actual.strip()
+    pointer = session_pointer.read_pointer(branch_path)
+    if pointer is not None and pointer.get("session_id") == actual:
+        return
+    if not session_pointer.write_pointer(branch_path, actual, "monitor-reconciled"):
+        logger.warning("[monitor] Could not reconcile pointer for %s to session %s", branch_path, actual)
 
 
 # CLI stderr marker: agent ended its turn with background tasks still alive,
@@ -367,9 +537,12 @@ def _get_jsonl_projects_dir(cwd: str) -> Path:
 
     Claude encodes the cwd by replacing path separators and ':' with '-'.
     Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
+
+    The encoding itself lives in session_pointer.transcript_dir. It used to be
+    duplicated here byte-for-byte; the day Claude changes how it encodes a cwd
+    there must be one line to fix, not two that drift apart silently.
     """
-    encoded = cwd.replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
-    return Path.home() / ".claude" / "projects" / encoded
+    return session_pointer.transcript_dir(cwd)
 
 
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
@@ -620,23 +793,22 @@ def main():
         logger.info("[monitor] Sandbox ENABLED for %s", branch_email)
 
     # ─── Retry Loop: 3 Strikes ─────────────────────────────
-    # Strike 1: original command (resume if -c was passed)
-    # Strike 2: same command again (transient failure)
-    # Strike 3: fresh start (remove -c, abandon potentially corrupted session)
+    # Strike 1: original command (resume when -c or --resume was passed)
+    # Strike 2: same command, except a --session-id already consumed by
+    #           strike 1 becomes --resume — the CLI refuses a used id outright
+    # Strike 3: fresh start on a newly minted session id, abandoning the
+    #           potentially corrupted one
     attempts = []
     exit_code = -1
     bg_orphaned = False
-    has_resume = "-c" in claude_cmd
+    # Seeded so post-processing always has a command to inspect, even on the
+    # path where the loop body never binds it.
+    cmd = list(claude_cmd)
 
     for attempt in range(1, 4):
-        # Strike 3: switch to fresh if original was resume
-        if attempt == 3 and has_resume:
-            cmd = _make_fresh_cmd(claude_cmd)
-            mode = "fresh"
+        cmd, mode = _cmd_for_attempt(claude_cmd, attempt, branch_path)
+        if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
-        else:
-            cmd = claude_cmd
-            mode = "resume" if has_resume else "fresh"
 
         # Sandbox wrap + broker fd: when enabled, wrap cmd and connect broker.
         # On failure: abort — NEVER silently launch unsandboxed.
@@ -748,6 +920,14 @@ def main():
     duration = int(time.time() - start_time)
 
     # ─── Post-Processing ───────────────────────────────────
+
+    # True up the pointer with where the run actually landed. Only on success:
+    # a failed run's result JSON names a session that may not be worth
+    # returning to, and strike 3 has already pointed the branch at its own.
+    # `cmd` is the LAST attempt's command, not the original — strike 3 remints,
+    # so the original would misreport which session this run actually aimed at.
+    if exit_code == 0:
+        _reconcile_pointer(branch_path, stdout_log, cmd)
 
     # Check for max-turns hit (Claude exits 0 but output contains stop_reason)
     max_turns_hit = False
