@@ -295,7 +295,7 @@ def _parse_simple_value(value):
             return float(value)
         return int(value)
     except ValueError:
-        logger.warning(f"Could not parse numeric value: {value}")
+        logger.debug(f"Not a numeric value, falling through to string: {value}")
 
     # String (strip quotes)
     return value.strip("'\"")
