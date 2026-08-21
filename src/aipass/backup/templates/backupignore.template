@@ -23,6 +23,7 @@ node_modules/
 Thumbs.db
 build/
 dist/
+target/
 *.log
 logs/
 .ruff_cache/

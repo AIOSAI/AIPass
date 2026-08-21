@@ -30,6 +30,7 @@ from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.handlers.state.changelog import append_changelog
@@ -38,6 +39,7 @@ from aipass.backup.apps.handlers.state.timestamps import load_timestamps, save_t
 from aipass.backup.apps.modules.display import (
     build_progress_bar,
     refuse_missing_root,
+    refuse_oversized_run,
     show_backups_now,
     show_last_backups,
     show_result_summary,
@@ -153,6 +155,12 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
 
     all_files = list(walk_project(project_root))
     filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
+
+    # Ceiling BEFORE any copying: a run this large is an ignore-pattern miss,
+    # not a big project. Refusing costs seconds; the alternative was 7.5h.
+    breach = check_ceiling(filtered, config)
+    if breach is not None:
+        return refuse_oversized_run("snapshot", project_root, breach, show_panels)
 
     # Quick-check: skip if nothing changed since last snapshot
     prev_timestamps = load_timestamps(project_root)

@@ -156,6 +156,48 @@ There is no static fallback. The seed IS the safety mechanism — an empty or mi
 
 The repo-root `/.backupignore` ships intentionally as the curated default so users don't snapshot junk.
 
+**A miss in the seed is expensive.** The template covers `build/`, `dist/`, `target/`, `node_modules/`, `.venv/` and friends precisely because an uncovered build-artifact tree is indistinguishable from real source to the walker. `target/` was added on 2026-08-20 after a Rust `src-tauri/target` tree (33,093 files / 18GB) was walked and copied for 7.5h, writing 50GB into the stores. Patterns are unanchored on purpose: baud's tree was `app/src-tauri/target`, so an anchored `/target/` would have missed it.
+
+---
+
+## Run Ceiling — the runaway guard
+
+An ignore miss cannot be caught by better ignore patterns alone; the next unfamiliar build system will have a directory nobody has listed yet. So every run **measures the filtered set before copying anything** and refuses loudly when it breaches a ceiling:
+
+| Config key | Default | Meaning |
+|---|---|---|
+| `max_backup_files` | `25000` | Maximum files in one run |
+| `max_backup_size_gb` | `10` | Maximum total source bytes in one run |
+
+Set either to `0` to disable it for a project that genuinely is that large.
+
+A refusal names the directories that caused it, at a depth you can paste straight into `.backupignore`:
+
+```
+✗ Backup refused — 33,093 files exceeds the 25,000-file ceiling
+  Largest directories in this run:
+    app/src-tauri/target  —  33,093 files
+  Add the build-artifact directories above to .backupignore, then re-run.
+  If the project really is this large, raise 'max_backup_files' in .backup/config.json (0 disables).
+```
+
+The guard sits in `snapshot`, `versioned` **and** `all`. It is in `all` as well as the sub-modules because `run_snapshot` does its own full walk — letting a breach fall through means walking a runaway tree twice before refusing it.
+
+**Known gap:** the ceiling stops a runaway *before* it happens. It does not clean up a store that a previous run already filled — see "Store Cleanup" below.
+
+---
+
+## Store Cleanup — what exists and what does not
+
+Mirror cleanup (`handlers/cleanup/mirror.py`) removes snapshot files **whose source no longer exists**. That is its only trigger.
+
+There is **no lane** that removes files which are now *ignored* but still present in the source tree. A directory added to `.backupignore` after a backup stays in `snapshots/` and `versioned/` indefinitely:
+
+- `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. `cleanup_deleted_files()` accepts a `should_ignore` callback and **never calls it** — the ignore-aware sweep is unimplemented, not merely unused.
+- `versioned/` — has no cleanup path at all. The store is append-only by design, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
+
+Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
+
 ---
 
 ## Integration Points

@@ -22,6 +22,8 @@ DEFAULTS = {
     "backup_mode": "snapshot",
     "max_versions": 10,
     "max_file_size_mb": 100,
+    "max_backup_files": 25000,
+    "max_backup_size_gb": 10,
     "auto_ignore_git": True,
     "drive_sync": False,
     "whitelist": [],
