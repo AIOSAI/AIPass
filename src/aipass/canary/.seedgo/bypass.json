@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2026-08-20",
+    "description": "Standards bypass configuration for this branch"
+  },
+  "bypass": [
+    {
+      "file": "tests/test_scaffold.py",
+      "standard": "architecture",
+      "reason": "Test file — lives in tests/, not in the 3-layer apps/ structure by design"
+    }
+  ],
+  "notes": {
+    "usage": "Add entries to bypass specific seedgo standard violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
+    "fields": {
+      "file": "Relative path to the file",
+      "standard": "Which standard to bypass (imports, cli, naming, etc.)",
+      "lines": "Optional array of line numbers",
+      "pattern": "Optional regex pattern to match",
+      "reason": "Why this bypass exists"
+    }
+  }
+}
