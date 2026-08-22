@@ -689,36 +689,41 @@ class TestHandleTarget:
         call_kwargs = mock_route.call_args.kwargs
         assert call_kwargs["interactive"] is True
 
-    def test_help_flag_module_fallback(self) -> None:
-        """--help BranchNotFoundError for a module falls back to _handle_module."""
+    def test_help_for_a_module_that_is_not_a_local_branch(self) -> None:
+        """External project seat: @seedgo is a module here, not a registered branch.
+
+        Was pinned via the exception fallback (route_command raises, the handler
+        catches and re-routes). The outcome is the feature — module routing for
+        an unregistered branch — and it is now DECIDED before any branch call
+        rather than discovered by failing one (DPLAN-0315 item 1).
+        """
         from aipass.drone.apps.drone import _handle_target
-        from aipass.drone.apps.modules import BranchNotFoundError
 
         with (
-            patch(f"{_DRONE}.is_module", side_effect=[False, True]),
-            patch(f"{_DRONE}.route_command", side_effect=BranchNotFoundError("not found")),
+            patch(f"{_DRONE}.is_module", return_value=True),
+            patch(f"{_DRONE}.branch_exists", return_value=False),
+            patch(f"{_DRONE}.route_command") as mock_route,
             patch(f"{_DRONE}._handle_module", return_value=0) as mock_hm,
         ):
             result = _handle_target(["@seedgo", "--help"])
         assert result == 0
         mock_hm.assert_called_once_with("seedgo", ["--help"])
+        mock_route.assert_not_called()
 
-    def test_branch_not_found_module_fallback(self) -> None:
-        """BranchNotFoundError for a module falls back to _handle_module."""
+    def test_command_for_a_module_that_is_not_a_local_branch(self) -> None:
+        """Same for a real command — graceful degradation outside AIPass is intact."""
         from aipass.drone.apps.drone import _handle_target
-        from aipass.drone.apps.modules import BranchNotFoundError
 
         with (
-            patch(f"{_DRONE}.is_module", side_effect=[False, True]),
-            patch(
-                f"{_DRONE}.route_command",
-                side_effect=BranchNotFoundError("not found"),
-            ),
+            patch(f"{_DRONE}.is_module", return_value=True),
+            patch(f"{_DRONE}.branch_exists", return_value=False),
+            patch(f"{_DRONE}.route_command") as mock_route,
             patch(f"{_DRONE}._handle_module", return_value=0) as mock_hm,
         ):
             result = _handle_target(["@seedgo", "audit"])
         assert result == 0
         mock_hm.assert_called_once()
+        mock_route.assert_not_called()
 
 
 # ===========================================================================
