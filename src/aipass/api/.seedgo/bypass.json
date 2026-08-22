@@ -65,6 +65,14 @@
       "file": "apps/handlers/host/settings.py",
       "standard": "gateway_boundary",
       "reason": "STANDING LINE, ruling pending — not a disagreement with the standard. The agent-settings lane writes .claude/settings.local.json, which the checker attributes to @aipass. There is NO owner door for that file: @aipass exposes no settings verb, and the fleet carries five in-tree writers of it. The hooks half of this same lane WAS cured on 2026-08-18 (FPLAN-0438 R1) — it now writes through 'drone @hooks hooksound' and reads through the owner's is_muted(), with the /tmp flag-file protocol deleted and zero grep hits. This half cannot follow until a door exists or Patrick rules who owns the file. Recorded as a bypass so the CI gate reflects the standing status rather than a silent red; RETIRE THIS ENTRY the day the door lands. No lines pin: line 163 moves whenever the file grows, and a stale line number reads as a passing check."
+    },
+    {
+      "file": "apps/handlers/host/refusals.py",
+      "standard": "unused_function",
+      "functions": [
+        "_reset_refusals"
+      ],
+      "reason": "Called from tests/conftest.py:207,209 — the unused_function checker skips tests/, so a fixture-only helper reads as dead. Same species as this branch's existing integrations_manager and api_key entries, and NAME-SCOPED rather than file-wide so a genuinely dead function in refusals.py is still caught. It exists because the refusal memory's 60s TTL outlives a suite run: one test provoking a refusal would silence every later test on that lane, and they would still pass — a remembered refusal raises exactly what a fresh one does. INTERIM, and it does not settle @devpulse's parked ruling on whether the checker should learn about conftest; if @seedgo teaches it, this entry becomes redundant, not wrong."
     }
   ],
   "notes": {

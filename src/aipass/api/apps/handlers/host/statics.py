@@ -3,8 +3,18 @@
 # Description: Host API Statics Handler — how @baud's bundle files reach a browser
 # Version: 1.0.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-08-21
 # =============================================
+# pyright: reportMissingImports=false
+# The suppression covers the [host] extra's own libraries. Every import below
+# is deferred and guarded — a machine that never serves the phone lane needs
+# none of them — but the checker resolves imports against the ENVIRONMENT IT
+# RUNS IN, and CI installs `.[dev,memory]`, never `[host]`. It reported 4
+# unresolved imports here while a local audit reported none, because the repo's
+# pyrightconfig carries `.venv/lib/python3.12/site-packages` on extraPaths and
+# that directory exists on a developer's machine and nowhere else. This file
+# was the only host module importing the extra WITHOUT the suppression every
+# other one carries. Same pattern as server.py, attach.py and google/auth.py.
 
 """
 Host API Statics Handler

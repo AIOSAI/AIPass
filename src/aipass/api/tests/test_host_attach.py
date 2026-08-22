@@ -49,6 +49,7 @@ import pytest
 
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import verbs as host_verbs
+from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -64,6 +65,10 @@ PATCH_SERVER_JSON = "aipass.api.apps.handlers.host.server.json_handler"
 SEAT = "AIPass"
 
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
+# The pump carries its own logger since the 2026-08-21 split: attach and
+# detach are logged by the route, control frames by the pump.
+PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
+PATCH_PUMP_JSON = "aipass.api.apps.handlers.host.pump.json_handler"
 
 pty_required = pytest.mark.skipif(
     not host_attach.is_available(),
@@ -1173,11 +1178,11 @@ class TestTheSocketRefusesBeforeItSpawns:
         assert accepted != raw
 
 
-def server_source_of(name: str) -> str:
+def source_of(name: str, module: Any = host_pump) -> str:
     """
-    The source of ONE function in server.py, cut on structure not on neighbours.
+    The source of ONE function, cut on structure not on neighbours.
 
-    Four tests in this file read the source, because the properties they pin are
+    Several tests here read the source, because the properties they pin are
     about shape rather than behaviour — an except clause that must exist, a call
     that must come before another. They used to slice between two literal names,
     and that broke the moment the pump moved out to module level: the end anchor
@@ -1188,13 +1193,20 @@ def server_source_of(name: str) -> str:
     Same lesson this branch keeps relearning on the other side of the wire: cut
     on structure, never on the prose that happens to sit next to it.
 
+    WHICH MODULE is a parameter for the same reason. The pump moved AGAIN on
+    2026-08-21, out of server.py into pump.py under a line cap, and a helper
+    that named its file in its own body would have had to be rewritten rather
+    than pointed. The default is where the pump lives; callers that read a
+    route pass server.py explicitly.
+
     Args:
-        name: The function's name in server.py.
+        name: The function's name.
+        module: The module to read it from — the pump by default.
 
     Returns:
         Exactly that function's source.
     """
-    source = Path(host_server.__file__).read_text(encoding="utf-8")
+    source = Path(module.__file__).read_text(encoding="utf-8")
 
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
@@ -1202,7 +1214,7 @@ def server_source_of(name: str) -> str:
             if segment is not None:
                 return segment
 
-    raise AssertionError(f"server.py has no function named {name!r}")
+    raise AssertionError(f"{Path(module.__file__).name} has no function named {name!r}")
 
 
 def detach_and_wait(socket: Any, session: Any, timeout: float = 10.0) -> None:
@@ -1313,7 +1325,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -1411,7 +1423,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         would reintroduce the hang, and the timing test above would only catch
         it as a mysterious slow test.
         """
-        pump = server_source_of("_pump")
+        pump = source_of("run_pump")
 
         assert "return_when=asyncio.FIRST_COMPLETED" in pump
         # hangup comes FIRST in the finally: closing the descriptor is what
@@ -1429,7 +1441,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         frame and a detached operator, so removing it fails here loudly rather
         than only through a timing-dependent socket test.
         """
-        handler = server_source_of("_handle_control")
+        handler = source_of("_handle_control")
 
         assert "except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError)" in handler
         assert "raise" not in handler
@@ -1472,7 +1484,7 @@ def test_the_control_frame_is_json_and_the_verbs_are_resize_and_ping() -> None:
     `session.write` assertion is the one that keeps it that way — a control verb
     reaching the write path types its own JSON into the operator's shell.
     """
-    handler = server_source_of("_handle_control")
+    handler = source_of("_handle_control")
 
     assert 'verb == "ping"' in handler
     assert 'verb != "resize"' in handler
@@ -1482,7 +1494,7 @@ def test_the_control_frame_is_json_and_the_verbs_are_resize_and_ping() -> None:
     # terminal the operator is reading.
     assert "send_text(" in handler
     assert "send_bytes" not in handler
-    assert json.loads(host_server.PONG_FRAME) == {"type": "pong"}
+    assert json.loads(host_pump.PONG_FRAME) == {"type": "pong"}
 
 
 def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
@@ -1497,7 +1509,7 @@ def test_a_blocking_read_never_runs_on_the_event_loop() -> None:
     silently never pumped). The property that matters is that the read is
     handed to SOME executor, never called on the loop.
     """
-    pump = server_source_of("_pump")
+    pump = source_of("run_pump")
 
     assert "run_in_executor(" in pump
     assert "session.read" in pump
@@ -1511,7 +1523,7 @@ def test_the_pump_always_hangs_up() -> None:
     Otherwise the room keeps a client attached to a socket nobody is holding,
     and the operator's next attach lands in a session with a ghost in it.
     """
-    pump = server_source_of("_pump")
+    pump = source_of("run_pump")
 
     assert "finally:" in pump
     assert "session.hangup()" in pump
@@ -2036,7 +2048,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = StubSession()
 
-        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_SERVER_JSON):
+        with patch(PATCH_PUMP_LOGGER) as log, patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 with client.websocket_connect(
@@ -2175,3 +2187,87 @@ class TestTheDetachIsWrittenDownToo:
 
         assert len([line for line in rendered if "socket attached to" in line]) == 3
         assert len([line for line in rendered if "socket detached from" in line]) == 3
+
+
+class RefusingSession(StubSession):
+    """A read-only watch, refusing at the layer that counts — like open_monitor's."""
+
+    def write(self, data: bytes) -> None:
+        """Refuse for real: the session, not the route, is what says no."""
+        raise host_attach.AttachRefused("This session is read-only — a watch takes no input")
+
+
+@fastapi_required
+class TestTypingIntoAWatchLeavesARecord:
+    """
+    The one socket refusal on this surface that used to leave no structured trace.
+
+    Every refusal BEFORE the socket goes live runs through the route's
+    _audit_socket_refusal — wrong scope, unknown branch, no tmux. This one
+    happens after: the socket is open, authenticated and pumping when a client
+    types into a read-only watch, so it never passes that gate. It logged a
+    warning and closed 1008, and the audit trail said nothing at all.
+
+    Found by the standards checker asking the new pump module why it recorded no
+    operations. The checker was right, and the honest way to satisfy it was to
+    close the gap rather than to log something cheap.
+    """
+
+    def test_the_refusal_is_recorded_with_the_room_and_the_reason(self, store: Any, seated: Any) -> None:
+        """
+        A client breaking the contract is exactly what an audit trail is for.
+
+        The room names WHICH watch was typed into and the reason carries the
+        session's own sentence — the two things somebody reading the record
+        afterwards cannot reconstruct from a close code.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = RefusingSession()
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch(PATCH_PUMP_JSON) as audit:
+                with patch.object(host_attach, "open_attach", return_value=session):
+                    client = TestClient(host_server.create_app())
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                    ) as socket:
+                        socket.send_bytes(b"rm -rf /")
+
+                        deadline = time.monotonic() + 10
+                        while session.hangups == 0 and time.monotonic() < deadline:
+                            time.sleep(0.01)
+
+        recorded = [call for call in audit.log_operation.call_args_list if call.args[0] == "host_api_input_refused"]
+
+        assert len(recorded) == 1, audit.log_operation.call_args_list
+        assert recorded[0].args[1]["room"] == "baud-api"
+        assert "read-only" in recorded[0].args[1]["reason"]
+        assert session.hangups == 1
+
+    def test_the_detach_line_carries_the_code_the_server_chose(self, store: Any, seated: Any) -> None:
+        """
+        A server-initiated close is a detach too, and it has a code.
+
+        1008 is the policy close the pump sends when a watch is typed into. If
+        only CLIENT codes reached the detach line, every refusal would read as
+        'room ended' and the log would lose which side ended the socket.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        session = RefusingSession()
+
+        with patch(PATCH_SERVER_LOGGER) as log, patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch(PATCH_PUMP_JSON):
+                with patch.object(host_attach, "open_attach", return_value=session):
+                    client = TestClient(host_server.create_app())
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                    ) as socket:
+                        socket.send_bytes(b"rm -rf /")
+                        line = wait_for_log(log, "socket detached from")
+
+        assert "close 1008" in line
+

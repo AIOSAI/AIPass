@@ -5,8 +5,40 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 99% (44/45) | **Tests:** 1577 pass | **Functions:** 224 public (204 tested)
-**Last Updated:** 2026-08-19
+**Seedgo:** 100% (45/45) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
+**Last Updated:** 2026-08-21
+
+*THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
+EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
+imports that a local audit could not see, and the reason is one line of shared
+configuration: `pyrightconfig.json` carries `.venv/lib/python3.12/site-packages`
+on extraPaths, a directory that exists on a developer's machine and nowhere
+else. CI installs `.[dev,memory]` and never `[host]`, so `fastapi` and
+`starlette` resolve here and vanish there. `statics.py` was the only host module
+importing the extra WITHOUT the suppression header every other one carries —
+server.py, attach.py and google/auth.py all have it — so it was the only one
+that failed. Reproduced before it was fixed, by running the checker against an
+empty environment and getting the same four, then re-run to zero: a fix for a
+failure you cannot reproduce is a guess with good intentions.*
+
+*THE PUMP MOVED OUT, because 1534 lines is over a 1500-line cap and the ping
+lane is what pushed it there. `pump.py` now holds the bidirectional socket and
+its two control verbs; `server.py` keeps the routes and dropped `asyncio` and
+`json` with them, since the pump was the only thing here that used either. A cap
+is only a good reason to move code that was already separable, and this was —
+these functions take everything they touch as arguments, which is why they had
+already survived one move. Three tests read their source and now read it from the
+new file; one asserted on a logger that no longer lives in the same module, which
+is exactly the kind of quiet disconnection a move like this can leave behind, and
+it failed loudly instead. Eight mutations, all bitten, across both files.*
+
+*AND THE STANDARDS CHECKER ASKED THE NEW MODULE WHY IT LOGGED NO OPERATIONS,
+which was a fair question with a real answer. Every socket refusal on this
+surface leaves a structured record EXCEPT one: typing into a read-only watch
+happens after the socket is live, so it never passes the route's audit gate. It
+logged a warning, closed 1008, and told the trail nothing. It records the room
+and the session's own sentence now. The cheap way to satisfy that checker was a
+token log line; the honest way was to find the gap it was pointing at.*
 
 *A PHONE COULD NOT TELL A LIVE ROOM FROM A CORPSE. When a socket's peer
 vanishes without a FIN — a tunnel dropped, a laptop slept, a NAT entry expired —
