@@ -75,6 +75,7 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.watchdog import baseline as _baseline
+from aipass.devpulse.apps.handlers.watchdog import feed as _feed
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 
@@ -519,6 +520,12 @@ def arm_wire(
 
     events_file = _baseline.events_file_for(root)
     cursor_file = _baseline.cursor_file_for(root)
+    # The push source (FPLAN-0451 P2). Its cursor is a digest set, not a byte
+    # offset, because the feed is trimmed by os.replace and offsets go stale
+    # silently across that — see feed.py's header.
+    feed_cursor_file = _feed.cursor_file_for(root)
+    feed_source = _feed.feed_file(root)
+    feed_state: dict | None = None
 
     replayed = 0
     delivered = 0
@@ -532,6 +539,13 @@ def arm_wire(
             _write_cursor(cursor_file, offset)
             replayed = len(records)
             logger.info("[watchdog.wire] replayed %s missed events", replayed)
+
+        feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
+        for record in feed_records:
+            _stdout_event(f"MISSED {_feed.format_feed_event(record)} [reported while no wire was up]")
+        if feed_records:
+            replayed += len(feed_records)
+            logger.info("[watchdog.wire] replayed %s missed feed events", len(feed_records))
 
         _stderr(
             f"watchdog wire: armed handle={handle} session={session_name or 'NONE (fg)'} "
@@ -556,6 +570,13 @@ def arm_wire(
                 _stdout_event(f"BASELINE DEAD: {reason} — re-arm with: drone @devpulse watchdog baseline")
                 logger.error("[watchdog.wire] %s", reason)
                 raise SystemExit(1)
+
+            feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
+            for record in feed_records:
+                _stdout_event(_feed.format_feed_event(record))
+            if feed_records:
+                delivered += len(feed_records)
+                logger.info("[watchdog.wire] delivered %s feed events", len(feed_records))
 
             records, new_offset = _drain_events(events_file, offset)
             for record in records:

@@ -846,3 +846,183 @@ def test_each_registry_is_parsed_only_when_its_own_mtime_moves(monkeypatch, tmp_
     assert parses[project_registry.name] == 2, (
         f"project parsed {parses[project_registry.name]}x — expected 1 + 1 reload"
     )
+
+
+# ---------------------------------------------------------------------------
+# ActivityGate — idle by design (FPLAN-0451 P2)
+#
+# Measured before this landed: 7.72% of one core sustained, 1640 CPU-seconds in
+# 5.9 hours, on a day with zero dispatches. These pin the two edges that decide
+# whether the roster gets touched at all, and the one property that makes the
+# design safe: a crashed monitor never reports completion, so the gate STAYS
+# active and the stale-lock scan keeps running for exactly the case it exists
+# to catch.
+# ---------------------------------------------------------------------------
+
+
+def _feed_line(kind: str, source: str = "canary", minute: int = 0) -> str:
+    return json.dumps(
+        {
+            "ts": f"2026-08-21T17:{minute:02d}:00.000000-07:00",
+            "kind": kind,
+            "title": f"@{source} {'waking' if kind == 'wake' else 'completed'}",
+            "body": "Duration: 12s",
+            "source": source,
+        }
+    )
+
+
+@pytest.fixture
+def gate_parts(tmp_path):
+    feed_path = tmp_path / "notifications.jsonl"
+    feed_path.write_text("", encoding="utf-8")
+    cursor = tmp_path / "daemon_cursor.json"
+    return feed_path, cursor
+
+
+def test_gate_starts_active_to_discover_runs_already_in_flight(gate_parts):
+    feed_path, cursor = gate_parts
+
+    gate = baseline.ActivityGate(cursor, feed_path)
+
+    assert gate.active is True
+    assert "startup" in gate.reason
+
+
+def test_gate_goes_idle_when_no_locks_are_on_disk(gate_parts):
+    feed_path, cursor = gate_parts
+    gate = baseline.ActivityGate(cursor, feed_path)
+
+    gate.settle(locks_present=0)
+
+    assert gate.active is False
+    assert gate.reason == "no dispatch locks on disk"
+
+
+def test_gate_stays_active_while_a_lock_exists(gate_parts):
+    feed_path, cursor = gate_parts
+    gate = baseline.ActivityGate(cursor, feed_path)
+
+    gate.settle(locks_present=1)
+
+    assert gate.active is True
+
+
+def test_a_wake_event_reactivates_the_gate(gate_parts):
+    feed_path, cursor = gate_parts
+    gate = baseline.ActivityGate(cursor, feed_path)
+    gate.observe()
+    gate.settle(locks_present=0)
+    assert gate.active is False
+
+    feed_path.write_text(_feed_line("wake", source="api", minute=5) + "\n", encoding="utf-8")
+    gate.observe()
+
+    assert gate.active is True
+    assert "@api" in gate.reason
+
+
+def test_a_completion_event_alone_does_not_reactivate(gate_parts):
+    """Only a START is a reason to look. A completion is the opposite of one."""
+    feed_path, cursor = gate_parts
+    gate = baseline.ActivityGate(cursor, feed_path)
+    gate.observe()
+    gate.settle(locks_present=0)
+
+    feed_path.write_text(_feed_line("dispatch", minute=6) + "\n", encoding="utf-8")
+    gate.observe()
+
+    assert gate.active is False
+
+
+def test_a_crashed_monitor_leaves_the_gate_active(gate_parts):
+    """The safety property. A SIGKILLed monitor never writes its completion
+    event, so the feed goes silent with a lock still on disk — and the gate
+    must keep scanning, because stale-lock detection is the only thing that
+    will ever notice."""
+    feed_path, cursor = gate_parts
+    gate = baseline.ActivityGate(cursor, feed_path)
+    feed_path.write_text(_feed_line("wake", minute=1) + "\n", encoding="utf-8")
+    gate.observe()
+
+    for _ in range(5):  # feed stays silent; the lock never clears
+        gate.observe()
+        gate.settle(locks_present=1)
+
+    assert gate.active is True
+
+
+def test_idle_tick_stays_under_the_heartbeat_stale_window(tmp_path):
+    """An idle daemon must still look alive from the statusline's side.
+
+    ~/.claude/statusline.sh hardcodes its own copy of the 15s threshold, so an
+    idle interval at or above it would paint a healthy watchdog red.
+    """
+    assert baseline.IDLE_POLL_SECONDS < baseline.HEARTBEAT_STALE_SECONDS
+    assert baseline.IDLE_POLL_SECONDS * 2 < baseline.HEARTBEAT_STALE_SECONDS
+
+
+def test_idle_loop_does_not_touch_the_roster(tmp_path, monkeypatch):
+    """The whole saving, asserted directly: no branch is stat-ed while idle."""
+    root = _build_registry(tmp_path, ["alpha", "beta"])
+    scanned = []
+
+    def _spy(name, branch_path, state):
+        scanned.append(name)
+        return None
+
+    monkeypatch.setattr(baseline, "_scan_branch", _spy)
+    monkeypatch.setattr(baseline, "_sleep", lambda s: None)
+
+    feed_path = tmp_path / "notifications.jsonl"
+    feed_path.write_text("", encoding="utf-8")
+    gate = baseline.ActivityGate(tmp_path / "cur.json", feed_path)
+    gate.active = False
+
+    baseline._run_loop(
+        root / "AIPASS_REGISTRY.json",
+        "handle-idle",
+        once=False,
+        poll_interval=0.01,
+        max_ticks=5,
+        started_at=time.monotonic(),
+        gate=gate,
+    )
+
+    assert scanned == [], "an idle gate must not scan a single branch"
+
+
+def test_a_crash_reported_lock_does_not_pin_the_gate_active(tmp_path, monkeypatch):
+    """A leaked lock must not hold the daemon in scan-every-tick mode forever.
+
+    Witnessed live 2026-08-21: a dispatch monitor was killed, its lock stayed on
+    disk with a dead pid, the scanner correctly reported it crashed ONCE — and
+    then the gate counted that same lock as outstanding on every subsequent
+    tick. The daemon scanned all 22 branches every 2s for ten minutes and only
+    went idle when the lock was moved by hand.
+
+    Nobody is coming to remove that lock; the watchdog deliberately does not
+    delete locks it does not own. So "already reported as crashed" has to mean
+    "stop counting it", or the gate has no way back to idle.
+    """
+    root = _build_registry(tmp_path, ["alpha"])
+    branch = root / "alpha"
+    _write_lock(branch, pid=999999, subject="dead monitor")  # pid that cannot be alive
+
+    monkeypatch.setattr(baseline, "_sleep", lambda s: None)
+    feed_path = tmp_path / "notifications.jsonl"
+    feed_path.write_text("", encoding="utf-8")
+    gate = baseline.ActivityGate(tmp_path / "cur.json", feed_path)
+
+    baseline._run_loop(
+        root / "AIPASS_REGISTRY.json",
+        "handle-stale",
+        once=False,
+        poll_interval=0.01,
+        max_ticks=8,  # past _STALE_PID_TICKS, so the crash is reported and then settles
+        started_at=time.monotonic(),
+        gate=gate,
+    )
+
+    assert gate.active is False, "a crash-reported lock must not keep the gate active"
+    assert gate.reason == "no dispatch locks on disk"

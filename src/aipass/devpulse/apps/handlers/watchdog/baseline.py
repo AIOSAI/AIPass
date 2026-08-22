@@ -59,12 +59,14 @@ See DPLAN-0308 for the design record (rounds 1 and 2).
 import json
 import os
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
+from aipass.devpulse.apps.handlers.watchdog import feed as _feed
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 
@@ -79,6 +81,30 @@ POLL_INTERVAL_SECONDS = 2.0
 # where dispatch_monitor.py rewrites the lock to self-register its own pid — the
 # parent's pid is briefly the recorded one and can already be gone.
 _STALE_PID_TICKS = 2
+
+# IDLE BY DESIGN (FPLAN-0451 P2). Measured before the change: 7.72% of one core
+# sustained — 1640 CPU-seconds in 5.9 hours — to watch a system that ran zero
+# dispatches. The scan was never the wrong MECHANISM, it was running when there
+# was nothing to scan for.
+#
+# The gate is the notification feed, which carries BOTH edges: wake.py:951
+# writes kind="wake" when a dispatch starts, dispatch_monitor.py:1014 writes
+# kind="dispatch" when one ends. So the daemon can know whether any run is
+# outstanding without touching a single branch.
+#
+# Idle: touch the heartbeat, drain the feed, sleep. Two syscalls a tick.
+# Active: the full roster scan, unchanged, because now it is earning its keep.
+#
+# Note which way this fails. A crashed monitor never writes its completion
+# event, so the daemon STAYS active — polling exactly while a run is genuinely
+# outstanding, which is the one case stale-lock detection exists for. The
+# expensive mode is entered only when it is the mode that pays.
+IDLE_POLL_SECONDS = 5.0
+
+# Kept under HEARTBEAT_STALE_SECONDS (15.0) with room to spare, because the
+# statusline reads that file and its own copy of the threshold is hardcoded in
+# ~/.claude/statusline.sh. An idle daemon must still look alive — going quiet
+# and going dead have to stay distinguishable from the outside.
 
 _WATCH_KIND = "baseline"
 # Self-completions are meaningless — devpulse cannot wake itself with news of
@@ -100,7 +126,14 @@ _CURSOR_RELPATH = ("devpulse_json", "baseline_cursor.json")
 # wire.py and ~/.claude/statusline.sh call the daemon hung once the mtime is
 # older than the stale window. The path predates this build — the statusline
 # has watched it since DPLAN-0106; the daemon is its first-ever writer.
-HEARTBEAT_FILE = Path("/tmp/aipass-watchdog-active")
+#
+# gettempdir() rather than a literal "/tmp": the literal was a house-rule breach
+# and Windows-hostile, and on Linux this resolves to exactly the same path, so
+# the contract with statusline.sh is unchanged where that script runs. NOTE the
+# coupling that remains — statusline.sh hardcodes both this path and its own
+# copy of HEARTBEAT_STALE_SECONDS. Moving the file on a POSIX box would need
+# that script changed in the SAME commit or the statusline paints red forever.
+HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "aipass-watchdog-active"
 HEARTBEAT_STALE_SECONDS = 15.0
 
 
@@ -658,6 +691,59 @@ def _arm(storage_path: Path | None, poll_interval: float, role: str | None = Non
     return {"state": "armed", "handle": handle, "stale_replaced": stale_replaced}
 
 
+class ActivityGate:
+    """Feed-driven answer to: is anything worth scanning for right now?
+
+    Holds one belief — ``active`` — and moves it on evidence only:
+
+      wake event on the feed      -> active   (a dispatch just started)
+      a scan finds zero locks     -> idle     (nothing is outstanding)
+
+    Deliberately NOT a counter of starts minus completions. Pairing those
+    across restarts, crashed monitors and peer-to-peer dispatches is exactly
+    the bookkeeping that goes wrong quietly. "Are there locks on disk" is a
+    fact the filesystem answers directly, and it self-corrects after any
+    missed edge.
+
+    Starts ACTIVE on purpose: a daemon launched while a dispatch is already
+    running has no wake event to see, and must discover that lock by scanning.
+    """
+
+    def __init__(self, cursor_file: Path, feed_path: Path) -> None:
+        self.cursor_file = cursor_file
+        self.feed_path = feed_path
+        self.state: dict | None = None
+        self.active = True
+        self.reason = "startup — scanning once to find runs already in flight"
+
+    def observe(self) -> list[dict]:
+        """Drain the feed and wake the gate on any reported dispatch start."""
+        records, self.state = _feed.drain_feed(
+            self.cursor_file,
+            kinds=("wake", "dispatch"),
+            feed_file_path=self.feed_path,
+            state=self.state,
+        )
+        for record in records:
+            if record.get("kind") == "wake":
+                source = str(record.get("source") or "?").lstrip("@")
+                if not self.active:
+                    _stderr(f"watchdog baseline: ACTIVE — @{source} was woken, scanning every tick")
+                    logger.info("[watchdog.baseline] gate active source=%s", source)
+                self.active = True
+                self.reason = f"@{source} was woken"
+        return records
+
+    def settle(self, locks_present: int) -> None:
+        """Called after each scan. No locks anywhere means nothing is outstanding."""
+        if locks_present or not self.active:
+            return
+        self.active = False
+        self.reason = "no dispatch locks on disk"
+        _stderr(f"watchdog baseline: IDLE — {self.reason}, backing off to {IDLE_POLL_SECONDS}s (feed still watched)")
+        logger.info("[watchdog.baseline] gate idle")
+
+
 def _run_loop(
     registry_file: Path,
     handle: str,
@@ -667,6 +753,7 @@ def _run_loop(
     started_at: float,
     events_file: Path | None = None,
     heartbeat: bool = False,
+    gate: "ActivityGate | None" = None,
 ) -> dict:
     """The poll loop. Raises on anything unexpected — see the crash boundary.
 
@@ -674,6 +761,10 @@ def _run_loop(
     appended durably BEFORE the stdout line (an event that printed but never
     persisted would vanish for every future wire), and the heartbeat is touched
     every tick so the statusline can tell a hung daemon from a live one.
+
+    ``gate`` makes the loop idle by design: while it reports inactive the roster
+    is not touched at all and the tick is a heartbeat plus a feed stat. Without
+    a gate the loop scans every tick exactly as it always did.
     """
     roster = Roster(registry_file)
     roster.refresh(required=True)
@@ -700,6 +791,17 @@ def _run_loop(
         ticks += 1
         if heartbeat:
             _touch_heartbeat()
+
+        if gate is not None:
+            gate.observe()
+            if not gate.active:
+                # The idle path. No roster refresh, no branch stats, nothing
+                # but the two syscalls above — this is the whole saving.
+                if max_ticks is not None and ticks >= max_ticks:
+                    return _result("stopped", handle, roster, ticks, completions, started_at)
+                _sleep(IDLE_POLL_SECONDS)
+                continue
+
         if roster.refresh():
             live = roster.names()
             states = {name: state for name, state in states.items() if name in live}
@@ -732,6 +834,20 @@ def _run_loop(
                 record["bounce"],
             )
         completions += len(batch)
+
+        if gate is not None:
+            # A lock still on disk means a run is outstanding, whatever the feed
+            # did or did not report about it — EXCEPT one already reported as
+            # crashed. That lock is known-dead, will never be reported again,
+            # and nobody is coming to remove it (it is not ours to delete).
+            # Counting it would pin the gate in scan-every-tick mode forever:
+            # witnessed 2026-08-21, when a stale @aipass lock held the daemon
+            # active for ten minutes and only released when the lock was moved
+            # by hand. Before the gate existed this cost nothing, because the
+            # daemon was always expensive; the gate is what gave a leaked lock
+            # something to hold open.
+            outstanding = sum(1 for state in states.values() if state.present and not state.crashed_reported)
+            gate.settle(outstanding)
 
         if once and batch:
             return _result("completed", handle, roster, ticks, completions, started_at)
@@ -799,6 +915,17 @@ def watch_baseline(
     registry_file = root / _REGISTRY_FILENAME
 
     events_file = events_file_for(root) if daemon else None
+    # The gate belongs to the daemon face only. A foreground/once run is a
+    # deliberate one-shot look and must scan when it is asked to, not decide
+    # for itself that there is nothing to see.
+    gate = (
+        ActivityGate(
+            _feed.cursor_file_for(root, _feed.DAEMON_CURSOR_NAME),
+            _feed.feed_file(root),
+        )
+        if daemon
+        else None
+    )
     armed = _arm(storage_path, poll_interval, role="daemon" if daemon else None)
     if armed["state"] == "already_armed":
         _stderr(f"baseline already armed (pid {armed['pid']})")
@@ -826,6 +953,7 @@ def watch_baseline(
             started_at,
             events_file=events_file,
             heartbeat=daemon,
+            gate=gate,
         )
     except KeyboardInterrupt:
         # An operator stopping the watcher is not a crash — it is still the end
