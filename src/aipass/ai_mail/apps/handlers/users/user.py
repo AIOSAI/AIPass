@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user.py
 # Description: User Info Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2025-11-30
-# Modified: 2026-08-04
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -26,7 +26,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 # Import branch detection functions
-from .branch_detection import detect_branch_from_pwd
+from .branch_detection import detect_branch_from_pwd, find_branch_root
 
 # =============================================
 # USER INFO FUNCTIONS
@@ -45,6 +45,19 @@ def _detection_failure_reason() -> str:
     caller_branch = os.environ.get("AIPASS_CALLER_BRANCH")
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
 
+    # Checked BEFORE the CALLER_BRANCH claim. When the caller stood outside any
+    # branch that IS the reason resolution failed, and the claim text below would
+    # misreport CALLER_CWD as unset — it is set, it is just not in a branch. This
+    # is the condition detect_branch_from_pwd() now refuses on, and this sentence
+    # is the one @devpulse asked to arrive: it names the mistake and the remedy.
+    if caller_cwd and not find_branch_root(Path(caller_cwd)):
+        return (
+            f"AIPASS_CALLER_CWD={caller_cwd} is not inside a branch — no "
+            ".trinity/passport.json at or above it. The caller invoked drone from "
+            "outside any branch directory (e.g. the repo root); re-run from within "
+            "the sending branch."
+        )
+
     if caller_branch:
         return (
             f"AIPASS_CALLER_BRANCH={caller_branch!r} is not a known sender: no matching "
@@ -52,11 +65,14 @@ def _detection_failure_reason() -> str:
             "is unset so no external identity could be synthesized."
         )
     if caller_cwd:
+        # Reached only when the cwd DOES sit in a branch (the case above already
+        # returned otherwise) — so the branch exists on disk but nothing in the
+        # registry claims it. Saying "not inside a branch" here would be the same
+        # class of lie the docstring above warns about.
         return (
-            f"AIPASS_CALLER_CWD={caller_cwd} is not inside a branch — no "
-            ".trinity/passport.json at or above it. The caller invoked drone from "
-            "outside any branch directory (e.g. the repo root); re-run from within "
-            "the sending branch."
+            f"AIPASS_CALLER_CWD={caller_cwd} sits inside a branch, but no registry "
+            "entry matches that path — the branch is not registered under this "
+            "project's AIPASS_REGISTRY.json or the caller project's *_REGISTRY.json."
         )
     return (
         "No AIPASS_CALLER_BRANCH or AIPASS_CALLER_CWD was set, and no "

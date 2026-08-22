@@ -9,6 +9,8 @@
 """Tests for CLI routing -- help flags, introspection, unknown commands, output capture."""
 
 import sys
+from pathlib import Path
+
 import pytest
 from io import StringIO
 from unittest.mock import patch, MagicMock
@@ -23,6 +25,32 @@ from aipass.ai_mail.apps.ai_mail import (
 
 
 # ---- Fixtures --------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _caller_stands_in_a_branch(monkeypatch):
+    """Give every test in this file a resolvable caller identity.
+
+    These are tests of ROUTING — which command reaches which module, and what the
+    exit code says about the result. They are not tests of identity. But main()
+    now refuses outright when the caller stands outside any branch (Patrick's
+    ruling, 2026-08-21), so without a caller they were implicitly asserting
+    something about identity they never meant to assert, and the answer depended
+    on the directory pytest was launched from:
+
+      cd src/aipass/ai_mail && pytest tests/test_cli_routing.py  -> 15 passed
+      cd <repo root>        && pytest src/.../test_cli_routing.py -> 2 FAILED
+
+    CI runs from the repo root, so per-branch green was not CI green (@devpulse,
+    3de0994d — the same shape as the 08-20 __init__.py collision).
+
+    A real caller always establishes an identity; these tests must too. Standing
+    in this branch is the most ordinary case — a human in their own seat, resolved
+    by the passport walk — and it needs no credential env var, so the fence is
+    exercised rather than bypassed. The fence is NOT weakened to accommodate them.
+    """
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(Path(__file__).resolve().parents[1]))
+    monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -170,17 +198,25 @@ def test_main_routed_but_failed_command_exits_nonzero(monkeypatch):
     """CANARY: a handled-but-failed command must not exit 0."""
     from aipass.cli.apps.modules import error as cli_error
 
+    reached = []
+
     class FailingModule:
         __name__ = "failing_module"
 
         @staticmethod
         def handle_command(command, args):
+            reached.append(True)
             cli_error("Invalid reply_path: /gone/inbox.json")
             return True
 
     monkeypatch.setattr(sys, "argv", ["ai_mail", "reply", "abc123", "text"])
     with patch.object(ai_mail_mod, "discover_modules", return_value=[FailingModule]):
         result = main()
+    # Must precede the exit-code checks: the identity fence ALSO returns 2, so
+    # from the repo root this test passed for months-adjacent minutes without ever
+    # reaching its module — a canary singing someone else's note. Proven by probe
+    # on 2026-08-21: RESULT=2, MODULE_REACHED=False.
+    assert reached, "never reached the module — this asserts the fence's 2, not resolve_exit's"
     assert result != 0, "failed delivery exited 0 — the exit code lied"
     assert result == 2
 

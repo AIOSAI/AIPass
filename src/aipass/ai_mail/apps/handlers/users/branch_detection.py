@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2025-11-18
-# Modified: 2026-08-07
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -37,6 +37,12 @@ if sys.platform == "win32":
 # CONSTANTS
 # =============================================
 BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
+
+# Values of AIPASS_CALLER_IDENTITY_SOURCE that are EVIDENCE OF WHO, not of WHERE,
+# and so survive a caller standing outside any branch. "project" is deliberately
+# absent: it names a directory, and a directory that happens to spell a citizen is
+# how a dispatch from the repo root sent as @aipass (@devpulse, 0bb77ec2).
+_CREDENTIAL_SOURCES = frozenset({"assigned", "passport"})
 
 
 def _get_contact_info(branch_name: str) -> Optional[Dict]:
@@ -235,6 +241,39 @@ def detect_branch_from_pwd() -> Optional[Dict]:
     json_handler.log_operation("detect_branch_from_pwd", {"cwd": str(Path.cwd())})
 
     try:
+        # AIPASS_CALLER_CWD is EVIDENCE of where the caller stood; AIPASS_CALLER_BRANCH
+        # is only a CLAIM about who they are, and the claim may not outvote the evidence.
+        # drone stamps CALLER_BRANCH from the nearest PROJECT directory name, so at the
+        # repo root it stamps 'aipass' — which collides with the @aipass citizen, whose
+        # contact row then resolves it "verified" and hands over that mailbox. That is
+        # how a dispatch run from the repo root sent as @aipass and woke the wrong
+        # citizen: 11 turns, $1.41 (@devpulse, 0bb77ec2; ruling in 096c9a42).
+        #
+        # ABSENT evidence is not CONTRADICTING evidence: an unset CALLER_CWD leaves the
+        # strategies below untouched, which is what in-process callers depend on
+        # (@trigger's delivery import, @daemon's wake import, the dispatch spawn env).
+        caller_cwd_env = os.environ.get("AIPASS_CALLER_CWD")
+        if caller_cwd_env and not find_branch_root(Path(caller_cwd_env)):
+            # The provenance decides, not the location. @drone stamps WHICH KIND of
+            # evidence named the caller (shipped 2026-08-21, at this branch's
+            # request): a CREDENTIAL travels, a location does not.
+            #
+            #   assigned — AIPASS_BRANCH_NAME, set when the process was created.
+            #              True from any directory; refusing it broke S102, where
+            #              an agent that cds into another branch is still itself.
+            #   passport — a passport under the caller's feet. drone saw the real
+            #              caller cwd and this process did not; trust the prover.
+            #   project  — a registry-derived PROJECT name. Answers "which project
+            #              am I in", never "who am I". @aipass the directory and
+            #              @aipass the citizen spell the same and are not the same.
+            #              This is the $1.41 wake; it stays refused forever.
+            #
+            # Anything else — absent (older drone, or no drone at all) or a value
+            # this code does not know — falls through to refusal. The lift is
+            # opt-in and fails closed.
+            if os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") not in _CREDENTIAL_SOURCES:
+                return _record_resolution(None, "caller_cwd:outside_branch", "refused")
+
         caller_branch = os.environ.get("AIPASS_CALLER_BRANCH")
         if caller_branch:
             contact = _get_contact_info(caller_branch)

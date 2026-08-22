@@ -400,9 +400,33 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
         error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
     else:
-        console.print(f"[dim]Wake-back enabled — sender will be woken when {target} completes (if available)[/dim]")
+        _announce_wake_back(target, verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")))
 
     return True
+
+
+def _announce_wake_back(target: str, sender: str) -> None:
+    """Print what will ACTUALLY happen when `target` finishes.
+
+    Managers are never woken — the blocklist is deliberate and stays. Telling a
+    manager "you will be woken" was a promise the lane could not keep, and the
+    manager then heard nothing at all: two live cases on 2026-08-21 (@devpulse
+    dispatching @ai_mail and @drone back to back). The wake-back now mails them,
+    so the promise says mail.
+
+    Args:
+        target: The dispatched branch.
+        sender: The address that will receive the wake-back.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager
+
+    if is_manager(sender):
+        console.print(
+            f"[dim]Wake-back enabled — {sender} is a manager and is never woken, "
+            f"so you will be MAILED when {target} completes[/dim]"
+        )
+    else:
+        console.print(f"[dim]Wake-back enabled — sender will be woken when {target} completes (if available)[/dim]")
 
 
 def _orchestrate_daemon() -> bool:

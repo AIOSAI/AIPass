@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-02
-# Modified: 2026-08-20
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -97,12 +97,14 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
 
     Builder-class citizens get woken back, subject to the same availability
     checks as a normal wake (interactive session, active lock, depth cap).
-    Managers never are: wake_branch's manager gate delivers the mail and skips
-    the wake by design, so a manager dispatcher is only ever mailed back.
+    Managers are never woken — the blocklist is correct and stays. They are MAILED
+    instead, by this function, via _mail_wake_back(). wake_branch's manager gate
+    does not send that mail: it returns having done nothing, which is what made
+    this a silent drop until 2026-08-21.
 
     Returns a result tag for the dispatch_wake.log:
       success, blocked_occupied, blocked_locked, blocked_depth,
-      skipped_sender, skipped_self, skipped_manager, failed
+      skipped_sender, skipped_self, mailed_manager, failed_manager_mail, failed
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -141,11 +143,12 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         # happened. The status object was honest all along; read it instead.
         manager_step = wake_status.find_step("manager")
         if manager_step and manager_step[0] == "info":
-            logger.info(
-                "[monitor] Wake-back skipped — sender %s is citizen_class=manager (mail delivered, never woken)",
-                sender,
-            )
-            return "skipped_manager"
+            # The wake is correctly refused; the NOTIFICATION is not optional. Until
+            # this, the branch returned here having neither woken nor mailed, and
+            # said "mail delivered" while delivering nothing.
+            if _mail_wake_back(sender, branch_email, exit_code, lock_file):
+                return "mailed_manager"
+            return "failed_manager_mail"
 
         if success:
             logger.info("[monitor] Wake-back: %s woken after %s completed (exit %d)", sender, branch_email, exit_code)
@@ -165,6 +168,56 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
     except Exception as e:
         logger.warning("[monitor] Wake-back failed for %s: %s", sender, e)
         return "failed"
+
+
+def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: str) -> bool:
+    """Deliver the wake-back as MAIL when the sender cannot be woken.
+
+    Managers are blocklisted from wakes and that is correct — two claudes on one
+    session id migrates the harness task state to the newer PID and kills the
+    running job (the OSPREY kill). The defect was never the blocklist: it was that
+    wake_branch returned True having done nothing, so the message built for the
+    sender was dropped and the manager was TOLD it would be woken and then was not
+    (@devpulse, confirmed live twice on 2026-08-21). A manager learned a dispatch
+    had finished only if the agent happened to volunteer an email.
+
+    Same transport as _send_bounce, for the same reason: `drone` resolves routing,
+    and cwd is the target branch — which is a real branch, so the identity fence
+    passes. Sending in-process would need a sender identity this process does not
+    have.
+
+    Returns:
+        bool: True when the mail was accepted for delivery.
+    """
+    subject = f"Dispatch complete: {branch_email} finished (exit {exit_code})"
+    body = (
+        f"{branch_email} finished (exit {exit_code}).\n\n"
+        f"You are a manager, so no agent was woken — that is by design and not a "
+        f"failure. This mail IS the wake-back.\n\n"
+        f"Check {branch_email}'s reply in your inbox, verify what it did, and hand "
+        f"off the next phase if there is one."
+    )
+    try:
+        result = subprocess.run(
+            ["drone", "@ai_mail", "send", sender, subject, body],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(Path(lock_file).parent.parent),
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",
+                sender,
+                result.returncode,
+                (result.stderr or "").strip()[:200],
+            )
+            return False
+        logger.info("[monitor] Wake-back mailed to manager %s (%s exit %d)", sender, branch_email, exit_code)
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[monitor] Wake-back mail to manager %s failed: %s", sender, e)
+        return False
 
 
 def _log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):

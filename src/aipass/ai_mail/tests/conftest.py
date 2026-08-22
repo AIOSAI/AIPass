@@ -46,6 +46,55 @@ def _isolate_notification_feed(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_mail_from_tests(monkeypatch):
+    """Refuse any test that shells out to `drone @ai_mail send` (or dispatch).
+
+    Earned the hard way on 2026-08-21: two tests exercising the manager wake-back
+    called subprocess.run without mocking it, and BOTH delivered real mail into
+    @devpulse's live inbox. The identity fence did not stop them — this suite runs
+    inside a dispatched agent whose shell carries AIPASS_BRANCH_NAME, so drone
+    stamped source=assigned and the send was, correctly, allowed.
+
+    Same class as the notification-feed and contacts guards above: a test that
+    writes into a citizen's real state. Mail is the worst of the three, because a
+    delivered message asks a human to read it. Tests that mean to exercise the
+    send path mock subprocess.run themselves, which overrides this.
+    """
+    import subprocess
+
+    real_run = subprocess.run
+
+    def _guarded(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and len(cmd) >= 3:
+            argv = [str(c) for c in cmd[:3]]
+            if argv[0].endswith("drone") and argv[1] == "@ai_mail" and argv[2] in ("send", "email", "dispatch"):
+                raise AssertionError(
+                    f"test tried to deliver REAL mail: {' '.join(str(c) for c in cmd[:4])} — "
+                    "mock subprocess.run in this test"
+                )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _guarded)
+
+
+@pytest.fixture(autouse=True)
+def _strip_ambient_identity_source(monkeypatch):
+    """Clear AIPASS_CALLER_IDENTITY_SOURCE for EVERY test.
+
+    This var is a CREDENTIAL: "assigned" or "passport" lets the identity fence
+    accept a caller standing outside any branch. A dispatched agent's own shell
+    carries it (this suite was first run under one holding source=passport), so
+    an ambient value silently DISABLES the fence inside tests that never mention
+    it — two fence tests passed while asserting the opposite of what they meant.
+
+    Stripped globally rather than per-fixture: the leak defeats a security-shaped
+    check, and the next test written would have to remember on its own. Tests that
+    need a value set it themselves; monkeypatch.setenv in the body wins over this.
+    """
+    monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_contacts_file(tmp_path, monkeypatch):
     """Point CONTACTS_FILE at tmp_path for EVERY test.
 

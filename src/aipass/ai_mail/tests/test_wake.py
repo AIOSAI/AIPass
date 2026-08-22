@@ -1851,3 +1851,38 @@ class TestWakeSessionPointer:
             assert args[args.index("--permission-mode") + 1] == "bypassPermissions"
             assert args[args.index("--output-format") + 1] == "json"
             assert "--max-turns" in args
+
+
+class TestIsManager:
+    """is_manager() — the promise at dispatch time must match the delivery."""
+
+    def _passport(self, tmp_path, name, citizen_class):
+        branch = tmp_path / name
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": citizen_class}}), encoding="utf-8"
+        )
+        return branch
+
+    def test_manager_passport_is_manager(self, tmp_path, monkeypatch):
+        branch = self._passport(tmp_path, "devpulse", "manager")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@devpulse") is True
+
+    def test_ordinary_citizen_is_not(self, tmp_path, monkeypatch):
+        branch = self._passport(tmp_path, "prax", "aipass_framework")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@prax") is False
+
+    def test_unreadable_passport_is_not_a_manager(self, tmp_path, monkeypatch):
+        """Fail toward the ordinary path: an unknown citizen is woken, which is
+        the behaviour that existed before this helper. Never invent a manager."""
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (tmp_path / "nope", e))
+        assert wake_mod.is_manager("@ghost") is False
+
+    def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):
+        """wake_branch's manager gate sends NO mail — the caller does. Its log line
+        claimed 'mail delivered', which is how a silent drop read as a delivery for
+        as long as it did (@devpulse P0, 2026-08-21)."""
+        src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
+        assert "wake skipped, mail delivered" not in src

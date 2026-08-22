@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -47,7 +47,7 @@ from typing import Optional, Tuple
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-from .branch_detection import find_branch_root
+from .branch_detection import find_branch_root, _CREDENTIAL_SOURCES
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -89,11 +89,26 @@ def resolve_verified_caller() -> str:
         normal answer (direct invocation, no drone), never an exception —
         callers decide what an unproven caller may do.
     """
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
+
+    # Evidence before claim. A CALLER_CWD that sits in no branch DISPROVES any
+    # CALLER_BRANCH stamped alongside it: drone derives that name from the nearest
+    # project directory, so at the repo root it reads 'aipass' and collides with the
+    # citizen of the same name. Returning that here would hand a privilege check an
+    # identity nobody proved (@devpulse, 0bb77ec2). Unset is different from
+    # contradicted — no cwd means no verdict, and the claim still stands.
+    if caller_cwd and not find_branch_root(Path(caller_cwd)):
+        # Same key as the identity fence: a credential travels, a location does
+        # not. Refusing "assigned" here would close the wake lane on exactly the
+        # dispatched agents it exists to serve, while "project" — a directory name
+        # — must never buy a privileged sender claim.
+        if os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") not in _CREDENTIAL_SOURCES:
+            return ""
+
     branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
     if branch:
         return _normalize(branch)
 
-    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if caller_cwd:
         root = find_branch_root(Path(caller_cwd))
         if root:

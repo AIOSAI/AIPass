@@ -2921,24 +2921,35 @@ class TestWakeBackManagerHonesty:
         )
         return mock_wake
 
-    def test_manager_sender_returns_skipped_manager(self, monkeypatch):
-        """The gate's True must not be reported as a successful wake."""
+    def test_manager_sender_returns_mailed_manager(self, monkeypatch):
+        """The gate's True must not be reported as a successful wake.
+
+        Tag changed from skipped_manager to mailed_manager on 2026-08-21: the
+        manager is no longer merely skipped, it is mailed. "Skipped" was the
+        honest tag for a silent drop and is the wrong word for a delivery.
+        """
         monkeypatch.setattr(mod, "logger", MagicMock())
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        )
         result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
-        assert result == "skipped_manager"
+        assert result == "mailed_manager"
 
     def test_manager_wake_back_never_claims_woken(self, monkeypatch):
-        """No log line may assert the manager was woken."""
+        """No log line may assert the manager was woken — it says MAILED instead."""
         mock_logger = MagicMock()
         monkeypatch.setattr(mod, "logger", mock_logger)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        )
 
         _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
 
         formats = [c.args[0] for c in mock_logger.info.call_args_list if c.args]
         assert not any("woken after" in f for f in formats), f"claimed a wake: {formats}"
-        assert any("skipped" in f for f in formats), f"no skip logged: {formats}"
+        assert any("mailed" in f.lower() for f in formats), f"no mail logged: {formats}"
 
     def test_daemon_bypassed_manager_still_reports_success(self, monkeypatch):
         """The @daemon self-wake exception records manager as ok — that IS a real wake."""
@@ -2959,6 +2970,71 @@ class TestWakeBackManagerHonesty:
         self._patch_wake(monkeypatch, status, True)
         result = _wake_sender("@prax", "@ai_mail", 0, "/fake/lock")
         assert result == "success"
+
+    def test_manager_sender_is_mailed_not_silently_dropped(self, monkeypatch):
+        """P0: a manager was TOLD it would be woken and then silently was not.
+
+        The blocklist is correct and stays — two claudes on one session id kills
+        the running job (the OSPREY kill). The bug is the silent return: the
+        wake-back message was built and dropped on the floor, so a manager learned
+        a dispatch finished only if the agent volunteered an email. Ten consecutive
+        skipped_manager lines in canary's dispatch_wake.log, and @devpulse confirmed
+        it live twice tonight (@ai_mail and @drone back to back).
+        """
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+
+        assert result == "mailed_manager"
+        assert sent.called, "manager wake-back sent no mail — the silent drop"
+        argv = sent.call_args.args[0]
+        assert argv[:3] == ["drone", "@ai_mail", "send"]
+        assert argv[3] == "@devpulse"
+
+    def test_manager_mail_names_target_and_exit_code(self, monkeypatch):
+        """The mail must carry what the dropped wake-back carried: WHICH target
+        finished and how. A manager cannot verify or hand off the next phase
+        without it (@daemon, 077cd1cf)."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        _wake_sender("@devpulse", "@ai_mail", 3, "/fake/lock")
+
+        body = " ".join(sent.call_args.args[0][4:])
+        assert "@ai_mail" in body
+        assert "3" in body
+
+    def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch):
+        """If the send fails the manager still learns nothing — that must not wear
+        the same tag as a delivered mail. Same lesson as the gate's True."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=1, stdout="", stderr="boom"))
+        )
+
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+        assert result == "failed_manager_mail"
+
+    def test_non_manager_wake_back_sends_no_mail(self, monkeypatch):
+        """An ordinary citizen is woken, not mailed. The mail exists only because
+        the wake cannot happen — adding it everywhere would double every wake-back."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        status = DispatchStatus()
+        status.ok("resolve", "@prax → /repo/src/aipass/prax")
+        status.ok("spawn", "agent started")
+        self._patch_wake(monkeypatch, status, True)
+        sent = MagicMock()
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        result = _wake_sender("@prax", "@ai_mail", 0, "/fake/lock")
+        assert result == "success"
+        assert not sent.called
 
     def test_skipped_manager_reaches_the_wake_log(self, monkeypatch, tmp_path):
         """The honest tag is what lands in dispatch_wake.log."""

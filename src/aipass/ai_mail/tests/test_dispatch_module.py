@@ -1256,3 +1256,41 @@ class TestSpoofedSenderRefusal:
         send.assert_called_once()
         wake.assert_called_once()
         assert errors == []
+
+
+class TestWakeBackPromiseMatchesDelivery:
+    """The line printed after a successful dispatch must describe what will
+    actually happen. A manager is never woken — it is mailed."""
+
+    def _run(self, monkeypatch, sender_is_manager):
+        import aipass.ai_mail.apps.modules.dispatch as dmod
+        from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
+
+        printed = []
+        status = DispatchStatus()
+        status.ok("spawn", "agent started")
+        monkeypatch.setattr(dmod, "console", MagicMock(print=lambda m, **k: printed.append(str(m))))
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
+            MagicMock(return_value=(status, True)),
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.wake.is_manager",
+            MagicMock(return_value=sender_is_manager),
+        )
+        return printed, dmod
+
+    def test_manager_sender_is_promised_mail_not_a_wake(self, monkeypatch):
+        """@devpulse was told 'sender will be woken' twice on 2026-08-21 and was
+        not woken either time. Managers get mail; the promise must say mail."""
+        printed, dmod = self._run(monkeypatch, sender_is_manager=True)
+        dmod._announce_wake_back("@canary", "@devpulse")
+        line = " ".join(printed).lower()
+        assert "mailed" in line
+        assert "will be woken" not in line
+
+    def test_ordinary_sender_is_still_promised_a_wake(self, monkeypatch):
+        printed, dmod = self._run(monkeypatch, sender_is_manager=False)
+        dmod._announce_wake_back("@canary", "@prax")
+        line = " ".join(printed).lower()
+        assert "woken" in line

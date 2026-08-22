@@ -468,6 +468,37 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
 # ─── Branch Resolution ──────────────────────────────────
 
 
+def is_manager(branch_email: str) -> bool:
+    """True when `branch_email` is citizen_class=manager, i.e. never woken.
+
+    Exists so a caller can PROMISE the right thing. Dispatch used to tell every
+    sender "you will be woken when X completes"; for a manager that was false, and
+    the manager then heard nothing at all (@devpulse P0, 2026-08-21). Managers are
+    mailed instead — the promise has to say so.
+
+    Fails toward "not a manager": an unreadable or missing passport keeps the
+    ordinary wake path, which is the behaviour that predates this helper. Inventing
+    a manager would silently suppress a wake that should happen.
+
+    Args:
+        branch_email: Address of the branch to classify (e.g. "@devpulse").
+
+    Returns:
+        bool: True only when a readable passport says citizen_class == "manager".
+    """
+    resolved = resolve_branch(branch_email)
+    if not resolved:
+        return False
+    branch_path, _ = resolved
+    try:
+        with open(branch_path / ".trinity" / "passport.json", "r", encoding="utf-8") as f:
+            passport = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.info("[wake] Could not classify %s: %s", branch_email, exc)
+        return False
+    return passport.get("identity", {}).get("citizen_class", "") == "manager"
+
+
 def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
 
@@ -709,8 +740,14 @@ def wake_branch(
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
             else:
-                status.info("manager", f"{email} is a manager — mail only, wake skipped")
-                logger.info("[wake] %s is citizen_class=manager — wake skipped, mail delivered", email)
+                # Returns True having woken nothing and sent nothing. The caller
+                # owns the notification: the dispatch pipeline already mailed this
+                # manager before calling, and dispatch_monitor's wake-back mails it
+                # via _mail_wake_back(). Saying "mail delivered" here asserted a
+                # delivery this function never makes, which is how the wake-back's
+                # silent drop read as success for months (@devpulse P0, 2026-08-21).
+                status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
+                logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
                 return status, True
     except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
         logger.info("[wake] Could not read passport for %s: %s", email, exc)

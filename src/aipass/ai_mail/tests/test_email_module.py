@@ -1149,24 +1149,27 @@ class TestHandleCommand:
 
 
 # ===========================================================================
-# _resolve_branch_path RuntimeError fallback (email.py line 67-69)
+# _resolve_branch_path — identity propagates, never substitutes
 # ===========================================================================
 
 
 class TestResolveBranchPath:
-    """Tests for _resolve_branch_path fallback behaviour."""
+    """Tests for _resolve_branch_path identity behaviour."""
 
-    def test_runtime_error_fallback(self, monkeypatch):
-        """When get_current_user raises RuntimeError, falls back to _AI_MAIL_DIR."""
+    def test_runtime_error_propagates_no_substitution(self, monkeypatch):
+        """POLICY CHANGE 2026-08-21: an unresolvable caller no longer collapses to
+        _AI_MAIL_DIR. That substitution pointed view/close/reply at @ai_mail's own
+        mailbox, so a caller standing outside any branch read and archived another
+        citizen's mail with no signal (Patrick's ruling via @devpulse, 096c9a42)."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.get_current_user",
             lambda: (_ for _ in ()).throw(RuntimeError("no branch")),
         )
 
-        from aipass.ai_mail.apps.modules.email import _resolve_branch_path, _AI_MAIL_DIR
+        from aipass.ai_mail.apps.modules.email import _resolve_branch_path
 
-        result = _resolve_branch_path()
-        assert result == _AI_MAIL_DIR
+        with pytest.raises(RuntimeError, match="no branch"):
+            _resolve_branch_path()
 
 
 # ===========================================================================

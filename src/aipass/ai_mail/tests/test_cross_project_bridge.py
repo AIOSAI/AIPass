@@ -47,7 +47,16 @@ def repo(tmp_path):
         json.dumps({"branches": [{"name": "DEVPULSE", "email": "@devpulse", "path": "src/aipass/devpulse"}]}),
         encoding="utf-8",
     )
-    (tmp_path / "src" / "aipass" / "devpulse").mkdir(parents=True)
+    devpulse_seat = tmp_path / "src" / "aipass" / "devpulse"
+    (devpulse_seat / ".trinity").mkdir(parents=True)
+    # Every real citizen carries a passport; a seat without one is a shape that
+    # does not exist on disk. The identity fence proves the caller by walking
+    # AIPASS_CALLER_CWD up to this file, so a passport-less fixture made the
+    # admin caller unprovable for a reason no live tree could reproduce.
+    (devpulse_seat / ".trinity" / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": "devpulse", "email": "@devpulse"}}),
+        encoding="utf-8",
+    )
 
     for project, seat in (("baud", "baud"), ("earmark", "earmark")):
         seat_path = tmp_path / "projects" / project
