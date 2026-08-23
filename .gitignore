@@ -33,6 +33,10 @@ DASHBOARD.local.json
 STATUS.local.md
 STATUS.md
 dev.local.md
+# Blanket: every *.local.md on this machine is a working file that stays home.
+# Named files above are kept for documentation; this catches the next one that
+# is not named here (e.g. TESTING_<plan>.local.md) before it ships publicly.
+*.local.md
 CLOSED_PLANS.local.json
 .ai_central/
 system_logs/
