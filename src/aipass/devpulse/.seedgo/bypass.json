@@ -26,6 +26,11 @@
     },
     {
       "standard": "cli",
+      "file": "apps/handlers/watchdog/presenter.py",
+      "reason": "Watchdog presentation layer \u2014 console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
+    },
+    {
+      "standard": "cli",
       "file": "apps/handlers/feedback/compose.py",
       "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
     },
