@@ -14,6 +14,21 @@
 
 ---
 
+## Quick Start
+
+```bash
+# Confirm the agent is alive
+drone @{{BRANCH}} hello
+
+# Show connected modules
+drone @{{BRANCH}}
+
+# Full help text
+drone @{{BRANCH}} --help
+```
+
+---
+
 ## Commands
 
 All commands run through `drone @{{BRANCH}} <command>`.
@@ -22,6 +37,7 @@ All commands run through `drone @{{BRANCH}} <command>`.
 drone @{{BRANCH}}                # Show connected modules
 drone @{{BRANCH}} hello          # Confirm the agent is alive
 drone @{{BRANCH}} --help         # Full help text
+drone @{{BRANCH}} --version      # Version string
 ```
 
 ---
@@ -53,3 +69,7 @@ apps/
 ---
 
 *Created by `aipass new` via spawn project_agent template.*
+
+---
+
+*Last Updated: {{DATE}}*

@@ -84,6 +84,7 @@ apps/
 
 *Non-obvious quirks, hard-won lessons, things that will waste 20 minutes if you don't know them. These are the breadcrumbs that save time — the stuff you'd tell a new agent on day one.*
 
-- After dispatching an agent, arm the Monitor-tool watchdog: `drone @devpulse watchdog agent @target`
+- You do not arm watchdogs — that is the project owner's seat (the citizen marked `owner: true`
+  in the project registry). After dispatching, expect the reply as mail: `drone @ai_mail inbox`
 - {Gotcha or non-obvious behavior}
 - {Hard-won lesson from a past session}

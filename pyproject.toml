@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.7.17"
+version = "2.7.18"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -128,7 +128,9 @@ exclude_lines = [
 line-length = 120
 # ruff 0.16.0 started linting/formatting Python code blocks inside markdown.
 # READMEs are prose with illustrative snippets — keep them out of scope.
-extend-exclude = ["*.md"]
+# spawn's templates carry {{BRANCH}} placeholders in code positions — not valid
+# Python until rendered at create time; the newborn they mint IS linted.
+extend-exclude = ["*.md", "src/aipass/spawn/templates"]
 
 [tool.ruff.lint]
 # Pin the pre-ruff-0.16 default rule set: 0.16.0 expanded the defaults to many

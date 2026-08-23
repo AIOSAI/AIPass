@@ -9,6 +9,164 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-22] — v2.7.18: the watchdog stops polling, identity stops being a directory name, a test citizen is born
+
+**feat(watchdog)** — three releases land as one arc, and each one killed a
+defect the previous one had left standing. r2 gave detection and delivery
+separate lifetimes: the 12:34 miss convicted `run_in_background`, which
+notifies on process exit only, so a continuous watcher armed that way wakes
+nobody, ever. r3 cut the daemon's idle cost from 7.72% of a core to 0.017% —
+1640 CPU-seconds burned across 5.9 hours in which zero dispatches occurred.
+r4 deletes the daemon outright, because gating the polling was the wrong fix:
+`feed.py`'s own header already said detection by inference is replaced by
+detection by report, and the code had taken one step toward it. Completion is
+now REPORTED by the completing agent. The defect that hid inside the old
+design: every completed dispatch produced TWO wakes for months — @ai_mail's
+report, then the daemon's lock inference one to two seconds later, drained
+from both sources with no dedupe. It survived because a duplicate wake looks
+exactly like a working wake, and every test that could have caught it asserted
+that something *arrived*, which stayed true throughout. Only a COUNT catches
+it; the replacing test counts. The wire also answers "was this mine" for the
+first time — the feed names the branch that finished, never the branch that
+sent, so this seat was woken for every citizen's completion fleet-wide. Sender
+is now stamped on the completion line and attribution is one comparison;
+an unattributable record fails CLOSED, because failing open is not a smaller
+version of the fleet-wide wake, it *is* the fleet-wide wake. Crash coverage
+stopped being a job for a process and became a fact about a file: a register
+entry past `expected_by` means the monitor died, true whether or not anyone is
+looking. Named rather than buried: that trades 10 minutes of detection latency
+for 2 hours, a 12x regression, and buying it back is a deliberate second
+timeout with its own justification, never a quiet edit to this one.
+
+**fix(ai_mail)** — identity stops being something a directory can spell. A
+dispatch run from the repo root sent as @aipass, and its wake-back then woke
+@aipass instead of the sender: 11 turns, $1.41, a phantom badge on a phone
+that could not be cleared, and a lock renamed by hand at midnight. Nothing
+warned, and the root cause was not a missing policy — `get_current_user()`
+already documented "no fallbacks, fails hard" and every route already reached
+it. It SUCCEEDED and returned the wrong citizen, because the identity was
+derived from the project *directory name* and the contact lookup then found
+the real citizen of that name. The raise had to be made reachable, not added.
+`AIPASS_CALLER_CWD` is now treated as evidence of where the caller stood while
+the claimed branch is only a claim, and the evidence outvotes the claim; the
+fence sits at the CLI entry above routing so every verb obeys it. Once @drone
+stamped provenance, the fence learned to ask what KIND of evidence names a
+caller: assigned and passport are credentials and pass from anywhere, a
+directory name is refused permanently, and absent or unrecognised is refused
+too — so the lift is opt-in and fails closed against an older drone. Three
+more silent substitutions in the same lane went with it, all of which had
+never fired because the claim path masked them. The manager wake-back was two
+lies, not one: the drop (managers were promised a wake the gate always
+blocked) and the promise (senders were told "you will be woken" regardless of
+class). Managers are now mailed, and told so. Earlier in the train, dispatch
+began recording the session it lands in — resume by pointer, not by transcript
+mtime, which is what every resume door in the system had been ranking by.
+
+**fix(drone)** — a fallback that fired on the happy path was also swallowing a
+security refusal. The router's fast path excluded interactive commands, but
+`status` is one, so `@git status` skipped it, looked for a *branch* named git,
+raised `BranchNotFoundError` on every single call by design, got caught, and
+was handed to the identical call the fast path would have made. The detour
+achieved nothing — and removing all three fallback sites rather than only the
+noisy one exposed that `resolve_branch()` refuses a registry path escaping the
+project root by raising that same exception. That refusal was reaching the
+except arm and being answered by running the module: a blocked branch served
+through another door. Nobody was hunting for it. Side effect of the fix:
+drone's own log stops being 1277 of 1279 lines of one INFO message.
+
+**feat(canary)** — @canary is born, a permanent test citizen, so dispatch — the
+riskiest lane in the system — is exercised on something disposable instead of
+on a real branch doing real work. It earned its keep immediately. Dispatched
+to probe owner-gates from a NON-OWNER seat, which is the one thing an owner
+can never verify from their own chair, it found that refusals EXITED 0:
+`warning()` does not call `mark_command_failed()` and `error()` does, so
+`<refused command> && <next step>` ran the next step, and nothing in the exit
+status said otherwise. Eight sites fixed across watchdog, feedback, compass
+and `admin_grant` — the birth-certificate privilege ceremony, reporting
+success to the shell while granting nothing. All now exit 2. It also found the
+gate outranking `--help`, so a stranger could not read the text naming whose
+module it is. Its birth also turned a months-old latent pytest defect into a
+hard failure: two branches missing a package-marker `__init__.py` resolve to
+the same bare `tests.conftest`, and that aborts collection for the WHOLE
+suite at the first clash. Fixed in both colliding branches, then fixed at the
+source — the spawn scaffold now mints the marker at birth, so the next citizen
+is born with it instead of re-redding the board.
+
+**feat(flow)** — a project is its register. A directory is a project root if
+and only if it holds a `<NAME>_REGISTRY.json` carrying a top-level `branches`
+key — not its repository marker, not the presence of citizens, not nesting
+depth. That distinguishes the 15 real projects on this machine, including
+zero-citizen ones and one with no repository marker at all; the `branches` key
+is load-bearing, because three files match the name glob and are not registers,
+and a name-only test would have minted them into projects and silently pulled
+rows out of their real project's scope. The new `project_scope` handler never
+consults `__file__` — seven files in flow answer "where am I" that way, which
+is right for flow's own registries and wrong for "whose plan is this".
+`close --all` gains three fences: `--exclude-type` validated against the
+registered templates, any unknown argument refuses the whole run instead of
+being ignored, and rows are scoped to the caller's project. Held rows are
+counted by WHY, and "foreign" is kept distinct from "unattributable", because
+a row no register claims is a data-quality defect and collapsing the two is
+how the second kind stays invisible. And the one that matters: RESTORE WAS
+DEAD FOR 719/719 CLOSED PLANS — it checked the `file_path` that close had
+archived away, while the archive sat intact. It had been proven on a test plan
+whose file still existed: proof on a neighbour is not proof on the row. It now
+reads the archive; 412/719 recoverable, 307 pre-May closes have no artifact.
+
+**feat(spawn)** — a newborn citizen is no longer born failing. @canary's birth
+proved the framework template minted citizens at 79% against a 100% CI gate —
+day-one red through no fault of their own. The template now ships a compliant
+entry point (META block, `--version`/`-V`, non-zero refusals on stderr), a
+json-handler shim, and 47 genuine starter tests; a probe citizen minted from
+the fixed template audits 100% on the real gate and was retired through the
+lifecycle, not deleted. The catch that mattered: a template file is a
+FLEET-WIDE MANDATE — seedgo's architecture baseline requires every template
+file in every branch of that class, so two new starter-test files red-boarded
+nine green branches that hadn't changed a line. Fixed via the template's
+registry ignore (files still ship at create, just aren't retroactive
+structural law). The template's prompt also stops teaching newborns a
+watchdog reflex that was owner-only since DPLAN-0239 and retired by r4 —
+an instruction whose only possible outcome was a refusal. project_agent got
+the same-species half (84% → 92%); its structural gaps are named, not
+papered over.
+
+**feat(hooks)** — the terminal boot menu learns what a dispatched branch is
+(session_boot 4.4.0). Two doors were broken in the same place: every human
+entry door resumed with `-c`, and interactive `-c` refuses headless
+transcripts. The dispatched card's door became a resume-INTERCEPT — reclaim
+stops the agent and the seat inherits the chat — and the first successful live
+intercept of a dispatched agent followed.
+
+**refactor(api)** — the room socket moves out of the route into a handler that
+owns the wire for as long as both ends are alive. The split it enforces is the
+load-bearing part: binary frames are keystrokes, text frames are control,
+which is what lets a resize or a liveness probe ride the same socket as the
+operator's typing without either being mistaken for the other. Bytes are
+forwarded undecoded in both directions, because the room emits escape
+sequences and partial UTF-8 across chunk boundaries and decoding at either end
+corrupts both. Riders from the same nights: room-lane liveness after the phone
+corpse-frame incident, an advisory throttle, and bearer-token receipts rehomed
+out of the home root.
+
+**fix(backup)** — a run ceiling, because no ignore list catches the build
+system nobody has met yet. One `backup all` run wrote 50GB over 7.5 hours
+through a generated ignore file that predated its target's build tooling.
+
+**fix(skills)** — a fall-through is not a warning. `_parse_simple_value` tries
+float, then int, and uses the ValueError as its *route* to the string branch,
+so the non-numeric case is the design, not a fault, and stops logging itself
+as one.
+
+**docs(prompts)** — every injected prompt file now opens with a pointer to
+`PROMPT_STYLE.md`: the four root tiers, every branch's local prompt, and both
+spawn templates, so a citizen born tomorrow carries it too. The reason it is a
+pointer at the top of the file rather than trust is measured, not theoretical
+— while shrinking one prompt its author re-added bold and caps, the two things
+the style guide bans, in the same pass. The writer cannot feel urgency
+creeping back into their own text; only the checks catch it. Devpulse's README
+is rewritten for the watchdog's login model, and its branch prompt dieted from
+2400 to 1032 words.
+
 ## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own

@@ -10,8 +10,6 @@ import json
 import os
 from pathlib import Path
 
-import pytest
-
 
 REGISTER_SUFFIX = "_REGISTRY" + ".json"  # assembled: the literal name is a sealed-write trigger
 

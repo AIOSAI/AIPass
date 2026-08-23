@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: {{BRANCH}}.py
+# Description: Entry point CLI for drone @{{BRANCH}} — project agent
+# Version: 1.0.0
+# Created: {{DATE}}
+# Modified: {{DATE}}
+# =============================================
+
 """
 {{BRANCHNAME}} — Project Agent
 
@@ -12,14 +20,14 @@ import sys
 from pathlib import Path
 from typing import Any, List
 
-PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
+# Set before the prax import: the logger resolves its branch at import time,
+# so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
 from aipass.cli.apps.modules import console  # noqa: E402
 from aipass.prax import logger  # noqa: E402
+
+__version__ = "1.0.0"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -32,7 +40,10 @@ def _module_import_path(stem: str) -> str:
         try:
             importlib.import_module(prefix)
             return prefix
-        except ImportError:
+        except ImportError as e:
+            # Not silent: which layout answered is a real behavioural branch, so
+            # the reason a candidate was skipped has to stay readable afterwards.
+            logger.info("[{{BRANCHNAME}}] Import failed for %s (%s) - trying next layout", prefix, e)
             continue
     return f"apps.modules.{stem}"
 
@@ -102,6 +113,10 @@ def print_help() -> None:
         desc = (m.__doc__ or "").strip().split("\n")[0]
         console.print(f"  [green]{cmd:10}[/green] [dim]{desc}[/dim]")
     console.print()
+    console.print("[yellow]Flags:[/yellow]")
+    console.print("  [cyan]--help, -h[/cyan]      Show this help")
+    console.print("  [cyan]--version, -V[/cyan]   Show version")
+    console.print()
     console.print("[yellow]Examples:[/yellow]")
     console.print()
     console.print("  [dim]# Check the agent is alive[/dim]")
@@ -122,6 +137,10 @@ def main():
 
     if args[0] in ("--help", "-h", "help"):
         print_help()
+        return 0
+
+    if args[0] in ("--version", "-V"):
+        console.print(f"{{BRANCHNAME}} v{__version__}")
         return 0
 
     if args[0] == "hello":
