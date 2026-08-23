@@ -8,7 +8,12 @@
     {
       "file": "tests/test_scaffold.py",
       "standard": "architecture",
-      "reason": "Test file — lives in tests/, not in the 3-layer apps/ structure by design"
+      "reason": "Test file \u2014 lives in tests/, not in the 3-layer apps/ structure by design"
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "naming",
+      "reason": "Shared-instance shim pattern \u2014 module-level names are function re-exports from JsonHandler, not constants. Lowercase is correct for callable bindings. Matches spawn/apps/handlers/json/json_handler.py and memory/apps/handlers/json/json_handler.py, which carry this identical bypass for this identical file."
     }
   ],
   "notes": {
