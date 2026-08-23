@@ -1,4 +1,5 @@
 # DAEMON — Branch Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/daemon/.aipass/aipass_local_prompt.md — Injected on every prompt when in daemon directory. -->
 
 Background scheduler and monitoring branch. Cron-triggered tasks, activity reports, action registry, scheduled follow-ups.

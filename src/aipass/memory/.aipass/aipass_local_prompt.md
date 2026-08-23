@@ -1,4 +1,5 @@
 # MEMORY Branch-Local Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 ## Identity
 

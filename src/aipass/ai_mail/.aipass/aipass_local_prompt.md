@@ -1,4 +1,5 @@
 # AI_MAIL Branch-Local Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- Source: src/aipass/ai_mail/.aipass/aipass_local_prompt.md -->
 
 ## Role

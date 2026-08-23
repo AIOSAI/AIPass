@@ -2270,4 +2270,3 @@ class TestTypingIntoAWatchLeavesARecord:
                         line = wait_for_log(log, "socket detached from")
 
         assert "close 1008" in line
-

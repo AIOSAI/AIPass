@@ -1,4 +1,5 @@
 # AIPass — Kernel
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 <!-- .aipass/tier0_kernel.md — Tier 0, injected every 5 turns (cadence period 5) + on every fresh context (new chat / clear / after compact). The irreducible "don't get lost" core. Keep it tiny — target under 2,000 chars. The full roster/framework/conventions arrive periodically as Tier 1 (.aipass/tier1_navmap.md); deep detail is pulled on demand. Format: .aipass/PROMPT_STYLE.md -->
 

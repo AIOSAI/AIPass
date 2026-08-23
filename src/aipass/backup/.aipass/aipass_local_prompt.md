@@ -1,4 +1,5 @@
 # BACKUP — Branch Prompt
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 *Injected every turn. Breadcrumbs only — details in README, --help, .trinity/ memories, STATUS.local.md.*
 

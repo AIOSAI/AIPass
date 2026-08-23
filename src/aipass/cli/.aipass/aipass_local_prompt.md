@@ -1,4 +1,5 @@
 # CLI — Branch Prompt
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/cli/.aipass/aipass_local_prompt.md — Injected every prompt when in cli directory. -->
 
 Shared Rich display and formatting service for all AIPass branches. Provides consistent terminal output — headers, success/error/warning messages, section breaks, operation templates — so every branch renders the same without duplicating formatting code.

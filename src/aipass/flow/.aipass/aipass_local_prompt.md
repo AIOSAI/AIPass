@@ -1,4 +1,5 @@
 # Flow — Plan Lifecycle Management
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 Flow is AIPass's unified plan lifecycle system. Creates, tracks, closes, archives numbered work plans across multiple plan types (FPLAN, DPLAN) via data-driven plugin architecture.
 # Commands

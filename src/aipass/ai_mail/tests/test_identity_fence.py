@@ -24,7 +24,6 @@ stood. When it is set and does not sit inside a branch, no identity is provable
 and every verb refuses — a claim in ``AIPASS_CALLER_BRANCH`` cannot outvote it.
 """
 
-import os
 from pathlib import Path
 
 import pytest

@@ -111,6 +111,34 @@
       "subject": "Log rotation retention: backup_count 1 to 3, dead config-template schema fix",
       "date_closed": "2026-08-05",
       "location": "prax"
+    },
+    {
+      "plan_id": "DPLAN-0242",
+      "type": "DPLAN",
+      "subject": "Runaway-log detection and escalation",
+      "date_closed": "2026-08-22",
+      "location": "prax"
+    },
+    {
+      "plan_id": "DPLAN-0280",
+      "type": "DPLAN",
+      "subject": "Event-queue hardening: priority-aware eviction, structural diagnostics sink, FileWatcherManager dead path",
+      "date_closed": "2026-08-22",
+      "location": "prax"
+    },
+    {
+      "plan_id": "DPLAN-0298",
+      "type": "DPLAN",
+      "subject": "Prompt-lane relocations: first-log-call cost",
+      "date_closed": "2026-08-22",
+      "location": "prax"
+    },
+    {
+      "plan_id": "DPLAN-0307",
+      "type": "DPLAN",
+      "subject": "Ecosystem observer per logging process: 1413 watches in every process that logs",
+      "date_closed": "2026-08-22",
+      "location": "prax"
     }
   ],
   "document_metadata": {

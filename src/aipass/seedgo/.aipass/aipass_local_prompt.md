@@ -1,4 +1,5 @@
 # SEEDGO — Branch Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/seedgo/.aipass/aipass_local_prompt.md — Injected every prompt when in seedgo directory. -->
 
 Standards compliance platform. Audits branches, queries standard content, manages bypass rules.

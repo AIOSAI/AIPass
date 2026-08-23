@@ -288,4 +288,4 @@ class TestFormat:
 
     def test_missing_fields_do_not_raise(self):
         """A malformed event still renders — a formatter that raises kills the wire."""
-        assert feed.format_feed_event({}) == '? @? title="?"' 
+        assert feed.format_feed_event({}) == '? @? title="?"'
