@@ -16,6 +16,7 @@ to keep if the file ever shrinks:
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -230,20 +231,33 @@ class TestTheReportIsDurable:
     def test_re_rooting_never_returns_the_live_reports_directory(self, repo):
         assert report.reports_dir(repo_root=repo) != report.reports_dir()
 
-    def test_it_raises_rather_than_guess_when_the_relative_shape_is_unknowable(self, monkeypatch, tmp_path):
+    def test_re_rooting_works_with_no_registry_marker_anywhere(self, monkeypatch, tmp_path):
+        """Same fresh-checkout fix as the register — see its test for the history."""
         orphan = tmp_path / "no-marker"
         orphan.mkdir()
         monkeypatch.setattr(report, "find_repo_root", lambda: orphan)
+        target = tmp_path / "elsewhere"
 
-        with pytest.raises(RuntimeError, match="cannot re-root"):
-            report.reports_dir(repo_root=tmp_path / "elsewhere")
+        assert report.reports_dir(repo_root=target) == target / ".aipass" / report.REPORTS_DIRNAME
+
+    def test_a_report_still_writes_with_no_registry_marker_anywhere(self, monkeypatch, tmp_path):
+        orphan = tmp_path / "no-marker"
+        orphan.mkdir()
+        monkeypatch.setattr(report, "find_repo_root", lambda: orphan)
+        target = tmp_path / "elsewhere"
+
+        path = report.write_report({"dispatch_id": "x"}, repo_root=target)
+
+        assert path is not None and Path(path).exists()
 
     def test_an_unwritable_report_returns_none_so_the_caller_can_say_so(self, monkeypatch, tmp_path):
-        orphan = tmp_path / "no-marker"
-        orphan.mkdir()
-        monkeypatch.setattr(report, "find_repo_root", lambda: orphan)
+        """A real write failure still reports itself — a FILE where the dir must go."""
+        blocker = tmp_path / "blocked"
+        blocker.mkdir()
+        (blocker / ".aipass").write_text("not a directory", encoding="utf-8")
+        monkeypatch.setattr(report, "find_repo_root", lambda: tmp_path / "anywhere")
 
-        assert report.write_report({"dispatch_id": "x"}, repo_root=tmp_path / "elsewhere") is None
+        assert report.write_report({"dispatch_id": "x"}, repo_root=blocker) is None
 
 
 class TestTheStamp:

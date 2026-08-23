@@ -26,8 +26,11 @@ and every verb refuses — a claim in ``AIPASS_CALLER_BRANCH`` cannot outvote it
 
 from pathlib import Path
 
+import json
+
 import pytest
 
+from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 from aipass.ai_mail.apps.handlers.users.branch_detection import detect_branch_from_pwd
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
 from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_verified_caller
@@ -101,15 +104,62 @@ class TestLegitimateCallersUnaffected:
         assert info is not None
         assert info.get("email") == "@devpulse"
 
-    def test_caller_cwd_unset_is_left_alone(self, monkeypatch):
+    def test_caller_cwd_unset_is_left_alone(self, tmp_path, monkeypatch):
         """In-process library callers (@trigger delivery, @daemon wake) and the
         dispatch env carry no AIPASS_CALLER_CWD. The fence keys on evidence that
         contradicts, not on evidence that is absent — no cwd means no verdict
-        here, and the existing passport walk still decides."""
+        here, and the existing passport walk still decides.
+
+        THE SEAT IS SYNTHETIC. This used to resolve against the live registry on
+        the author's machine and returned None on a fresh checkout, where the
+        registry does not exist — reported red in CI on PR 739 (@devpulse,
+        2026-08-23). It was testing the machine. The walk now runs entirely
+        inside tmp_path, so "the passport walk still decides" is demonstrated
+        rather than borrowed.
+
+        AIPASS_CALLER_BRANCH IS NOW UNSET TOO, and that is a correction rather
+        than a convenience. With it set, detect_branch_from_pwd takes the
+        caller_branch lane and returns before the passport walk is reached — so
+        the old version named a mechanism its own input could never exercise.
+        The real callers this test speaks for (in-process @trigger delivery,
+        @daemon wake) carry no caller env at all, which is what it now sets up.
+        """
+        branch = tmp_path / "src" / "aipass" / "ai_mail"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "ai_mail", "email": "@ai_mail", "path": "src/aipass/ai_mail"}}),
+            encoding="utf-8",
+        )
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "total_branches": 1},
+                    "branches": [
+                        {
+                            "name": "AI_MAIL",
+                            "path": "src/aipass/ai_mail",
+                            "email": "@ai_mail",
+                            "status": "active",
+                            "profile": "library",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.chdir(branch)
+        # BRANCH_REGISTRY_PATH is frozen at import from find_repo_root(), so it
+        # points at whatever machine this runs on — the live registry here, a
+        # cwd-derived guess on a fresh checkout. Pointed at the fixture for the
+        # same reason conftest points FEED_PATH and CONTACTS_FILE at tmp_path.
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
+
         info = detect_branch_from_pwd()
-        assert info is not None
+
+        assert info is not None, "no CALLER_CWD must not refuse — the walk decides"
         assert info.get("email") == "@ai_mail"
 
 
@@ -222,3 +272,102 @@ class TestProvenanceLiftsTheOverRefusal:
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")
         monkeypatch.setattr("sys.argv", ["ai_mail.py", "inbox"])
         assert entry.main() == 0
+
+
+class TestThePoisonedContactRowCannotOutvoteTheRegistry:
+    """Found live, 2026-08-23: `drone @ai_mail inbox` served @flow's mailbox.
+
+    The system's own identity log is what named it — right name, right email,
+    WRONG PATH, and stamped "verified":
+
+        strategy       caller_branch:contact
+        confidence     verified
+        resolved_name  AI_MAIL
+        resolved_email @ai_mail
+        resolved_path  .../src/aipass/flow
+
+    contacts.json is a LEARNED, WRITABLE cache; AIPASS_REGISTRY.json is the
+    authoritative catalog. Consulting the cache FIRST let one poisoned row
+    outrank the catalog for a citizen the catalog knows perfectly well. The
+    existing staleness guard could not catch it: it only asks whether the
+    branch root is a directory, and the wrong directory was a real live branch.
+
+    Contacts exist for EXTERNAL projects that are not in the registry — that is
+    what _get_contact_info's own docstring says. So the ordering was backwards
+    for every AIPass citizen, which is every caller that matters here.
+    """
+
+    def _poison(self, monkeypatch, tmp_path, victim_dir):
+        """Stage a contact row for 'ai_mail' whose inbox is another branch's."""
+        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
+
+        contact_row = {"project": "", "inbox": str(victim_dir / ".ai_mail.local" / "inbox.json")}
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.email.contacts.get_contact",
+            lambda name: contact_row if name.lstrip("@").lower() == "ai_mail" else None,
+        )
+        return bd
+
+    def test_the_registry_wins_when_a_contact_row_contradicts_it(self, monkeypatch, tmp_path):
+        """The regression test for the live leak: right name must mean right mailbox."""
+        registry_root = tmp_path / "repo"
+        real = registry_root / "src" / "aipass" / "ai_mail"
+        victim = registry_root / "src" / "aipass" / "flow"
+        for branch in (real, victim):
+            (branch / ".ai_mail.local").mkdir(parents=True)
+
+        registry = registry_root / "AIPASS_REGISTRY.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {"name": "AI_MAIL", "email": "@ai_mail", "path": "src/aipass/ai_mail"},
+                        {"name": "FLOW", "email": "@flow", "path": "src/aipass/flow"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        bd = self._poison(monkeypatch, tmp_path, victim)
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", registry)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+        resolved = bd.detect_branch_from_pwd()
+
+        assert resolved is not None, "premise: the caller must still resolve"
+        assert Path(resolved["path"]).name == "ai_mail", (
+            f"served another citizen's branch: {resolved['path']} — this is the live leak"
+        )
+
+    def test_contacts_still_serve_a_name_the_registry_does_not_know(self, monkeypatch, tmp_path):
+        """The cache keeps its actual job: external projects absent from the registry.
+
+        Without this, "registry first" would quietly become "registry only" and
+        break every external-tier caller — the case contacts were built for.
+        """
+        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
+
+        stranger = tmp_path / "outside" / "vera"
+        (stranger / ".ai_mail.local").mkdir(parents=True)
+
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.email.contacts.get_contact",
+            lambda name: (
+                {"project": "Vera", "inbox": str(stranger / ".ai_mail.local" / "inbox.json")}
+                if name.lstrip("@").lower() == "vera"
+                else None
+            ),
+        )
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", registry)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "vera")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+        resolved = bd.detect_branch_from_pwd()
+
+        assert resolved is not None
+        assert Path(resolved["path"]).name == "vera"

@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1301 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1313 pass (1309 + 4 live-hygiene skips on a fresh checkout) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -242,6 +242,33 @@ because the promise staying visible is the whole point.
 per id sees every dispatch ever made as outstanding forever: wrong, plausible, and
 silent. `outstanding_dispatches()` does this correctly and is why the
 reconstruction is exported rather than left for each consumer to re-implement.
+
+### Empty and unreadable are opposite answers
+
+`outstanding_dispatches()` returns `[]` when the register **does not exist** —
+nobody has dispatched from this project yet, which is legitimate and honest. It
+**raises `OSError`** when the register exists and cannot be read.
+
+The distinction is @devpulse's, and it is load-bearing for anything that renders
+health: *"none outstanding"* and *"I cannot tell what is outstanding"* must not
+look the same, and an empty list is how they would. A watchdog that shows all
+clear because it could not open the file is worse than one that shows an error.
+
+If you want the tolerant read instead, `jsonl_records(path, strict=False)` is the
+default and logs rather than raises. The feed uses it deliberately — a
+notification bell that raises at a delivery hook is a worse failure than one that
+misses an event.
+
+### Where the root comes from
+
+Both paths resolve through `find_repo_root()`, which walks up for
+`AIPASS_REGISTRY.json` and then for `pyproject.toml`. **The second marker is not
+redundant.** The registry is untracked runtime state, so on a fresh checkout — CI,
+a new clone — it exists nowhere, and the walk used to fall through to
+`Path.cwd()`. The register would then be created wherever the process happened to
+be standing, which reports perfect health while covering nothing. `pyproject.toml`
+is tracked and sits only at the repo root, so the right answer was always
+available; it simply was not being asked for.
 
 ```
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "sender": "@devpulse", "target": "@ai_mail",
@@ -727,7 +754,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1301 tests across 46 test files
+└── tests/                      # 1313 tests across 46 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

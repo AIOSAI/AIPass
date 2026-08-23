@@ -49,9 +49,6 @@ REPORTS_DIRNAME = "dispatch_reports"
 # every mail the agent writes is STAMPED with the dispatch it belongs to.
 DISPATCH_ID_ENV = "AIPASS_DISPATCH_ID"
 
-# The marker that identifies a repo root — see register.register_file.
-_REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
-
 # Ceiling for the reports directory, mirroring the feed's trim policy: reports
 # are durable, not eternal. Oldest are pruned on write.
 REPORTS_MAX_FILES = 400
@@ -65,27 +62,21 @@ RESULT_EXCERPT_CHARS = 600
 def reports_dir(repo_root: Optional[Path] = None) -> Path:
     """Where completion reports wait to be read.
 
-    Same re-rooting discipline as ``register.register_file``: the relative
-    position is discovered by walking up from the live answer, and a caller
-    that asks for a ``repo_root`` this function cannot honour gets an error
-    rather than the PRODUCTION directory.
+    Same discipline as ``register.register_file``, including the fix: the
+    transplant uses the root ``find_repo_root()`` just returned rather than
+    re-deriving it by hunting for a marker file. On a fresh checkout no marker
+    exists anywhere, and the old walk raised for every caller who passed a
+    ``repo_root``.
 
-    Raises:
-        RuntimeError: when ``repo_root`` was given but cannot be honoured
+    A caller who asks for ``repo_root`` can never be handed the live directory:
+    the return is always rooted at what they passed.
     """
-    resolved = find_repo_root() / ".aipass" / REPORTS_DIRNAME
+    root = find_repo_root()
+    resolved = root / ".aipass" / REPORTS_DIRNAME
     if repo_root is None:
         return resolved
 
-    for parent in resolved.parents:
-        if (parent / _REGISTRY_FILENAME).exists():
-            return repo_root / resolved.relative_to(parent)
-
-    raise RuntimeError(
-        f"cannot re-root dispatch reports onto {repo_root}: no {_REGISTRY_FILENAME} "
-        f"above {resolved}, so their position relative to a repo root is unknown. "
-        f"Omit repo_root to use the live reports directory deliberately."
-    )
+    return repo_root / resolved.relative_to(root)
 
 
 def memories_edited(branch_path: Path, since: float) -> bool:
@@ -245,12 +236,7 @@ def write_report(report: Dict, repo_root: Optional[Path] = None) -> Optional[str
     dispatch_id = report.get("dispatch_id") or "unregistered"
     json_handler.log_operation("write_dispatch_report", {"dispatch_id": dispatch_id})
 
-    try:
-        directory = reports_dir(repo_root)
-    except RuntimeError as e:
-        logger.error("[report] reports directory unresolvable: %s", e)
-        return None
-
+    directory = reports_dir(repo_root)
     path = directory / f"{dispatch_id}.json"
 
     try:

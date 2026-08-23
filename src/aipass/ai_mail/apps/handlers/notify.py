@@ -203,13 +203,24 @@ def append_jsonl(path: Path, record: Dict, *, lock_name: str, max_lines: int, ke
         return False
 
 
-def jsonl_records(path: Path):
+def jsonl_records(path: Path, strict: bool = False):
     """Yield each parseable record from a JSONL log, oldest first.
 
     A malformed line is skipped and named rather than aborting the read: these
     logs are appended by concurrent processes, and one truncated line must not
     cost a reader every record after it. A missing file yields nothing — that
     is a defined empty state ("nothing registered yet"), not a failure.
+
+    Args:
+        path: The JSONL log to read
+        strict: Raise OSError when an EXISTING file cannot be read, instead of
+            logging and yielding nothing. Callers whose emptiness is meaningful
+            need this: for the dispatch register, "nothing is outstanding" and
+            "I cannot tell what is outstanding" are opposite answers, and
+            returning an empty sequence for both renders them identically.
+            @devpulse pinned that distinction in their wire (2026-08-22) and it
+            is theirs to rely on. The feed keeps the tolerant default — a bell
+            that misses events is better than one that raises at a hook.
     """
     # Checked, not caught: "nothing has been registered yet" is a DEFINED EMPTY
     # STATE, and an empty generator says so honestly. Swallowing FileNotFoundError
@@ -221,6 +232,8 @@ def jsonl_records(path: Path):
         with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except OSError as e:
+        if strict:
+            raise
         logger.error("[notify] jsonl read failed for %s: %s", path, e)
         return
 

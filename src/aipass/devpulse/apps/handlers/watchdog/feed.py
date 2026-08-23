@@ -74,11 +74,16 @@ CURSOR_KEEP_DIGESTS = 400
 # negligible across a 400-line window, and the cursor file stays ~7KB.
 _DIGEST_CHARS = 16
 
-# The repo-root marker, used only to work out where the feed sits RELATIVE to
-# its own root so that answer can be transplanted onto another tree. r4 note:
-# baseline.py used to hold a second copy of this constant; it was deleted with
-# the daemon, so this is the only one left in the lane.
-_REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
+# The repo-root markers, used only to work out where the feed sits RELATIVE to
+# its own root so that answer can be transplanted onto another tree. TWO
+# markers, in this order, mirroring @ai_mail's find_repo_root (2026-08-23, the
+# PR #739 fresh-checkout fix): the registry is runtime state and exists on no
+# fresh checkout, so a walk that knows only the registry raises on every CI
+# machine while passing on every machine with history. pyproject.toml is
+# TRACKED and sits only at the repo root — the right answer was on the
+# ancestor chain the whole time. The real retirement of both walks is a root
+# door on @ai_mail's public surface; until then this pair must match theirs.
+_ROOT_MARKERS = ("AIPASS_REGISTRY.json", "pyproject.toml")
 
 # Named cursors, one per reader. See cursor_file_for.
 #
@@ -112,9 +117,10 @@ def feed_file(repo_root: Path | None = None) -> Path:
     if repo_root is None:
         return resolved
 
-    for parent in resolved.parents:
-        if (parent / _REGISTRY_FILENAME).exists():
-            return repo_root / resolved.relative_to(parent)
+    for marker in _ROOT_MARKERS:
+        for parent in resolved.parents:
+            if (parent / marker).exists():
+                return repo_root / resolved.relative_to(parent)
 
     # NO FALLBACK (Patrick's ruling, 2026-08-21). Returning the live path here
     # would hand a caller who explicitly asked for `repo_root` the PRODUCTION
@@ -124,8 +130,8 @@ def feed_file(repo_root: Path | None = None) -> Path:
     # in time. The caller asked a question this function cannot answer, so it
     # says so and stops.
     raise RuntimeError(
-        f"cannot re-root the notification feed onto {repo_root}: no {_REGISTRY_FILENAME} "
-        f"above {resolved}, so its position relative to a repo root is unknown. "
+        f"cannot re-root the notification feed onto {repo_root}: none of {_ROOT_MARKERS} "
+        f"found above {resolved}, so its position relative to a repo root is unknown. "
         f"Pass feed_file_path explicitly, or omit repo_root to use the live feed deliberately."
     )
 

@@ -37,7 +37,6 @@ One construction site
 import subprocess
 import sys
 
-import pytest
 from pathlib import Path
 
 import aipass.ai_mail as ai_mail
@@ -197,21 +196,24 @@ class TestOutstandingDoor:
 
         assert ai_mail.outstanding_dispatches(tmp_path)[0]["overdue"] is False
 
-    def test_an_unrootable_tree_raises_rather_than_returning_the_live_register(self, monkeypatch, tmp_path):
-        """@devpulse's wire RAISES at arm time if the register cannot be found.
+    def test_a_tree_with_no_registry_marker_still_re_roots(self, monkeypatch, tmp_path):
+        """@devpulse's wire raises at arm time if the register cannot be FOUND.
 
-        That decision only holds if this door raises too. Handing them the live
-        register when they asked for another tree would let a wire that covers
-        nothing look healthy — the failure shape r4 exists to remove.
+        That decision is only safe if this door does not raise for the ordinary
+        case of a fresh checkout, where no marker exists anywhere. It used to,
+        which reddened 26 of their tests. What still must never happen is being
+        handed the LIVE register after asking for another tree — and that is now
+        structural: the return is always rooted at what the caller passed.
         """
         from aipass.ai_mail.apps.handlers.dispatch import register
 
         orphan = tmp_path / "no-marker"
         orphan.mkdir()
         monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
+        target = tmp_path / "elsewhere"
 
-        with pytest.raises(RuntimeError, match="cannot re-root"):
-            ai_mail.outstanding_dispatches(tmp_path / "elsewhere")
+        assert ai_mail.outstanding_dispatches(target) == []
+        assert target in register.register_file(repo_root=target).parents
 
 
 class TestImportStaysLight:

@@ -24,9 +24,11 @@ returns a registry ENTRY DICT. Stringifying it yields a plausible-looking
 address that matches nothing, which is a filter that silently excludes
 everything: a wire that looks armed and delivers nothing.
 
-``test_outstanding_refuses_rather_than_returning_the_live_register`` — the
-re-root refusal is @ai_mail's, and this asserts we inherit it rather than
-swallowing it into an empty list.
+``test_outstanding_refuses_rather_than_returning_the_live_register`` — "none
+outstanding" and "I cannot tell" must never render the same. The refusal is
+@ai_mail's strict read (an existing register that cannot be opened raises
+OSError; a missing one is genuinely "nobody dispatched here"), and this
+asserts we inherit it rather than swallowing it into an empty list.
 
 Nothing here folds the register: that reconstruction has one owner (@ai_mail's
 ``outstanding_dispatches``) and a second implementation of an append-only rule
@@ -43,6 +45,14 @@ from aipass.devpulse.apps.handlers.watchdog import dispatches
 
 
 SEAT = "@devpulse"
+
+
+@pytest.fixture(autouse=True)
+def _mail_doors(hermetic_mail_doors):
+    """outstanding() re-roots @ai_mail's register; the transplant must not
+    depend on this machine's live registry marker (the CI fresh-checkout
+    failure, PR #739)."""
+    return hermetic_mail_doors
 
 
 # --------------------------------------------------------------------------
@@ -209,19 +219,21 @@ def test_a_completed_dispatch_is_never_overdue(tmp_path):
     assert dispatches.overdue(root) == []
 
 
-def test_outstanding_refuses_rather_than_returning_the_live_register(tmp_path, monkeypatch):
-    """@ai_mail's re-root refusal must reach us, not be swallowed into [].
+def test_outstanding_refuses_rather_than_returning_the_live_register(tmp_path):
+    """ "None outstanding" and "I cannot tell" must never render the same.
 
-    Handing a caller who explicitly asked for a repo_root the PRODUCTION
-    register is the defect feed.py was fixed for the same evening. The refusal
-    is theirs; this asserts we inherit it instead of reporting "none
-    outstanding" — which would read as coverage.
+    The principle survives; the TRIGGER moved (2026-08-23, @ai_mail's CI fix):
+    re-rooting was the wrong event to hang it on — it fired on every fresh
+    checkout, where nothing is wrong. The event that actually means "I cannot
+    tell" is an EXISTING register that cannot be read, and @ai_mail's strict
+    read raises OSError there. A MISSING register stays [] — that genuinely is
+    "nobody has dispatched here yet". Staged as a DIRECTORY at the register
+    path (their shape): it exists, so the empty-state check passes, and opening
+    it fails the same under any user — a permissions-based stage behaves
+    differently under root.
     """
-    import aipass.ai_mail.apps.handlers.dispatch.register as ai_register
+    register = tmp_path / ".aipass" / "dispatch_register.jsonl"
+    register.mkdir(parents=True)
 
-    orphan = tmp_path / "no-repo-above-me" / "dispatch_register.jsonl"
-    orphan.parent.mkdir(parents=True)
-    monkeypatch.setattr(ai_register, "find_repo_root", lambda: orphan.parent)
-
-    with pytest.raises(RuntimeError):
-        dispatches.outstanding(tmp_path / "elsewhere")
+    with pytest.raises(OSError):
+        dispatches.outstanding(tmp_path)

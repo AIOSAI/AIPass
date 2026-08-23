@@ -113,6 +113,38 @@ class TestLoadRegistry:
         reg_path = setup_flow_root / "flow_json" / "template_registry.json"
         assert reg_path.exists()
 
+    def test_first_read_of_a_fresh_install_sees_every_shipped_template(self, setup_flow_root):
+        """The defect CI found: call 1 answered with 2 types, call 2 with 7.
+
+        A fresh checkout ships template directories and no registry. The
+        create branch returned the bare defaults and never ran the same
+        auto-discovery the read branch runs, so the FIRST flow command on a
+        new install saw a registered set that was missing every shipped type
+        beyond FPLAN and DPLAN -- and the second command saw them all. Two
+        answers to one question, decided by call ordering.
+        """
+        mod = _import_mod()
+        for name in ("flow_plans", "dev_plans", "audit_plans", "playbook_plans"):
+            _create_template_dir(setup_flow_root, name, ["default.md"])
+
+        first = sorted(e["prefix"] for e in mod.load_registry()["types"].values())
+        second = sorted(e["prefix"] for e in mod.load_registry()["types"].values())
+
+        assert first == second, "the registered set must not depend on how many times it has been read"
+        assert "APLAN" in first and "PPLAN" in first
+
+    def test_a_recreated_corrupt_registry_also_sees_shipped_templates(self, setup_flow_root):
+        """Same fall-through, reached by the corrupt-file branch instead."""
+        mod = _import_mod()
+        _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
+        _create_template_dir(setup_flow_root, "audit_plans", ["default.md"])
+        reg_path = setup_flow_root / "flow_json" / "template_registry.json"
+        reg_path.write_text("{ not json", encoding="utf-8")
+
+        prefixes = sorted(e["prefix"] for e in mod.load_registry()["types"].values())
+
+        assert "APLAN" in prefixes
+
     def test_loads_existing_valid_registry(self, setup_flow_root):
         """Loads a valid existing registry from disk."""
         mod = _import_mod()

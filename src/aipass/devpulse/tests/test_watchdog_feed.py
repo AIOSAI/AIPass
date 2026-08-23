@@ -43,6 +43,14 @@ def _event(kind: str = "dispatch", source: str = "canary", title: str = "@canary
     )
 
 
+@pytest.fixture(autouse=True)
+def _mail_doors(hermetic_mail_doors):
+    """TestRepoRoot re-roots through @ai_mail's door; the transplant must not
+    depend on this machine's live registry marker (the CI fresh-checkout
+    failure, PR #739)."""
+    return hermetic_mail_doors
+
+
 @pytest.fixture
 def feed_file(tmp_path: Path) -> Path:
     return tmp_path / "notifications.jsonl"
@@ -248,9 +256,13 @@ class TestRepoRoot:
         assert rerooted.parent.name == live.parent.name
 
     def test_no_root_uses_the_owners_answer_unchanged(self):
-        from aipass.ai_mail.apps.handlers import notify
+        """Reference the PUBLIC door, not notify internals: feed.py consumes
+        aipass.ai_mail.feed_path, so that is the answer 'unchanged' means —
+        and it is what the hermetic fixture patches, keeping this true off
+        the live machine too."""
+        from aipass import ai_mail
 
-        assert feed.feed_file() == notify.feed_path()
+        assert feed.feed_file() == ai_mail.feed_path()
 
     def test_drain_honours_repo_root(self, tmp_path, cursor):
         """The end-to-end guarantee: an injected root never reads production."""

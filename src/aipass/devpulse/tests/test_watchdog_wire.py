@@ -60,6 +60,13 @@ def _no_json_writes():
 
 
 @pytest.fixture(autouse=True)
+def _mail_doors(hermetic_mail_doors):
+    """Every test here re-roots the feed; none may depend on this machine's
+    live registry marker (the CI fresh-checkout failure, PR #739)."""
+    return hermetic_mail_doors
+
+
+@pytest.fixture(autouse=True)
 def _private_heartbeat(tmp_path, monkeypatch):
     """Point the heartbeat at a per-test file — never the real /tmp signal.
 

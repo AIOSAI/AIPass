@@ -6,6 +6,8 @@ parse_restore_command_args from apps/handlers/plan/command_parser.py.
 
 from unittest.mock import patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Default type map returned by the mocked get_type_map
@@ -15,6 +17,30 @@ DEFAULT_TYPE_MAP = {
     "fplan": "flow_plans",
     "dplan": "dev_plans",
 }
+
+# The registered set these tests parse against.
+#
+# WHY THIS IS PINNED RATHER THAN READ. --exclude-type validates against the
+# live template registry, which is runtime state: a fresh checkout ships no
+# registry at all. Asserting that APLAN is accepted therefore asserted that
+# THIS MACHINE had audit_plans registered, and CI -- which is always a fresh
+# checkout -- red on exactly that (PR 739, linux 3.10). What these tests are
+# for is the parser: does it collect the value, upper-case it, repeat, refuse
+# an unknown one. None of that is a claim about which types happen to exist.
+# The one test that IS a claim about the live registry stays live and is
+# marked as such; TestRegisteredPrefixesContract keeps this constant honest.
+FAKE_REGISTERED = ["APLAN", "DPLAN", "FPLAN", "PPLAN"]
+
+
+@pytest.fixture
+def registered(request):
+    """Pin the parser's registered-type source for the duration of a test."""
+    prefixes = getattr(request, "param", FAKE_REGISTERED)
+    with patch(
+        "aipass.flow.apps.handlers.plan.command_parser._registered_prefixes",
+        return_value=list(prefixes),
+    ) as mocked:
+        yield mocked
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +432,7 @@ class TestParseCloseCommandArgs:
 
     # ---- --exclude-type ----
 
-    def test_exclude_type_collected(self):
+    def test_exclude_type_collected(self, registered):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         _, _, all_plans, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", "APLAN"])
@@ -414,7 +440,7 @@ class TestParseCloseCommandArgs:
         assert all_plans is True
         assert exclude_types == ["APLAN"]
 
-    def test_exclude_type_is_repeatable(self):
+    def test_exclude_type_is_repeatable(self, registered):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         _, _, _, _, exclude_types, error = parse_close_command_args(
@@ -423,31 +449,57 @@ class TestParseCloseCommandArgs:
         assert error is None
         assert exclude_types == ["APLAN", "PPLAN"]
 
-    def test_exclude_type_accepts_equals_form_and_lowercase(self):
+    def test_exclude_type_accepts_equals_form_and_lowercase(self, registered):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type=aplan"])
         assert error is None
         assert exclude_types == ["APLAN"]
 
-    def test_unknown_plan_type_refuses_and_names_the_valid_ones(self):
+    def test_unknown_plan_type_refuses_and_names_the_valid_ones(self, registered):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-type", "APLNA"])
         assert error is not None
         assert "APLNA" in error
-        # The operator must be able to act on the refusal.
-        assert "APLAN" in error and "FPLAN" in error
+        # The operator must be able to act on the refusal, so every registered
+        # type is named -- whatever the registered set happens to be.
+        for prefix in FAKE_REGISTERED:
+            assert prefix in error
 
     def test_exclude_type_validated_against_the_live_registry(self):
-        """Not a literal list -- the valid set comes from the registered templates."""
+        """Not a literal list -- the valid set comes from the registered templates.
+
+        Deliberately NOT mocked: this is the one test that must touch the real
+        registry, because what it pins is that the parser and `drone @flow
+        templates` read the same source. It is hermetic by construction rather
+        than by isolation -- the input is derived from the same call the parser
+        validates against, so it holds on a fresh checkout with two types and
+        on this machine with seven.
+        """
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
         from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
 
-        registered = {p.upper() for p in get_prefix_map().values()}
-        for prefix in registered:
+        live = {p.upper() for p in get_prefix_map().values() if p}
+        assert live, "the registry must always answer with at least the protected types"
+        for prefix in sorted(live):
             _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", prefix])
             assert error is None, f"{prefix} is registered but was refused"
+            assert exclude_types == [prefix]
+
+    def test_a_bare_registry_still_accepts_the_protected_types(self):
+        """What a fresh checkout is GUARANTEED to have, tracked tree alone.
+
+        flow_json/ is not tracked, so CI starts with no registry and seeds
+        _DEFAULT_TYPES. FPLAN and DPLAN are also _PROTECTED_TYPES and cannot be
+        removed, so they are the only prefixes any checkout can promise. This
+        test is the floor the CI failure exposed.
+        """
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        for prefix in ("FPLAN", "DPLAN"):
+            _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", prefix])
+            assert error is None, f"{prefix} is protected but was refused"
             assert exclude_types == [prefix]
 
     def test_exclude_type_without_a_value_refuses(self):
@@ -456,7 +508,7 @@ class TestParseCloseCommandArgs:
         _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-type"])
         assert error is not None
 
-    def test_exclude_type_without_all_refuses(self):
+    def test_exclude_type_without_all_refuses(self, registered):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         _, _, _, _, _excl, error = parse_close_command_args(["FPLAN-0042", "--exclude-type", "APLAN"])
@@ -553,3 +605,49 @@ class TestParseRestoreCommandArgs:
         plan_num, error = parse_restore_command_args(["  "])
         assert plan_num == "  "
         assert error is None
+
+
+# ---------------------------------------------------------------------------
+# The mock's contract with production
+# ---------------------------------------------------------------------------
+class TestRegisteredPrefixesContract:
+    """Proves FAKE_REGISTERED is shaped like what production actually returns.
+
+    A mock is only worth what its shape agreement is worth. The exclude-type
+    tests above run against FAKE_REGISTERED; if _registered_prefixes() ever
+    starts returning something else -- a dict, lower-case, dir names instead of
+    prefixes -- those tests would keep passing against a fiction. These do not.
+    """
+
+    @staticmethod
+    def _is_prefix_list(value) -> bool:
+        return (
+            isinstance(value, list)
+            and all(isinstance(p, str) and p and p == p.upper() and p == p.strip() for p in value)
+            and value == sorted(value)
+        )
+
+    def test_production_returns_a_sorted_list_of_upper_case_prefixes(self):
+        from aipass.flow.apps.handlers.plan.command_parser import _registered_prefixes
+
+        live = _registered_prefixes()
+        assert self._is_prefix_list(live), live
+        assert len(set(live)) == len(live), "prefixes must be unique"
+
+    def test_the_fake_satisfies_the_same_contract(self):
+        assert self._is_prefix_list(FAKE_REGISTERED)
+
+    def test_the_protected_types_are_present_on_any_checkout(self):
+        """_PROTECTED_TYPES cannot be unregistered, so these always hold."""
+        from aipass.flow.apps.handlers.plan.command_parser import _registered_prefixes
+
+        live = _registered_prefixes()
+        assert {"FPLAN", "DPLAN"} <= set(live)
+        assert {"FPLAN", "DPLAN"} <= set(FAKE_REGISTERED)
+
+    def test_the_fixture_actually_replaces_the_production_source(self, registered):
+        """REACH assertion: without this the mocked tests prove nothing."""
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        parse_close_command_args(["--all", "--exclude-type", "APLAN"])
+        assert registered.called, "the parser never consulted the registered-type source"

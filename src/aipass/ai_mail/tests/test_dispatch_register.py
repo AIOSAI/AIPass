@@ -154,21 +154,47 @@ class TestNeverProduction:
 
         assert register.register_file(repo_root=repo) != live
 
-    def test_it_raises_rather_than_guess_when_the_relative_shape_is_unknowable(self, monkeypatch, tmp_path):
-        """NO FALLBACK. The question cannot be answered, so it is not answered."""
+    def test_re_rooting_works_with_no_registry_marker_anywhere(self, monkeypatch, tmp_path):
+        """A FRESH CHECKOUT has no marker — the registry is untracked runtime state.
+
+        This test replaces one that asserted a RuntimeError here, and that
+        assertion was pinning the bug rather than the behaviour. The old code
+        re-DERIVED the root by walking for a marker file after find_repo_root()
+        had already returned one; with no marker on disk the walk found nothing
+        and raised for every caller passing repo_root — 26 of @devpulse's tests
+        and the CI job on PR 739 (reported by them, 2026-08-23).
+
+        The root is now carried, not hunted, so there is no second answer to
+        disagree with the first.
+        """
         orphan = tmp_path / "no-marker-above-here"
         orphan.mkdir()
         monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
+        target = tmp_path / "elsewhere"
 
-        with pytest.raises(RuntimeError, match="cannot re-root"):
-            register.register_file(repo_root=tmp_path / "elsewhere")
+        assert register.register_file(repo_root=target) == target / ".aipass" / register.REGISTER_FILENAME
 
-    def test_an_unresolvable_register_reports_failure_instead_of_writing_elsewhere(self, monkeypatch, tmp_path):
+    def test_writing_works_with_no_registry_marker_anywhere(self, monkeypatch, tmp_path):
         orphan = tmp_path / "no-marker"
         orphan.mkdir()
         monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
+        target = tmp_path / "x"
 
-        assert register.open_dispatch("@a", "@b", "s", 7200, repo_root=tmp_path / "x") is None
+        dispatch_id = register.open_dispatch("@a", "@b", "s", 7200, repo_root=target)
+
+        assert dispatch_id, "a fresh checkout must not stop a dispatch being registered"
+        assert (target / ".aipass" / register.REGISTER_FILENAME).exists()
+
+    def test_the_transplant_never_reaches_outside_the_given_root(self, monkeypatch, tmp_path):
+        """Structural, not checked: every return is rooted at what the caller passed."""
+        orphan = tmp_path / "no-marker-either"
+        orphan.mkdir()
+        monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
+        target = tmp_path / "sandbox"
+
+        result = register.register_file(repo_root=target)
+
+        assert target in result.parents
 
 
 class TestReadingIsForgiving:
@@ -196,6 +222,45 @@ class TestReadingIsForgiving:
             register.open_dispatch("@a", f"@b{i}", str(i), 7200, repo_root=repo)
 
         assert len(_lines(repo)) <= 6
+
+
+class TestEmptyAndUnreadableAreNotTheSameAnswer:
+    """@devpulse's pin: "none outstanding" and "I cannot tell" must not render alike.
+
+    They wrote it against the old re-root raise, which was the WRONG trigger —
+    it fired on every fresh checkout, where nothing is actually wrong. Removing
+    it was correct and their own later dispatch asked for it. The distinction
+    they were protecting is not, and this is where it actually belongs: a
+    register that EXISTS and cannot be READ.
+    """
+
+    def test_a_missing_register_is_empty_because_nothing_was_registered(self, repo):
+        """The honest empty state — no file yet means no promises yet."""
+        assert register.outstanding(repo_root=repo) == []
+
+    def test_an_unreadable_register_raises_instead_of_reporting_all_clear(self, repo):
+        """A register that exists but cannot be read must never answer "[]".
+
+        Staged as a DIRECTORY at the register's path: it exists, so the
+        defined-empty-state check passes, and opening it is an OSError. That is
+        the same shape as a permission failure or a bad mount, without a test
+        that behaves differently under root.
+        """
+        path = repo / ".aipass" / register.REGISTER_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.mkdir()
+
+        with pytest.raises(OSError):
+            register.outstanding(repo_root=repo)
+
+    def test_the_feed_keeps_the_tolerant_read(self, tmp_path):
+        """Strictness is opt-in — a bell that raises at a delivery hook is worse."""
+        from aipass.ai_mail.apps.handlers.notify import jsonl_records
+
+        unreadable = tmp_path / "feed.jsonl"
+        unreadable.mkdir()
+
+        assert list(jsonl_records(unreadable)) == []
 
 
 class TestTheSuiteCannotTouchProduction:

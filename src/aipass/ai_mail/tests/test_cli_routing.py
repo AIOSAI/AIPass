@@ -8,8 +8,8 @@
 
 """Tests for CLI routing -- help flags, introspection, unknown commands, output capture."""
 
+import json
 import sys
-from pathlib import Path
 
 import pytest
 from io import StringIO
@@ -28,28 +28,57 @@ from aipass.ai_mail.apps.ai_mail import (
 
 
 @pytest.fixture(autouse=True)
-def _caller_stands_in_a_branch(monkeypatch):
-    """Give every test in this file a resolvable caller identity.
+def _caller_stands_in_a_branch(tmp_path, monkeypatch):
+    """Give every test in this file a resolvable caller identity, built from nothing.
 
     These are tests of ROUTING — which command reaches which module, and what the
     exit code says about the result. They are not tests of identity. But main()
-    now refuses outright when the caller stands outside any branch (Patrick's
-    ruling, 2026-08-21), so without a caller they were implicitly asserting
-    something about identity they never meant to assert, and the answer depended
-    on the directory pytest was launched from:
+    refuses outright when the caller cannot be resolved (Patrick's ruling,
+    2026-08-21), so without a caller they assert something about identity they
+    never meant to.
 
-      cd src/aipass/ai_mail && pytest tests/test_cli_routing.py  -> 15 passed
-      cd <repo root>        && pytest src/.../test_cli_routing.py -> 2 FAILED
+    THE SEAT IS SYNTHETIC, and that is the fix. An earlier version pointed
+    AIPASS_CALLER_CWD at this branch's real directory, which resolved only
+    because the LIVE registry on the author's machine had a row for it. CI is a
+    fresh checkout — the registry is untracked runtime state and does not exist
+    there — so identity resolved to nobody, the fence refused with 2, and three
+    tests here went red (@devpulse, PR 739, 2026-08-23). They were testing the
+    machine, not the code.
 
-    CI runs from the repo root, so per-branch green was not CI green (@devpulse,
-    3de0994d — the same shape as the 08-20 __init__.py collision).
+    Everything identity needs is now built in tmp_path: a repo marker, a
+    registry row keyed on the branch's relative path, and a passport at the end
+    of the walk. Nothing outside this directory is read, so the result is the
+    same on any machine and in any checkout.
 
-    A real caller always establishes an identity; these tests must too. Standing
-    in this branch is the most ordinary case — a human in their own seat, resolved
-    by the passport walk — and it needs no credential env var, so the fence is
-    exercised rather than bypassed. The fence is NOT weakened to accommodate them.
+    The fence is EXERCISED, not stubbed. These tests still prove a legitimate
+    caller reaches routing — they just no longer borrow someone else's registry
+    to do it.
     """
-    monkeypatch.setenv("AIPASS_CALLER_CWD", str(Path(__file__).resolve().parents[1]))
+    branch = tmp_path / "seat" / "src" / "aipass" / "ai_mail"
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".trinity" / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": "ai_mail", "email": "@ai_mail", "path": "src/aipass/ai_mail"}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "seat" / "AIPASS_REGISTRY.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"version": "1.0.0", "total_branches": 1},
+                "branches": [
+                    {
+                        "name": "AI_MAIL",
+                        "path": "src/aipass/ai_mail",
+                        "email": "@ai_mail",
+                        "status": "active",
+                        "profile": "library",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch))
     monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
 
 

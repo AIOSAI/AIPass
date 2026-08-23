@@ -167,6 +167,33 @@ creeping back into their own text; only the checks catch it. Devpulse's README
 is rewritten for the watchdog's login model, and its branch prompt dieted from
 2400 to 1032 words.
 
+**fix(ci)** — the release's first fresh-checkout run failed 37 tests across
+three branches, and every one was a single species: tests green against live
+machine state, red on a machine without history. CI has no
+`AIPASS_REGISTRY.json` — it is runtime state — and the watchdog re-root walk,
+@ai_mail's register transplant, and @flow's plan-type assertions all
+implicitly required it. No local gate could have caught this; every local run
+is on a machine with history. The reusable artifact is the mimic: copy the
+tree to a marker-less directory, force imports there via PYTHONPATH, run
+pytest from the copy root — red on the old code, green on the fix, both
+directions proven. Behind the test fixes, three production defects fell out.
+@flow's `load_registry` seeded a missing registry and returned early, skipping
+type discovery — every fresh install answered "which plan types exist" two
+different ways depending on call order, and CI was the only machine that could
+ever see call one. @ai_mail's `find_repo_root` fell back to `Path.cwd()` on a
+fresh checkout, so the dispatch register would be created in whatever
+directory the caller stood in; it now walks for the untracked registry and
+then for tracked `pyproject.toml`, which sat on the ancestor chain the whole
+time, unasked. And the transplants (theirs and devpulse's feed) re-derived a
+repo root they already held, with a marker only historied machines have —
+fixed by carrying the root in hand and by the two-marker walk. In passing,
+@ai_mail caught and fixed a LIVE cross-citizen mailbox leak: a poisoned row in
+their learned contacts cache outranked the authoritative registry and served
+@flow's mailbox to @ai_mail's own CLI, stamped "verified" — right name, right
+email, wrong path. Registry now outranks cache for every citizen it knows;
+contradicting rows are refused and logged; a fleet-wide scan of all 18
+branches' caches found no other poisoned row.
+
 ## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own

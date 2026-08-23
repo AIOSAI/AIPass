@@ -55,10 +55,6 @@ from aipass.ai_mail.apps.handlers.paths import find_repo_root
 REGISTER_FILENAME = "dispatch_register.jsonl"
 REGISTER_LOCK_NAME = ".dispatch_register.lock"
 
-# The marker that identifies a repo root, used to learn where the register sits
-# RELATIVE to one so the same position can be transplanted onto another tree.
-_REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
-
 # Trim policy, mirroring the feed's ceiling: an append-only log still needs a
 # ceiling or it grows without bound. Kept larger than the feed's 400/200
 # because an outstanding entry must survive long enough for its completion
@@ -83,26 +79,26 @@ def register_file(repo_root: Optional[Path] = None) -> Path:
         RuntimeError: when ``repo_root`` was given but the register's position
             relative to a repo root cannot be determined.
 
-    NO FALLBACK (Patrick's ruling, 2026-08-21). Returning the live path when a
-    caller explicitly asked for ``repo_root`` would hand a test the PRODUCTION
-    register to write into — which is exactly the defect ``feed.py`` was fixed
-    for the same evening, where two tests read the real feed from inside
-    ``tmp_path``. A caller that asks a question this function cannot answer
-    gets an error, not a different question's answer.
+    NEVER THE LIVE PATH when a caller asked for ``repo_root``. Handing a test
+    the PRODUCTION register to write into is the defect ``feed.py`` was fixed
+    for on 2026-08-21. Here that is STRUCTURAL rather than checked: the return
+    below is always rooted at ``repo_root``, so there is no branch that could
+    return the live answer by mistake.
+
+    TRANSPLANTED WITH THE ROOT WE ALREADY HOLD, which is the whole point.
+    An earlier version re-DERIVED the root by walking ``resolved.parents`` for
+    the marker file — asking a second time a question we had just answered. On
+    a fresh checkout there is no marker anywhere (the registry is untracked
+    runtime state), so the walk found nothing and this RAISED for every
+    consumer who passed ``repo_root``: 26 of @devpulse's tests and the CI job
+    on PR 739. One root, one answer, no second opinion to disagree with.
     """
-    resolved = find_repo_root() / ".aipass" / REGISTER_FILENAME
+    root = find_repo_root()
+    resolved = root / ".aipass" / REGISTER_FILENAME
     if repo_root is None:
         return resolved
 
-    for parent in resolved.parents:
-        if (parent / _REGISTRY_FILENAME).exists():
-            return repo_root / resolved.relative_to(parent)
-
-    raise RuntimeError(
-        f"cannot re-root the dispatch register onto {repo_root}: no {_REGISTRY_FILENAME} "
-        f"above {resolved}, so its position relative to a repo root is unknown. "
-        f"Omit repo_root to use the live register deliberately."
-    )
+    return repo_root / resolved.relative_to(root)
 
 
 def open_dispatch(
@@ -222,11 +218,23 @@ def outstanding(repo_root: Optional[Path] = None, now: Optional[datetime] = None
         Open entries, each gaining an ``overdue`` bool. An entry whose
         ``expected_by`` cannot be parsed is returned with ``overdue`` False and
         the reason logged — an unreadable timestamp is not evidence of a crash.
+
+    Raises:
+        OSError: when the register EXISTS but cannot be read. A missing register
+            yields ``[]`` (nothing has been registered yet, which is honest);
+            an unreadable one must not, because a caller cannot tell that
+            emptiness apart from "all clear" and would report all-clear.
     """
     moment = now or datetime.now().astimezone()
     open_entries: Dict[str, Dict] = {}
 
-    for record in jsonl_records(register_file(repo_root)):
+    # strict=True: an unreadable register must NOT return []. "Nothing is
+    # outstanding" and "I cannot tell what is outstanding" are opposite answers,
+    # and an empty list renders them identically — @devpulse's wire pins the
+    # distinction rather than swallowing it, and this is the half that makes
+    # their pin possible. Removing the old re-root raise (which fired on every
+    # fresh checkout) closed the wrong door on the same question.
+    for record in jsonl_records(register_file(repo_root), strict=True):
         key = record.get("dispatch_id")
         if not key:
             continue
@@ -267,15 +275,9 @@ def _is_overdue(entry: Dict, moment: datetime) -> bool:
 
 
 def _append(record: Dict, repo_root: Optional[Path]) -> bool:
-    """Append one record, letting a re-root failure surface as False, not as a wrong file."""
-    try:
-        path = register_file(repo_root)
-    except RuntimeError as e:
-        logger.error("[register] register path unresolvable: %s", e)
-        return False
-
+    """Append one record. register_file() cannot fail, so only the write can."""
     return append_jsonl(
-        path,
+        register_file(repo_root),
         record,
         lock_name=REGISTER_LOCK_NAME,
         max_lines=REGISTER_MAX_LINES,
