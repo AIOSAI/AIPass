@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-08-21
+# Modified: 2026-08-22
 # =============================================
 
 # Why this exists: baseline.py polls ~19 branches every 2s to SYNTHESISE an
@@ -75,14 +75,19 @@ CURSOR_KEEP_DIGESTS = 400
 _DIGEST_CHARS = 16
 
 # The repo-root marker, used only to work out where the feed sits RELATIVE to
-# its own root so that answer can be transplanted onto another tree. baseline.py
-# holds the same constant; they are not shared because baseline imports this
-# module and the dependency may not run the other way.
+# its own root so that answer can be transplanted onto another tree. r4 note:
+# baseline.py used to hold a second copy of this constant; it was deleted with
+# the daemon, so this is the only one left in the lane.
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
 # Named cursors, one per reader. See cursor_file_for.
+#
+# r4: there is exactly ONE reader now. DAEMON_CURSOR_NAME was deleted with the
+# detection daemon that owned it. The stale devpulse_json/feed_daemon_cursor.json
+# on disk is inert — nothing opens it — and is left where it is rather than
+# deleted, because a file nobody reads costs nothing and a deletion nobody asked
+# for costs a debugging session.
 WIRE_CURSOR_NAME = "feed_cursor.json"
-DAEMON_CURSOR_NAME = "feed_daemon_cursor.json"
 
 
 def feed_file(repo_root: Path | None = None) -> Path:
@@ -128,11 +133,12 @@ def feed_file(repo_root: Path | None = None) -> Path:
 def cursor_file_for(repo_root: Path, name: str = WIRE_CURSOR_NAME) -> Path:
     """Where a reader remembers which feed lines it has already delivered.
 
-    ``name`` exists because two readers follow the same feed for different
-    reasons — the wire delivers events to a session, the daemon uses them only
-    to decide whether anything is worth watching. A shared cursor would have
-    them stealing each other's events: whichever drained first would mark the
-    line seen and the other would never see it at all.
+    ``name`` survives r4 with one reader left, and it is not vestigial: it is
+    the thing that stops a second reader from silently sharing this one. Two
+    readers on one cursor steal each other's events — whichever drains first
+    marks the line seen and the other never sees it at all. That failure is
+    total and completely silent, so the parameter stays as the door a future
+    reader has to walk through to get its own cursor.
     """
     return repo_root.joinpath("src", "aipass", "devpulse", "devpulse_json", name)
 

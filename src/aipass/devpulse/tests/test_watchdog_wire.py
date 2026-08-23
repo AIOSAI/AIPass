@@ -1,26 +1,37 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
-# Description: Tests for the watchdog wire handler (DPLAN-0308 round 2)
-# Version: 1.0.0
+# Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
+# Version: 2.0.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-08-22
 # =============================================
 
-"""Tests for arm_wire + the daemon face of watch_baseline.
+"""Tests for arm_wire — delivering THIS seat's dispatch completions.
 
-The failure these pin was witnessed live on 2026-08-19: a session-wired
-watcher kept detecting after the session id churned, delivering COMPLETE lines
-into a dead session's task file. The wire architecture must (a) never lose an
-event across the unwired window (replay), (b) take over a wire soldered to
-another session, (c) never SIGTERM a recycled pid, and (d) die loudly when the
-detection daemon dies — silence must never mean covered.
+Two failures are pinned here, from two different rounds.
+
+r2's, witnessed live on 2026-08-19: a session-wired watcher kept detecting after
+the session id churned, delivering COMPLETE lines into a dead session's task
+file. So the wire must take over a wire soldered to another session, never
+SIGTERM a recycled pid, and refuse to run continuously under
+run_in_background — where its per-line stdout notifies nobody.
+
+r4's, measured 2026-08-22 and the reason this file lost seventeen tests: the
+wire drained the detection daemon's events file AND @ai_mail's notification
+feed, with no dedupe. They carried the same completions 1-2 seconds apart, so
+every dispatch produced TWO wakes for months. ``test_one_completion_delivers_one_line``
+is the load-bearing test of this rewrite — a duplicate wake looks exactly like a
+working wake, so only a count can tell them apart.
+
+The other r4 headline is attribution: the feed names the branch that FINISHED,
+never the one that SENT the work, so this seat used to be woken fleet-wide.
+``test_another_citizens_completion_is_not_delivered`` pins rule 5.
 
 Every test passes ``repo_root``/``storage_path`` explicitly and drives loops by
 replacing the handler's own ``_sleep`` — no test waits a real tick.
 """
 
 import json
-import os
 import subprocess
 import time
 from datetime import datetime
@@ -29,15 +40,16 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.devpulse.apps.handlers.watchdog import baseline
+from aipass.devpulse.apps.handlers.watchdog import feed as watch_feed
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 from aipass.devpulse.apps.handlers.watchdog import wire
 
 
-# Same convention as test_watchdog_baseline.py: a pid that cannot be running,
-# re-asserted where used so a machine where it IS alive fails as
-# fixture-broken instead of quietly passing for the wrong reason.
+# A pid that cannot be running, re-asserted where used so a machine where it IS
+# alive fails as fixture-broken instead of quietly passing for the wrong reason.
 DEAD_PID = 999999
+
+SEAT = "@devpulse"
 
 
 @pytest.fixture(autouse=True)
@@ -49,9 +61,13 @@ def _no_json_writes():
 
 @pytest.fixture(autouse=True)
 def _private_heartbeat(tmp_path, monkeypatch):
-    """Point the heartbeat at a per-test file — never the real /tmp signal."""
+    """Point the heartbeat at a per-test file — never the real /tmp signal.
+
+    r4 moved this file's WRITER from the daemon to the wire; it is patched on
+    ``wire`` now for that reason, not merely because the module moved.
+    """
     hb = tmp_path / "heartbeat"
-    monkeypatch.setattr(baseline, "HEARTBEAT_FILE", hb)
+    monkeypatch.setattr(wire, "HEARTBEAT_FILE", hb)
     return hb
 
 
@@ -63,10 +79,19 @@ def _no_signal_rebind(monkeypatch):
 
 
 def _repo(tmp_path: Path) -> Path:
-    """A minimal repo root: registry file is all the wire itself needs."""
+    """A minimal repo root with a SEALED OWNER.
+
+    The owner entry is not decoration: dispatches.seat_email() resolves "whose
+    dispatches are these" through spawn's owner contract, and a repo without one
+    refuses to attribute anything at all — which is the correct behaviour and
+    would make every test here fail for the wrong reason.
+    """
     root = tmp_path / "repo"
     root.mkdir(exist_ok=True)
-    (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    (root / "AIPASS_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "DEVPULSE", "email": SEAT, "owner": True, "path": str(root)}]}),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -74,26 +99,45 @@ def _store(tmp_path: Path) -> Path:
     return tmp_path / "trinity" / "watchdog_active.json"
 
 
-def _write_events(root: Path, records: list[dict], tail: str = "") -> Path:
-    """Write the daemon's events JSONL; ``tail`` appends raw bytes (torn line)."""
-    events = baseline.events_file_for(root)
-    events.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(json.dumps(r) + "\n" for r in records) + tail
-    events.write_text(body, encoding="utf-8")
-    return events
+def _write_feed(root: Path, records: list[dict]) -> Path:
+    """Write @ai_mail's notification feed as the wire will re-root it."""
+    path = watch_feed.feed_file(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    return path
 
 
-def _event(branch: str, subject: str = "job done") -> dict:
+def _completion(branch: str, dispatch_id: str, minute: int = 0, sender: str = SEAT) -> dict:
+    """One feed line in the shape dispatch_monitor writes at the terminal moment.
+
+    ``sender`` is the field that makes rule 5 answerable at all — @ai_mail
+    stamps it on the line (FPLAN-0452 P1) precisely so a consumer never has to
+    join back to the register to ask "was this mine".
+    """
     return {
-        "branch": branch,
-        "subject": subject,
-        "age": 12,
-        "bounce": False,
-        "state": "completed",
-        "pid": None,
-        "epoch": time.time(),
-        "iso": datetime.now().isoformat(timespec="seconds"),
+        "ts": f"2026-08-22T12:{minute:02d}:00.000000+00:00",
+        "kind": "dispatch",
+        "title": f"@{branch} completed",
+        "body": "Duration: 42s",
+        "source": branch,
+        "sender": sender,
+        "dispatch_id": dispatch_id,
+        "report_path": f".aipass/dispatch_reports/{dispatch_id}.json",
     }
+
+
+def _seed_cursor(root: Path) -> None:
+    """Absorb the current feed so a later append is the only NEW record.
+
+    drain_feed seeds silently on its first look — there is no honest way to know
+    what a previous session already saw — so a test about *live* delivery has to
+    get past that first look deliberately.
+    """
+    watch_feed.drain_feed(
+        watch_feed.cursor_file_for(root),
+        kinds=("dispatch",),
+        feed_file_path=watch_feed.feed_file(root),
+    )
 
 
 def _plant_entry(store: Path, wtype: str, pid: int, metadata: dict | None = None, handle: str | None = None) -> str:
@@ -120,15 +164,6 @@ def _plant_entry(store: Path, wtype: str, pid: int, metadata: dict | None = None
     return handle
 
 
-def _live_daemon(store: Path) -> str:
-    """A daemon entry whose pid is THIS test process — alive by construction."""
-    return _plant_entry(store, "baseline", os.getpid(), {"role": "daemon", "scope": "all citizens"})
-
-
-def _fresh_heartbeat(hb: Path) -> None:
-    hb.touch()
-
-
 def _entries(store: Path) -> list[dict]:
     try:
         return json.loads(store.read_text(encoding="utf-8"))["watches"]
@@ -137,262 +172,287 @@ def _entries(store: Path) -> list[dict]:
 
 
 def _spawn_named(name: str) -> subprocess.Popen:
-    """A live process whose cmdline carries ``name`` — argv[0] via exec -a."""
-    return subprocess.Popen(
+    """A live process whose cmdline carries ``name`` — argv[0] via exec -a.
+
+    Waits for the POST-exec cmdline, and the distinction matters: during
+    ``execve`` /proc/<pid>/cmdline reads EMPTY for an instant, and a sweep that
+    looks in that window sees no watchdog name and correctly refuses to signal
+    what looks like a recycled pid — so the test asserts against the wrong
+    branch. Merely checking that the name is present is not enough, because the
+    ``bash -c`` string contains it too and matches immediately, before the exec
+    has happened at all. argv[0] == name is the only proof the exec landed.
+
+    Not a new race: r4 exposed it by removing the daemon-ensure step the arm
+    door used to spend time on before sweeping.
+    """
+    proc = subprocess.Popen(
         ["bash", "-c", f"exec -a {name} sleep 30"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    for _ in range(500):
+        if wire._cmdline(proc.pid).startswith(name):
+            return proc
+        time.sleep(0.01)
+    proc.kill()
+    raise AssertionError(f"fixture broken: {name} never became argv[0] of pid {proc.pid}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Replay — the whole point: churn delays events, never loses them
+# THE r4 HEADLINE — one completion, one wake, and only mine
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_replay_delivers_missed_events_and_advances_cursor(tmp_path, capsys, _private_heartbeat):
+def test_one_completion_delivers_one_line(tmp_path, capsys, monkeypatch):
+    """The defect r4 exists to kill: every completion used to wake twice.
+
+    The daemon's events file and @ai_mail's feed carried the SAME completion
+    1-2s apart, and the wire drained both with no dedupe. Only a COUNT can
+    catch this — a duplicate wake is indistinguishable from a working one.
+    """
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    events = _write_events(root, [_event("api"), _event("baud")])
+    _write_feed(root, [])
+    _seed_cursor(root)
+
+    appended = {"done": False}
+
+    def append_once(_seconds):
+        if not appended["done"]:
+            _write_feed(root, [_completion("flow", "d1")])
+            appended["done"] = True
+
+    monkeypatch.setattr(wire, "_sleep", append_once)
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=3, wire_poll=0)
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if "@flow" in ln]
+    assert len(lines) == 1, f"one completion must produce exactly one wake, got {lines}"
+
+
+def test_another_citizens_completion_is_not_delivered(tmp_path, capsys, monkeypatch):
+    """Rule 5: if @flow dispatched @seedgo, that is @flow's wake, not mine.
+
+    Note both records name a branch that FINISHED — ``source`` cannot separate
+    them. Only ``sender`` can, which is why @ai_mail stamps it.
+    """
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+
+    def append_both(_seconds):
+        _write_feed(
+            root,
+            [
+                _completion("flow", "mine"),
+                _completion("seedgo", "theirs", sender="@flow"),
+            ],
+        )
+
+    monkeypatch.setattr(wire, "_sleep", append_both)
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=2, wire_poll=0)
+
+    out = capsys.readouterr().out
+    assert "@flow" in out
+    assert "@seedgo" not in out, "another citizen's dispatch must never reach this seat"
+
+
+def test_a_completion_without_a_sender_is_not_mine(tmp_path, capsys, monkeypatch):
+    """Unattributable fails CLOSED. Failing open restores the fleet-wide wake.
+
+    This is the shape every completion has under an OLDER producer, so the
+    open/closed choice here decides what happens during a rollout, not just in
+    a corner case.
+    """
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+
+    anonymous = _completion("stranger", "ignored")
+    anonymous.pop("sender")
+    monkeypatch.setattr(wire, "_sleep", lambda _s: _write_feed(root, [anonymous]))
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=2, wire_poll=0)
+
+    assert "@stranger" not in capsys.readouterr().out
+
+
+def test_wake_start_edges_are_not_delivered(tmp_path, capsys, monkeypatch):
+    """Only a COMPLETION wakes (rule 5).
+
+    An agent may mail a report and then mail a correction, so the wake waits for
+    it to be FINISHED. The feed also carries kind="wake" start edges, which this
+    wire used to deliver — that is noise, not news.
+    """
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+
+    start_edge = {
+        "ts": "2026-08-22T12:00:00+00:00",
+        "kind": "wake",
+        "title": "@flow waking",
+        "body": "dispatched",
+        "source": "flow",
+        "dispatch_id": "d1",
+    }
+    monkeypatch.setattr(wire, "_sleep", lambda _s: _write_feed(root, [start_edge]))
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=2, wire_poll=0)
+
+    assert "waking" not in capsys.readouterr().out
+
+
+def test_an_unresolvable_seat_refuses_to_arm(tmp_path, capsys):
+    """No identity means every completion filters out — that must be LOUD, not quiet.
+
+    A wire that armed here would sit looking healthy and deliver nothing, which
+    is silence reading as coverage: the failure shape this release exists to
+    remove. Note the deliberate asymmetry with the register, whose ABSENCE is
+    legitimate (no dispatch has ever been sent from this project yet); an
+    unknown seat never is.
+    """
+    root = tmp_path / "repo"
+    root.mkdir()
+    # A registry with no sealed owner — nobody to attribute dispatches to.
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    _write_feed(root, [])
+
+    with pytest.raises(SystemExit) as exc_info:
+        wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "BASELINE DEAD" in out
+    assert "whose dispatches to deliver" in out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Replay — churn delays completions, never loses them
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_replay_delivers_completions_missed_while_unwired(tmp_path, capsys):
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    _seed_cursor(root)
+    _write_feed(root, [_completion("flow", "d1"), _completion("baud", "d2", minute=5)])
 
     result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     out = capsys.readouterr().out
-    assert out.count("MISSED COMPLETE") == 2
-    assert "@api" in out and "@baud" in out
-    assert "no wire was up" in out
+    assert "MISSED" in out
+    assert "@flow" in out and "@baud" in out
     assert result["replayed"] == 2
-    cursor = json.loads(baseline.cursor_file_for(root).read_text(encoding="utf-8"))
-    assert cursor["offset"] == events.stat().st_size
 
 
-def test_replay_starts_where_the_cursor_left_off(tmp_path, capsys, _private_heartbeat):
-    """Already-delivered events must not repeat on the next arm."""
+def test_replay_does_not_resurface_what_was_already_delivered(tmp_path, capsys):
+    """The cursor is a digest set, not an offset — the feed is rewritten on trim."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    delivered_already = _event("api")
-    first = json.dumps(delivered_already) + "\n"
-    _write_events(root, [delivered_already, _event("prax")])
-    wire._write_cursor(baseline.cursor_file_for(root), len(first.encode()))
+    _write_feed(root, [_completion("flow", "d1")])
+    _seed_cursor(root)
 
-    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
-    out = capsys.readouterr().out
-    assert "@prax" in out
-    assert "@api" not in out
+    assert result["replayed"] == 0
+    assert "@flow" not in capsys.readouterr().out
 
 
-def test_once_returns_after_replay(tmp_path, capsys, _private_heartbeat):
+def test_once_returns_after_replay(tmp_path, capsys):
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    _write_events(root, [_event("api")])
+    _write_feed(root, [])
+    _seed_cursor(root)
+    _write_feed(root, [_completion("api", "d1")])
 
     result = wire.arm_wire(repo_root=root, storage_path=store, once=True, wire_poll=0)
 
     assert result["state"] == "completed"
-    assert result["delivered"] == 1
-    assert "MISSED COMPLETE @api" in capsys.readouterr().out
+    assert "MISSED" in capsys.readouterr().out
 
 
-def test_live_follow_delivers_appended_event(tmp_path, capsys, monkeypatch, _private_heartbeat):
+def test_live_follow_delivers_an_appended_completion(tmp_path, capsys, monkeypatch):
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    events = _write_events(root, [])
+    _write_feed(root, [])
+    _seed_cursor(root)
 
-    appended = {"done": False}
-
-    def append_event(_seconds):
-        if appended["done"]:
-            return
-        appended["done"] = True
-        with open(events, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(_event("trigger", "third door closed")) + "\n")
-
-    monkeypatch.setattr(wire, "_sleep", append_event)
-    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=3, wire_poll=0)
-
-    out = capsys.readouterr().out
-    assert "COMPLETE @trigger" in out
-    assert "MISSED" not in out
-    assert result["delivered"] == 1
-
-
-def test_torn_tail_line_is_not_consumed(tmp_path, _private_heartbeat):
-    """A write still in flight stays for the next tick — never half-delivered."""
-    root = _repo(tmp_path)
-    record = _event("api")
-    complete = json.dumps(record) + "\n"
-    _write_events(root, [record], tail='{"branch":"ba')
-
-    records, offset = wire._drain_events(baseline.events_file_for(root), 0)
-
-    assert [r["branch"] for r in records] == ["api"]
-    assert offset == len(complete.encode())
-
-
-def test_junk_line_is_skipped_and_cursor_moves_past_it(tmp_path, capsys, _private_heartbeat):
-    """Unparseable-but-complete lines must not wedge delivery at the same offset."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    events = baseline.events_file_for(root)
-    events.parent.mkdir(parents=True, exist_ok=True)
-    events.write_text("this is not json\n" + json.dumps(_event("memory")) + "\n", encoding="utf-8")
-
-    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
-
-    captured = capsys.readouterr()
-    assert "COMPLETE @memory" in captured.out
-    assert "skipped an unparseable event line" in captured.err
-    cursor = json.loads(baseline.cursor_file_for(root).read_text(encoding="utf-8"))
-    assert cursor["offset"] == events.stat().st_size
-
-
-def test_shrunk_events_file_replays_from_top(tmp_path, capsys, _private_heartbeat):
-    """Truncation/replacement = duplicates over silence, said out loud."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    _write_events(root, [_event("hooks")])
-    wire._write_cursor(baseline.cursor_file_for(root), 10_000)
-
-    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
-
-    captured = capsys.readouterr()
-    assert "COMPLETE @hooks" in captured.out
-    assert "replaying from the top" in captured.err
-
-
-def test_corrupt_cursor_resets_to_zero(tmp_path, _private_heartbeat):
-    root = _repo(tmp_path)
-    cursor = baseline.cursor_file_for(root)
-    cursor.parent.mkdir(parents=True, exist_ok=True)
-    cursor.write_text("{broken", encoding="utf-8")
-
-    assert wire._read_cursor(cursor) == 0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Daemon lifecycle — ensure, spawn, and die loudly
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_arm_spawns_daemon_when_none_lives(tmp_path, _private_heartbeat):
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _fresh_heartbeat(_private_heartbeat)
-    calls = []
-
-    def fake_spawn(devpulse_dir, daemon_log):
-        calls.append((devpulse_dir, daemon_log))
-        _live_daemon(store)
-
-    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0, spawn_fn=fake_spawn)
-
-    assert len(calls) == 1
-    assert result["state"] == "stopped"
-
-
-def test_arm_dies_loudly_when_spawn_never_registers(tmp_path, capsys, monkeypatch, _private_heartbeat):
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    monkeypatch.setattr(wire, "_DAEMON_SPAWN_WAIT_SECONDS", 0.0)
-
-    with pytest.raises(SystemExit) as exc_info:
-        wire.arm_wire(repo_root=root, storage_path=store, spawn_fn=lambda *a: None)
-
-    assert exc_info.value.code == 1
-    assert "BASELINE DEAD" in capsys.readouterr().out
-
-
-def test_wire_dies_loudly_when_daemon_pid_dies(tmp_path, capsys, _private_heartbeat):
-    """The wire watches the daemon back — a dead detector must never look covered."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _fresh_heartbeat(_private_heartbeat)
-    victim = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL)
-    _plant_entry(store, "baseline", victim.pid, {"role": "daemon"})
-    victim.terminate()
-    victim.wait(timeout=5)
-
-    # The sweep buries the dead daemon, so hand arm a spawn that "revives" it
-    # with a pid that dies between arm and the first follow tick.
-    revived = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL)
-
-    def fake_spawn(*_a):
-        _plant_entry(store, "baseline", revived.pid, {"role": "daemon"})
-
-    revived_killed = {"done": False}
-
-    def kill_before_tick(_seconds):
-        if not revived_killed["done"]:
-            revived.terminate()
-            revived.wait(timeout=5)
-            revived_killed["done"] = True
-
-    with patch.object(wire, "_sleep", kill_before_tick):
-        # First tick sees the daemon alive; the scripted sleep kills it; the
-        # second tick must exit loudly.
-        with pytest.raises(SystemExit) as exc_info:
-            wire.arm_wire(repo_root=root, storage_path=store, spawn_fn=fake_spawn, max_ticks=10, wire_poll=0)
-
-    assert exc_info.value.code == 1
-    out = capsys.readouterr().out
-    assert "BASELINE DEAD" in out
-    assert "daemon gone" in out
-    assert "re-arm" in out
-
-
-def test_wire_dies_loudly_when_heartbeat_goes_stale(tmp_path, capsys, _private_heartbeat):
-    """A live pid with a stale heartbeat is a HUNG detector — the worse corpse."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _live_daemon(store)
-    stale = time.time() - (baseline.HEARTBEAT_STALE_SECONDS + 60)
-    _private_heartbeat.touch()
-    os.utime(_private_heartbeat, (stale, stale))
-
-    with pytest.raises(SystemExit) as exc_info:
-        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=5, wire_poll=0)
-
-    assert exc_info.value.code == 1
-    out = capsys.readouterr().out
-    assert "BASELINE DEAD" in out
-    assert "hung" in out
-
-
-def test_missing_heartbeat_with_live_pid_is_grace_not_death(tmp_path, _private_heartbeat):
-    """A fresh daemon that hasn't completed its first tick is not a corpse."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _live_daemon(store)
-    assert not _private_heartbeat.exists()
-
+    monkeypatch.setattr(wire, "_sleep", lambda _s: _write_feed(root, [_completion("flow", "d1")]))
     result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=2, wire_poll=0)
 
-    assert result["state"] == "stopped"
+    assert result["delivered"] == 1
+    assert "@flow" in capsys.readouterr().out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Takeover + migration — one wire, the right wire, and never an innocent pid
+# The daemon is gone — and must not come back through a side door
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monkeypatch, _private_heartbeat):
+def test_wire_never_spawns_anything(tmp_path, monkeypatch):
+    """Rule 2: idle is zero running processes. The arm door used to spawn a daemon."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
+    _write_feed(root, [])
+
+    def explode(*a, **kw):
+        raise AssertionError(f"the wire must not spawn a process: {a}")
+
+    monkeypatch.setattr(subprocess, "Popen", explode)
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+
+def test_a_pre_r4_daemon_still_running_is_retired(tmp_path, capsys):
+    """An old detached daemon from another checkout would restore the double-wake.
+
+    It would also be invisible while doing it — the second wake looks like the
+    first — so the arm retires it by name rather than ignoring an unknown type.
+    """
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    old = _spawn_named("watchdog-baseline-daemon")
+    try:
+        _plant_entry(store, "baseline", old.pid, {"role": "daemon", "scope": "all citizens"})
+
+        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+        assert "retired pre-r4 detection daemon" in capsys.readouterr().err
+        old.wait(timeout=5)
+        assert old.returncode is not None
+        assert [w for w in _entries(store) if w["type"] == "baseline"] == []
+    finally:
+        if old.poll() is None:
+            old.kill()
+
+
+def test_wire_touches_the_heartbeat_the_daemon_used_to_own(tmp_path, _private_heartbeat):
+    """Move this and the statusline paints red forever with a healthy wire.
+
+    That is not hypothetical — FPLAN-0451 P2 hit the same trap from the other
+    side with a hardcoded /tmp path.
+    """
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    assert not _private_heartbeat.exists()
+
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert _private_heartbeat.exists(), "the wire owns the heartbeat now — nothing else writes it"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Takeover — one wire, the right wire, and never an innocent pid
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monkeypatch):
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
     stale = _spawn_named("watchdog-wire-stale")
     try:
         _plant_entry(store, "baseline_wire", stale.pid, {"session": "dead-session"})
@@ -415,15 +475,14 @@ def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monke
             stale.kill()
 
 
-def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch, _private_heartbeat):
+def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
     """No 'already wired' answer exists: a wire writing into the CURRENT
     session dir proves a writer, never a listener (the 10:55 wire kept writing
     into the live session dir after the resume killed its monitor). The arm
     happening right now is the only wire known to have ears."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
+    _write_feed(root, [])
     peer = _spawn_named("watchdog-wire-peer")
     try:
         _plant_entry(store, "baseline_wire", peer.pid, {"session": "same-session"})
@@ -447,12 +506,11 @@ def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch, _pri
             peer.kill()
 
 
-def test_recycled_pid_is_never_signalled(tmp_path, capsys, _private_heartbeat):
+def test_recycled_pid_is_never_signalled(tmp_path, capsys):
     """A registry pid whose cmdline is not a watchdog gets buried, not shot."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
+    _write_feed(root, [])
     innocent = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL)
     try:
         _plant_entry(store, "baseline_wire", innocent.pid, {"session": "other"})
@@ -467,36 +525,12 @@ def test_recycled_pid_is_never_signalled(tmp_path, capsys, _private_heartbeat):
         innocent.kill()
 
 
-def test_legacy_single_process_watcher_is_migrated(tmp_path, capsys, _private_heartbeat):
-    """A live round-1 baseline (no role=daemon) is the orphan species — killed
-    and replaced, said out loud."""
+def test_dead_entries_are_buried_on_arm(tmp_path, capsys):
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _fresh_heartbeat(_private_heartbeat)
-    legacy = _spawn_named("watchdog-legacy")
-    try:
-        _plant_entry(store, "baseline", legacy.pid, {"scope": "all citizens"})
-
-        def fake_spawn(*_a):
-            _live_daemon(store)
-
-        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0, spawn_fn=fake_spawn)
-
-        assert "migrated legacy single-process watcher" in capsys.readouterr().err
-        legacy.wait(timeout=5)
-        assert legacy.returncode is not None
-    finally:
-        if legacy.poll() is None:
-            legacy.kill()
-
-
-def test_dead_entries_are_buried_on_arm(tmp_path, capsys, _private_heartbeat):
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
+    _write_feed(root, [])
     assert not watch_registry.is_pid_alive(DEAD_PID), "fixture broken: DEAD_PID is alive on this machine"
     _plant_entry(store, "baseline_wire", DEAD_PID, {"session": "gone"})
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
 
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
@@ -504,24 +538,29 @@ def test_dead_entries_are_buried_on_arm(tmp_path, capsys, _private_heartbeat):
     assert [w for w in _entries(store) if w.get("pid") == DEAD_PID] == []
 
 
-def test_wire_deregisters_itself_on_exit(tmp_path, _private_heartbeat):
+def test_wire_deregisters_itself_on_exit(tmp_path):
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
+    _write_feed(root, [])
 
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     assert [w for w in _entries(store) if w["type"] == "baseline_wire"] == []
 
 
-def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, monkeypatch, _private_heartbeat):
+# ─────────────────────────────────────────────────────────────────────────────
+# The wrapper tripwire — the 12:34 failure
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, monkeypatch):
     """Monitor stdout is a socket; run_in_background stdout is a REAL FILE in a
     tasks dir (measured live 2026-08-19). A continuous wire behind that file
     never notifies — the 12:34 failure — so the arm refuses before touching
-    anything (no takeover, no daemon spawn, no registration)."""
+    anything (no takeover, no registration)."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
+    _write_feed(root, [])
     peer = _spawn_named("watchdog-wire-good")
     try:
         _plant_entry(store, "baseline_wire", peer.pid, {"session": "healthy"})
@@ -542,13 +581,13 @@ def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, mon
         peer.kill()
 
 
-def test_once_arm_under_run_in_background_is_allowed(tmp_path, capsys, monkeypatch, _private_heartbeat):
+def test_once_arm_under_run_in_background_is_allowed(tmp_path, capsys, monkeypatch):
     """--once exits on first delivery, so bg-Bash DOES notify — stays legal."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    _write_events(root, [_event("api")])
+    _write_feed(root, [])
+    _seed_cursor(root)
+    _write_feed(root, [_completion("api", "d1")])
     bg_file = tmp_path / "some-session" / "tasks" / "b0l5zsqp7.output"
     bg_file.parent.mkdir(parents=True)
     bg_file.touch()
@@ -557,57 +596,115 @@ def test_once_arm_under_run_in_background_is_allowed(tmp_path, capsys, monkeypat
     result = wire.arm_wire(repo_root=root, storage_path=store, once=True, wire_poll=0)
 
     assert result["state"] == "completed"
-    assert "MISSED COMPLETE @api" in capsys.readouterr().out
+    assert "MISSED DISPATCH @api" in capsys.readouterr().out
 
 
-def test_wire_records_conversation_id_from_env(tmp_path, monkeypatch, _private_heartbeat):
-    """metadata.session is the CONVERSATION id (what the statusline receives),
-    never the tasks-dir id — the two namespaces measured 2026-08-19 differ."""
-    root = _repo(tmp_path)
-    store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "conv-abc-123")
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
-    seen = {}
+# ─────────────────────────────────────────────────────────────────────────────
+# Wire identity — two id namespaces, do not confuse them
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _spy_register(monkeypatch, seen: dict) -> None:
     real_register = watch_registry.register
 
-    def spy_register(watch_type, metadata=None, storage_path=None):
+    def spy(watch_type, metadata=None, storage_path=None):
         if watch_type == "baseline_wire":
             seen.update(metadata or {})
         return real_register(watch_type, metadata=metadata, storage_path=storage_path)
 
-    monkeypatch.setattr(wire._registry, "register", spy_register)
+    monkeypatch.setattr(wire._registry, "register", spy)
+
+
+def test_wire_records_conversation_id_from_env(tmp_path, monkeypatch):
+    """metadata.session is the CONVERSATION id (what the statusline receives),
+    never the tasks-dir id — the two namespaces measured 2026-08-19 differ."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "conv-abc-123")
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     assert seen["session"] == "conv-abc-123"
     assert seen["tasks_dir"] == "runtime-xyz"
 
 
-def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch, _private_heartbeat):
+def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch):
     root = _repo(tmp_path)
     store = _store(tmp_path)
-    _live_daemon(store)
-    _fresh_heartbeat(_private_heartbeat)
+    _write_feed(root, [])
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
-    seen = {}
-    real_register = watch_registry.register
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
 
-    def spy_register(watch_type, metadata=None, storage_path=None):
-        if watch_type == "baseline_wire":
-            seen.update(metadata or {})
-        return real_register(watch_type, metadata=metadata, storage_path=storage_path)
-
-    monkeypatch.setattr(wire._registry, "register", spy_register)
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     assert seen["session"] == "runtime-xyz"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Wire identity primitives
-# ─────────────────────────────────────────────────────────────────────────────
+def test_wire_records_the_wrapper_carrying_it(tmp_path, monkeypatch):
+    """A socket stdout is a Monitor child — the only wrapper that can hear a
+    continuous wire. Recorded at arm time, because by the time anyone asks
+    'was that wire real' the pid is gone and /proc cannot answer."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("socket:[4532132]"))
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert seen["wrapper"] == wire.WRAPPER_MONITOR
+
+
+def test_a_foreground_wire_is_recorded_as_foreground(tmp_path, monkeypatch):
+    """A tty is not a listener. It must not record as covered."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("/dev/pts/3"))
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert seen["wrapper"] == wire.WRAPPER_FOREGROUND
+
+
+def test_the_run_in_background_shape_records_as_background(tmp_path, monkeypatch):
+    """--once is legal under run_in_background (it exits on delivery), so the
+    wrapper must still be recorded truthfully there rather than assumed."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    bg_file = tmp_path / "runtime-xyz" / "tasks" / "t.output"
+    bg_file.parent.mkdir(parents=True)
+    bg_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: bg_file)
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, once=True, max_ticks=1, wire_poll=0)
+
+    assert seen["wrapper"] == wire.WRAPPER_BACKGROUND
+
+
+def test_wire_no_longer_records_a_daemon_pid(tmp_path, monkeypatch):
+    """There is no daemon to point at. A leftover key would read as one existing."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert "daemon_pid" not in seen
 
 
 def test_session_dir_requires_tasks_parent(tmp_path):
@@ -633,92 +730,15 @@ def test_dead_pid_has_no_stdout_target():
     assert wire._stdout_target(DEAD_PID) is None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# The daemon face of watch_baseline
-# ─────────────────────────────────────────────────────────────────────────────
+def test_find_repo_root_walks_up_to_the_registry(tmp_path):
+    """Moved here from baseline.py when r4 deleted the daemon around it."""
+    root = _repo(tmp_path)
+    deep = root / "a" / "b" / "c"
+    deep.mkdir(parents=True)
+    assert wire.find_repo_root(deep) == root.resolve()
 
 
-def _daemon_repo(tmp_path: Path) -> Path:
-    """A repo with one citizen mid-dispatch, for daemon-mode runs."""
-    root = tmp_path / "repo"
-    branch = root / "alpha"
-    (branch / ".ai_mail.local").mkdir(parents=True)
-    (root / "AIPASS_REGISTRY.json").write_text(
-        json.dumps({"branches": [{"name": "ALPHA", "email": "@alpha", "path": str(branch)}]}),
-        encoding="utf-8",
-    )
-    return root
-
-
-def test_daemon_mode_appends_event_and_heartbeats(tmp_path, monkeypatch, _private_heartbeat):
-    root = _daemon_repo(tmp_path)
-    store = _store(tmp_path)
-    branch = root / "alpha"
-    lock = branch / ".ai_mail.local" / ".dispatch.lock"
-    lock.write_text(
-        json.dumps({"pid": os.getpid(), "timestamp": datetime.now().isoformat(), "subject": "alpha run"}),
-        encoding="utf-8",
-    )
-
-    def steps(_seconds):
-        if lock.exists():
-            lock.unlink()
-
-    monkeypatch.setattr(baseline, "_sleep", steps)
-    result = baseline.watch_baseline(daemon=True, repo_root=root, storage_path=store, max_ticks=3)
-
-    assert result["completions"] == 1
-    assert _private_heartbeat.exists(), "daemon must heartbeat every tick"
-    events = baseline.events_file_for(root)
-    lines = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
-    assert len(lines) == 1
-    assert lines[0]["branch"] == "alpha"
-    assert "epoch" in lines[0] and "iso" in lines[0]
-
-
-def test_daemon_mode_registers_with_daemon_role(tmp_path, monkeypatch, _private_heartbeat):
-    root = _daemon_repo(tmp_path)
-    store = _store(tmp_path)
-    seen = {}
-
-    real_register = watch_registry.register
-
-    def spy_register(watch_type, metadata=None, storage_path=None):
-        seen["metadata"] = metadata
-        return real_register(watch_type, metadata=metadata, storage_path=storage_path)
-
-    monkeypatch.setattr(baseline._registry, "register", spy_register)
-    baseline.watch_baseline(daemon=True, repo_root=root, storage_path=store, max_ticks=1)
-
-    assert seen["metadata"]["role"] == "daemon"
-
-
-def test_non_daemon_mode_registers_without_role(tmp_path, monkeypatch, _private_heartbeat):
-    """The role key IS the migration discriminator — its absence must stay
-    exactly what a legacy watcher looks like."""
-    root = _daemon_repo(tmp_path)
-    store = _store(tmp_path)
-    seen = {}
-
-    real_register = watch_registry.register
-
-    def spy_register(watch_type, metadata=None, storage_path=None):
-        seen["metadata"] = metadata
-        return real_register(watch_type, metadata=metadata, storage_path=storage_path)
-
-    monkeypatch.setattr(baseline._registry, "register", spy_register)
-    baseline.watch_baseline(repo_root=root, storage_path=store, max_ticks=1)
-
-    assert "role" not in seen["metadata"]
-    events = baseline.events_file_for(root)
-    assert not events.exists(), "non-daemon mode must not write the events file"
-
-
-def test_replayed_line_matches_live_format(tmp_path):
-    """One formatter, two moments: MISSED is the live line plus lateness."""
-    record = _event("api", subject="daemon wake")
-    live = wire._format_delivery(record, missed=False)
-    missed = wire._format_delivery(record, missed=True)
-    assert live == baseline.format_completion(record)
-    assert missed.startswith("MISSED " + live)
-    assert record["iso"] in missed
+def test_find_repo_root_returns_none_without_a_registry(tmp_path):
+    orphan = tmp_path / "orphan"
+    orphan.mkdir()
+    assert wire.find_repo_root(orphan) is None

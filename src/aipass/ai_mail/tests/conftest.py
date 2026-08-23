@@ -93,6 +93,46 @@ def _strip_ambient_identity_source(monkeypatch):
     """
     monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
 
+    # AIPASS_DISPATCH_ID is the same shape of trap, stripped BEFORE it can cost
+    # anything (FPLAN-0452). This suite runs inside dispatched agents, and once
+    # wake.py stamps the spawn env every future run carries a live id ambiently.
+    # A test asserting "mail sent outside a dispatch carries no stamp" would then
+    # fail — or worse, one asserting the stamp would pass on the AMBIENT id
+    # rather than the one it set. Same lesson as the credential above, applied
+    # before the leak exists rather than after it burns a session.
+    monkeypatch.delenv("AIPASS_DISPATCH_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dispatch_register(tmp_path, monkeypatch):
+    """Point the register and the reports directory at tmp_path for EVERY test.
+
+    wake_branch() now registers every dispatch before it spawns, and the wake
+    tests exercise wake_branch with the spawn mocked — so the FIRST run of this
+    suite wrote 31 phantom "outstanding" entries into the live register. Every
+    one of them would have read as OVERDUE two hours later: a fleet of crashed
+    dispatches that never existed, in the one file whose whole job is to make
+    real crashes visible.
+
+    Both paths are re-rooted by patching the root they are DERIVED from, not the
+    functions themselves — so a test that passes repo_root= explicitly still gets
+    its own answer, and the raise-on-unrootable path stays reachable.
+
+    Third of its kind after FEED_PATH (S141) and CONTACTS_FILE (S146). A shared
+    file a handler writes to is production state, and the pattern is now: guard
+    it in conftest the day the writer lands, not the day someone notices.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch import register, report
+
+    # In its OWN subdirectory, never tmp_path itself: the marker file this needs
+    # is exactly what the find_caller_registry tests build tmp_path to control,
+    # and dropping a second AIPASS_REGISTRY.json beside theirs broke 15 of them.
+    root = tmp_path / ".dispatch_register_root"
+    root.mkdir(exist_ok=True)
+    (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(register, "find_repo_root", lambda: root)
+    monkeypatch.setattr(report, "find_repo_root", lambda: root)
+
 
 @pytest.fixture(autouse=True)
 def _isolate_contacts_file(tmp_path, monkeypatch):

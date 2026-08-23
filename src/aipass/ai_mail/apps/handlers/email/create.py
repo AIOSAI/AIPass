@@ -45,6 +45,9 @@ def _get_append_footer():
     return _append_footer
 
 
+from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
+
+
 def create_email_file(
     to_branch: str,
     subject: str,
@@ -102,6 +105,11 @@ def create_email_file(
     # Add dispatched_to for reply chain validation (tracks original dispatch recipient)
     if dispatched_to:
         email_data["dispatched_to"] = dispatched_to
+
+    # Stamp the dispatch that authored this mail (FPLAN-0452 P1). This is what
+    # makes the completion report's email list a RECORD rather than an mtime
+    # guess about what happened to be written during the run.
+    stamp_dispatch_id(email_data)
 
     # Create filename (safe, no special chars)
     safe_subject = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in subject)

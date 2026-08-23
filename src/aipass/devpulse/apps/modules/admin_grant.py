@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_grant.py
 # Description: Admin grant module — birth-cert privilege ceremony CLI (FPLAN-0401)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -16,7 +16,7 @@ a signed privilege block on the existing birth certificate.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, warning
+from aipass.cli.apps.modules import err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 from aipass.devpulse.apps.handlers.owner.admin_grant import (
@@ -44,12 +44,28 @@ HELP_TEXT = """\
 
 
 def _guard_caller() -> bool:
-    """Owner-only gate for ceremony verbs (see handlers.owner.guard)."""
-    from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller
+    """Owner-only gate for ceremony verbs (see handlers.owner.guard).
+
+    ``error`` and NOT ``warning``: ``warning`` does not call
+    ``mark_command_failed``, so this refusal used to EXIT 0 — a privilege
+    ceremony reporting success to the shell while granting nothing. @canary
+    found the identical defect in watchdog from a non-owner seat on 2026-08-22
+    and asked whether the shared guard had other callers; it had two, and this
+    was the worse one.
+    """
+    from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller, owner_address
 
     if guard_owner_caller("admin_grant"):
         return True
-    warning("admin_grant ceremony verbs are owner-only — refusing non-owner call")
+    owner = owner_address()
+    whose = f"they belong to {owner}" if owner else "no owner is sealed for this project"
+    error(
+        "admin_grant ceremony verbs are owner-only and this seat is not the owner",
+        suggestion=(
+            f"{whose} — ownership is the entry marked owner: true in the project's sealed registry. "
+            "Run 'aipass doctor' if you believe the seat is wrong. 'admin_grant --help' works from anywhere."
+        ),
+    )
     return False
 
 
@@ -149,6 +165,10 @@ def handle_command(command: str, args: list[str]) -> bool:
     elif verb == "mint":
         _cmd_mint()
     else:
-        warning(f"unknown admin_grant verb: {verb}")
+        # error, not warning: an unrecognised verb ran nothing, and a caller
+        # chaining on this needs the exit code to say so. watchdog's unknown
+        # subcommand already exits 2; this one exited 0 for the same reason
+        # the owner refusal above did.
+        error(f"unknown admin_grant verb: {verb}", suggestion="Use 'admin_grant --help' for usage")
         console.print(HELP_TEXT)
     return True

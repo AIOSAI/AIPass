@@ -36,6 +36,8 @@ One construction site
 
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 import aipass.ai_mail as ai_mail
@@ -124,6 +126,94 @@ class TestFeedPathDoor:
         assert "FEED_PATH" in ai_mail.__all__
 
 
+class TestRegisterDoor:
+    """The second door, asked for by @devpulse (FPLAN-0452 P0 addendum).
+
+    Same argument as the feed's: their wire resolves the register through this
+    package rather than assuming it sits beside the feed in ``.aipass/``, so the
+    location is learned from its owner instead of restated by a consumer.
+    """
+
+    def test_register_path_is_importable_from_the_package(self):
+        from aipass.ai_mail import register_path
+
+        assert callable(register_path)
+
+    def test_register_path_matches_the_handler_implementation(self):
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        assert ai_mail.register_path() == register.register_file()
+
+    def test_the_register_lives_where_the_contract_says(self):
+        path = ai_mail.register_path()
+
+        assert path.name == "dispatch_register.jsonl"
+        assert path.parent.name == ".aipass"
+
+    def test_register_path_returns_a_path_not_a_string(self):
+        assert isinstance(ai_mail.register_path(), Path)
+
+    def test_register_path_resolves_fresh_at_call_time(self, monkeypatch, tmp_path):
+        """A function, not a frozen constant — the feed's own lesson, reused."""
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        monkeypatch.setattr(register, "find_repo_root", lambda: tmp_path)
+
+        assert ai_mail.register_path() == tmp_path / ".aipass" / "dispatch_register.jsonl"
+
+    def test_both_doors_are_advertised_in_dunder_all(self):
+        assert "register_path" in ai_mail.__all__
+        assert "outstanding_dispatches" in ai_mail.__all__
+
+
+class TestOutstandingDoor:
+    """Why the RECONSTRUCTION is exported too, not just the path."""
+
+    def test_a_closed_dispatch_is_not_outstanding_through_the_door(self, tmp_path):
+        """The append-only trap, pinned at the public surface.
+
+        The register closes a dispatch by APPENDING a second record; the first
+        still reads "outstanding" forever. A consumer that parses the file
+        itself and takes the first record per id sees every dispatch ever made
+        as open — wrong, plausible, and silent. Exporting the reconstruction is
+        what stops a second implementation of that rule existing.
+        """
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=tmp_path)
+        assert dispatch_id
+        assert len(ai_mail.outstanding_dispatches(tmp_path)) == 1, "anchor: it must be open first"
+
+        register.close_dispatch(dispatch_id, "completed", repo_root=tmp_path)
+
+        assert ai_mail.outstanding_dispatches(tmp_path) == []
+
+    def test_each_entry_carries_the_overdue_verdict(self, tmp_path):
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=tmp_path)
+
+        assert ai_mail.outstanding_dispatches(tmp_path)[0]["overdue"] is False
+
+    def test_an_unrootable_tree_raises_rather_than_returning_the_live_register(self, monkeypatch, tmp_path):
+        """@devpulse's wire RAISES at arm time if the register cannot be found.
+
+        That decision only holds if this door raises too. Handing them the live
+        register when they asked for another tree would let a wire that covers
+        nothing look healthy — the failure shape r4 exists to remove.
+        """
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        orphan = tmp_path / "no-marker"
+        orphan.mkdir()
+        monkeypatch.setattr(register, "find_repo_root", lambda: orphan)
+
+        with pytest.raises(RuntimeError, match="cannot re-root"):
+            ai_mail.outstanding_dispatches(tmp_path / "elsewhere")
+
+
 class TestImportStaysLight:
     """The reason the door is lazy."""
 
@@ -145,6 +235,17 @@ class TestImportStaysLight:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "0", "importing aipass.ai_mail pulled in prax"
+
+    def test_the_register_door_is_lazy_too(self):
+        """A second door must not undo the first door's reason for existing."""
+        probe = (
+            "import sys; import aipass.ai_mail as m; p = m.register_path(); "
+            "print(int(any(k.startswith('aipass.prax') for k in sys.modules)), p.name)"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=60)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "1 dispatch_register.jsonl"
 
     def test_touching_the_door_does_load_it(self):
         """The other half: laziness must not mean broken.

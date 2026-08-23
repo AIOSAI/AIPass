@@ -16,9 +16,27 @@ import pytest
 from aipass.devpulse.apps.modules import watchdog as wd_mod
 
 
+@pytest.fixture
+def real_owner_gate():
+    """Opt OUT of the autouse bypass below — for tests whose subject IS the gate.
+
+    Requested as a fixture rather than declared as a marker so no pytest.ini
+    registration is needed and the opt-out is visible in the test signature.
+    """
+    return True
+
+
 @pytest.fixture(autouse=True)
-def _bypass_caller_guard():
-    """Force _guard_caller to always pass so tests don't depend on cwd."""
+def _bypass_caller_guard(request):
+    """Force _guard_caller to always pass so tests don't depend on cwd.
+
+    Skipped for tests that request ``real_owner_gate``: bypassing the guard
+    everywhere is exactly why the gate's own defects (help refused, refusal
+    exiting 0) had no test to fail.
+    """
+    if "real_owner_gate" in request.fixturenames:
+        yield
+        return
     with patch.object(wd_mod, "_guard_caller", return_value=True):
         yield
 
@@ -53,6 +71,109 @@ def test_handle_command_unknown_subcommand(capsys):
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "bogus" in combined.lower() or "unknown" in combined.lower()
+
+
+# --------------------------------------------------------------------------
+# The owner gate — @canary's three findings from a non-owner seat, 2026-08-22
+#
+# These deliberately do NOT use the autouse bypass: the gate is the subject.
+# --------------------------------------------------------------------------
+
+
+def _deny_owner(monkeypatch):
+    """Make the shared owner guard refuse, as it does for a non-owner seat."""
+    import aipass.devpulse.apps.handlers.owner.guard as owner_guard
+
+    monkeypatch.setattr(owner_guard, "guard_owner_caller", lambda _name: False)
+
+
+def test_help_survives_the_owner_gate(capsys, monkeypatch, real_owner_gate):
+    """--help must work from a seat that owns nothing.
+
+    The gate used to run first, so a non-owner asking for help got
+    'refusing non-owner call' — the module refused to explain itself to exactly
+    the person who did not know whose it was. That is how a gate teaches people
+    to route around it.
+    """
+    _deny_owner(monkeypatch)
+    assert wd_mod.handle_command("watchdog", ["--help"]) is True
+    text = capsys.readouterr()
+    combined = text.out + text.err
+    assert "usage" in combined.lower()
+    assert "owner-only" not in combined.lower()
+
+
+def test_introspection_survives_the_owner_gate(capsys, monkeypatch, real_owner_gate):
+    """Bare 'watchdog' is the same class as help — explain, never execute."""
+    _deny_owner(monkeypatch)
+    assert wd_mod.handle_command("watchdog", []) is True
+    text = capsys.readouterr()
+    assert "owner-only" not in (text.out + text.err).lower()
+
+
+def test_a_privileged_subcommand_is_still_refused(capsys, monkeypatch, real_owner_gate):
+    """Letting help through must not let anything else through with it."""
+    _deny_owner(monkeypatch)
+    assert wd_mod.handle_command("watchdog", ["baseline"]) is True
+    text = capsys.readouterr()
+    assert "owner-only" in (text.out + text.err).lower()
+
+
+def test_the_owner_refusal_flips_the_exit_code(monkeypatch, real_owner_gate):
+    """A refusal that exits 0 is a lie to every non-human caller.
+
+    This used ``warning``, which does not call ``mark_command_failed``, so
+    ``watchdog baseline && <next step>`` ran the next step believing the wire
+    was armed. @canary proved it specific, not drone-wide: unknown subcommand
+    exits 2, this exited 0. The human-facing text was a legibility problem;
+    this one was silent.
+
+    Asserts the FAILURE MARK, not the wording — wording is cosmetic and this
+    is the half that talks to scripts.
+    """
+    from aipass.cli.apps.modules import display as cli_display
+
+    _deny_owner(monkeypatch)
+    marks: list[int] = []
+    monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
+
+    assert wd_mod._guard_caller() is False
+    assert marks, "the refusal must mark the command failed, or it exits 0"
+
+
+def test_the_owner_refusal_names_the_owner(capsys, monkeypatch, real_owner_gate):
+    """'Owner-only' tells a stranger they are in the wrong place, not where the
+    right place is. A refusal with no next step dead-ends."""
+    _deny_owner(monkeypatch)
+    monkeypatch.setattr(wd_mod, "_owner_address", lambda: "@vera")
+
+    assert wd_mod._guard_caller() is False
+    text = capsys.readouterr()
+    assert "@vera" in (text.out + text.err)
+
+
+def test_the_refusal_still_refuses_when_the_owner_cannot_be_named(capsys, monkeypatch, real_owner_gate):
+    """Building a nicer message must never be able to break the refusal itself.
+
+    The owner lookup reads a registry, and a registry read can fail. If that
+    failure escaped, an unreadable registry would turn a refusal into a
+    traceback — and a traceback is not a refusal, it is a crash someone
+    retries.
+    """
+    import aipass.spawn.apps.handlers.registry as spawn_registry
+
+    _deny_owner(monkeypatch)
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("registry unreadable")
+
+    monkeypatch.setattr(spawn_registry, "get_owner", explode)
+
+    assert wd_mod._guard_caller() is False
+    text = capsys.readouterr()
+    combined = (text.out + text.err).lower()
+    assert "owner-only" in combined
+    assert "no owner is sealed" in combined
 
 
 def _fake_registry_module(active=None, kill_result=None, kill_all_result=None):
@@ -103,12 +224,23 @@ def _patch_registry_imports(fake_registry, fake_timer=None):
             return fake_registry
         if name.endswith(".timer"):
             return timer
-        if name.endswith(".baseline"):
-            # status now prints the delivery-lag line off the real baseline
-            # path helpers; a rootless fake keeps the line quiet in tests.
-            fake_baseline = type(sys)("fake_baseline_paths")
-            fake_baseline.find_repo_root = lambda *a, **kw: None
-            return fake_baseline
+        if name.endswith(".dispatches"):
+            # status prints the dispatch line off the REGISTER now (r4 deleted
+            # the events-file lag line with the daemon). A fake that reports an
+            # unavailable register keeps the line quiet without reaching the
+            # real one — and asserts nothing about a machine's live state.
+            fake_dispatches = type(sys)("fake_dispatches")
+
+            class RegisterUnavailable(RuntimeError):
+                pass
+
+            def _unavailable(*_a, **_kw):
+                raise RegisterUnavailable("no register in this test")
+
+            fake_dispatches.RegisterUnavailable = RegisterUnavailable
+            fake_dispatches.outstanding = _unavailable
+            fake_dispatches.overdue = _unavailable
+            return fake_dispatches
         raise ImportError(f"unexpected import in test: {name}")
 
     return patch("importlib.import_module", side_effect=fake_import)
@@ -208,6 +340,105 @@ def test_status_prints_active_watches(capsys):
     assert "schedule-def456" in out
     assert "@drone" in out
     assert "2 active" in out or "2 active watch" in out
+
+
+def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys):
+    """r4 has no daemon, so the wire row must not print ``daemon_pid``.
+
+    The field survived the daemon by two hours. It rendered as a permanent
+    ``daemon_pid=?`` on the one row an operator checks when they suspect the
+    watchdog is broken — a phantom fault on the health display of the thing
+    whose whole job is not to lie about its own health.
+    """
+    active = [
+        {
+            "handle": "wire-001",
+            "type": "baseline_wire",
+            "pid": 5150,
+            "started_epoch": 1000.0,
+            "elapsed_seconds": 90,
+            "metadata": {"session": "sess-abc", "wrapper": "monitor", "stdout": "socket:[123]"},
+        },
+    ]
+    fake = _fake_registry_module(active=active)
+    with _patch_registry_imports(fake):
+        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    out = capsys.readouterr().out
+    assert "daemon" not in out.lower()
+    assert "sess-abc" in out
+
+
+def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys):
+    """``via`` must show a real value on the HEALTHY path, not a permanent ?.
+
+    This row replaced two fields that read ``?`` whenever the watchdog was
+    working — first ``daemon_pid``, then ``tasks_dir`` (a Monitor child's
+    stdout is a socket and has no tasks dir). A field that says ``?`` on the
+    happy path trains the operator to skip the row, which is the opposite of
+    what a health display is for.
+    """
+    active = [
+        {
+            "handle": "wire-003",
+            "type": "baseline_wire",
+            "pid": 5153,
+            "started_epoch": 1000.0,
+            "elapsed_seconds": 10,
+            "metadata": {"session": "sess-abc", "wrapper": "background", "stdout": "/x/tasks/y.output"},
+        },
+    ]
+    fake = _fake_registry_module(active=active)
+    with _patch_registry_imports(fake):
+        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    out = capsys.readouterr().out
+    assert "via=background" in out
+    assert "?" not in out.split("wire-003")[1].split("\n")[0]
+
+
+def test_a_foreground_wire_is_named_as_having_no_listener(capsys):
+    """No session means nothing is reading stdout — the 2026-08-19 12:34 failure.
+
+    It must read as NONE and not as a blank field, because a blank column looks
+    like a rendering gap and a rendering gap gets scrolled past.
+    """
+    active = [
+        {
+            "handle": "wire-002",
+            "type": "baseline_wire",
+            "pid": 5151,
+            "started_epoch": 1000.0,
+            "elapsed_seconds": 5,
+            "metadata": {"session": None, "tasks_dir": None, "stdout": None},
+        },
+    ]
+    fake = _fake_registry_module(active=active)
+    with _patch_registry_imports(fake):
+        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    assert "NONE (fg)" in capsys.readouterr().out
+
+
+def test_an_unknown_watch_type_still_renders_its_row(capsys):
+    """A watch nobody can see is a watch nobody retires.
+
+    The tail table replaced an if/elif chain; a table lookup that misses must
+    fall back to raw metadata rather than dropping or crashing the row.
+    """
+    active = [
+        {
+            "handle": "mystery-01",
+            "type": "from_the_future",
+            "pid": 5152,
+            "started_epoch": 1000.0,
+            "elapsed_seconds": 5,
+            "metadata": {"invented_field": "cassiopeia"},
+        },
+    ]
+    fake = _fake_registry_module(active=active)
+    with _patch_registry_imports(fake):
+        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    out = capsys.readouterr().out
+    assert "mystery-01" in out
+    assert "cassiopeia" in out
 
 
 def test_list_routes_to_status(capsys):
@@ -416,19 +647,28 @@ def test_baseline_rejects_unknown_flag(capsys):
     assert "--forever" in combined or "unknown" in combined.lower()
 
 
-def test_baseline_daemon_flag_routes_to_detection(capsys):
-    """--daemon runs the detection role, never the wire door."""
-    recorder = {}
-    fake_module = _fake_baseline_module(recorder=recorder)
+def test_baseline_daemon_flag_is_refused_by_name(capsys):
+    """r4 deleted the detection daemon. --daemon must say THAT, not "unknown flag".
 
-    with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
+    An operator or a stale script passing it deserves to be told the lane
+    changed rather than that they made a typo — and the refusal happens before
+    any import, so nothing is armed on the way to the error.
+    """
+    fake_module = _fake_baseline_module(recorder={})
 
-    assert recorder == {"daemon": True}
+    with patch("importlib.import_module", return_value=fake_module) as imported:
+        result = wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
+
+    assert result is True
+    imported.assert_not_called()
+    combined = capsys.readouterr()
+    text = combined.out + combined.err
+    assert "removed in watchdog r4" in text
+    assert "no detection daemon" in text
 
 
-def test_baseline_once_and_daemon_together_is_an_error(capsys):
-    """The two flags are different lifetimes — refused before any import."""
+def test_baseline_daemon_is_still_refused_alongside_once(capsys):
+    """The flag is dead in every combination, not just alone."""
     fake_module = _fake_baseline_module(recorder={})
 
     with patch("importlib.import_module", return_value=fake_module) as imported:
@@ -436,6 +676,5 @@ def test_baseline_once_and_daemon_together_is_an_error(capsys):
 
     assert result is True
     imported.assert_not_called()
-    captured = capsys.readouterr()
-    combined = captured.out + captured.err
-    assert "lifetimes" in combined
+    combined = capsys.readouterr()
+    assert "removed in watchdog r4" in combined.out + combined.err

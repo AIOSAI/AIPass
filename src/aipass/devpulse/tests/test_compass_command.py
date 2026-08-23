@@ -189,6 +189,41 @@ def test_rate_missing_id_warns(capsys, db):
     assert "999" in out and ("nothing changed" in out or "no decision" in out)
 
 
+def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
+    """'nothing changed' must not report success.
+
+    It used ``warning``, which skips ``mark_command_failed``, so
+    ``compass rate <id> good && <next step>`` ran the next step as if the
+    rating had landed. Same defect @canary found in the owner gates on
+    2026-08-22, in a verb nobody was looking at. Asserts the FAILURE MARK
+    rather than the wording — the wording is for humans, the code is for
+    everything else.
+    """
+    from aipass.cli.apps.modules import display as cli_display
+
+    marks: list[int] = []
+    monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
+
+    for verb_args in (["rate", "999", "good"], ["archive", "999"], ["note", "999", "hello"]):
+        marks.clear()
+        assert compass_cmd.handle_command("compass", [*verb_args, "--db", db]) is True
+        capsys.readouterr()
+        assert marks, f"'{verb_args[0]}' on a missing id must mark the command failed"
+
+
+def test_a_real_id_still_reports_success(capsys, db, monkeypatch):
+    """The fix must not turn every rate into a failure."""
+    from aipass.cli.apps.modules import display as cli_display
+
+    did = _add(capsys, db, "ctx", "did the thing", "good")
+    marks: list[int] = []
+    monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
+
+    assert compass_cmd.handle_command("compass", ["rate", str(did), "bad", "--db", db]) is True
+    capsys.readouterr()
+    assert marks == [], "a rating that landed must not mark the command failed"
+
+
 # ---------------------------------------------------------------------------
 # archive
 # ---------------------------------------------------------------------------

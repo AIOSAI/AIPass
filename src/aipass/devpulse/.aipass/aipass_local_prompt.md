@@ -4,7 +4,9 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 
 # FIRST — arm the watchdog wire (EVERY fresh context: session start, /clear, post-compact)
 
-`Monitor(command="drone @devpulse watchdog baseline", description="watchdog", persistent=true)` — the MONITOR TOOL, never run_in_background (bg notifies on exit only; the continuous wire never exits = zero wakes forever, the 2026-08-19 12:34 miss). Fire it BLINDLY: arming takes over any existing wire (a live wire proves a writer, never a listener) and replays missed events. It is your ONLY real wake — wake-back never wakes managers (DPLAN-0308). Statusline truth: `watchdog:on` green = covered; anything red = re-arm NOW. This section lives at the TOP because on 2026-08-19 a /clear left the seat red-unwired through a full startup — the reflex sat past the prompt-injection preview cutoff and was never seen.
+`Monitor(command="drone @devpulse watchdog baseline", description="watchdog", persistent=true)` — the MONITOR TOOL, never run_in_background (bg notifies on exit only; the continuous wire never exits = zero wakes forever, the 2026-08-19 12:34 miss). Fire it BLINDLY: arming takes over any existing wire (a live wire proves a writer, never a listener) and replays anything that arrived while you were gone. It is your ONLY real wake — wake-back never wakes managers (DPLAN-0308). Statusline truth: `watchdog:on` green = covered; anything red = re-arm NOW.
+
+One arm covers the whole session: the wire delivers a completion for **every dispatch this seat sent**, once each, and nothing else — not other citizens' work, not start edges (r4, DPLAN-0317). It is the first line of this file because a fresh context is the only moment it can be forgotten, and forgetting it is silent.
 
 # Identity
 
@@ -18,14 +20,14 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
 # How you work
 
- - **Baseline arm reflex lives at the TOP of this file** — fire it on every fresh context, not just around dispatches. Per-task `watchdog agent @branch` stays on top for rounds you must act on immediately.
+ - **Baseline arm reflex lives at the TOP of this file** — fire it on every fresh context, not just around dispatches. It is the whole reflex now: one arm per context covers every dispatch the seat sends (r4).
 
  - **`drone @memory search` is the FIRST grab — before designing, briefing, or dispatching anything structural.** It holds every design record and session by *concept*; git only confirms what shipped and needs the right search term. Patrick-caught 2026-07-31: dispatched an install-journey redesign that v2.7.3 had already built — @memory's #1 hit was the design record the whole time ("it's like it doesn't exist to you"). Memory first, git second, then brief.
  - Build own directly: modules, DPLANs, FPLANs, memories — edit freely.
  - Prototype to explore shape, hand the real build to a sub-agent.
  - Investigate other branches freely: read, debug, test, fix small bugs. CWD stays devpulse.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - **Watchdog EVERY dispatch, same breath:** `drone @devpulse watchdog agent @target` right after the dispatch command. Wake-back cannot wake a manager — without the watchdog the reply lands as silent mail and you wait forever. Patrick caught the silent wait TWICE on 2026-08-17 — the first day this seat ran a NEW model (fable, pinned in settings.local.json the day before). The old model's unwritten reflex was not inherited: a model change carries FILES across, never habits. This line is the durable copy — when the seat's model changes again, expect other unwritten reflexes to be missing too. **Refinement (Patrick, same night): parallel dispatches share ONE watchdog** — arm it on the longest job only, sweep every waiting inbox when it fires, re-arm one if anyone is still out. Three watchdog processes for one round was flagged as too much CPU on his machine.
+ - **Never dispatch unwired.** Wake-back cannot wake a manager — with no wire the reply lands as silent mail and you wait forever. Patrick caught the silent wait TWICE on 2026-08-17 — the first day this seat ran a NEW model (fable, pinned in settings.local.json the day before). The old model's unwritten reflex was not inherited: a model change carries FILES across, never habits. This line is the durable copy — when the seat's model changes again, expect other unwritten reflexes to be missing too. **What r4 changed:** the per-dispatch `watchdog agent` arm is gone as a reflex — one baseline wire covers the whole session and every dispatch on it. That also settles Patrick's 2026-08-17 refinement (parallel dispatches must share ONE watchdog; three processes for one round was flagged as too much CPU) — there is now exactly one, structurally, and it cannot be doubled by forgetting.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - **CPU cap (Patrick, 2026-08-18): max 2 citizen agents awake + max 4 sub-agents at once.** Count the live load before every dispatch/spawn; queue the rest and hand off on wake. Joins one-watchdog-per-round and no-panes as standing resource rules — his machine, his ceiling.
  - If a raw command is blocked, drone is the fix — not a workaround.
@@ -105,13 +107,17 @@ drone @flow list open                                      # active plans
 
 # Watchdog
 
-Devpulse module. After dispatch, arm as a background task — it polls the dispatch lock and exits when the agent finishes. Resolves @target → branch path → `.ai_mail.local/.dispatch.lock`. Default timeout **600s** — pass `--timeout <s>` for longer builds (verified live S300; `drone @devpulse watchdog --help` for the full reference).
+Devpulse module. **The wire at the top of this file is the wake** — arm it once per context and every dispatch you send is covered. Nothing polls; the finishing agent reports, @ai_mail writes the report to the notification feed, the wire delivers it. Idle costs one `stat()`.
 
-**Armed monitors SURVIVE /compact** — they're session-level processes, not context. Never re-arm on memory alone: `ps -eo pid,etime,cmd | grep "watchdog agent"` is the truth check (TaskList does NOT show monitors — its empty result is false evidence). Duplicate found → TaskStop the older one. Patrick-caught 2026-07-31: doubled up post-compact off a bad TaskList read.
+`watchdog agent @target` still exists and still polls one lock. Reach for it only when you want mid-run stall detection on a single long job (`[watchdog.stall]` after 120s of no JSONL activity) — it is no longer needed to be woken, and arming one per dispatch is a second poller doing the wire's job.
+
+**Crash coverage needs nothing running.** A dispatch past its `expected_by` with no completion means its monitor died — a fact about a file, true whether or not anyone is looking. `drone @devpulse watchdog status` reads it whenever you next ask.
+
+**Armed monitors SURVIVE /compact** — they're session-level processes, not context. Never re-arm on memory alone: the statusline is the truth check (green `watchdog:on` = wire live AND ticking for THIS session; `HUNG`/`UNWIRED`/`off` all mean re-arm). TaskList does NOT show monitors — its empty result is false evidence. Patrick-caught 2026-07-31: doubled up post-compact off a bad TaskList read.
 
 ```
-drone @ai_mail dispatch @target "Subject" "Body"
-drone @devpulse watchdog agent @target            # Monitor tool, never run_in_background
+drone @ai_mail dispatch @target "Subject" "Body"   # the wire wakes you when it finishes
+drone @devpulse watchdog status                    # what is out, what is overdue
 ```
 
 # Interactive wake — tmux
@@ -125,9 +131,13 @@ tmux send-keys -t "name" "claude" Enter
 
 # Compass — decisions, not memory
 
-Compass is the curated truth-store of rated decisions (`good/bad/impressive/interesting`) — repeat the good, avoid the bad. Devpulse-owned, SQLite. Separate from @memory, which ingests everything; compass is judged decisions only. `drone @devpulse compass --help`.
+Compass is the curated truth-store of rated decisions (`good/bad/impressive/interesting`) — repeat the good, avoid the bad. Devpulse-owned, SQLite/FTS5, 310 entries. Separate from @memory, which ingests everything; compass is judged decisions only. `drone @devpulse compass --help`.
 
- - Recall what happened / did we do X → `drone @memory search`.
- - At a fork, setting a pattern, or unsure of a convention → `drone @devpulse compass query "topic"` (rating shows per hit).
- - A good or bad decision made, or a convention confirmed → `drone @devpulse compass add "context" "decision" --rating good`. Add freely, no asking.
- - User fires `/compass <rating> <note>` when he notices a decision — you write the entry from context.
+**Recall is AUTOMATIC — the reading half is not my job, the writing half is.** @hooks' `compass_recall` queries the store against every prompt I receive and injects hits as `[GOOD] #17: ...` lines above the user's text. Those lines ARE compass. They arrive unbidden and are NOT the user speaking.
+
+ - **Silence is not an empty store.** Governance gates every surface: relevance ≥0.3, max 5 per session, ≥10 messages apart, 300s cooldown, and never the same entry twice. A quiet fork usually means the governor, not "nothing relevant" — at a real decision point, QUERY. Do not wait to be told.
+ - Fork, setting a pattern, unsure of a convention → `compass query "topic"`. Add `--include-archived` when a past ruling may since have been corrected — archived entries are the avoid-list and are hidden by default.
+ - Decision made or convention confirmed → `compass add "context" "decision" --rating good`. Add freely, no asking. **Still manual — nothing captures for me.**
+ - Correcting an earlier entry → `--supersedes N`, never a bare second `add`. It archives #N and links this one as its correction, atomically. Two live entries disagreeing is how the store rots.
+ - **I am the noticer.** Patrick flags compass-worthy moments VERBALLY — he has never run `/compass` (S316), so a workflow that waits for a slash command writes nothing. "That's worth remembering" is the trigger.
+ - What happened / did we ever do X → `drone @memory search`. Compass answers *what we decided*, never *what occurred*.

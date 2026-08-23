@@ -226,17 +226,17 @@ def test_trim_leaves_no_temp_file_behind(feed, monkeypatch):
 
 
 def test_trim_reports_false_when_feed_is_within_cap(feed):
-    """_trim_feed returns False when there is nothing to do."""
+    """_trim_jsonl returns False when there is nothing to do."""
     mod.send_notification("T", "B")
 
-    assert mod._trim_feed(feed) is False
+    assert mod._trim_jsonl(feed, mod.FEED_MAX_LINES, mod.FEED_KEEP_LINES) is False
 
 
 def test_trim_reports_false_and_logs_when_feed_is_unreadable(tmp_path, _capture_logger):
     """A missing feed is an error the trim states, not a crash it hides."""
     missing = tmp_path / "not_here.jsonl"
 
-    assert mod._trim_feed(missing) is False
+    assert mod._trim_jsonl(missing, mod.FEED_MAX_LINES, mod.FEED_KEEP_LINES) is False
     assert _capture_logger.error.called
 
 

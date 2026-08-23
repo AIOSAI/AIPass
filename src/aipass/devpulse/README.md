@@ -98,19 +98,67 @@ Default timeout is **600 s**; pass `--timeout <s>` for longer builds. Mid-watch 
 also emits `[watchdog.stall]` / `[watchdog.resumed]` events (no JSONL activity 120 s
 with no in-flight tool = probable stuck agent).
 
-**Baseline — the always-on wake (round 2, DPLAN-0308):** detection and delivery
-are separate lifetimes. A detached daemon polls every registry branch's dispatch
-lock and appends completions to a durable events file; a per-session *wire*
-(armed via the Monitor tool: `drone @devpulse watchdog baseline`) follows that
-file and turns each event into a wake. `/clear` or a new chat kills only the
-wire — the daemon keeps detecting, and re-arming replays anything missed as
-`MISSED` lines. The statusline shows `watchdog:on` (green) only when daemon and
-a wire for the *current* session are both live; anything red means re-arm.
+**Baseline — the always-on wake (round 4, DPLAN-0317):** completion is
+**reported, not discovered.** The agent that finishes says so; `@ai_mail` writes
+that report to a durable notification feed, and a per-session *wire* (armed via
+the Monitor tool: `drone @devpulse watchdog baseline`) turns each report into a
+wake. Nothing polls, nothing is scheduled, and at idle the entire system is one
+`stat()` on a file.
+
+Two rules the wire enforces and neither is optional:
+
+- **Only completions wake.** The feed also carries dispatch *start* edges, and
+  those are dropped. An agent may mail a report and then mail a correction —
+  you want to be woken once, when it is actually finished.
+- **Only YOUR dispatches wake you.** The feed names the branch that *finished*,
+  never the branch that *sent* the work, so every citizen's completion used to
+  wake this seat fleet-wide. `@ai_mail` now stamps `sender` on the completion
+  line and the wire compares it against this project's sealed owner. A record
+  with no sender is **not** yours — unattributable fails closed.
+
+`/clear` or a new chat kills the wire; nothing else is running to kill. The
+reports stay on the feed, so re-arming replays whatever arrived while you were
+gone as `MISSED` lines. The statusline shows `watchdog:on` (green) only when a
+wire for the *current* session is live **and** ticking; `HUNG`, `UNWIRED` and
+`off` are all "re-arm".
+
+**Crash coverage without a watcher:** every dispatch is registered at send time
+with an `expected_by` taken from dispatch_monitor's hard timeout. An entry past
+that with no completion means the monitor *died* — and that is a fact about a
+file, true whether or not anything is looking. `watchdog status` reads it. There
+is nothing to keep alive for it to be noticed.
+
+**Round 3 and earlier had a detection daemon. It is gone.** `baseline.py` was a
+detached process polling ~19 branches' `.dispatch.lock` every 2 s to work out
+who had finished. It was deleted because **the event it synthesised was already
+being written**: `dispatch_monitor.py` reports the completion 1–2 s *before* the
+poll notices the lock disappear, and the wire was draining both sources with no
+dedupe between them. Every completion produced **two wakes**, for months, and
+nobody spotted it because a duplicate wake looks exactly like a working wake.
+Measured live on 2026-08-22 — events file vs notification feed, same events:
+
+```
+08:51:59 backup  | 08:51:59 backup
+08:52:15 daemon  | 08:52:14 daemon
+08:55:02 spawn   | 08:55:00 spawn
+11:16:02 flow    | 11:16:01 flow
+```
+
+Idle cost before r3's gate: **7.72% of a core** — 1640 CPU-seconds across 5.9
+hours in which zero dispatches occurred. r3 gated that to 0.017%, which was the
+wrong fix: `feed.py`'s own header already said *"detection by inference is
+replaced by detection by report."* The comment named the destination; the code
+took one step. r4 took the rest.
+
+The daemon's source is preserved where source is preserved — **git history**,
+recoverable at the commit that removed it. It is deliberately not parked in a
+`.archive/` directory: those are gitignored disposal zones, cleaned without
+warning, so nothing that must survive may live there.
+`watchdog baseline --daemon` is refused by name.
 
 | Command | What it does |
 |---|---|
-| `watchdog baseline` | Arm the always-on wake: ensure the detection daemon, take the wire for this session |
-| `watchdog baseline --daemon` | Run the detection daemon itself (the wire spawns this — rarely run by hand) |
+| `watchdog baseline` | Arm the always-on wake for this session (takes over any older wire) |
 | `watchdog agent @target [--timeout s]` | Wake when the dispatched agent exits (default 600 s) |
 | `watchdog timer <duration>` | Wake after duration (5m, 30s, 2h, 1h30m) |
 | `watchdog timer start/stop <name>` | Named duration tracking |

@@ -40,7 +40,8 @@ from typing import Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.dispatch import session_pointer
+from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
+from aipass.ai_mail.apps.handlers.dispatch import report as report_mod
 
 # Startup timeout: if zero stdout after this many seconds, kill and retry
 STARTUP_TIMEOUT = 90
@@ -1048,9 +1049,6 @@ def main():
         )
         _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
 
-    # Clean up the lock — PID-verified, never a successor monitor's lock
-    _cleanup_own_lock(lock_file)
-
     # Log completion to Prax
     branch_name = branch_email.lstrip("@")
     status = "completed" if exit_code == 0 else f"FAILED (code {exit_code})"
@@ -1060,17 +1058,100 @@ def main():
         status = f"MAX TURNS HIT ({duration}s)"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
 
-    # Notification feed event on completion
+    # ─── Wake-back: wake the dispatcher ────────────────────
+    # Runs BEFORE the report so wake_result is a known fact when the report is
+    # assembled, and the report still lands before the lock is released. The
+    # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
+    # arbitrary — see the block comment on the report write.
+    wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+
+    # ─── The completion report, written BEFORE the lock is released ────────
+    # Under the old design the report was a garnish, so losing it was a
+    # nuisance. Under r4 THE REPORT IS THE EVENT: losing it means the dispatch
+    # never happened as far as the system is concerned, while the released lock
+    # says it finished cleanly. "Looks complete, reports nothing" is the worst
+    # failure shape available here, and releasing the lock first is what
+    # created it — main() has no top-level try/except, so a death in that
+    # window left the lock gone and the report unwritten.
+    #
+    # With the release moved below, the same death leaves a HELD LOCK: visible,
+    # and already recoverable by the stale-lock path in wake.py.
+    report_path = None
+    dispatch_id = report_mod.current_dispatch_id()
+    try:
+        report = report_mod.build_report(
+            dispatch_id=dispatch_id,
+            sender=sender,
+            target=branch_email,
+            branch_path=branch_path,
+            start_time=start_time,
+            duration=duration,
+            exit_code=exit_code,
+            status=status,
+            attempts=attempts,
+            bg_orphaned=bg_orphaned,
+            max_turns_hit=max_turns_hit,
+            wake_result=wake_result,
+            result_json=_parse_result_json(stdout_log),
+        )
+        report_path = report_mod.write_report(report)
+        if report_path is None:
+            logger.warning(
+                "[monitor] REPORT LOST for %s (%s) — no durable record of this dispatch: %s",
+                branch_email,
+                dispatch_id,
+                report,
+            )
+    except Exception as e:
+        logger.warning("[monitor] report assembly failed for %s: %s", branch_email, e)
+
+    # Close the register entry. A dispatch left open reads as outstanding
+    # forever, which is a FALSE ALARM rather than a missed one — the safe
+    # direction for a record whose whole job is to make crashes visible.
+    if dispatch_id:
+        register.close_dispatch(dispatch_id, status, report_path)
+
+    # Notification feed event on completion. This is what carries the event
+    # ACROSS the process boundary to @devpulse's wire — the trigger fire below
+    # cannot. The record stays a one-line summary and gains additive fields
+    # only: @api serves this feed to BAUD, so a 1-2KB report on every line
+    # would bloat a contract that is frozen mid-flight for the phone work.
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, kind="dispatch")
-    except Exception:
-        logger.info("[monitor] Notification feed unavailable")
+        feed_extra = {"dispatch_id": dispatch_id, "sender": sender, "report_path": report_path}
+        if not send_notification(
+            f"@{branch_name} {status}",
+            f"Duration: {duration}s",
+            source=branch_name,
+            kind="dispatch",
+            extra=feed_extra,
+        ):
+            logger.warning(
+                "[monitor] FEED WRITE FAILED for %s — this dispatch will not reach the wire: %s",
+                branch_email,
+                feed_extra,
+            )
+    except Exception as e:
+        # Was logger.info, the quietest level in this file, behind a bare
+        # except. A failed report write is a LOST DISPATCH RECORD, not a
+        # routine unavailability, and it must not look healthy in the log.
+        logger.warning(
+            "[monitor] Notification feed unavailable for %s (%s, report=%s): %s",
+            branch_email,
+            status,
+            report_path,
+            e,
+        )
 
-    # ─── Wake-back: wake the dispatcher ────────────────────
-    wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
-    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+    # In-process push (Patrick's rule 3). Fired after the durable write, never
+    # instead of it: see report.fire_completed on why this cannot reach the
+    # watchdog and the feed line above is what does.
+    report_mod.fire_completed(dispatch_id, sender, branch_email, report_path)
+
+    # Clean up the lock LAST — PID-verified, never a successor monitor's lock
+    _cleanup_own_lock(lock_file)
 
     sys.exit(0 if exit_code == 0 and not bg_orphaned else 1)
 

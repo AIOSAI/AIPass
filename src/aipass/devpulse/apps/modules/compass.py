@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-16
-# Modified: 2026-06-16
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -35,7 +35,7 @@ Auto-discovered by devpulse.py via the handle_command() convention.
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, error, warning
+from aipass.cli.apps.modules import err_console, error
 from aipass.devpulse.apps.handlers import compass
 from aipass.devpulse.apps.handlers.compass import mark_surfaced, recall_decisions
 from aipass.devpulse.apps.handlers.json import json_handler
@@ -463,7 +463,14 @@ def _handle_rate(sub_args: List[str]) -> bool:
     if changed:
         console.print(f"[green]Re-rated[/green] [bold]#{decision_id}[/bold] -> {_rating_tag(rating)}")
     else:
-        warning(f"No decision with id {decision_id} — nothing changed.")
+        # error, not warning: warning() skips mark_command_failed(), so
+        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
+        # the next step as if it had. Same defect @canary found in the owner
+        # gates on 2026-08-22, in a verb nobody was looking at.
+        error(
+            f"No decision with id {decision_id} — nothing changed.",
+            suggestion="Run 'compass list' to see the ids that exist.",
+        )
     return True
 
 
@@ -493,7 +500,14 @@ def _handle_archive(sub_args: List[str]) -> bool:
             f"[green]Archived[/green] [bold]#{decision_id}[/bold] [dim](kept as avoid-list, not deleted)[/dim]"
         )
     else:
-        warning(f"No decision with id {decision_id} — nothing changed.")
+        # error, not warning: warning() skips mark_command_failed(), so
+        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
+        # the next step as if it had. Same defect @canary found in the owner
+        # gates on 2026-08-22, in a verb nobody was looking at.
+        error(
+            f"No decision with id {decision_id} — nothing changed.",
+            suggestion="Run 'compass list' to see the ids that exist.",
+        )
     return True
 
 
@@ -531,7 +545,14 @@ def _handle_note(sub_args: List[str]) -> bool:
         console.print(f"[green]Note set[/green] on [bold]#{decision_id}[/bold]")
         console.print(f"  [cyan]note:[/cyan] {note_text}")
     else:
-        warning(f"No decision with id {decision_id} — nothing changed.")
+        # error, not warning: warning() skips mark_command_failed(), so
+        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
+        # the next step as if it had. Same defect @canary found in the owner
+        # gates on 2026-08-22, in a verb nobody was looking at.
+        error(
+            f"No decision with id {decision_id} — nothing changed.",
+            suggestion="Run 'compass list' to see the ids that exist.",
+        )
     return True
 
 

@@ -221,6 +221,26 @@ class TestOwnerGate:
             result = feedback_module.handle_command("feedback", ["--help"])
         assert result is True
 
+    def test_help_goes_to_stdout_so_a_redirect_captures_it(self, empty_inbox, capsys):
+        """`feedback --help > usage.txt` used to write an EMPTY FILE.
+
+        This module aliases `console = err_console` on purpose — mailbox chatter
+        must not pollute a pipeline capturing something else. Help rode that
+        alias and went to stderr with it. Help is documentation, not chatter,
+        and documentation belongs on the stream a redirect captures. Measured by
+        @canary 2026-08-22: watchdog's help 1861B on stdout, this module's 0B.
+        """
+        assert feedback_module.handle_command("feedback", ["--help"]) is True
+        captured = capsys.readouterr()
+        assert "feedback" in captured.out.lower(), "help must reach stdout"
+        assert "usage" in captured.out.lower()
+
+    def test_ordinary_feedback_output_stays_off_stdout(self, empty_inbox, capsys):
+        """The alias itself must survive the help fix — only help moved."""
+        assert feedback_module.handle_command("feedback", []) is True
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "", "only help belongs on stdout in this module"
+
 
 class TestHandleCommandHasCorrectSignature:
     """Verify handle_command meets auto-discovery requirements."""

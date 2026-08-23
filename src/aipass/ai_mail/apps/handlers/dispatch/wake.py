@@ -634,6 +634,7 @@ def wake_branch(
     *,
     scheduled: bool = False,
     admin: bool = False,
+    subject: Optional[str] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -887,6 +888,40 @@ def wake_branch(
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
         return status, False
     status.ok("lock-acquire", "Dispatch lock acquired")
+
+    # ─── Register the dispatch BEFORE anything spawns (FPLAN-0452 P0) ───
+    # Patrick's rule 1: the watchdog knows what is outstanding because it was
+    # TOLD. Written here, above the spawn, so a spawn that never starts still
+    # leaves evidence the dispatch was promised — evidence written after a
+    # successful spawn only ever records the dispatches that were already fine.
+    #
+    # expected_by uses the monitor's own HARD_TIMEOUT, never a number invented
+    # here. That is what makes "past expected_by with no completion record"
+    # mean the monitor DIED: a live one kills the run at HARD_TIMEOUT and
+    # reports, so it cannot legitimately overrun.
+    from aipass.ai_mail.apps.handlers.dispatch import register
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import HARD_TIMEOUT
+
+    # Clear any INHERITED id first. spawn_env is a copy of this process's
+    # environment, and a dispatched agent dispatching another agent would
+    # otherwise hand the child its OWN dispatch id — every mail the child sent
+    # would be attributed to the parent's run. Same class of leak as the
+    # AIPASS_CALLER_* strip above, and it fails closed: no id beats a wrong one.
+    spawn_env.pop("AIPASS_DISPATCH_ID", None)
+
+    dispatch_id = register.open_dispatch(
+        sender=sender,
+        target=email,
+        subject=subject or "",
+        expected_seconds=HARD_TIMEOUT,
+    )
+    if dispatch_id:
+        spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id
+        status.ok("register", f"Registered as {dispatch_id[:8]}")
+    else:
+        # open_dispatch already logged why. The dispatch still goes: a register
+        # that cannot record must not also be able to CANCEL work.
+        status.info("register", "Not registered — completion will be unattributable")
 
     # When inside a systemd oneshot service (e.g. daemon-tick.timer), the
     # default KillMode=control-group sends SIGTERM to all cgroup members

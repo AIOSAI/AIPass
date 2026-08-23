@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1123 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1301 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -209,6 +209,100 @@ that crashes on the cursor comparison stops serving the feed entirely.
 Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: four
 call sites write feed lines as a side effect, and an unguarded suite run
 appends fake dispatch events to the real feed BAUD renders.
+
+## Dispatch Register + Completion Reports
+
+Patrick's rule 1 (DPLAN-0317): *"the watchdog knows what is outstanding because it
+was TOLD, never because it looked."* Nothing polls. Three files carry it.
+
+```
+.aipass/dispatch_register.jsonl        # what was promised, append-only
+.aipass/dispatch_reports/<id>.json     # what happened, durable, waits to be read
+.aipass/notifications.jsonl            # the existing feed, now pointing at both
+```
+
+### Locating them
+
+```python
+from aipass.ai_mail import register_path            # <repo root>/.aipass/dispatch_register.jsonl
+from aipass.ai_mail import outstanding_dispatches   # the parsed open entries — prefer this
+```
+
+Same rule as the feed: import from the package, never from `apps.handlers`, and
+never restate the path as your own constant.
+
+### The register is APPEND-ONLY, and a naive reader is wrong rather than broken
+
+An entry is written by `wake_branch()` **before anything spawns**, so a spawn that
+dies still leaves evidence the dispatch was promised. It is closed by appending a
+**second record** carrying the same `dispatch_id` — the first is never rewritten,
+because the promise staying visible is the whole point.
+
+**Read forward and let later records win.** A reader that takes the first record
+per id sees every dispatch ever made as outstanding forever: wrong, plausible, and
+silent. `outstanding_dispatches()` does this correctly and is why the
+reconstruction is exported rather than left for each consumer to re-implement.
+
+```
+{"dispatch_id": "<uuid4>", "ts": "<iso>", "sender": "@devpulse", "target": "@ai_mail",
+ "subject": "...", "expected_by": "<iso>", "status": "outstanding"}
+{"dispatch_id": "<uuid4>", "ts": "<iso>", "status": "completed", "report_path": "..."}
+```
+
+### Crash coverage without a process — and its two-hour latency
+
+`expected_by` comes from `dispatch_monitor`'s own `HARD_TIMEOUT` (7200s), never an
+invented number. A **live** monitor kills the run at that mark and reports, so it
+cannot legitimately overrun: an entry past `expected_by` with no completion record
+means the monitor **died**. Zero false positives, and nothing runs to discover it —
+the staleness is simply a fact about a file that any reader sees.
+
+Honest cost, named rather than found later: the deleted r3 daemon spotted a stale
+lock in ten minutes. This spots a dead monitor in two hours. That is a deliberate
+trade of detection latency for zero idle cost. `drone @ai_mail dispatch register`
+lists what is open and flags what is overdue.
+
+### The report is durable; delivery is opportunistic
+
+Written **before the dispatch lock is released** — under r4 the report *is* the
+event, so losing it means the dispatch never happened while the released lock says
+it finished cleanly. With the release last, the same crash leaves a held lock:
+visible, and recoverable by the stale-lock path that already exists.
+
+Two honesty requirements the report will not drop:
+
+- **`bg_orphaned` and `max_turns_hit` ship beside `emails_sent`, always.** When
+  `bg_orphaned` is true the agent exited 0 while its background tasks — possibly
+  including its reply — were killed at the headless ceiling. The report then
+  honestly says *zero emails sent* for an agent that believed it had replied.
+  Without those flags beside it a reader concludes the agent ignored its mail.
+  **Never a bare exit 0.**
+- **`memories_edited` detects a WRITE, not a good one.** Rewriting `local.json`
+  with identical bytes still trips it.
+
+`emails_sent` is a **record, not an inference**: every mail is stamped with the
+`dispatch_id` live at send time, so attribution is by authorship. An mtime scan of
+`sent/` would attribute by *time* and credit the agent with anything else that
+wrote the mailbox during its run.
+
+### Feed records for dispatch completions
+
+`kind: "dispatch"` lines gained three **additive** keys — `dispatch_id`, `sender`,
+`report_path`. The five contract keys are untouched and are written last, so an
+extra can never redefine `ts` or `kind`. Values may be null on an unregistered
+dispatch; treat them as optional. The full report is deliberately **not** inlined:
+it is 1–2 KB and would bloat what @api serves to BAUD, so the line carries a
+pointer instead.
+
+`trigger.fire("dispatch_completed", ...)` also fires, and is **in-process only** —
+@trigger cannot cross process boundaries (DPLAN-0314). **The feed file is what
+carries this event to another process.** Anything expecting the trigger to reach a
+separate watchdog will silently never fire.
+
+Tests re-root the register and the reports directory to `tmp_path` via an autouse
+conftest fixture. `wake_branch` registers before spawning and the wake tests mock
+the spawn, so an unguarded run writes phantom "outstanding" entries into the live
+register — 62 of them, the first time this shipped.
 
 ## Refused Sends
 
@@ -633,7 +727,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1123 tests across 41 test files
+└── tests/                      # 1301 tests across 46 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -654,7 +748,7 @@ ai_mail/
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)
     ├── test_cross_scope_addressing.py # Honest refusal of hosted-project addresses (8 tests)
-    ├── test_public_surface.py  # Package-level feed_path door + lazy import (12 tests)
+    ├── test_public_surface.py  # Package doors: feed_path, register_path, outstanding (22 tests)
     ├── test_message_correlation.py # sent_id back-reference + shared id resolver (12 tests)
     ├── test_live_mailbox_hygiene.py # Guard: no test fixtures in real mailboxes (4 tests)
     └── test_paths.py           # find_repo_root() utility

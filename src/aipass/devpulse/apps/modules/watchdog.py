@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 1.1.0
+# Version: 2.0.0
 # Created: 2026-04-14
-# Modified: 2026-08-19
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -22,31 +22,35 @@ Subcommands:
 Auto-discovered by devpulse.py via handle_command() convention.
 Heavy handler imports are lazy — only imported when a subcommand is invoked.
 
-See FPLAN-0186 for the build plan and DPLAN-0130 for the design record.
+Design record: DPLAN-0130 (original), DPLAN-0308 (r2, wire/daemon split),
+DPLAN-0317 (r4, the daemon deleted — the current shape). Builds: FPLAN-0186,
+FPLAN-0451, FPLAN-0452.
 """
 
 import importlib
-import json
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console, error, warning
+from aipass.cli.apps.modules import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 _VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
-_NOT_IMPLEMENTED_MSG = "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
-# Phase 4 wired cancel + list for real. Left the map so future deferrals can reuse the shape.
-_PHASE_BY_SUB: dict[str, int] = {}
+
+# Subcommands that are fully wired. Everything in _VALID_SUBCOMMANDS is, today —
+# the list exists so the introspection view stops claiming otherwise. It used to
+# read a _PHASE_BY_SUB dict that was permanently empty and never assigned
+# anywhere in the repo, so timer/schedule/cancel/list each rendered as
+# "phase ?" while being completely implemented (FPLAN-0452 P3).
+_WIRED_SUBCOMMANDS = frozenset(_VALID_SUBCOMMANDS)
 
 HELP_TEXT = """\
 [bold cyan]watchdog[/bold cyan] — devpulse directed wake system
 
 [bold]Usage:[/bold]
   watchdog agent <branch> [--timeout SECONDS]   Wake when dispatched agent exits
-  watchdog baseline                             Arm fleet watch: detection daemon + THIS session's wire
+  watchdog baseline                             Arm THIS session's wire: deliver my dispatch completions
   watchdog baseline --once                      Wire until the first delivered completion
-  watchdog baseline --daemon                    (internal) detection daemon — the arm door spawns this
   watchdog status                               List active watches
   watchdog timer <duration>                     Wake in N (5m, 30s, 2h, 1h30m)
   watchdog timer start <name>                   Start named duration timer
@@ -71,7 +75,8 @@ HELP_TEXT = """\
   drone @devpulse watchdog schedule "02:00"
   drone @devpulse watchdog schedule "+30m" "drone @git status"
 
-See FPLAN-0186 (build plan) and DPLAN-0130 (design).
+Current design: DPLAN-0317 (r4 — completion is reported by the finishing agent,
+not discovered by polling). Earlier rounds: DPLAN-0130, DPLAN-0308.
 """
 
 _TIMER_HELP_TEXT = """\
@@ -110,14 +115,27 @@ def print_introspection() -> None:
     console.print()
     console.print("[yellow]Subcommands:[/yellow]")
     for sub in _VALID_SUBCOMMANDS:
-        marker = "active" if sub in ("agent", "baseline", "status") else f"phase {_PHASE_BY_SUB.get(sub, '?')}"
+        marker = "active" if sub in _WIRED_SUBCOMMANDS else "unwired"
         console.print(f"  [cyan]{sub:<10}[/cyan] [dim]({marker})[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/watchdog/[/cyan]")
     console.print("    [dim]- agent.py (watch_agent — block until dispatched agent exits)[/dim]")
-    console.print("    [dim]- baseline.py (watch_baseline — report every citizen completion)[/dim]")
+    console.print("    [dim]- wire.py (arm_wire — deliver MY dispatch completions into this session)[/dim]")
+    console.print("    [dim]- dispatches.py (the register — which dispatches are this seat's)[/dim]")
     console.print()
+
+
+def _owner_address() -> str | None:
+    """Whose watchdog this is, for the refusal message. None if unresolvable.
+
+    Named rather than described: "owner-only" tells a stranger they are in the
+    wrong place but not where the right place is, and a refusal with no next
+    step is what teaches people to route around a gate.
+    """
+    from aipass.devpulse.apps.handlers.owner.guard import owner_address
+
+    return owner_address()
 
 
 def _guard_caller() -> bool:
@@ -127,12 +145,30 @@ def _guard_caller() -> bool:
     it works across projects — not a hardcoded 'devpulse' name. (Drone runs a
     routed module with cwd=<branch_path>, so Path.cwd() can't identify the real
     caller; the guard reads the AIPASS_CALLER_* env drone sets.) #681.
+
+    Uses ``error`` and NOT ``warning``, which is the whole point of this
+    docstring. ``warning`` does not call ``mark_command_failed``, so for months
+    this refusal EXITED 0: ``watchdog baseline && <next step>`` ran the next
+    step believing the wire was armed, and nothing in the exit status said
+    otherwise. @canary found it from a non-owner seat on 2026-08-22 and proved
+    it was specific rather than a drone-wide limitation — unknown subcommand
+    exits 2, this exited 0. A refusal that does not flip the exit code is a
+    lie to every caller that is not a human reading stderr.
     """
     from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller
 
     if guard_owner_caller("watchdog"):
         return True
-    warning("watchdog is an owner-only module — refusing non-owner call")
+    owner = _owner_address()
+    whose = f"it belongs to {owner}" if owner else "no owner is sealed for this project"
+    error(
+        "watchdog is owner-only and this seat is not the owner",
+        suggestion=(
+            f"{whose} — ownership is the entry marked owner: true in the project's sealed registry. "
+            "Ask that seat to arm it, or run 'aipass doctor' if you believe the seat is wrong. "
+            "'watchdog --help' works from anywhere."
+        ),
+    )
     return False
 
 
@@ -159,15 +195,25 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "watchdog":
         return False
 
-    if not _guard_caller():
-        return True
-
+    # EXPLAIN BEFORE GATE, EXECUTE AFTER IT. The gate used to run first, which
+    # made --help owner-only too: a non-owner got "refusing non-owner call" and
+    # could not read the text that would have told them whose module it is.
+    # Help is precisely the verb that must survive an ownership check, because
+    # it is how a stranger discovers the thing is not theirs (@canary, from a
+    # non-owner seat, 2026-08-22). It also restores this module's own rule E
+    # (DPLAN-0291), which _wants_help documents and the gate outranked, and it
+    # matches @ai_mail's identity fence, which leaves help/version open for the
+    # same reason. Neither branch reveals anything privileged — both print
+    # static text that is already in a public repo.
     if not args:
         print_introspection()
         return True
 
     if _wants_help(args):
         console.print(HELP_TEXT)
+        return True
+
+    if not _guard_caller():
         return True
 
     subcommand = args[0]
@@ -200,11 +246,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if subcommand == "cancel":
         return _handle_cancel(sub_args)
-
-    if subcommand in _PHASE_BY_SUB:
-        phase = _PHASE_BY_SUB[subcommand]
-        console.print(_NOT_IMPLEMENTED_MSG.format(sub=subcommand, phase=phase))
-        return True
 
     return True
 
@@ -407,42 +448,40 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
 
 def _handle_baseline(sub_args: List[str]) -> bool:
-    """Route ``watchdog baseline [--once|--daemon]`` (DPLAN-0308 round 2).
+    """Route ``watchdog baseline [--once]`` (DPLAN-0317 r4).
 
-    Default = the ARM DOOR (wire.py): ensure the detached detection daemon,
-    take the delivery wire for THIS session, replay anything missed, follow.
+    The ARM DOOR (wire.py): take the delivery wire for THIS session, replay
+    completions missed while nothing was wired, follow the notification feed.
     Run it via the Monitor tool with description "watchdog". ``--once`` wires
-    until the first delivered event (run_in_background style). ``--daemon`` is
-    the internal detection role the arm door spawns detached — not for hands.
+    until the first delivered completion (run_in_background style).
+
+    ``--daemon`` was removed in r4. There is no detection process any more: the
+    agent that finishes REPORTS, and this wire delivers what it reported. The
+    flag is rejected by name below rather than as "unknown", because an
+    operator or a stale script passing it deserves to be told the lane changed
+    instead of being told they made a typo.
     """
     once = False
-    daemon = False
     for arg in sub_args:
         if arg == "--once":
             once = True
             continue
         if arg == "--daemon":
-            daemon = True
-            continue
-        error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once|--daemon]")
-        return True
-    if once and daemon:
-        error("--once and --daemon are different lifetimes", suggestion="Usage: watchdog baseline [--once|--daemon]")
-        return True
-
-    if daemon:
-        baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
-        result = baseline_mod.watch_baseline(daemon=True)
-        err_console.print(
-            f"[dim]watchdog baseline daemon: state={result.get('state', 'unknown')} "
-            f"completions={result.get('completions', 0)} elapsed={result.get('elapsed', 0)}s[/dim]"
-        )
+            error(
+                "--daemon was removed in watchdog r4",
+                suggestion=(
+                    "There is no detection daemon. Completion is reported by the finishing agent, "
+                    "not discovered by polling. Arm the wire alone: watchdog baseline"
+                ),
+            )
+            return True
+        error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once]")
         return True
 
     # stderr, never stdout: the Monitor tool reads every stdout line as a wake
     # event, so an arm-time banner there fires a spurious wake (same contract as
     # _handle_agent's reminder, #634).
-    err_console.print("[dim]watchdog baseline: arming — daemon + wire (run via Monitor, description 'watchdog')[/dim]")
+    err_console.print("[dim]watchdog baseline: arming the wire (run via Monitor, description 'watchdog')[/dim]")
 
     wire_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.wire")
     result = wire_mod.arm_wire(once=once)
@@ -465,6 +504,61 @@ def _load_timer_module_for_format():
     return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.timer")
 
 
+def _tail_agent(meta: dict) -> str:
+    return f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
+
+
+def _tail_baseline(meta: dict) -> str:
+    """A pre-r4 detection daemon, if one is somehow still standing.
+
+    r4 deleted the daemon, so this row should never appear again — which is
+    exactly why the renderer stays. A row nothing can render is a row nobody
+    sees, and an orphaned daemon from an older binary is precisely the thing
+    the operator needs shown to them.
+    """
+    role = meta.get("role") or "legacy"
+    return f"role={role} scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
+
+
+def _tail_baseline_wire(meta: dict) -> str:
+    """The wire. ``session`` is the whole of the health question.
+
+    This used to print ``daemon_pid`` — a field r4's wire no longer writes, so
+    it rendered as a permanent ``daemon_pid=?`` that read like a fault. The
+    first replacement was ``tasks_dir``, which was the same mistake wearing a
+    different name: a Monitor child's stdout is a socket and has no tasks dir,
+    so the healthy case printed ``tasks=?`` forever. A field that reads ``?``
+    on the happy path teaches the operator to ignore the row.
+
+    ``via`` is the honest one. Only ``monitor`` means covered — ``background``
+    is the wrapper that notifies on exit only (a continuous wire never exits,
+    so zero wakes), and ``foreground`` means nobody is listening at all.
+    """
+    return f"session={meta.get('session') or 'NONE (fg)'} via={meta.get('wrapper') or 'unrecorded'}"
+
+
+def _tail_timer(meta: dict) -> str:
+    return f"duration={meta.get('duration', '?')}"
+
+
+def _tail_schedule(meta: dict) -> str:
+    cmd = meta.get("command")
+    cmd_repr = f' cmd="{cmd}"' if cmd else ""
+    return f"scheduled={meta.get('scheduled_for', '?')}{cmd_repr}"
+
+
+# Type -> tail renderer. A table rather than an if/elif chain: the chain nested
+# one level deeper per watch type, so adding a seventh kind of watch was a
+# standards failure on arrival.
+_TAIL_BY_TYPE = {
+    "agent": _tail_agent,
+    "baseline": _tail_baseline,
+    "baseline_wire": _tail_baseline_wire,
+    "timer": _tail_timer,
+    "schedule": _tail_schedule,
+}
+
+
 def _format_status_line(watch: dict, format_human) -> str:
     """One-line renderer for a single watch entry in the status output."""
     handle = watch.get("handle", "?")
@@ -473,21 +567,10 @@ def _format_status_line(watch: dict, format_human) -> str:
     pid = watch.get("pid", "?")
     meta = watch.get("metadata") or {}
 
-    if wtype == "agent":
-        tail = f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
-    elif wtype == "baseline":
-        role = meta.get("role") or "legacy"
-        tail = f"role={role} scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
-    elif wtype == "baseline_wire":
-        tail = f"session={meta.get('session') or 'NONE (fg)'} daemon_pid={meta.get('daemon_pid', '?')}"
-    elif wtype == "timer":
-        tail = f"duration={meta.get('duration', '?')}"
-    elif wtype == "schedule":
-        tail_cmd = meta.get("command")
-        cmd_repr = f' cmd="{tail_cmd}"' if tail_cmd else ""
-        tail = f"scheduled={meta.get('scheduled_for', '?')}{cmd_repr}"
-    else:
-        tail = str(meta)
+    # An unknown type still renders — raw metadata beats hiding the row, because
+    # a watch nobody can see is a watch nobody retires.
+    render = _TAIL_BY_TYPE.get(wtype)
+    tail = render(meta) if render is not None else str(meta)
 
     # Escape the [ so Rich console doesn't interpret it as a style tag.
     return f"  \\[{handle}]  {wtype:<8}  {format_human(elapsed):<10}  pid={pid}  {tail}"
@@ -528,33 +611,40 @@ def _handle_status() -> bool:
 
 
 def _print_delivery_lag() -> None:
-    """One line of baseline delivery truth: events written vs events delivered.
+    """One line of dispatch truth: what this seat has out, and what is late.
 
-    This is the ONLY observable for the silent failure a live-looking wire can
-    hide (e.g. continuous mode armed via run_in_background): the wire process
-    exists, the daemon detects, and nothing reaches the chat. Undelivered
-    bytes that keep growing while a wire shows 'live' = the wire is deaf.
+    r4 replaced the old observable (events written vs bytes delivered) because
+    both files it read are gone with the daemon. This reads the REGISTER
+    instead, and it is the whole of the crash coverage: an entry past its
+    expected_by is late whether or not anything is running, so simply looking
+    is the detector. Nothing polls for this — it becomes true on its own and is
+    noticed by whoever next asks.
+
+    A missing register is reported as exactly that, never as "none outstanding".
     """
+    dispatches_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.dispatches")
     try:
-        baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
-        root = baseline_mod.find_repo_root()
-        if root is None:
-            return
-        events = baseline_mod.events_file_for(root)
-        size = events.stat().st_size if events.exists() else 0
-        cursor_file = baseline_mod.cursor_file_for(root)
-        offset = 0
-        if cursor_file.exists():
-            offset = int(json.loads(cursor_file.read_text(encoding="utf-8")).get("offset", 0))
-        lag = max(0, size - offset)
-        if lag:
-            console.print(
-                f"[yellow]Baseline delivery lag: {lag} bytes undelivered[/yellow] (events={size} cursor={offset})"
-            )
-        else:
-            console.print(f"[dim]Baseline delivery: current (events={size} bytes, all delivered).[/dim]")
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        console.print(f"[dim]Baseline delivery lag unreadable: {exc}[/dim]")
+        open_now = dispatches_mod.outstanding()
+        late = dispatches_mod.overdue()
+    except dispatches_mod.RegisterUnavailable as exc:
+        # Printed AND logged: the print tells whoever ran `status` right now,
+        # the log is what remains if the crash coverage was blind for a week
+        # and nobody was watching the terminal when it went blind.
+        logger.warning("[watchdog] dispatch register unavailable: %s", exc)
+        console.print(f"[dim]Dispatch register unavailable: {exc}[/dim]")
+        return
+
+    if late:
+        names = ", ".join(str(e.get("target", "?")) for e in late)
+        console.print(
+            f"[yellow]Dispatches overdue: {len(late)}[/yellow] ({names}) — "
+            f"{len(open_now)} outstanding. An overdue entry never reported back."
+        )
+    elif open_now:
+        names = ", ".join(str(e.get("target", "?")) for e in open_now)
+        console.print(f"[dim]Dispatches outstanding: {len(open_now)} ({names}), none overdue.[/dim]")
+    else:
+        console.print("[dim]Dispatches: none outstanding.[/dim]")
 
 
 def _handle_list() -> bool:

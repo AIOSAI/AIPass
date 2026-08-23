@@ -1,34 +1,81 @@
 # =================== AIPass ====================
 # Name: wire.py
-# Description: Watchdog Wire Handler — per-session delivery of the baseline daemon's completion events
-# Version: 1.0.0
+# Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
+# Version: 2.0.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-08-22
 # =============================================
 
-# WHY THIS FILE EXISTS (DPLAN-0308 round 2): the round-1 baseline was one
-# process doing two jobs — detecting completions AND delivering them into the
-# chat via its own stdout. Its delivery depends on a LISTENER the process can
-# neither see nor keep alive: witnessed live on 2026-08-19, @api (11:22) and
-# @baud (12:34) COMPLETE lines sat unread in a task file while Patrick watched
-# the live session stay silent. The registry said "armed", the pid was alive,
-# and the idempotence check ("pid alive = covered") re-armed into a lie —
-# detection and delivery share a lifetime only by accident.
+"""
+Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session.
+
+Public surface:
+  arm_wire(once=False, ...) -> dict
+  find_repo_root(start=None) -> Path | None
+  HEARTBEAT_FILE, HEARTBEAT_STALE_SECONDS
+
+The arm door (``watchdog baseline`` routes here):
+  1. sweep the registry — deregister dead entries and take over EVERY live
+     wire: an existing wire proves a writer, never a listener, so only the arm
+     happening right now is known to have ears;
+  2. replay completions past the cursor as ``MISSED`` stdout lines;
+  3. follow the notification feed, one stdout line per completion THAT THIS
+     SEAT DISPATCHED, cursor advanced after every delivery;
+  4. touch the heartbeat so the statusline can tell a live wire from a hung one.
+
+There is no detection process to ensure, watch, or mourn. Run via the Monitor
+tool with description "watchdog".
+
+The commentary below this docstring is the history — why the daemon this file
+used to depend on no longer exists, and why delivery is a separate lifetime
+from everything else. It is long on purpose and it stays.
+"""
+
+# WHAT CHANGED IN r4 (DPLAN-0317, FPLAN-0452 P2) — read this before the r2
+# history below, because it deletes half of it.
 #
-# So detection and delivery are now SEPARATE lifetimes:
-#   - baseline.py --daemon: session-agnostic detection, events appended to a
-#     durable JSONL, heartbeat for the statusline. Never dies with a session.
-#   - THIS file: the wire — a cheap follower whose stdout IS the session task
-#     file (Monitor-wrapped). On arm it replays everything past the delivery
-#     cursor as MISSED lines, so churn delays events instead of losing them.
+# This file used to drain TWO sources every tick with no dedupe between them: a
+# detection daemon's events file, and @ai_mail's notification feed. They carried
+# THE SAME COMPLETIONS. The daemon polled ~19 branches every 2s to synthesise an
+# event dispatch_monitor.py had already written 1-2 seconds earlier, and both
+# lines cleared Monitor's 200ms batching window — so every dispatch completion
+# produced TWO wakes, for months. Nobody noticed, because a duplicate wake looks
+# exactly like a working wake.
+#
+# The daemon is gone. Detection by inference is replaced by detection by report:
+# the agent that finishes says so, and this file delivers what it said. Idle is
+# one stat on the feed per tick and nothing else running anywhere.
+#
+# AND THE WIRE NOW ANSWERS "WAS THIS MINE". The feed names the branch that
+# FINISHED, never the branch that SENT the work, so this seat used to be woken
+# for every citizen's completion fleet-wide. dispatches.py reads @ai_mail's
+# register — written at send time — and only ids belonging to this seat are
+# delivered. That is Patrick's rule 5, and it is not satisfiable from the feed
+# alone at any price.
+#
+# KINDS: completions ONLY. The feed also carries "wake" start edges, and this
+# wire used to deliver those too. Rule 5 again: only a COMPLETION wakes,
+# because an agent may mail a report and then mail a correction — we wait for
+# it to be finished, and wake once.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS FILE EXISTS AT ALL (DPLAN-0308 round 2) — still true, still the
+# reason delivery is a separate lifetime from anything else:
+#
+# The round-1 baseline was one process doing two jobs, and its delivery depended
+# on a LISTENER the process could neither see nor keep alive: witnessed live on
+# 2026-08-19, @api (11:22) and @baud (12:34) COMPLETE lines sat unread in a task
+# file while Patrick watched the live session stay silent. The registry said
+# "armed", the pid was alive, and the idempotence check ("pid alive = covered")
+# re-armed into a lie.
 #
 # THE 12:34 KILLER, NAMED FROM THE TRANSCRIPT: the 10:55 arm ran under Bash
-# run_in_background — which notifies only when the command EXITS, and
-# continuous mode never exits. Zero wakes by construction, healthy session or
-# not. The Monitor tool (one notification per stdout line) is the ONLY correct
-# wrapper for the continuous wire; nothing inside this process can distinguish
-# the two wrappers, so the arm banner and the branch reflex both prescribe the
-# exact call. --once is the run_in_background-safe shape (exits on delivery).
+# run_in_background — which notifies only when the command EXITS, and continuous
+# mode never exits. Zero wakes by construction, healthy session or not. The
+# Monitor tool (one notification per stdout line) is the ONLY correct wrapper
+# for the continuous wire; nothing inside this process can distinguish the two
+# wrappers, so the tripwire below refuses the combination outright. --once is
+# the run_in_background-safe shape (it exits on delivery).
 #
 # TWO ID NAMESPACES, measured 2026-08-19, do not confuse them:
 #   - conversation/session id (env CLAUDE_CODE_SESSION_ID, statusline input
@@ -40,62 +87,63 @@
 # Residual, on the record: a wire from a PREVIOUS claude process of the same
 # conversation would still session-match the statusline (green) while its
 # listener is gone. Takeover-always + the arm-at-session-start reflex bound
-# that window; the @hooks cadence check (P2b) closes it properly.
+# that window.
 
-"""
-Watchdog Wire Handler — deliver baseline completions into THIS session.
-
-Public surface:
-  arm_wire(once=False, ...) -> dict
-
-The arm door (``watchdog baseline`` routes here):
-  1. sweep the registry — deregister dead entries, migrate a live LEGACY
-     single-process watcher (no role=daemon), and take over EVERY live wire:
-     an existing wire proves a writer, never a listener, so only the arm
-     happening right now is known to have ears;
-  2. ensure the detection daemon runs (spawn detached if not);
-  3. replay events past the cursor as ``MISSED`` stdout lines;
-  4. follow the events file, one stdout line per completion, cursor advanced
-     after every delivery;
-  5. watch the daemon back — dead pid or stale heartbeat prints
-     ``BASELINE DEAD`` on stdout and exits nonzero, never a quiet stop.
-
-Run via the Monitor tool with description "watchdog".
-"""
-
-import json
 import os
 import signal
-import subprocess
 import sys
+import tempfile
 import time
-from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.devpulse.apps.handlers.watchdog import baseline as _baseline
+from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 from aipass.devpulse.apps.handlers.watchdog import feed as _feed
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 
 
-# Delivery cadence. Detection already pays the per-branch stats every 2s; the
-# wire only stats ONE file (the events JSONL) plus the heartbeat, so 1s keeps
-# wake latency ~3s worst case (2s detect + 1s deliver) for two syscalls a tick.
+# Delivery cadence. The feed drain is ONE stat when nothing changed, so a quiet
+# system costs a syscall a second and wake latency is ~1s after the report
+# lands. Measured idle cost of this loop: 0.033% of a core.
 WIRE_POLL_SECONDS = 1.0
 
-# How long the arm door waits for a freshly spawned daemon to register itself
-# before declaring the spawn failed and pointing at the daemon log.
-_DAEMON_SPAWN_WAIT_SECONDS = 10.0
-_DAEMON_SPAWN_POLL_SECONDS = 0.25
+# The statusline reads this file's mtime. It is touched by the WIRE now — under
+# r3 the daemon owned it, and deleting the daemon without moving this would
+# have painted the statusline red forever with a perfectly healthy wire (the
+# exact trap FPLAN-0451 P2 hit with a hardcoded /tmp path).
+HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "aipass-watchdog-active"
+HEARTBEAT_STALE_SECONDS = 15.0
+
+# Touched at most this often. Once a second would be a WRITE per tick to buy
+# nothing: the staleness threshold above is 15s, so 5s leaves two missed
+# touches of headroom before anything reads red.
+_HEARTBEAT_INTERVAL_SECONDS = 5.0
+
+# The feed kinds this wire delivers. Completions ONLY — see the header. Passed
+# explicitly rather than taking feed.FEED_KINDS, because that default also
+# carries "wake" start edges for other readers and a silent widening here would
+# be a silent re-broadening of what wakes this seat.
+_DELIVER_KINDS = ("dispatch",)
 
 _WIRE_KIND = "baseline_wire"
-_DAEMON_KIND = "baseline"
 
-# Relative to the devpulse branch dir. The daemon's stdout/stderr land here
-# when the wire spawns it detached — its BASELINE DEAD confessions included.
-_DAEMON_LOG_RELPATH = ("logs", "baseline_daemon.out")
+_REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
+
+
+def find_repo_root(start: Path | None = None) -> Path | None:
+    """Walk up from ``start`` (default CWD) to the dir holding the registry.
+
+    Lived in baseline.py until r4 deleted the daemon around it; it moved here
+    rather than being re-copied, because this package already carries three
+    near-duplicate pid checks and does not need a fourth duplicated primitive.
+    """
+    here = (start or Path.cwd()).resolve()
+    for candidate in [here, *here.parents]:
+        if (candidate / _REGISTRY_FILENAME).exists():
+            return candidate
+    return None
 
 
 def _stderr(msg: str) -> None:
@@ -114,6 +162,20 @@ def _sleep(seconds: float) -> None:
     """Inter-tick pause — its own function so tests replace it, not time.sleep
     globally (the prax logger's daemon threads sleep in the same process)."""
     time.sleep(seconds)
+
+
+def _touch_heartbeat() -> None:
+    """Say 'a wire is alive' to the statusline. Never fatal.
+
+    A failed touch must not end delivery: the heartbeat is an observability
+    signal, and losing the signal is not losing the coverage. It IS logged —
+    a statusline that goes red for a healthy wire sends someone re-arming for
+    no reason, and the log is the only place that explains why.
+    """
+    try:
+        HEARTBEAT_FILE.touch()
+    except OSError as exc:
+        logger.warning("[watchdog.wire] heartbeat touch failed %s: %s", HEARTBEAT_FILE, exc)
 
 
 def _stdout_target(pid: int | None = None) -> Path | None:
@@ -143,6 +205,36 @@ def _session_dir_of(target: Path | None) -> Path | None:
     return target.parent.parent
 
 
+WRAPPER_MONITOR = "monitor"
+WRAPPER_BACKGROUND = "background"
+WRAPPER_FOREGROUND = "foreground"
+
+
+def _wrapper_of(target: Path | None) -> str:
+    """Which harness wrapper this wire runs under, read from stdout alone.
+
+    Measured live 2026-08-19, and it is the entire arm-time health question:
+
+      - a Monitor child's stdout is a SOCKET — one notification per line, the
+        only shape a CONTINUOUS wire can be heard through;
+      - a run_in_background child's is a REGULAR FILE under a session tasks dir
+        — notifies on exit only, which a continuous wire never reaches (the
+        12:34 miss);
+      - anything else is a terminal, which nobody is reading asynchronously.
+
+    Recorded at arm time rather than re-derived later, because deriving it needs
+    ``/proc/<pid>/fd/1`` and by the time someone asks "was that wire real" the
+    pid is usually gone. ``monitor`` is the only value that means covered.
+    """
+    if target is None:
+        return WRAPPER_FOREGROUND
+    if str(target).startswith("socket:"):
+        return WRAPPER_MONITOR
+    if _session_dir_of(target) is not None:
+        return WRAPPER_BACKGROUND
+    return WRAPPER_FOREGROUND
+
+
 def _cmdline(pid: int) -> str:
     """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
     try:
@@ -164,142 +256,11 @@ def _looks_like_ours(pid: int) -> bool:
     return "watchdog" in _cmdline(pid)
 
 
-def _read_cursor(cursor_file: Path) -> int:
-    """The delivery offset — how many bytes of the events file were delivered."""
-    try:
-        data = json.loads(cursor_file.read_text(encoding="utf-8"))
-        offset = data.get("offset")
-        return offset if isinstance(offset, int) and offset >= 0 else 0
-    except FileNotFoundError:
-        return 0
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        # A corrupt cursor resets delivery to the top of the file: duplicates
-        # over silence, always — a replayed event is noise, a lost one is the
-        # exact failure this handler exists to end.
-        logger.warning("[watchdog.wire] cursor unreadable %s — resetting to 0: %s", cursor_file, exc)
-        _stderr(f"watchdog wire: cursor unreadable ({exc}) — replaying from the top (duplicates possible)")
-        return 0
+def _sweep_wires(storage_path: Path | None) -> None:
+    """One pass over the registry: bury the dead, take over every live wire.
 
-
-def _write_cursor(cursor_file: Path, offset: int) -> None:
-    """Persist the delivery offset atomically (tmp + replace).
-
-    A torn cursor would reset delivery to 0 on the next arm — survivable
-    (duplicates), but two lines of atomicity buy exactness.
-    """
-    cursor_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cursor_file.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps({"offset": offset, "updated": datetime.now().isoformat(timespec="seconds")}),
-        encoding="utf-8",
-    )
-    os.replace(tmp, cursor_file)
-
-
-def _drain_events(events_file: Path, offset: int) -> tuple[list[dict], int]:
-    """Read complete event lines past ``offset``. Returns (records, new_offset).
-
-    A trailing line without its newline is a write still in flight — left
-    unconsumed for the next tick. A COMPLETE line that fails to parse is junk
-    to step over loudly, never a reason to wedge delivery forever at the same
-    offset. A file shorter than the offset means it was replaced/truncated —
-    delivery resets to the top and says so (duplicates over silence).
-    """
-    try:
-        size = events_file.stat().st_size
-    except FileNotFoundError:
-        # No events file yet — the daemon hasn't detected anything since the
-        # split shipped. Nothing to deliver is a normal answer.
-        return [], 0 if offset else offset
-
-    if size < offset:
-        logger.warning("[watchdog.wire] events file shrank (%s < %s) — replaying from 0", size, offset)
-        _stderr("watchdog wire: events file was replaced — replaying from the top (duplicates possible)")
-        offset = 0
-    if size == offset:
-        return [], offset
-
-    with open(events_file, "rb") as fh:
-        fh.seek(offset)
-        chunk = fh.read()
-
-    records: list[dict] = []
-    consumed = 0
-    for raw_line in chunk.splitlines(keepends=True):
-        if not raw_line.endswith(b"\n"):
-            break
-        consumed += len(raw_line)
-        text = raw_line.decode("utf-8", errors="replace").strip()
-        if not text:
-            continue
-        try:
-            record = json.loads(text)
-        except json.JSONDecodeError as exc:
-            logger.warning("[watchdog.wire] unparseable event line skipped: %s (%s)", text[:120], exc)
-            _stderr(f"watchdog wire: skipped an unparseable event line ({exc})")
-            continue
-        if isinstance(record, dict):
-            records.append(record)
-
-    return records, offset + consumed
-
-
-def _format_delivery(record: dict, missed: bool) -> str:
-    """Render one delivered event — the baseline formatter plus lateness."""
-    line = _baseline.format_completion(record)
-    if missed:
-        detected = str(record.get("iso") or "?")
-        line = f"MISSED {line} [detected {detected}, delivered on re-arm — no wire was up]"
-    return line
-
-
-def _heartbeat_age() -> float | None:
-    """Seconds since the daemon last touched the heartbeat, or None if absent."""
-    try:
-        return max(0.0, time.time() - _baseline.HEARTBEAT_FILE.stat().st_mtime)
-    except OSError as exc:
-        logger.info("[watchdog.wire] heartbeat unreadable: %s", exc)
-        return None
-
-
-def _spawn_daemon(devpulse_dir: Path, daemon_log: Path) -> None:
-    """Start the detection daemon detached from every session.
-
-    ``start_new_session`` puts it in its own process group — no tty, no
-    harness task file, nothing a session teardown can reach. Its stdout and
-    stderr go to the daemon log so its BASELINE DEAD confessions survive.
-    Spawned through drone — the sanctioned door, same as every routed call.
-    """
-    daemon_log.parent.mkdir(parents=True, exist_ok=True)
-    with open(daemon_log, "ab") as log_fh:
-        subprocess.Popen(
-            ["drone", "@devpulse", "watchdog", "baseline", "--daemon"],
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-            cwd=str(devpulse_dir),
-        )
-
-
-def _find_live_daemon(storage_path: Path | None) -> dict | None:
-    """The registry's live round-2 daemon entry, or None."""
-    for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
-        if watch.get("type") != _DAEMON_KIND:
-            continue
-        pid = watch.get("pid")
-        meta = watch.get("metadata") or {}
-        if isinstance(pid, int) and _registry.is_pid_alive(pid) and meta.get("role") == "daemon":
-            return watch
-    return None
-
-
-def _sweep_and_migrate(storage_path: Path | None) -> dict:
-    """One pass over the registry: bury the dead, migrate legacies, kill wires.
-
-    Returns {"daemon": entry|None}. Everything it kills or buries is said on
-    stderr — a slot silently reused is how a dead watcher passes for a live
-    one (round 1's _arm doctrine, now wire-aware).
+    Everything killed or buried is said on stderr — a slot silently reused is
+    how a dead watcher passes for a live one.
 
     EVERY live wire is taken over, same session or not. There is no
     "already wired" answer: a wire process writing into the current session's
@@ -308,16 +269,16 @@ def _sweep_and_migrate(storage_path: Path | None) -> dict:
     resume killed its monitor, and @baud's 12:34 completion landed unread. Only
     the arm happening right now is known to have ears; the process that exists
     is always the newest arm.
-    """
-    daemon_entry: dict | None = None
 
+    r4 note: this used to also find/migrate DAEMON entries. There is no daemon
+    to find. A pre-r4 daemon still running from an older binary is swept as an
+    ordinary stale watchdog entry by ``_sweep_stale_daemons`` below.
+    """
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
-        wtype = watch.get("type")
-        if wtype not in (_DAEMON_KIND, _WIRE_KIND):
+        if watch.get("type") != _WIRE_KIND:
             continue
         pid = watch.get("pid")
         handle = watch.get("handle")
-        meta = watch.get("metadata") or {}
         if not isinstance(handle, str):
             # An entry with no handle can be neither killed nor deregistered
             # through the registry's doors — name it and move on.
@@ -326,34 +287,9 @@ def _sweep_and_migrate(storage_path: Path | None) -> dict:
 
         if not isinstance(pid, int) or not _registry.is_pid_alive(pid):
             _registry.deregister(handle, storage_path=storage_path)
-            _stderr(f"watchdog wire: buried dead {wtype} entry {handle} (pid {pid})")
+            _stderr(f"watchdog wire: buried dead wire entry {handle} (pid {pid})")
             continue
 
-        if wtype == _DAEMON_KIND:
-            if meta.get("role") == "daemon":
-                daemon_entry = watch
-                continue
-            # A live baseline WITHOUT the daemon role is the round-1 shape:
-            # one process wired to one session's task file. Its detection is
-            # real but its delivery is a coin flip — migrate it.
-            if _looks_like_ours(pid):
-                result = _registry.kill_watch(handle, storage_path=storage_path)
-                _stderr(
-                    f"watchdog wire: migrated legacy single-process watcher {handle} "
-                    f"(pid {pid}) — {result.get('reason', '')}"
-                )
-                logger.info("[watchdog.wire] migrated legacy watcher handle=%s pid=%s", handle, pid)
-            else:
-                _registry.deregister(handle, storage_path=storage_path)
-                _stderr(
-                    f"watchdog wire: {handle} records pid {pid} whose cmdline is not a watchdog "
-                    f"— entry buried, process left alone (recycled pid)"
-                )
-            continue
-
-        # A live wire — taken over unconditionally (see the docstring: its
-        # existence proves a writer, never a listener). The session name rides
-        # along only so the takeover line says where the corpse was pointed.
         their_session = _session_dir_of(_stdout_target(pid))
         if _looks_like_ours(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
@@ -369,64 +305,59 @@ def _sweep_and_migrate(storage_path: Path | None) -> dict:
                 f"— entry buried, process left alone (recycled pid)"
             )
 
-    return {"daemon": daemon_entry}
 
+def _sweep_stale_daemons(storage_path: Path | None) -> int:
+    """Retire any detection daemon left running by a pre-r4 binary.
 
-def _ensure_daemon(
-    storage_path: Path | None,
-    repo_root: Path,
-    existing: dict | None,
-    spawn_fn=None,
-) -> dict:
-    """A live daemon entry — the one found, or one spawned and waited for.
-
-    Raises RuntimeError when a spawn doesn't register in time, with the daemon
-    log's tail on stderr — the spawn's own words beat a guess about them.
+    Written for ONE upgrade, and deliberately not deleted after it: an operator
+    can still be running a months-old detached daemon from any checkout on the
+    box. Leaving it alive would restore the exact double-wake r4 removes, and
+    it would be invisible — the second wake looks like the first.
     """
-    if existing is not None:
-        return existing
-
-    devpulse_dir = _baseline.devpulse_dir_for(repo_root)
-    daemon_log = devpulse_dir.joinpath(*_DAEMON_LOG_RELPATH)
-    spawn = spawn_fn if spawn_fn is not None else _spawn_daemon
-    _stderr("watchdog wire: no detection daemon — spawning one detached")
-    spawn(devpulse_dir, daemon_log)
-
-    waited = 0.0
-    while waited < _DAEMON_SPAWN_WAIT_SECONDS:
-        entry = _find_live_daemon(storage_path)
-        if entry is not None:
-            _stderr(f"watchdog wire: daemon up pid={entry.get('pid')} handle={entry.get('handle')}")
-            return entry
-        _sleep(_DAEMON_SPAWN_POLL_SECONDS)
-        waited += _DAEMON_SPAWN_POLL_SECONDS
-
-    tail = ""
-    try:
-        tail = "\n".join(daemon_log.read_text(encoding="utf-8", errors="replace").splitlines()[-5:])
-    except OSError as exc:
-        tail = f"(daemon log unreadable: {exc})"
-    raise RuntimeError(f"daemon did not register within {_DAEMON_SPAWN_WAIT_SECONDS:.0f}s — its log ends:\n{tail}")
+    retired = 0
+    for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
+        if watch.get("type") != "baseline":
+            continue
+        handle = watch.get("handle")
+        pid = watch.get("pid")
+        if not isinstance(handle, str):
+            continue
+        if isinstance(pid, int) and _registry.is_pid_alive(pid) and _looks_like_ours(pid):
+            result = _registry.kill_watch(handle, storage_path=storage_path)
+            _stderr(
+                f"watchdog wire: retired pre-r4 detection daemon {handle} (pid {pid}) "
+                f"— it double-wakes this seat — {result.get('reason', '')}"
+            )
+            logger.info("[watchdog.wire] retired pre-r4 daemon handle=%s pid=%s", handle, pid)
+        else:
+            _registry.deregister(handle, storage_path=storage_path)
+            _stderr(f"watchdog wire: buried pre-r4 daemon entry {handle} (pid {pid})")
+        retired += 1
+    return retired
 
 
-def _daemon_dead_reason(daemon_pid: int | None) -> str | None:
-    """Why the daemon should be called dead this tick, or None if it's fine.
+def _partition_mine(records: list[dict], seat: str) -> list[dict]:
+    """Keep only the completions THIS seat dispatched — rule 5's implementation.
 
-    Two checks because they fail differently: a gone pid is a crash, a live
-    pid with a stale heartbeat is a hang — and a hung detector is the more
-    dangerous corpse, it still LOOKS armed everywhere.
+    One field comparison per record: @ai_mail stamps ``sender`` on the feed line
+    at the terminal moment (FPLAN-0452 P1), so nothing is read and nothing is
+    joined on the delivery path.
+
+    An earlier version of this joined against the dispatch register to build an
+    id allow-list. It raced the producer — which closes the register entry and
+    writes the feed line in the same breath — and it duplicated a
+    reconstruction rule @ai_mail owns. Both were reasons to stop reading a file
+    to answer a question the record already answers.
+
+    A record with no ``sender`` is NOT mine (see ``dispatches.is_mine``): it
+    fails closed, because treating an unattributable completion as mine
+    restores the fleet-wide wake this function exists to end.
     """
-    if daemon_pid is None or not _registry.is_pid_alive(daemon_pid):
-        return f"detection daemon gone (pid={daemon_pid})"
-    age = _heartbeat_age()
-    if age is None:
-        # No heartbeat file at all while the pid lives: the daemon hasn't
-        # completed a tick yet (fresh spawn) — the pid check carries liveness
-        # until the first touch lands. Not a death.
-        return None
-    if age > _baseline.HEARTBEAT_STALE_SECONDS:
-        return f"detection daemon hung (pid={daemon_pid} heartbeat_age={age:.0f}s)"
-    return None
+    mine = [record for record in records if _dispatches.is_mine(record, seat)]
+    dropped = len(records) - len(mine)
+    if dropped:
+        logger.info("[watchdog.wire] %s completion(s) were not this seat's — not delivered", dropped)
+    return mine
 
 
 def _result(state: str, **extra) -> dict:
@@ -441,10 +372,9 @@ def arm_wire(
     repo_root: Path | None = None,
     storage_path: Path | None = None,
     max_ticks: int | None = None,
-    spawn_fn=None,
     wire_poll: float = WIRE_POLL_SECONDS,
 ) -> dict:
-    """The arm door: ensure the daemon, take the wire for THIS session, deliver.
+    """The arm door: take the wire for THIS session and deliver my completions.
 
     Args:
         once: Return after the first delivery (replayed MISSED events count —
@@ -452,7 +382,6 @@ def arm_wire(
         repo_root: Override the repo root holding AIPASS_REGISTRY.json.
         storage_path: Override the watch registry path (tests).
         max_ticks: Bound the follow loop to N ticks (tests). None = unbounded.
-        spawn_fn: Override the daemon spawner (tests).
         wire_poll: Seconds between delivery ticks.
 
     Returns:
@@ -461,13 +390,25 @@ def arm_wire(
 
     Raises:
         SystemExit(1): after a ``BASELINE DEAD: ...`` stdout line, for any
-            failure that ends delivery — daemon death included. Silence must
-            never mean covered.
+            failure that ends delivery. Silence must never mean covered.
     """
-    root = repo_root if repo_root is not None else _baseline.find_repo_root()
+    root = repo_root if repo_root is not None else find_repo_root()
     if root is None:
-        _stdout_event("BASELINE DEAD: AIPASS_REGISTRY.json not found — no roster, no coverage")
+        _stdout_event(f"BASELINE DEAD: {_REGISTRY_FILENAME} not found — no root, no coverage")
         raise SystemExit(1)
+
+    # Resolved ONCE, here, and fatal if it fails. Without an identity there is
+    # no "mine", so every completion would be filtered out and the wire would
+    # sit there looking armed while delivering nothing — silence that reads as
+    # coverage, which is the failure this whole release removes. Note the
+    # asymmetry with the register: a MISSING register is legitimate (no
+    # dispatch has ever been sent here), an unknown seat never is.
+    try:
+        seat = _dispatches.seat_email(repo_root=root)
+    except RuntimeError as exc:
+        _stdout_event(f"BASELINE DEAD: cannot tell whose dispatches to deliver — {exc}")
+        logger.error("[watchdog.wire] seat unresolved: %s", exc)
+        raise SystemExit(1) from exc
 
     my_target = _stdout_target()
     my_session = _session_dir_of(my_target)
@@ -491,15 +432,8 @@ def arm_wire(
         logger.error("[watchdog.wire] refused continuous arm under run_in_background stdout=%s", my_target)
         raise SystemExit(1)
 
-    sweep = _sweep_and_migrate(storage_path)
-
-    try:
-        daemon_entry = _ensure_daemon(storage_path, root, sweep["daemon"], spawn_fn=spawn_fn)
-    except RuntimeError as exc:
-        _stdout_event(f"BASELINE DEAD: {exc}")
-        logger.error("[watchdog.wire] daemon ensure failed: %s", exc)
-        raise SystemExit(1) from exc
-    daemon_pid = daemon_entry.get("pid") if isinstance(daemon_entry.get("pid"), int) else None
+    _sweep_wires(storage_path)
+    _sweep_stale_daemons(storage_path)
 
     # SIGTERM must run the finally below — a takeover kills the old wire with
     # SIGTERM, and a wire that dies without deregistering leaves the stale
@@ -510,19 +444,16 @@ def arm_wire(
         _WIRE_KIND,
         metadata={
             "session": session_name,
+            "wrapper": _wrapper_of(my_target),
             "tasks_dir": my_session.name if my_session is not None else None,
             "stdout": str(my_target) if my_target is not None else None,
-            "daemon_pid": daemon_pid,
         },
         storage_path=storage_path,
     )
     json_handler.log_operation("arm_wire", {"handle": handle, "session": session_name, "once": once})
 
-    events_file = _baseline.events_file_for(root)
-    cursor_file = _baseline.cursor_file_for(root)
-    # The push source (FPLAN-0451 P2). Its cursor is a digest set, not a byte
-    # offset, because the feed is trimmed by os.replace and offsets go stale
-    # silently across that — see feed.py's header.
+    # The cursor is a digest set, not a byte offset, because the feed is trimmed
+    # by os.replace and offsets go stale silently across that — see feed.py.
     feed_cursor_file = _feed.cursor_file_for(root)
     feed_source = _feed.feed_file(root)
     feed_state: dict | None = None
@@ -530,26 +461,24 @@ def arm_wire(
     replayed = 0
     delivered = 0
     ticks = 0
+    last_heartbeat = 0.0
     try:
-        offset = _read_cursor(cursor_file)
-        records, offset = _drain_events(events_file, offset)
-        for record in records:
-            _stdout_event(_format_delivery(record, missed=True))
-        if records:
-            _write_cursor(cursor_file, offset)
-            replayed = len(records)
-            logger.info("[watchdog.wire] replayed %s missed events", replayed)
+        _touch_heartbeat()
+        last_heartbeat = time.monotonic()
 
-        feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
-        for record in feed_records:
-            _stdout_event(f"MISSED {_feed.format_feed_event(record)} [reported while no wire was up]")
-        if feed_records:
-            replayed += len(feed_records)
-            logger.info("[watchdog.wire] replayed %s missed feed events", len(feed_records))
+        feed_records, feed_state = _feed.drain_feed(
+            feed_cursor_file, kinds=_DELIVER_KINDS, feed_file_path=feed_source, state=feed_state
+        )
+        missed = _partition_mine(feed_records, seat)
+        for record in missed:
+            _stdout_event(f"MISSED {_feed.format_feed_event(record)} [completed while no wire was up]")
+        if missed:
+            replayed = len(missed)
+            logger.info("[watchdog.wire] replayed %s missed completions", replayed)
 
         _stderr(
             f"watchdog wire: armed handle={handle} session={session_name or 'NONE (fg)'} "
-            f"daemon_pid={daemon_pid} replayed={replayed} tick={wire_poll}s"
+            f"replayed={replayed} tick={wire_poll}s"
         )
         if not once:
             # The wrapper is invisible from inside — this line is the only
@@ -565,32 +494,20 @@ def arm_wire(
 
         while True:
             ticks += 1
-            reason = _daemon_dead_reason(daemon_pid)
-            if reason is not None:
-                _stdout_event(f"BASELINE DEAD: {reason} — re-arm with: drone @devpulse watchdog baseline")
-                logger.error("[watchdog.wire] %s", reason)
-                raise SystemExit(1)
+            now = time.monotonic()
+            if now - last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                _touch_heartbeat()
+                last_heartbeat = now
 
-            feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
-            for record in feed_records:
+            feed_records, feed_state = _feed.drain_feed(
+                feed_cursor_file, kinds=_DELIVER_KINDS, feed_file_path=feed_source, state=feed_state
+            )
+            fresh = _partition_mine(feed_records, seat)
+            for record in fresh:
                 _stdout_event(_feed.format_feed_event(record))
-            if feed_records:
-                delivered += len(feed_records)
-                logger.info("[watchdog.wire] delivered %s feed events", len(feed_records))
-
-            records, new_offset = _drain_events(events_file, offset)
-            for record in records:
-                _stdout_event(_format_delivery(record, missed=False))
-            if records:
-                offset = new_offset
-                _write_cursor(cursor_file, offset)
-                delivered += len(records)
-                logger.info("[watchdog.wire] delivered %s events", len(records))
-            elif new_offset != offset:
-                # Junk/blank lines consumed without a delivery still move the
-                # cursor — otherwise the same junk is re-skipped every tick.
-                offset = new_offset
-                _write_cursor(cursor_file, offset)
+            if fresh:
+                delivered += len(fresh)
+                logger.info("[watchdog.wire] delivered %s completions", len(fresh))
 
             if once and delivered:
                 return _result(
