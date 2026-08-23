@@ -51,8 +51,9 @@ drone @flow create . "Design topic" dplan       # Create DPLAN
 # Close plans
 drone @flow close FPLAN-0042                    # Close specific plan
 drone @flow close DPLAN-0005                    # Close a DPLAN
-drone @flow close --all                         # Close all open plans
+drone @flow close --all                         # Close every open plan in YOUR project
 drone @flow close --all --dry-run               # Preview what would close
+drone @flow close --all --exclude-type APLAN    # Hold a whole plan type back (repeatable)
 drone @flow close --dry-run FPLAN-0042          # Preview single close
 
 # List plans
@@ -120,7 +121,7 @@ flow/
 │   ├── audit_plans/             # APLAN templates (default)
 │   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 784 tests across 24 files
+├── tests/                       # 936 tests across 27 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -319,18 +320,21 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ## Quality
 
-- **Seedgo:** 100% (44 standards, 42 files, no type errors)
-- **Tests:** 784 tests in 24 files — 788 cases collected after parametrisation, 787 pass / 1 skip. 88/88 public functions tested (100%)
-- **Source files:** 42 tracked by seedgo
-- **Bypass rules:** 58 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
-- **Last audit:** 2026-08-13 (APLAN-0004, full live command sweep)
+- **Seedgo:** 100% (46 standards, 44 files, no type errors)
+- **Tests:** 936 tests in 27 files — 955 cases collected after parametrisation, 954 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
+- **Source files:** 44 tracked by seedgo
+- **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
+- **Last audit:** 2026-08-22 (every figure on this list re-measured, not carried forward)
 
 ### Known Issues
-- **`restore` cannot reach the backup archive on the normal close path.** Close
-  *moves* the file to `.backup/processed_plans/`; `restore` then fails step 5
-  ("file not found at registered location") because backup recovery is only
-  attempted when the plan is missing from the registry entirely. Verified live
-  on FPLAN-0408. Every normally-closed plan is affected.
+- **307 of 719 closed plans have no archived copy and cannot be restored.**
+  Fixed 2026-08-22: `restore` now reads `.backup/processed_plans/` when the
+  registered `file_path` is empty, which it always is after a close. Before
+  that fix restore failed for **719 of 719** closed plans while 412 archives
+  sat intact beside them. Coverage by close month: 2026-03 and 04 are 0%,
+  05 is 89%, 06–08 are 98–100%. The 307 pre-May rows have no artifact to
+  recover — that is a gap in the archive, not in restore, and it is not
+  recoverable by code.
 - **`--help` advertises full module names that the dispatcher rejects.** It
   prints "Commands can be called by short name or full name", but 7 of 8
   modules match only their short verb. It also lists `template`, which no
@@ -348,7 +352,7 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-22*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -16,16 +16,6 @@ import pytest
 REGISTER_SUFFIX = "_REGISTRY" + ".json"  # assembled: the literal name is a sealed-write trigger
 
 
-@pytest.fixture(autouse=True)
-def _clear_scope_cache():
-    """The resolver memoises directory -> root; tmp_path reuse must not leak."""
-    from aipass.flow.apps.handlers.plan import project_scope
-
-    project_scope.clear_cache()
-    yield
-    project_scope.clear_cache()
-
-
 def _register(directory: Path, name: str = "PROJ", **payload) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}{REGISTER_SUFFIX}"
@@ -40,6 +30,49 @@ def _import():
     )
 
     return find_project_root, caller_project_root
+
+
+class TestTheCacheIsTheCallersNotTheModules:
+    """The memo is a parameter, not module state -- see find_project_root.
+
+    A module-level cache would answer from before a register existed, and
+    nothing in a long-lived process could invalidate it. These pin that a
+    resolver with no cache always re-reads the tree.
+    """
+
+    def test_a_register_created_after_a_miss_is_found_on_the_next_call(self, tmp_path):
+        find_project_root, _ = _import()
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        assert find_project_root(deep) is None
+
+        _register(tmp_path)
+        assert find_project_root(deep) == tmp_path.resolve()
+
+    def test_a_supplied_cache_is_filled_with_every_directory_walked(self, tmp_path):
+        find_project_root, _ = _import()
+        _register(tmp_path)
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+
+        cache = {}
+        assert find_project_root(deep, cache) == tmp_path.resolve()
+        assert cache[deep.resolve()] == tmp_path.resolve()
+        assert cache[(tmp_path / "a").resolve()] == tmp_path.resolve()
+
+    def test_a_supplied_cache_answers_without_re_reading_the_tree(self, tmp_path):
+        find_project_root, _ = _import()
+        _register(tmp_path)
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+
+        cache = {}
+        find_project_root(deep, cache)
+        # The register is gone; only the memo can still answer.
+        for stale in tmp_path.glob(f"*{REGISTER_SUFFIX}"):
+            stale.unlink()
+        assert find_project_root(deep, cache) == tmp_path.resolve()
+        assert find_project_root(deep) is None
 
 
 class TestFindProjectRoot:
@@ -196,3 +229,47 @@ class TestCallerProjectRoot:
 
         assert caller_project_root() == tmp_path.resolve()
         assert os.environ["AIPASS_CALLER_BRANCH"] == "somebody-else"
+
+
+class TestCallerCwd:
+    """caller_cwd is the evidence every scope decision rests on.
+
+    Exercised through caller_project_root everywhere else; pinned directly here
+    because "which location did we read" is the question a wrong sweep starts
+    from, and an indirect assertion cannot answer it.
+    """
+
+    def test_returns_the_env_location_verbatim(self, tmp_path, monkeypatch):
+        from aipass.flow.apps.handlers.plan.project_scope import caller_cwd
+
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        assert caller_cwd() == tmp_path
+
+    def test_falls_back_to_the_process_cwd(self, tmp_path, monkeypatch):
+        from aipass.flow.apps.handlers.plan.project_scope import caller_cwd
+
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert caller_cwd() == Path(os.getcwd())
+
+    def test_an_empty_env_value_is_not_a_location(self, tmp_path, monkeypatch):
+        """Empty is absent, not Path("") -- which resolves to the process CWD."""
+        from aipass.flow.apps.handlers.plan.project_scope import caller_cwd
+
+        monkeypatch.setenv("AIPASS_CALLER_CWD", "")
+        monkeypatch.chdir(tmp_path)
+        assert caller_cwd() == Path(os.getcwd())
+
+
+class TestDescribeProject:
+    """The name that lands in a refusal message the operator has to act on."""
+
+    def test_names_the_project_directory(self, tmp_path):
+        from aipass.flow.apps.handlers.plan.project_scope import describe_project
+
+        assert describe_project(tmp_path / "MARKETSTAND") == "MARKETSTAND"
+
+    def test_no_project_is_said_in_words_not_left_as_none(self, tmp_path):
+        from aipass.flow.apps.handlers.plan.project_scope import describe_project
+
+        assert describe_project(None) == "no project"

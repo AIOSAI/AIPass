@@ -40,7 +40,8 @@ Usage:
     )
 
     caller = caller_project_root()          # Path | None
-    row    = find_project_root(Path(loc))   # Path | None
+    cache  = {}                             # share across one operation
+    row    = find_project_root(Path(loc), cache)
     in_scope = caller is not None and row == caller
 """
 
@@ -59,17 +60,6 @@ MODULE_NAME = "project_scope"
 # "branches" list. Both halves are required -- see the module docstring.
 REGISTER_GLOB = "*_REGISTRY.json"
 REGISTER_KEY = "branches"
-
-# Directory -> project root, memoised. Safe as module state because flow is a
-# one-shot CLI: one process per invocation, and the register set cannot change
-# underneath a single run. Tests that build registers in tmp_path must call
-# clear_cache().
-_ROOT_CACHE: Dict[Path, Optional[Path]] = {}
-
-
-def clear_cache() -> None:
-    """Drop the memoised directory -> project-root map."""
-    _ROOT_CACHE.clear()
 
 
 def _holds_register(directory: Path) -> bool:
@@ -98,12 +88,18 @@ def _holds_register(directory: Path) -> bool:
     return False
 
 
-def find_project_root(start: Optional[Path]) -> Optional[Path]:
+def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional[Path]]] = None) -> Optional[Path]:
     """Return the nearest ancestor of `start` (inclusive) holding a register.
 
     Args:
         start: Absolute path to a file or directory. A relative path, an empty
                path or None yields None -- see below.
+        cache: Optional directory -> root map, filled in as the walk proceeds.
+               Resolving many rows shares one walk per ancestor chain; pass the
+               SAME dict for the duration of one operation and drop it after.
+               Deliberately not module state: a memo with no invalidation path
+               is only safe while flow stays a one-shot CLI, and that is an
+               assumption the caller can hold but the resolver cannot.
 
     Returns:
         The project root, or None when no register stands above `start`.
@@ -128,11 +124,12 @@ def find_project_root(start: Optional[Path]) -> Optional[Path]:
         logger.warning(f"[{MODULE_NAME}] Cannot resolve {start}: {e}")
         return None
 
+    memo: Dict[Path, Optional[Path]] = cache if cache is not None else {}
     walked = []
     result: Optional[Path] = None
     while True:
-        if current in _ROOT_CACHE:
-            result = _ROOT_CACHE[current]
+        if current in memo:
+            result = memo[current]
             break
         walked.append(current)
         if _holds_register(current):
@@ -144,7 +141,7 @@ def find_project_root(start: Optional[Path]) -> Optional[Path]:
         current = current.parent
 
     for seen in walked:
-        _ROOT_CACHE[seen] = result
+        memo[seen] = result
     return result
 
 

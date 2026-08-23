@@ -69,11 +69,23 @@ def _project_label(root: Any) -> str:
     return describe_project(root)
 
 
-def _default_resolve_project(location: Path) -> Any:
-    """Resolve a row's project from the row's own location."""
+def _make_project_resolver() -> Any:
+    """Build a row -> project resolver backed by a cache scoped to one sweep.
+
+    The cache lives in this closure and dies with it. Every row in a sweep
+    walks the same handful of ancestor chains, so memoising is worth real work
+    -- but a module-level memo would outlive the run with no way to invalidate
+    it, and the first caller to build a register mid-process would get the
+    answer from before it existed.
+    """
     from aipass.flow.apps.handlers.plan.project_scope import find_project_root
 
-    return find_project_root(location)
+    cache: Dict[Path, Any] = {}
+
+    def resolve(location: Path) -> Any:
+        return find_project_root(location, cache)
+
+    return resolve
 
 
 def _scope_reason(row_project: Any) -> str:
@@ -556,7 +568,7 @@ def close_all_plans_impl(
         # by default. Refusing is the only honest move; the alternative is the
         # exact silent-widening this command exists to remove.
         if resolve_project_fn is None:
-            resolve_project_fn = _default_resolve_project
+            resolve_project_fn = _make_project_resolver()
         if caller_project is _UNSET:
             caller_project = _caller_project_default()
         if caller_project is None:
