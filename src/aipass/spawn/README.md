@@ -44,7 +44,7 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 | Class | Template | What It Creates |
 |-------|----------|-----------------|
-| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ — 45 files, 23 dirs |
+| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ — 46 files, 23 dirs |
 | `project_agent` | `templates/project_agent/` | Minimal citizen for an external project: .trinity/, .aipass/, apps/ (modules/ + handlers/), artifacts/, logs/ — 17 files, 9 dirs |
 
 `admin` is permanently refused as a class or `--template` value — see Grant Admin below.
@@ -188,7 +188,7 @@ spawn/
 │       └── json/
 │           └── json_handler.py          # Standard JSON I/O, operation logging, 7 API functions
 ├── templates/
-│   └── aipass_framework/                # Full scaffold template (44 files, 23 dirs)
+│   └── aipass_framework/                # Full scaffold template (46 files, 23 dirs)
 ├── tests/                               # 20 test files, 456 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
@@ -293,7 +293,7 @@ branch has a real conftest (see Known Issues).
 - **Seedgo:** 100% with bypasses, 98% without (15 live bypass rules, all measured 2026-08-13)
 - **Tests:** 434 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
-- **Template registry:** 45 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
+- **Template registry:** 46 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
 ---
