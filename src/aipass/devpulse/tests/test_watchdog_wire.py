@@ -33,6 +33,7 @@ replacing the handler's own ``_sleep`` — no test waits a real tick.
 
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -411,6 +412,13 @@ def test_wire_never_spawns_anything(tmp_path, monkeypatch):
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
 
+_POSIX_ARGV0 = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX-only fixture: argv[0] via exec -a — the Windows process table never shows it",
+)
+
+
+@_POSIX_ARGV0
 def test_a_pre_r4_daemon_still_running_is_retired(tmp_path, capsys):
     """An old detached daemon from another checkout would restore the double-wake.
 
@@ -456,6 +464,7 @@ def test_wire_touches_the_heartbeat_the_daemon_used_to_own(tmp_path, _private_he
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@_POSIX_ARGV0
 def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monkeypatch):
     root = _repo(tmp_path)
     store = _store(tmp_path)
@@ -482,6 +491,7 @@ def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monke
             stale.kill()
 
 
+@_POSIX_ARGV0
 def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
     """No 'already wired' answer exists: a wire writing into the CURRENT
     session dir proves a writer, never a listener (the 10:55 wire kept writing
@@ -560,6 +570,7 @@ def test_wire_deregisters_itself_on_exit(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@_POSIX_ARGV0
 def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, monkeypatch):
     """Monitor stdout is a socket; run_in_background stdout is a REAL FILE in a
     tasks dir (measured live 2026-08-19). A continuous wire behind that file
@@ -721,6 +732,11 @@ def test_session_dir_requires_tasks_parent(tmp_path):
     assert wire._session_dir_of(None) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="/proc fd inspection is POSIX-only — on Windows _stdout_target answers None "
+    "(cannot tell), by design and logged, never a wrong path",
+)
 def test_stdout_target_reads_proc_truth(tmp_path):
     """The identity primitive against a real process with a known stdout."""
     target = tmp_path / "known.output"

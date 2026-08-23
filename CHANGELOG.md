@@ -194,6 +194,31 @@ email, wrong path. Registry now outranks cache for every citizen it knows;
 contradicting rows are refused and logged; a fleet-wide scan of all 18
 branches' caches found no other poisoned row.
 
+The Linux gate going green exposed the second stratum: `windows-setup` is a
+fresh-INSTALL machine (setup.sh runs first, so the registry exists), and it
+failed 14 tests across five owners. The house standard that emerged: build the
+foreign platform's semantics locally and reproduce before fixing — @flow
+patched one `Path` name to `PureWindowsPath` and got CI's three assertions
+verbatim (their fence was fully working; three tests compared stringified
+paths against forward-slash literals, an idiom also wrong on Linux for
+`/aipass-old` under `/aipass`); @hooks replaced `os.path.expanduser` with
+ntpath semantics and reproduced their exact four-vs-three split
+(`patch.dict(clear=True)` strips USERPROFILE, which Windows home resolution
+needs and POSIX doesn't — fixed portably at all 12 sites, no skips, and the
+sim surfaced two latent import-time crashes from module-scope `Path.home()`,
+invisible in CI only by import order); @ai_mail refused the comparison-side
+fix because their failing test was REPORTING a production defect — the
+mismatch message rendered paths with repr, showing Windows humans
+double-escaped paths that match nothing — and fixed the message instead,
+keeping repr's quiet gift (an empty pointer renders as quotes, not a vanished
+word). Devpulse's wire tests were the honest exception: argv[0] renaming and
+/proc inspection are POSIX mechanisms Windows does not have, so those five
+carry skipifs naming the mechanism. And @spawn's passport-drift test caught a
+real gap on the runner: setup.sh's hand-written bootstrap list predates
+@canary's birth, so fresh installs minted every passport except theirs — one
+line added, and the hazard (a list every birth must remember by hand) written
+beside it.
+
 ## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own

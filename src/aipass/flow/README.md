@@ -121,7 +121,7 @@ flow/
 │   ├── audit_plans/             # APLAN templates (default)
 │   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 943 tests across 27 files
+├── tests/                       # 950 tests across 27 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -321,7 +321,7 @@ aggregation untouched, plus anything auto-closed during the run.
 ## Quality
 
 - **Seedgo:** 100% (46 standards, 44 files, no type errors)
-- **Tests:** 943 tests in 27 files — 962 cases collected after parametrisation, 961 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
+- **Tests:** 950 tests in 27 files — 969 cases collected after parametrisation, 968 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
 - **Source files:** 44 tracked by seedgo
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Last audit:** 2026-08-23 (every figure on this list re-measured, not carried forward)

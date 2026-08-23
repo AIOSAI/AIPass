@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_transcripts.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: CC-native transcript reader — the chats, not the processes
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-08-23
 # =============================================
 
 """CC-native transcript reader — what conversations exist in a branch.
@@ -32,7 +32,32 @@ from aipass.cli.apps.modules import err_console
 
 CONSOLE = err_console
 
-PROJECTS_ROOT = Path.home() / ".claude" / "projects"
+
+def _claude_home() -> Path:
+    """Home directory for Claude's state, or an unusable sentinel if unknown.
+
+    `Path.home()` RAISES RuntimeError("Could not determine home directory.")
+    when expanduser cannot answer — on POSIX only if the pwd lookup also fails,
+    but on Windows whenever %USERPROFILE% is absent, since ntpath has no pwd to
+    fall back on. Evaluated at module scope, that turns an unresolvable home
+    into an IMPORT-time crash: the whole module dies, not the one call that
+    wanted a path.
+
+    A missing home is not an emergency here — it means there is no
+    ~/.claude to read, which is the same answer as an empty one. So resolution
+    degrades to a path that cannot exist, letting the `.is_dir()` / `.exists()`
+    checks downstream report "nothing here" instead of raising. The fallback is
+    logged, never silent: a machine that cannot name its own home is worth a
+    line in the log even though it does not stop us.
+    """
+    try:
+        return Path.home()
+    except RuntimeError as e:
+        logger.warning("[%s] Cannot resolve home directory (%s) - treating ~/.claude as absent", __name__, e)
+        return Path("<no-home>")
+
+
+PROJECTS_ROOT = _claude_home() / ".claude" / "projects"
 
 # CC truncates a mangled name at 200 chars and appends a hash of the ORIGINAL
 # path. Read out of the shipping CLI (2.1.228), not inferred:

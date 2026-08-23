@@ -1434,21 +1434,61 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
         assert "no tmux" in out
 
 
+def home_env(home) -> dict[str, str]:
+    """The environment that redirects home resolution on BOTH platforms.
+
+    `Path.home()` asks `os.path.expanduser`, and the two implementations read
+    different variables: POSIX honours $HOME (falling back to the pwd database
+    when it is unset), while Windows reads %USERPROFILE% and has no pwd to fall
+    back to. Setting HOME alone therefore redirects home on Linux and does
+    nothing at all on Windows.
+
+    That gap is not cosmetic under `patch.dict(..., clear=True)`. Clearing the
+    environ strips the runner's real USERPROFILE, so Windows expanduser returns
+    "~" unchanged and pathlib raises RuntimeError("Could not determine home
+    directory.") — four of these tests died exactly that way on the
+    windows-setup CI job (PR 739, 2026-08-22). Their siblings survived only by
+    returning before any home lookup, which made the split look like a bug in
+    the pointer code rather than a POSIX-only fixture.
+
+    Setting both keys is the portable redirect, so this is deliberately NOT a
+    skipif: nothing about pointing home at a temp directory is POSIX-only, and
+    these doors ship to Windows users too.
+    """
+    return {"HOME": str(home), "USERPROFILE": str(home)}
+
+
+def set_home(monkeypatch, home) -> str:
+    """Point home resolution at `home` for the current test, both platforms.
+
+    The monkeypatch half of `home_env` — same reasoning, same two keys. Returns
+    the path as a string, which is what the `patch.dict` callers pass on.
+    """
+    for key, value in home_env(home).items():
+        monkeypatch.setenv(key, value)
+    return str(home)
+
+
 def plant_pointer(tmp_path, monkeypatch, session_id):
     """A real session pointer plus the transcript that makes it trustworthy.
 
     Written through session_pointer itself — the FPLAN-0447 store is the only
     production writer, so the tests speak its format by calling it, never by
-    spelling the JSON. HOME is redirected first because the transcript check
-    walks $HOME/.claude/projects; the caller must keep that HOME set inside
-    boot() (a cleared environ falls back to the REAL home via pwd and the
-    check silently misses).
+    spelling the JSON. Home is redirected first because the transcript check
+    walks <home>/.claude/projects; the caller must keep that redirect in place
+    inside boot() by spreading `home_env(...)` into its `patch.dict`. A cleared
+    environ resolves to the REAL home on POSIX (pwd fallback) and to no home at
+    all on Windows — a silent miss on one platform, a RuntimeError on the other.
     """
     from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
 
     home = tmp_path / "home"
-    monkeypatch.setenv("HOME", str(home))
+    set_home(monkeypatch, home)
     tdir = sp.transcript_dir(tmp_path)
+    # None means session_pointer could not name the home directory, which here
+    # can only mean set_home above failed to take — assert it rather than dying
+    # on NoneType later, so a broken redirect names itself.
+    assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / f"{session_id}.jsonl").write_text("{}\n", encoding="utf-8")
     assert sp.write_pointer(Path(tmp_path), session_id, "test")
@@ -1467,7 +1507,7 @@ class TestSessionPointerDoors:
     def test_no_live_enter_resumes_the_pointer(self, tmp_path, monkeypatch):
         home = plant_pointer(tmp_path, monkeypatch, "ptr-sid-1")
         with (
-            patch.dict("os.environ", {"HOME": home}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1505,9 +1545,11 @@ class TestSessionPointerDoors:
         home = plant_pointer(tmp_path, monkeypatch, "ptr-gone")
         from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
 
-        (sp.transcript_dir(tmp_path) / "ptr-gone.jsonl").unlink()
+        tdir = sp.transcript_dir(tmp_path)
+        assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
+        (tdir / "ptr-gone.jsonl").unlink()
         with (
-            patch.dict("os.environ", {"HOME": home}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1527,9 +1569,9 @@ class TestSessionPointerDoors:
         — a fresh seat the record never learned about is how the resume door
         drifts back to guessing."""
         home = tmp_path / "home"
-        monkeypatch.setenv("HOME", str(home))
+        set_home(monkeypatch, home)
         with (
-            patch.dict("os.environ", {"HOME": str(home)}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1558,7 +1600,7 @@ class TestSessionPointerDoors:
             {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {"HOME": home}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1579,13 +1621,13 @@ class TestSessionPointerDoors:
         make_transcript(fake_projects, tmp_path, "chosen", "Chosen chat", 5, age_seconds=600)
         make_transcript(fake_projects, tmp_path, "newest", "Newest chat", 9)
         home = tmp_path / "home"
-        monkeypatch.setenv("HOME", str(home))
+        set_home(monkeypatch, home)
         live = [
             {"pid": 1234, "sessionId": "held", "cwd": str(tmp_path), "kind": "interactive"},
             {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {"HOME": str(home)}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1615,10 +1657,10 @@ class TestSessionPointerDoors:
         target.mkdir()
         monkeypatch.chdir(decoy)
         home = tmp_path / "home"
-        monkeypatch.setenv("HOME", str(home))
+        set_home(monkeypatch, home)
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(target), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {"HOME": str(home)}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1713,9 +1755,9 @@ class TestDispatchedGuard:
         """'n' mints a NEW session id — it steals nothing from the job."""
         plant_dispatch_lock(tmp_path)
         home = tmp_path / "home"
-        monkeypatch.setenv("HOME", str(home))
+        set_home(monkeypatch, home)
         with (
-            patch.dict("os.environ", {"HOME": str(home)}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1768,7 +1810,7 @@ class TestDispatchedGuard:
             return ["PID 999: sent SIGTERM"]
 
         with (
-            patch.dict("os.environ", {"HOME": home}, clear=True),
+            patch.dict("os.environ", home_env(home), clear=True),
             patch.object(cc_sessions, "reclaim", side_effect=fake_reclaim),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
@@ -1805,3 +1847,62 @@ class TestDispatchedGuard:
             result = session_boot.boot(cwd=str(tmp_path))
         assert result["exit_code"] == 1
         mock_exec.assert_not_called()
+
+
+class TestHomeResolutionIsPortable:
+    """PR 739 / windows-setup: home resolution must not be POSIX-only.
+
+    Four pointer-door tests died on the Windows runner with
+    RuntimeError("Could not determine home directory."), while their siblings
+    passed — the split was not in the pointer logic at all. Every failing test
+    planted a pointer and then ran boot() under
+    `patch.dict(..., {"HOME": ...}, clear=True)`; every passing one returned
+    before the first home lookup. Clearing the environ strips %USERPROFILE%,
+    and Windows expanduser reads that, not $HOME.
+
+    These pin both halves of the fix so the platform gap cannot come back
+    quietly on a machine where nobody can run the failing platform.
+    """
+
+    def test_home_env_sets_both_platform_keys(self, tmp_path):
+        """HOME alone is a Linux-only redirect. The Windows key must ride too."""
+        env = home_env(tmp_path / "home")
+        assert env["HOME"] == str(tmp_path / "home")
+        assert env["USERPROFILE"] == str(tmp_path / "home")
+
+    def test_set_home_redirects_home_with_the_environ_cleared(self, tmp_path, monkeypatch):
+        """The whole point: resolution must survive a cleared environ, which is
+        what every one of the four failing tests did to itself."""
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        with patch.dict("os.environ", home_env(home), clear=True):
+            assert Path.home() == home
+
+    def test_pointer_doors_resolve_under_a_cleared_environ(self, tmp_path, monkeypatch):
+        """The CI failure itself, reduced: plant a pointer, clear the environ to
+        exactly what the fixture provides, and resolve. This is the call that
+        raised on the runner (session_pointer.transcript_dir -> Path.home())."""
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        home = plant_pointer(tmp_path, monkeypatch, "portable-sid")
+        with patch.dict("os.environ", home_env(home), clear=True):
+            sid, reason = sp.resolve_resume_target(Path(tmp_path))
+        assert sid == "portable-sid", reason
+
+    def test_claude_home_degrades_instead_of_raising(self):
+        """An unresolvable home must not crash at import. The constants are
+        module-level, so `Path.home()` raising there kills the whole module
+        rather than the one lookup that wanted a path."""
+        from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
+
+        for mod in (cc_sessions, cc_transcripts):
+            with patch.object(Path, "home", side_effect=RuntimeError("Could not determine home directory.")):
+                fallback = mod._claude_home()
+            assert not (fallback / ".claude").exists()
+
+    def test_session_file_presence_survives_an_unresolvable_home(self, monkeypatch):
+        """A presence check answers True or False — never takes the menu down."""
+        from aipass.hooks.apps.modules import cc_sessions
+
+        monkeypatch.setattr(cc_sessions, "CC_SESSIONS_DIR", Path("<no-home>") / ".claude" / "sessions")
+        assert session_boot._is_session_file_present(4321) is False

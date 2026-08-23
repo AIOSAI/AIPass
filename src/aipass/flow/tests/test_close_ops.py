@@ -1,6 +1,6 @@
 """Tests for close_ops handler — plan closure business logic."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import MagicMock, patch
 
 
@@ -38,6 +38,27 @@ def _import_self_heal():
 
 
 _PROJ = Path("/proj")
+
+
+def _under(path: Path, root: Path) -> bool:
+    """True when `path` IS `root` or lives beneath it.
+
+    A path relationship, never a string prefix. This exists because three
+    tests in this file red on the windows-setup CI runner while their
+    siblings stayed green, and the difference was exactly the idiom:
+
+        str(Path("/aipass/src"))            # posix   -> "/aipass/src"
+        str(Path("/aipass/src"))            # windows -> "\\aipass\\src"
+        "\\aipass\\src".startswith("/aipass")  # False
+
+    So a resolver written as ``str(path).startswith("/aipass")`` returned None
+    for every row on Windows, the whole sweep landed in the held bucket, and
+    nothing closed. The siblings compared ``str(path)`` to ``str(root)`` --
+    both sides wearing the same separator -- which is why they survived.
+    Neither idiom belongs in a path test; is_relative_to answers the question
+    that was actually being asked, on every platform.
+    """
+    return path.is_relative_to(root)
 
 
 def _scope(**overrides) -> dict:
@@ -1309,7 +1330,7 @@ class TestProjectScopeFence:
         aipass, baud = Path("/aipass"), Path("/aipass/projects/baud")
 
         def resolver(path):
-            return baud if str(path).startswith(str(baud)) else aipass
+            return baud if _under(path, baud) else aipass
 
         open_plans = [
             ("0100", {"subject": "ours", "location": "/aipass/src", "file_path": "/aipass/src/DPLAN-0100_ours.md"}),
@@ -1351,7 +1372,7 @@ class TestProjectScopeFence:
 
         result = close_all(
             caller_project=aipass,
-            resolve_project_fn=lambda path: aipass if str(path).startswith("/aipass") else None,
+            resolve_project_fn=lambda path: aipass if _under(path, aipass) else None,
             get_open_plans=MagicMock(return_value=open_plans),
             close_plan_fn=mock_close,
         )
@@ -1370,9 +1391,9 @@ class TestProjectScopeFence:
         aipass, baud = Path("/aipass"), Path("/aipass/projects/baud")
 
         def resolver(path):
-            if str(path).startswith(str(baud)):
+            if _under(path, baud):
                 return baud
-            if str(path).startswith("/aipass"):
+            if _under(path, aipass):
                 return aipass
             return None
 
@@ -1420,9 +1441,9 @@ class TestDryRunEqualsRunUnderFences:
         aipass, baud = Path("/aipass"), Path("/aipass/projects/baud")
 
         def resolver(path):
-            if str(path).startswith(str(baud)):
+            if _under(path, baud):
                 return baud
-            if str(path).startswith("/aipass"):
+            if _under(path, aipass):
                 return aipass
             return None
 
@@ -1488,7 +1509,7 @@ class TestDryRunEqualsRunUnderFences:
             dry_run=True,
             exclude_types=["APLAN"],
             caller_project=aipass,
-            resolve_project_fn=lambda p: aipass if str(p).startswith("/aipass") else None,
+            resolve_project_fn=lambda p: aipass if _under(p, aipass) else None,
             get_open_plans=MagicMock(return_value=open_plans),
             close_plan_fn=MagicMock(),
         )
@@ -1499,3 +1520,120 @@ class TestDryRunEqualsRunUnderFences:
         assert summary["held_out_of_scope"] == 1
         assert summary["refused"] == 0
         assert summary["in_scope"] == len(preview["plan_ids"])
+
+
+class TestTheScopeComparisonIsPlatformNeutral:
+    """Guards the idiom the windows-setup runner caught, from Linux.
+
+    The three tests that red on Windows all shared one line shape and no
+    Linux run could see it: the whole failure lived in what str(Path(...))
+    produces on a platform this machine is not. PureWindowsPath implements
+    exactly those semantics here, so the class of bug is now catchable
+    locally rather than only in CI on a runner nobody can reach.
+    """
+
+    ROW = "/aipass/src"
+    ROOT = "/aipass"
+    OTHER = "/tmp/loose"
+
+    def test_a_row_under_the_root_is_recognised_on_both_platforms(self):
+        for flavour in (PurePosixPath, PureWindowsPath):
+            assert _under(flavour(self.ROW), flavour(self.ROOT)), flavour.__name__
+
+    def test_the_root_itself_counts_as_inside_on_both_platforms(self):
+        for flavour in (PurePosixPath, PureWindowsPath):
+            assert _under(flavour(self.ROOT), flavour(self.ROOT)), flavour.__name__
+
+    def test_a_row_outside_the_root_stays_outside_on_both_platforms(self):
+        for flavour in (PurePosixPath, PureWindowsPath):
+            assert not _under(flavour(self.OTHER), flavour(self.ROOT)), flavour.__name__
+
+    def test_a_sibling_that_merely_shares_a_prefix_is_not_inside(self):
+        """/aipass-old is not under /aipass. A string prefix would say it is."""
+        for flavour in (PurePosixPath, PureWindowsPath):
+            assert not _under(flavour("/aipass-old/src"), flavour(self.ROOT)), flavour.__name__
+
+    def test_the_string_prefix_idiom_is_the_thing_that_broke(self):
+        """Pins the mechanism, so the docstring above cannot rot into folklore."""
+        assert str(PurePosixPath(self.ROW)).startswith(self.ROOT)
+        assert not str(PureWindowsPath(self.ROW)).startswith(self.ROOT)
+
+
+class TestTheFenceUnderWindowsPathSemantics:
+    """Runs the scope fence with close_ops seeing Windows paths, from Linux.
+
+    close_ops turns each row's location into ``Path(location)`` before handing
+    it to the scope resolver, so patching that one name to PureWindowsPath puts
+    the resolver in exactly the position it occupies on the windows-setup
+    runner. This is not a substitute for CI -- it cannot see filesystem or
+    drive-letter behaviour -- but it makes the SEPARATOR class of defect
+    reproducible on a machine that has no Windows, which is the class that
+    reddened three tests here and could not be seen locally at all.
+
+    Proven faithful: with the old ``str(path).startswith("/aipass")`` idiom
+    restored, this harness reproduces the CI job's three assertions verbatim --
+    [] == ['DPLAN-0100'], [] == ['DPLAN-0316'], and 0 == 1.
+    """
+
+    @staticmethod
+    def _rows():
+        return [
+            ("0100", {"subject": "ours", "location": "/aipass/src", "file_path": "/aipass/src/DPLAN-0100_o.md"}),
+            ("0101", {"subject": "theirs", "location": "/aipass/projects/baud/a", "file_path": "/x/DPLAN-0101.md"}),
+            ("0102", {"subject": "nowhere", "location": "/tmp/loose", "file_path": "/tmp/loose/DPLAN-0102_x.md"}),
+        ]
+
+    @staticmethod
+    def _resolver(aipass, baud):
+        def resolve(path):
+            if _under(path, baud):
+                return baud
+            if _under(path, aipass):
+                return aipass
+            return None
+
+        return resolve
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
+    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler")
+    def test_the_three_buckets_survive_windows_separators(self, _mock_jh, _mock_bg):
+        close_all = _import_close_all_plans_impl()
+        import aipass.flow.apps.handlers.plan.close_ops as mod
+
+        aipass, baud = PureWindowsPath("/aipass"), PureWindowsPath("/aipass/projects/baud")
+        mock_close = MagicMock(return_value={"success": True, "messages": []})
+
+        with patch.object(mod, "Path", PureWindowsPath):
+            result = close_all(
+                caller_project=aipass,
+                resolve_project_fn=self._resolver(aipass, baud),
+                get_open_plans=MagicMock(return_value=self._rows()),
+                close_plan_fn=mock_close,
+            )
+
+        # In scope, foreign and unattributable each land where they belong --
+        # the exact split that collapsed to "everything is unattributable".
+        assert _closed_ids(mock_close) == ["DPLAN-0100"]
+        assert sorted(_held_ids(result)) == ["DPLAN-0101", "DPLAN-0102"]
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
+    @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler")
+    def test_the_held_reasons_still_tell_foreign_from_unattributable(self, _mock_jh, _mock_bg):
+        """The load-bearing half: a held row must still say WHY it was held."""
+        close_all = _import_close_all_plans_impl()
+        import aipass.flow.apps.handlers.plan.close_ops as mod
+
+        aipass, baud = PureWindowsPath("/aipass"), PureWindowsPath("/aipass/projects/baud")
+
+        with patch.object(mod, "Path", PureWindowsPath):
+            result = close_all(
+                dry_run=True,
+                caller_project=aipass,
+                resolve_project_fn=self._resolver(aipass, baud),
+                get_open_plans=MagicMock(return_value=self._rows()),
+                close_plan_fn=MagicMock(),
+            )
+
+        reasons = {m["plan_id"]: m["reason"] for m in result["messages"] if m.get("type") == "held_row"}
+        assert reasons["DPLAN-0101"] == "belongs to baud"
+        assert "no project register" in reasons["DPLAN-0102"]

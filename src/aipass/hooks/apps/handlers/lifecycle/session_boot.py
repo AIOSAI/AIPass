@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.4.0
+# Version: 4.4.1
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-08-20
+# Modified: 2026-08-23
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -545,10 +545,21 @@ def _takeover_bg(
 
 
 def _is_session_file_present(pid: int | None) -> bool:
-    """Check if a CC session file exists for the given PID."""
+    """Check if a CC session file exists for the given PID.
+
+    Home is resolved through cc_sessions._claude_home() rather than
+    `Path.home()` directly: that call raises RuntimeError when expanduser
+    cannot answer (Windows with no %USERPROFILE%), and a presence CHECK must
+    come back True or False, never take the menu down with it. No home means no
+    session file, which is False. Resolution stays LIVE rather than reading the
+    module constant, so a caller that redirects home still moves this lookup.
+    """
     if pid is None:
         return False
-    session_file = Path.home() / ".claude" / "sessions" / f"{pid}.json"
+    import importlib
+
+    cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    session_file = cc_sessions._claude_home() / ".claude" / "sessions" / f"{pid}.json"
     return session_file.exists()
 
 

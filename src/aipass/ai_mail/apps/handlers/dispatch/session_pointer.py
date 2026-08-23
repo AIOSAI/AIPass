@@ -86,7 +86,62 @@ def mint_session_id() -> str:
     return str(uuid.uuid4())
 
 
-def transcript_dir(cwd: str | Path) -> Path:
+_HOME_FAILURE_WARNED = False
+
+
+def _claude_home() -> Optional[Path]:
+    """This machine's home directory, or None when it cannot be named.
+
+    ``Path.home()`` was called bare here, and it was the ONE unguarded call on
+    the resume path (reported by @hooks, 2026-08-23, found while fixing their
+    own Windows CI red — tracebacks landed on this line). It delegates to
+    ``os.path.expanduser``, which raises RuntimeError when it cannot answer.
+
+    POSIX honours $HOME and then falls back to the pwd database, so it is very
+    nearly unfailable there. ntpath has no such fallback: it reads USERPROFILE,
+    then HOMEDRIVE + HOMEPATH, and absent all three returns "~" unchanged, at
+    which point pathlib raises. So this is a Windows-shaped hole that is
+    invisible on the machines any of us can actually run.
+
+    IT SITS ON THE HAPPY PATH, which is why it earns a fix rather than a note:
+    it is only reached once a pointer EXISTS and its cwd MATCHES. A branch with
+    no pointer returns early and never touches it, so the branches exposed are
+    exactly the correctly-pointed ones.
+
+    None rather than a fabricated path: "this machine cannot name its home" and
+    "there is no transcript there" are different facts, and a sentinel that
+    cannot exist would render them identically — the same collapse this branch
+    removed from the dispatch register and from find_repo_root the same night.
+
+    Warned once per process. This is called per path construction, so a line per
+    call is the runaway-log problem; a warning nobody can read is another kind
+    of silence.
+
+    NOT HOISTED TO A MODULE CONSTANT, deliberately. @hooks hit the nastier half
+    of this defect in two of their own modules, where the home lookup ran at
+    MODULE SCOPE: an unresolvable home became an IMPORT-time crash that took the
+    whole module down, and it stayed invisible in CI only because some earlier
+    test had imported it outside a cleared environ. Import order was the only
+    thing between that and a red board. Computing inside the call keeps the
+    failure local to the caller that wanted a path.
+    """
+    global _HOME_FAILURE_WARNED
+
+    try:
+        return Path.home()
+    except RuntimeError as e:
+        if not _HOME_FAILURE_WARNED:
+            _HOME_FAILURE_WARNED = True
+            logger.warning(
+                "[session_pointer] cannot determine the home directory (%s) — no ~/.claude/projects "
+                "can be located, so transcript lookups will report absence and dispatches fall back "
+                "to -c. On Windows this means USERPROFILE and HOMEDRIVE+HOMEPATH are all unset.",
+                e,
+            )
+        return None
+
+
+def transcript_dir(cwd: str | Path) -> Optional[Path]:
     """Return Claude's transcript directory for a working directory.
 
     Claude stores transcripts under ``~/.claude/projects/<encoded-cwd>``, where
@@ -101,19 +156,35 @@ def transcript_dir(cwd: str | Path) -> Path:
 
     The cwd is encoded exactly as handed in — no resolving. Callers should pass
     the same path the agent actually runs in, since that is what Claude encoded.
+
+    Returns None when this machine cannot name its own home directory. That is
+    an ABSENT ANSWER, not a path — see ``_claude_home``. Callers must handle it;
+    a sentinel path that cannot exist would read as "no transcript here", which
+    is a different fact and the one that hides the real failure.
     """
     encoded = str(cwd).replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
-    return Path.home() / ".claude" / "projects" / encoded
+    home = _claude_home()
+    if home is None:
+        return None
+
+    return home / ".claude" / "projects" / encoded
 
 
-def transcript_file(cwd: str | Path, session_id: str) -> Path:
+def transcript_file(cwd: str | Path, session_id: str) -> Optional[Path]:
     """Return the transcript path for one session inside a working directory.
 
     Existence of this file is what makes a pointer trustworthy: an id with no
     transcript behind it would make ``--resume`` fail and cost the branch a
     whole dispatch, so callers check the file rather than believing the id.
+
+    None when the home directory cannot be named — propagated from
+    ``transcript_dir`` rather than papered over.
     """
-    return transcript_dir(cwd) / f"{session_id}.jsonl"
+    directory = transcript_dir(cwd)
+    if directory is None:
+        return None
+
+    return directory / f"{session_id}.jsonl"
 
 
 def pointer_path(branch_path: Path) -> Path:
@@ -215,7 +286,7 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str) -> bool:
                 logger.info("[session_pointer] Could not remove temp file %s: %s", tmp_name, e)
 
 
-def _transcript_candidates(branch_path: Path, session_id: str) -> list[Path]:
+def _transcript_candidates(branch_path: Path, session_id: str) -> Optional[list[Path]]:
     """Transcript paths to check for a branch, most literal first.
 
     Normally one path. A branch reached through a symlink gives two: Claude
@@ -223,11 +294,40 @@ def _transcript_candidates(branch_path: Path, session_id: str) -> list[Path]:
     while the caller may hold the unresolved path. Checking both costs a stat
     and avoids throwing away a perfectly good session over a symlink.
     """
-    candidates = [transcript_file(branch_path, session_id)]
+    literal = transcript_file(branch_path, session_id)
+    if literal is None:
+        return None
+
+    candidates = [literal]
     resolved = transcript_file(Path(branch_path).resolve(), session_id)
-    if resolved != candidates[0]:
+    if resolved is not None and resolved != literal:
         candidates.append(resolved)
     return candidates
+
+
+def _quote_path(value: object) -> str:
+    """Render a path inside a human-facing message: quoted, but never escaped.
+
+    ``{value!r}`` used to do this job and it broke the Windows CI runner
+    (PR 739's windows-setup job, 2026-08-23). repr() escapes for a Python
+    literal, so every backslash in a Windows path DOUBLES: a caller comparing
+    against ``str(path)`` can never match, and — the half that matters more —
+    the human reading the log is shown ``C:\\Users\\x``, which matches nothing
+    they can paste into a terminal or eyeball against their own directory. On
+    POSIX the bug is invisible, because repr of a slash path only adds quotes.
+
+    The quoting SURVIVES because that is what repr was actually buying here: an
+    empty or whitespace-only cwd renders as ``''`` instead of vanishing into the
+    sentence, which is the difference between "the pointer is blank" and "the
+    pointer is missing from this message". Bare str() would have traded a
+    Windows bug for a blank-value bug.
+
+    ``None`` is spelled out rather than quoted, so an absent key cannot be
+    confused with a pointer whose cwd is the literal text "None".
+    """
+    if value is None:
+        return "<absent>"
+    return f"'{value}'"
 
 
 def resolve_resume_target(branch_path: Path, max_transcript_mb: Optional[float] = None) -> Tuple[Optional[str], str]:
@@ -287,11 +387,17 @@ def resolve_resume_target(branch_path: Path, max_transcript_mb: Optional[float] 
     pointer_cwd = pointer.get("cwd")
     if pointer_cwd != expected_cwd:
         return None, (
-            f"pointer cwd mismatch - pointer says {pointer_cwd!r} but this branch resolves to "
-            f"{expected_cwd!r} (moved or copied branch?) - falling back to -c"
+            f"pointer cwd mismatch - pointer says {_quote_path(pointer_cwd)} but this branch resolves to "
+            f"{_quote_path(expected_cwd)} (moved or copied branch?) - falling back to -c"
         )
 
     candidates = _transcript_candidates(branch_path, session_id)
+    if candidates is None:
+        return None, (
+            "cannot determine this machine's home directory, so there is no ~/.claude/projects "
+            "to search - falling back to -c"
+        )
+
     found = None
     for candidate in candidates:
         try:

@@ -471,3 +471,151 @@ def test_pointer_file_is_valid_json_on_disk(branch):
     parsed = json.loads(raw)
     assert set(parsed) == {"session_id", "set_at", "set_by", "cwd"}
     assert os.linesep in raw or "\n" in raw  # indented, not a single blob
+
+
+# --- Windows path rendering ------------------------------------------
+
+
+class TestTheMismatchMessageIsReadableOnBothPlatforms:
+    """CI red on PR 739's windows-setup job (@devpulse, 2026-08-23).
+
+    test_resolve_returns_none_on_cwd_mismatch asserted ``str(branch.resolve())
+    in reason`` while the production message rendered the same path through
+    ``{...!r}``. On POSIX that is invisible - repr of "/home/x" only adds
+    quotes, so the needle is still a substring. On Windows repr DOUBLES every
+    backslash, so the haystack holds ``'C:\\\\Users\\\\x'`` while the needle is
+    ``C:\\Users\\x``, and the comparison can never succeed.
+
+    The test's intent was right and stays: a mismatch message that does not NAME
+    both paths is useless to the human reading it. What was wrong was the
+    rendering underneath - and it was wrong for the reader too, not just for the
+    assertion. A Windows user was being shown a path with doubled separators
+    that matches nothing they can copy, paste, or eyeball against their own
+    directory. Fixing the assertion alone would have left that in place.
+    """
+
+    def test_a_windows_pointer_cwd_survives_into_the_message(self, branch, fake_home):
+        """The reproduction, run on Linux: pointer cwd is read from JSON verbatim.
+
+        Nothing is mocked. ``cwd`` comes straight out of session.json, so a
+        Windows path reaches the real formatting on any platform - which is what
+        makes CI's failure provable from here.
+        """
+        windows_cwd = r"C:\Users\patrick\Projects\AIPass\src\aipass\ai_mail"
+        path = pointer_path(branch)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"session_id": "sess-live", "cwd": windows_cwd, "reason": "wake"}),
+            encoding="utf-8",
+        )
+
+        _session_id, reason = resolve_resume_target(branch)
+
+        assert "cwd" in reason, "premise: this must be the mismatch verdict"
+        assert windows_cwd in reason, (
+            "the pointer's own cwd must appear exactly as it is stored, so a human can "
+            f"compare it against their directory. Got: {reason}"
+        )
+        assert "\\\\" not in reason, "no doubled separators - the reader cannot copy those"
+
+    def test_an_empty_cwd_is_still_visible(self, branch, fake_home):
+        """What ``!r`` was buying, kept: a blank value must not vanish.
+
+        This is the reason repr was reached for in the first place. Swapping to
+        bare ``str`` would render an empty pointer cwd as nothing at all -
+        "pointer says  but this branch resolves to ..." - so the quoting has to
+        survive the fix even though the escaping does not.
+        """
+        path = pointer_path(branch)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"session_id": "s", "cwd": "", "reason": "wake"}), encoding="utf-8")
+
+        _session_id, reason = resolve_resume_target(branch)
+
+        assert "''" in reason, f"an empty cwd must still be visible as a quoted empty value. Got: {reason}"
+
+    def test_a_posix_path_is_unchanged(self, branch, fake_home, tmp_path):
+        """The original assertion still holds - this fix must not buy Windows with Linux."""
+        moved = tmp_path / "moved-branch"
+        (moved / ".ai_mail.local").mkdir(parents=True)
+        write_pointer(branch, "sess-live", "wake")
+        (moved / ".ai_mail.local" / "session.json").write_text(
+            pointer_path(branch).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+        _session_id, reason = resolve_resume_target(moved)
+
+        assert str(branch.resolve()) in reason
+        assert str(moved.resolve()) in reason
+
+
+# --- unresolvable home ------------------------------------------------
+
+
+class TestAnUnnameableHomeDoesNotRaise:
+    """Reported by @hooks (2026-08-23), found inside my file while fixing their own CI red.
+
+    ``Path.home()`` was the one unguarded call on the resume path. It delegates
+    to ``os.path.expanduser``, which on POSIX falls back to the pwd database and
+    so is nearly unfailable — but ntpath reads USERPROFILE, then
+    HOMEDRIVE+HOMEPATH, and has NO pwd fallback. Absent those it returns "~"
+    unchanged and pathlib raises RuntimeError. Verified here rather than taken
+    on trust: ntpath.expanduser("~") -> "~" with those three cleared.
+
+    That breaks two written contracts. The module docstring: "Nothing here
+    raises." resolve_resume_target's: "This never raises." Everything else on
+    the path is careful — read_pointer swallows I/O and parse errors, the branch
+    resolve catches OSError, every candidate stat catches OSError.
+
+    THE REACH IS THE HAPPY PATH, which is what makes it worth fixing rather than
+    noting: it only fires once a pointer EXISTS and its cwd MATCHES. A branch
+    with no pointer returns early and never touches it. So it is reached by
+    exactly the branches that are correctly pointed.
+    """
+
+    @staticmethod
+    def _home_is_unnameable(monkeypatch):
+        """Make Path.home() fail the way ntpath does with no USERPROFILE."""
+
+        def _raise():
+            raise RuntimeError("Could not determine home directory.")
+
+        monkeypatch.setattr(mod.Path, "home", staticmethod(_raise))
+
+    def test_resolve_degrades_to_a_reason_instead_of_raising(self, branch, fake_home, monkeypatch):
+        """The contract: a broken machine costs a resume, never a dispatch."""
+        write_pointer(branch, "sess-live", "wake")
+        _make_transcript(branch, "sess-live")
+        self._home_is_unnameable(monkeypatch)
+
+        session_id, reason = resolve_resume_target(branch)
+
+        assert session_id is None
+        assert reason, "every verdict lands in a log line, so none may be silent"
+
+    def test_the_reason_says_home_and_not_transcript_not_found(self, branch, fake_home, monkeypatch):
+        """ "I cannot name home" and "there is no transcript" are different facts.
+
+        Collapsing them would be the same defect as an unreadable dispatch
+        register returning [] — a reader cannot act on a message that blames the
+        wrong thing, and the machine-level failure is the one worth fixing.
+        """
+        write_pointer(branch, "sess-live", "wake")
+        _make_transcript(branch, "sess-live")
+        self._home_is_unnameable(monkeypatch)
+
+        _session_id, reason = resolve_resume_target(branch)
+
+        assert "home" in reason.lower(), f"the reason must name the actual failure. Got: {reason}"
+
+    def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch):
+        """No home means no answer — not a plausible path that cannot exist.
+
+        Returning a sentinel would make "this machine cannot name its home"
+        indistinguishable from "no transcript here", which is precisely the
+        collapse this branch spent the night removing from three other files.
+        """
+        self._home_is_unnameable(monkeypatch)
+
+        assert transcript_dir("/anywhere") is None
+        assert transcript_file("/anywhere", "sess") is None

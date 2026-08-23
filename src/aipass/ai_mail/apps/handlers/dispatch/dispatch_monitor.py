@@ -427,8 +427,15 @@ def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple
 
 def _transcript_exists(branch_path: Path, session_id: str) -> bool:
     """True when a transcript file exists for this session in this branch."""
+    transcript = session_pointer.transcript_file(branch_path, session_id)
+    if transcript is None:
+        # No home means no transcript can be located — and "unknown beats wrong"
+        # applies with more force here than to a stat failure: this gates whether
+        # a session id is safe to re-send.
+        return False
+
     try:
-        return session_pointer.transcript_file(branch_path, session_id).is_file()
+        return transcript.is_file()
     except OSError as e:
         # Unknown beats wrong here: a stat failure must not make us re-send an
         # id that may already be taken.
@@ -586,7 +593,7 @@ def _cleanup_own_lock(lock_file: str) -> None:
         logger.info("[monitor] Failed to clean up lock file %s", lock_file)
 
 
-def _get_jsonl_projects_dir(cwd: str) -> Path:
+def _get_jsonl_projects_dir(cwd: str) -> Optional[Path]:
     """Get Claude's JSONL projects directory for a branch CWD.
 
     Claude encodes the cwd by replacing path separators and ':' with '-'.
@@ -595,6 +602,13 @@ def _get_jsonl_projects_dir(cwd: str) -> Path:
     The encoding itself lives in session_pointer.transcript_dir. It used to be
     duplicated here byte-for-byte; the day Claude changes how it encodes a cwd
     there must be one line to fix, not two that drift apart silently.
+
+    None when the machine cannot name its home directory (@hooks, 2026-08-23).
+    THIS CALL SITE IS THE SHARPER ONE: it runs AFTER the agent has been spawned,
+    so the bare Path.home() it used to inherit would have killed the monitor
+    with a live agent still running — the dispatch orphaned, no report written,
+    the lock left held. Losing the startup poll costs a slower start; raising
+    here costs the whole dispatch.
     """
     return session_pointer.transcript_dir(cwd)
 
@@ -692,14 +706,19 @@ def _run_with_startup_check(
     # stdout is buffered by --output-format json, so we can't use it.
     # Claude writes to ~/.claude/projects/{encoded-cwd}/*.jsonl continuously.
     projects_dir = _get_jsonl_projects_dir(cwd)
-    initial_sizes = _snapshot_jsonl_sizes(projects_dir)
+    if projects_dir is None:
+        # No home means no transcripts to watch. The startup probe is an
+        # OPTIMISATION — it notices the agent is alive sooner — so its absence
+        # degrades the wait, never the dispatch. _claude_home already warned.
+        logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
+    initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
     deadline = time.time() + STARTUP_TIMEOUT
     started = False
 
     try:
         while time.time() < deadline:
             # Check if JSONL files show activity (new file or growth)
-            if _check_jsonl_activity(projects_dir, initial_sizes):
+            if projects_dir is not None and _check_jsonl_activity(projects_dir, initial_sizes):
                 started = True
                 break
 
