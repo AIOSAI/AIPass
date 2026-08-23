@@ -20,7 +20,7 @@ Usage:
 import os
 import re
 from pathlib import Path
-from typing import Callable, Dict, Any, List
+from typing import Callable, Dict, Any, List, Tuple
 
 from aipass.prax import logger
 
@@ -138,9 +138,10 @@ def scan_plan_files_impl(
     """
     logger.info(f"[{MODULE_NAME}] Starting PLAN file scan from: {ecosystem_root}")
 
-    # Find all PLAN files (detect duplicates)
-    plan_files: Dict[str, Path] = {}
-    duplicates: Dict[str, List[Path]] = {}
+    # Find all PLAN files (detect duplicates). Keyed by (prefix, number) --
+    # see the duplicate-detection comment below for why the bare number is wrong.
+    plan_files: Dict[Tuple[str, str], Path] = {}
+    duplicates: Dict[Tuple[str, str], List[Path]] = {}
 
     def handle_walk_error(error):
         """Handle permission errors during os.walk"""
@@ -159,34 +160,36 @@ def scan_plan_files_impl(
             match = PLAN_PATTERN.match(filename)
             if match:
                 file_path = Path(root) / filename
-                plan_number = match.group(2)
+                # Keyed by (prefix, number), never the bare number. Every type
+                # numbers from 0001, so APLAN-0007 and FPLAN-0007 are two
+                # different plans -- a number-only key called them one plan
+                # filed twice and sent the loser to be renamed on disk.
+                # heal_registry._build_plan_file_index keys the same way.
+                plan_key = (match.group(1), match.group(2))
 
-                # Duplicate detection
-                if plan_number in plan_files:
-                    if plan_number not in duplicates:
-                        duplicates[plan_number] = [plan_files[plan_number]]
-                    duplicates[plan_number].append(file_path)
+                # Duplicate detection -- same TYPE and same number
+                if plan_key in plan_files:
+                    if plan_key not in duplicates:
+                        duplicates[plan_key] = [plan_files[plan_key]]
+                    duplicates[plan_key].append(file_path)
                     logger.warning(f"[{MODULE_NAME}] Duplicate plan {filename} found: {file_path}")
                 else:
-                    plan_files[plan_number] = file_path
+                    plan_files[plan_key] = file_path
 
     # Auto-renumber duplicates (keep first, renumber rest)
     renumbered: List[Dict[str, str]] = []
     if duplicates:
         logger.warning(f"[{MODULE_NAME}] Found {len(duplicates)} duplicate PLAN files")
 
-        # Get next available plan number
-        current_max = max(int(num) for num in plan_files.keys()) if plan_files else 0
-        next_available = current_max + 1
-
-        for plan_num, paths in duplicates.items():
-            # Keep first occurrence, renumber the rest
+        for (dup_prefix, plan_num), paths in duplicates.items():
+            # Keep first occurrence, renumber the rest. The replacement number
+            # comes from THIS prefix's own sequence -- each type numbers
+            # independently, so an unrelated DPLAN-0900 must not push a
+            # duplicate FPLAN to 0901.
             for dup_path in paths[1:]:  # Skip first path (already in plan_files)
                 old_name = dup_path.name
-                # Preserve original plan prefix (FPLAN, DPLAN, TDPLAN, etc.)
-                prefix_match = re.match(r"^([A-Z]+PLAN)", old_name)
-                dup_prefix = prefix_match.group(1) if prefix_match else "FPLAN"
-                new_num = f"{next_available:04d}"
+                prefix_max = max((int(num) for pfx, num in plan_files if pfx == dup_prefix), default=0)
+                new_num = f"{prefix_max + 1:04d}"
                 new_name = f"{dup_prefix}-{new_num}.md"
                 new_path = dup_path.parent / new_name
 
@@ -196,10 +199,8 @@ def scan_plan_files_impl(
                     logger.info(f"[{MODULE_NAME}] Auto-renumbered: {old_name} -> {new_name} at {dup_path.parent}")
 
                     # Add to plan_files with new number
-                    plan_files[new_num] = new_path
+                    plan_files[(dup_prefix, new_num)] = new_path
                     renumbered.append({"old_number": plan_num, "new_number": new_num, "path": str(new_path)})
-
-                    next_available += 1
                 except Exception as e:
                     logger.error(f"[{MODULE_NAME}] Failed to renumber {old_name}: {e}")
 
@@ -212,8 +213,12 @@ def scan_plan_files_impl(
     updated: List[str] = []
     removed: List[str] = []
 
-    # Fire events for missing files (not in registry)
-    for plan_number, file_path in plan_files.items():
+    # Fire events for missing files (not in registry).
+    # NOTE: `plans` here is whatever load_registry() returned -- the injected
+    # default is the FPLAN registry, so rows of other types read as unregistered
+    # and re-fire plan_file_created on every scan. Reported separately; not
+    # changed here, as this run is scoped to the duplicate-keying hazard.
+    for (_plan_prefix, plan_number), file_path in plan_files.items():
         if plan_number not in plans:
             # File exists but not in registry - fire created event
             if _fire_event("plan_file_created", path=str(file_path)):
@@ -232,10 +237,15 @@ def scan_plan_files_impl(
     # Closed plans are expected to be archived out of the scanned tree (see IGNORE_FOLDERS) —
     # treating that as "deleted" every scan is what caused the runaway log (305 closed plans
     # logged as orphaned on every single run). Only open plans can be genuinely orphaned.
+    # Compared on the bare number, matching `plans` (which is keyed that way).
+    # The typed index above is about not confusing two plans for one; this check
+    # only asks "is there a file with this number at all", which is what the
+    # single-type registry in `plans` can answer.
+    disk_numbers = {num for _pfx, num in plan_files}
     for plan_number in list(plans.keys()):
         if plans[plan_number].get("status") == "closed":
             continue
-        if plan_number not in plan_files:
+        if plan_number not in disk_numbers:
             # Registry entry but no file - fire deleted event
             orphan_path = plans[plan_number].get("file_path", "")
             orphan_name = Path(orphan_path).name if orphan_path else f"PLAN-{plan_number}.md"

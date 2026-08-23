@@ -182,6 +182,93 @@ def recover_plan_from_backup(
     return True, f"Recovered {plan_label} from {plan_file.name} to {original_location}"
 
 
+def find_backup_copy(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path | None = None) -> Path | None:
+    """Locate the archived copy of an ALREADY-REGISTERED closed plan.
+
+    Close archives the plan file out of the tree and leaves the registry row's
+    ``file_path`` pointing at where the file used to be. Measured on this
+    machine: 0 of 719 closed rows have a file at their registered path, while
+    412 have an intact copy sitting in the archive. The net exists; nothing
+    reached for it.
+
+    Matching is by the row's OWN filename first, because that name carries the
+    slug and the date. A bare ``PREFIX-NNNN.md`` husk is not a restore -- see
+    the auto-renumber that erased exactly that and left an orphaned row.
+
+    The glob fallback is TYPE-SCOPED. Every registry numbers from 0001, so
+    ``*-0011*.md`` would happily hand back a DPLAN when an FPLAN was asked for.
+
+    Args:
+        plan_info: The registry row (its file_path supplies the wanted name)
+        plan_key: Normalised plan number, e.g. "0011"
+        backup_dir: Archive directory; defaults to the live processed_plans
+
+    Returns:
+        Path to the archived file, or None when nothing credible was found.
+    """
+    archive = backup_dir if backup_dir is not None else PROCESSED_PLANS_DIR
+    if not archive.is_dir():
+        logger.warning(f"[{MODULE_NAME}] Backup directory not present: {archive}")
+        return None
+
+    wanted = Path(plan_info.get("file_path", "") or "").name
+    if wanted:
+        exact = archive / wanted
+        if exact.is_file():
+            return exact
+
+    prefix = _extract_prefix(Path(wanted).stem) if wanted else None
+    if not prefix:
+        # No type evidence on the row -- refuse rather than glob every type.
+        logger.warning(f"[{MODULE_NAME}] Row {plan_key} carries no typed file_path; not searching backups")
+        return None
+
+    variants = sorted(archive.glob(f"{prefix}-{plan_key}*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+    return variants[0] if variants else None
+
+
+def restore_file_from_backup(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path | None = None):
+    """Copy a closed plan's archived file back to its registered location.
+
+    Deliberately narrow, and NOT recover_plan_from_backup: that function
+    rewrites the registry row with a synthetic one whose subject reads
+    "Recovered from backup" and whose created date is now. Calling it on a row
+    that already exists would destroy the real subject, the real creation date
+    and the real location in the act of "recovering" them.
+
+    COPY, never move. The archive stays intact, so a restore is repeatable and
+    a failed restore has not consumed the only copy.
+
+    Returns:
+        (restored_path, message). restored_path is None on failure.
+    """
+    source = find_backup_copy(plan_info, plan_key, backup_dir=backup_dir)
+    if source is None:
+        return None, "no archived copy found"
+
+    target = Path(plan_info.get("file_path", "") or "")
+    if not target.name:
+        return None, "registry row has no file_path to restore to"
+
+    if not target.parent.is_dir():
+        # The original directory is gone. Recreating it would invent a location
+        # for a plan whose home no longer exists; naming it is more useful.
+        return None, f"original location no longer exists: {target.parent}"
+
+    try:
+        copy2(source, target)
+    except OSError as e:
+        logger.error(f"[{MODULE_NAME}] Failed to copy {source} -> {target}: {e}")
+        return None, f"copy failed: {e}"
+
+    logger.info(f"[{MODULE_NAME}] Restored {target.name} from archive")
+    json_handler.log_operation(
+        "plan_file_restored_from_backup",
+        {"plan_key": plan_key, "source": str(source), "target": str(target)},
+    )
+    return target, f"restored {target.name} from archive"
+
+
 # =============================================
 # RESTORE PLAN IMPLEMENTATION
 # =============================================
@@ -195,6 +282,7 @@ def restore_plan_impl(
     save_registry: Any = None,
     validate_plan_exists: Any = None,
     recover_plan_from_backup_fn: Any = None,
+    restore_file_from_backup_fn: Any = restore_file_from_backup,
     scan_plan_files: Any = None,
     update_dashboard_local: Any = None,
     push_to_plans_central: Any = None,
@@ -306,18 +394,27 @@ def restore_plan_impl(
                 "restored_location": "",
             }
 
-        # 5. VALIDATE: Check file exists at registered location
+        # 5. RECOVER OR REFUSE: the file is not where the registry says it is.
+        # For a normally-closed plan it never is -- close archives it out of
+        # the tree. This branch used to be a hard failure, which made restore
+        # fail for 719 of 719 closed plans while 412 intact copies sat in the
+        # archive it never looked in.
         if not plan_file.exists():
-            logger.warning(f"[{MODULE_NAME}] File not found at {plan_file}")
-            messages.append(
-                {"type": "error", "error_type": "file_missing", "plan_key": plan_key, "prefix": plan_prefix}
-            )
-            return {
-                "success": False,
-                "messages": messages,
-                "plan_key": plan_key,
-                "restored_location": "",
-            }
+            recovered_path, recovery_msg = restore_file_from_backup_fn(plan_info, plan_key)
+            if recovered_path is None:
+                logger.warning(f"[{MODULE_NAME}] File not found at {plan_file} and {recovery_msg}")
+                messages.append(
+                    {"type": "error", "error_type": "file_missing", "plan_key": plan_key, "prefix": plan_prefix}
+                )
+                messages.append({"type": "dim", "text": f"  Archive lookup: {recovery_msg}"})
+                return {
+                    "success": False,
+                    "messages": messages,
+                    "plan_key": plan_key,
+                    "restored_location": "",
+                }
+            plan_file = recovered_path
+            messages.append({"type": "success", "text": f"  {recovery_msg}"})
 
         # 6. DISPLAY: Plan info header data
         messages.append({"type": "restore_header", "plan_key": plan_key, "plan_info": plan_info, "prefix": plan_prefix})

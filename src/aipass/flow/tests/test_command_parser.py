@@ -184,7 +184,7 @@ class TestParseCloseCommandArgs:
     def test_empty_args_returns_error(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args([])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args([])
         assert plan_num is None
         assert confirm is False
         assert all_plans is False
@@ -194,7 +194,7 @@ class TestParseCloseCommandArgs:
     def test_plan_number_only(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["42"])
         assert plan_num == "42"
         assert confirm is False
         assert all_plans is False
@@ -204,7 +204,7 @@ class TestParseCloseCommandArgs:
     def test_all_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--all"])
         assert plan_num is None
         assert confirm is False
         assert all_plans is True
@@ -214,7 +214,7 @@ class TestParseCloseCommandArgs:
     def test_confirm_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--confirm"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["42", "--confirm"])
         assert plan_num == "42"
         assert confirm is True
         assert all_plans is False
@@ -224,14 +224,14 @@ class TestParseCloseCommandArgs:
     def test_interactive_flag_sets_confirm(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        _, confirm, _, _, error = parse_close_command_args(["42", "--interactive"])
+        _, confirm, _, _, _excl, error = parse_close_command_args(["42", "--interactive"])
         assert confirm is True
         assert error is None
 
     def test_dry_run_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--dry-run"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["42", "--dry-run"])
         assert plan_num == "42"
         assert confirm is False
         assert all_plans is False
@@ -241,14 +241,14 @@ class TestParseCloseCommandArgs:
     def test_preview_flag_sets_dry_run(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        _, _, _, dry_run, error = parse_close_command_args(["42", "--preview"])
+        _, _, _, dry_run, _excl, error = parse_close_command_args(["42", "--preview"])
         assert dry_run is True
         assert error is None
 
     def test_all_with_confirm(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--confirm"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--all", "--confirm"])
         assert plan_num is None
         assert confirm is True
         assert all_plans is True
@@ -258,7 +258,7 @@ class TestParseCloseCommandArgs:
     def test_all_with_dry_run(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--dry-run"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--all", "--dry-run"])
         assert plan_num is None
         assert confirm is False
         assert all_plans is True
@@ -268,7 +268,7 @@ class TestParseCloseCommandArgs:
     def test_all_with_preview(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        _, _, all_plans, dry_run, error = parse_close_command_args(["--all", "--preview"])
+        _, _, all_plans, dry_run, _excl, error = parse_close_command_args(["--all", "--preview"])
         assert all_plans is True
         assert dry_run is True
         assert error is None
@@ -276,7 +276,9 @@ class TestParseCloseCommandArgs:
     def test_all_confirm_dry_run_combined(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--confirm", "--dry-run"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(
+            ["--all", "--confirm", "--dry-run"]
+        )
         assert plan_num is None
         assert confirm is True
         assert all_plans is True
@@ -286,7 +288,7 @@ class TestParseCloseCommandArgs:
     def test_yes_flag_is_redundant(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--yes"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["42", "--yes"])
         assert plan_num == "42"
         # --yes does NOT set confirm (it's for backward compat, auto-confirm is default)
         assert confirm is False
@@ -295,7 +297,7 @@ class TestParseCloseCommandArgs:
     def test_y_flag_is_redundant(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, _, _, error = parse_close_command_args(["42", "-y"])
+        plan_num, confirm, _, _, _excl, error = parse_close_command_args(["42", "-y"])
         assert plan_num == "42"
         assert confirm is False
         assert error is None
@@ -303,7 +305,7 @@ class TestParseCloseCommandArgs:
     def test_plan_number_with_all_flags(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["7", "--confirm", "--dry-run"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["7", "--confirm", "--dry-run"])
         assert plan_num == "7"
         assert confirm is True
         assert all_plans is False
@@ -315,8 +317,9 @@ class TestParseCloseCommandArgs:
 
         result = parse_close_command_args(["42"])
         assert isinstance(result, tuple)
-        assert len(result) == 5
-        plan_num, confirm, all_plans, dry_run, error = result
+        assert len(result) == 6
+        plan_num, confirm, all_plans, dry_run, exclude_types, error = result
+        assert isinstance(exclude_types, list)
         assert isinstance(plan_num, str)
         assert isinstance(confirm, bool)
         assert isinstance(all_plans, bool)
@@ -327,21 +330,21 @@ class TestParseCloseCommandArgs:
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         result = parse_close_command_args([])
-        plan_num, confirm, all_plans, dry_run, error = result
+        plan_num, confirm, all_plans, dry_run, _excl, error = result
         assert plan_num is None
         assert isinstance(error, str)
 
     def test_only_flags_no_plan_number_without_all(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        _, _, all_plans, _, error = parse_close_command_args(["--confirm", "--dry-run"])
+        _, _, all_plans, _, _excl, error = parse_close_command_args(["--confirm", "--dry-run"])
         assert all_plans is False
         assert error == "Plan number or --all required"
 
     def test_plan_number_string_preserved(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, _, _, _, _ = parse_close_command_args(["0042"])
+        plan_num, _, _, _, _excl, _ = parse_close_command_args(["0042"])
         assert plan_num == "0042"
 
     def test_flag_order_does_not_matter(self):
@@ -356,15 +359,115 @@ class TestParseCloseCommandArgs:
         """--help starts with -- so it's filtered from non-flag args."""
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--help"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--help"])
         # --help starts with -- so no non-flag args remain
         assert error is not None  # "Plan number or --all required"
+
+    # ---- the silent flag drop ----
+    # `--exclude APLAN` used to be byte-identical to passing nothing: the
+    # argument vanished and the bulk close ran anyway. Red first — every one
+    # of these returned error=None before the fix.
+
+    def test_unknown_flag_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        plan_num, _, all_plans, _, _excl, error = parse_close_command_args(["--all", "--exclude", "APLAN"])
+        assert error is not None
+        assert "--exclude" in error
+        # REFUSES the run: nothing survives the parse to be acted on.
+        assert plan_num is None
+        assert all_plans is False or error  # the caller must not proceed on an error
+
+    def test_typo_in_the_flag_name_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-typo", "APLAN"])
+        assert error is not None
+        assert "--exclude-typo" in error
+
+    def test_unknown_flag_on_single_close_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["FPLAN-0042", "--force"])
+        assert error is not None
+        assert "--force" in error
+
+    def test_stray_positional_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["FPLAN-0042", "FPLAN-0043"])
+        assert error is not None
+
+    def test_plan_number_with_all_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["--all", "42"])
+        assert error is not None
+
+    # ---- --exclude-type ----
+
+    def test_exclude_type_collected(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, all_plans, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", "APLAN"])
+        assert error is None
+        assert all_plans is True
+        assert exclude_types == ["APLAN"]
+
+    def test_exclude_type_is_repeatable(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, exclude_types, error = parse_close_command_args(
+            ["--all", "--exclude-type", "APLAN", "--exclude-type", "PPLAN"]
+        )
+        assert error is None
+        assert exclude_types == ["APLAN", "PPLAN"]
+
+    def test_exclude_type_accepts_equals_form_and_lowercase(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type=aplan"])
+        assert error is None
+        assert exclude_types == ["APLAN"]
+
+    def test_unknown_plan_type_refuses_and_names_the_valid_ones(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-type", "APLNA"])
+        assert error is not None
+        assert "APLNA" in error
+        # The operator must be able to act on the refusal.
+        assert "APLAN" in error and "FPLAN" in error
+
+    def test_exclude_type_validated_against_the_live_registry(self):
+        """Not a literal list -- the valid set comes from the registered templates."""
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+        from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+
+        registered = {p.upper() for p in get_prefix_map().values()}
+        for prefix in registered:
+            _, _, _, _, exclude_types, error = parse_close_command_args(["--all", "--exclude-type", prefix])
+            assert error is None, f"{prefix} is registered but was refused"
+            assert exclude_types == [prefix]
+
+    def test_exclude_type_without_a_value_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["--all", "--exclude-type"])
+        assert error is not None
+
+    def test_exclude_type_without_all_refuses(self):
+        from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
+
+        _, _, _, _, _excl, error = parse_close_command_args(["FPLAN-0042", "--exclude-type", "APLAN"])
+        assert error is not None
+        assert "--all" in error
 
     def test_dry_run_with_error(self):
         """--dry-run alone without plan number should error but preserve dry_run."""
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--dry-run"])
+        plan_num, confirm, all_plans, dry_run, _excl, error = parse_close_command_args(["--dry-run"])
         assert dry_run is True
         assert error is not None
 
