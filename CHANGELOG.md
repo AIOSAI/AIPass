@@ -219,7 +219,28 @@ real gap on the runner: setup.sh's hand-written bootstrap list predates
 line added, and the hazard (a list every birth must remember by hand) written
 beside it.
 
-## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
+**docs(readme)** — the root README verified claim-by-claim against the tree by
+four parallel reviewers before this release ships it. Fleet count corrected 17
+→ 18 in four places and @canary added to the diagram and tables (a reader
+running `ls src/aipass/` finds 18; a public README must not lose a count to
+its own registry). Descriptions refreshed from each agent's own words: api is
+an external API gateway (keys, secrets, Google OAuth, host server — OpenRouter
+is one module of thirteen now), trigger's medic fingerprints and wakes, never
+"self-heals", spawn creates, updates, AND deletes. The honesty fixes: "delete
+the directory and it's gone" was false — the installer writes hooks in
+`~/.claude/`, PATH entries, and cross-project state in `~/.aipass/`, so the
+claim now names both halves and Uninstall covers removing them. The uninstall
+recipe itself was defused: it said `rm -rf src/` in a section that exists for
+brought-your-own projects, where `src/` is plausibly the user's entire source
+tree, and it deleted a `hooks/` directory nothing ever creates. `aipass init`
+corrected to `aipass init .` (bare init prints help and scaffolds nothing),
+`--no-chat` now admits it skips the doctor preflight too, the structure
+diagram gained the three standard dirs it omitted, and "Linux or WSL" widened
+to Linux/macOS/Windows (Git Bash or WSL) — both extra platforms run the full
+suite in CI on every PR. Verified clean and left alone: every badge and link
+(zero dead, LICENSE genuinely MIT, codecov live at 78%), and the whole
+Subscriptions & Compliance section — the subprocess claim is backed by code,
+zero credential handling in the tree.: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own
 board from red to 21/21. Main was never red — the merge gate forbids it; these
