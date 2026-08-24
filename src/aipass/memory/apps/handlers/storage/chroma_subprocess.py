@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-27
 # Modified: 2026-08-23
 # =============================================
@@ -20,6 +20,7 @@ Output: JSON on stdout with result
 
 import sys
 import json
+import subprocess
 import logging
 import hashlib
 from pathlib import Path
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 # Default global chroma path: memory/.chroma
 _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
+
+# Sibling embedder script -- same venv, invoked by path. Encoding lives behind
+# this handler on purpose: a caller that picks its own embedding model can put
+# vectors from two models in one collection, which fails silently rather than
+# loudly (no error, just wrong neighbours). The store owns the model choice.
+_EMBED_SCRIPT = Path(__file__).resolve().parent.parent / "vector" / "embed_subprocess.py"
 
 # Singleton clients per path
 _clients = {}
@@ -103,6 +110,81 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
         "total_vectors": new_count,
         "ids": ids,
     }
+
+
+def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
+    """Encode raw texts and store them -- the text-in entry point.
+
+    Callers send text and get a verdict; they never pick an embedding model.
+    Every failure returns success=False with a reason: a caller that deletes its
+    originals on the strength of this answer must be able to trust it.
+
+    Args:
+        branch: Owning branch name (e.g. "AI_MAIL")
+        memory_type: Collection suffix (e.g. "email_sent")
+        texts: Raw strings to encode and store
+        metadatas: One metadata dict per text, same order
+        db_path: Optional path to Chroma database
+
+    Returns:
+        Dict with success, collection, count -- or success=False and an error
+    """
+    if not branch or not memory_type:
+        return {"success": False, "error": "branch and memory_type are required"}
+
+    texts = texts or []
+    metadatas = metadatas or []
+
+    if not texts:
+        return {"success": True, "count": 0, "message": "No texts to store"}
+
+    # zip() in the store path would truncate a mismatch silently and hand a row
+    # someone else's provenance. Refuse instead.
+    if len(metadatas) != len(texts):
+        return {"success": False, "error": f"metadatas ({len(metadatas)}) does not match texts ({len(texts)})"}
+
+    timeout = max(30, len(texts) * 3)
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(_EMBED_SCRIPT)],
+            input=json.dumps({"texts": texts}),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[chroma_subprocess] Embedding timed out after {timeout}s for {len(texts)} texts")
+        return {"success": False, "error": f"Embedding timed out after {timeout}s"}
+    except Exception as e:
+        logger.warning(f"[chroma_subprocess] Embed subprocess failed: {e}")
+        return {"success": False, "error": f"Embedding subprocess failed: {e}"}
+
+    if completed.returncode != 0:
+        return {"success": False, "error": completed.stderr or "Embedding failed"}
+
+    try:
+        embed_reply = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        # Unreadable output is not evidence of success.
+        logger.warning(f"[chroma_subprocess] Unreadable embedder reply: {e}")
+        return {"success": False, "error": f"Unreadable embedder reply: {e}"}
+
+    if not isinstance(embed_reply, dict) or not embed_reply.get("success"):
+        error = embed_reply.get("error") if isinstance(embed_reply, dict) else None
+        return {"success": False, "error": str(error or "Embedding refused without a reason")}
+
+    embeddings = embed_reply.get("embeddings") or []
+    if len(embeddings) != len(texts):
+        return {"success": False, "error": f"embeddings ({len(embeddings)}) does not match texts ({len(texts)})"}
+
+    return _store_vectors(
+        branch=branch,
+        memory_type=memory_type,
+        embeddings=embeddings,
+        documents=texts,
+        metadatas=metadatas,
+        db_path=db_path,
+    )
 
 
 def _list_collections(db_path=None):
@@ -319,6 +401,14 @@ def main():
                 memory_type=input_data.get("memory_type"),
                 embeddings=input_data.get("embeddings"),
                 documents=input_data.get("documents"),
+                metadatas=input_data.get("metadatas"),
+                db_path=input_data.get("db_path"),
+            )
+        elif operation == "vectorize_and_store":
+            result = _vectorize_and_store(
+                branch=input_data.get("branch"),
+                memory_type=input_data.get("memory_type"),
+                texts=input_data.get("texts"),
                 metadatas=input_data.get("metadatas"),
                 db_path=input_data.get("db_path"),
             )

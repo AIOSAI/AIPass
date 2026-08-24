@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1319 pass (1315 + 4 live-hygiene skips on a fresh checkout) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1323 pass (1319 + 4 live-hygiene skips on a fresh checkout) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -754,7 +754,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1319 tests across 46 test files
+└── tests/                      # 1323 tests across 46 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
