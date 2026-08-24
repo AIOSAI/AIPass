@@ -9,6 +9,24 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-23] — v2.7.19: the merge playbook grows teeth
+
+**docs(flow)** — README truth check and site parity become hard checkboxes in
+the merge playbook template (Patrick's ruling during the v2.7.18 train, edit
+by @flow). The soft "flag site drift" note let aipass.ai sit three claims
+stale since May; now a train that changes anything user-facing must run the
+claim-by-claim README fan-out BEFORE merge (parallel read-only reviewers, one
+per section, ACCURATE/STALE/WRONG with file-and-line evidence, fixes riding
+the same PR), and every merge closes with a five-field site parity diff
+(agent count, platform line, install commands, structure snippet, FAQ). The
+site repo's missing write door is written in as stop-and-record, never
+work-around. @flow re-measured the brief before carving it in and fixed it
+twice: `drone systems` lists @drone and @canary but omits them only from its
+printed count (which also counts @git, a branchless module), and "count the
+directories" answers 19 because `__pycache__` is one — the checklist carries
+two literal commands that both return 18, with the load-bearing `grep -v`
+named as such.
+
 ## [2026-08-22] — v2.7.18: the watchdog stops polling, identity stops being a directory name, a test citizen is born
 
 **feat(watchdog)** — three releases land as one arc, and each one killed a
