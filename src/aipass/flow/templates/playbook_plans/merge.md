@@ -92,6 +92,12 @@ just that one merge commit — **cosmetic and trivially resolved**.
 
 ## 4. Wait for CI green (ALL required checks)
 
+- [ ] **README truth check — mandatory when this train touches anything user-facing** (install flow, commands, agent count, platform story, directory structure). The root `README.md` is the first thing a stranger reads; a front page that loses an argument to its own registry ships as a lie. Verify **claim-by-claim**, never by skim:
+      - Fan out **parallel read-only reviewers, one per section** — quickstart/install, roster + tables, how-it-works/structure, links + badges. Each returns a per-claim verdict of **ACCURATE / STALE / WRONG** with **file-and-line evidence**. An impression is not a verdict.
+      - Fixes ride **this same PR**. A README correction deferred to "next merge" is a stale front page shipped on purpose.
+      - ⚠️ **Never justify the agent count from `drone systems`.** It prints `AIPass Services (17)` — that 17 counts `@git` (a module, no branch) and excludes `@drone` and `@canary`, which it lists separately. It is not the fleet count and must never be used as one. Count from a source of truth; both of these answer **18** today:
+        `python3 -c "import json;print(len(json.load(open('AIPASS_REGISTRY.json'))['branches']))"` — or — `ls -d src/aipass/*/ | grep -v __pycache__ | wc -l` (the `grep -v` is load-bearing: without it the glob answers 19).
+
 The PR gate (verified against `.github/workflows/`):
 - [ ] `ci.yml` → **lint**, **test**, **standards** (= seedgo-audit / the README + 100%-floor check, runs `.github/scripts/seedgo_audit.py`), **coverage**
 - [ ] `security.yml` → Security Scan / dependency-scan
@@ -116,7 +122,9 @@ The PR gate (verified against `.github/workflows/`):
 - [ ] **Stay on `dev`. Do not check out `main`.** Local main being behind is fine — `drone @git sync` from dev covers it.
 - [ ] Never rebase, never reset, never checkout main.
 - [ ] Dependabot / other PRs targeting main: they go green once main has the fix + bots rebase — check after the push
-- [ ] **Site drift check (S323):** does this merge change install commands, onboarding flow, agent count, or the platform/CLI story? If YES → note it here and flag that aipass.ai must be updated same-day (devpulse handles the site edit; the site is a projection of the README, never its own source of facts).
+- [ ] **Site parity diff (S323) — same-day after merge.** aipass.ai is a **projection of the merged README, never its own source of facts.** Diff the site's claims against the README *as merged*, field by field — **agent count, platform line, install commands, structure snippet, FAQ answers**. Each one matches or gets fixed; "looks about right" is not a verdict, and neither is "nothing user-facing changed" unless you checked the five fields.
+      - devpulse edits the content at `projects/aipass-site/index.html` — its own git repo nested in the tree, untracked by the AIPass repo.
+      - ⚠️ **There is currently no `drone @git` write door for the site repo** — the commit/push path is an **open Patrick ruling**. If you hit that wall, **record the refusal in the Run Summary and stop.** Do not work around it: a workaround invented to get past a gate is precisely what the gate exists to catch.
 
 ## 7. Release tag
 
