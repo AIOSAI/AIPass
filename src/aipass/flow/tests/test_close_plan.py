@@ -111,7 +111,7 @@ class TestHelp:
 
 class TestCloseSinglePlan:
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, False, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, False, [], None))
     def test_plan_number_calls_close_plan(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["42"])
@@ -121,10 +121,11 @@ class TestCloseSinglePlan:
             confirm=False,
             all_plans=False,
             dry_run=False,
+            exclude_types=[],
         )
 
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, False, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, False, [], None))
     def test_parse_receives_correct_args(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["42"])
@@ -132,7 +133,7 @@ class TestCloseSinglePlan:
         mock_parse.assert_called_once_with(["42"])
 
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=("FPLAN-0042", False, False, False, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=("FPLAN-0042", False, False, False, [], None))
     def test_prefixed_plan_number(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["FPLAN-0042"])
@@ -142,6 +143,7 @@ class TestCloseSinglePlan:
             confirm=False,
             all_plans=False,
             dry_run=False,
+            exclude_types=[],
         )
 
 
@@ -152,7 +154,7 @@ class TestCloseSinglePlan:
 
 class TestCloseAllPlans:
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, False, True, False, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, False, True, False, [], None))
     def test_all_flag_calls_close_plan_with_all(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["--all"])
@@ -162,10 +164,11 @@ class TestCloseAllPlans:
             confirm=False,
             all_plans=True,
             dry_run=False,
+            exclude_types=[],
         )
 
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, True, True, False, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, True, True, False, [], None))
     def test_all_with_confirm(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["--all", "--confirm"])
@@ -175,6 +178,7 @@ class TestCloseAllPlans:
             confirm=True,
             all_plans=True,
             dry_run=False,
+            exclude_types=[],
         )
 
 
@@ -185,7 +189,7 @@ class TestCloseAllPlans:
 
 class TestDryRun:
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, True, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=("42", False, False, True, [], None))
     def test_dry_run_flag(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["--dry-run", "42"])
@@ -195,10 +199,11 @@ class TestDryRun:
             confirm=False,
             all_plans=False,
             dry_run=True,
+            exclude_types=[],
         )
 
     @patch(f"{_MOD}.close_plan")
-    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, False, True, True, None))
+    @patch(f"{_PARSER}.parse_close_command_args", return_value=(None, False, True, True, [], None))
     def test_dry_run_with_all(self, mock_parse, mock_close):
         handle_command = _import_handle_command()
         result = handle_command("close", ["--all", "--dry-run"])
@@ -208,6 +213,7 @@ class TestDryRun:
             confirm=False,
             all_plans=True,
             dry_run=True,
+            exclude_types=[],
         )
 
 
@@ -220,7 +226,8 @@ class TestParseError:
     @patch(f"{_MOD}.format_delete_usage_error", return_value="Usage error text")
     @patch(f"{_MOD}.close_plan")
     @patch(
-        f"{_PARSER}.parse_close_command_args", return_value=(None, False, False, False, "Plan number or --all required")
+        f"{_PARSER}.parse_close_command_args",
+        return_value=(None, False, False, False, [], "Plan number or --all required"),
     )
     def test_parse_error_returns_true(self, mock_parse, mock_close, mock_format):
         """Parse error is still a handled command."""
@@ -229,16 +236,34 @@ class TestParseError:
         assert result is True
         mock_close.assert_not_called()
 
+    @patch(f"{_MOD}.error_display")
+    @patch(f"{_MOD}.close_plan")
+    @patch(
+        f"{_PARSER}.parse_close_command_args",
+        return_value=(None, False, False, False, [], "Unknown plan type(s): APLNA. Registered: APLAN, FPLAN"),
+    )
+    def test_parse_error_prints_the_parsers_own_reason(self, mock_parse, mock_close, mock_error):
+        """The specific reason reaches the operator, not a fixed usage block.
+
+        The generic block said "ERROR: Plan number required / Usage: delete
+        <plan_number>" for EVERY parse failure -- wrong verb, and a false
+        diagnosis printed under a true refusal.
+        """
+        handle_command = _import_handle_command()
+        result = handle_command("close", ["--all", "--exclude-type", "APLNA"])
+        assert result is True  # Command was handled (error displayed)
+        mock_error.assert_called_once_with("Unknown plan type(s): APLNA. Registered: APLAN, FPLAN")
+
     @patch(f"{_MOD}.format_delete_usage_error", return_value="Usage error text")
     @patch(f"{_MOD}.close_plan")
     @patch(
-        f"{_PARSER}.parse_close_command_args", return_value=(None, False, False, False, "Plan number or --all required")
+        f"{_PARSER}.parse_close_command_args",
+        return_value=(None, False, False, False, [], "Plan number or --all required"),
     )
-    def test_parse_error_shows_usage(self, mock_parse, mock_close, mock_format):
+    def test_parse_error_does_not_print_the_misleading_usage_block(self, mock_parse, mock_close, mock_format):
         handle_command = _import_handle_command()
-        result = handle_command("close", ["--unknown-flag"])
-        assert result is True  # Command was handled (error displayed)
-        mock_format.assert_called_once()
+        handle_command("close", ["--unknown-flag"])
+        mock_format.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.2.0
+# Version: 2.4.0
 # Created: 2026-03-02
-# Modified: 2026-08-04
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -36,9 +36,12 @@ import sys
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
+from aipass.ai_mail.apps.handlers.dispatch import report as report_mod
 
 # Startup timeout: if zero stdout after this many seconds, kill and retry
 STARTUP_TIMEOUT = 90
@@ -95,12 +98,14 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
 
     Builder-class citizens get woken back, subject to the same availability
     checks as a normal wake (interactive session, active lock, depth cap).
-    Managers never are: wake_branch's manager gate delivers the mail and skips
-    the wake by design, so a manager dispatcher is only ever mailed back.
+    Managers are never woken — the blocklist is correct and stays. They are MAILED
+    instead, by this function, via _mail_wake_back(). wake_branch's manager gate
+    does not send that mail: it returns having done nothing, which is what made
+    this a silent drop until 2026-08-21.
 
     Returns a result tag for the dispatch_wake.log:
       success, blocked_occupied, blocked_locked, blocked_depth,
-      skipped_sender, skipped_self, skipped_manager, failed
+      skipped_sender, skipped_self, mailed_manager, failed_manager_mail, failed
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -124,18 +129,27 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         # sender="" terminates the wake-back chain. It also means the @daemon
         # exception inside the manager gate can never apply here — a wake-back is
         # never a daemon-scheduled self-wake — so managers always hit the skip path.
-        wake_status, success = wake_branch(sender, auto=True, sender="")
+        # custom_message names the completed target: wake_branch's DEFAULT_PROMPT
+        # ("Check inbox, process new emails") describes a mail-triggered wake, but a
+        # wake-back fires on dispatch completion, not on mail — an empty inbox there
+        # is normal, not a signal something is wrong (@daemon, 077cd1cf).
+        wake_back_message = (
+            f"{branch_email} finished (exit {exit_code}). Check its reply in your inbox, "
+            "verify what it did, and continue."
+        )
+        wake_status, success = wake_branch(sender, custom_message=wake_back_message, auto=True, sender="")
 
         # Must precede the success check: the manager gate returns True having woken
         # nothing, so trusting the bool alone logged "woken" for a wake that never
         # happened. The status object was honest all along; read it instead.
         manager_step = wake_status.find_step("manager")
         if manager_step and manager_step[0] == "info":
-            logger.info(
-                "[monitor] Wake-back skipped — sender %s is citizen_class=manager (mail delivered, never woken)",
-                sender,
-            )
-            return "skipped_manager"
+            # The wake is correctly refused; the NOTIFICATION is not optional. Until
+            # this, the branch returned here having neither woken nor mailed, and
+            # said "mail delivered" while delivering nothing.
+            if _mail_wake_back(sender, branch_email, exit_code, lock_file):
+                return "mailed_manager"
+            return "failed_manager_mail"
 
         if success:
             logger.info("[monitor] Wake-back: %s woken after %s completed (exit %d)", sender, branch_email, exit_code)
@@ -155,6 +169,56 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
     except Exception as e:
         logger.warning("[monitor] Wake-back failed for %s: %s", sender, e)
         return "failed"
+
+
+def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: str) -> bool:
+    """Deliver the wake-back as MAIL when the sender cannot be woken.
+
+    Managers are blocklisted from wakes and that is correct — two claudes on one
+    session id migrates the harness task state to the newer PID and kills the
+    running job (the OSPREY kill). The defect was never the blocklist: it was that
+    wake_branch returned True having done nothing, so the message built for the
+    sender was dropped and the manager was TOLD it would be woken and then was not
+    (@devpulse, confirmed live twice on 2026-08-21). A manager learned a dispatch
+    had finished only if the agent happened to volunteer an email.
+
+    Same transport as _send_bounce, for the same reason: `drone` resolves routing,
+    and cwd is the target branch — which is a real branch, so the identity fence
+    passes. Sending in-process would need a sender identity this process does not
+    have.
+
+    Returns:
+        bool: True when the mail was accepted for delivery.
+    """
+    subject = f"Dispatch complete: {branch_email} finished (exit {exit_code})"
+    body = (
+        f"{branch_email} finished (exit {exit_code}).\n\n"
+        f"You are a manager, so no agent was woken — that is by design and not a "
+        f"failure. This mail IS the wake-back.\n\n"
+        f"Check {branch_email}'s reply in your inbox, verify what it did, and hand "
+        f"off the next phase if there is one."
+    )
+    try:
+        result = subprocess.run(
+            ["drone", "@ai_mail", "send", sender, subject, body],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(Path(lock_file).parent.parent),
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",
+                sender,
+                result.returncode,
+                (result.stderr or "").strip()[:200],
+            )
+            return False
+        logger.info("[monitor] Wake-back mailed to manager %s (%s exit %d)", sender, branch_email, exit_code)
+        return True
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning("[monitor] Wake-back mail to manager %s failed: %s", sender, e)
+        return False
 
 
 def _log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
@@ -254,9 +318,176 @@ def _check_rate_limited(stderr_log: str) -> bool:
     return "rate_limit" in lower or "429" in content or "overloaded" in lower or "529" in content
 
 
+# Every way a claude command can be bound to an existing conversation.
+# --resume/-r name a session explicitly; -c picks whichever transcript in the
+# directory was modified last.
+RESUME_FLAGS = ("--resume", "-r")
+SESSION_ID_FLAG = "--session-id"
+
+
+def _has_resume(claude_cmd: list) -> bool:
+    """True when the command continues an existing conversation.
+
+    Drives the attempt "mode" label and the strike-3 fresh switch. Checking
+    only "-c" was correct until wake.py started emitting --resume <id>: a
+    pointer-resumed run would then be labelled fresh in every log line AND
+    would never get its strike-3 fresh switch, which is the recovery path for
+    a session that has gone bad.
+    """
+    return "-c" in claude_cmd or any(flag in claude_cmd for flag in RESUME_FLAGS)
+
+
+def _session_id_in(claude_cmd: list) -> Optional[str]:
+    """Return the value passed to --session-id, or None when absent.
+
+    A flag with nothing after it reads as "no id" rather than raising: there
+    is no id to be had either way, and a malformed command is not worth
+    failing a dispatch over — it is worth a log line, which is what it gets.
+    """
+    if SESSION_ID_FLAG not in claude_cmd:
+        return None
+    value_index = claude_cmd.index(SESSION_ID_FLAG) + 1
+    if value_index >= len(claude_cmd):
+        logger.warning("[monitor] %s passed with no value — treating as no session id", SESSION_ID_FLAG)
+        return None
+    return claude_cmd[value_index]
+
+
 def _make_fresh_cmd(claude_cmd: list) -> list:
-    """Remove -c flag from claude command to force fresh start."""
-    return [arg for arg in claude_cmd if arg != "-c"]
+    """Strip every session binding so the command starts a brand-new session.
+
+    -c, --resume/-r and --session-id each tie the run to a specific thread.
+    The two value-carrying flags must be removed as a PAIR: dropping --resume
+    while leaving its uuid behind would hand the CLI a bare uuid as a
+    positional argument, i.e. as the prompt.
+    """
+    fresh = []
+    skip_value = False
+    for arg in claude_cmd:
+        if skip_value:
+            skip_value = False
+            continue
+        if arg == "-c":
+            continue
+        if arg in RESUME_FLAGS or arg == SESSION_ID_FLAG:
+            skip_value = True
+            continue
+        fresh.append(arg)
+    return fresh
+
+
+def _cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
+    """Build the command for one attempt of the 3-strike loop. Returns (cmd, mode).
+
+    Attempts 1 and 2 used to re-run the identical command. Harmless for -c,
+    fatal for --session-id: the CLI refuses an id that already exists
+    ("Session ID <id> is already in use", verified on CLI 2.1.228) and the run
+    produces no output at all. Re-sending a consumed id would turn a real
+    3-strike recovery into three instant failures — a worse regression than
+    the mtime bug the pointer exists to fix. So each attempt is built for
+    wherever the previous one left the session.
+    """
+    has_resume = _has_resume(claude_cmd)
+    session_id = _session_id_in(claude_cmd)
+    default_mode = "resume" if has_resume else "fresh"
+
+    if attempt == 1:
+        return list(claude_cmd), default_mode
+
+    if attempt == 2:
+        # A transcript for our minted id means attempt 1 got far enough to
+        # create the session, so the id is spent. Continue it instead of
+        # asking for it again. No transcript = nothing was consumed, and the
+        # command stands as built.
+        stripped = _make_fresh_cmd(claude_cmd) if session_id else []
+        if session_id and stripped and _transcript_exists(branch_path, session_id):
+            logger.info("[monitor] Attempt 2: session %s already exists — retrying as --resume", session_id)
+            # Rebuilt in wake.py's shape — `--resume <id>` straight after the
+            # binary — rather than swapped where --session-id sat. A swap in
+            # place would leave the flag trailing AFTER `-p <prompt>`, a
+            # position never tested against the CLI; the leading form is the
+            # one that is. A retry is the least-exercised path in this file and
+            # the worst place to find out an argument order does not parse.
+            return [stripped[0], RESUME_FLAGS[0], session_id, *stripped[1:]], "resume"
+        return list(claude_cmd), default_mode
+
+    # Strike 3: abandon the bound session entirely. Minting a NEW id (rather
+    # than dropping the flag) keeps the final attempt recorded, so a run that
+    # crashes here still leaves the branch pointing somewhere real.
+    if not has_resume and session_id is None:
+        return list(claude_cmd), "fresh"
+
+    fresh_cmd = _make_fresh_cmd(claude_cmd)
+    new_id = session_pointer.mint_session_id()
+    fresh_cmd += [SESSION_ID_FLAG, new_id]
+    if not session_pointer.write_pointer(branch_path, new_id, "monitor-retry-fresh"):
+        logger.warning("[monitor] Strike-3 pointer write failed for %s — running fresh anyway", new_id)
+    return fresh_cmd, "fresh"
+
+
+def _transcript_exists(branch_path: Path, session_id: str) -> bool:
+    """True when a transcript file exists for this session in this branch."""
+    transcript = session_pointer.transcript_file(branch_path, session_id)
+    if transcript is None:
+        # No home means no transcript can be located — and "unknown beats wrong"
+        # applies with more force here than to a stat failure: this gates whether
+        # a session id is safe to re-send.
+        return False
+
+    try:
+        return transcript.is_file()
+    except OSError as e:
+        # Unknown beats wrong here: a stat failure must not make us re-send an
+        # id that may already be taken.
+        logger.warning("[monitor] Cannot stat transcript for session %s: %s", session_id, e)
+        return False
+
+
+def _aimed_at_a_session(claude_cmd: list) -> bool:
+    """True when WE chose the session, rather than letting mtime choose it.
+
+    --session-id and --resume both name a specific thread. Bare -c does not: it
+    means "whichever transcript in this directory was modified last", which is
+    a guess, not a decision.
+    """
+    return _session_id_in(claude_cmd) is not None or any(flag in claude_cmd for flag in RESUME_FLAGS)
+
+
+def _reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> None:
+    """Record the session the CLI actually used, when it differs from the pointer.
+
+    Only runs when we AIMED at a session (--session-id or --resume). On the bare
+    -c fallback the landing spot was picked by file mtime, and writing that down
+    would promote a guess into a durable record — the next dispatch would then
+    resume it deliberately, forever. That turns an occasional wrong landing into
+    a permanent one: a branch whose newest transcript happened to be a human's
+    chat would be married to that chat (Patrick's ruling, 2026-08-20).
+
+    Branches on -c therefore keep behaving exactly as they do today until
+    something dispatches them --fresh, which mints a pointer properly. Several
+    callers already default fresh=True (daemon rotation, inbox_sweep), so the
+    fleet fills in on its own without ever adopting a guess.
+
+    On the aimed paths this is a cheap confirmation that we landed where we
+    meant to, and the one place a strike-3 remint gets written down. Never
+    fatal: a pointer that cannot be written costs the next dispatch its
+    precision, not its wake.
+    """
+    if not _aimed_at_a_session(claude_cmd):
+        logger.info(
+            "[monitor] %s ran on -c — not adopting the landed session as a pointer (mtime is a guess)",
+            branch_path,
+        )
+        return
+    actual = _parse_result_json(stdout_log).get("session_id")
+    if not isinstance(actual, str) or not actual.strip():
+        return
+    actual = actual.strip()
+    pointer = session_pointer.read_pointer(branch_path)
+    if pointer is not None and pointer.get("session_id") == actual:
+        return
+    if not session_pointer.write_pointer(branch_path, actual, "monitor-reconciled"):
+        logger.warning("[monitor] Could not reconcile pointer for %s to session %s", branch_path, actual)
 
 
 # CLI stderr marker: agent ended its turn with background tasks still alive,
@@ -362,14 +593,24 @@ def _cleanup_own_lock(lock_file: str) -> None:
         logger.info("[monitor] Failed to clean up lock file %s", lock_file)
 
 
-def _get_jsonl_projects_dir(cwd: str) -> Path:
+def _get_jsonl_projects_dir(cwd: str) -> Optional[Path]:
     """Get Claude's JSONL projects directory for a branch CWD.
 
     Claude encodes the cwd by replacing path separators and ':' with '-'.
     Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
+
+    The encoding itself lives in session_pointer.transcript_dir. It used to be
+    duplicated here byte-for-byte; the day Claude changes how it encodes a cwd
+    there must be one line to fix, not two that drift apart silently.
+
+    None when the machine cannot name its home directory (@hooks, 2026-08-23).
+    THIS CALL SITE IS THE SHARPER ONE: it runs AFTER the agent has been spawned,
+    so the bare Path.home() it used to inherit would have killed the monitor
+    with a live agent still running — the dispatch orphaned, no report written,
+    the lock left held. Losing the startup poll costs a slower start; raising
+    here costs the whole dispatch.
     """
-    encoded = cwd.replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
-    return Path.home() / ".claude" / "projects" / encoded
+    return session_pointer.transcript_dir(cwd)
 
 
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
@@ -465,14 +706,19 @@ def _run_with_startup_check(
     # stdout is buffered by --output-format json, so we can't use it.
     # Claude writes to ~/.claude/projects/{encoded-cwd}/*.jsonl continuously.
     projects_dir = _get_jsonl_projects_dir(cwd)
-    initial_sizes = _snapshot_jsonl_sizes(projects_dir)
+    if projects_dir is None:
+        # No home means no transcripts to watch. The startup probe is an
+        # OPTIMISATION — it notices the agent is alive sooner — so its absence
+        # degrades the wait, never the dispatch. _claude_home already warned.
+        logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
+    initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
     deadline = time.time() + STARTUP_TIMEOUT
     started = False
 
     try:
         while time.time() < deadline:
             # Check if JSONL files show activity (new file or growth)
-            if _check_jsonl_activity(projects_dir, initial_sizes):
+            if projects_dir is not None and _check_jsonl_activity(projects_dir, initial_sizes):
                 started = True
                 break
 
@@ -620,23 +866,22 @@ def main():
         logger.info("[monitor] Sandbox ENABLED for %s", branch_email)
 
     # ─── Retry Loop: 3 Strikes ─────────────────────────────
-    # Strike 1: original command (resume if -c was passed)
-    # Strike 2: same command again (transient failure)
-    # Strike 3: fresh start (remove -c, abandon potentially corrupted session)
+    # Strike 1: original command (resume when -c or --resume was passed)
+    # Strike 2: same command, except a --session-id already consumed by
+    #           strike 1 becomes --resume — the CLI refuses a used id outright
+    # Strike 3: fresh start on a newly minted session id, abandoning the
+    #           potentially corrupted one
     attempts = []
     exit_code = -1
     bg_orphaned = False
-    has_resume = "-c" in claude_cmd
+    # Seeded so post-processing always has a command to inspect, even on the
+    # path where the loop body never binds it.
+    cmd = list(claude_cmd)
 
     for attempt in range(1, 4):
-        # Strike 3: switch to fresh if original was resume
-        if attempt == 3 and has_resume:
-            cmd = _make_fresh_cmd(claude_cmd)
-            mode = "fresh"
+        cmd, mode = _cmd_for_attempt(claude_cmd, attempt, branch_path)
+        if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
-        else:
-            cmd = claude_cmd
-            mode = "resume" if has_resume else "fresh"
 
         # Sandbox wrap + broker fd: when enabled, wrap cmd and connect broker.
         # On failure: abort — NEVER silently launch unsandboxed.
@@ -749,6 +994,14 @@ def main():
 
     # ─── Post-Processing ───────────────────────────────────
 
+    # True up the pointer with where the run actually landed. Only on success:
+    # a failed run's result JSON names a session that may not be worth
+    # returning to, and strike 3 has already pointed the branch at its own.
+    # `cmd` is the LAST attempt's command, not the original — strike 3 remints,
+    # so the original would misreport which session this run actually aimed at.
+    if exit_code == 0:
+        _reconcile_pointer(branch_path, stdout_log, cmd)
+
     # Check for max-turns hit (Claude exits 0 but output contains stop_reason)
     max_turns_hit = False
     try:
@@ -815,9 +1068,6 @@ def main():
         )
         _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
 
-    # Clean up the lock — PID-verified, never a successor monitor's lock
-    _cleanup_own_lock(lock_file)
-
     # Log completion to Prax
     branch_name = branch_email.lstrip("@")
     status = "completed" if exit_code == 0 else f"FAILED (code {exit_code})"
@@ -827,17 +1077,100 @@ def main():
         status = f"MAX TURNS HIT ({duration}s)"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
 
-    # Notification feed event on completion
+    # ─── Wake-back: wake the dispatcher ────────────────────
+    # Runs BEFORE the report so wake_result is a known fact when the report is
+    # assembled, and the report still lands before the lock is released. The
+    # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
+    # arbitrary — see the block comment on the report write.
+    wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+
+    # ─── The completion report, written BEFORE the lock is released ────────
+    # Under the old design the report was a garnish, so losing it was a
+    # nuisance. Under r4 THE REPORT IS THE EVENT: losing it means the dispatch
+    # never happened as far as the system is concerned, while the released lock
+    # says it finished cleanly. "Looks complete, reports nothing" is the worst
+    # failure shape available here, and releasing the lock first is what
+    # created it — main() has no top-level try/except, so a death in that
+    # window left the lock gone and the report unwritten.
+    #
+    # With the release moved below, the same death leaves a HELD LOCK: visible,
+    # and already recoverable by the stale-lock path in wake.py.
+    report_path = None
+    dispatch_id = report_mod.current_dispatch_id()
+    try:
+        report = report_mod.build_report(
+            dispatch_id=dispatch_id,
+            sender=sender,
+            target=branch_email,
+            branch_path=branch_path,
+            start_time=start_time,
+            duration=duration,
+            exit_code=exit_code,
+            status=status,
+            attempts=attempts,
+            bg_orphaned=bg_orphaned,
+            max_turns_hit=max_turns_hit,
+            wake_result=wake_result,
+            result_json=_parse_result_json(stdout_log),
+        )
+        report_path = report_mod.write_report(report)
+        if report_path is None:
+            logger.warning(
+                "[monitor] REPORT LOST for %s (%s) — no durable record of this dispatch: %s",
+                branch_email,
+                dispatch_id,
+                report,
+            )
+    except Exception as e:
+        logger.warning("[monitor] report assembly failed for %s: %s", branch_email, e)
+
+    # Close the register entry. A dispatch left open reads as outstanding
+    # forever, which is a FALSE ALARM rather than a missed one — the safe
+    # direction for a record whose whole job is to make crashes visible.
+    if dispatch_id:
+        register.close_dispatch(dispatch_id, status, report_path)
+
+    # Notification feed event on completion. This is what carries the event
+    # ACROSS the process boundary to @devpulse's wire — the trigger fire below
+    # cannot. The record stays a one-line summary and gains additive fields
+    # only: @api serves this feed to BAUD, so a 1-2KB report on every line
+    # would bloat a contract that is frozen mid-flight for the phone work.
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, kind="dispatch")
-    except Exception:
-        logger.info("[monitor] Notification feed unavailable")
+        feed_extra = {"dispatch_id": dispatch_id, "sender": sender, "report_path": report_path}
+        if not send_notification(
+            f"@{branch_name} {status}",
+            f"Duration: {duration}s",
+            source=branch_name,
+            kind="dispatch",
+            extra=feed_extra,
+        ):
+            logger.warning(
+                "[monitor] FEED WRITE FAILED for %s — this dispatch will not reach the wire: %s",
+                branch_email,
+                feed_extra,
+            )
+    except Exception as e:
+        # Was logger.info, the quietest level in this file, behind a bare
+        # except. A failed report write is a LOST DISPATCH RECORD, not a
+        # routine unavailability, and it must not look healthy in the log.
+        logger.warning(
+            "[monitor] Notification feed unavailable for %s (%s, report=%s): %s",
+            branch_email,
+            status,
+            report_path,
+            e,
+        )
 
-    # ─── Wake-back: wake the dispatcher ────────────────────
-    wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
-    _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
+    # In-process push (Patrick's rule 3). Fired after the durable write, never
+    # instead of it: see report.fire_completed on why this cannot reach the
+    # watchdog and the feed line above is what does.
+    report_mod.fire_completed(dispatch_id, sender, branch_email, report_path)
+
+    # Clean up the lock LAST — PID-verified, never a successor monitor's lock
+    _cleanup_own_lock(lock_file)
 
     sys.exit(0 if exit_code == 0 and not bg_orphaned else 1)
 

@@ -1,4 +1,5 @@
 # AIPass — Navigation map
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 <!-- Tier 1 — injected on cadence 5, at session start, and post-compaction. Kernel = tier0_kernel.md, every turn. Cap: ~8,000 chars per fire (hook truncates near 10k). Format: PROMPT_STYLE.md -->
 

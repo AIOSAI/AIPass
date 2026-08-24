@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -22,28 +22,36 @@ Subcommands:
 Auto-discovered by devpulse.py via handle_command() convention.
 Heavy handler imports are lazy — only imported when a subcommand is invoked.
 
-See FPLAN-0186 for the build plan and DPLAN-0130 for the design record.
+Design record: DPLAN-0130 (original), DPLAN-0308 (r2, wire/daemon split),
+DPLAN-0317 (r4, the daemon deleted — the current shape). Builds: FPLAN-0186,
+FPLAN-0451, FPLAN-0452.
 """
 
 import importlib
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console, error, warning
+from aipass.cli.apps.modules import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import presenter
 
 _VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
-_NOT_IMPLEMENTED_MSG = "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
-# Phase 4 wired cancel + list for real. Left the map so future deferrals can reuse the shape.
-_PHASE_BY_SUB: dict[str, int] = {}
+
+# Subcommands that are fully wired. Everything in _VALID_SUBCOMMANDS is, today —
+# the list exists so the introspection view stops claiming otherwise. It used to
+# read a _PHASE_BY_SUB dict that was permanently empty and never assigned
+# anywhere in the repo, so timer/schedule/cancel/list each rendered as
+# "phase ?" while being completely implemented (FPLAN-0452 P3).
+_WIRED_SUBCOMMANDS = frozenset(_VALID_SUBCOMMANDS)
 
 HELP_TEXT = """\
 [bold cyan]watchdog[/bold cyan] — devpulse directed wake system
 
 [bold]Usage:[/bold]
   watchdog agent <branch> [--timeout SECONDS]   Wake when dispatched agent exits
-  watchdog baseline \\[--once]                    Wake on ANY citizen completion
+  watchdog baseline                             Arm THIS session's wire: deliver my dispatch completions
+  watchdog baseline --once                      Wire until the first delivered completion
   watchdog status                               List active watches
   watchdog timer <duration>                     Wake in N (5m, 30s, 2h, 1h30m)
   watchdog timer start <name>                   Start named duration timer
@@ -59,7 +67,8 @@ HELP_TEXT = """\
 [bold]Examples:[/bold]
   drone @devpulse watchdog agent @drone
   drone @devpulse watchdog agent @flow --timeout 600
-  drone @devpulse watchdog baseline            (via Monitor — one line per completion)
+  drone @devpulse watchdog baseline            (via Monitor, description "watchdog" — one line per completion,
+                                                replays events missed while no wire was up)
   drone @devpulse watchdog baseline --once     (via run_in_background — wake on first)
   drone @devpulse watchdog timer 5m
   drone @devpulse watchdog timer start build-phase-3
@@ -67,7 +76,8 @@ HELP_TEXT = """\
   drone @devpulse watchdog schedule "02:00"
   drone @devpulse watchdog schedule "+30m" "drone @git status"
 
-See FPLAN-0186 (build plan) and DPLAN-0130 (design).
+Current design: DPLAN-0317 (r4 — completion is reported by the finishing agent,
+not discovered by polling). Earlier rounds: DPLAN-0130, DPLAN-0308.
 """
 
 _TIMER_HELP_TEXT = """\
@@ -106,14 +116,27 @@ def print_introspection() -> None:
     console.print()
     console.print("[yellow]Subcommands:[/yellow]")
     for sub in _VALID_SUBCOMMANDS:
-        marker = "active" if sub in ("agent", "baseline", "status") else f"phase {_PHASE_BY_SUB.get(sub, '?')}"
+        marker = "active" if sub in _WIRED_SUBCOMMANDS else "unwired"
         console.print(f"  [cyan]{sub:<10}[/cyan] [dim]({marker})[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/watchdog/[/cyan]")
     console.print("    [dim]- agent.py (watch_agent — block until dispatched agent exits)[/dim]")
-    console.print("    [dim]- baseline.py (watch_baseline — report every citizen completion)[/dim]")
+    console.print("    [dim]- wire.py (arm_wire — deliver MY dispatch completions into this session)[/dim]")
+    console.print("    [dim]- dispatches.py (the register — which dispatches are this seat's)[/dim]")
     console.print()
+
+
+def _owner_address() -> str | None:
+    """Whose watchdog this is, for the refusal message. None if unresolvable.
+
+    Named rather than described: "owner-only" tells a stranger they are in the
+    wrong place but not where the right place is, and a refusal with no next
+    step is what teaches people to route around a gate.
+    """
+    from aipass.devpulse.apps.handlers.owner.guard import owner_address
+
+    return owner_address()
 
 
 def _guard_caller() -> bool:
@@ -123,12 +146,30 @@ def _guard_caller() -> bool:
     it works across projects — not a hardcoded 'devpulse' name. (Drone runs a
     routed module with cwd=<branch_path>, so Path.cwd() can't identify the real
     caller; the guard reads the AIPASS_CALLER_* env drone sets.) #681.
+
+    Uses ``error`` and NOT ``warning``, which is the whole point of this
+    docstring. ``warning`` does not call ``mark_command_failed``, so for months
+    this refusal EXITED 0: ``watchdog baseline && <next step>`` ran the next
+    step believing the wire was armed, and nothing in the exit status said
+    otherwise. @canary found it from a non-owner seat on 2026-08-22 and proved
+    it was specific rather than a drone-wide limitation — unknown subcommand
+    exits 2, this exited 0. A refusal that does not flip the exit code is a
+    lie to every caller that is not a human reading stderr.
     """
     from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller
 
     if guard_owner_caller("watchdog"):
         return True
-    warning("watchdog is an owner-only module — refusing non-owner call")
+    owner = _owner_address()
+    whose = f"it belongs to {owner}" if owner else "no owner is sealed for this project"
+    error(
+        "watchdog is owner-only and this seat is not the owner",
+        suggestion=(
+            f"{whose} — ownership is the entry marked owner: true in the project's sealed registry. "
+            "Ask that seat to arm it, or run 'aipass doctor' if you believe the seat is wrong. "
+            "'watchdog --help' works from anywhere."
+        ),
+    )
     return False
 
 
@@ -155,15 +196,25 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "watchdog":
         return False
 
-    if not _guard_caller():
-        return True
-
+    # EXPLAIN BEFORE GATE, EXECUTE AFTER IT. The gate used to run first, which
+    # made --help owner-only too: a non-owner got "refusing non-owner call" and
+    # could not read the text that would have told them whose module it is.
+    # Help is precisely the verb that must survive an ownership check, because
+    # it is how a stranger discovers the thing is not theirs (@canary, from a
+    # non-owner seat, 2026-08-22). It also restores this module's own rule E
+    # (DPLAN-0291), which _wants_help documents and the gate outranked, and it
+    # matches @ai_mail's identity fence, which leaves help/version open for the
+    # same reason. Neither branch reveals anything privileged — both print
+    # static text that is already in a public repo.
     if not args:
         print_introspection()
         return True
 
     if _wants_help(args):
         console.print(HELP_TEXT)
+        return True
+
+    if not _guard_caller():
         return True
 
     subcommand = args[0]
@@ -197,11 +248,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if subcommand == "cancel":
         return _handle_cancel(sub_args)
 
-    if subcommand in _PHASE_BY_SUB:
-        phase = _PHASE_BY_SUB[subcommand]
-        console.print(_NOT_IMPLEMENTED_MSG.format(sub=subcommand, phase=phase))
-        return True
-
     return True
 
 
@@ -224,7 +270,7 @@ def _handle_timer(sub_args: List[str]) -> bool:
             error("Usage: watchdog timer start <name>")
             return True
         result = timer_mod.timer_start(sub_args[1])
-        _print_timer_result(result)
+        presenter.print_timer_result(result)
         return True
 
     if action == "stop":
@@ -232,12 +278,12 @@ def _handle_timer(sub_args: List[str]) -> bool:
             error("Usage: watchdog timer stop <name>")
             return True
         result = timer_mod.timer_stop(sub_args[1])
-        _print_timer_result(result)
+        presenter.print_timer_result(result)
         return True
 
     if action == "list":
         snapshot = timer_mod.timer_list()
-        _print_timer_list(snapshot)
+        presenter.print_timer_list(snapshot)
         return True
 
     if action == "report":
@@ -251,7 +297,7 @@ def _handle_timer(sub_args: List[str]) -> bool:
         logger.warning("[watchdog] invalid timer duration %r: %s", action, exc)
         error(f"Invalid duration: {action} ({exc})")
         return True
-    _print_timer_result(result)
+    presenter.print_timer_result(result)
     return True
 
 
@@ -282,63 +328,8 @@ def _handle_schedule(sub_args: List[str]) -> bool:
         error(f"Invalid schedule: {time_str} ({exc})")
         return True
 
-    _print_schedule_result(result)
+    presenter.print_schedule_result(result)
     return True
-
-
-def _print_schedule_result(result: dict) -> None:
-    """Render a schedule handler return dict as CLI output."""
-    scheduled_for = result.get("scheduled_for", "?")
-    elapsed = result.get("elapsed", 0)
-    console.print(f"[bold]watchdog schedule[/bold] woke after {elapsed}s (scheduled_for={scheduled_for})")
-    if result.get("command"):
-        exit_code = result.get("command_exit_code")
-        console.print(f"  command: {result['command']} -> exit={exit_code}")
-        stdout = result.get("command_stdout") or ""
-        stderr = result.get("command_stderr") or ""
-        if stdout:
-            console.print(f"  stdout: {stdout.rstrip()}")
-        if stderr:
-            console.print(f"  stderr: {stderr.rstrip()}")
-
-
-def _print_timer_result(result: dict) -> None:
-    """Render a timer handler return dict as a single CLI line."""
-    state = result.get("state", "unknown")
-    name = result.get("name") or result.get("duration") or ""
-    if state == "error":
-        error(f"timer {name}: {result.get('reason', 'unknown error')}")
-        return
-    if state == "stopped":
-        console.print(f"[bold]timer[/bold] {name} stopped -> elapsed={result.get('human', '?')}")
-        return
-    if state == "started":
-        console.print(f"[bold]timer[/bold] {name} started at {result.get('started_at', '?')}")
-        return
-    if state == "woke":
-        console.print(f"[bold]timer[/bold] {name} woke after {result.get('elapsed', 0)}s")
-        return
-    console.print(f"[dim]timer result:[/dim] {result}")
-
-
-def _print_timer_list(snapshot: dict) -> None:
-    """Pretty-print the ``timer_list`` snapshot."""
-    active = snapshot.get("active", [])
-    history = snapshot.get("history", [])
-    console.print("[bold]Active timers:[/bold]")
-    if active:
-        for item in active:
-            console.print(f"  - {item['name']}  elapsed {item['human']}  (started {item.get('started_at', '?')})")
-    else:
-        console.print("  (none)")
-    console.print("[bold]History:[/bold]")
-    if history:
-        for item in history:
-            console.print(
-                f"  - {item['name']}  {item['human']}  ({item.get('started_at', '?')} -> {item.get('stopped_at', '?')})"
-            )
-    else:
-        console.print("  (none)")
 
 
 def _handle_agent(sub_args: List[str]) -> bool:
@@ -403,37 +394,48 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
 
 def _handle_baseline(sub_args: List[str]) -> bool:
-    """Route ``watchdog baseline [--once]`` through the baseline handler.
+    """Route ``watchdog baseline [--once]`` (DPLAN-0317 r4).
 
-    The call blocks: continuous by default (wrap it in the Monitor tool — each
-    stdout line is one completion notification, no re-arm between wakes), or
-    ``--once`` to return after the first completion batch the way a
-    ``run_in_background`` Bash wake does.
+    The ARM DOOR (wire.py): take the delivery wire for THIS session, replay
+    completions missed while nothing was wired, follow the notification feed.
+    Run it via the Monitor tool with description "watchdog". ``--once`` wires
+    until the first delivered completion (run_in_background style).
+
+    ``--daemon`` was removed in r4. There is no detection process any more: the
+    agent that finishes REPORTS, and this wire delivers what it reported. The
+    flag is rejected by name below rather than as "unknown", because an
+    operator or a stale script passing it deserves to be told the lane changed
+    instead of being told they made a typo.
     """
     once = False
     for arg in sub_args:
         if arg == "--once":
             once = True
             continue
+        if arg == "--daemon":
+            error(
+                "--daemon was removed in watchdog r4",
+                suggestion=(
+                    "There is no detection daemon. Completion is reported by the finishing agent, "
+                    "not discovered by polling. Arm the wire alone: watchdog baseline"
+                ),
+            )
+            return True
         error(f"Unknown baseline flag: {arg}", suggestion="Usage: watchdog baseline [--once]")
         return True
 
     # stderr, never stdout: the Monitor tool reads every stdout line as a wake
     # event, so an arm-time banner there fires a spurious wake (same contract as
     # _handle_agent's reminder, #634).
-    err_console.print("[dim]watchdog baseline: invoke via Monitor tool (continuous) or --once in background[/dim]")
+    err_console.print("[dim]watchdog baseline: arming the wire (run via Monitor, description 'watchdog')[/dim]")
 
-    baseline_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.baseline")
-    result = baseline_mod.watch_baseline(once=once)
+    wire_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.wire")
+    result = wire_mod.arm_wire(once=once)
 
     state = result.get("state", "unknown")
-    if state == "already_armed":
-        # The handler already said so on stderr — one voice, no echo.
-        return True
-
     err_console.print(
-        f"[dim]watchdog baseline: state={state} completions={result.get('completions', 0)} "
-        f"ticks={result.get('ticks', 0)} elapsed={result.get('elapsed', 0)}s[/dim]"
+        f"[dim]watchdog baseline: state={state} replayed={result.get('replayed', 0)} "
+        f"delivered={result.get('delivered', 0)} ticks={result.get('ticks', 0)}[/dim]"
     )
     return True
 
@@ -446,31 +448,6 @@ def _load_registry_module():
 def _load_timer_module_for_format():
     """Lazy-import timer for ``format_human`` (reused in the status output)."""
     return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.timer")
-
-
-def _format_status_line(watch: dict, format_human) -> str:
-    """One-line renderer for a single watch entry in the status output."""
-    handle = watch.get("handle", "?")
-    wtype = watch.get("type", "?")
-    elapsed = int(watch.get("elapsed_seconds", 0))
-    pid = watch.get("pid", "?")
-    meta = watch.get("metadata") or {}
-
-    if wtype == "agent":
-        tail = f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
-    elif wtype == "baseline":
-        tail = f"scope={meta.get('scope', '?')} (tick={meta.get('tick_seconds', '?')}s)"
-    elif wtype == "timer":
-        tail = f"duration={meta.get('duration', '?')}"
-    elif wtype == "schedule":
-        tail_cmd = meta.get("command")
-        cmd_repr = f' cmd="{tail_cmd}"' if tail_cmd else ""
-        tail = f"scheduled={meta.get('scheduled_for', '?')}{cmd_repr}"
-    else:
-        tail = str(meta)
-
-    # Escape the [ so Rich console doesn't interpret it as a style tag.
-    return f"  \\[{handle}]  {wtype:<8}  {format_human(elapsed):<10}  pid={pid}  {tail}"
 
 
 def _handle_status() -> bool:
@@ -496,12 +473,14 @@ def _handle_status() -> bool:
     console.print(f"{len(post)} active watch(es):")
     console.print()
     for watch in post:
-        console.print(_format_status_line(watch, timer_mod.format_human))
+        console.print(presenter.format_status_line(watch, timer_mod.format_human))
 
     if pruned:
         console.print(f"[dim]Pruned {pruned} stale watch(es).[/dim]")
     else:
         console.print("[dim]No stale watches to prune.[/dim]")
+
+    presenter.print_delivery_lag()
     return True
 
 
@@ -512,16 +491,6 @@ def _handle_list() -> bool:
     differentiating wasn't worth the divergence.
     """
     return _handle_status()
-
-
-def _print_kill_result(result: dict) -> None:
-    """Render a single ``registry.kill_watch`` result on one line."""
-    handle = result.get("handle", "?")
-    killed = result.get("killed", False)
-    was_alive = result.get("was_alive", False)
-    reason = result.get("reason", "")
-    status = "KILLED" if killed else "FAILED"
-    console.print(f"  \\[{handle}] {status} was_alive={was_alive} reason={reason}")
 
 
 def _handle_cancel(sub_args: List[str]) -> bool:
@@ -539,12 +508,12 @@ def _handle_cancel(sub_args: List[str]) -> bool:
             return True
         console.print(f"[bold]Cancelling {len(results)} watch(es):[/bold]")
         for result in results:
-            _print_kill_result(result)
+            presenter.print_kill_result(result)
         return True
 
     handle = sub_args[0]
     result = registry_mod.kill_watch(handle)
-    _print_kill_result(result)
+    presenter.print_kill_result(result)
     if not result.get("killed", False):
         logger.info("[watchdog] cancel failed handle=%s", handle)
     return True

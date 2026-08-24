@@ -74,7 +74,87 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     return location, subject, plan_type_key
 
 
-def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, bool, str | None]:
+# Every argument the close command understands. Anything outside this set
+# REFUSES the run. The defect this removes: `--exclude APLAN` used to be
+# byte-identical to passing nothing at all -- the flag was dropped and the bulk
+# close proceeded, so the operator watched the dangerous thing happen while
+# believing they had fenced it. A fallback that does the risky action on an
+# argument it did not understand is the worst shape of fallback there is.
+_CLOSE_BOOL_FLAGS = {
+    "--all": "all_plans",
+    "--confirm": "confirm",
+    "--interactive": "confirm",
+    "--dry-run": "dry_run",
+    "--preview": "dry_run",
+    # Accepted and inert: auto-confirm is already the default. Kept recognised
+    # so old scripts keep working -- inert is not the same as unrecognised.
+    "--yes": None,
+    "-y": None,
+}
+
+_EXCLUDE_TYPE_FLAG = "--exclude-type"
+
+
+def _registered_prefixes() -> List[str]:
+    """Return the plan-type prefixes that are actually registered.
+
+    Read from the template registry -- the same source `drone @flow templates`
+    reads -- never a literal list. Types are registered over time; a hardcoded
+    set goes stale the day someone adds a type that also must not be swept.
+    """
+    from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+
+    return sorted({prefix.upper() for prefix in get_prefix_map().values() if prefix})
+
+
+def _read_exclude_value(args: List[str], index: int) -> Tuple[str | None, int]:
+    """Read the value of an --exclude-type occurrence at `index`.
+
+    Handles both ``--exclude-type APLAN`` and ``--exclude-type=APLAN``.
+
+    Returns:
+        (upper-cased type, next index), or (None, next index) when the flag
+        carries no value -- a flag with nothing after it is a fence the
+        operator believes they set, so it must refuse rather than pass.
+    """
+    arg = args[index]
+    if "=" in arg:
+        return (arg.split("=", 1)[1] or "").upper() or None, index + 1
+    value = args[index + 1] if index + 1 < len(args) else ""
+    if not value or value.startswith("-"):
+        return None, index + 2
+    return value.upper(), index + 2
+
+
+def _validate_close_args(positionals: List[str], exclude_types: List[str], all_plans: bool) -> str | None:
+    """Return a refusal message for the parsed close arguments, or None."""
+    if len(positionals) > 1:
+        return f"Unrecognised argument: {' '.join(positionals[1:])}"
+
+    if all_plans and positionals:
+        return f"Unrecognised argument: {positionals[0]} (--all takes no plan number)"
+
+    if not exclude_types:
+        return None
+
+    # Validate against the live registry, and name the valid ones. An unknown
+    # type is a typo in a fence -- accepting it silently would let the sweep
+    # run without the protection the operator asked for.
+    try:
+        valid = _registered_prefixes()
+    except Exception as e:
+        logger.error(f"[{MODULE_NAME}] Cannot read registered plan types: {e}")
+        return f"Cannot read registered plan types: {e}"
+
+    unknown = [t for t in exclude_types if t not in valid]
+    if unknown:
+        return f"Unknown plan type(s): {', '.join(unknown)}. Registered: {', '.join(valid)}"
+    if not all_plans:
+        return f"{_EXCLUDE_TYPE_FLAG} only applies to --all"
+    return None
+
+
+def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, bool, List[str], str | None]:
     """
     Parse arguments for close command
 
@@ -82,69 +162,81 @@ def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, b
     Use --confirm or --interactive to explicitly request a confirmation prompt.
     --yes/-y kept for backwards compatibility (now redundant, already auto-confirms).
     --dry-run or --preview previews what would be closed without taking action.
+    --exclude-type <TYPE> holds a whole plan type back from --all; repeatable.
+
+    Unrecognised arguments REFUSE the run -- see _CLOSE_BOOL_FLAGS.
 
     Args:
         args: Command arguments
 
     Returns:
-        Tuple of (plan_num, confirm, all_plans, dry_run, error_message)
-        - plan_num: Plan number from first arg, or None if --all or missing
+        Tuple of (plan_num, confirm, all_plans, dry_run, exclude_types, error_message)
+        - plan_num: Plan number from the positional arg, or None if --all or missing
         - confirm: True only if --confirm or --interactive flag present, False otherwise
         - all_plans: True if --all flag present, False otherwise
         - dry_run: True if --dry-run or --preview flag present, False otherwise
+        - exclude_types: Upper-cased plan-type prefixes to hold back (may be empty)
         - error_message: None if valid, error string if invalid args
 
     Examples:
         >>> parse_close_command_args(["42"])
-        ("42", False, False, False, None)
-
-        >>> parse_close_command_args(["42", "--yes"])
-        ("42", False, False, False, None)
-
-        >>> parse_close_command_args(["42", "--confirm"])
-        ("42", True, False, False, None)
-
-        >>> parse_close_command_args(["42", "--interactive"])
-        ("42", True, False, False, None)
+        ("42", False, False, False, [], None)
 
         >>> parse_close_command_args(["--all"])
-        (None, False, True, False, None)
+        (None, False, True, False, [], None)
 
-        >>> parse_close_command_args(["--all", "--confirm"])
-        (None, True, True, False, None)
-
-        >>> parse_close_command_args(["42", "--dry-run"])
-        ("42", False, False, True, None)
-
-        >>> parse_close_command_args(["--all", "--preview"])
-        (None, False, True, True, None)
+        >>> parse_close_command_args(["--all", "--exclude-type", "APLAN"])
+        (None, False, True, False, ["APLAN"], None)
 
         >>> parse_close_command_args([])
-        (None, False, False, False, "Plan number or --all required")
+        (None, False, False, False, [], "Plan number or --all required")
     """
-    # Check for --all flag
-    all_plans = "--all" in args
+    all_plans = False
+    confirm = False
+    dry_run = False
+    exclude_types: List[str] = []
+    positionals: List[str] = []
 
-    # Default: auto-confirm (confirm=False means no prompt)
-    # --confirm or --interactive explicitly requests a prompt
-    # --yes/-y kept for backwards compat (redundant, already auto-confirms)
-    confirm = "--confirm" in args or "--interactive" in args
+    index = 0
+    while index < len(args):
+        arg = args[index]
 
-    # Check for --dry-run or --preview flag
-    dry_run = "--dry-run" in args or "--preview" in args
+        if arg in _CLOSE_BOOL_FLAGS:
+            target = _CLOSE_BOOL_FLAGS[arg]
+            all_plans = all_plans or target == "all_plans"
+            confirm = confirm or target == "confirm"
+            dry_run = dry_run or target == "dry_run"
+            index += 1
+            continue
 
-    # If --all, plan_num is None
+        if arg == _EXCLUDE_TYPE_FLAG or arg.startswith(f"{_EXCLUDE_TYPE_FLAG}="):
+            value, index = _read_exclude_value(args, index)
+            if value is None:
+                return None, confirm, all_plans, dry_run, exclude_types, f"{_EXCLUDE_TYPE_FLAG} requires a plan type"
+            exclude_types.append(value)
+            continue
+
+        if arg.startswith("-"):
+            return None, confirm, all_plans, dry_run, exclude_types, f"Unrecognised argument: {arg}"
+
+        positionals.append(arg)
+        index += 1
+
+    error = _validate_close_args(positionals, exclude_types, all_plans)
+    if error:
+        return None, confirm, all_plans, dry_run, exclude_types, error
+
     if all_plans:
-        return None, confirm, True, dry_run, None
+        return None, confirm, True, dry_run, exclude_types, None
 
-    # Otherwise, need plan number
-    # Filter out flag args to find the plan number
-    non_flag_args = [a for a in args if not a.startswith("--") and a not in ("-y",)]
-    if not non_flag_args:
-        return None, False, False, dry_run, "Plan number or --all required"
+    if not positionals:
+        return None, confirm, False, dry_run, exclude_types, "Plan number or --all required"
 
-    plan_num = non_flag_args[0]
-    return plan_num, confirm, False, dry_run, None
+    json_handler.log_operation(
+        "close_args_parsed",
+        {"plan_num": positionals[0], "all_plans": all_plans, "dry_run": dry_run, "exclude_types": exclude_types},
+    )
+    return positionals[0], confirm, False, dry_run, exclude_types, None
 
 
 def parse_restore_command_args(args: List[str]) -> Tuple[str | None, str | None]:

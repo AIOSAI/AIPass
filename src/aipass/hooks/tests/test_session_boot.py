@@ -1109,9 +1109,13 @@ class TestAutoNamer:
             session_boot.boot(cwd=str(tmp_path))
         cmd = mock_exec.call_args[0][1]
         assert "--name" in cmd
+        # Since FPLAN-0448 a fresh start MINTS its session id, so its name
+        # carries the short id like every resumed seat's does — this used to
+        # pin the bare branch name, which was just "no id known yet".
         branch = tmp_path.name
+        minted = cmd[cmd.index("--session-id") + 1]
         idx = cmd.index("--name")
-        assert cmd[idx + 1] == branch
+        assert cmd[idx + 1] == f"{branch}-{minted[:8]}"
 
     def test_takeover_gets_name_with_session_id(self, tmp_path):
         session = {"pid": 1234, "sessionId": "abc12345-full-uuid", "cwd": str(tmp_path), "kind": "bg"}
@@ -1428,3 +1432,477 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
         assert result["action"] == "quit"
         assert "A chat" in out
         assert "no tmux" in out
+
+
+def home_env(home) -> dict[str, str]:
+    """The environment that redirects home resolution on BOTH platforms.
+
+    `Path.home()` asks `os.path.expanduser`, and the two implementations read
+    different variables: POSIX honours $HOME (falling back to the pwd database
+    when it is unset), while Windows reads %USERPROFILE% and has no pwd to fall
+    back to. Setting HOME alone therefore redirects home on Linux and does
+    nothing at all on Windows.
+
+    That gap is not cosmetic under `patch.dict(..., clear=True)`. Clearing the
+    environ strips the runner's real USERPROFILE, so Windows expanduser returns
+    "~" unchanged and pathlib raises RuntimeError("Could not determine home
+    directory.") — four of these tests died exactly that way on the
+    windows-setup CI job (PR 739, 2026-08-22). Their siblings survived only by
+    returning before any home lookup, which made the split look like a bug in
+    the pointer code rather than a POSIX-only fixture.
+
+    Setting both keys is the portable redirect, so this is deliberately NOT a
+    skipif: nothing about pointing home at a temp directory is POSIX-only, and
+    these doors ship to Windows users too.
+    """
+    return {"HOME": str(home), "USERPROFILE": str(home)}
+
+
+def set_home(monkeypatch, home) -> str:
+    """Point home resolution at `home` for the current test, both platforms.
+
+    The monkeypatch half of `home_env` — same reasoning, same two keys. Returns
+    the path as a string, which is what the `patch.dict` callers pass on.
+    """
+    for key, value in home_env(home).items():
+        monkeypatch.setenv(key, value)
+    return str(home)
+
+
+def plant_pointer(tmp_path, monkeypatch, session_id):
+    """A real session pointer plus the transcript that makes it trustworthy.
+
+    Written through session_pointer itself — the FPLAN-0447 store is the only
+    production writer, so the tests speak its format by calling it, never by
+    spelling the JSON. Home is redirected first because the transcript check
+    walks <home>/.claude/projects; the caller must keep that redirect in place
+    inside boot() by spreading `home_env(...)` into its `patch.dict`. A cleared
+    environ resolves to the REAL home on POSIX (pwd fallback) and to no home at
+    all on Windows — a silent miss on one platform, a RuntimeError on the other.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+    home = tmp_path / "home"
+    set_home(monkeypatch, home)
+    tdir = sp.transcript_dir(tmp_path)
+    # None means session_pointer could not name the home directory, which here
+    # can only mean set_home above failed to take — assert it rather than dying
+    # on NoneType later, so a broken redirect names itself.
+    assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / f"{session_id}.jsonl").write_text("{}\n", encoding="utf-8")
+    assert sp.write_pointer(Path(tmp_path), session_id, "test")
+    return str(home)
+
+
+class TestSessionPointerDoors:
+    """FPLAN-0448: every human entry door resumes by the session pointer.
+
+    `-c` REFUSES headless transcripts outright ("No conversation found to
+    continue"), so it can never enter a dispatched agent's session — the
+    pointer is the only record that can. Chain, never hard-failing:
+    pointer → today's behaviour → fresh.
+    """
+
+    def test_no_live_enter_resumes_the_pointer(self, tmp_path, monkeypatch):
+        home = plant_pointer(tmp_path, monkeypatch, "ptr-sid-1")
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        assert "--resume" in cmd and "ptr-sid-1" in cmd
+        assert "--continue" not in cmd
+
+    def test_no_live_enter_without_pointer_still_continues(self, tmp_path):
+        """No pointer → today's door, unchanged. A branch that predates the
+        pointer must still open."""
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        assert "--continue" in mock_exec.call_args[0][3]
+
+    def test_no_live_enter_with_stale_pointer_falls_back(self, tmp_path, monkeypatch):
+        """A pointer whose transcript is gone must degrade to --continue —
+        `--resume <missing id>` would fail the whole launch."""
+        home = plant_pointer(tmp_path, monkeypatch, "ptr-gone")
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        tdir = sp.transcript_dir(tmp_path)
+        assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
+        (tdir / "ptr-gone.jsonl").unlink()
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        assert "--continue" in cmd
+        assert "ptr-gone" not in cmd
+
+    def test_fresh_start_mints_and_records_the_seat(self, tmp_path, monkeypatch):
+        """'n' mints the session id and writes the pointer BEFORE claude starts
+        — a fresh seat the record never learned about is how the resume door
+        drifts back to guessing."""
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value="n"),
+            patch.object(session_boot, "_tmux_session_exists", return_value=False),
+            patch(f"{_MOD}.os.execvp") as mock_exec,
+        ):
+            session_boot.boot(cwd=str(tmp_path))
+        claude_cmd = mock_exec.call_args[0][1]
+        assert "--session-id" in claude_cmd
+        minted = claude_cmd[claude_cmd.index("--session-id") + 1]
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        pointer = sp.read_pointer(Path(tmp_path))
+        assert pointer is not None and pointer["session_id"] == minted
+        assert pointer["set_by"] == "session_boot"
+
+    def test_multi_enter_prefers_the_pointer_chat(self, tmp_path, monkeypatch, fake_projects):
+        """Enter on the >=2 menu follows the pointer, not newest-by-mtime —
+        mtime is the guess the pointer exists to retire."""
+        make_transcript(fake_projects, tmp_path, "older-ptr", "Pointer chat", 3, age_seconds=600)
+        make_transcript(fake_projects, tmp_path, "newest", "Newest chat", 9)
+        home = plant_pointer(tmp_path, monkeypatch, "older-ptr")
+        live = [
+            {"pid": 1234, "sessionId": "held", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        assert "--resume" in cmd and "older-ptr" in cmd
+        assert "newest" not in cmd
+
+    def test_picker_override_repoints_the_seat(self, tmp_path, monkeypatch, fake_projects):
+        """A numbered pick IS the seat now — the pointer must follow it, or the
+        next Enter (and the next dispatch) march back to the old session."""
+        make_transcript(fake_projects, tmp_path, "chosen", "Chosen chat", 5, age_seconds=600)
+        make_transcript(fake_projects, tmp_path, "newest", "Newest chat", 9)
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        live = [
+            {"pid": 1234, "sessionId": "held", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_read_choice", return_value="2"),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        picked = cmd[cmd.index("--resume") + 1]
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        pointer = sp.read_pointer(Path(tmp_path))
+        assert pointer is not None and pointer["session_id"] == picked
+        assert pointer["set_by"] == "session_boot"
+
+    def test_fresh_never_writes_outside_the_boot_cwd(self, tmp_path, monkeypatch):
+        """The defect that wrote a REAL pointer into the live hooks branch
+        during a test run (2026-08-20): menu chains dropped boot's cwd, and
+        _start_fresh fell back to Path.cwd() — wherever pytest happened to
+        run. Every chain must carry boot's cwd all the way to the write."""
+        decoy = tmp_path / "decoy"
+        decoy.mkdir()
+        target = tmp_path / "branch"
+        target.mkdir()
+        monkeypatch.chdir(decoy)
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        live = [{"pid": 1234, "sessionId": "abc", "cwd": str(target), "kind": "interactive"}]
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_read_choice", return_value="n"),
+            patch.object(session_boot, "_stop_session", return_value="stopped"),
+            patch.object(session_boot, "_tmux_session_exists", return_value=False),
+            patch(f"{_MOD}.os.execvp"),
+        ):
+            session_boot.boot(cwd=str(target))
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        assert sp.read_pointer(target) is not None
+        assert not (decoy / ".ai_mail.local").exists()
+
+
+def plant_dispatch_lock(tmp_path, pid=None):
+    """A live dispatch lock, the exact shape ai_mail's wake writes.
+
+    {pid, timestamp, branch} — see wake.py _acquire_lock. pid defaults to
+    THIS process so the liveness check passes without patching.
+    """
+    import json
+    import os
+
+    lock = tmp_path / ".ai_mail.local" / ".dispatch.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps(
+            {
+                "pid": pid if pid is not None else os.getpid(),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "branch": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return lock
+
+
+class TestDispatchedGuard:
+    """FPLAN-0449: while an agent WORKS in the branch, resume steps aside.
+
+    Resume onto a live dispatch is takeover, not spectate — two claudes on
+    one session id migrate the session's background-task state to the newer
+    PID and the job dies mid-run, unreplied (DPLAN-0310, measured live
+    2026-08-20, the OSPREY intercept). The boot menus must never offer that
+    door by default: Enter waits, 'n' stays safe (new session id), 'r'
+    takes the seat with eyes open, and a dead lock gates nothing.
+    """
+
+    def test_enter_leaves_the_job_working(self, tmp_path):
+        plant_dispatch_lock(tmp_path)
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        assert result["action"] == "left_working"
+        mock_exec.assert_not_called()
+
+    def test_the_dispatch_process_is_never_offered_as_a_chat(self, tmp_path):
+        """A dispatch claude writes a session file too, so without the guard
+        the single-session menu calls the JOB a 'live chat' and Enter walks
+        straight into the takeover. The lock check must outrank the live
+        menu."""
+        import os
+
+        plant_dispatch_lock(tmp_path)
+        live = [{"pid": os.getpid(), "sessionId": "job-sid", "cwd": str(tmp_path), "kind": "interactive"}]
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=live),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["action"] == "left_working"
+        mock_exec.assert_not_called()
+
+    def test_fresh_stays_a_door(self, tmp_path, monkeypatch):
+        """'n' mints a NEW session id — it steals nothing from the job."""
+        plant_dispatch_lock(tmp_path)
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value="n"),
+            patch.object(session_boot, "_tmux_session_exists", return_value=False),
+            patch(f"{_MOD}.os.execvp") as mock_exec,
+        ):
+            session_boot.boot(cwd=str(tmp_path))
+        claude_cmd = mock_exec.call_args[0][1]
+        assert "--session-id" in claude_cmd
+        assert "--resume" not in claude_cmd
+
+    def test_dead_lock_gates_nothing_and_stays(self, tmp_path):
+        """A lock whose PID is dead means the job is over — the door opens as
+        usual. And the probe is READ-ONLY: cleanup belongs to ai_mail's own
+        lifecycle, so the file must still be there afterwards."""
+        from aipass.hooks.apps.modules import cc_sessions
+
+        lock = plant_dispatch_lock(tmp_path)
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(cc_sessions, "_is_pid_alive", return_value=False),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value=""),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        assert "--continue" in mock_exec.call_args[0][3]
+        assert lock.exists()
+
+    def test_reclaim_stops_the_job_then_resumes_its_chat(self, tmp_path, monkeypatch):
+        """'r' is the deliberate takeover: stop the branch's claudes, wait for
+        the monitor to surrender the lock, then resume by the pointer — the
+        session comes over whole, task state and all."""
+        from aipass.hooks.apps.modules import cc_sessions
+
+        lock = plant_dispatch_lock(tmp_path)
+        home = plant_pointer(tmp_path, monkeypatch, "job-sid-9")
+        monkeypatch.setattr(session_boot, "_RECLAIM_WAIT_S", 1.0)
+        monkeypatch.setattr(session_boot, "_RECLAIM_POLL_S", 0.05)
+
+        def fake_reclaim(branch_filter=None):
+            assert branch_filter == tmp_path.name
+            lock.unlink()
+            return ["PID 999: sent SIGTERM"]
+
+        with (
+            patch.dict("os.environ", home_env(home), clear=True),
+            patch.object(cc_sessions, "reclaim", side_effect=fake_reclaim),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value="r"),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 0
+        cmd = mock_exec.call_args[0][3]
+        assert "--resume" in cmd and "job-sid-9" in cmd
+
+    def test_reclaim_refuses_when_the_lock_stays(self, tmp_path, monkeypatch):
+        """If the lock never clears, resuming would race the monitor —
+        refuse honestly instead."""
+        from aipass.hooks.apps.modules import cc_sessions
+
+        plant_dispatch_lock(tmp_path)
+        monkeypatch.setattr(session_boot, "_RECLAIM_WAIT_S", 0.15)
+        monkeypatch.setattr(session_boot, "_RECLAIM_POLL_S", 0.05)
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(cc_sessions, "reclaim", return_value=[]),
+            patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+            patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+            patch.object(session_boot, "_find_live_sessions", return_value=[]),
+            patch.object(session_boot, "_read_choice", return_value="r"),
+            patch.object(
+                session_boot, "_exec_in_tmux", return_value={"exit_code": 0, "action": "started"}
+            ) as mock_exec,
+        ):
+            result = session_boot.boot(cwd=str(tmp_path))
+        assert result["exit_code"] == 1
+        mock_exec.assert_not_called()
+
+
+class TestHomeResolutionIsPortable:
+    """PR 739 / windows-setup: home resolution must not be POSIX-only.
+
+    Four pointer-door tests died on the Windows runner with
+    RuntimeError("Could not determine home directory."), while their siblings
+    passed — the split was not in the pointer logic at all. Every failing test
+    planted a pointer and then ran boot() under
+    `patch.dict(..., {"HOME": ...}, clear=True)`; every passing one returned
+    before the first home lookup. Clearing the environ strips %USERPROFILE%,
+    and Windows expanduser reads that, not $HOME.
+
+    These pin both halves of the fix so the platform gap cannot come back
+    quietly on a machine where nobody can run the failing platform.
+    """
+
+    def test_home_env_sets_both_platform_keys(self, tmp_path):
+        """HOME alone is a Linux-only redirect. The Windows key must ride too."""
+        env = home_env(tmp_path / "home")
+        assert env["HOME"] == str(tmp_path / "home")
+        assert env["USERPROFILE"] == str(tmp_path / "home")
+
+    def test_set_home_redirects_home_with_the_environ_cleared(self, tmp_path, monkeypatch):
+        """The whole point: resolution must survive a cleared environ, which is
+        what every one of the four failing tests did to itself."""
+        home = tmp_path / "home"
+        set_home(monkeypatch, home)
+        with patch.dict("os.environ", home_env(home), clear=True):
+            assert Path.home() == home
+
+    def test_pointer_doors_resolve_under_a_cleared_environ(self, tmp_path, monkeypatch):
+        """The CI failure itself, reduced: plant a pointer, clear the environ to
+        exactly what the fixture provides, and resolve. This is the call that
+        raised on the runner (session_pointer.transcript_dir -> Path.home())."""
+        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
+
+        home = plant_pointer(tmp_path, monkeypatch, "portable-sid")
+        with patch.dict("os.environ", home_env(home), clear=True):
+            sid, reason = sp.resolve_resume_target(Path(tmp_path))
+        assert sid == "portable-sid", reason
+
+    def test_claude_home_degrades_instead_of_raising(self):
+        """An unresolvable home must not crash at import. The constants are
+        module-level, so `Path.home()` raising there kills the whole module
+        rather than the one lookup that wanted a path."""
+        from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
+
+        for mod in (cc_sessions, cc_transcripts):
+            with patch.object(Path, "home", side_effect=RuntimeError("Could not determine home directory.")):
+                fallback = mod._claude_home()
+            assert not (fallback / ".claude").exists()
+
+    def test_session_file_presence_survives_an_unresolvable_home(self, monkeypatch):
+        """A presence check answers True or False — never takes the menu down."""
+        from aipass.hooks.apps.modules import cc_sessions
+
+        monkeypatch.setattr(cc_sessions, "CC_SESSIONS_DIR", Path("<no-home>") / ".claude" / "sessions")
+        assert session_boot._is_session_file_present(4321) is False

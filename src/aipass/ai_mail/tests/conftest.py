@@ -46,6 +46,95 @@ def _isolate_notification_feed(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_mail_from_tests(monkeypatch):
+    """Refuse any test that shells out to `drone @ai_mail send` (or dispatch).
+
+    Earned the hard way on 2026-08-21: two tests exercising the manager wake-back
+    called subprocess.run without mocking it, and BOTH delivered real mail into
+    @devpulse's live inbox. The identity fence did not stop them — this suite runs
+    inside a dispatched agent whose shell carries AIPASS_BRANCH_NAME, so drone
+    stamped source=assigned and the send was, correctly, allowed.
+
+    Same class as the notification-feed and contacts guards above: a test that
+    writes into a citizen's real state. Mail is the worst of the three, because a
+    delivered message asks a human to read it. Tests that mean to exercise the
+    send path mock subprocess.run themselves, which overrides this.
+    """
+    import subprocess
+
+    real_run = subprocess.run
+
+    def _guarded(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and len(cmd) >= 3:
+            argv = [str(c) for c in cmd[:3]]
+            if argv[0].endswith("drone") and argv[1] == "@ai_mail" and argv[2] in ("send", "email", "dispatch"):
+                raise AssertionError(
+                    f"test tried to deliver REAL mail: {' '.join(str(c) for c in cmd[:4])} — "
+                    "mock subprocess.run in this test"
+                )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _guarded)
+
+
+@pytest.fixture(autouse=True)
+def _strip_ambient_identity_source(monkeypatch):
+    """Clear AIPASS_CALLER_IDENTITY_SOURCE for EVERY test.
+
+    This var is a CREDENTIAL: "assigned" or "passport" lets the identity fence
+    accept a caller standing outside any branch. A dispatched agent's own shell
+    carries it (this suite was first run under one holding source=passport), so
+    an ambient value silently DISABLES the fence inside tests that never mention
+    it — two fence tests passed while asserting the opposite of what they meant.
+
+    Stripped globally rather than per-fixture: the leak defeats a security-shaped
+    check, and the next test written would have to remember on its own. Tests that
+    need a value set it themselves; monkeypatch.setenv in the body wins over this.
+    """
+    monkeypatch.delenv("AIPASS_CALLER_IDENTITY_SOURCE", raising=False)
+
+    # AIPASS_DISPATCH_ID is the same shape of trap, stripped BEFORE it can cost
+    # anything (FPLAN-0452). This suite runs inside dispatched agents, and once
+    # wake.py stamps the spawn env every future run carries a live id ambiently.
+    # A test asserting "mail sent outside a dispatch carries no stamp" would then
+    # fail — or worse, one asserting the stamp would pass on the AMBIENT id
+    # rather than the one it set. Same lesson as the credential above, applied
+    # before the leak exists rather than after it burns a session.
+    monkeypatch.delenv("AIPASS_DISPATCH_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dispatch_register(tmp_path, monkeypatch):
+    """Point the register and the reports directory at tmp_path for EVERY test.
+
+    wake_branch() now registers every dispatch before it spawns, and the wake
+    tests exercise wake_branch with the spawn mocked — so the FIRST run of this
+    suite wrote 31 phantom "outstanding" entries into the live register. Every
+    one of them would have read as OVERDUE two hours later: a fleet of crashed
+    dispatches that never existed, in the one file whose whole job is to make
+    real crashes visible.
+
+    Both paths are re-rooted by patching the root they are DERIVED from, not the
+    functions themselves — so a test that passes repo_root= explicitly still gets
+    its own answer, and the raise-on-unrootable path stays reachable.
+
+    Third of its kind after FEED_PATH (S141) and CONTACTS_FILE (S146). A shared
+    file a handler writes to is production state, and the pattern is now: guard
+    it in conftest the day the writer lands, not the day someone notices.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch import register, report
+
+    # In its OWN subdirectory, never tmp_path itself: the marker file this needs
+    # is exactly what the find_caller_registry tests build tmp_path to control,
+    # and dropping a second AIPASS_REGISTRY.json beside theirs broke 15 of them.
+    root = tmp_path / ".dispatch_register_root"
+    root.mkdir(exist_ok=True)
+    (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(register, "find_repo_root", lambda: root)
+    monkeypatch.setattr(report, "find_repo_root", lambda: root)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_contacts_file(tmp_path, monkeypatch):
     """Point CONTACTS_FILE at tmp_path for EVERY test.
 

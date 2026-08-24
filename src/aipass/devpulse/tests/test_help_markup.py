@@ -20,7 +20,7 @@ the call but never renders, so it cannot catch this class.
 Covers:
 - devpulse.print_help() — the ``[args...]`` usage placeholder
 - watchdog HELP_TEXT / schedule + timer help — ``[command]``, ``[--timeout ...]``
-- watchdog._format_status_line / _print_kill_result — the ``[handle]`` prefix
+- watchdog presenter.format_status_line / print_kill_result — the ``[handle]`` prefix
 """
 
 import io
@@ -100,21 +100,21 @@ class TestStatusHandleTag:
     }
 
     def test_status_line_keeps_handle(self):
-        """_format_status_line's [handle] renders literally."""
-        from aipass.devpulse.apps.modules import watchdog
+        """format_status_line's [handle] renders literally."""
+        from aipass.devpulse.apps.handlers.watchdog import presenter
 
-        line = watchdog._format_status_line(self.WATCH, lambda s: f"{s}s")
+        line = presenter.format_status_line(self.WATCH, lambda s: f"{s}s")
         console, buffer = _real_console()
         console.print(line)
         assert "[wd-1234]" in buffer.getvalue()
 
     def test_kill_result_keeps_handle(self):
-        """_print_kill_result's [handle] renders literally."""
-        from aipass.devpulse.apps.modules import watchdog
+        """print_kill_result's [handle] renders literally."""
+        from aipass.devpulse.apps.handlers.watchdog import presenter
 
         output = _render_module_call(
-            watchdog,
-            lambda m: m._print_kill_result({"handle": "wd-9", "killed": True, "was_alive": True, "reason": "test"}),
+            presenter,
+            lambda m: m.print_kill_result({"handle": "wd-9", "killed": True, "was_alive": True, "reason": "test"}),
         )
         assert "[wd-9]" in output
 

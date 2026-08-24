@@ -30,6 +30,7 @@ from aipass.backup.apps.handlers.path.builder import build_versioned_store
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.handlers.state.changelog import append_changelog
@@ -37,6 +38,7 @@ from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.modules.display import (
     build_progress_bar,
     refuse_missing_root,
+    refuse_oversized_run,
     show_backups_now,
     show_last_backups,
     show_result_summary,
@@ -82,15 +84,22 @@ def run_versioned(
     if show_panels:
         show_last_backups()
 
+    # Loaded on BOTH paths: the ceiling is a guard, and a guard that only
+    # runs when this module did its own scan is not guarding the 'all' path.
+    config = load_project_config(project_root)
+
     if pre_scanned is not None:
         filtered = pre_scanned
     else:
-        config = load_project_config(project_root)
         spec = load_spec(project_root)
         whitelist_entries = load_whitelist(project_root)
         max_size = config.get("max_file_size_mb", 100)
         all_files = list(walk_project(project_root))
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
+
+    breach = check_ceiling(filtered, config)
+    if breach is not None:
+        return refuse_oversized_run("versioned", project_root, breach, show_panels)
 
     store = str(build_versioned_store(project_root))
 

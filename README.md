@@ -34,11 +34,11 @@ That's not a team. That's a room full of people wearing headphones.
 
 ## What AIPass Does
 
-AIPass is a CLI-native scaffold that adds **persistent memory, identity, and coordination** to your AI agents. You bring your project — AIPass adds the agent layer on top. No UI, no dashboard, no cloud. Everything is plain files on your machine; delete the directory and it's gone.
+AIPass is a CLI-native scaffold that adds **persistent memory, identity, and coordination** to your AI agents. You bring your project — AIPass adds the agent layer on top. No dashboard to run, no cloud to sign into. Everything is plain files on your machine: agent state lives in your project directory, plus a thin install layer outside it (Claude Code hooks, PATH entries, `~/.aipass/`) — the Uninstall section covers both.
 
 - **Agents are persistent.** They remember across sessions. Expertise develops over time. Nobody starts from zero.
 - **Bring your own project.** AIPass adds agent infrastructure to whatever you're building. It's a scaffold, not a product — you shape it.
-- **Everything is local.** Memory is JSON files. Communication is local mailbox files. No cloud, no external APIs.
+- **Everything is local.** Memory is JSON files. Communication is local mailbox files. No cloud services, no data leaves your machine — agents that talk to outside APIs are opt-in, with your own keys.
 - **Shared workspace.** All agents work on the same filesystem, same project, same time. No sandboxes.
 - **One command for everything.** `drone @agent command` reaches any agent. Learn it once, use it everywhere.
 
@@ -56,7 +56,7 @@ cd AIPass
 ./aipass install
 ```
 
-One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet, runs a health check (`aipass doctor --fix` — heals what it can, automatically) — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report and health verdict in hand: it greets you by name, shows you around, and walks you through what your machine still needs — every machine is different.
+One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 18-agent reference fleet, runs a health check (`aipass doctor --fix` — heals what it can, automatically) — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report and health verdict in hand: it greets you by name, shows you around, and walks you through what your machine still needs — every machine is different.
 
 Along the way, in an interactive shell, expect three quick prompts: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so skip is always an option, and a bad address is never silently stored), your **name**, so the concierge knows what to call you, and **how the session should run** (asks before system-changing commands by default, or full autonomy). Anything skipped or still missing gets collected into one "action needed" summary at the end, right before the welcome conversation opens — no project prompt, nothing else to answer. Project creation comes later, when you're ready (see below).
 
@@ -65,7 +65,7 @@ Come back tomorrow, say "hi", and it picks up exactly where you left off. That's
 <!-- GIF SLOT 2 — memory payoff (~15s): close the terminal, reopen, "hi", the agent recalls yesterday.
      ![memory](assets/memory.gif) -->
 
-Options: `--no-chat` skips the welcome chat. Non-interactive shells (CI, pipes) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
+Options: `--no-chat` skips the welcome chat — and with it the doctor preflight, which runs as part of the chat handoff. Non-interactive shells (CI, pipes) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
 
 ### 2. Your own project
 
@@ -75,7 +75,7 @@ Two ways in. From anywhere inside your AIPass environment, `aipass new` builds a
 aipass new my-project --template python   # Project + resident manager agent + git birth commit
 ```
 
-It mints the project registry, spawns a full citizen (identity, memory, mailbox, birth certificate) at `src/my_project/my_project`, makes the first commit — and drops you straight into a conversation with your new manager.
+It mints the project registry, spawns a full citizen (identity, memory, mailbox, birth certificate) at `projects/my-project/src/my_project/my_project`, makes the first commit — and drops you straight into a conversation with your new manager.
 
 Or bring your own directory, anywhere on disk:
 
@@ -87,7 +87,7 @@ aipass init run                       # Guided setup — project, first agent, e
 Either way your agent has identity, memory, a mailbox, and access to every AIPass service — planning, quality audits, dispatch, real-time monitoring.
 
 ```bash
-aipass init                           # Just the scaffold (no guided setup)
+aipass init .                         # Just the scaffold, current directory (no guided setup)
 aipass init agent my_agent            # Add another agent
 aipass doctor                         # Check system health
 aipass feedback off                   # Silence the occasional how-are-we-doing ask
@@ -95,7 +95,7 @@ aipass feedback off                   # Silence the occasional how-are-we-doing 
 
 ### 3. Meet the fleet
 
-The clone already includes all 17 agents working together — the reference implementation that maintains AIPass itself:
+The clone already includes all 18 agents working together — the reference implementation that maintains AIPass itself:
 
 ```bash
 cd src/aipass/devpulse
@@ -116,26 +116,29 @@ drone @ai_mail dispatch @agent "Subject" "Body"  # Send a task + wake an agent
 
 **Memory.** Every agent owns a `.trinity/` directory — identity, session history, learnings — read on startup, updated as it works. Memory starts as plain JSON, no setup required. When files fill up, older entries automatically archive into ChromaDB for long-term semantic search. Nothing is lost.
 
-**One structure.** Every agent — yours and the reference fleet — shares the same layout. If you know one agent, you know all of them:
+**One structure.** Every agent — yours and the reference fleet — shares the same core layout. If you know one agent, you know all of them:
 
 ```
 src/my_project/<agent>/
 ├── .trinity/           # Identity + memory (persists across sessions)
 ├── .ai_mail.local/     # Mailbox (receives tasks, sends results)
+├── .aipass/            # Branch prompt (how this agent introduces itself)
 ├── apps/               # Entry point → modules → handlers
+├── artifacts/          # Birth certificate + agent-produced files
+├── logs/               # Per-agent logs
 └── README.md           # Domain knowledge (read on startup)
 ```
 
 **One router.** `drone @branch command [args]` reaches any agent — routing, access tiers, and @agent resolution handled for you. Agents use the same commands to reach each other: they dispatch work, share findings, and wake whoever they're waiting on.
 
-<!-- GIF SLOT 3 — team (~20s): dispatch a task to an agent, watchdog wake-back, result lands.
+<!-- GIF SLOT 3 — team (~20s): dispatch a task to an agent, completion reported back, result lands.
      ![team](assets/team.gif) -->
 
 ---
 
 ## The Reference Implementation
 
-AIPass ships with 17 core agents that maintain and develop the framework itself — proving the architecture works at scale. You don't need any of these to use AIPass in your own project. They're here as examples and as services your project can call.
+AIPass ships with 18 core agents that maintain and develop the framework itself — proving the architecture works at scale. You don't need any of these to use AIPass in your own project. They're here as examples and as services your project can call.
 
 ```
 devpulse (orchestrator)
@@ -145,22 +148,23 @@ devpulse (orchestrator)
    ├── prax     — real-time monitoring + runaway-log detection across all agents
    ├── ai_mail  — agent-to-agent communication + task dispatch
    ├── flow     — plan lifecycle, templates, auto-archival
-   ├── spawn    — creates new agents anywhere on your filesystem
+   ├── spawn    — branch lifecycle — creates, updates, and deletes agents anywhere on your filesystem
    ├── hooks    — hook engine, sound control, per-project config
    ├── memory   — automatic archival, ChromaDB, semantic search
-   ├── api      — LLM access layer (OpenRouter, multi-provider)
-   ├── trigger  — event-driven automation + self-healing
+   ├── api      — external API gateway — keys, secrets, Google OAuth, LLM calls, host server
+   ├── trigger  — event bus + error medic — fingerprints log errors, wakes the owning branch
    ├── cli      — terminal formatting and rich output
    ├── backup   — local-first snapshots + restore (optional Drive sync)
    ├── daemon   — cron-style task scheduler (each branch owns its schedule)
    ├── skills   — discoverable capability units any agent can run
-   └── commons  — the social space — post, comment, vote, gather
+   ├── commons  — the social space — post, comment, vote, gather
+   └── canary   — permanent test citizen — spawned, broken, and re-scaffolded so the working fleet never is
 ```
 
 <details>
 <summary>Agent details</summary>
 
-**You interact with one:** [**devpulse**](src/aipass/devpulse/README.md) — the orchestrator. You talk to it, it coordinates everyone else.
+**Day to day you talk to one:** [**devpulse**](src/aipass/devpulse/README.md) — the orchestrator. It coordinates everyone else. (At install time, the **aipass** concierge greets you first and handles setup.)
 
 **Core infrastructure** — how agents connect:
 
@@ -170,8 +174,8 @@ devpulse (orchestrator)
 | [**drone**](src/aipass/drone/README.md) | Routes `drone @branch command` to the right agent |
 | [**ai_mail**](src/aipass/ai_mail/README.md) | Agent-to-agent messaging and task dispatch |
 | [**memory**](src/aipass/memory/README.md) | Memory lifecycle — automatic archival, ChromaDB vectors, semantic search |
-| [**api**](src/aipass/api/README.md) | LLM access layer — multi-provider routing (OpenRouter) |
-| [**spawn**](src/aipass/spawn/README.md) | Creates new agents from templates |
+| [**api**](src/aipass/api/README.md) | Gateway for every external API — key and secret store, Google OAuth2, OpenRouter calls, usage tracking, host API server |
+| [**spawn**](src/aipass/spawn/README.md) | Creates, updates, and deletes agents — the branch lifecycle manager |
 
 **Quality and operations** — how the system stays healthy:
 
@@ -181,10 +185,11 @@ devpulse (orchestrator)
 | [**prax**](src/aipass/prax/README.md) | Real-time monitoring, logs, dashboards, runaway-log detection |
 | [**flow**](src/aipass/flow/README.md) | Plan lifecycle — multiple template types, auto-archival, vector verification |
 | [**hooks**](src/aipass/hooks/README.md) | Hook engine — per-project config, sound control, event dispatch, persistent alerts |
-| [**trigger**](src/aipass/trigger/README.md) | Event-driven automation + self-healing |
+| [**trigger**](src/aipass/trigger/README.md) | Event bus and error dispatch — medic fingerprints log errors, deduplicates, and wakes the responsible branch |
 | [**cli**](src/aipass/cli/README.md) | Terminal formatting and rich output |
 | [**backup**](src/aipass/backup/README.md) | Local-first backups — snapshots, versioning, restore (optional Google Drive sync) |
 | [**daemon**](src/aipass/daemon/README.md) | Task scheduler — cron-style firing; each branch owns its schedule |
+| [**canary**](src/aipass/canary/README.md) | Permanent test citizen — absorbs spawn/dispatch/resume tests so no working agent is the experiment; everything in it is test data |
 
 **Capabilities and community** — what agents can do and where they gather:
 
@@ -204,19 +209,19 @@ devpulse (orchestrator)
 | Metric | Value |
 |--------|-------|
 | Version | See [git tags](https://github.com/AIOSAI/AIPass/tags) |
-| Agents | 17 core + user-created |
+| Agents | 18 core + user-created |
 | Quality | Automated standards enforced across every agent |
 | Tests | Extensive — every agent ships its own suite |
 
-Each agent documents its own operational status in its branch README — what works, what doesn't, and why.
+Most agents document their own operational status in their branch README — what works, what doesn't, and why.
 
 ## Requirements
 
 - Python 3.10+
 - [Claude Code](https://code.claude.com/docs)
-- Linux or WSL
+- Linux, macOS, or Windows (via Git Bash or WSL)
 - `sudo` access optional (for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without sudo)
-- API keys optional (OpenRouter/OpenAI — for optional add-on agents)
+- API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 ---
 
@@ -225,18 +230,21 @@ Each agent documents its own operational status in its branch README — what wo
 
 ### Remove AIPass from a project
 
-AIPass stores everything locally in your project directory. To remove it:
+AIPass keeps agent state inside your project directory. To remove it:
 
 ```bash
-# Remove AIPass files from your project
-rm -rf .aipass/ .claude/ .ai_mail.local/ hooks/ src/
-rm -f CLAUDE.md AGENTS.md *_REGISTRY.json .gitignore
+# Remove AIPass files from your project.
+# ⚠️ In a brought-your-own project, src/, README.md, CLAUDE.md and .gitignore
+# may be partly or wholly YOURS (init never overwrites existing files) —
+# remove only the agent's directory under src/ and review the rest by hand.
+rm -rf .aipass/ .claude/ .ai_mail.local/ src/<your_agent>/
+rm -f CLAUDE.md AGENTS.md *_REGISTRY.json .gitignore pyproject.toml .venv
 
 # If you ran the backup system, also remove its local state + shipped config
 rm -rf .backup/ && rm -f .backupignore
 ```
 
-No cloud accounts, no external services, no cleanup beyond your local filesystem.
+The installer also writes a thin layer outside the project: Claude Code hook wiring in `~/.claude/settings.json`, `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`, a PATH line in your shell rc, and cross-project state in `~/.aipass/` (plus `~/.secrets/aipass/` if seeded). Remove those to erase AIPass completely. No cloud accounts, no external services — everything to clean up is on your machine.
 
 ### Remove a single agent
 

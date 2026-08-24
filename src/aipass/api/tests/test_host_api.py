@@ -81,9 +81,11 @@ import pytest
 
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
+from aipass.api.apps.modules import host_serve as host_serve_module
 
 
 # Patch targets
@@ -104,6 +106,17 @@ PATCH_MOD_WARNING = "aipass.api.apps.modules.host_api.warning"
 PATCH_MOD_JSON = "aipass.api.apps.modules.host_api.json_handler"
 PATCH_MOD_HELP = "aipass.api.apps.modules.host_api.print_help"
 
+# The serve/status/stop commands moved to host_serve.py on 2026-08-19 (host_api
+# hit its size cap). They import console and friends by NAME, so silencing only
+# host_api would leave their output loose in the suite AND leave every
+# assertion about it reading an untouched mock.
+PATCH_SRV_CONSOLE = "aipass.api.apps.modules.host_serve.console"
+PATCH_SRV_HEADER = "aipass.api.apps.modules.host_serve.header"
+PATCH_SRV_ERROR = "aipass.api.apps.modules.host_serve.error"
+PATCH_SRV_SUCCESS = "aipass.api.apps.modules.host_serve.success"
+PATCH_SRV_WARNING = "aipass.api.apps.modules.host_serve.warning"
+PATCH_SRV_JSON = "aipass.api.apps.modules.host_serve.json_handler"
+
 # An address in TEST-NET-3 (RFC 5737). Guaranteed not to be a real interface.
 UNHELD_ADDRESS = "203.0.113.7"
 # Shaped like the tailnet address Stage 0 is ultimately aimed at.
@@ -122,14 +135,27 @@ def store(tmp_path: Path):
 def quiet_module():
     """Silence the module's console output during CLI tests."""
     with (
-        patch(PATCH_MOD_CONSOLE),
+        patch(PATCH_MOD_CONSOLE) as mock_console,
         patch(PATCH_MOD_HEADER),
         patch(PATCH_MOD_ERROR) as mock_error,
         patch(PATCH_MOD_SUCCESS) as mock_success,
         patch(PATCH_MOD_WARNING) as mock_warning,
         patch(PATCH_MOD_JSON),
+        patch(PATCH_SRV_CONSOLE, new=mock_console),
+        patch(PATCH_SRV_HEADER),
+        patch(PATCH_SRV_ERROR, new=mock_error),
+        patch(PATCH_SRV_SUCCESS, new=mock_success),
+        patch(PATCH_SRV_WARNING, new=mock_warning),
+        patch(PATCH_SRV_JSON),
     ):
-        yield {"error": mock_error, "success": mock_success, "warning": mock_warning}
+        # `console` is handed back so a test can read what was PRINTED, not
+        # just what was refused — the S49 check needs the actual output.
+        yield {
+            "error": mock_error,
+            "success": mock_success,
+            "warning": mock_warning,
+            "console": mock_console,
+        }
 
 
 # =============================================
@@ -663,7 +689,7 @@ class TestCommandRouting:
         'cleanup 30 --help' run a real cleanup (S58) and leaked key material (S59)."""
         with (
             patch(PATCH_MOD_HELP) as mock_help,
-            patch.object(host_api_module, "_cmd_serve") as mock_serve,
+            patch.object(host_serve_module, "cmd_serve") as mock_serve,
             patch.object(host_api_module, "_cmd_revoke_token") as mock_revoke,
             patch.object(host_api_module, "_cmd_issue_token") as mock_issue,
         ):
@@ -707,7 +733,7 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
 
     def test_the_help_gate_still_covers_the_alias(self, quiet_module: dict) -> None:
         """A second spelling must not become a second, ungated door."""
-        with patch(PATCH_MOD_HELP) as helped, patch.object(host_api_module, "_cmd_serve") as served:
+        with patch(PATCH_MOD_HELP) as helped, patch.object(host_serve_module, "cmd_serve") as served:
             assert handle_command("host_api", ["serve", "--help"]) is True
 
         helped.assert_called_once()
@@ -717,14 +743,134 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
 class TestIssueTokenCommand:
     """The CLI's issuance discipline."""
 
-    def test_refuses_without_out_flag(self, store: Path, quiet_module: dict) -> None:
-        """No raw secret to stdout — S49 precedent. A token in scrollback is a
-        token in the shell history file."""
+    def test_no_out_flag_lands_the_receipt_in_the_secrets_store(self, store: Path, quiet_module: dict) -> None:
+        """--out is OPTIONAL, and the default is where secrets already live.
+
+        This test used to pin the opposite — that --out was mandatory — and the
+        rule it was defending was never "make the caller name a file", it was
+        S49's "never print the raw value". The mandatory flag defended that
+        badly: its own example said `--out ~/pixel.token`, and on 2026-08-19
+        Patrick found three raw bearer receipts sitting in his home root
+        because of it. A default that lands beside the hashed store honours S49
+        and takes the home root off the table.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        quiet_module["error"].assert_not_called()
+
+        receipt = store / "host_api" / "pixel-8.token"
+        assert receipt.is_file(), "no receipt was written and nothing said so"
+        assert host_tokens.verify_token(receipt.read_text(encoding="utf-8")) is not None
+
+    def test_the_default_receipt_is_still_0600(self, store: Path, quiet_module: dict) -> None:
+        """The mode is the point of the file, not a property of --out."""
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        receipt = store / "host_api" / "pixel-8.token"
+        if sys.platform != "win32":
+            assert stat.S_IMODE(os.stat(receipt).st_mode) == 0o600
+            assert stat.S_IMODE(os.stat(receipt.parent).st_mode) == 0o700
+
+    def test_the_raw_value_is_still_never_printed(self, store: Path, quiet_module: dict) -> None:
+        """S49, checked against the console rather than assumed from the shape.
+
+        The whole reason --out was mandatory. Making it optional must not have
+        quietly reintroduced the thing it was defending against, so this reads
+        every line the command printed and looks for the secret in it.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+
+        raw = (store / "host_api" / "pixel-8.token").read_text(encoding="utf-8")
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+
+        assert raw not in printed, "the raw token reached the console"
+
+    def test_an_existing_receipt_is_never_overwritten(self, store: Path, quiet_module: dict) -> None:
+        """Its token is still LIVE — truncating the file orphans a credential.
+
+        The failure this prevents is quiet and permanent: the raw value exists
+        exactly once, at mint time, so overwriting the receipt leaves a working
+        token in the store that nobody holds and nobody knows to revoke.
+        """
+        handle_command("host-api", ["issue-token", "pixel-8"])
+        receipt = store / "host_api" / "pixel-8.token"
+        first = receipt.read_text(encoding="utf-8")
+
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         quiet_module["error"].assert_called_once()
-        assert "--out" in str(quiet_module["error"].call_args)
-        assert host_tokens.list_tokens() == []
+        assert receipt.read_text(encoding="utf-8") == first, "the first receipt was overwritten"
+        assert len(host_tokens.list_tokens()) == 1, "a second token was minted for a receipt that could not be written"
+
+    def test_an_existing_explicit_out_file_is_never_overwritten_either(
+        self,
+        store: Path,
+        tmp_path: Path,
+        quiet_module: dict,
+    ) -> None:
+        """Same rule when the caller names the path — the loss is identical."""
+        out = tmp_path / "device.token"
+        out.write_text("an-older-receipt", encoding="utf-8")
+
+        handle_command("host-api", ["issue-token", "pixel-8", "--out", str(out)])
+
+        quiet_module["error"].assert_called_once()
+        assert out.read_text(encoding="utf-8") == "an-older-receipt"
+        assert host_tokens.list_tokens() == [], "a token was minted that its caller can never read"
+
+    def test_a_label_that_is_a_path_is_refused_before_anything_is_minted(
+        self,
+        store: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The label becomes a FILENAME now, so it needs the name fence.
+
+        Nothing validated the label as a path component before, because nothing
+        ever built a path from it. The default receipt does.
+        """
+        handle_command("host-api", ["issue-token", "../escaped"])
+
+        quiet_module["error"].assert_called_once()
+        assert host_tokens.list_tokens() == [], "a token was minted for a label that could not be written"
+        assert not (store.parent / "escaped.token").exists()
+
+    def test_a_receipt_appearing_mid_mint_is_not_truncated(
+        self,
+        store: Path,
+        tmp_path: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The existence check is a good sentence; O_EXCL is the guarantee.
+
+        Found while mutating: swapping O_EXCL for O_TRUNC bit NOTHING, because
+        every overwrite test above is refused by the exists() check one screen
+        earlier — which is itself a check-then-act, the same shape as the
+        create race @trigger reported in json_handler on the same day. This
+        opens the window on purpose by creating the file DURING the mint, and
+        asks whether the older receipt survives.
+
+        The other half matters as much: the token was already minted when the
+        write failed, so the caller must be told to revoke it. A "could not
+        write" that reads like nothing happened leaves a live credential in the
+        store that nobody holds.
+        """
+        out = tmp_path / "device.token"
+        real_issue = host_tokens.issue_token
+
+        def _someone_else_gets_there_first(label: str, scope: str = "read") -> Any:
+            out.write_text("a receipt that arrived first", encoding="utf-8")
+            return real_issue(label, scope)
+
+        with patch.object(host_tokens, "issue_token", side_effect=_someone_else_gets_there_first):
+            handle_command("host-api", ["issue-token", "pixel-8", "--out", str(out)])
+
+        assert out.read_text(encoding="utf-8") == "a receipt that arrived first", (
+            "a receipt created inside the window was truncated"
+        )
+        quiet_module["error"].assert_called_once()
+        told = str(quiet_module["error"].call_args)
+        assert "revoke" in told.lower(), f"the token was minted and the operator was not told to revoke it: {told}"
 
     def test_missing_label_refused(self, store: Path, quiet_module: dict) -> None:
         """A label is required before anything is minted."""
@@ -751,6 +897,196 @@ class TestIssueTokenCommand:
         handle_command("host-api", ["issue-token", "ops-phone", "--scope", "operate", "--out", str(out)])
 
         assert host_tokens.list_tokens()[0]["scope"] == "operate"
+
+
+class TestDetachStatusAndStop:
+    """
+    The CLI half of the serve-flap fix (@baud/@devpulse, 2026-08-19).
+
+    A serve routed through drone is a child of drone's exec timeout, and the
+    tailnet server was dying on a twelve-hour schedule and restarting into a
+    pane whose scrollback then ate a day of access history. `--detach` gives
+    the process its own session and its output a file; `status` and `stop`
+    exist because shipping the first without them would just be a nicer way to
+    create orphans.
+    """
+
+    @pytest.fixture
+    def detachable(self):
+        """The lifetime handler, stubbed — this is about the CLI's wiring."""
+        with patch.object(host_serve_module, "host_lifetime") as lifetime:
+            lifetime.LifetimeError = host_lifetime.LifetimeError
+            yield lifetime
+
+    def test_serve_without_detach_still_runs_in_this_process(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """Detaching is opt-in. Every existing caller keeps what it had."""
+        with patch.object(host_server, "serve") as served:
+            handle_command("host-api", ["serve"])
+
+        served.assert_called_once()
+        detachable.serve_detached.assert_not_called()
+
+    def test_detach_never_runs_the_server_in_this_process(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """The point of the flag: drone times a launcher, not a server."""
+        detachable.serve_detached.return_value = {"pid": 42, "host": "127.0.0.1", "port": 8790, "log": "/x.log"}
+
+        with patch.object(host_server, "serve") as served:
+            handle_command("host-api", ["serve", "--detach"])
+
+        served.assert_not_called()
+        detachable.serve_detached.assert_called_once()
+
+    def test_detach_passes_the_parsed_bind_through(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """--host and --port must reach the child, not be silently dropped."""
+        detachable.serve_detached.return_value = {"pid": 42, "host": "127.0.0.1", "port": 9001, "log": "/x.log"}
+
+        handle_command("host-api", ["serve", "--detach", "--host", "127.0.0.1", "--port", "9001"])
+
+        assert detachable.serve_detached.call_args.kwargs == {"host": "127.0.0.1", "port": 9001}
+
+    def test_a_bad_port_is_refused_before_anything_detaches(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """The existing gate must not be skipped by the new path."""
+        handle_command("host-api", ["serve", "--detach", "--port", "eighty"])
+
+        detachable.serve_detached.assert_not_called()
+        quiet_module["error"].assert_called_once()
+
+    def test_a_refused_bind_is_reported_by_the_command_that_was_told_no(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+        detachable,
+    ) -> None:
+        """D1 across the detach seam.
+
+        A refusal that happens inside a detached child is a refusal the
+        operator reads about in a log file, if at all — so it surfaces here.
+        """
+        detachable.serve_detached.side_effect = host_config.BindRefused("wildcards are refused")
+
+        handle_command("host-api", ["serve", "--detach"])
+
+        quiet_module["error"].assert_called_once()
+
+    def test_an_unknown_subcommand_still_reaches_the_error(
+        self,
+        store: Path,
+        quiet_module: dict,
+    ) -> None:
+        """The delegation must not swallow anything.
+
+        host_api offers every host-api call to host_serve first. A router that
+        returned True for things it does not implement would turn every typo
+        into a silent success — so it declines, and this is what notices if it
+        ever stops.
+        """
+        handle_command("host-api", ["serv"])
+
+        quiet_module["error"].assert_called_once()
+
+    def test_host_serve_declines_commands_that_are_not_host_api(self) -> None:
+        """It answers for `host-api` subcommands and nothing else."""
+        assert host_serve_module.handle_command("issue-token", ["serve"]) is False
+        assert host_serve_module.handle_command("host-api", ["list-tokens"]) is False
+
+    def test_a_help_flag_anywhere_explains_rather_than_serves(self, quiet_module: dict) -> None:
+        """`serve --help` must never start a server.
+
+        host_api's own gate catches this first today. The pin is on THIS
+        router because a sub-router that is only safe given its current caller
+        is a trap for the next one — and the failure mode here is starting a
+        long-running process somebody was asking a question about.
+        """
+        with patch.object(host_serve_module, "cmd_serve") as served:
+            assert host_serve_module.handle_command("host-api", ["serve", "--help"]) is True
+
+        served.assert_not_called()
+
+    def test_status_says_where_to_read_a_server_that_is_not_running(
+        self,
+        store: Path,
+        quiet_module: dict,
+        detachable,
+    ) -> None:
+        """A dead server stays dead and SAYS SO — no restart, and no silence.
+
+        The log path is the useful half: the operator's next question is always
+        why it went, and the answer is in a file they should not have to find
+        by reading this source.
+        """
+        detachable.running.return_value = None
+        detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
+
+        handle_command("host-api", ["status"])
+
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+
+        assert "host_api_serve.log" in printed
+        quiet_module["error"].assert_not_called()
+
+    def test_status_reports_a_running_server(self, store: Path, quiet_module: dict, detachable) -> None:
+        """pid, bind and log — the three things an operator asks for next."""
+        detachable.running.return_value = {
+            "pid": 4242,
+            "host": "127.0.0.1",
+            "port": 8790,
+            "log": "/tmp/host_api_serve.log",
+            "started": "2026-08-19 18:00:00",
+        }
+
+        handle_command("host-api", ["status"])
+
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+
+        assert "4242" in printed
+        assert "8790" in printed
+
+    def test_stopping_nothing_is_not_an_error(self, store: Path, quiet_module: dict, detachable) -> None:
+        """Running `stop` twice must be safe — the second has nothing to do."""
+        detachable.stop.return_value = None
+
+        handle_command("host-api", ["stop"])
+
+        quiet_module["error"].assert_not_called()
+
+    def test_a_server_that_will_not_stop_is_reported_not_swallowed(
+        self,
+        store: Path,
+        quiet_module: dict,
+        detachable,
+    ) -> None:
+        """Never silently escalated, never silently given up on."""
+        detachable.stop.side_effect = host_lifetime.LifetimeError("did not exit within 10.0s")
+
+        handle_command("host-api", ["stop"])
+
+        quiet_module["error"].assert_called_once()
 
 
 @pytest.fixture
@@ -869,19 +1205,19 @@ class TestFlagParsing:
 
     def test_absent_flag_returns_none(self) -> None:
         """A flag nobody passed has no value."""
-        assert host_api_module._flag_value(["serve"], "--host") is None
+        assert host_serve_module.flag_value(["serve"], "--host") is None
 
     def test_flag_at_end_without_value_returns_none(self) -> None:
         """A dangling flag is not a value, and must not read past the list."""
-        assert host_api_module._flag_value(["serve", "--host"], "--host") is None
+        assert host_serve_module.flag_value(["serve", "--host"], "--host") is None
 
     def test_flag_followed_by_another_flag_returns_none(self) -> None:
         """'--host --port 80' has no host — reading '--port' as one would bind junk."""
-        assert host_api_module._flag_value(["serve", "--host", "--port", "80"], "--host") is None
+        assert host_serve_module.flag_value(["serve", "--host", "--port", "80"], "--host") is None
 
     def test_returns_the_value(self) -> None:
         """The ordinary case."""
-        assert host_api_module._flag_value(["serve", "--host", "127.0.0.1"], "--host") == "127.0.0.1"
+        assert host_serve_module.flag_value(["serve", "--host", "127.0.0.1"], "--host") == "127.0.0.1"
 
 
 class TestIntrospection:

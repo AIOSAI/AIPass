@@ -1,4 +1,5 @@
 # SKILLS — Branch Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/skills/.aipass/aipass_local_prompt.md — Injected on every prompt when in skills directory. -->
 
 Capability framework for AI agents. Discoverable, validatable, executable skill units across three tiers: markdown-only, with handler, full 3-layer.

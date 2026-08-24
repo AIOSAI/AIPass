@@ -653,10 +653,16 @@ bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "aipass_framework" "
 bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "aipass_framework" "Community social space — posts, comments, votes"
 bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "aipass_framework" "Task scheduler — per-branch schedule discovery"
 bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "Capability framework — discoverable skill units"
+bootstrap_branch "canary"   "$SCRIPT_DIR/src/aipass/canary" "aipass_framework" "Permanent test citizen — dispatch and gate verification"
 
-# All 17 core branches in src/aipass/ are bootstrapped above. (A stale note here
+# All 18 core branches in src/aipass/ are bootstrapped above. (A stale note here
 # once claimed backup/commons/daemon/skills were external — they returned to core
 # long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
+# THIS LIST IS A BIRTH-DAY HAZARD: every citizen @spawn creates must be added by
+# hand or fresh installs mint every passport except theirs — which is exactly how
+# @canary (born 2026-08-22) failed spawn's drift test on the Windows runner the
+# next morning. @spawn is told; the durable fix is deriving this list from the
+# tree the way the registry build already does.
 
 echo "  $BRANCH_COUNT branches bootstrapped"
 

@@ -47,6 +47,11 @@ from aipass.flow.apps.handlers.json import json_handler
 # CLI services for display and error handling
 from aipass.cli.apps.modules import console, error, warning
 
+# handle_command binds a local named `error` (the parser's message), which
+# shadows the helper above for that whole function. Aliased so a refusal can
+# still be printed rather than swallowed.
+from aipass.cli.apps.modules import error as error_display
+
 # Internal: Registry handlers
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
@@ -136,10 +141,45 @@ def _display_messages(messages: List[Dict[str, Any]]):
         elif msg_type == "close_success":
             console.print(format_plan_deletion_success(msg["plan_key"], prefix=msg.get("prefix", "FPLAN")))
 
+        elif msg_type == "dry_run_row":
+            # plan_id arrives as DATA from the same resolution the run uses --
+            # never re-derived here, or the preview could drift from the run.
+            # Location is width-capped rather than padded: a 40-char absolute
+            # path silently overflows a fixed field and butts against the
+            # subject, and this listing is what a human reads before
+            # authorising a bulk close.
+            location = str(msg.get("location", "unknown"))
+            if len(location) > 44:
+                location = f"...{location[-41:]}"
+            console.print(f"[dim]  {msg.get('plan_id', '?'):<14}  {location:<44}  {msg.get('subject', '')}[/dim]")
+
+        elif msg_type == "close_all_scope":
+            # The fence, stated before the list it produced. Held-back rows are
+            # counted separately from refusals: one is the fence working, the
+            # other is a broken registry row, and a single number hides that.
+            console.print()
+            console.print(f"[bold]Project:[/bold] {msg['project']}")
+            console.print(f"  [dim]open plans considered:[/dim] {msg['considered']}")
+            console.print(f"  [dim]in scope:[/dim] {msg['in_scope']}")
+            if msg.get("excluded_types"):
+                console.print(
+                    f"  [dim]held back by type ({', '.join(msg['excluded_types'])}):[/dim] {msg['held_by_type']}"
+                )
+            console.print(f"  [dim]held back, another project:[/dim] {msg['held_out_of_scope']}")
+            if msg.get("refused"):
+                error(f"  refused (untyped registry row): {msg['refused']}")
+            console.print()
+
+        elif msg_type == "held_row":
+            console.print(f"[dim]  {msg.get('plan_id', '?'):<14}  held: {msg.get('reason', '')}[/dim]")
+
         elif msg_type == "plan_list":
             warning(f"Found {msg['count']} open plan(s) to close:")
             for plan in msg.get("plans", []):
-                console.print(f"  * {plan.get('prefix', 'FPLAN')}-{plan['plan_num']}: {plan['subject']}")
+                # plan_num is already the typed ID. It used to be a bare key
+                # that this line prefixed with a guessed "FPLAN", which since
+                # the typed-ID fix printed "FPLAN-DPLAN-0300".
+                console.print(f"  * {plan['plan_num']}: {plan['subject']}")
 
         elif msg_type == "confirm_warning":
             error(f"WARNING: This will close all {msg['count']} plans!")
@@ -149,14 +189,19 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print("-" * 60)
 
         elif msg_type == "closing_single":
-            console.print(f"\n[dim]Closing {msg.get('prefix', 'FPLAN')}-{msg['plan_num']}...[/dim]")
+            # Position/total so a multi-minute sweep visibly advances. Silence
+            # during a bulk close reads as a hang.
+            position = msg.get("position")
+            counter = f"[{position}/{msg.get('total', '?')}] " if position else ""
+            console.print(f"\n[dim]{counter}Closing {msg['plan_num']}...[/dim]")
 
         elif msg_type == "close_all_summary":
             console.print("\n" + "=" * 60)
             console.print("[bold green]CLOSE ALL COMPLETE[/bold green]")
             console.print(f"  * Successfully closed: {msg['success_count']}")
             console.print(f"  * Failed to close: {msg['failure_count']}")
-            console.print(f"  * Total processed: {msg['total']}")
+            console.print(f"  * Held back by the fences: {msg.get('held_count', 0)}")
+            console.print(f"  * Total open plans considered: {msg['total']}")
             console.print("=" * 60 + "\n")
 
 
@@ -208,15 +253,23 @@ def print_help():
     console.print("  drone @flow close <PLAN-ID> \\[options]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
-    console.print("  --all       Close all open plans")
-    console.print("  --confirm   Interactive confirmation prompt")
-    console.print("  --dry-run   Preview what would be closed (no action taken)")
+    console.print("  --all                  Close all open plans in THIS project")
+    console.print("  --confirm              Interactive confirmation prompt")
+    console.print("  --dry-run              Preview what would be closed (no action taken)")
+    console.print("  --exclude-type <TYPE>  Hold a plan type back from --all (repeatable)")
+    console.print()
+    console.print("[yellow]SCOPE:[/yellow]")
+    console.print("  [dim]--all means every open plan of the project you are standing in.[/dim]")
+    console.print("  [dim]A project is a directory holding a sealed project register.[/dim]")
+    console.print("  [dim]Plans belonging to another project are never touched.[/dim]")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [dim]drone @flow close FPLAN-0042[/dim]          # Close specific plan")
-    console.print("  [dim]drone @flow close DPLAN-0005[/dim]          # Close a DPLAN")
-    console.print("  [dim]drone @flow close --all[/dim]               # Close all open plans")
-    console.print("  [dim]drone @flow close --all --dry-run[/dim]     # Preview close-all")
+    console.print("  [dim]drone @flow close FPLAN-0042[/dim]                    # Close specific plan")
+    console.print("  [dim]drone @flow close DPLAN-0005[/dim]                    # Close a DPLAN")
+    console.print("  [dim]drone @flow close --all --dry-run[/dim]               # Preview close-all")
+    console.print("  [dim]drone @flow close --all --exclude-type APLAN[/dim]    # Sweep, keep audits open")
+    console.print()
+    console.print("[dim]Unrecognised arguments refuse the whole run — they are never ignored.[/dim]")
     console.print()
 
 
@@ -231,6 +284,7 @@ def close_plan(
     all_plans: bool = False,
     spawn_background: bool = True,
     dry_run: bool = False,
+    exclude_types: List[str] | None = None,
 ) -> bool:
     """
     Orchestrate plan closure workflow (thin orchestrator)
@@ -263,6 +317,7 @@ def close_plan(
         all_plans=all_plans,
         spawn_background=spawn_background,
         dry_run=dry_run,
+        exclude_types=exclude_types,
         # Inject dependencies
         normalize_plan_number=normalize_plan_number,
         load_registry=load_registry,
@@ -287,13 +342,18 @@ def close_plan(
     return bool(result)
 
 
-def close_all_plans(confirm: bool = False, dry_run: bool = False) -> bool:
+def close_all_plans(confirm: bool = False, dry_run: bool = False, exclude_types: List[str] | None = None) -> bool:
     """
     Close all open plans in one operation (thin orchestrator)
+
+    Scope comes from the handler's own project resolution: the caller's
+    location decides which project's plans "all" means. Nothing is passed in
+    here, so there is one answer to that question and one place to change it.
 
     Args:
         confirm: Whether to ask for bulk confirmation (default False, auto-confirms)
         dry_run: If True, preview what would be closed without taking action (default False)
+        exclude_types: Plan-type prefixes to hold back (e.g. ["APLAN"])
 
     Returns:
         True if at least one plan closed successfully, False otherwise
@@ -301,6 +361,7 @@ def close_all_plans(confirm: bool = False, dry_run: bool = False) -> bool:
     result = close_all_plans_impl(
         confirm=confirm,
         dry_run=dry_run,
+        exclude_types=exclude_types,
         get_open_plans=get_open_plans,
         close_plan_fn=close_plan,
     )
@@ -351,15 +412,29 @@ def handle_command(command: str, args: List[str]) -> bool:
     json_handler.log_operation("plan_closed", {"command": command, "args": args})
 
     # 1. PARSE ARGS: Use command_parser handler
-    plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(args)
+    plan_num, confirm, all_plans, dry_run, exclude_types, error = parse_close_command_args(args)
 
-    # 2. VALIDATE: Check for parsing errors
+    # 2. VALIDATE: Check for parsing errors.
+    # The parser's own message is printed FIRST. It used to be discarded in
+    # favour of a generic usage block, which meant "Unknown plan type: APLNA.
+    # Registered: APLAN, CPLAN, ..." reached nobody -- a refusal the operator
+    # could not act on is only marginally better than a silent drop.
     if error:
-        console.print(format_delete_usage_error())
+        # The parser's own message, and nothing else. It used to be discarded
+        # in favour of a fixed usage block that says "ERROR: Plan number
+        # required / Usage: delete <plan_number>" -- wrong verb, wrong
+        # diagnosis, and printed directly under the true reason it replaced.
+        # A refusal the operator cannot act on is barely better than a silent
+        # drop, and a refusal followed by a false explanation is worse.
+        console.print()
+        error_display(error)
+        console.print()
+        console.print("[dim]Run 'drone @flow close --help' for usage[/dim]")
+        console.print()
         return True  # Command was handled (error already displayed)
 
     # 3. EXECUTE: Run workflow orchestrator
-    close_plan(plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run)
+    close_plan(plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run, exclude_types=exclude_types)
 
     # 4. RETURN: True = command was handled (even if the operation failed,
     #    the error has already been displayed -- returning False would cause

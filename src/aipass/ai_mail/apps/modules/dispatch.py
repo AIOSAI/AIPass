@@ -40,6 +40,7 @@ Dispatch Module - Agent dispatch management
 COMMANDS:
   dispatch @target "Subject" "Body"   - Send dispatch email + wake target
   dispatch status                     - Show last 5 dispatch spawns with current status
+  dispatch register                   - Show outstanding dispatches and which are overdue
   dispatch daemon                     - Start the continuous dispatch daemon
   dispatch wake @branch               - Wake only (no email sent)
 
@@ -103,18 +104,63 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     json_handler.log_operation("dispatch_command", {"subcommand": subcommand})
 
-    if subcommand == "status":
-        return _orchestrate_status()
-    elif subcommand == "daemon":
-        return _orchestrate_daemon()
-    elif subcommand == "wake":
-        return _orchestrate_wake(args[1:])
-    elif subcommand.startswith("@") or subcommand.startswith("/"):
+    # A verb table rather than an if/elif chain. Adding `register` made the chain
+    # deep enough to trip the nesting limit; a table stays flat however many
+    # verbs land, and the address forms below stay separate because they match on
+    # a PREFIX rather than on the whole word.
+    verbs = {
+        "status": lambda: _orchestrate_status(),
+        "register": lambda: _orchestrate_register(),
+        "daemon": lambda: _orchestrate_daemon(),
+        "wake": lambda: _orchestrate_wake(args[1:]),
+    }
+
+    run_verb = verbs.get(subcommand)
+    if run_verb is not None:
+        return run_verb()
+
+    if subcommand.startswith("@") or subcommand.startswith("/"):
         return _orchestrate_dispatch_send(args)
-    else:
-        error(f"Unknown dispatch subcommand: {subcommand}")
-        print_help()
+
+    error(f"Unknown dispatch subcommand: {subcommand}")
+    print_help()
+    return True
+
+
+def _orchestrate_register() -> bool:
+    """Show what the register says is still outstanding, and what is overdue.
+
+    The reader door for Patrick's rule 1. Crash detection is supposed to be
+    "visible to any reader" with nothing running to discover it — this is a
+    reader, and it proves the claim rather than leaving it as an assertion in
+    a docstring. Reading the register costs one file read and no process.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch import register
+
+    entries = register.outstanding()
+    if not entries:
+        console.print("No dispatches outstanding.")
         return True
+
+    console.print(f"\n[bold]Outstanding dispatches ({len(entries)})[/bold]\n")
+    for entry in entries:
+        flag = "[red]OVERDUE[/red]" if entry.get("overdue") else "[green]running[/green]"
+        console.print(
+            f"  {flag}  {entry.get('sender', '?')} -> {entry.get('target', '?')}"
+            f"  [dim]{entry.get('dispatch_id', '')[:8]}[/dim]"
+        )
+        console.print(f"           {entry.get('subject') or '(no subject)'}")
+        console.print(
+            f"           [dim]sent {entry.get('ts', '?')} · expected by {entry.get('expected_by', '?')}[/dim]"
+        )
+
+    overdue = sum(1 for e in entries if e.get("overdue"))
+    if overdue:
+        console.print(
+            f"\n[yellow]{overdue} past its expected-by with no completion record — "
+            f"the monitor for it is not running.[/yellow]"
+        )
+    return True
 
 
 def _orchestrate_status() -> bool:
@@ -393,6 +439,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         sender=verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")),
         model=use_model,
         admin=is_admin,
+        subject=subject,
     )
     console.print(dispatch_status.format())
 
@@ -400,9 +447,33 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
         error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
     else:
-        console.print(f"[dim]Wake-back enabled — sender will be woken when {target} completes (if available)[/dim]")
+        _announce_wake_back(target, verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")))
 
     return True
+
+
+def _announce_wake_back(target: str, sender: str) -> None:
+    """Print what will ACTUALLY happen when `target` finishes.
+
+    Managers are never woken — the blocklist is deliberate and stays. Telling a
+    manager "you will be woken" was a promise the lane could not keep, and the
+    manager then heard nothing at all: two live cases on 2026-08-21 (@devpulse
+    dispatching @ai_mail and @drone back to back). The wake-back now mails them,
+    so the promise says mail.
+
+    Args:
+        target: The dispatched branch.
+        sender: The address that will receive the wake-back.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch.wake import is_manager
+
+    if is_manager(sender):
+        console.print(
+            f"[dim]Wake-back enabled — {sender} is a manager and is never woken, "
+            f"so you will be MAILED when {target} completes[/dim]"
+        )
+    else:
+        console.print(f"[dim]Wake-back enabled — sender will be woken when {target} completes (if available)[/dim]")
 
 
 def _orchestrate_daemon() -> bool:

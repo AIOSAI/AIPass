@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2025-11-18
-# Modified: 2026-08-07
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -38,6 +38,12 @@ if sys.platform == "win32":
 # =============================================
 BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
+# Values of AIPASS_CALLER_IDENTITY_SOURCE that are EVIDENCE OF WHO, not of WHERE,
+# and so survive a caller standing outside any branch. "project" is deliberately
+# absent: it names a directory, and a directory that happens to spell a citizen is
+# how a dispatch from the repo root sent as @aipass (@devpulse, 0bb77ec2).
+_CREDENTIAL_SOURCES = frozenset({"assigned", "passport"})
+
 
 def _get_contact_info(branch_name: str) -> Optional[Dict]:
     """Look up branch info from the contacts address book.
@@ -68,6 +74,30 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
             # through to the next resolution strategy instead.
             return None
         name_key = branch_name.lstrip("@").lower()
+
+        # DEFENCE IN DEPTH, and it is here to make poisoning AUDIBLE. The caller
+        # above now asks the registry first, so a contradicting row is no longer
+        # reachable from that lane — but a row claiming a citizen's name while
+        # pointing at a different branch is CORRUPT DATA, not a cache miss, and a
+        # silent fall-through would leave it in the file to surprise the next
+        # reader. Refuse it and say so, loudly enough to be found.
+        registry_entry = _lookup_branch_by_name(name_key)
+        if registry_entry:
+            registry_path = Path(str(registry_entry.get("path", "")))
+            if not registry_path.is_absolute():
+                registry_path = (BRANCH_REGISTRY_PATH.parent / registry_path).resolve()
+            if registry_path != branch_path.resolve():
+                logger.error(
+                    "[identity] POISONED CONTACT ROW: %r claims branch %s but the registry places "
+                    "that citizen at %s. Refusing the row — serving it would hand this caller "
+                    "another citizen's mailbox. Repair the 'inbox' field for %r in contacts.json.",
+                    name_key,
+                    branch_path,
+                    registry_path,
+                    name_key,
+                )
+                return None
+
         return {
             "name": name_key.upper(),
             "email": "@" + name_key,
@@ -235,14 +265,64 @@ def detect_branch_from_pwd() -> Optional[Dict]:
     json_handler.log_operation("detect_branch_from_pwd", {"cwd": str(Path.cwd())})
 
     try:
+        # AIPASS_CALLER_CWD is EVIDENCE of where the caller stood; AIPASS_CALLER_BRANCH
+        # is only a CLAIM about who they are, and the claim may not outvote the evidence.
+        # drone stamps CALLER_BRANCH from the nearest PROJECT directory name, so at the
+        # repo root it stamps 'aipass' — which collides with the @aipass citizen, whose
+        # contact row then resolves it "verified" and hands over that mailbox. That is
+        # how a dispatch run from the repo root sent as @aipass and woke the wrong
+        # citizen: 11 turns, $1.41 (@devpulse, 0bb77ec2; ruling in 096c9a42).
+        #
+        # ABSENT evidence is not CONTRADICTING evidence: an unset CALLER_CWD leaves the
+        # strategies below untouched, which is what in-process callers depend on
+        # (@trigger's delivery import, @daemon's wake import, the dispatch spawn env).
+        caller_cwd_env = os.environ.get("AIPASS_CALLER_CWD")
+        if caller_cwd_env and not find_branch_root(Path(caller_cwd_env)):
+            # The provenance decides, not the location. @drone stamps WHICH KIND of
+            # evidence named the caller (shipped 2026-08-21, at this branch's
+            # request): a CREDENTIAL travels, a location does not.
+            #
+            #   assigned — AIPASS_BRANCH_NAME, set when the process was created.
+            #              True from any directory; refusing it broke S102, where
+            #              an agent that cds into another branch is still itself.
+            #   passport — a passport under the caller's feet. drone saw the real
+            #              caller cwd and this process did not; trust the prover.
+            #   project  — a registry-derived PROJECT name. Answers "which project
+            #              am I in", never "who am I". @aipass the directory and
+            #              @aipass the citizen spell the same and are not the same.
+            #              This is the $1.41 wake; it stays refused forever.
+            #
+            # Anything else — absent (older drone, or no drone at all) or a value
+            # this code does not know — falls through to refusal. The lift is
+            # opt-in and fails closed.
+            if os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") not in _CREDENTIAL_SOURCES:
+                return _record_resolution(None, "caller_cwd:outside_branch", "refused")
+
         caller_branch = os.environ.get("AIPASS_CALLER_BRANCH")
         if caller_branch:
-            contact = _get_contact_info(caller_branch)
-            if contact:
-                return _record_resolution(contact, "caller_branch:contact", "verified")
+            # THE REGISTRY IS ASKED FIRST, and the order is the whole fix.
+            # AIPASS_REGISTRY.json is the authoritative catalog; contacts.json is
+            # a LEARNED, WRITABLE cache. Asking the cache first let ONE poisoned
+            # row outrank the catalog for a citizen the catalog knew perfectly
+            # well — found live on 2026-08-23, when `drone @ai_mail inbox` served
+            # @flow's mailbox from inside @ai_mail's own directory. The identity
+            # log recorded it as name AI_MAIL, email @ai_mail, path .../flow,
+            # confidence "verified", which is the worst possible combination:
+            # correct enough to look right, wrong where it counts, and confident.
+            #
+            # The is_dir() staleness guard in _get_contact_info could never have
+            # caught it. That guard asks whether the branch root still exists;
+            # the wrong root was a live branch with a real mailbox in it.
+            #
+            # Contacts keep their actual job — resolving EXTERNAL callers that the
+            # registry has never heard of, which is what their own docstring
+            # describes. They simply stop overruling the catalog for citizens.
             branch_info = _lookup_branch_by_name(caller_branch)
             if branch_info:
                 return _record_resolution(branch_info, "caller_branch:registry", "verified")
+            contact = _get_contact_info(caller_branch)
+            if contact:
+                return _record_resolution(contact, "caller_branch:contact", "verified")
             # Invents a citizen from env vars alone — no passport, no registry entry.
             return _record_resolution(
                 _synthesize_external_branch(caller_branch), "caller_branch:synthesized", "unverified"

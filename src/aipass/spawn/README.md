@@ -44,7 +44,7 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 | Class | Template | What It Creates |
 |-------|----------|-----------------|
-| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ — 45 files, 23 dirs |
+| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/ incl. json shim), tests/, docs/, logs/ — 50 files, 24 dirs |
 | `project_agent` | `templates/project_agent/` | Minimal citizen for an external project: .trinity/, .aipass/, apps/ (modules/ + handlers/), artifacts/, logs/ — 17 files, 9 dirs |
 
 `admin` is permanently refused as a class or `--template` value — see Grant Admin below.
@@ -188,7 +188,7 @@ spawn/
 │       └── json/
 │           └── json_handler.py          # Standard JSON I/O, operation logging, 7 API functions
 ├── templates/
-│   └── aipass_framework/                # Full scaffold template (44 files, 23 dirs)
+│   └── aipass_framework/                # Full scaffold template (50 files, 24 dirs)
 ├── tests/                               # 20 test files, 456 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
@@ -281,6 +281,26 @@ branch has a real conftest (see Known Issues).
 
 ---
 
+## Newborn Compliance
+
+A citizen minted from `aipass_framework` audits **100%** against the CI gate on
+its first day — verified 2026-08-22 by minting one and running
+`.venv/bin/python .github/scripts/seedgo_audit.py`, the real gate, floor 100.
+Before this the same mint scored 79% and failed the gate, having earned none of
+it (@canary's finding: their entry point was byte-identical to the template
+apart from name substitution).
+
+Two starter test suites ship at birth (`tests/test_cli_routing.py`,
+`tests/test_json_handler.py`) because `test_quality` cannot reach 100 without
+real tests. They are listed in the template's `.spawn/.registry_ignore.json`:
+seedgo's architecture baseline treats every template file as a structural
+requirement of **every** branch of that class, so adding them without that entry
+dropped 9 existing branches to 99% and red-boarded the gate. Measured, not
+assumed — the exclusion is what keeps a template addition from being a fleet-wide
+mandate.
+
+---
+
 ## Known Issues
 
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
@@ -293,11 +313,11 @@ branch has a real conftest (see Known Issues).
 - **Seedgo:** 100% with bypasses, 98% without (15 live bypass rules, all measured 2026-08-13)
 - **Tests:** 434 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
-- **Template registry:** 45 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
+- **Template registry:** 50 files, 24 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-23*
 
 [← Back to AIPass](../../../README.md)

@@ -22,7 +22,7 @@ this would be the first network-listening service in AIPass.
 
 Commands (via drone @api):
     host-api serve [--host H] [--port P]        Run the server
-    host-api issue-token <label> [--scope S] --out FILE
+    host-api issue-token <label> [--scope S] [--out FILE]
     host-api list-tokens                        Show tokens (never the values)
     host-api revoke-token <id>                  Revoke, effective next request
     host-api config                             Show the effective config
@@ -39,6 +39,7 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from aipass.cli.apps.modules import console, header, success, error, warning
@@ -46,6 +47,7 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.modules import host_serve
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 HELP_FLAGS = ("--help", "-h", "help")
@@ -101,6 +103,8 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]COMMANDS:[/yellow]  [dim](via drone @api)[/dim]")
     console.print("  [cyan]host-api serve[/cyan]                 [dim]Run the server (loopback only in Phase 1)[/dim]")
+    console.print("  [cyan]host-api status[/cyan]                [dim]Is a detached server running, and where[/dim]")
+    console.print("  [cyan]host-api stop[/cyan]                  [dim]Ask a detached server to exit[/dim]")
     console.print("  [cyan]host-api issue-token <label>[/cyan]   [dim]Mint a bearer token for a device[/dim]")
     console.print("  [cyan]host-api list-tokens[/cyan]           [dim]List tokens — values are never shown[/dim]")
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
@@ -110,12 +114,15 @@ def print_help() -> None:
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  [cyan]--host <ip>[/cyan]      [dim]Bind address override (literal IP, never a hostname)[/dim]")
     console.print("  [cyan]--port <n>[/cyan]       [dim]Port override[/dim]")
+    console.print("  [cyan]--detach[/cyan]         [dim]serve: run in its own session, output to a log file[/dim]")
+    console.print("  [dim]                a serve under drone dies on drone's exec timeout[/dim]")
     console.print("  [cyan]--scope <s>[/cyan]      [dim]Token scope: read or operate (default: read)[/dim]")
-    console.print("  [cyan]--out <file>[/cyan]     [dim]Write the raw token to a 0600 file[/dim]")
+    console.print("  [cyan]--out <file>[/cyan]     [dim]Override where the 0600 receipt lands[/dim]")
+    console.print("  [dim]                default: ~/.secrets/aipass/host_api/<label>.token[/dim]")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [dim]# Enroll a phone, then start the server[/dim]")
-    console.print("  [cyan]drone @api host-api issue-token pixel-8 --scope read --out ~/pixel.token[/cyan]")
+    console.print("  [cyan]drone @api host-api issue-token pixel-8 --scope read[/cyan]")
     console.print("  [cyan]drone @api host-api serve[/cyan]")
     console.print()
     console.print("  [dim]# Lost phone — revoke it, no restart needed[/dim]")
@@ -125,10 +132,16 @@ def print_help() -> None:
     console.print("  [dim]# Check what the server would bind[/dim]")
     console.print("  [cyan]drone @api host-api config[/cyan]")
     console.print()
+    console.print("  [dim]# A server that outlives the shell that started it[/dim]")
+    console.print("  [cyan]drone @api host-api serve --detach[/cyan]")
+    console.print("  [cyan]drone @api host-api status[/cyan]")
+    console.print()
     console.print("[yellow]SECURITY:[/yellow]")
-    console.print("  [dim]Raw token values are never printed — use --out (0600 file).[/dim]")
+    console.print("  [dim]Raw token values are never printed — they land in a 0600 receipt file.[/dim]")
+    console.print("  [dim]An existing receipt is never overwritten: its token is still live.[/dim]")
     console.print("  [dim]Bind refuses wildcards, hostnames, and addresses this machine lacks.[/dim]")
     console.print("  [dim]Phase 1 is loopback-only, pending the security review gate.[/dim]")
+    console.print("  [dim]--detach validates the bind BEFORE spawning — a refusal never reaches a child.[/dim]")
     console.print()
 
 
@@ -196,9 +209,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcommand = args[0]
     rest = args[1:]
 
-    if subcommand == "serve":
-        _cmd_serve(rest)
+    # Offered to host_serve FIRST — it owns serve/status/stop and declines
+    # everything else, so an unknown subcommand still reaches the error below
+    # rather than disappearing into a silent True.
+    if host_serve.handle_command(command, args):
         return True
+
     if subcommand == "issue-token":
         _cmd_issue_token(rest)
         return True
@@ -227,69 +243,58 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================
 
 
-def _cmd_serve(args: List[str]) -> None:
-    """Run the server after the bind gate clears."""
-    header("Host API Server")
-    console.print()
-
-    if not host_server.is_available():
-        error(
-            "Server libraries not installed",
-            suggestion=host_server.INSTALL_HINT,
-        )
-        return
-
-    host = _flag_value(args, "--host")
-    port_raw = _flag_value(args, "--port")
-
-    port = None
-    if port_raw is not None:
-        try:
-            port = int(port_raw)
-        except ValueError:
-            logger.warning("[host_api] non-numeric port rejected: %s", port_raw)
-            error(f"Port must be a number, got: {port_raw}")
-            return
-
-    try:
-        host_server.serve(host=host, port=port)
-    except host_config.BindRefused as e:
-        # The whole point of D1: refuse, explain, and do not start.
-        logger.error("[host_api] bind refused, server not started: %s", e)
-        error("Bind refused — server not started", suggestion=str(e))
-        json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-    except RuntimeError as e:
-        logger.error("[host_api] server could not start: %s", e)
-        error(str(e))
-
-
 def _cmd_issue_token(args: List[str]) -> None:
     """Mint a token for a device, writing the raw value to a 0600 file."""
     header("Issue Host API Token")
     console.print()
 
     positional = [arg for arg in args if not arg.startswith("-")]
-    flag_values = {_flag_value(args, "--scope"), _flag_value(args, "--out")}
+    flag_values = {host_serve.flag_value(args, "--scope"), host_serve.flag_value(args, "--out")}
     label_candidates = [value for value in positional if value not in flag_values]
 
     if not label_candidates:
         error(
             "Token label required",
-            suggestion="drone @api host-api issue-token <label> --out FILE",
+            suggestion="drone @api host-api issue-token <label> [--scope read|operate]",
         )
         return
 
     label = label_candidates[0]
-    scope = _flag_value(args, "--scope") or "read"
-    out_path = _flag_value(args, "--out")
+    scope = host_serve.flag_value(args, "--scope") or "read"
+    out_path = host_serve.flag_value(args, "--out")
 
-    if not out_path:
-        # S49 precedent: no raw secret to stdout. A token pasted into scrollback
-        # is a token in the shell history file.
+    # --out IS OPTIONAL NOW, and S49 is untouched by that: the rule was never
+    # "make the caller name a file", it was "never print the raw value". A
+    # default that lands in the secrets directory honours it better than a
+    # required flag whose own example pointed at the home root — which is how
+    # three raw receipts came to be sitting in ~ (found 2026-08-19).
+    try:
+        target = Path(os.path.expanduser(out_path)) if out_path else host_tokens.receipt_path(label)
+    except host_tokens.TokenError as e:
+        logger.warning("[host_api] token receipt path refused: %s", e)
+        error(str(e))
+        return
+
+    # BEFORE minting, not after: a token that exists in the store with no
+    # readable receipt is a live credential nobody holds. Checked here so the
+    # refusal costs nothing, and again by O_EXCL below so the check is not
+    # merely check-then-act.
+    if target.exists():
         error(
-            "--out FILE is required",
-            suggestion="The raw token is never printed. Write it to a file: --out ~/device.token",
+            f"A receipt already exists at {target}",
+            suggestion=(
+                "Refusing to overwrite it — the token it holds is still LIVE in the store, and truncating the "
+                "file would leave a credential nobody can read and nobody thought to revoke. Move or delete "
+                "that file, or revoke its token first: drone @api host-api list-tokens"
+            ),
         )
+        return
+
+    try:
+        host_tokens.prepare_receipt_dir(target)
+    except OSError as e:
+        logger.error("[host_api] could not prepare the receipt directory %s: %s", target.parent, e)
+        error(f"Could not prepare {target.parent}: {e}")
         return
 
     try:
@@ -300,8 +305,11 @@ def _cmd_issue_token(args: List[str]) -> None:
         return
 
     try:
-        target = os.path.expanduser(out_path)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # O_EXCL, not O_TRUNC: the existence check above is a good sentence, this
+        # is the guarantee. Between the two, another process could have created
+        # the file — and silently truncating whatever it wrote is the data loss
+        # the check exists to prevent.
+        fd = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.write(fd, raw.encode("utf-8"))
         finally:
@@ -311,7 +319,7 @@ def _cmd_issue_token(args: List[str]) -> None:
         # write failed cleanly would issue a second one and leave a live orphan.
         logger.error("[host_api] token %s issued but its file write failed: %s", record["id"], e)
         error(
-            f"Token was issued but could not be written to {out_path}: {e}",
+            f"Token was issued but could not be written to {target}: {e}",
             suggestion=f"Revoke it: drone @api host-api revoke-token {record['id']}",
         )
         return
@@ -334,7 +342,7 @@ def _cmd_list_tokens() -> None:
     if not records:
         warning("No tokens issued")
         console.print()
-        console.print("[dim]Issue one: drone @api host-api issue-token <label> --out FILE[/dim]")
+        console.print("[dim]Issue one: drone @api host-api issue-token <label>[/dim]")
         return
 
     for record in records:
@@ -446,8 +454,8 @@ def _cmd_set_config(args: List[str]) -> None:
     header("Set Host API Config")
     console.print()
 
-    host = _flag_value(args, "--host")
-    port_raw = _flag_value(args, "--port")
+    host = host_serve.flag_value(args, "--host")
+    port_raw = host_serve.flag_value(args, "--port")
 
     if host is None and port_raw is None:
         error(
@@ -485,31 +493,6 @@ def _cmd_set_config(args: List[str]) -> None:
 # =============================================
 # PRIVATE HELPERS
 # =============================================
-
-
-def _flag_value(args: List[str], flag: str) -> Optional[str]:
-    """
-    Read the value following *flag*.
-
-    Args:
-        args: Argument list.
-        flag: Flag name, e.g. "--host".
-
-    Returns:
-        The value, or None if the flag is absent or has no value after it.
-    """
-    if flag not in args:
-        return None
-
-    index = args.index(flag)
-    if index + 1 >= len(args):
-        return None
-
-    value = args[index + 1]
-    if value.startswith("-"):
-        return None
-
-    return value
 
 
 # =============================================

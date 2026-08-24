@@ -26,6 +26,7 @@ from aipass.cli.apps.modules import console, error, header, success, warning
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.scan.ceiling import CeilingBreach
 from aipass.backup.apps.handlers.state.backup_timestamps import (
     format_age,
     get_timestamps,
@@ -56,6 +57,38 @@ def refuse_missing_root(mode: str, project_root: str, show_panels: bool = True) 
     json_handler.log_operation(
         f"{mode}_refused",
         {"project_root": project_root, "reason": "not a directory"},
+    )
+    result = BackupResult(mode=mode, project_root=project_root)
+    result.add_error(message, is_critical=True)
+    return result
+
+
+def refuse_oversized_run(
+    mode: str,
+    project_root: str,
+    breach: CeilingBreach,
+    show_panels: bool = True,
+) -> BackupResult:
+    """Build the refusal result for a run that breached a per-run ceiling.
+
+    Shared by snapshot/versioned/all. Fails LOUD and early: the alternative
+    the baud incident demonstrated is a run that grinds for 7.5h writing
+    50GB of build artifacts while reporting nothing wrong.
+    """
+    message = f"Backup refused — {breach.summary()}"
+    logger.error(f"[backup] {mode} refused — {breach.summary()}")
+    if show_panels:
+        error(message)
+        for line in breach.detail_lines():
+            console.print(f"[dim]{line}[/dim]")
+    json_handler.log_operation(
+        f"{mode}_refused",
+        {
+            "project_root": project_root,
+            "reason": f"ceiling_{breach.reason}",
+            "measured": breach.measured,
+            "limit": breach.limit,
+        },
     )
     result = BackupResult(mode=mode, project_root=project_root)
     result.add_error(message, is_critical=True)

@@ -636,3 +636,101 @@ def test_the_reserved_comment_is_gone(store: Any) -> None:
     source = Path(host_tokens.__file__).read_text(encoding="utf-8")
 
     assert "never written in Phase 1" not in source
+
+
+class TestTheReceiptHasAHomeAndTheLabelIsFenced:
+    """
+    Where a raw token lands when the caller does not choose.
+
+    Patrick found three raw bearer receipts in his home root on 2026-08-19 —
+    ~/patrick.token and two siblings, 43 bytes each, from the August phone
+    setup. The mechanism was never wrong (raw never printed, 0600 file); the
+    HELP TEXT said `--out ~/pixel.token` and whoever follows the docs mints a
+    secret into their home directory. The default lives beside the hashed store
+    now, and the label — free-form until today — becomes a filename, which is
+    the one place it could reach somewhere it should not.
+    """
+
+    def test_the_receipt_sits_beside_the_hashed_store(self, store: Path) -> None:
+        """One provider directory, both halves of the same secret."""
+        receipt = host_tokens.receipt_path("pixel-8")
+
+        assert receipt == (store / "host_api" / "pixel-8.token").resolve()
+        assert receipt.parent == host_tokens.store_path().parent.resolve()
+
+    def test_a_label_carrying_a_separator_is_refused(self, store: Path) -> None:
+        """A label is a NAME. This is the one function that makes it a path."""
+        with pytest.raises(host_tokens.TokenError) as refusal:
+            host_tokens.receipt_path("phones/pixel-8")
+
+        assert "path" in str(refusal.value)
+
+    def test_a_traversing_label_is_refused(self, store: Path) -> None:
+        """The obvious escape, named rather than sanitised into something else."""
+        with pytest.raises(host_tokens.TokenError):
+            host_tokens.receipt_path("../../pixel-8")
+
+    def test_an_absolute_label_is_refused(self, store: Path) -> None:
+        """A label that is already a path does not get to become one."""
+        with pytest.raises(host_tokens.TokenError):
+            host_tokens.receipt_path("/etc/pixel-8")
+
+    def test_a_hidden_label_is_refused(self, store: Path) -> None:
+        """A secret nobody can see is a secret nobody rotates."""
+        with pytest.raises(host_tokens.TokenError) as refusal:
+            host_tokens.receipt_path(".pixel-8")
+
+        assert "hidden" in str(refusal.value)
+
+    def test_a_bare_dot_is_refused(self, store: Path) -> None:
+        """'.' survives Path().name and would name the directory itself."""
+        with pytest.raises(host_tokens.TokenError):
+            host_tokens.receipt_path(".")
+
+    def test_an_empty_label_is_refused_in_the_stores_own_words(self, store: Path) -> None:
+        """The same sentence issue_token uses — one rule, stated once."""
+        with pytest.raises(host_tokens.TokenError) as refusal:
+            host_tokens.receipt_path("   ")
+
+        assert "label is required" in str(refusal.value)
+
+    def test_an_ordinary_label_with_spaces_still_works(self, store: Path) -> None:
+        """The fence refuses what is DANGEROUS, not what is untidy.
+
+        Labels are human names ("Patrick's old phone"). Refusing a space would
+        make the fence a naming policy, which is not what it is for.
+        """
+        receipt = host_tokens.receipt_path("Patrick's old phone")
+
+        assert receipt.name == "Patrick's old phone.token"
+        assert receipt.parent == (store / "host_api").resolve()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privilege on Windows")
+    def test_a_receipt_path_that_symlinks_out_of_the_store_is_refused(self, store: Path) -> None:
+        """The second gate, and the case that proves it is not decoration.
+
+        The label checks above all refuse the SENTENCE — a name that looks like
+        a path. They cannot see this one: "pixel-8" is a perfectly good name,
+        and the escape lives in the filesystem rather than in the string. A
+        symlink planted at the receipt's own path sends an 0600 write wherever
+        it points, so the fence has to be checked after resolving, not only
+        before.
+
+        Found while mutating: deleting the post-resolve check bit nothing,
+        because every label test above is caught one line earlier. A guard no
+        test can distinguish from its own absence is a guard nobody can trust.
+        """
+        provider_dir = store / "host_api"
+        provider_dir.mkdir(parents=True, exist_ok=True)
+        (provider_dir / "pixel-8.token").symlink_to(store.parent / "elsewhere.token")
+
+        with pytest.raises(host_tokens.TokenError) as refusal:
+            host_tokens.receipt_path("pixel-8")
+
+        assert "outside" in str(refusal.value)
+
+    def test_the_label_is_stripped_the_way_the_record_strips_it(self, store: Path) -> None:
+        """The receipt and the record must agree on what the label IS."""
+        record, _raw = host_tokens.issue_token("  pixel-8  ")
+
+        assert host_tokens.receipt_path("  pixel-8  ").name == f"{record['label']}.token"

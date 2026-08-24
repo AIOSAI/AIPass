@@ -22,6 +22,10 @@ import os
 import time
 from unittest.mock import patch
 
+import pytest
+
+from aipass.hooks.apps.modules import cadence
+
 MODULE = "aipass.hooks.apps.modules.cadence"
 
 
@@ -1147,3 +1151,123 @@ class TestShouldFireMail:
         _write_state(tmp_path, turn=3)
         with _mail_env(tmp_path, config):
             assert should_fire_mail(1, {}) is True
+
+
+class TestShouldFireAdvisory:
+    """Throttle for STANDING conditions — states that stay true for days and
+    re-assert on every qualifying edit. @devpulse's seat sat over the todos cap
+    long enough to write 209 identical lines and trip @trigger's
+    repeat-signature escalation (Patrick's ruling, 2026-08-19)."""
+
+    @pytest.fixture(autouse=True)
+    def _state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "advisory-test")
+        self.tmp = tmp_path
+
+    def _at_turn(self, turn):
+        return patch.object(cadence, "current_turn", return_value=turn)
+
+    def test_fires_the_first_time(self):
+        with self._at_turn(1):
+            assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_silent_on_the_very_next_turn(self):
+        with self._at_turn(1):
+            cadence.should_fire_advisory("todos_count")
+        with self._at_turn(2):
+            assert cadence.should_fire_advisory("todos_count") is False
+
+    def test_silent_for_repeated_edits_within_one_turn(self):
+        """The actual defect: many edits, one turn, 209 log lines."""
+        with self._at_turn(7):
+            fired = [cadence.should_fire_advisory("todos_count") for _ in range(20)]
+        assert fired.count(True) == 1
+
+    def test_fires_again_after_the_period(self):
+        with self._at_turn(1):
+            cadence.should_fire_advisory("todos_count")
+        with self._at_turn(1 + cadence.ADVISORY_PERIOD):
+            assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_silent_one_turn_short_of_the_period(self):
+        with self._at_turn(1):
+            cadence.should_fire_advisory("todos_count")
+        with self._at_turn(cadence.ADVISORY_PERIOD):
+            assert cadence.should_fire_advisory("todos_count") is False
+
+    def test_a_counter_reset_re_announces(self):
+        """Backwards means compact or a new session — the old numbering must
+        not buy silence in the new one."""
+        with self._at_turn(50):
+            cadence.should_fire_advisory("todos_count")
+        with self._at_turn(2):
+            assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_advisories_are_throttled_independently(self):
+        with self._at_turn(1):
+            assert cadence.should_fire_advisory("todos_count") is True
+            assert cadence.should_fire_advisory("something_else") is True
+
+    def test_no_session_id_cannot_throttle_so_it_fires(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_unreadable_turn_falls_back_to_elapsed_time(self):
+        """An unreadable counter must still throttle — degrading to
+        fire-every-time is the bug being fixed, not a fallback."""
+        with self._at_turn(None):
+            assert cadence.should_fire_advisory("todos_count") is True
+            assert cadence.should_fire_advisory("todos_count") is False
+
+    def test_time_fallback_fires_once_the_window_passes(self):
+        with self._at_turn(None):
+            cadence.should_fire_advisory("todos_count")
+            path = self.tmp / "aipass-advisory-todos_count-advisory-test.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["at"] = data["at"] - cadence.ADVISORY_SECONDS - 1
+            path.write_text(json.dumps(data), encoding="utf-8")
+            assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_corrupt_state_is_treated_as_never_fired(self):
+        path = self.tmp / "aipass-advisory-todos_count-advisory-test.json"
+        path.write_text("{ not json", encoding="utf-8")
+        with self._at_turn(3):
+            assert cadence.should_fire_advisory("todos_count") is True
+
+    def test_unwritable_state_still_fires(self):
+        """Losing the advisory is worse than repeating it."""
+        with self._at_turn(1), patch.object(cadence.Path, "write_text", side_effect=OSError("read-only")):
+            assert cadence.should_fire_advisory("todos_count") is True
+
+
+class TestCurrentTurn:
+    """Read-only: a PreToolUse consumer must never advance the counter — many
+    tool calls share one turn, and the token guard keys off UserPromptSubmit."""
+
+    @pytest.fixture(autouse=True)
+    def _state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "turn-test")
+        self.path = tmp_path / "aipass-cadence-turn-test.json"
+
+    def test_reads_the_stored_turn(self):
+        self.path.write_text(json.dumps({"turn": 12, "token": 5}), encoding="utf-8")
+        assert cadence.current_turn() == 12
+
+    def test_does_not_advance_it(self):
+        self.path.write_text(json.dumps({"turn": 12, "token": 5}), encoding="utf-8")
+        for _ in range(5):
+            cadence.current_turn()
+        assert json.loads(self.path.read_text(encoding="utf-8"))["turn"] == 12
+
+    def test_missing_state_is_none(self):
+        assert cadence.current_turn() is None
+
+    def test_corrupt_state_is_none(self):
+        self.path.write_text("{ not json", encoding="utf-8")
+        assert cadence.current_turn() is None
+
+    def test_no_session_id_is_none(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        assert cadence.current_turn() is None

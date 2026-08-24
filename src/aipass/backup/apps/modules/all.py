@@ -26,9 +26,11 @@ from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.project.config import load_project_config
+from aipass.backup.apps.handlers.project.setup import create_backup_dir
+from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
-from aipass.backup.apps.modules.display import refuse_missing_root
+from aipass.backup.apps.modules.display import refuse_missing_root, refuse_oversized_run
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.versioned import run_versioned
 
@@ -78,6 +80,17 @@ def handle_command(command: str, args: list) -> bool:
 
     logger.info(f"[backup] Running full backup cycle for {project_root}")
 
+    # Scaffold BEFORE the shared scan. create_backup_dir is what writes the
+    # seed .backupignore, and it used to run first inside run_snapshot — after
+    # this scan had already been taken. On a project's first run that meant
+    # load_spec() read a file that did not exist yet, returned an empty spec,
+    # and handed versioned every path the seed was about to exclude. Snapshot
+    # rescanned and looked correct; versioned took the pre-seed list and
+    # copied the artifacts anyway. Idempotent: nothing is overwritten.
+    if create_backup_dir(project_root) is None:
+        refuse_missing_root("all", project_root, show_panels)
+        return True
+
     # ONE scan shared between both modes (single-scan rule)
     config = load_project_config(project_root)
     spec = load_spec(project_root)
@@ -85,6 +98,15 @@ def handle_command(command: str, args: list) -> bool:
     max_size = config.get("max_file_size_mb", 100)
     all_files = list(walk_project(project_root))
     filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
+
+    # Refuse the whole cycle here, not just inside the sub-modules. A refusal
+    # from run_snapshot alone does not stop this function: it would fall
+    # straight through to run_versioned and write the store it just refused
+    # to mirror.
+    breach = check_ceiling(filtered, config)
+    if breach is not None:
+        refuse_oversized_run("all", project_root, breach, show_panels)
+        return True
 
     snap_result = run_snapshot(project_root)
     console.print()

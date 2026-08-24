@@ -276,6 +276,31 @@ class TestSeedTemplate:
         content = _TEMPLATE_PATH.read_text(encoding="utf-8")
         assert ".venv/" in content
 
+    def test_template_has_rust_target(self):
+        """Seed template excludes target/ — the Rust build-artifact dir.
+
+        Regression: baud's generated .backupignore covered build/ and dist/
+        but not target/, so an 18GB src-tauri/target tree was walked and
+        copied for 7.5h, landing 50GB of .o files in the stores.
+        """
+        from aipass.backup.apps.handlers.project.setup import _TEMPLATE_PATH
+
+        content = _TEMPLATE_PATH.read_text(encoding="utf-8")
+        assert "target/" in content
+
+    def test_template_target_matches_nested_rust_tree(self):
+        """target/ is unanchored, so it matches at any depth.
+
+        baud's tree is app/src-tauri/target, not a top-level target/ — an
+        anchored pattern would have been written and still missed it.
+        """
+        from aipass.backup.apps.handlers.project.setup import _TEMPLATE_PATH
+
+        spec = pathspec.PathSpec.from_lines("gitignore", _TEMPLATE_PATH.read_text(encoding="utf-8").splitlines())
+        assert spec.match_file("app/src-tauri/target/debug/deps/foo.rcgu.o")
+        assert spec.match_file("target/debug/build.rs")
+        assert not spec.match_file("app/src/target_resolver.rs")
+
     def test_build_backupignore_reads_template(self):
         """_build_backupignore returns the template content."""
         from aipass.backup.apps.handlers.project.setup import _TEMPLATE_PATH, _build_backupignore

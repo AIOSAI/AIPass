@@ -1124,3 +1124,95 @@ class TestOrphanDetectionIsNotOverBroad:
         attributed, reason = mod._attribute_orphan(root, {"seatname": [seat]})
         assert attributed == seat
         assert reason == ""
+
+
+class TestFindQuarantinedLocations:
+    """The read-only half of the attribution rule, used by `status`.
+
+    It shares _attribute_orphan with the healer but must never write. That
+    "never" is the whole reason the function exists separately, so it is
+    asserted here rather than assumed from the docstring.
+    """
+
+    def test_a_row_with_no_location_is_quarantined_by_that_reason(self, tmp_path):
+        mod = _import_heal_registry()
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {"plans": {"0200": {"status": "open", "location": ""}}, "next_number": 356},
+                "tdplan_registry.json": {"plans": {}, "next_number": 15},
+            }
+        )
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
+            with patch.object(mod, "_citizen_seat_index", return_value={}):
+                rows = mod.find_quarantined_locations(store.load)
+
+        assert [r["plan_id"] for r in rows] == ["FPLAN-0200"]
+        assert rows[0]["reason"] == "no location recorded"
+        assert rows[0]["registry"] == "fplan_registry.json"
+        assert store.saves == []
+
+    def test_an_attributable_orphan_is_not_quarantined(self, tmp_path):
+        """One seat beneath the location IS the evidence — nothing to rule on."""
+        mod = _import_heal_registry()
+        seat = tmp_path / "proj" / "baud"
+        seat.mkdir(parents=True)
+        root = tmp_path / "proj"
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0200": {"status": "open", "location": str(root)}},
+                    "next_number": 356,
+                },
+                "tdplan_registry.json": {"plans": {}, "next_number": 15},
+            }
+        )
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
+            with patch.object(mod, "_citizen_seat_index", return_value={"baud": [seat]}):
+                rows = mod.find_quarantined_locations(store.load)
+
+        assert rows == []
+        assert store.saves == []
+
+    def test_an_unattributable_orphan_carries_the_refusal_reason(self, tmp_path):
+        """A vanished path no live seat claims: named, never guessed at."""
+        mod = _import_heal_registry()
+        gone = tmp_path / "deleted" / "somebody"
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {"plans": {}, "next_number": 356},
+                "tdplan_registry.json": {
+                    "plans": {"0015": {"status": "open", "location": str(gone)}},
+                    "next_number": 16,
+                },
+            }
+        )
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
+            with patch.object(mod, "_citizen_seat_index", return_value={}):
+                rows = mod.find_quarantined_locations(store.load)
+
+        assert [r["plan_id"] for r in rows] == ["TDPLAN-0015"]
+        assert rows[0]["location"] == str(gone)
+        assert rows[0]["reason"]
+        assert rows[0]["reason"] != "no location recorded"
+        assert store.saves == []
+
+    def test_an_unreadable_registry_skips_that_type_not_the_run(self, tmp_path):
+        """One blown-up type must not hide the quarantined rows of the others."""
+        mod = _import_heal_registry()
+        store = FakeRegistryStore(
+            {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "location": ""}}, "next_number": 16}}
+        )
+
+        def load(registry_file=None):
+            if registry_file == "fplan_registry.json":
+                raise OSError("registry unreadable")
+            return store.load(registry_file)
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
+            with patch.object(mod, "_citizen_seat_index", return_value={}):
+                rows = mod.find_quarantined_locations(load)
+
+        assert [r["plan_id"] for r in rows] == ["TDPLAN-0015"]

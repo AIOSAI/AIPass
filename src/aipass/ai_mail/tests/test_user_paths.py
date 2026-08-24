@@ -326,3 +326,119 @@ class TestDetectionFailureDiagnostics:
 
         with pytest.raises(RuntimeError, match="BRANCH DETECTION FAILED"):
             get_current_user()
+
+
+class TestRepoRootFallbackIsLoud:
+    """The cwd fallback still happens, but it stops being silent."""
+
+    def test_the_fallback_names_itself_once(self, monkeypatch, tmp_path, caplog):
+        """Silence here was doing real work — every caller got "wherever I stand".
+
+        Written when the fresh checkout was the ORDINARY way to reach this
+        branch. It no longer is: pyproject.toml resolves that case, and the
+        class below pins it. What remains is a tree with neither marker, which
+        really is broken — so the warning still has to be findable, and still
+        must not repeat per call. Flagged by @devpulse alongside the PR 739
+        failures (2026-08-23).
+        """
+        import logging
+
+        from aipass.ai_mail.apps.handlers import paths
+
+        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
+        monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
+        monkeypatch.chdir(tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            first = paths.find_repo_root()
+            paths.find_repo_root()
+            paths.find_repo_root()
+
+        assert first == tmp_path, "anchor: the fallback must actually have fired"
+        warnings = [r for r in caplog.records if "falling back to the current directory" in r.getMessage()]
+        assert len(warnings) == 1, "warned once per process — a line per call is the runaway-log problem"
+
+    def test_it_still_returns_rather_than_raising(self, monkeypatch, tmp_path):
+        """Refusing would make every CI run an import-time failure by construction."""
+        from aipass.ai_mail.apps.handlers import paths
+
+        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
+        monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
+        monkeypatch.chdir(tmp_path)
+
+        assert paths.find_repo_root() == tmp_path
+
+
+class TestTheFreshCheckoutFindsTheRightRoot:
+    """@devpulse's standing item (dc764d49): "find_repo_root's return Path.cwd(). Fix it."
+
+    Their framing is what made the fix findable, so it is recorded here: the
+    danger was never the register being MISSING — they refuse on that — it is
+    the register being FOUND IN THE WRONG PLACE, which no refusal can catch. A
+    wire that arms against an empty file in the wrong directory reports perfect
+    health and covers nothing.
+
+    AIPASS_REGISTRY.json is UNTRACKED runtime state, so on a fresh checkout it
+    exists nowhere and the walk fell through to "wherever this process happens
+    to be standing". pyproject.toml is tracked, sits only at the repo root, and
+    is on the ancestor chain from this package — so the answer is available, it
+    was simply never asked for.
+    """
+
+    def test_a_checkout_with_no_registry_still_finds_its_own_root(self, monkeypatch, tmp_path):
+        """The regression test for the actual defect: right root, wrong cwd.
+
+        Reds before the pyproject marker exists — find_repo_root returns the
+        unrelated cwd, and every path built from it (feed, register, reports)
+        lands in a directory that has nothing to do with the checkout.
+        """
+        from aipass.ai_mail.apps.handlers import paths
+
+        checkout = tmp_path / "fresh-checkout"
+        (checkout / "src" / "aipass" / "ai_mail" / "apps" / "handlers").mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\nname = 'aipass'\n", encoding="utf-8")
+        assert not list(checkout.rglob("AIPASS_REGISTRY.json")), "premise: a fresh checkout has no registry"
+
+        elsewhere = tmp_path / "somewhere-else"
+        elsewhere.mkdir()
+
+        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
+        monkeypatch.setattr(
+            paths, "__file__", str(checkout / "src" / "aipass" / "ai_mail" / "apps" / "handlers" / "paths.py")
+        )
+        monkeypatch.chdir(elsewhere)
+
+        assert paths.find_repo_root() == checkout
+
+    def test_the_registry_still_wins_when_it_is_there(self, monkeypatch, tmp_path):
+        """Order matters: the live registry is authoritative, pyproject is the stand-in.
+
+        Both markers present, at DIFFERENT levels, so the assertion can only
+        pass for one of them.
+        """
+        from aipass.ai_mail.apps.handlers import paths
+
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        (inner / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (outer / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+        monkeypatch.setattr(paths, "__file__", str(inner / "paths.py"))
+
+        assert paths.find_repo_root() == inner
+
+    def test_neither_marker_anywhere_still_falls_back_loudly(self, monkeypatch, tmp_path, caplog):
+        """The last resort survives — it is just no longer the fresh-checkout path."""
+        import logging
+
+        from aipass.ai_mail.apps.handlers import paths
+
+        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
+        monkeypatch.setattr(paths, "__file__", str(tmp_path / "bare" / "paths.py"))
+        monkeypatch.chdir(tmp_path)
+
+        with caplog.at_level(logging.WARNING):
+            assert paths.find_repo_root() == tmp_path
+
+        assert any("falling back to the current directory" in r.getMessage() for r in caplog.records)

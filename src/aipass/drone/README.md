@@ -232,9 +232,11 @@ drone/
 1. **CLI input** → `drone.py:main()`
 2. **Built-in commands** checked first: `systems`, `scan`, `activate`, `list`, `remove`, `rm`
 3. **`@target` routing** → branch resolution via `AIPASS_REGISTRY.json` → subprocess dispatch
-4. **Module fallback** → if branch not found but is a registered module, routes internally
+4. **Module routing** → a registered module that is not a branch here is routed internally, **decided before any branch call** (`branch_exists()`), never discovered by failing one
 5. **Bare module names** → auto-discovered from `apps/modules/*.py`, routed via `importlib`
 6. **Custom commands** → greedy multi-word matching against `drone_command_registry.json`
+
+There is **no module fallback on the error path.** A `BranchNotFoundError` from a branch that the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a registry path that escapes the project root, and the old fallback answered that security refusal by quietly running the module instead.
 
 ### Module System
 
@@ -258,6 +260,17 @@ Every routed command is attributed to a caller, stamped into `AIPASS_CALLER_BRAN
 | cwd `*_REGISTRY.json` | Which **project** the process is in — never a citizen | Last resort |
 
 Assigned identity beats location: an agent that cds into another branch is still itself. Nothing here grants authority — git's owner tier reads passports directly.
+
+**The provenance travels with the name.** `resolve_caller_identity_signal()` returns a `CallerIdentity(name, source)` where source is `assigned` | `passport` | `project`, and `execute_branch_command()` stamps it as **`AIPASS_CALLER_IDENTITY_SOURCE`** alongside `AIPASS_CALLER_BRANCH`. `resolve_caller_identity()` still returns the bare name for attribution sites (the `[CALLER:X]` tag, the deletion record); anything that must *decide* on an identity takes the signal.
+
+Why it exists: these two cases arrived byte-identical downstream, and they are not the same claim.
+
+| Case | `CALLER_BRANCH` | Source | What it is |
+|---|---|---|---|
+| agent assigned `@commons`, standing in `/tmp` | `commons` | `assigned` | a **credential** — valid from any directory (S102) |
+| nobody assigned, standing at the repo root | `aipass` | `project` | a **directory name** that collides with the citizen `@aipass` |
+
+The second sent a dispatch out as `@aipass` on 2026-08-21; ai_mail's contact lookup found the real citizen row and stamped it "verified", and the wake-back woke the wrong branch — 11 turns, $1.41, and nothing warned (DPLAN-0315 item 3). A consumer cannot re-derive this: it is a different process with a different cwd. Unstamped, ai_mail's identity fence had to refuse **both**, which re-broke the very S102 case it protects.
 
 **Log severity is chosen by what the outcome means, not by how unusual it looks:**
 
@@ -432,6 +445,8 @@ By default, drone captures subprocess output (`capture_output=True`) with a 30s 
 
 Commands in the interactive tuple bypass capture and inherit the terminal directly — enabling live Rich output, colors, and no timeout.
 
+**Interactive mode is a property of BRANCH (subprocess) routing only.** It means "inherit the terminal instead of capturing the subprocess", and `_handle_module()` runs in-process and takes no interactive parameter — so a module target never receives it and never could. `@seedgo`, `@cli` and `@spawn` are both module and branch, so an interactive command against them takes the subprocess lane and renders live. `git` is a module and **never** a branch: `drone @git status` matched `INTERACTIVE_COMMANDS`, skipped the module fast path, and raised `BranchNotFoundError` on every call by design — a fallback firing on the **happy path**, which is worse than one firing on failure because it trains everyone to ignore the channel it fires on. It was 1335 of 1337 lines in `system_logs/drone_drone.log`, burying the one real WARNING in there at 0.08% concentration (DPLAN-0315, Patrick's ruling: *"there should be no fallback full stop... if our intended action or process fail, it fail loud"*). The target is now checked for a branch before the interactive lane is taken.
+
 **Always interactive** — these presentational commands always inherit the terminal for Rich color on a TTY, plain when piped:
 
 | Pattern        | Reason                                      |
@@ -514,7 +529,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1123 tests collected across 28 test files (1118 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-14:
+1199 tests collected across 30 test files (1194 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-21:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -528,6 +543,8 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 | Broker | `test_broker.py` | 60 |
 | Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 93 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
+| Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
+| Caller identity provenance | `test_caller_identity_provenance.py` | 10 |
 
 Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
@@ -544,7 +561,7 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1118 pass, 5 skip | **Last Updated:** 2026-08-14
+**Seedgo:** 100% | **Tests:** 1194 pass, 5 skip | **Last Updated:** 2026-08-21
 
 ---
 [← Back to AIPass](../../../README.md)

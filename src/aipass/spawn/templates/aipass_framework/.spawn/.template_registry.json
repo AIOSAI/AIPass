@@ -5,6 +5,11 @@
       "name": ".ai_mail.local",
       "path": ".ai_mail.local"
     },
+    "d002": {
+      "has_branch_placeholder": false,
+      "name": "json",
+      "path": "apps/handlers/json"
+    },
     "d003": {
       "has_branch_placeholder": false,
       "name": ".aipass",
@@ -136,7 +141,7 @@
       "path": ".aipass/README.md"
     },
     "f004": {
-      "content_hash": "840297f5e837",
+      "content_hash": "66a466374411",
       "has_branch_placeholder": false,
       "name": "aipass_local_prompt.md",
       "path": ".aipass/aipass_local_prompt.md"
@@ -172,7 +177,7 @@
       "path": ".seedgo/README.md"
     },
     "f010": {
-      "content_hash": "0b0a1f25990f",
+      "content_hash": "ee41999ae694",
       "has_branch_placeholder": false,
       "name": "bypass.json",
       "path": ".seedgo/bypass.json"
@@ -214,7 +219,7 @@
       "path": "DASHBOARD.local.json"
     },
     "f017": {
-      "content_hash": "ad99517a50f9",
+      "content_hash": "b0b06a218551",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "README.md"
@@ -256,7 +261,7 @@
       "path": "apps/modules/README.md"
     },
     "f024": {
-      "content_hash": "34f5e7ff7e01",
+      "content_hash": "1170eef8a2a4",
       "has_branch_placeholder": false,
       "name": ".registry_ignore.json",
       "path": ".spawn/.registry_ignore.json"
@@ -267,8 +272,14 @@
       "name": "README.md",
       "path": "apps/plugins/README.md"
     },
+    "f026": {
+      "content_hash": "cb42dcf8f733",
+      "has_branch_placeholder": false,
+      "name": "__init__.py",
+      "path": "__init__.py"
+    },
     "f027": {
-      "content_hash": "024209a8c889",
+      "content_hash": "e17341c51e86",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -328,7 +339,7 @@
       "path": "templates/README.md"
     },
     "f037": {
-      "content_hash": "c157895c9b27",
+      "content_hash": "e464e53f006f",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "tests/README.md"
@@ -340,7 +351,7 @@
       "path": "tests/__init__.py"
     },
     "f039": {
-      "content_hash": "97f220799d19",
+      "content_hash": "a93754f0613f",
       "has_branch_placeholder": false,
       "name": "conftest.py",
       "path": "tests/conftest.py"
@@ -381,16 +392,40 @@
       "name": "requirements.project.txt",
       "path": "requirements.project.txt"
     },
+    "f046": {
+      "content_hash": "c516e01e6aaf",
+      "has_branch_placeholder": false,
+      "name": "__init__.py",
+      "path": "apps/handlers/json/__init__.py"
+    },
+    "f047": {
+      "content_hash": "afed9ec00a56",
+      "has_branch_placeholder": false,
+      "name": "json_handler.py",
+      "path": "apps/handlers/json/json_handler.py"
+    },
+    "f048": {
+      "content_hash": "e4fe1ed373a7",
+      "has_branch_placeholder": false,
+      "name": "test_cli_routing.py",
+      "path": "tests/test_cli_routing.py"
+    },
     "f049": {
       "content_hash": "4b01d4130807",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
+    },
+    "f050": {
+      "content_hash": "b7b11f2f916e",
+      "has_branch_placeholder": false,
+      "name": "test_json_handler.py",
+      "path": "tests/test_json_handler.py"
     }
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-08-17",
+    "last_updated": "2026-08-23",
     "version": "1.0.0"
   }
 }

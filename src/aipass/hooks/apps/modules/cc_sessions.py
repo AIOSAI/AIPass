@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.2.0
+# Version: 3.2.1
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-08-18
+# Modified: 2026-08-23
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -33,7 +33,32 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-CC_SESSIONS_DIR = Path.home() / ".claude" / "sessions"
+
+def _claude_home() -> Path:
+    """Home directory for Claude's state, or an unusable sentinel if unknown.
+
+    `Path.home()` RAISES RuntimeError("Could not determine home directory.")
+    when expanduser cannot answer — on POSIX only if the pwd lookup also fails,
+    but on Windows whenever %USERPROFILE% is absent, since ntpath has no pwd to
+    fall back on. Evaluated at module scope, that turns an unresolvable home
+    into an IMPORT-time crash: the whole module dies, not the one call that
+    wanted a path.
+
+    A missing home is not an emergency here — it means there is no
+    ~/.claude to read, which is the same answer as an empty one. So resolution
+    degrades to a path that cannot exist, letting the `.is_dir()` / `.exists()`
+    checks downstream report "nothing here" instead of raising. The fallback is
+    logged, never silent: a machine that cannot name its own home is worth a
+    line in the log even though it does not stop us.
+    """
+    try:
+        return Path.home()
+    except RuntimeError as e:
+        logger.warning("[%s] Cannot resolve home directory (%s) - treating ~/.claude as absent", __name__, e)
+        return Path("<no-home>")
+
+
+CC_SESSIONS_DIR = _claude_home() / ".claude" / "sessions"
 
 HELP_COMMANDS = [
     ("sessions", "List all CC sessions (PID · branch · short-id · kind · age)"),

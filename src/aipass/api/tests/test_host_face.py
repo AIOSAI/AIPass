@@ -268,6 +268,84 @@ class TestTheMountCannotEatTheApi:
 
 
 @fastapi_required
+class TestTheEntryDocumentIsNeverServedStale:
+    """
+    A stable name plus no cache-control is a stale bundle waiting to happen.
+
+    @baud measured it and Patrick paid for it on 2026-08-19: GET / answered 200
+    with etag and last-modified and NO cache-control, so RFC 9111 4.2.2
+    heuristic freshness applies — a browser may treat the document as fresh for
+    roughly 10% of its age since last-modified and serve location.reload()
+    wholly from cache. The entry is un-hashed and NAMES the content-hashed
+    bundles, so a stale entry faithfully fetches OLD assets. His first reload
+    served a round-3 bundle and cost an acceptance round a false FAIL.
+
+    THE RULE, stated once: a file whose NAME changes when its content changes
+    may be cached; a file served under a STABLE name must revalidate. Every
+    file at the bundle root is stable-named and replaced in place by a build,
+    so they all revalidate. /assets is the hashed lane and keeps its caching —
+    a stale hashed file is impossible by construction, because a new build
+    produces a new name.
+
+    no-cache, deliberately, NOT no-store: the etag still answers 304 and the
+    bytes are still saved. This costs one conditional request, not a download.
+    """
+
+    def test_the_entry_document_must_revalidate(self, client) -> None:
+        """The measured defect, asked of the response @baud measured."""
+        response = client.get("/")
+
+        assert response.headers.get("cache-control") == "no-cache"
+
+    def test_the_pwa_start_url_must_revalidate_too(self, client) -> None:
+        """The route a phone actually launches, and the one a narrow fix misses.
+
+        @baud's manifest declares start_url /phone.html, so tapping the home
+        screen icon does NOT go to "/" — it goes to the same document served by
+        its own bundle-root route. Fixing only "/" would leave every installed
+        phone on the stale path while the browser-typed URL looked fixed.
+        """
+        response = client.get("/phone.html")
+
+        assert response.status_code == 200
+        assert response.headers.get("cache-control") == "no-cache"
+
+    def test_the_manifest_must_revalidate(self, client) -> None:
+        """Un-hashed and it names the start_url and the icons — same class."""
+        response = client.get("/manifest.webmanifest")
+
+        assert response.status_code == 200
+        assert response.headers.get("cache-control") == "no-cache"
+
+    def test_revalidating_still_answers_304_and_sends_no_bytes(self, client) -> None:
+        """no-cache, not no-store — the distinction is the whole cost argument.
+
+        If this ever fails, the fix has started re-downloading the document on
+        every reload, which is a different bug wearing the same fix.
+        """
+        first = client.get("/")
+
+        assert "etag" in {key.lower() for key in first.headers}
+
+        second = client.get("/", headers={"If-None-Match": first.headers["etag"]})
+
+        assert second.status_code == 304
+        assert second.content == b""
+
+    def test_hashed_assets_keep_their_caching(self, client) -> None:
+        """The lane that must NOT be touched, pinned so a widening is noticed.
+
+        A hashed name cannot go stale — a new build writes a new name that the
+        (now-revalidated) entry points at. Putting no-cache here would spend a
+        round trip per asset per load to prevent nothing.
+        """
+        response = client.get("/assets/phone.js")
+
+        assert response.status_code == 200
+        assert response.headers.get("cache-control") is None
+
+
+@fastapi_required
 class TestUnbuiltFace:
     """An unbuilt bundle degrades honestly and takes nothing else down."""
 

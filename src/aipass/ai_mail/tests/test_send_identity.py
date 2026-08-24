@@ -194,6 +194,10 @@ def clean_env():
         "AIPASS_CALLER_BRANCH",
         "AIPASS_CALLER_CWD",
         "AIPASS_BRANCH_NAME",
+        # A credential: an ambient "passport"/"assigned" lets the identity fence
+        # accept a caller outside any branch, so leaving it set here disables the
+        # very thing these tests assert. Also stripped globally in conftest.
+        "AIPASS_CALLER_IDENTITY_SOURCE",
     ]
     saved = {k: os.environ.pop(k, None) for k in env_keys}
     yield
@@ -267,6 +271,13 @@ class TestDetectBranchFromPwd:
         """
         registry_path, _ = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
+            # External citizens carry their own passport (verified on disk:
+            # projects/*/src/*/<seat>/.trinity/passport.json for baud, earmark,
+            # finch, marketstand, aipass_site). The synthesis lane serves callers
+            # standing in their OWN branch whose name this registry does not know
+            # — not callers standing nowhere, which the identity fence refuses.
+            (tmp_path / ".trinity").mkdir(parents=True, exist_ok=True)
+            (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
             os.environ["AIPASS_CALLER_BRANCH"] = "VERA-STUDIO"
             os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
             result = detect_branch_from_pwd()
@@ -583,20 +594,46 @@ class TestDispatchEnvIsolation:
             "dispatch_monitor.py must pass spawn_env as the subprocess env"
         )
 
-    def test_detect_resolves_identity_when_cwd_is_wrong(self, clean_env, tmp_path, list_format_registry):
-        """When AIPASS_CALLER_BRANCH is set but CWD is outside any branch,
-        detection should succeed via the env var path, not CWD.
+    def test_detect_refuses_when_cwd_is_outside_any_branch(self, clean_env, tmp_path, list_format_registry):
+        """A CALLER_BRANCH claim no longer survives a CALLER_CWD outside any branch.
 
-        This is the dispatch scenario: agent cd'd away, CWD is useless,
-        but AIPASS_CALLER_BRANCH (set by drone from AIPASS_BRANCH_NAME) works.
+        POLICY CHANGE, 2026-08-21 (Patrick's ruling via @devpulse, 096c9a42):
+        "ur dispatch should fail if u run from [outside] ur cwd, and if aimail was
+        run in root it should fail outright." This test previously asserted the
+        opposite — that the env var rescues a useless cwd — and that permissiveness
+        is the defect: at the repo root drone stamps CALLER_BRANCH from the PROJECT
+        directory name ('aipass'), which collides with the citizen of the same name.
+        A dispatch sent that way cost $1.41 and woke the wrong citizen (0bb77ec2).
+
+        The cost of the trade is named in the reply to @devpulse: ai_mail cannot see
+        whether drone ASSIGNED the identity (AIPASS_BRANCH_NAME, authoritative) or
+        INFERRED it from a directory name (the collision), because drone collapses
+        both into AIPASS_CALLER_BRANCH. Until drone passes that provenance, a
+        dispatched agent that cds out of its branch is refused too — loudly, with a
+        message telling it to re-run from home, which is recoverable. Sending as the
+        wrong citizen is not.
         """
         _, registry_path = list_format_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             os.environ["AIPASS_CALLER_BRANCH"] = "spawn"
             os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)  # Points nowhere useful
+            assert detect_branch_from_pwd() is None
+
+    def test_assigned_identity_still_beats_location_inside_a_branch(self, clean_env, list_format_registry):
+        """The S102 protection survives the fence: standing in SOMEONE ELSE'S branch,
+        the caller is still whoever drone stamped, not whoever lives there.
+
+        The fence asks only "is the caller standing in A branch" — it never asks
+        "is it THEIR branch", which would re-break the case drone's
+        resolve_caller_identity() docstring was written for: an agent that cds into
+        another branch to read its code is still itself.
+        """
+        branch_dir, registry_path = list_format_registry
+        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
+            os.environ["AIPASS_CALLER_BRANCH"] = "spawn"
+            os.environ["AIPASS_CALLER_CWD"] = str(branch_dir)  # test_cwd_branch's home
             result = detect_branch_from_pwd()
             assert result is not None
-            assert result["name"] == "SPAWN"
             assert result["email"] == "@spawn"
 
 
@@ -1013,6 +1050,11 @@ class TestIdentityResolutionLogging:
                 side_effect=lambda op, data: calls.append((op, data)),
             ),
         ):
+            # Passport present: this test is about the CONFIDENCE stamp on a
+            # synthesized identity, not about the fence. Without it the fence
+            # refuses first and the synthesis lane is never reached.
+            (tmp_path / ".trinity").mkdir(parents=True, exist_ok=True)
+            (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
             os.environ["AIPASS_CALLER_BRANCH"] = "NOBODY-KNOWS-ME"
             os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
             detect_branch_from_pwd()
@@ -1041,7 +1083,12 @@ class TestIdentityResolutionLogging:
         assert records[0]["resolved_email"] == "@test_cwd_branch"
 
     def test_failed_resolution_is_recorded_not_silent(self, clean_env, tmp_path):
-        """An unresolved sender still records the strategy that failed."""
+        """An unresolved sender still records the strategy that failed.
+
+        The strategy is now ``caller_cwd:outside_branch``: a CALLER_CWD that sits
+        in no branch is refused up front rather than walked and found wanting.
+        Same outcome, earlier and by name.
+        """
         calls = []
         with patch(
             "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
@@ -1051,7 +1098,7 @@ class TestIdentityResolutionLogging:
             assert detect_branch_from_pwd() is None
 
         records = self._resolve_identity_records(calls)
-        assert records[0]["strategy"] == "caller_cwd:passport_walk"
+        assert records[0]["strategy"] == "caller_cwd:outside_branch"
         assert records[0]["resolved_email"] == ""
 
     def test_conflicting_caller_signals_warn(self, clean_env, list_format_registry, tmp_path):

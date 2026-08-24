@@ -10,6 +10,7 @@
 
 """Shared pytest fixtures for hooks tests."""
 
+import importlib
 import json
 import shutil
 import tempfile
@@ -78,3 +79,20 @@ def mock_subprocess():
     """Mock subprocess.run for hook execution tests."""
     with patch("aipass.hooks.apps.modules.engine.subprocess.run") as mock:
         yield mock
+
+
+@pytest.fixture(autouse=True)
+def isolated_cadence_state(tmp_path_factory, monkeypatch):
+    """Keep per-session cadence/advisory state out of the LIVE seat's files.
+
+    cadence persists throttle state in the system temp dir keyed by
+    CLAUDE_CODE_SESSION_ID, so an unisolated run both reads and WRITES the
+    state of whatever session is executing the suite — a test could silence a
+    real advisory for ten turns, or be silenced by one. Same class of defect as
+    the 12 fixture lines this branch put in the production presence_gate.log.
+
+    Tests that exercise cadence itself patch _GUARD_DIR on top of this.
+    """
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")

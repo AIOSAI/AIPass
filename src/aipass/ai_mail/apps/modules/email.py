@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.2.0
+# Version: 3.4.0
 # Created: 2025-12-02
-# Modified: 2026-08-12
+# Modified: 2026-08-20
 # =============================================
 
 """
@@ -27,7 +27,7 @@ from typing import List
 from rich.markup import escape
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.create import load_email_file
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
@@ -86,15 +86,51 @@ def _print_row(row: str) -> None:
 def _resolve_branch_path() -> Path:
     """Resolve the branch path for inbox operations.
 
-    Tries get_current_user() first (detects caller's branch).
-    Falls back to this module's own branch path when caller detection fails
-    (e.g., user calling from terminal outside any branch directory).
+    Identity comes from get_current_user() and nowhere else. There is no longer a
+    fallback to this module's own branch: substituting @ai_mail's mailbox for an
+    unresolvable caller meant `view`/`close`/`reply` quietly operated on the wrong
+    citizen's mail — reading another citizen's inbox because of where a terminal
+    happened to be standing, which is the same defect as sending as them
+    (Patrick's ruling, 2026-08-21; @devpulse 096c9a42).
+
+    Raises:
+        RuntimeError: propagated from get_current_user() when the caller cannot be
+            resolved. The CLI fence in ai_mail.py refuses before any verb reaches
+            here, so this is a backstop for in-process callers, not the user-facing
+            path.
+    """
+    return Path(get_current_user()["mailbox_path"]).parent
+
+
+def caller_refusal() -> str:
+    """Return a refusal message when the caller stands outside any branch, else "".
+
+    Patrick's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
+    ur cwd, and if aimail was run in root it should fail outright." Every verb —
+    inbox, view, reply, send, dispatch — refuses rather than resolving to whichever
+    citizen the route happens to land on. Reading another citizen's mail because of
+    where a terminal happened to be standing is the same defect as sending as them
+    (@devpulse 0bb77ec2 / 096c9a42: a dispatch from the repo root sent as @aipass,
+    woke the wrong citizen, cost $1.41).
+
+    Called from the CLI entry point rather than per handler: the per-id verbs
+    (view/close/reply) resolve through ``_resolve_branch_path()`` and never consult
+    identity again, so one gate above all of them is the only place "every verb" is
+    actually true. In-process importers (@trigger's delivery, @daemon's wake) do not
+    pass through here — that is the import boundary, a different trust model.
+
+    The text is get_current_user()'s own RuntimeError, never a second wording: it
+    already names the mistake and tells the caller to re-run from the sending branch.
+
+    Returns:
+        str: The refusal text, or "" when the caller's identity is resolvable.
     """
     try:
-        return Path(get_current_user()["mailbox_path"]).parent
+        get_current_user()
+        return ""
     except RuntimeError as e:
-        logger.warning("[email] caller detection failed, using own branch: %s", e)
-        return _AI_MAIL_DIR
+        logger.warning("[email] caller refused — no branch under the caller: %s", e)
+        return str(e)
 
 
 HELP_TEXT = """
@@ -168,17 +204,12 @@ def handle_inbox(args: List[str]) -> bool:
     try:
         first_arg = args[0] if args else None
 
-        def _get_user_with_fallback():
-            try:
-                return get_current_user()
-            except RuntimeError as e:
-                logger.warning("[email] caller detection failed for inbox, using own branch: %s", e)
-                return {
-                    "mailbox_path": str(_AI_MAIL_DIR / ".ai_mail.local"),
-                    "display_name": "AI_MAIL",
-                }
-
-        ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, _get_user_with_fallback)
+        # get_current_user passed directly, with no substitute wrapper: an
+        # unresolvable caller must not be shown @ai_mail's own inbox. That was the
+        # third substitution in this lane (with _resolve_branch_path and the
+        # CALLER_BRANCH claim) and the quietest — it rendered someone else's mail
+        # under a heading that named no one. The CLI fence refuses before here.
+        ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, get_current_user)
         if not ok:
             error(info["error"])
             return True
@@ -333,6 +364,15 @@ def handle_reply(args: List[str]) -> bool:
             error(f"Message not found: {args[0]}")
             return True
         reply_message = " ".join(args[1:])
+        flag_like = [a for a in args[1:] if a.startswith("--")]
+        if flag_like:
+            # reply has no flag parsing — args[1:] is joined verbatim as the message body.
+            # An unrecognized flag (e.g. --body-file) is not consumed, not rejected, and
+            # not substituted — it ships as literal text with no signal it happened
+            # (@cli, ef49d937: a --body-file typo silently became the sent message).
+            warning(
+                f"reply takes no flags — {', '.join(flag_like)} sent as literal message text.",
+            )
         success, message, reply_id = send_reply(branch_path, original, reply_message)
         if success:
             console.print(f"[green]{escape(message)}[/green]")

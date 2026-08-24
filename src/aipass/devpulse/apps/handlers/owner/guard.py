@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: guard.py
 # Description: Owner-capability caller guard for devpulse owner-only tools
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -93,6 +93,40 @@ def _owner_decision(email: str, caller_cwd: Path) -> bool:
         return _legacy_devpulse_heuristic(caller_cwd)
 
     return bool(email) and is_owner(email, start_path=caller_cwd)
+
+
+def owner_address(start_path: Path | None = None) -> str | None:
+    """The project owner's address — ``@devpulse`` here, ``@vera`` elsewhere.
+
+    The single lookup for "who owns this project", so a refusal message and an
+    arm-time check can never disagree about the answer. Returns None rather
+    than raising: callers that must refuse hard convert it themselves, and a
+    message-builder must never be able to break the refusal it is decorating.
+
+    ``get_owner`` returns the owner's REGISTRY ENTRY DICT, not a name. Reading
+    it as a string stringifies the whole dict into a plausible-looking address
+    that matches nothing — the same class of mistake as answering "who am I"
+    with a project directory name, which cost $1.41 on 2026-08-21.
+    """
+    try:
+        from aipass.spawn.apps.handlers.registry import get_owner
+    except ImportError as exc:  # pragma: no cover - resolver is a hard dependency
+        logger.info("[owner_guard] owner resolver unavailable: %s", exc)
+        return None
+
+    try:
+        entry = get_owner(start_path=start_path) if start_path is not None else get_owner()
+    except Exception as exc:  # noqa: BLE001 - a registry read can fail any number of ways
+        logger.info("[owner_guard] owner lookup failed: %s", exc)
+        return None
+
+    if not isinstance(entry, dict):
+        return None
+    email = str(entry.get("email") or "").strip()
+    if not email:
+        logger.info("[owner_guard] sealed owner entry carries no email: %s", sorted(entry))
+        return None
+    return f"@{email.lstrip('@').lower()}"
 
 
 def guard_owner_caller(tool: str) -> bool:

@@ -1706,3 +1706,183 @@ class TestAdminManagerLane:
         assert len(calls["popen"]) == 1
         assert status.find_step("scheduled") is not None
         assert status.find_step("admin") is None
+
+
+# --- session pointer wiring --------------------------------------------
+
+
+def _claude_args(popen_cmd: list) -> list:
+    """The claude command a monitor spawn was handed (everything after '--')."""
+    return popen_cmd[popen_cmd.index("--") + 1 :]
+
+
+class TestWakeSessionPointer:
+    """Which session a dispatch lands in comes from a written pointer, not a mtime.
+
+    `-c` continues the most recently MODIFIED transcript in the branch dir, so
+    a --fresh run or a human opening a terminal there re-points the next wake
+    into somebody else's thread. These tests pin the three routes wake.py can
+    take — mint, resume, and the unchanged -c fallback — and that none of them
+    can refuse to spawn.
+    """
+
+    @pytest.fixture
+    def fake_home(self, tmp_path, monkeypatch):
+        """Point Path.home at tmp_path so transcript paths land under the sandbox."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(_Path, "home", classmethod(lambda cls: home))
+        return home
+
+    def _plant_pointer(self, branch_path, fake_home, session_id):
+        """Write a valid pointer AND the transcript it names.
+
+        Both are required: resolve_resume_target refuses an id with no
+        transcript behind it, because --resume on a missing transcript fails
+        the dispatch outright.
+        """
+        wake_mod.session_pointer.write_pointer(branch_path, session_id, "test")
+        transcript = wake_mod.session_pointer.transcript_file(branch_path, session_id)
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        transcript.write_text("{}\n", encoding="utf-8")
+        return transcript
+
+    def test_fresh_mints_an_id_and_records_it_before_spawning(self, tmp_path, monkeypatch, fake_home):
+        """fresh=True passes --session-id, and the pointer names that same id."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", fresh=True)
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "--session-id" in args
+        spawned_id = args[args.index("--session-id") + 1]
+        pointer = wake_mod.session_pointer.read_pointer(branch_path)
+        assert pointer is not None
+        assert pointer["session_id"] == spawned_id
+        assert pointer["set_by"] == "wake-fresh"
+        session_step = status.find_step("session")
+        assert session_step is not None and session_step[0] == "ok"
+        # Humans read a prefix; the full id goes to the log.
+        assert spawned_id[:8] in session_step[2]
+
+    def test_non_fresh_with_a_valid_pointer_resumes_and_drops_c(self, tmp_path, monkeypatch, fake_home):
+        """The pointed session is named explicitly — no mtime guess left in the command."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._plant_pointer(branch_path, fake_home, "11111111-2222-3333-4444-555555555555")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "--resume" in args
+        assert args[args.index("--resume") + 1] == "11111111-2222-3333-4444-555555555555"
+        assert "-c" not in args
+        session_step = status.find_step("session")
+        assert session_step is not None and session_step[0] == "ok"
+        assert "11111111" in session_step[2]
+
+    def test_non_fresh_without_a_pointer_keeps_the_c_fallback(self, tmp_path, monkeypatch, fake_home):
+        """No pointer = today's behaviour exactly. A wake is never worth failing over."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "-c" in args
+        assert "--resume" not in args
+        assert "--session-id" not in args
+        session_step = status.find_step("session")
+        assert session_step is not None and session_step[0] == "info"
+
+    def test_a_stale_pointer_falls_back_instead_of_resuming_a_dead_session(self, tmp_path, monkeypatch, fake_home):
+        """Pointer with no transcript behind it: --resume would fail the dispatch."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        wake_mod.session_pointer.write_pointer(branch_path, "dead-session-id", "test")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "-c" in args
+        assert "dead-session-id" not in args
+
+    def test_a_failing_pointer_write_still_spawns(self, tmp_path, monkeypatch, fake_home):
+        """A read-only .ai_mail.local must cost precision, never the wake itself."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+        monkeypatch.setattr(wake_mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+
+        status, ok = wake_branch("@testbranch", fresh=True)
+
+        assert ok is True
+        assert len(calls["popen"]) == 1
+        args = _claude_args(calls["popen"][0]["cmd"])
+        # The id still goes to the CLI — only the record of it was lost.
+        assert "--session-id" in args
+        assert status.find_step("session") is not None
+
+    def test_the_rest_of_the_command_is_untouched(self, tmp_path, monkeypatch, fake_home):
+        """Model, turn cap, permission mode and output format survive every route."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch")  # -c fallback
+        wake_branch("@testbranch", fresh=True)  # mint
+        self._plant_pointer(branch_path, fake_home, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        wake_branch("@testbranch")  # resume
+
+        assert len(calls["popen"]) == 3
+        for spawn in calls["popen"]:
+            args = _claude_args(spawn["cmd"])
+            assert "-p" in args
+            assert args[args.index("--model") + 1] == wake_mod.DEFAULT_MODEL
+            assert args[args.index("--permission-mode") + 1] == "bypassPermissions"
+            assert args[args.index("--output-format") + 1] == "json"
+            assert "--max-turns" in args
+
+
+class TestIsManager:
+    """is_manager() — the promise at dispatch time must match the delivery."""
+
+    def _passport(self, tmp_path, name, citizen_class):
+        branch = tmp_path / name
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": citizen_class}}), encoding="utf-8"
+        )
+        return branch
+
+    def test_manager_passport_is_manager(self, tmp_path, monkeypatch):
+        branch = self._passport(tmp_path, "devpulse", "manager")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@devpulse") is True
+
+    def test_ordinary_citizen_is_not(self, tmp_path, monkeypatch):
+        branch = self._passport(tmp_path, "prax", "aipass_framework")
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (branch, e))
+        assert wake_mod.is_manager("@prax") is False
+
+    def test_unreadable_passport_is_not_a_manager(self, tmp_path, monkeypatch):
+        """Fail toward the ordinary path: an unknown citizen is woken, which is
+        the behaviour that existed before this helper. Never invent a manager."""
+        monkeypatch.setattr(wake_mod, "resolve_branch", lambda e, admin=False: (tmp_path / "nope", e))
+        assert wake_mod.is_manager("@ghost") is False
+
+    def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):
+        """wake_branch's manager gate sends NO mail — the caller does. Its log line
+        claimed 'mail delivered', which is how a silent drop read as a delivery for
+        as long as it did (@devpulse P0, 2026-08-21)."""
+        src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
+        assert "wake skipped, mail delivered" not in src

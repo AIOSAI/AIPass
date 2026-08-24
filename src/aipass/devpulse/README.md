@@ -49,7 +49,7 @@ src/aipass/devpulse/
 │   │   ├── admin_grant.py       # Birth-cert admin privilege ceremony command routing
 │   │   ├── compass.py           # Rated decision engine (SQLite/FTS5) command routing
 │   │   ├── feedback.py          # Feedback mailbox command routing
-│   │   └── watchdog.py          # Directed wake system command routing
+│   │   └── watchdog.py          # Always-on dispatch reporting + directed wakes
 │   ├── handlers/
 │   │   ├── compass/             # Decision store (SQLite/FTS5), rating, query, review
 │   │   ├── feedback/            # Inbox, compose, storage
@@ -69,42 +69,80 @@ src/aipass/devpulse/
 
 All commands via `drone @devpulse <command>`:
 
-### Watchdog — directed wake system (owner-only)
+### Watchdog — always-on dispatch reporting (owner-only)
 
 **Who may call it:** the project OWNER only — the first agent, seated as `owner: true`
 in the project's sealed `*_REGISTRY.json`. Portable: `@devpulse` in AIPass, `@vera` in
 Vera Studio, whoever owns elsewhere. A refusal means your project's owner isn't seated —
 run `aipass doctor` to see why and `aipass doctor --fix` to repair (DPLAN-0239).
 
-**How the wake works (read this once, save a debugging session):**
+**The model — a login, not a service (r4, DPLAN-0317):** watchdog is always on
+because nothing runs. Dispatching registers the job at send time; the agent that
+finishes **reports**; `@ai_mail` writes that report to a durable notification
+feed, where it **queues** whether anyone is listening or not. A conversation
+**signs in** to receive — one call via the harness Monitor TOOL (never Bash
+`run_in_background`, whose output goes nowhere):
 
-1. `drone @ai_mail dispatch @target "Subject" "Body"` — hand off the work.
-2. **Immediately arm the watchdog via the harness Monitor TOOL** — never Bash
-   `run_in_background` (its output goes nowhere and cannot wake you):
-   `drone @devpulse watchdog agent @target --timeout 600`
-3. The status line shows **"1 monitor"** the moment it's armed — that IS the
-   active-dispatch indicator. When `@target` finishes, the watchdog exits, the
-   Monitor completes, and **your session is re-invoked with the result — that IS
-   the wake.**
+```
+drone @devpulse watchdog baseline
+```
 
-There is no passive wake: ai_mail's wake-back spawns a new headless process and can
-never inject into a live interactive session (`BLOCKED — interactive session` in the
-logs is that guard working as designed; it only serves senders whose session closed).
-If you dispatched and idle without arming, nothing will ever wake you.
+Sign-in syncs whatever queued while you were logged out (`MISSED` lines), pushes
+new reports live from then on, and logs out any older session — the newest
+sign-in owns delivery. `/clear` or a new chat destroys only the receiver — the
+conversation's ear; reports keep queueing regardless. At idle the entire system
+is one `stat()` on a file. The harness status line's **"1 monitor"** is the
+signed-in session itself, not a watcher — nothing is being watched.
 
-`@target` resolves in the **caller's own project** (then falls back to scanning
-`~/Projects` registries) — external-project owners monitor their own agents with it.
-Default timeout is **600 s**; pass `--timeout <s>` for longer builds. Mid-watch it
-also emits `[watchdog.stall]` / `[watchdog.resumed]` events (no JSONL activity 120 s
-with no in-flight tool = probable stuck agent).
+Statusline: `watchdog:in` (green) — this session is signed in and ticking.
+`HUNG` (signed in, receiver frozen), `ELSEWHERE` (another session holds the
+sign-in), `OUT` (nobody is signed in) — all red, all mean sign in again.
+
+**There is no passive wake.** ai_mail's wake-back spawns a new headless process
+and can never inject into a live interactive session (`BLOCKED — interactive
+session` in the logs is that guard working as designed; it only serves senders
+whose session closed). Dispatch and idle without signing in and nothing will
+ever wake you — the report just queues.
+
+Two rules the receiver enforces, neither optional:
+
+- **Only completions wake.** The feed also carries dispatch *start* edges, and
+  those are dropped — you are woken once, when the work is actually finished.
+- **Only YOUR dispatches wake you.** The feed names the branch that *finished*,
+  never the branch that *sent*, so every citizen's completion used to wake this
+  seat fleet-wide. `@ai_mail` stamps `sender` on the completion line and the
+  receiver compares it against this project's sealed owner. A record with no
+  sender is **not** yours — unattributable fails closed.
+
+**Crash coverage needs nothing running.** Every dispatch is registered at send
+time with an `expected_by` taken from dispatch_monitor's hard timeout. An entry
+past that with no completion means the monitor *died* — a fact about a file,
+true whether or not anything is looking. `watchdog status` reads it.
+
+**Rounds 1–3 had a detection daemon; r4 deleted it** (commit `5444dd9a`). It
+polled ~19 branches' `.dispatch.lock` every 2 s to synthesize an event that
+`dispatch_monitor.py` had already reported 1–2 s earlier — every completion
+produced **two wakes**, for months, unnoticed because a duplicate wake looks
+exactly like a working wake. Idle cost: 7.72 % of a core. The source is
+preserved where source is preserved — git history, at the removing commit —
+deliberately not in `.archive/` (gitignored disposal, cleaned without warning).
+`watchdog baseline --daemon` is refused by name.
+
+`watchdog agent @target [--timeout s]` remains for **mid-run stall detection**
+on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of
+JSONL silence with no in-flight tool) — it is no longer needed to be woken, and
+arming one per dispatch is a second poller doing the receiver's job. `@target`
+resolves in the caller's own project, then falls back to `~/Projects`
+registries.
 
 | Command | What it does |
 |---|---|
-| `watchdog agent @target [--timeout s]` | Wake when the dispatched agent exits (default 600 s) |
+| `watchdog baseline` | Sign this session in to receive dispatch reports (logs out any older session) |
+| `watchdog agent @target [--timeout s]` | Stall-watch one dispatched agent (default 600 s) |
 | `watchdog timer <duration>` | Wake after duration (5m, 30s, 2h, 1h30m) |
 | `watchdog timer start/stop <name>` | Named duration tracking |
 | `watchdog schedule <HH:MM>` | Wait until a specific time |
-| `watchdog status` | Show active watchdogs |
+| `watchdog status` | Signed-in session, outstanding dispatches, overdue entries |
 | `watchdog cancel <id>` | Cancel a running watchdog |
 | `watchdog list` | List all watchdog entries |
 
@@ -187,9 +225,9 @@ drone @git log                   # Recent commits
 
 ### Provides To
 
-All branches via dispatch orchestration. Watchdog monitoring for any dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
+All branches via dispatch orchestration. Watchdog reporting for every dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
 
-*Last Updated: 2026-08-16*
+*Last Updated: 2026-08-19*
 
 ---
 

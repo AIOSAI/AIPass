@@ -68,6 +68,27 @@ class CallerSignal(NamedTuple):
     source: str | None  # "passport" | "project" | None
 
 
+class CallerIdentity(NamedTuple):
+    """Who is calling, and which KIND of evidence said so.
+
+    ``source`` is what a consumer in another process needs and could not have:
+
+      - ``assigned``  — AIPASS_BRANCH_NAME, set when the process was created.
+        A credential. Valid from any directory, which is the whole point (S102).
+      - ``passport``  — a passport under the caller's feet. Identity inferred
+        from location; true for a human standing in their own branch.
+      - ``project``   — a registry-derived PROJECT name. Answers "which project
+        am I in", never "who am I". @aipass the project directory and @aipass
+        the citizen are different things that spell the same.
+
+    Collapsing these to a bare string is what let a dispatch from the repo root
+    send as the citizen @aipass and wake the wrong branch (DPLAN-0315 item 3).
+    """
+
+    name: str | None
+    source: str | None  # "assigned" | "passport" | "project" | None
+
+
 def find_entry_point(branch_path: str, branch_name: str) -> Path:
     """Locate the apps/{branch_name}.py entry point for a branch.
 
@@ -200,8 +221,8 @@ def detect_caller_signal(cwd: Path) -> CallerSignal:
     return CallerSignal(None, None)
 
 
-def resolve_caller_identity(cwd: Path) -> str | None:
-    """Resolve who is CALLING drone. Assigned identity beats location.
+def resolve_caller_identity_signal(cwd: Path) -> CallerIdentity:
+    """Resolve who is CALLING drone, WITH the provenance of the answer.
 
     Two signals can answer "who is calling", and they are not the same kind of
     claim:
@@ -271,7 +292,23 @@ def resolve_caller_identity(cwd: Path) -> str | None:
                 cwd,
             )
 
-    return assigned or standing
+    if assigned:
+        return CallerIdentity(assigned, "assigned")
+    if standing:
+        return CallerIdentity(standing, source)
+    return CallerIdentity(None, None)
+
+
+def resolve_caller_identity(cwd: Path) -> str | None:
+    """Resolve who is CALLING drone — the name alone.
+
+    The bare-name view of :func:`resolve_caller_identity_signal`, kept because
+    attribution sites (the ``[CALLER:X]`` tag, the deletion record) want a name
+    and nothing more. Anything that must DECIDE on an identity — grant, refuse,
+    send as — takes the signal instead: a name on its own cannot tell a
+    credential from a directory name.
+    """
+    return resolve_caller_identity_signal(cwd).name
 
 
 def execute_branch_command(
@@ -306,9 +343,14 @@ def execute_branch_command(
     }
 
     # Who is calling: assigned identity first, cwd passport only as fallback.
-    caller_branch = resolve_caller_identity(Path.cwd())
+    # The provenance ships WITH the name: a consumer deciding whether to trust
+    # this identity cannot re-derive it — it is in another process, with a
+    # different cwd and no access to our environment. Unstamped, "commons
+    # standing in /tmp" and "nobody standing at a repo root" arrive identical.
+    caller_branch, identity_source = resolve_caller_identity_signal(Path.cwd())
     if caller_branch:
         caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
+        caller_env["AIPASS_CALLER_IDENTITY_SOURCE"] = identity_source or "unknown"
 
     result = execute_command(
         executable=sys.executable,

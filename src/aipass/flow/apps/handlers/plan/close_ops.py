@@ -30,6 +30,7 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
     _find_plan_across_registries,
+    _canonical_plan_id,
 )
 from aipass.flow.apps.handlers.plan.close_helpers import (
     PROCESSED_PLANS_DIR,
@@ -41,6 +42,64 @@ from aipass.flow.apps.handlers.plan.close_helpers import (
 )
 
 MODULE_NAME = "close_plan"
+
+# Distinguishes "the caller did not inject a project" from "the caller stands
+# in no project". Both are None-shaped and they mean opposite things: the first
+# means go and resolve it, the second means refuse the run.
+_UNSET = object()
+
+# Why a row was held back. Two different things wearing one count is how the
+# second kind stays invisible: an excluded type is the operator's choice, an
+# out-of-scope row is the fence.
+HELD_TYPE = "type"
+HELD_SCOPE = "scope"
+
+
+def _caller_project_default() -> Any:
+    """Resolve the caller's project from where they actually stood."""
+    from aipass.flow.apps.handlers.plan.project_scope import caller_project_root
+
+    return caller_project_root()
+
+
+def _project_label(root: Any) -> str:
+    """Short display name for a project root."""
+    from aipass.flow.apps.handlers.plan.project_scope import describe_project
+
+    return describe_project(root)
+
+
+def _make_project_resolver() -> Any:
+    """Build a row -> project resolver backed by a cache scoped to one sweep.
+
+    The cache lives in this closure and dies with it. Every row in a sweep
+    walks the same handful of ancestor chains, so memoising is worth real work
+    -- but a module-level memo would outlive the run with no way to invalidate
+    it, and the first caller to build a register mid-process would get the
+    answer from before it existed.
+    """
+    from aipass.flow.apps.handlers.plan.project_scope import find_project_root
+
+    cache: Dict[Path, Any] = {}
+
+    def resolve(location: Path) -> Any:
+        return find_project_root(location, cache)
+
+    return resolve
+
+
+def _scope_reason(row_project: Any) -> str:
+    """Name why a row is out of scope -- 'foreign' and 'unattributable' differ.
+
+    A row in another project is fenced correctly. A row that answers to NO
+    project is a data-quality problem in the registry, and collapsing the two
+    into one count is how the second kind stays invisible for months.
+    """
+    from aipass.flow.apps.handlers.plan.project_scope import describe_project
+
+    if row_project is None:
+        return "no project register above its location"
+    return f"belongs to {describe_project(row_project)}"
 
 
 # =============================================
@@ -54,6 +113,7 @@ def close_plan_impl(
     all_plans: bool = False,
     spawn_background: bool = True,
     dry_run: bool = False,
+    exclude_types: List[str] | None = None,
     # Dependencies injected from module
     normalize_plan_number: Any = None,
     load_registry: Any = None,
@@ -81,6 +141,7 @@ def close_plan_impl(
         spawn_background: Whether to spawn background post-processing (default True).
                           Set False when called from close_all_plans() to avoid race condition.
         dry_run: If True, preview what would be closed without taking action (default False)
+        exclude_types: Plan-type prefixes to hold back; only meaningful with all_plans
         (remaining args): Handler/service dependencies injected by module
 
     Returns:
@@ -91,7 +152,7 @@ def close_plan_impl(
 
     # Handle --all flag
     if all_plans:
-        return close_all_plans_fn(confirm, dry_run=dry_run)
+        return close_all_plans_fn(confirm, dry_run=dry_run, exclude_types=exclude_types)
 
     # Single plan closure
     if not plan_num:
@@ -457,25 +518,77 @@ def close_plan_impl(
 def close_all_plans_impl(
     confirm: bool = False,
     dry_run: bool = False,
+    exclude_types: List[str] | None = None,
     # Dependencies injected from module
     get_open_plans: Any = None,
     close_plan_fn: Any = None,
+    caller_project: Any = _UNSET,
+    resolve_project_fn: Any = None,
 ) -> Dict[str, Any]:
     """
-    Close all open plans in one operation
+    Close every open plan that belongs to the CALLER'S project
+
+    Three fences, applied at the read, all visible in the dry run:
+
+    1. TYPE      -- rows whose prefix is in `exclude_types` are held back.
+                    Validated by the caller against the registered templates.
+    2. SCOPE     -- rows whose nearest register-holding ancestor is not the
+                    caller's project are out of scope. A service running in a
+                    project never leaves it; 50 of the 792 live rows belong to
+                    baud, Vera-Studio, AIPL, marketstand and speakeasy, and a
+                    sweep from AIPass must not touch one of them.
+    3. TYPE-EVIDENCE -- a row whose file_path carries no prefix cannot be named
+                    and is REFUSED as a failure, never guessed.
+
+    There is deliberately NO self-preservation rule. DPLAN-0316 -- the plan
+    tracking this command -- is one of the rows a full sweep closes, and an
+    invisible exemption would be a fallback wearing a helpful hat. The dry run
+    NAMES it; the operator decides.
 
     Args:
         confirm: Whether to ask for bulk confirmation (default False, auto-confirms)
-        dry_run: If True, preview what would be closed without taking action (default False)
+        dry_run: If True, preview what would be closed without taking action
+        exclude_types: Upper-cased prefixes to hold back (e.g. ["APLAN"])
         get_open_plans: Handler function to get open plans
         close_plan_fn: Function to close a single plan (the module's close_plan)
+        caller_project: Project root the caller is standing in (Path or None)
+        resolve_project_fn: Callable(Path) -> project root or None, for a row
 
     Returns:
-        Dict with keys: success (bool), messages (list), success_count, failure_count, total
+        Dict with keys: success (bool), messages (list), success_count,
+        failure_count, total, and the resolution buckets (see below).
     """
     messages: List[Dict[str, Any]] = []
+    excluded_prefixes = {t.upper() for t in (exclude_types or [])}
 
     try:
+        # SCOPE FENCE PRE-CHECK -- refuse before reading anything.
+        # No project above the caller means no answer to "which plans are
+        # mine", and a bulk close with no answer to that question would sweep
+        # by default. Refusing is the only honest move; the alternative is the
+        # exact silent-widening this command exists to remove.
+        if resolve_project_fn is None:
+            resolve_project_fn = _make_project_resolver()
+        if caller_project is _UNSET:
+            caller_project = _caller_project_default()
+        if caller_project is None:
+            logger.error(f"[{MODULE_NAME}] close_all refused: caller stands in no registered project")
+            return {
+                "success": False,
+                "messages": [
+                    {
+                        "type": "error_text",
+                        "text": (
+                            "REFUSED: no project register stands above your working directory, "
+                            "so 'every plan' has no boundary. Run this from inside a project."
+                        ),
+                    }
+                ],
+                "success_count": 0,
+                "failure_count": 0,
+                "total": 0,
+            }
+
         # Get all open plans (handler)
         open_plans = get_open_plans()
 
@@ -489,39 +602,123 @@ def close_all_plans_impl(
                 "total": 0,
             }
 
-        # DRY RUN: Preview all plans that would be closed, then return early
+        # RESOLVE IDENTITY AND SCOPE ONCE -- this list drives BOTH the preview
+        # and the run. A bare registry key is ambiguous across types (every
+        # registry numbers from 0001), so each row is resolved to its typed ID
+        # up front. The preview used to derive a label here while the execution
+        # passed the bare key downstream to be re-resolved: two paths, and they
+        # disagreed on 61 of 72 live rows. One resolution means the dry run
+        # cannot drift from the run -- and that matters most at the moment of
+        # authorisation, where a preview that does not match the run
+        # manufactures false confidence.
+        resolved: List[tuple[str, Dict[str, Any]]] = []
+        unresolved: List[tuple[str, Dict[str, Any]]] = []
+        # (plan_id, category, reason, plan_info). The CATEGORY is carried, not
+        # re-derived from the reason text -- counting by string prefix means an
+        # edit to a human-readable sentence silently moves the numbers.
+        held: List[tuple[str, str, str, Dict[str, Any]]] = []
+
+        for plan_num, plan_info in open_plans:
+            plan_id = _canonical_plan_id(plan_num, plan_info)
+            if plan_id is None:
+                unresolved.append((plan_num, plan_info))
+                continue
+
+            location = plan_info.get("location") or ""
+            row_project = resolve_project_fn(Path(location)) if location else None
+            if row_project != caller_project:
+                held.append((plan_id, HELD_SCOPE, _scope_reason(row_project), plan_info))
+                continue
+
+            prefix = plan_id.split("-", 1)[0]
+            if prefix in excluded_prefixes:
+                held.append((plan_id, HELD_TYPE, f"type {prefix} excluded", plan_info))
+                continue
+
+            resolved.append((plan_id, plan_info))
+
+        held_by_type = sum(1 for _id, category, _reason, _info in held if category == HELD_TYPE)
+        held_out_of_scope = len(held) - held_by_type
+
+        def _refusal_text(plan_num: str, plan_info: Dict[str, Any]) -> str:
+            return (
+                f"  REFUSED {plan_num} ({plan_info.get('subject', 'No subject')}) — "
+                "registry row has no typed file_path, so its plan type cannot be "
+                "established. Refusing to guess."
+            )
+
+        def _scope_summary() -> Dict[str, Any]:
+            return {
+                "type": "close_all_scope",
+                "project": _project_label(caller_project),
+                "considered": len(open_plans),
+                "in_scope": len(resolved),
+                "held_by_type": held_by_type,
+                "held_out_of_scope": held_out_of_scope,
+                "refused": len(unresolved),
+                "excluded_types": sorted(excluded_prefixes),
+            }
+
+        # DRY RUN: Preview exactly what the run would resolve, then return early.
+        # This IS the authorisation step, so it shows the post-fence list --
+        # not a superset, not a statement of intent.
         if dry_run:
-            messages.append({"type": "dim", "text": f"[DRY RUN] Would close {len(open_plans)} plan(s):"})
-            for plan_num, plan_info in open_plans:
-                subject = plan_info.get("subject", "No subject")
-                location = plan_info.get("location", "unknown")
-                # Derive prefix from file_path if available
-                plan_file = Path(plan_info.get("file_path", ""))
-                plan_label = plan_file.stem if plan_file.name else f"PLAN-{plan_num}"
-                prefix = _extract_prefix(plan_label) or "FPLAN"
-                display_id = f"{prefix}-{plan_num}"
-                messages.append({"type": "dim", "text": f"  {display_id:<14}{location:<14}{subject}"})
+            messages.append(_scope_summary())
+            messages.append({"type": "dim", "text": f"[DRY RUN] Would close {len(resolved)} plan(s):"})
+            for plan_id, plan_info in resolved:
+                messages.append(
+                    {
+                        "type": "dry_run_row",
+                        "plan_id": plan_id,
+                        "location": plan_info.get("location", "unknown"),
+                        "subject": plan_info.get("subject", "No subject"),
+                    }
+                )
+            if held:
+                messages.append({"type": "dim", "text": f"Held back ({len(held)}):"})
+                for plan_id, _category, reason, plan_info in held:
+                    messages.append(
+                        {
+                            "type": "held_row",
+                            "plan_id": plan_id,
+                            "reason": reason,
+                            "subject": plan_info.get("subject", "No subject"),
+                        }
+                    )
+            for plan_num, plan_info in unresolved:
+                messages.append({"type": "error_text", "text": _refusal_text(plan_num, plan_info)})
             messages.append({"type": "dim", "text": "No action taken."})
-            logger.info(f"[{MODULE_NAME}] Dry run: would close {len(open_plans)} plan(s)")
+            logger.info(
+                "[%s] Dry run: %d to close, %d held (type %d / scope %d), %d refused",
+                MODULE_NAME,
+                len(resolved),
+                len(held),
+                held_by_type,
+                held_out_of_scope,
+                len(unresolved),
+            )
             return {
                 "success": True,
                 "messages": messages,
                 "success_count": 0,
                 "failure_count": 0,
                 "total": len(open_plans),
+                "plan_ids": [plan_id for plan_id, _ in resolved],
+                "held_ids": [plan_id for plan_id, _cat, _reason, _info in held],
+                "refused": [plan_num for plan_num, _ in unresolved],
             }
 
         # Build plan list for display
-        plan_list = []
-        for plan_num, plan_info in open_plans:
-            subject = plan_info.get("subject", "No subject")
-            plan_list.append({"plan_num": plan_num, "subject": subject})
+        plan_list = [
+            {"plan_num": plan_id, "subject": plan_info.get("subject", "No subject")} for plan_id, plan_info in resolved
+        ]
 
-        messages.append({"type": "plan_list", "count": len(open_plans), "plans": plan_list})
+        messages.append(_scope_summary())
+        messages.append({"type": "plan_list", "count": len(resolved), "plans": plan_list})
 
         # Confirm bulk close
         if confirm:
-            messages.append({"type": "confirm_warning", "count": len(open_plans)})
+            messages.append({"type": "confirm_warning", "count": len(resolved)})
 
             # Auto-confirm in non-interactive environments (autonomous workflows)
             if not sys.stdin.isatty():
@@ -543,17 +740,26 @@ def close_all_plans_impl(
                     "total": len(open_plans),
                 }
 
-        messages.append({"type": "closing_all", "count": len(open_plans)})
+        messages.append({"type": "closing_all", "count": len(resolved)})
 
         # Close each plan
         success_count = 0
         failure_count = 0
+        closed_ids: List[str] = []
+        failed_ids: List[str] = []
 
-        for plan_num, plan_info in open_plans:
-            messages.append({"type": "closing_single", "plan_num": plan_num})
+        for position, (plan_id, _plan_info) in enumerate(resolved, start=1):
+            # Position is carried so the operator sees movement. A bulk close
+            # of 55 plans takes minutes; a few minutes is fine, a SILENT few
+            # minutes is not.
+            messages.append(
+                {"type": "closing_single", "plan_num": plan_id, "position": position, "total": len(resolved)}
+            )
 
-            # Call close_plan with spawn_background=False to avoid race condition
-            result = close_plan_fn(plan_num=plan_num, confirm=False, all_plans=False, spawn_background=False)
+            # Call close_plan with spawn_background=False to avoid race condition.
+            # plan_id carries the type prefix, so the downstream resolve lands on
+            # this row's own registry instead of defaulting to fplan_registry.json.
+            result = close_plan_fn(plan_num=plan_id, confirm=False, all_plans=False, spawn_background=False)
 
             # Handle both old bool and new dict return formats
             if isinstance(result, dict):
@@ -564,8 +770,19 @@ def close_all_plans_impl(
 
             if plan_success:
                 success_count += 1
+                closed_ids.append(plan_id)
             else:
                 failure_count += 1
+                failed_ids.append(plan_id)
+
+        # Rows whose type could not be established are failures, and are NAMED.
+        # A bare count cannot distinguish "nothing to do" from "something broke".
+        # Held-back rows are NOT failures -- they are the fence working.
+        for plan_num, plan_info in unresolved:
+            messages.append({"type": "error_text", "text": _refusal_text(plan_num, plan_info)})
+            logger.error(f"[{MODULE_NAME}] close_all refused untyped row {plan_num}")
+            failure_count += 1
+            failed_ids.append(plan_num)
 
         # Spawn ONE background process for all closed plans
         if success_count > 0:
@@ -585,14 +802,26 @@ def close_all_plans_impl(
                 "type": "close_all_summary",
                 "success_count": success_count,
                 "failure_count": failure_count,
+                "held_count": len(held),
                 "total": len(open_plans),
             }
         )
 
-        logger.info(f"[{MODULE_NAME}] close_all completed: {success_count} success, {failure_count} failures")
+        logger.info(
+            "[%s] close_all completed: %d success, %d failures, %d held",
+            MODULE_NAME,
+            success_count,
+            failure_count,
+            len(held),
+        )
         json_handler.log_operation(
             "all_plans_closed",
-            {"success_count": success_count, "failure_count": failure_count, "total": len(open_plans)},
+            {
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "held_count": len(held),
+                "total": len(open_plans),
+            },
         )
         return {
             "success": success_count > 0,
@@ -600,6 +829,11 @@ def close_all_plans_impl(
             "success_count": success_count,
             "failure_count": failure_count,
             "total": len(open_plans),
+            # Named separately from the dry run's "plan_ids" (what it WOULD
+            # attempt) because these report what actually happened.
+            "closed_ids": closed_ids,
+            "failed_ids": failed_ids,
+            "held_ids": [plan_id for plan_id, _cat, _reason, _info in held],
         }
 
     except Exception as e:

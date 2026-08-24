@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
@@ -104,37 +104,52 @@ def _empty_registry() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def load_registry() -> Dict[str, Any]:
-    """Load the template registry from disk, auto-creating if missing.
+def _read_or_seed(path: Path) -> Tuple[Dict[str, Any], bool]:
+    """Return ``(registry, seeded)`` for `path`, seeding defaults when unusable.
 
-    Auto-heals missing ``types`` or ``metadata`` keys.
-
-    Returns:
-        Registry dict with ``types`` and ``metadata`` keys.
+    Missing, unparseable and structurally wrong all mean the same thing --
+    there is nothing here to trust -- so all three seed the same defaults.
+    The seed is RETURNED rather than saved-and-returned: the caller runs
+    auto-discovery over it first, so a fresh install writes its file once,
+    complete, instead of writing a two-type file and correcting it on the
+    next read.
     """
-    path = _registry_path()
-
     if not path.exists():
         logger.info("[%s] Registry not found, creating at %s", MODULE_NAME, path)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
+        return _empty_registry(), True
 
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("[%s] Corrupt registry, recreating: %s", MODULE_NAME, exc)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
+        return _empty_registry(), True
 
-    # Auto-heal: must be a dict
     if not isinstance(data, dict):
         logger.warning("[%s] Invalid registry structure, recreating", MODULE_NAME)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
+        return _empty_registry(), True
+
+    return data, False
+
+
+def load_registry() -> Dict[str, Any]:
+    """Load the template registry from disk, auto-creating if missing.
+
+    Auto-heals missing ``types`` or ``metadata`` keys, prunes orphans, and
+    registers template directories that are on disk but not yet in the file.
+
+    THE ORDER MATTERS. Auto-discovery runs on the seeded registry too, not
+    only on one read back from disk. It used to run only on the read path, so
+    the first command on a fresh install answered with FPLAN and DPLAN while
+    five more template directories sat beside them, and the second command
+    answered with all seven. The registered set must not depend on how many
+    times it has been asked for.
+
+    Returns:
+        Registry dict with ``types`` and ``metadata`` keys.
+    """
+    path = _registry_path()
+    data, seeded = _read_or_seed(path)
 
     # Auto-heal: missing "types" key
     if "types" not in data:
@@ -149,10 +164,13 @@ def load_registry() -> Dict[str, Any]:
             "type_count": len(data["types"]),
         }
 
-    # Auto-heal: prune orphans + register new dirs
-    if _prune_orphaned_types(data):
-        save_registry(data)
-    if _auto_register_new_types(data):
+    # Auto-heal: prune orphans + register new dirs. A SEEDED registry is always
+    # written, even when discovery adds nothing -- otherwise a corrupt file that
+    # happens to need no new types would be left on disk to be re-parsed and
+    # re-warned about on every single read.
+    changed = _prune_orphaned_types(data)
+    changed = _auto_register_new_types(data) or changed
+    if changed or seeded:
         save_registry(data)
 
     return data

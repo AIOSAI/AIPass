@@ -1,4 +1,5 @@
 # DRONE — Branch Prompt
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/drone/.aipass/aipass_local_prompt.md — Injected every prompt when in drone directory. -->
 
 Command router and symbolic addressing for AIPass. Resolves `@branch` names to paths, routes commands to entry points, and owns all git operations behind a tier-based access system. The only git interface in the system — raw git/gh is blocked by hooks.

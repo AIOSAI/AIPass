@@ -29,6 +29,7 @@ from typing import Optional, Tuple, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 
 
 def _find_claude_bin() -> str:
@@ -467,6 +468,37 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
 # ─── Branch Resolution ──────────────────────────────────
 
 
+def is_manager(branch_email: str) -> bool:
+    """True when `branch_email` is citizen_class=manager, i.e. never woken.
+
+    Exists so a caller can PROMISE the right thing. Dispatch used to tell every
+    sender "you will be woken when X completes"; for a manager that was false, and
+    the manager then heard nothing at all (@devpulse P0, 2026-08-21). Managers are
+    mailed instead — the promise has to say so.
+
+    Fails toward "not a manager": an unreadable or missing passport keeps the
+    ordinary wake path, which is the behaviour that predates this helper. Inventing
+    a manager would silently suppress a wake that should happen.
+
+    Args:
+        branch_email: Address of the branch to classify (e.g. "@devpulse").
+
+    Returns:
+        bool: True only when a readable passport says citizen_class == "manager".
+    """
+    resolved = resolve_branch(branch_email)
+    if not resolved:
+        return False
+    branch_path, _ = resolved
+    try:
+        with open(branch_path / ".trinity" / "passport.json", "r", encoding="utf-8") as f:
+            passport = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        logger.info("[wake] Could not classify %s: %s", branch_email, exc)
+        return False
+    return passport.get("identity", {}).get("citizen_class", "") == "manager"
+
+
 def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
 
@@ -602,6 +634,7 @@ def wake_branch(
     *,
     scheduled: bool = False,
     admin: bool = False,
+    subject: Optional[str] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -708,8 +741,14 @@ def wake_branch(
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
             else:
-                status.info("manager", f"{email} is a manager — mail only, wake skipped")
-                logger.info("[wake] %s is citizen_class=manager — wake skipped, mail delivered", email)
+                # Returns True having woken nothing and sent nothing. The caller
+                # owns the notification: the dispatch pipeline already mailed this
+                # manager before calling, and dispatch_monitor's wake-back mails it
+                # via _mail_wake_back(). Saying "mail delivered" here asserted a
+                # delivery this function never makes, which is how the wake-back's
+                # silent drop read as success for months (@devpulse P0, 2026-08-21).
+                status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
+                logger.info("[wake] %s is citizen_class=manager — wake skipped, no mail sent here", email)
                 return status, True
     except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
         logger.info("[wake] Could not read passport for %s: %s", email, exc)
@@ -774,35 +813,48 @@ def wake_branch(
         "work after 600s with no reply sent."
     )
 
+    base_args = [
+        "-p",
+        prompt,
+        "--model",
+        resolved_model,
+        "--max-turns",
+        str(max_turns),
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
+    ]
+
+    # Which session this dispatch lands in is decided by a written record, not
+    # by a file mtime. `-c` means "continue the most recently MODIFIED transcript
+    # in this directory", so a --fresh run, a late-flushing dispatch or a human
+    # opening a terminal here silently re-points the NEXT wake into somebody
+    # else's thread. session_pointer names the session instead; the -c branch
+    # below stays as the fallback for branches that have no usable pointer yet.
     if fresh:
-        claude_cmd = [
-            _CLAUDE_BIN,
-            "-p",
-            prompt,
-            "--model",
-            resolved_model,
-            "--max-turns",
-            str(max_turns),
-            "--permission-mode",
-            "bypassPermissions",
-            "--output-format",
-            "json",
-        ]
+        session_id = session_pointer.mint_session_id()
+        # Written BEFORE the spawn on purpose: the CLI accepts the id we hand it
+        # and returns that same id, so there is no window in which a crash
+        # leaves a live session nobody recorded.
+        if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):
+            # Never fatal. A branch whose pointer cannot be written must still
+            # wake — the next non-fresh dispatch simply falls back to -c.
+            logger.warning("[wake] %s pointer write failed for session %s — spawning anyway", email, session_id)
+        logger.info("[wake] %s fresh session %s", email, session_id)
+        status.ok("session", f"fresh session {session_id[:8]}")
+        claude_cmd = [_CLAUDE_BIN, *base_args, "--session-id", session_id]
     else:
-        claude_cmd = [
-            _CLAUDE_BIN,
-            "-c",
-            "-p",
-            prompt,
-            "--model",
-            resolved_model,
-            "--max-turns",
-            str(max_turns),
-            "--permission-mode",
-            "bypassPermissions",
-            "--output-format",
-            "json",
-        ]
+        resume_id, reason = session_pointer.resolve_resume_target(branch_path)
+        # Verbatim: this reason string is the only trace left when an agent
+        # wakes somewhere unexpected.
+        logger.info("[wake] %s session decision: %s", email, reason)
+        if resume_id:
+            status.ok("session", f"resuming {resume_id[:8]} (pointer)")
+            claude_cmd = [_CLAUDE_BIN, "--resume", resume_id, *base_args]
+        else:
+            status.info("session", "no pointer — continuing newest transcript (-c)")
+            claude_cmd = [_CLAUDE_BIN, "-c", *base_args]
 
     # Step 7: Spawn via dispatch_monitor
     log_dir = branch_path / "logs"
@@ -836,6 +888,40 @@ def wake_branch(
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
         return status, False
     status.ok("lock-acquire", "Dispatch lock acquired")
+
+    # ─── Register the dispatch BEFORE anything spawns (FPLAN-0452 P0) ───
+    # Patrick's rule 1: the watchdog knows what is outstanding because it was
+    # TOLD. Written here, above the spawn, so a spawn that never starts still
+    # leaves evidence the dispatch was promised — evidence written after a
+    # successful spawn only ever records the dispatches that were already fine.
+    #
+    # expected_by uses the monitor's own HARD_TIMEOUT, never a number invented
+    # here. That is what makes "past expected_by with no completion record"
+    # mean the monitor DIED: a live one kills the run at HARD_TIMEOUT and
+    # reports, so it cannot legitimately overrun.
+    from aipass.ai_mail.apps.handlers.dispatch import register
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import HARD_TIMEOUT
+
+    # Clear any INHERITED id first. spawn_env is a copy of this process's
+    # environment, and a dispatched agent dispatching another agent would
+    # otherwise hand the child its OWN dispatch id — every mail the child sent
+    # would be attributed to the parent's run. Same class of leak as the
+    # AIPASS_CALLER_* strip above, and it fails closed: no id beats a wrong one.
+    spawn_env.pop("AIPASS_DISPATCH_ID", None)
+
+    dispatch_id = register.open_dispatch(
+        sender=sender,
+        target=email,
+        subject=subject or "",
+        expected_seconds=HARD_TIMEOUT,
+    )
+    if dispatch_id:
+        spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id
+        status.ok("register", f"Registered as {dispatch_id[:8]}")
+    else:
+        # open_dispatch already logged why. The dispatch still goes: a register
+        # that cannot record must not also be able to CANCEL work.
+        status.info("register", "Not registered — completion will be unattributable")
 
     # When inside a systemd oneshot service (e.g. daemon-tick.timer), the
     # default KillMode=control-group sends SIGTERM to all cgroup members

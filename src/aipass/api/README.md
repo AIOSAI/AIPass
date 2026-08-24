@@ -5,8 +5,119 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1499 pass | **Functions:** 208 public (194 tested)
-**Last Updated:** 2026-08-19
+**Seedgo:** 100% (45/45) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
+**Last Updated:** 2026-08-21
+
+*THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
+EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
+imports that a local audit could not see, and the reason is one line of shared
+configuration: `pyrightconfig.json` carries `.venv/lib/python3.12/site-packages`
+on extraPaths, a directory that exists on a developer's machine and nowhere
+else. CI installs `.[dev,memory]` and never `[host]`, so `fastapi` and
+`starlette` resolve here and vanish there. `statics.py` was the only host module
+importing the extra WITHOUT the suppression header every other one carries —
+server.py, attach.py and google/auth.py all have it — so it was the only one
+that failed. Reproduced before it was fixed, by running the checker against an
+empty environment and getting the same four, then re-run to zero: a fix for a
+failure you cannot reproduce is a guess with good intentions.*
+
+*THE PUMP MOVED OUT, because 1534 lines is over a 1500-line cap and the ping
+lane is what pushed it there. `pump.py` now holds the bidirectional socket and
+its two control verbs; `server.py` keeps the routes and dropped `asyncio` and
+`json` with them, since the pump was the only thing here that used either. A cap
+is only a good reason to move code that was already separable, and this was —
+these functions take everything they touch as arguments, which is why they had
+already survived one move. Three tests read their source and now read it from the
+new file; one asserted on a logger that no longer lives in the same module, which
+is exactly the kind of quiet disconnection a move like this can leave behind, and
+it failed loudly instead. Eight mutations, all bitten, across both files.*
+
+*AND THE STANDARDS CHECKER ASKED THE NEW MODULE WHY IT LOGGED NO OPERATIONS,
+which was a fair question with a real answer. Every socket refusal on this
+surface leaves a structured record EXCEPT one: typing into a read-only watch
+happens after the socket is live, so it never passes the route's audit gate. It
+logged a warning, closed 1008, and told the trail nothing. It records the room
+and the session's own sentence now. The cheap way to satisfy that checker was a
+token log line; the honest way was to find the gap it was pointing at.*
+
+*A PHONE COULD NOT TELL A LIVE ROOM FROM A CORPSE. When a socket's peer
+vanishes without a FIN — a tunnel dropped, a laptop slept, a NAT entry expired —
+the browser keeps rendering the last frame it received and the operator believes
+they are looking at a live terminal. uvicorn pings from this side every 20
+seconds, so the SERVER always finds out; the JS WebSocket API exposes no ping at
+all, so the phone had no round-trip of its own and never did. So the control
+channel gained a second verb: `{"type":"ping"}` is answered `{"type":"pong"}`,
+on the text channel it arrived on, because a pong on the binary channel is
+indistinguishable from room output and would paint itself across the terminal.
+It is inert by construction — nothing typed, nothing resized, nothing logged; a
+liveness probe every few seconds is not an event, and recording it would bury
+the two lines that are. An inbound pong is an unknown frame, deliberately: the
+server pongs, it does not ping, and answering one would be two sockets shouting
+at each other on the wire the operator's keystrokes share.*
+
+*AND THE ROOM LANE WROTE DOWN ARRIVALS BUT NOT DEPARTURES. Thirteen attaches to
+one room in three minutes, and the log could not say whether thirteen sockets
+came and went or came and stayed — an arrival count alone cannot tell a
+reconnect loop from an operator opening sheets. Every detach now names the room,
+how long the socket lived, and the code it closed on. When the ROOM ends first
+the field says `room ended` rather than `None`: that is a different detach from
+any a client can cause, and a bare `None` reads as a logging bug rather than as
+the fact it is. Both fixes are @baud's r5 diagnosis of an incident on Patrick's
+own seat, and neither is LIVE — the production server on 8787 still predates
+them, along with the cache-control fixes below, until the restart window
+@devpulse holds. Nine tests, six mutations, all bitten. The honest cost: +55
+lines put `server.py` at 1533 against a 1500 cap, and the answer is a split
+(the pump and its control handler are self-contained), not a trim.*
+
+*Three findings arrived from other people's instruments in one night, and two
+of them were the same defect wearing different clothes. THE PHONE FACE was
+served with an etag, a last-modified and NO cache-control — which is not "do not
+cache" but "guess", and RFC 9111's heuristic guess is ~10% of the age since
+last-modified. The entry is un-hashed and NAMES the content-hashed bundles, so a
+stale entry faithfully fetches OLD assets; Patrick's first reload served a
+round-3 bundle and cost an acceptance round a false FAIL. Every stable-named
+file revalidates now, including `/phone.html` — the manifest's own start_url,
+which a narrow fix would have left stale for every installed phone while the
+typed URL looked fixed. `/assets` keeps its caching: a hashed name cannot go
+stale. And `no-cache` only means "ask first" if this server ANSWERS conditional
+requests, which it never did — starlette's FileResponse sets an etag and ignores
+If-None-Match — so that got closed too, with starlette's own comparison rather
+than a copy of it.*
+
+*THE GIT LANE was re-asking a question it already had the answer to, 720 times
+an hour. A phone polls every 5 seconds; for an external project whose branch
+carries no passport, drone refuses the caller before the door runs, and every
+poll spawned a subprocess that was never going to work and warned in three
+places across two branches' logs. What is remembered is drone's ANSWER, never
+drone's rule — checking for a passport here would be reimplementing another
+branch's authentication and drifting from it in the worst direction. A 60-second
+window means a root that gains a passport recovers on its own.*
+
+*AND THE SERVER GAINED A LIFETIME. `serve` routed through drone is a child of
+drone's exec timeout, so the tailnet server was dying on a twelve-hour schedule;
+the restarts cost more than the downtime, because uvicorn's access log goes to
+stdout, stdout was a tmux pane, and a day of access history scrolled out of a
+bounded scrollback right when it was needed. `serve --detach` gives the process
+its own session and its output an appended file, with `status` and `stop`
+because shipping the first without them is a nicer way to make orphans. It does
+NOT restart anything — a dead server that stays dead and says so is the honest
+failure. The first live start/stop found a bug twenty-two mocked tests could
+not: a reaped-but-not-waited child is a zombie, and `os.kill(pid, 0)` says yes
+to a corpse.*
+
+*`--out` became OPTIONAL, and that is a security fix rather than a
+convenience. The rule was never "make the caller name a file", it was S49's
+"never print the raw value" — and the mandatory flag defended it badly, because
+its own example said `--out ~/pixel.token`. Patrick found three raw bearer
+receipts sitting in his home root on 2026-08-19, 43 bytes each, put there by
+whoever read my help text and did what it said. The receipt lands beside the
+hashed store now (`~/.secrets/aipass/host_api/<label>.token`, dir 0700, file
+0600). That turns a free-form label into a FILENAME, which is the one thing it
+could never reach before, so the label now goes through the same two-gate name
+fence the routes use: refuse the sentence up front, check containment after
+resolving. Refusing an existing receipt is the other half — the token it names
+is still LIVE in the store, and truncating the file leaves a working credential
+nobody holds and nobody thinks to revoke.*
 
 *The name fence gained ROOTS (FPLAN-0443). It answered exactly one kind of
 word — a citizen name — which is why the phone could only ever stand in
@@ -125,8 +236,10 @@ drone @api stats
 | `cleanup [days]` | Clean up data older than N days (default: 30) |
 | `integrations list` | List registered contracts |
 | `integrations call <contract> [args...]` | Call a registered contract |
-| `host-api serve [--host IP] [--port N]` | Run the host API (binds the configured address or refuses) |
-| `host-api issue-token <label> --out FILE` | Mint a bearer token (raw value never printed) |
+| `host-api serve [--host IP] [--port N] [--detach]` | Run the host API (binds the configured address or refuses); `--detach` gives it its own session and a log file |
+| `host-api status` | Is a detached server running, its pid, bind and log |
+| `host-api stop` | Ask a detached server to exit (SIGTERM, never SIGKILL) |
+| `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
 | `host-api config` / `set-config` | Show / set the bind address (validated first) |
@@ -148,12 +261,14 @@ api/
 │   │   ├── usage_tracker.py           # Usage metrics — track, stats, cleanup
 │   │   ├── bridge.py                  # Generic contract registry (register/resolve)
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
-│   │   └── registry.py               # Driver auto-discovery (load_drivers)
+│   │   ├── registry.py               # Driver auto-discovery (load_drivers)
+│   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
 │   ├── handlers/                      # Business logic (9 packages, 35 files)
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
+│   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory)
 │   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py
@@ -165,7 +280,7 @@ api/
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
-Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
+Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` is a SUB-router: `host_api.py` offers it every `host-api` call first and owns everything it declines, so an unknown subcommand still reaches an error rather than a silent success.
 
 ---
 
@@ -215,8 +330,10 @@ The server the BAUD phone face talks to. **Bound to the tailnet since 2026-08-14
 after the Phase 5 security review — the first network-listening service in AIPass.
 
 ```bash
-drone @api host-api issue-token pixel-8 --scope read --out ~/pixel.token
+drone @api host-api issue-token pixel-8 --scope read   # receipt -> ~/.secrets/aipass/host_api/
 drone @api host-api serve              # binds the configured address
+drone @api host-api serve --detach     # survives drone's exec timeout; log in logs/
+drone @api host-api status             # pid, bind, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api revoke-token <id>  # effective next request, no restart
 ```
@@ -295,7 +412,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/hooks-sound` | read | @hooks' mute switch, read live through their own `is_muted()` |
 | `POST /v1/hooks-sound` | operate | Flip machine-wide hook sounds through @hooks' own command. Idempotent both directions |
 | `POST /v1/files/upload` | operate | Multipart image. The SERVER names the file; returns its absolute path |
-| `WS /v1/room/attach?branch=&project=&kind=` | operate\* | A real PTY. Bearer on the subprotocol. `kind=watch` is **read** scope; a watch with **no branch** is global mission control |
+| `WS /v1/room/attach?branch=&project=&kind=` | operate\* | A real PTY. Bearer on the subprotocol. `kind=watch` is **read** scope; a watch with **no branch** is global mission control. Control frames: `resize`, `ping` |
 | `GET /` | none | @baud's phone face, served from this same origin |
 
 **Verbs answer `{ok, detail}` at 200, and the line matters:** `ok: false` means the
@@ -775,9 +892,12 @@ client that reads that has already chosen its own fallback.
 resize ride the same socket without ever being mistaken for something the
 operator typed. Bytes are forwarded undecoded in both directions — the room emits
 escape sequences and partial UTF-8 across chunk boundaries, and decoding either
-end corrupts both. Resize is the only control verb: `{"type":"resize","cols":N,
-"rows":N}`, refused rather than clamped, and never fatal — a bad geometry must not
-drop a room the operator is working in.
+end corrupts both. There are two control verbs. `{"type":"resize","cols":N,
+"rows":N}` is refused rather than clamped, and never fatal — a bad geometry must
+not drop a room the operator is working in. `{"type":"ping"}` is answered
+`{"type":"pong"}` and does nothing else: it exists because a browser cannot send
+a protocol-level ping, so without it a phone whose peer vanished without a FIN
+reads its socket as OPEN forever. Anything else is logged and dropped.
 
 **Scope is `operate`, with no reading half.** An attached room is a shell prompt,
 so there is no read-scope attach to offer. `kind=watch` is the exception and the

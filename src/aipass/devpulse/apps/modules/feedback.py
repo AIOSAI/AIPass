@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feedback.py
 # Description: Feedback Module — command routing for devpulse feedback mailbox
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-05-15
+# Modified: 2026-08-22
 # =============================================
 
 """
@@ -27,9 +27,15 @@ from aipass.devpulse.apps.handlers.feedback.compose import (
 )
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, error, warning
+from aipass.cli.apps.modules import console as stdout_console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
+# This module's ordinary output goes to stderr, deliberately — it is a mailbox
+# UI, and its chatter must not pollute a pipeline that is capturing something
+# else. HELP is the exception: `feedback --help > usage.txt` wrote an EMPTY FILE
+# because help rode the same alias (@canary, 2026-08-22, measuring watchdog's
+# help at 1861B on stdout against this module's 0B). Help is documentation, not
+# chatter, and documentation belongs on the stream a redirect captures.
 console = err_console
 
 HELP_TEXT = """\
@@ -53,12 +59,27 @@ def _guard_caller() -> bool:
     The mailbox belongs to the project owner. `send` and `--help` stay open
     (send is the inbound channel any agent uses to drop feedback here); every
     other verb reads or mutates the owner's mail and is owner-gated. #681.
+
+    ``error`` and NOT ``warning``: ``warning`` does not call
+    ``mark_command_failed``, so this refusal used to EXIT 0 — every script
+    chaining ``feedback inbox && <next step>`` ran the next step believing it
+    had read the mailbox. @canary found the identical defect in watchdog from a
+    non-owner seat on 2026-08-22 and asked whether the shared guard had other
+    callers. It had two.
     """
-    from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller
+    from aipass.devpulse.apps.handlers.owner.guard import guard_owner_caller, owner_address
 
     if guard_owner_caller("feedback"):
         return True
-    warning("feedback mailbox management is owner-only — refusing non-owner call")
+    owner = owner_address()
+    whose = f"it belongs to {owner}" if owner else "no owner is sealed for this project"
+    error(
+        "feedback mailbox management is owner-only and this seat is not the owner",
+        suggestion=(
+            f"{whose} — ownership is the entry marked owner: true in the project's sealed registry. "
+            "'feedback send' and 'feedback --help' are open to every seat."
+        ),
+    )
     return False
 
 
@@ -100,7 +121,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     # any agent uses to drop feedback into the owner's mailbox. Everything else
     # reads or manages that mailbox -> owner-only (#681).
     if _wants_help(args):
-        console.print(HELP_TEXT)
+        stdout_console.print(HELP_TEXT)
         return True
 
     if args and args[0] == "send":

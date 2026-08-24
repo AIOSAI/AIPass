@@ -8,5 +8,5 @@ Modules orchestrate work by calling handlers. They are the public API of the bra
 
 | Module | Purpose |
 |---|---|
-| `watchdog.py` | Directed wake system. Subcommands: `agent`, `timer`, `schedule`, `status`, `cancel`, `list`. Wakes devpulse reliably on agent exit, wall-clock time, or named duration. Replaces the old bash one-liner. |
+| `watchdog.py` | Always-on dispatch reporting — a session signs in via `baseline` and every completion report is delivered; plus directed wakes. Subcommands: `baseline`, `agent`, `timer`, `schedule`, `status`, `cancel`, `list`. |
 | `feedback.py` | Cross-project feedback channel. `compose` / `inbox` handlers. Lets external projects report bugs/friction back to devpulse. |

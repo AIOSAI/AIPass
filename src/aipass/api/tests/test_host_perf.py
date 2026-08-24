@@ -63,6 +63,7 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -902,7 +903,8 @@ class TestThePumpPoolIsBoundedOutLoud:
 
     def test_the_pump_hands_its_read_to_that_pool(self) -> None:
         """The pool exists to be used — the read must actually reach it."""
-        pump = Path(host_server.__file__).read_text(encoding="utf-8")
+        # pump.py since 2026-08-21 — the read moved out of server.py with it.
+        pump = Path(host_pump.__file__).read_text(encoding="utf-8")
 
         assert "run_in_executor(host_attach.pump_executor(), session.read)" in pump
 

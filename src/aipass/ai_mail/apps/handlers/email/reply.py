@@ -23,6 +23,7 @@ from datetime import datetime
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
+from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -138,6 +139,12 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
         # misattribution showed can name the wrong branch entirely.
         "reply_path": str(from_branch_path / ".ai_mail.local" / "inbox.json"),
     }
+
+    # Dispatch authorship, same reason as create_email_file (FPLAN-0452 P1).
+    # Stamped on the SHARED dict, before either delivery lane runs, so the
+    # registry path and the stored reply_path lane both carry it — they write
+    # their own sent records and a stamp in only one would silently under-count.
+    stamp_dispatch_id(reply_email_data)
 
     # Find recipient branch
     branches = get_all_branches()

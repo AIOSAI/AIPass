@@ -1264,6 +1264,33 @@ def test_class_naming_no_classes():
     assert result is None
 
 
+def test_class_naming_private_pascal_passes():
+    """PEP 8 sanctions a single leading underscore on an internal PascalCase class."""
+    content = "class _LivenessState:\n    pass\n"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+        check_class_naming,
+    )
+
+    result = check_class_naming(content)
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_class_naming_private_snake_still_fails():
+    """A leading underscore does not excuse a non-PascalCase body."""
+    content = "class _foo_bar:\n    pass\n"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+        check_class_naming,
+    )
+
+    result = check_class_naming(content)
+    assert result is not None
+    assert result["passed"] is False
+    assert "_foo_bar" in result["message"]
+
+
 # ===========================================================================
 # 16. permission_flags_check -- check_no_dangerous_flags
 # ===========================================================================

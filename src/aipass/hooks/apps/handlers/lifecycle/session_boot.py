@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.2.0
-# Description: Boot wrapper — attach-first menu for Claude Code sessions
+# Version: 4.4.1
+# Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-08-18
+# Modified: 2026-08-23
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -28,6 +28,13 @@ No live session:
   devpulse — no live chat
     [Enter]  continue last chat
     [n]      new chat
+
+Dispatched (an agent is WORKING here — outranks every menu above):
+  canary — agent is WORKING here (dispatched · lock PID 1781957 · 2m ago)
+    [Enter]  leave it working and exit
+    [w]      spectate (read-only):  drone @prax monitor run canary
+    [r]      reclaim the seat — STOPS THE JOB, then resumes its chat
+    [n]      new chat  (separate session — steals nothing)
 
 All interactive launches are tmux-wrapped (closed terminal = recoverable).
 
@@ -52,6 +59,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
 _CHAT_LIMIT = 5
+
+# After 'r' stops the branch's claudes, the dispatch monitor notices its agent
+# die and surrenders the lock it owns (PID-verified). How long to wait for that
+# handover before refusing to resume — resuming while the lock stands would
+# race the monitor's own cleanup.
+_RECLAIM_WAIT_S = 10.0
+_RECLAIM_POLL_S = 0.5
 
 
 def _resolve_claude_binary() -> str:
@@ -418,11 +432,22 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
 
     _warn_on_version_drift(claude_bin)
 
+    # FPLAN-0449: a live dispatch lock outranks BOTH menus below. The
+    # dispatch claude writes a session file like any other, so without this
+    # check the live menu offers the JOB as a "live chat" and Enter walks
+    # into the takeover; and the no-live pointer aims Enter at the exact
+    # session the job is working in. Checked after the -p/tmux early exits
+    # on purpose — the dispatch itself boots through -p and must never be
+    # gated by its own lock.
+    lock = _dispatch_lock(cwd)
+    if lock is not None:
+        return _menu_dispatched(lock, branch, claude_bin, defaults, extra_args, cwd)
+
     live = _find_live_sessions(cwd)
 
     if live:
         return _menu_live(live, branch, claude_bin, defaults, extra_args, cwd)
-    return _menu_no_live(branch, claude_bin, defaults, extra_args)
+    return _menu_no_live(branch, claude_bin, defaults, extra_args, cwd)
 
 
 def _has_bg(sessions: list[dict]) -> bool:
@@ -520,10 +545,21 @@ def _takeover_bg(
 
 
 def _is_session_file_present(pid: int | None) -> bool:
-    """Check if a CC session file exists for the given PID."""
+    """Check if a CC session file exists for the given PID.
+
+    Home is resolved through cc_sessions._claude_home() rather than
+    `Path.home()` directly: that call raises RuntimeError when expanduser
+    cannot answer (Windows with no %USERPROFILE%), and a presence CHECK must
+    come back True or False, never take the menu down with it. No home means no
+    session file, which is False. Resolution stays LIVE rather than reading the
+    module constant, so a caller that redirects home still moves this lookup.
+    """
     if pid is None:
         return False
-    session_file = Path.home() / ".claude" / "sessions" / f"{pid}.json"
+    import importlib
+
+    cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    session_file = cc_sessions._claude_home() / ".claude" / "sessions" / f"{pid}.json"
     return session_file.exists()
 
 
@@ -533,6 +569,7 @@ def _menu_single_session(
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
     """Handle menu for a single live session."""
     label = _session_label(session, branch)
@@ -552,7 +589,7 @@ def _menu_single_session(
     if choice in ("", "r"):
         return _resume_session(session, branch, claude_bin, defaults, extra_args)
     if choice == "n":
-        return _menu_single_new(session, is_bg, branch, claude_bin, defaults, extra_args)
+        return _menu_single_new(session, is_bg, branch, claude_bin, defaults, extra_args, cwd=cwd)
     if choice == "c":
         return _menu_single_close(session, is_bg, branch, claude_bin)
     if choice in ("exit", "q", "quit"):
@@ -568,6 +605,7 @@ def _menu_single_new(
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
     """Handle 'n' choice for single session — stop current, start fresh."""
     if is_bg:
@@ -576,7 +614,7 @@ def _menu_single_new(
             return {"exit_code": 1, "error": stop["error"]}
     else:
         _stop_session(session, claude_bin)
-    return _start_fresh(branch, claude_bin, defaults, extra_args)
+    return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=cwd)
 
 
 def _menu_single_close(session: dict, is_bg: bool, branch: str, claude_bin: str) -> dict:
@@ -602,6 +640,23 @@ def _transcripts():
     import importlib
 
     return importlib.import_module("aipass.hooks.apps.modules.cc_transcripts")
+
+
+def _session_pointer():
+    """The dispatch session-pointer store, imported on use (same rule as above).
+
+    FPLAN-0448: the branch's `.ai_mail.local/session.json` names the session
+    its seat lives in — written by ai_mail's dispatch on every wake, and by
+    this shim when a human opens or mints a seat. It is the only record that
+    can reach a dispatched session: interactive `-c` refuses headless
+    transcripts outright, so continue-by-mtime lands at the last HUMAN chat
+    no matter how many dispatches ran since. Reading and writing go through
+    session_pointer.py, never by hand — it owns the format, the atomic write,
+    and the trust checks (cwd match + transcript-exists).
+    """
+    import importlib
+
+    return importlib.import_module("aipass.ai_mail.apps.handlers.dispatch.session_pointer")
 
 
 def _chat_age(modified: float) -> str:
@@ -638,6 +693,7 @@ def _open_chat(
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
     """Open a chosen chat — ATTACH when a brain already holds it, never spawn a second.
 
@@ -655,6 +711,13 @@ def _open_chat(
 
     session_id = chat.get("session_id", "")
     logger.info("[SESSION_BOOT] Resuming transcript %s (no live holder)", session_id[:8])
+    # The chat he just opened IS the seat now — record it, so the next Enter,
+    # the next dispatch, and BAUD's resume door all land here (FPLAN-0448).
+    # Opening under -c had the same effect implicitly (the resumed
+    # transcript's mtime rose); the pointer makes it a written record instead
+    # of a side effect. The attach path above records nothing on purpose:
+    # joining a live seat doesn't change which session is current.
+    _session_pointer().write_pointer(Path(cwd or Path.cwd()), session_id, "session_boot")
     nf = _name_flag(branch, session_id, extra_args)
     cmd = [claude_bin] + defaults + ["--resume", session_id] + list(extra_args or []) + nf
     return _exec_in_tmux(branch, session_id, claude_bin, cmd)
@@ -685,7 +748,7 @@ def _menu_live(
 ) -> dict:
     """Display menu when live session(s) exist."""
     if len(live) == 1:
-        return _menu_single_session(live[0], branch, claude_bin, defaults, extra_args)
+        return _menu_single_session(live[0], branch, claude_bin, defaults, extra_args, cwd=cwd)
 
     return _menu_multi(live, branch, claude_bin, defaults, extra_args, cwd)
 
@@ -720,9 +783,28 @@ def _menu_multi(
                 transcripts.append(held)
                 listed.add(sid)
 
+    # FPLAN-0448: Enter follows the SEAT'S OWN RECORD, not newest-by-mtime —
+    # mtime is the guess the pointer exists to retire, and it is how a day of
+    # dispatch work vanished behind an older interactive chat. The numbered
+    # list stays the override. No trustworthy pointer → transcripts[0], the
+    # old behaviour.
+    default_chat = None
+    ptr_sid, ptr_reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
+    if ptr_sid:
+        default_chat = next((c for c in transcripts if c.get("session_id") == ptr_sid), None)
+        if default_chat is None:
+            pointed = _transcripts().chat_for(branch_cwd, ptr_sid)
+            if pointed:
+                transcripts.append(pointed)
+                listed.add(ptr_sid)
+                default_chat = pointed
+    if default_chat is None:
+        logger.info("[SESSION_BOOT] No pointer default for Enter: %s", ptr_reason)
+        default_chat = transcripts[0] if transcripts else None
+
     sys.stderr.write(f"\n{branch} — recent chats:\n")
-    if transcripts:
-        sys.stderr.write(f"  [Enter]  continue last chat  ({_chat_line(transcripts[0])})\n")
+    if default_chat is not None:
+        sys.stderr.write(f"  [Enter]  continue last chat  ({_chat_line(default_chat)})\n")
         for i, chat in enumerate(transcripts, 1):
             sys.stderr.write(f"  [{i}]      {_chat_line(chat)}\n")
     else:
@@ -739,8 +821,8 @@ def _menu_multi(
     choice = _read_choice()
 
     if choice in ("", "r"):
-        if transcripts:
-            return _open_chat(transcripts[0], live, branch, claude_bin, defaults, extra_args)
+        if default_chat is not None:
+            return _open_chat(default_chat, live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
         logger.info("[SESSION_BOOT] Continuing last chat via --continue (no transcripts listed)")
         nf = _name_flag(branch, extra_args=extra_args)
         cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
@@ -750,7 +832,7 @@ def _menu_multi(
         return _close_all(live, branch, claude_bin)
 
     if choice == "n":
-        return _new_over_all(live, branch, claude_bin, defaults, extra_args)
+        return _new_over_all(live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
 
     if choice in ("exit", "q", "quit"):
         return {"exit_code": 0, "action": "quit"}
@@ -758,7 +840,7 @@ def _menu_multi(
     try:
         idx = int(choice) - 1
         if 0 <= idx < len(transcripts):
-            return _open_chat(transcripts[idx], live, branch, claude_bin, defaults, extra_args)
+            return _open_chat(transcripts[idx], live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
     except (ValueError, IndexError):
         logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
 
@@ -789,6 +871,7 @@ def _new_over_all(
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
     """Start new chat, stopping what's stoppable first."""
     non_bg = [s for s in live if s.get("kind") not in ("bg", "background")]
@@ -801,7 +884,7 @@ def _new_over_all(
         if not stop["ok"]:
             sys.stderr.write("  Cannot start new — bg session(s) still running.\n")
             return {"exit_code": 1, "error": "daemon stop failed, aborting to preserve one-brain"}
-    return _start_fresh(branch, claude_bin, defaults, extra_args)
+    return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=cwd)
 
 
 def _menu_no_live(
@@ -809,21 +892,30 @@ def _menu_no_live(
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
-    """Display menu when no live session exists."""
+    """Display menu when no live session exists.
+
+    Enter follows the SESSION POINTER when the branch has a trustworthy one
+    (FPLAN-0448) — `--resume <id>` is the only door into a dispatched
+    session, `-c` refuses those transcripts outright. No pointer → the old
+    `--continue`, so a branch that predates the pointer opens exactly as
+    before.
+    """
+    branch_cwd = cwd or str(Path.cwd())
+    sid, reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
+
     sys.stderr.write(f"\n{branch} — no live chat\n")
-    sys.stderr.write("  [Enter]  continue last chat\n")
+    seat = f"  (seat {sid[:8]})" if sid else ""
+    sys.stderr.write(f"  [Enter]  continue last chat{seat}\n")
     sys.stderr.write("  [n]      new chat\n\n")
 
     choice = _read_choice()
 
     if choice in ("", "r"):
-        logger.info("[SESSION_BOOT] Continuing last chat via --continue")
-        nf = _name_flag(branch, extra_args=extra_args)
-        cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
-        return _exec_in_tmux(branch, "", claude_bin, cmd)
+        return _continue_by_pointer(branch, claude_bin, defaults, extra_args, branch_cwd)
     elif choice == "n":
-        return _start_fresh(branch, claude_bin, defaults, extra_args)
+        return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
     elif choice in ("exit", "q", "quit"):
         return {"exit_code": 0, "action": "quit"}
     else:
@@ -831,20 +923,166 @@ def _menu_no_live(
         return {"exit_code": 1, "error": "unknown choice"}
 
 
+def _continue_by_pointer(
+    branch: str,
+    claude_bin: str,
+    defaults: list[str],
+    extra_args: list[str] | None,
+    branch_cwd: str,
+) -> dict:
+    """Open the branch's recorded seat — `--resume <pointer>` when trustworthy,
+    else the old `--continue`. The shared tail of the no-live Enter and the
+    reclaim door: both mean "give me this branch's current chat"."""
+    sid, reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
+    if sid:
+        logger.info("[SESSION_BOOT] Continuing via session pointer: %s", reason)
+        nf = _name_flag(branch, sid, extra_args)
+        cmd = [claude_bin] + defaults + ["--resume", sid] + list(extra_args or []) + nf
+        return _exec_in_tmux(branch, sid, claude_bin, cmd)
+    logger.info("[SESSION_BOOT] Continuing last chat via --continue (%s)", reason)
+    nf = _name_flag(branch, extra_args=extra_args)
+    cmd = [claude_bin] + defaults + ["--continue"] + list(extra_args or []) + nf
+    return _exec_in_tmux(branch, "", claude_bin, cmd)
+
+
+def _dispatch_lock(cwd: str) -> dict | None:
+    """The branch's live dispatch lock, or None. READ-ONLY — never unlinks.
+
+    ai_mail's wake owns the lock lifecycle (acquire, PID-verify, stale
+    cleanup) — this probe only asks "is an agent working here right now",
+    so a lock whose PID is dead gates nothing and is left in place for the
+    owner to clean. Format is wake.py's: {pid, timestamp, branch}.
+    """
+    import importlib
+
+    lock_file = Path(cwd) / ".ai_mail.local" / ".dispatch.lock"
+    if not lock_file.exists():
+        return None
+    try:
+        data = json.loads(lock_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.info("[SESSION_BOOT] Unreadable dispatch lock %s: %s", lock_file, exc)
+        return None
+    pid = data.get("pid")
+    if not pid:
+        return None
+    cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    if not cc_sessions._is_pid_alive(pid):
+        logger.info("[SESSION_BOOT] Dispatch lock PID %s dead — not gating (cleanup is ai_mail's)", pid)
+        return None
+    return data
+
+
+def _menu_dispatched(
+    lock: dict,
+    branch: str,
+    claude_bin: str,
+    defaults: list[str],
+    extra_args: list[str] | None,
+    cwd: str | None = None,
+) -> dict:
+    """An agent is WORKING in this branch — resume steps aside (FPLAN-0449).
+
+    Resume onto a live dispatch is takeover, not spectate: two claudes on
+    one session id migrate the session's background-task state to the newer
+    PID and the job dies mid-run, unreplied (DPLAN-0310, measured live
+    2026-08-20 — the OSPREY intercept). The presence gate blocks the newer
+    seat's prompts but cannot block that migration, so the DOOR refuses.
+    What remains: wait (Enter), spectate (w), take the seat with eyes open
+    (r), or a fresh chat (n) — a new session id steals nothing.
+    """
+    branch_cwd = cwd or str(Path.cwd())
+    age = ""
+    ts = lock.get("timestamp", "")
+    if ts:
+        try:
+            from datetime import datetime
+
+            age = f" · {_chat_age(datetime.fromisoformat(ts).timestamp())}"
+        except (ValueError, TypeError) as exc:
+            logger.info("[SESSION_BOOT] Unparseable dispatch lock timestamp %r: %s", ts, exc)
+
+    sys.stderr.write(f"\n{branch} — agent is WORKING here (dispatched · lock PID {lock.get('pid')}{age})\n")
+    sys.stderr.write("  Resume is takeover, not spectate: a second claude on the same session\n")
+    sys.stderr.write("  steals its background-task state and the job dies mid-run (DPLAN-0310).\n\n")
+    sys.stderr.write("  [Enter]  leave it working and exit\n")
+    sys.stderr.write(f"  [w]      spectate (read-only):  drone @prax monitor run {branch}\n")
+    sys.stderr.write("  [r]      reclaim the seat — STOPS THE JOB, then resumes its chat\n")
+    sys.stderr.write("  [n]      new chat  (separate session — steals nothing)\n\n")
+
+    choice = _read_choice()
+
+    if choice in ("", "q", "quit", "exit"):
+        return {"exit_code": 0, "action": "left_working"}
+    if choice == "w":
+        os.execvp("drone", ["drone", "@prax", "monitor", "run", branch])
+        return {"exit_code": 0, "action": "spectate"}
+    if choice == "n":
+        return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
+    if choice == "r":
+        return _reclaim_dispatched(branch, claude_bin, defaults, extra_args, branch_cwd)
+    sys.stderr.write("  Unknown choice. Exiting.\n")
+    return {"exit_code": 1, "error": "unknown choice"}
+
+
+def _reclaim_dispatched(
+    branch: str,
+    claude_bin: str,
+    defaults: list[str],
+    extra_args: list[str] | None,
+    branch_cwd: str,
+) -> dict:
+    """Deliberate takeover: stop the job, wait for its lock, resume its chat.
+
+    The kill is the CHOICE here — this door exists so takeover happens with
+    eyes open instead of by accident. Only after the monitor surrenders the
+    lock is the session unheld and safe to resume with its task state whole.
+    """
+    import importlib
+
+    cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    for action in cc_sessions.reclaim(branch):
+        sys.stderr.write(f"  {action}\n")
+
+    lock_file = Path(branch_cwd) / ".ai_mail.local" / ".dispatch.lock"
+    deadline = time.monotonic() + _RECLAIM_WAIT_S
+    while lock_file.exists() and time.monotonic() < deadline:
+        time.sleep(_RECLAIM_POLL_S)
+    if lock_file.exists():
+        sys.stderr.write("  Dispatch lock did not clear — the monitor may still be finishing. Try again shortly.\n")
+        return {"exit_code": 1, "error": "dispatch lock did not clear after reclaim"}
+
+    return _continue_by_pointer(branch, claude_bin, defaults, extra_args, branch_cwd)
+
+
 def _start_fresh(
     branch: str,
     claude_bin: str,
     defaults: list[str],
     extra_args: list[str] | None,
+    cwd: str | None = None,
 ) -> dict:
-    """Start a fresh Claude session in a new tmux session."""
+    """Start a fresh Claude session in a new tmux session.
+
+    The session id is MINTED here and the pointer written BEFORE claude
+    starts (FPLAN-0448) — a fresh seat the record never learned about is how
+    the resume doors drift back to mtime guessing. Crash-safe by order: a
+    pointer to a session that never materialized is refused later by the
+    transcript-exists check. Proven live 2026-08-20: interactive claude binds
+    a minted `--session-id` exactly like headless does.
+    """
     session_name = _make_session_name(branch)
 
     if _tmux_session_exists(session_name):
         logger.info("[SESSION_BOOT] Killing stale tmux session '%s'", session_name)
         subprocess.run(["tmux", "kill-session", "-t", session_name], check=False)
 
-    claude_cmd = [claude_bin] + defaults + _name_flag(branch, extra_args=extra_args)
+    sp = _session_pointer()
+    session_id = sp.mint_session_id()
+    branch_cwd = cwd or str(Path.cwd())
+    sp.write_pointer(Path(branch_cwd), session_id, "session_boot")
+
+    claude_cmd = [claude_bin] + defaults + ["--session-id", session_id] + _name_flag(branch, session_id, extra_args)
     if extra_args:
         claude_cmd.extend(extra_args)
 

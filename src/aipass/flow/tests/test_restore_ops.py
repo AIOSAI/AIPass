@@ -701,3 +701,181 @@ class TestRecoverPlanFromBackup:
         assert "FPLAN-0011" in msg
         save.assert_called_once()
         assert save.call_args[1].get("registry_file") == "fplan_registry.json"
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. THE ARCHIVE IS THE SAFETY NET — restoring a normally-closed plan
+#
+# Measured on the live tree before writing any of this: 719 closed
+# rows, 0 with a file at their registered path, 412 with an intact
+# copy in the archive. Restore failed for all 719 because step 5
+# checked one location and never looked at the other.
+# ═══════════════════════════════════════════════════════════
+
+
+def _import_find_backup_copy():
+    from aipass.flow.apps.handlers.plan.restore_ops import find_backup_copy
+
+    return find_backup_copy
+
+
+def _import_restore_file_from_backup():
+    from aipass.flow.apps.handlers.plan.restore_ops import restore_file_from_backup
+
+    return restore_file_from_backup
+
+
+def _closed_plan(tmp_path, name="FPLAN-0042_the_real_subject_2026-08-01.md"):
+    """A plan closed the normal way: row intact, file archived out of the tree."""
+    home = tmp_path / "src" / "aipass" / "somebranch"
+    home.mkdir(parents=True)
+    archive = tmp_path / ".backup" / "processed_plans"
+    archive.mkdir(parents=True)
+    (archive / name).write_text("# The plan\n\n**Location**: " + str(home) + "\n", encoding="utf-8")
+    row = {
+        "status": "closed",
+        "file_path": str(home / name),
+        "location": str(home),
+        "relative_path": "somebranch",
+        "subject": "The real subject",
+        "created": "2026-08-01T00:00:00+00:00",
+        "closed": "2026-08-20T00:00:00+00:00",
+        "closed_reason": "completed",
+    }
+    return row, home, archive, name
+
+
+class TestFindBackupCopy:
+    def test_matches_the_rows_own_filename_slug_and_date_intact(self, tmp_path):
+        find_backup_copy = _import_find_backup_copy()
+        row, _home, archive, name = _closed_plan(tmp_path)
+
+        found = find_backup_copy(row, "0042", backup_dir=archive)
+        assert found is not None
+        # Not a PREFIX-NNNN.md husk -- the name that carries the work.
+        assert found.name == name
+        assert "the_real_subject" in found.name and "2026-08-01" in found.name
+
+    def test_glob_fallback_is_type_scoped(self, tmp_path):
+        """Every registry numbers from 0001; a bare-number glob returns the wrong plan."""
+        find_backup_copy = _import_find_backup_copy()
+        row, _home, archive, _name = _closed_plan(tmp_path, "FPLAN-0011_wanted_2026-08-01.md")
+        # Row points at a name that is NOT in the archive, forcing the fallback.
+        row["file_path"] = str(tmp_path / "gone" / "FPLAN-0011_renamed_2026-08-01.md")
+        (archive / "DPLAN-0011_decoy_2026-08-01.md").write_text("# decoy", encoding="utf-8")
+
+        found = find_backup_copy(row, "0011", backup_dir=archive)
+        assert found is not None
+        assert found.name.startswith("FPLAN-0011")
+
+    def test_row_without_type_evidence_is_not_globbed(self, tmp_path):
+        find_backup_copy = _import_find_backup_copy()
+        _row, _home, archive, _name = _closed_plan(tmp_path)
+        assert find_backup_copy({"file_path": ""}, "0042", backup_dir=archive) is None
+
+    def test_absent_archive_returns_none(self, tmp_path):
+        find_backup_copy = _import_find_backup_copy()
+        row, _home, _archive, _name = _closed_plan(tmp_path)
+        assert find_backup_copy(row, "0042", backup_dir=tmp_path / "no_such_dir") is None
+
+
+class TestRestoreFileFromBackup:
+    def test_copies_back_and_preserves_the_archive(self, tmp_path):
+        """COPY, not move -- a restore must be repeatable and must not consume the net."""
+        restore_file_from_backup = _import_restore_file_from_backup()
+        row, home, archive, name = _closed_plan(tmp_path)
+
+        target, msg = restore_file_from_backup(row, "0042", backup_dir=archive)
+        assert target == home / name
+        assert target.is_file()
+        assert (archive / name).is_file(), "archive copy was consumed"
+        assert "restored" in msg
+
+    def test_refuses_when_the_original_location_is_gone(self, tmp_path):
+        restore_file_from_backup = _import_restore_file_from_backup()
+        row, home, archive, _name = _closed_plan(tmp_path)
+        import shutil
+
+        shutil.rmtree(home)
+
+        target, msg = restore_file_from_backup(row, "0042", backup_dir=archive)
+        assert target is None
+        assert "no longer exists" in msg
+
+    def test_reports_plainly_when_nothing_is_archived(self, tmp_path):
+        restore_file_from_backup = _import_restore_file_from_backup()
+        row, _home, archive, name = _closed_plan(tmp_path)
+        (archive / name).unlink()
+
+        target, msg = restore_file_from_backup(row, "0042", backup_dir=archive)
+        assert target is None
+        assert "no archived copy" in msg
+
+
+class TestRestoreOfANormallyClosedPlan:
+    """The end-to-end claim: 'every closed plan is recoverable'."""
+
+    def test_closed_plan_with_an_archived_copy_restores(self, tmp_path):
+        fn = _import_restore_plan_impl()
+        row, home, archive, name = _closed_plan(tmp_path)
+        registry = {"plans": {"0042": row}}
+
+        deps = _make_deps(
+            normalize_plan_number=MagicMock(side_effect=lambda x: str(x).split("-")[-1].zfill(4)),
+            load_registry=MagicMock(return_value=registry),
+        )
+        deps["restore_file_from_backup_fn"] = lambda info, key: _import_restore_file_from_backup()(
+            info, key, backup_dir=archive
+        )
+
+        result = fn(plan_num="FPLAN-0042", **deps)
+
+        # REACHED: the restore ran to completion, not short-circuited earlier.
+        assert result["success"] is True, result["messages"]
+        # OUTCOME: file back on disk, row reopened, and the name still carries the work.
+        assert (home / name).is_file()
+        assert registry["plans"]["0042"]["status"] == "open"
+        assert "the_real_subject" in name and "2026-08-01" in name
+
+    def test_the_rows_own_metadata_survives_the_restore(self, tmp_path):
+        """recover_plan_from_backup would have overwritten subject and created."""
+        fn = _import_restore_plan_impl()
+        row, _home, archive, _name = _closed_plan(tmp_path)
+        registry = {"plans": {"0042": row}}
+
+        deps = _make_deps(
+            normalize_plan_number=MagicMock(side_effect=lambda x: str(x).split("-")[-1].zfill(4)),
+            load_registry=MagicMock(return_value=registry),
+        )
+        deps["restore_file_from_backup_fn"] = lambda info, key: _import_restore_file_from_backup()(
+            info, key, backup_dir=archive
+        )
+
+        fn(plan_num="FPLAN-0042", **deps)
+
+        restored = registry["plans"]["0042"]
+        assert restored["subject"] == "The real subject"
+        assert restored["created"] == "2026-08-01T00:00:00+00:00"
+        assert restored["subject"] != "Recovered from backup"
+        # Close metadata is cleared, which is what reopening means.
+        assert "closed" not in restored
+
+    def test_no_archived_copy_still_refuses_and_says_where_it_looked(self, tmp_path):
+        fn = _import_restore_plan_impl()
+        row, _home, archive, name = _closed_plan(tmp_path)
+        (archive / name).unlink()
+        registry = {"plans": {"0042": row}}
+
+        deps = _make_deps(
+            normalize_plan_number=MagicMock(side_effect=lambda x: str(x).split("-")[-1].zfill(4)),
+            load_registry=MagicMock(return_value=registry),
+        )
+        deps["restore_file_from_backup_fn"] = lambda info, key: _import_restore_file_from_backup()(
+            info, key, backup_dir=archive
+        )
+
+        result = fn(plan_num="FPLAN-0042", **deps)
+        assert result["success"] is False
+        assert any(m.get("error_type") == "file_missing" for m in result["messages"])
+        blob = " ".join(str(m.get("text", "")) for m in result["messages"])
+        assert "Archive lookup" in blob and "no archived copy" in blob

@@ -32,7 +32,7 @@ from rich.text import Text
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
-from aipass.drone.apps.modules.resolver import get_all_branches
+from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
 from aipass.drone.apps.modules.router import route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
@@ -475,10 +475,16 @@ def _handle_target(args: List[str]) -> int:
     is_presentational = not rest or first_cmd is None
     needs_interactive = is_presentational or first_cmd in INTERACTIVE_COMMANDS or module_name in INTERACTIVE_BRANCHES
 
-    # Route to internal module — unless command needs interactive terminal,
-    # in which case fall through to branch (subprocess) routing so Rich
-    # Progress / TUI output renders live instead of being buffered.
-    if is_module(module_name) and not needs_interactive:
+    # Route to a module — unless this command needs a live terminal AND there is
+    # a branch behind the name to deliver it. Interactive mode is a property of
+    # BRANCH routing: it means "inherit the terminal instead of capturing the
+    # subprocess", and _handle_module runs in-process and takes no interactive
+    # parameter. So deferring a module-only target like @git to branch routing
+    # buys nothing and costs a BranchNotFoundError on every single call —
+    # 1335 of 1337 lines in drone_drone.log were that fallback firing on the
+    # happy path (DPLAN-0315). @seedgo and @cli are both module and branch, and
+    # still take the subprocess lane so their Rich output renders live.
+    if is_module(module_name) and not (needs_interactive and branch_exists(target)):
         return _handle_module(module_name, rest)
 
     # No args = pass through to branch (introspection — inherit terminal for color)
@@ -486,9 +492,6 @@ def _handle_target(args: List[str]) -> int:
         try:
             result = route_command(target, interactive=True)
         except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
-            if isinstance(exc, BranchNotFoundError) and is_module(module_name):
-                logger.info("Falling back to module routing for @%s (not in local registry)", module_name)
-                return _handle_module(module_name, rest)
             logger.warning("Introspection failed for %s: %s", target, exc)
             err_console.print(f"drone: {exc}")
             if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
@@ -501,9 +504,6 @@ def _handle_target(args: List[str]) -> int:
         try:
             result = route_command(target, rest[0], interactive=True)
         except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
-            if isinstance(exc, BranchNotFoundError) and is_module(module_name):
-                logger.info("Falling back to module routing for @%s %s (not in local registry)", module_name, rest[0])
-                return _handle_module(module_name, rest)
             logger.warning("Help lookup failed for %s: %s", target, exc)
             err_console.print(f"drone: {exc}")
             if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):
@@ -533,9 +533,6 @@ def _handle_target(args: List[str]) -> int:
             interactive=interactive,
         )
     except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
-        if isinstance(exc, BranchNotFoundError) and is_module(module_name):
-            logger.info("Falling back to module routing for @%s %s (not in local registry)", module_name, command)
-            return _handle_module(module_name, rest)
         logger.warning("Command routing failed for %s %s: %s", target, command, exc)
         err_console.print(f"drone: {exc}")
         if isinstance(exc, BranchNotFoundError) and not os.environ.get("AIPASS_HOME"):

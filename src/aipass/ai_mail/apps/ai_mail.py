@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-08-21
 # =============================================
 
 """
@@ -209,6 +209,25 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 # =============================================================================
+# IDENTITY FENCE
+# =============================================================================
+
+
+def _refuse_unresolvable_caller() -> str:
+    """Return a refusal message when the caller stands outside any branch, else "".
+
+    Delegates to the email module, which owns sender identity; the entry point
+    stays a router. See ``modules.email.caller_refusal`` for the policy.
+
+    Returns:
+        str: The refusal text, or "" when the caller's identity is resolvable.
+    """
+    from aipass.ai_mail.apps.modules.email import caller_refusal
+
+    return caller_refusal()
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -258,6 +277,15 @@ def main():
                     return 0
             print_help()
             return 0
+
+        # Identity fence — after every help/version door above, because help needs
+        # no identity and @aipass's cross-OS preflight probes `drone @ai_mail --help`
+        # from wherever it happens to run. Before routing, because past this line a
+        # verb would act on a mailbox chosen by a guess.
+        refusal = _refuse_unresolvable_caller()
+        if refusal:
+            error(refusal)
+            return 2
 
         # Route command
         if route_command(command, remaining_args, modules):

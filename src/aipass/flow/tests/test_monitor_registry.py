@@ -448,3 +448,96 @@ class TestFireEvent:
         with patch.object(builtins, "__import__", side_effect=_failing_import):
             result = mod._fire_event("test_event")
         assert result is False
+
+
+# ═══════════════════════════════════════════════════════════
+# Cross-type numbers are NOT duplicates
+#
+# Ruling 2026-08-22 (Patrick): "numbers are separated by plan names. the plan
+# name is the separation. aplan0002 fplan0001 dplan0001 pplan0001." The on-disk
+# index used to key on the bare number, so APLAN-0007 and FPLAN-0007 read as one
+# plan filed twice — and the scan RENAMES the loser on the filesystem, dropping
+# its topic slug and orphaning its registry row. heal_registry's own index has
+# always keyed on (prefix, number); this brings the scan in line.
+#
+# Every test here asserts the walk REACHED the files before asserting on the
+# outcome: a scan that found nothing would satisfy "nothing was renamed".
+# ═══════════════════════════════════════════════════════════
+
+
+def _write_plan(directory: Path, name: str) -> Path:
+    """Create a plan file on disk and return its path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text("# plan\n", encoding="utf-8")
+    return path
+
+
+class TestCrossTypeNumbersAreNotDuplicates:
+    """Same number, different type = two plans, not one to repair."""
+
+    def test_aplan_and_fplan_sharing_a_number_are_both_left_alone(self, tmp_path):
+        mod = _import_monitor_ops()
+        aplan = _write_plan(tmp_path / "a", "APLAN-0007_branch_audit_flow_2026-08-13.md")
+        fplan = _write_plan(tmp_path / "b", "FPLAN-0007_some_build_2026-08-13.md")
+
+        with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
+            result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        # REACHED: both files were walked. Without this the assertions below
+        # would also pass on an empty scan.
+        assert fire.call_count == 2, "scan did not reach both plan files"
+
+        assert result["renumbered"] == []
+        assert aplan.exists(), "APLAN-0007 was renamed away"
+        assert fplan.exists(), "FPLAN-0007 was renamed away"
+
+    def test_four_types_one_number_all_survive(self, tmp_path):
+        mod = _import_monitor_ops()
+        paths = [
+            _write_plan(tmp_path / p.lower(), f"{p}-0001_topic_2026-08-13.md")
+            for p in ("APLAN", "FPLAN", "DPLAN", "PPLAN")
+        ]
+
+        with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
+            result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        assert fire.call_count == 4, "scan did not reach all four plan files"
+        assert result["renumbered"] == []
+        for p in paths:
+            assert p.exists(), f"{p.name} was renamed away"
+
+
+class TestGenuineDuplicatesStillRenumber:
+    """Same prefix AND same number really is a collision — behaviour preserved."""
+
+    def test_two_fplans_with_one_number_still_renumber(self, tmp_path):
+        mod = _import_monitor_ops()
+        first = _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
+        second = _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
+
+        with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
+            result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        assert fire.call_count == 2, "scan did not reach both plan files"
+        assert len(result["renumbered"]) == 1
+        # One of the pair keeps 0007, the other is renamed to a free number.
+        survivors = [p for p in (first, second) if p.exists()]
+        assert len(survivors) == 1
+        assert result["renumbered"][0]["old_number"] == "0007"
+        assert result["renumbered"][0]["new_number"] != "0007"
+
+    def test_renumbering_draws_from_its_own_prefix_sequence(self, tmp_path):
+        """A duplicate FPLAN must not be handed a number chosen by looking at DPLANs."""
+        mod = _import_monitor_ops()
+        _write_plan(tmp_path / "d", "DPLAN-0900_unrelated_2026-08-13.md")
+        _write_plan(tmp_path / "one", "FPLAN-0007_first_2026-08-13.md")
+        _write_plan(tmp_path / "two", "FPLAN-0007_second_2026-08-13.md")
+
+        with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
+            result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
+
+        assert fire.call_count == 3, "scan did not reach all three plan files"
+        assert len(result["renumbered"]) == 1
+        # 0008, not 0901 — the unrelated DPLAN must not drive the FPLAN sequence.
+        assert result["renumbered"][0]["new_number"] == "0008"

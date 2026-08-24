@@ -48,6 +48,30 @@ def _extract_prefix(plan_num_raw: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+def _canonical_plan_id(plan_num: str, plan_info: Dict[str, Any]) -> str | None:
+    """Build the typed plan ID (e.g. ``"DPLAN-0300"``) for a registry row.
+
+    A bare registry key is NOT an identity. Every per-type registry numbers
+    from 0001, so "0300" names one row in each of them; handing that key to
+    anything that re-resolves it lands on ``fplan_registry.json`` by default
+    (see this module's docstring). ``file_path`` is the only field on a row
+    that carries the plan's type, so the prefix is derived from there.
+
+    Returns None when the row offers no type evidence -- an absent or
+    prefix-less ``file_path``. Callers must refuse such a row rather than
+    guess a prefix: guessing is what closed the wrong plan.
+
+    Args:
+        plan_num: Registry key for the row (e.g. "0300")
+        plan_info: The registry row itself
+
+    Returns:
+        Typed plan ID, or None if the row's type cannot be established.
+    """
+    prefix = _extract_prefix(Path(plan_info.get("file_path", "") or "").stem)
+    return f"{prefix}-{plan_num}" if prefix else None
+
+
 def _resolve_registry_file(plan_num_raw: str) -> str | None:
     """Resolve registry_file from a raw plan number with prefix.
 

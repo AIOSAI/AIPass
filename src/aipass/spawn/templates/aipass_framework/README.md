@@ -17,6 +17,21 @@
 
 ---
 
+## Quick Start
+
+```bash
+# See what this branch is and which modules it has discovered
+drone @{{BRANCH}}
+
+# Full help - usage, commands, flags, examples
+drone @{{BRANCH}} --help
+
+# Version
+drone @{{BRANCH}} --version
+```
+
+---
+
 ## Architecture
 
 ```
@@ -49,3 +64,7 @@
 
 ### Provides To
 {{PROVIDES_TO}}
+
+---
+
+*Last Updated: {{DATE}}*

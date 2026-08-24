@@ -1,4 +1,5 @@
 # PRAX — Branch Prompt
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/prax/.aipass/aipass_local_prompt.md — Injected every prompt when in prax directory. -->
 
 The logging and monitoring backbone. Every branch logs through prax — `from aipass.prax import logger`. Also provides real-time Mission Control, dashboard infrastructure, and log audit.

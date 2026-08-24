@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-08-07
+# Modified: 2026-08-19
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -324,6 +324,89 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
 
 
 _REGROUP_DEBOUNCE_S = 30.0
+
+
+ADVISORY_PERIOD = 10
+# Used only when the turn cannot be read (no session id). Ten turns is roughly
+# this long in practice, and a throttle that silently degrades to "every time"
+# is the bug being fixed, not a fallback.
+ADVISORY_SECONDS = 600
+
+
+def current_turn() -> int | None:
+    """The turn counter WITHOUT advancing it, or None when it cannot be read.
+
+    A PreToolUse consumer must never call _load_and_increment: several tool
+    calls share one turn, and the token guard that makes incrementing safe
+    keys off UserPromptSubmit's transcript growth. Reading is always safe.
+    """
+    path = _state_path()
+    if path is None or not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.info("[HOOKS] cadence: turn unreadable: %s", exc)
+        return None
+    turn = data.get("turn")
+    return turn if isinstance(turn, int) else None
+
+
+def _advisory_state_path(name: str) -> Path | None:
+    """Per-session, per-advisory throttle state.
+
+    Separate from the turn counter for the same reason mail state is:
+    _load_and_increment truncates its file to {turn, token} every turn.
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not session_id:
+        return None
+    return _GUARD_DIR / f"aipass-advisory-{name}-{session_id}.json"
+
+
+def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
+    """True at most once per *period* turns for the named advisory.
+
+    For standing conditions — states that stay true for days and re-assert on
+    every qualifying edit. @devpulse's seat sat over the todos cap long enough
+    to write 209 identical lines and trip repeat-signature escalation; the
+    advisory was right and the cadence was the noise (Patrick, 2026-08-19).
+
+    Fires when it has never fired, when the period has elapsed, and when the
+    turn counter went BACKWARDS — a reset means compact or a new session, and
+    the old numbering must not buy silence in the new one. Falls back to
+    elapsed seconds when the turn cannot be read, so an unreadable counter
+    still throttles rather than restoring fire-every-time.
+    """
+    path = _advisory_state_path(name)
+    if path is None:
+        return True
+
+    turn = current_turn()
+    now = time.time()
+    last_turn, last_at = None, None
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+            last_turn = data.get("turn") if isinstance(data.get("turn"), int) else None
+            last_at = data.get("at") if isinstance(data.get("at"), (int, float)) else None
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.info("[HOOKS] cadence: advisory state unreadable, treating as never fired: %s", exc)
+
+    if last_at is None and last_turn is None:
+        fire = True
+    elif turn is not None and last_turn is not None:
+        fire = turn < last_turn or (turn - last_turn) >= period
+    else:
+        fire = last_at is None or (now - last_at) >= ADVISORY_SECONDS
+
+    if fire:
+        try:
+            path.write_text(json.dumps({"turn": turn, "at": now}), encoding="utf-8")
+        except OSError as exc:
+            # Fire anyway — losing the advisory is worse than repeating it.
+            logger.info("[HOOKS] cadence: advisory state write failed: %s", exc)
+    return fire
 
 
 def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> None:

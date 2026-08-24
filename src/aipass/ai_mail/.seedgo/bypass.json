@@ -15,12 +15,12 @@
     {
       "file": "apps/handlers/users/verified_caller.py",
       "standard": "handlers",
-      "reason": "Lazy cross-branch import of devpulse's admin_grant.verify_admin_grant, authorized by @devpulse in the FPLAN-0401 Phase 4 dispatch: the 5-leg admin contract has ONE home so this lane cannot drift from it. Their modules/ entry point re-exports the same function object, but that import trips the handler-imports-modules rule instead \u2014 both shapes need a bypass, and the handler import is the narrower dependency (no CLI/help layer at verification time). Import failure is caught and returns lane-dark, so the coupling can never break a dispatch."
+      "reason": "Lazy cross-branch import of devpulse's admin_grant.verify_admin_grant, authorized by @devpulse in the FPLAN-0401 Phase 4 dispatch: the 5-leg admin contract has ONE home so this lane cannot drift from it. Their modules/ entry point re-exports the same function object, but that import trips the handler-imports-modules rule instead — both shapes need a bypass, and the handler import is the narrower dependency (no CLI/help layer at verification time). Import failure is caught and returns lane-dark, so the coupling can never break a dispatch."
     },
     {
       "file": "apps/handlers/users/verified_caller.py",
       "standard": "encapsulation",
-      "reason": "Same cross-branch import as the handlers entry above \u2014 devpulse owns the admin-grant contract (FPLAN-0401 THE CONTRACT), ai_mail consumes it rather than mirroring it."
+      "reason": "Same cross-branch import as the handlers entry above — devpulse owns the admin-grant contract (FPLAN-0401 THE CONTRACT), ai_mail consumes it rather than mirroring it."
     },
     {
       "file": "apps/modules/email.py",
@@ -30,7 +30,7 @@
     {
       "file": "apps/handlers/json_utils/json_handler.py",
       "standard": "json_structure",
-      "reason": "This IS the json_handler implementation \u2014 cannot import itself."
+      "reason": "This IS the json_handler implementation — cannot import itself."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
@@ -40,62 +40,74 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "deep_nesting",
-      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type \u2014 must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
+      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type — must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
     },
     {
       "file": "apps/handlers/email/inbox_ops.py",
       "standard": "deep_nesting",
-      "reason": "load_inbox() depth 5 \u2014 auto-migration between v1 and v2 inbox formats requires nested schema checks. (Was written as depth 4; the checker reports 5 at line 46 as of 2026-08-13, so the code drifted a level deeper than the reason claimed.)"
+      "reason": "load_inbox() depth 5 — auto-migration between v1 and v2 inbox formats requires nested schema checks. (Was written as depth 4; the checker reports 5 at line 46 as of 2026-08-13, so the code drifted a level deeper than the reason claimed.)"
     },
     {
       "file": "apps/handlers/email/inbox_lock.py",
       "standard": "deep_nesting",
-      "reason": "inbox_lock() depth 6 \u2014 cross-platform file locking context manager (POSIX fcntl vs Windows msvcrt), platform branching is inherent"
+      "reason": "inbox_lock() depth 6 — cross-platform file locking context manager (POSIX fcntl vs Windows msvcrt), platform branching is inherent"
     },
     {
       "file": "apps/handlers/email/send.py",
       "standard": "handlers",
-      "reason": "Imports trigger.apps.modules.core.trigger \u2014 cross-branch module import for firing email_sent events. trigger integration is by design."
+      "reason": "Imports trigger.apps.modules.core.trigger — cross-branch module import for firing email_sent events. trigger integration is by design."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "handlers",
-      "reason": "Two cross-branch imports, both lazy and both inside the function that needs them. line 83 drone.apps.handlers.broker.client.create_identified_connection \u2014 Phase 6b broker-fd handshake (FPLAN-0250), authorized by brief. line 66 hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command \u2014 the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. Both raise rather than fall back, so neither can silently degrade a spawn."
+      "reason": "Two cross-branch imports, both lazy and both inside the function that needs them. line 83 drone.apps.handlers.broker.client.create_identified_connection — Phase 6b broker-fd handshake (FPLAN-0250), authorized by brief. line 66 hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command — the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. Both raise rather than fall back, so neither can silently degrade a spawn."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "encapsulation",
-      "reason": "Lazy-imports drone.apps.handlers.broker.client.create_identified_connection inside _connect_broker() \u2014 cross-branch handler import for Phase 6b broker-fd handshake (FPLAN-0250). Brief explicitly authorizes this import path."
+      "reason": "Lazy-imports drone.apps.handlers.broker.client.create_identified_connection inside _connect_broker() — cross-branch handler import for Phase 6b broker-fd handshake (FPLAN-0250). Brief explicitly authorizes this import path."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "naming",
-      "reason": "dispatch_monitor.py in dispatch/ dir \u2014 renaming to monitor.py would break all 3 callers (wake.py, daemon.py, MONITOR_SCRIPT references) and confuse with prax monitor."
+      "reason": "dispatch_monitor.py in dispatch/ dir — renaming to monitor.py would break all 3 callers (wake.py, daemon.py, MONITOR_SCRIPT references) and confuse with prax monitor."
     },
     {
       "file": "apps/handlers/email/create.py",
       "standard": "naming",
-      "reason": "False positive \u2014 _append_footer is a function reference stored in a local variable, not a module-level constant."
+      "reason": "False positive — _append_footer is a function reference stored in a local variable, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
       "standard": "naming",
-      "reason": "False positive \u2014 _inbox_lock is a lazy-import function reference, not a module-level constant."
+      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/inbox_ops.py",
       "standard": "naming",
-      "reason": "False positive \u2014 _inbox_lock is a lazy-import function reference, not a module-level constant."
+      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "deep_nesting",
-      "reason": "_send_bounce() depth 4, main() depth 5 \u2014 subprocess management with error handling and log rotation"
+      "reason": "_send_bounce() depth 4, main() depth 5 — subprocess management with error handling and log rotation"
     },
     {
       "file": "apps/modules/email_send.py",
       "standard": "cli",
-      "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module \u2014 handle_send is called by email.py's handle_command()."
+      "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module — handle_send is called by email.py's handle_command()."
+    },
+    {
+      "file": "apps/handlers/dispatch/report.py",
+      "standard": "handlers",
+      "reason": "Imports trigger.apps.modules.core.trigger inside fire_completed() — the same cross-branch module import already bypassed for apps/handlers/email/send.py, for the same reason: @trigger's pub/sub bus IS its modules/ entry point and there is no handler-level door to it. FPLAN-0452 P1 explicitly forbids inventing a second push mechanism ('trigger.fire() already exists and your lane already speaks it — DO NOT invent a mechanism'), so consuming the existing one is the instruction, not a shortcut. Lazy, inside the one function that needs it, and its failure is caught and warned so a dead bus cannot take a completed dispatch down with it."
+    },
+    {
+      "file": "__init__.py",
+      "standard": "unused_function",
+      "pattern": "register_path, outstanding_dispatches",
+      "reason": "HALF OF THIS ENTRY HAS NOW EXPIRED, and it is recorded rather than quietly kept. Both doors were requested in writing by @devpulse (FPLAN-0452 P0 addendum, mail 8c9c65cb) for a watchdog wire that was unbuilt at the time. It is built now: outstanding_dispatches() is called in production by devpulse/apps/handlers/watchdog/dispatches.py:143, so seedgo would no longer flag it and it needs no cover. register_path() is the half that still does — its only caller in the repo is devpulse's tests/conftest.py:75, which patches it; a door reached only by a test patch is a door with no production reader. It stays exported because @devpulse asked for it in writing and removing another branch's requested door on my own initiative is not mine to do, but the honest state is 'unused, kept on request', not 'unused, pending'. REMOVE THIS ENTRY the day register_path() gets a production caller — an unused_function bypass that outlives its cause is how a dead export becomes permanent.",
+      "measured": "2026-08-23 (S154) — re-checked against the built wire, not assumed. One of the two doors named here is now live; the entry survives only for register_path()."
     }
   ],
   "notes": {

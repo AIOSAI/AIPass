@@ -6,8 +6,8 @@
 **Module:** `aipass.cli`
 **Version:** 2.1.0
 **Seedgo:** 100%
-**Tests:** 188 tests across 9 files — 197 passing, 0 skipped (parametrized cases expand at runtime)
-**Last Updated:** 2026-08-18
+**Tests:** 192 tests across 10 files — 201 passing, 0 skipped (parametrized cases expand at runtime)
+**Last Updated:** 2026-08-19
 
 ## Quick Start
 
@@ -118,7 +118,7 @@ cli/
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 188 tests across 9 files (197 pass, 0 skip)
+├── tests/                      # 192 tests across 10 files (201 pass, 0 skip)
 │   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
 │   ├── test_display.py         # 60 tests — display functions + routing + exit codes + help flags
 │   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
@@ -128,7 +128,9 @@ cli/
 │   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
 │   ├── test_handler_guard.py   # 19 tests — cross-branch import guard contract
 │   ├── test_integration.py     # 6 tests — main() flow, entry points
-│   └── test_init_provisioning.py # 4 tests — JSON provisioning on first run
+│   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
+│   ├── test_parked_is_not_collected.py # 4 tests — collection barrier over tests/parked/ holds
+│   └── parked/                 # TRACKED, not run — collect_ignore_glob barrier (archive doctrine, 2026-08-18)
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
 └── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__, test_scaffold)
@@ -190,7 +192,7 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 
 ---
 
-*Last Updated: 2026-08-18*
+*Last Updated: 2026-08-19*
 
 ---
 [← Back to AIPass](../../../README.md)

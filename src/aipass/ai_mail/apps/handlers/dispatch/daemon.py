@@ -404,6 +404,17 @@ def spawn_agent(
 
     prompt = "Hi. Check inbox, process new emails, update memories when done." + sender_note + reply_instr
 
+    # KNOWN DRIFT (FPLAN-0447, 2026-08-20): this still binds by `-c`, which continues the
+    # most recently MODIFIED transcript in the branch dir — a file mtime, not the agent's
+    # own session. wake.py no longer does this: it resolves a durable per-branch pointer
+    # (session_pointer.py) and resumes by session id, falling back to `-c` only when that
+    # pointer is missing or stale.
+    #
+    # Left as-is ON PURPOSE, not overlooked: this daemon is dormant — no systemd unit, not
+    # running — and it already duplicates wake.py's lock/occupancy logic byte-for-byte
+    # instead of calling it. Editing dead code widens the blast radius for no gain today.
+    # IF THIS DAEMON IS EVER REVIVED, wire it to session_pointer.resolve_resume_target()
+    # first, or dispatches through this path will silently chase mtime again.
     claude_cmd = [
         "claude",
         "-c",

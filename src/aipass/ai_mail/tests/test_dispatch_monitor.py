@@ -24,16 +24,20 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     _check_jsonl_activity,
     _check_rate_limited,
     _cleanup_own_lock,
+    _cmd_for_attempt,
     _get_jsonl_projects_dir,
+    _has_resume,
     _is_sandbox_enabled,
     _kill_process,
     _log_wake_result,
     _make_fresh_cmd,
     _parse_result_json,
     _read_stderr_segment,
+    _reconcile_pointer,
     _rotate_attempt_stdout,
     _run_with_startup_check,
     _send_bounce,
+    _session_id_in,
     _snapshot_jsonl_sizes,
     _summarize_result_json,
     _wake_sender,
@@ -2259,7 +2263,10 @@ class TestWakeSender:
             mock_wake,
         )
         _wake_sender("@prax", "@trigger", 0, "/fake/lock")
-        mock_wake.assert_called_once_with("@prax", auto=True, sender="")
+        _, kwargs = mock_wake.call_args
+        assert mock_wake.call_args.args == ("@prax",)
+        assert kwargs["auto"] is True
+        assert kwargs["sender"] == ""
 
     def test_any_citizen_reaches_wake_branch(self, monkeypatch):
         """Any citizen sender reaches wake_branch."""
@@ -2305,7 +2312,30 @@ class TestWakeSender:
 
         result = _wake_sender("@trigger", "@target", 0, "/fake/lock")
         assert result == "success"
-        mock_wake.assert_called_once_with("@trigger", auto=True, sender="")
+        _, kwargs = mock_wake.call_args
+        assert mock_wake.call_args.args == ("@trigger",)
+        assert kwargs["auto"] is True
+        assert kwargs["sender"] == ""
+
+    def test_wake_back_message_names_completed_target(self, monkeypatch):
+        """Wake-back custom_message names the completed target and exit code,
+        not the generic mail-check prompt — the woken lead was told nothing
+        about which target finished (@daemon, 077cd1cf)."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
+
+        mock_status = MagicMock()
+        mock_status.summary = "ok"
+        mock_wake = MagicMock(return_value=(mock_status, True))
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
+            mock_wake,
+        )
+
+        _wake_sender("@prax", "@target", 1, "/fake/lock")
+        _, kwargs = mock_wake.call_args
+        assert "@target" in kwargs["custom_message"]
+        assert "1" in kwargs["custom_message"]
 
     def test_blocked_locked_on_lock_failure(self, monkeypatch):
         """wake_branch failing with lock-related message returns blocked_locked."""
@@ -2891,24 +2921,35 @@ class TestWakeBackManagerHonesty:
         )
         return mock_wake
 
-    def test_manager_sender_returns_skipped_manager(self, monkeypatch):
-        """The gate's True must not be reported as a successful wake."""
+    def test_manager_sender_returns_mailed_manager(self, monkeypatch):
+        """The gate's True must not be reported as a successful wake.
+
+        Tag changed from skipped_manager to mailed_manager on 2026-08-21: the
+        manager is no longer merely skipped, it is mailed. "Skipped" was the
+        honest tag for a silent drop and is the wrong word for a delivery.
+        """
         monkeypatch.setattr(mod, "logger", MagicMock())
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        )
         result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
-        assert result == "skipped_manager"
+        assert result == "mailed_manager"
 
     def test_manager_wake_back_never_claims_woken(self, monkeypatch):
-        """No log line may assert the manager was woken."""
+        """No log line may assert the manager was woken — it says MAILED instead."""
         mock_logger = MagicMock()
         monkeypatch.setattr(mod, "logger", mock_logger)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        )
 
         _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
 
         formats = [c.args[0] for c in mock_logger.info.call_args_list if c.args]
         assert not any("woken after" in f for f in formats), f"claimed a wake: {formats}"
-        assert any("skipped" in f for f in formats), f"no skip logged: {formats}"
+        assert any("mailed" in f.lower() for f in formats), f"no mail logged: {formats}"
 
     def test_daemon_bypassed_manager_still_reports_success(self, monkeypatch):
         """The @daemon self-wake exception records manager as ok — that IS a real wake."""
@@ -2930,6 +2971,71 @@ class TestWakeBackManagerHonesty:
         result = _wake_sender("@prax", "@ai_mail", 0, "/fake/lock")
         assert result == "success"
 
+    def test_manager_sender_is_mailed_not_silently_dropped(self, monkeypatch):
+        """P0: a manager was TOLD it would be woken and then silently was not.
+
+        The blocklist is correct and stays — two claudes on one session id kills
+        the running job (the OSPREY kill). The bug is the silent return: the
+        wake-back message was built and dropped on the floor, so a manager learned
+        a dispatch finished only if the agent volunteered an email. Ten consecutive
+        skipped_manager lines in canary's dispatch_wake.log, and @devpulse confirmed
+        it live twice tonight (@ai_mail and @drone back to back).
+        """
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+
+        assert result == "mailed_manager"
+        assert sent.called, "manager wake-back sent no mail — the silent drop"
+        argv = sent.call_args.args[0]
+        assert argv[:3] == ["drone", "@ai_mail", "send"]
+        assert argv[3] == "@devpulse"
+
+    def test_manager_mail_names_target_and_exit_code(self, monkeypatch):
+        """The mail must carry what the dropped wake-back carried: WHICH target
+        finished and how. A manager cannot verify or hand off the next phase
+        without it (@daemon, 077cd1cf)."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        _wake_sender("@devpulse", "@ai_mail", 3, "/fake/lock")
+
+        body = " ".join(sent.call_args.args[0][4:])
+        assert "@ai_mail" in body
+        assert "3" in body
+
+    def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch):
+        """If the send fails the manager still learns nothing — that must not wear
+        the same tag as a delivered mail. Same lesson as the gate's True."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        monkeypatch.setattr(
+            mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=1, stdout="", stderr="boom"))
+        )
+
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+        assert result == "failed_manager_mail"
+
+    def test_non_manager_wake_back_sends_no_mail(self, monkeypatch):
+        """An ordinary citizen is woken, not mailed. The mail exists only because
+        the wake cannot happen — adding it everywhere would double every wake-back."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        status = DispatchStatus()
+        status.ok("resolve", "@prax → /repo/src/aipass/prax")
+        status.ok("spawn", "agent started")
+        self._patch_wake(monkeypatch, status, True)
+        sent = MagicMock()
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        result = _wake_sender("@prax", "@ai_mail", 0, "/fake/lock")
+        assert result == "success"
+        assert not sent.called
+
     def test_skipped_manager_reaches_the_wake_log(self, monkeypatch, tmp_path):
         """The honest tag is what lands in dispatch_wake.log."""
         monkeypatch.setattr(mod, "logger", MagicMock())
@@ -2942,3 +3048,483 @@ class TestWakeBackManagerHonesty:
         written = (tmp_path / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
         assert "wake_result=skipped_manager" in written
         assert "sender=@devpulse" in written
+
+
+# --- session-pointer aware retry loop ---------------------------------
+#
+# wake.py now emits --resume <id> and --session-id <id> where it only ever
+# emitted -c. Every place the monitor reasoned about "-c" had to learn the
+# new flags, and one of them (the attempt loop) had to learn that a session
+# id is single-use: the CLI refuses an id that already exists, so re-running
+# an identical command is fatal where it used to be free.
+
+
+@pytest.fixture
+def pointer_home(tmp_path, monkeypatch):
+    """Point Path.home at tmp_path so transcript paths land under the sandbox."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
+def _plant_transcript(branch_path, session_id):
+    """Create the transcript file Claude would have written for a session."""
+    transcript = mod.session_pointer.transcript_file(branch_path, session_id)
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text("{}\n", encoding="utf-8")
+    return transcript
+
+
+def test_has_resume_detects_dash_c():
+    """The original form: continue whatever transcript was modified last."""
+    assert _has_resume(["claude", "-c", "-p", "hi"]) is True
+
+
+def test_has_resume_detects_long_resume_flag():
+    """--resume was invisible to the old check, so a resumed run logged as fresh
+    and never earned its strike-3 fresh switch."""
+    assert _has_resume(["claude", "--resume", "abc", "-p", "hi"]) is True
+
+
+def test_has_resume_detects_short_resume_flag():
+    """-r is the same flag; the CLI accepts it and so must we."""
+    assert _has_resume(["claude", "-r", "abc", "-p", "hi"]) is True
+
+
+def test_has_resume_false_for_a_fresh_command():
+    """A minted session is not a resume — --session-id starts something new."""
+    assert _has_resume(["claude", "-p", "hi", "--session-id", "abc"]) is False
+
+
+def test_session_id_in_reads_the_value():
+    assert _session_id_in(["claude", "--session-id", "abc", "-p", "hi"]) == "abc"
+
+
+def test_session_id_in_none_when_absent():
+    assert _session_id_in(["claude", "-c", "-p", "hi"]) is None
+
+
+def test_session_id_in_none_when_flag_has_no_value():
+    """A truncated command must read as "no id", not raise on the way past."""
+    assert _session_id_in(["claude", "-p", "hi", "--session-id"]) is None
+
+
+def test_make_fresh_cmd_removes_resume_pair():
+    """The uuid goes with its flag — orphaned, it becomes a positional prompt."""
+    cmd = ["claude", "--resume", "abc-123", "-p", "hi", "--model", "opus"]
+    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
+
+
+def test_make_fresh_cmd_removes_short_resume_pair():
+    cmd = ["claude", "-r", "abc-123", "-p", "hi", "--model", "opus"]
+    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
+
+
+def test_make_fresh_cmd_removes_session_id_pair():
+    cmd = ["claude", "-p", "hi", "--model", "opus", "--session-id", "abc-123"]
+    assert _make_fresh_cmd(cmd) == ["claude", "-p", "hi", "--model", "opus"]
+
+
+def test_make_fresh_cmd_leaves_everything_else_byte_identical():
+    """Strip the bindings and nothing else — the prompt and every option survive."""
+    cmd = [
+        "claude",
+        "-c",
+        "--resume",
+        "abc-123",
+        "--session-id",
+        "def-456",
+        "-p",
+        "check inbox",
+        "--model",
+        "opus",
+        "--max-turns",
+        "100",
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
+    ]
+    assert _make_fresh_cmd(cmd) == [
+        "claude",
+        "-p",
+        "check inbox",
+        "--model",
+        "opus",
+        "--max-turns",
+        "100",
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
+    ]
+
+
+def test_attempt_1_is_the_command_as_built(tmp_path, pointer_home):
+    """Strike 1 changes nothing — wake.py already decided where this lands."""
+    cmd = ["claude", "--resume", "abc", "-p", "hi"]
+    built, mode = _cmd_for_attempt(cmd, 1, tmp_path)
+    assert built == cmd
+    assert mode == "resume"
+
+
+def test_attempt_2_converts_a_consumed_session_id_to_resume(tmp_path, pointer_home):
+    """THE regression guard: attempt 1 created the session, so the id is spent.
+
+    Re-sending it gets "Session ID <id> is already in use" and no output at
+    all — three strikes would fail instantly instead of recovering.
+
+    The rebuilt command must match wake.py's shape exactly: `--resume <id>`
+    leads, because that is the form verified against the CLI. Swapping the
+    flag where --session-id sat would trail it after `-p <prompt>` — an
+    argument order nobody has ever run.
+    """
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    _plant_transcript(branch, "abc-123")
+    cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
+
+    built, mode = _cmd_for_attempt(cmd, 2, branch)
+
+    assert built == ["claude", "--resume", "abc-123", "-p", "hi"]
+    assert "--session-id" not in built
+    assert mode == "resume"
+
+
+def test_attempt_2_resume_leads_even_for_a_long_command(tmp_path, pointer_home):
+    """Position is what this pins: --resume sits at index 1, never after -p."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    _plant_transcript(branch, "abc-123")
+    cmd = [
+        "/usr/bin/claude",
+        "-p",
+        "check inbox",
+        "--model",
+        "opus",
+        "--max-turns",
+        "100",
+        "--output-format",
+        "json",
+        "--session-id",
+        "abc-123",
+    ]
+
+    built, _ = _cmd_for_attempt(cmd, 2, branch)
+
+    assert built[:3] == ["/usr/bin/claude", "--resume", "abc-123"]
+    assert built[3:] == ["-p", "check inbox", "--model", "opus", "--max-turns", "100", "--output-format", "json"]
+
+
+def test_attempt_2_leaves_a_command_with_nothing_but_a_session_id_alone(tmp_path, pointer_home):
+    """Degenerate input: no binary to lead with, so there is nothing to rebuild."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    _plant_transcript(branch, "abc-123")
+    cmd = ["--session-id", "abc-123"]
+
+    built, _ = _cmd_for_attempt(cmd, 2, branch)
+
+    assert built == cmd
+
+
+def test_attempt_2_leaves_an_unconsumed_session_id_alone(tmp_path, pointer_home):
+    """No transcript means attempt 1 never got far enough to claim the id."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    cmd = ["claude", "-p", "hi", "--session-id", "abc-123"]
+
+    built, mode = _cmd_for_attempt(cmd, 2, branch)
+
+    assert built == cmd
+    assert mode == "fresh"
+
+
+def test_attempt_2_of_a_dash_c_run_is_unchanged(tmp_path, pointer_home):
+    """The -c path has no id to consume — retrying it is free, as before."""
+    cmd = ["claude", "-c", "-p", "hi"]
+    built, mode = _cmd_for_attempt(cmd, 2, tmp_path)
+    assert built == cmd
+    assert mode == "resume"
+
+
+def test_attempt_3_mints_a_new_id_and_repoints_the_branch(tmp_path, pointer_home):
+    """Strike 3 abandons the bad session but keeps its own crash-safety."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    cmd = ["claude", "--resume", "old-id", "-p", "hi", "--model", "opus"]
+
+    built, mode = _cmd_for_attempt(cmd, 3, branch)
+
+    assert mode == "fresh"
+    assert "--resume" not in built and "old-id" not in built
+    assert "--session-id" in built
+    new_id = built[built.index("--session-id") + 1]
+    assert new_id != "old-id"
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == new_id
+    assert pointer["set_by"] == "monitor-retry-fresh"
+
+
+def test_attempt_3_replaces_a_spent_minted_id(tmp_path, pointer_home):
+    """A fresh run that failed twice must not re-send the id it already used."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    cmd = ["claude", "-p", "hi", "--session-id", "spent-id"]
+
+    built, _ = _cmd_for_attempt(cmd, 3, branch)
+
+    assert "spent-id" not in built
+    assert built[built.index("--session-id") + 1] != "spent-id"
+
+
+def test_attempt_3_still_spawns_when_the_pointer_cannot_be_written(tmp_path, pointer_home, monkeypatch):
+    """A pointer write is never worth losing the last attempt over."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    monkeypatch.setattr(mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+
+    built, mode = _cmd_for_attempt(["claude", "-c", "-p", "hi"], 3, branch)
+
+    assert mode == "fresh"
+    assert "-c" not in built
+    assert "--session-id" in built
+
+
+def test_attempt_3_of_an_unbound_command_is_unchanged(tmp_path, pointer_home):
+    """Nothing to abandon and no id to burn — leave it exactly as it is."""
+    cmd = ["claude", "-p", "hi", "--model", "opus"]
+    built, mode = _cmd_for_attempt(cmd, 3, tmp_path)
+    assert built == cmd
+    assert mode == "fresh"
+
+
+_AIMED_CMD = ["claude", "--resume", "aimed-id", "-p", "hi"]
+_C_CMD = ["claude", "-c", "-p", "hi"]
+
+
+def test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c(tmp_path, pointer_home):
+    """THE RULING (Patrick, 2026-08-20): a -c landing is never written down.
+
+    -c picks by file mtime. Recording that choice would promote a guess into a
+    durable record, and every later dispatch would resume it deliberately — so
+    a branch whose newest transcript happened to be a human's chat would be
+    married to that chat forever. One wrong landing becomes permanent.
+    """
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "landed-by-mtime", "is_error": False}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _C_CMD)
+
+    assert mod.session_pointer.read_pointer(branch) is None, "a -c landing must leave the branch pointerless"
+
+
+def test_reconcile_writes_the_pointer_when_we_aimed_and_landed_elsewhere(tmp_path, pointer_home):
+    """We named a session and the CLI reports a different one — record the truth.
+
+    This is how a strike-3 remint reaches the pointer: we aimed, the id moved,
+    and the branch must end up pointing at where its agent actually is.
+    """
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "actual-id", "is_error": False}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == "actual-id"
+    assert pointer["set_by"] == "monitor-reconciled"
+
+
+def test_reconcile_adopts_a_minted_session_id(tmp_path, pointer_home):
+    """--session-id counts as aiming just as much as --resume does."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "minted-id"}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), ["claude", "-p", "hi", "--session-id", "minted-id"])
+
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == "minted-id"
+
+
+def test_reconcile_does_not_rewrite_a_matching_pointer(tmp_path, pointer_home):
+    """We landed where we aimed — no write, so set_by keeps naming who decided."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    mod.session_pointer.write_pointer(branch, "same-id", "wake-fresh")
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "same-id"}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["set_by"] == "wake-fresh"
+
+
+def test_reconcile_ignores_result_json_without_a_session_id(tmp_path, pointer_home):
+    """Nothing to reconcile against; the existing pointer stands."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    mod.session_pointer.write_pointer(branch, "kept-id", "wake-fresh")
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"is_error": True}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == "kept-id"
+
+
+def test_reconcile_leaves_an_existing_pointer_alone_on_a_c_run(tmp_path, pointer_home):
+    """A -c fallback must not disturb a pointer that is already there."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    mod.session_pointer.write_pointer(branch, "kept-id", "wake-fresh")
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "somewhere-else"}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _C_CMD)
+
+    pointer = mod.session_pointer.read_pointer(branch)
+    assert pointer is not None
+    assert pointer["session_id"] == "kept-id"
+
+
+def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monkeypatch):
+    """Reconciliation is bookkeeping — it must never raise into the exit path."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    monkeypatch.setattr(mod.session_pointer, "write_pointer", lambda *a, **kw: False)
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text(json.dumps({"session_id": "actual-id"}), encoding="utf-8")
+
+    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)  # no raise
+
+
+def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_argv, pointer_home):
+    """End-to-end: --resume reaches strike 3 as a fresh, newly-minted session.
+
+    The old `"-c" in claude_cmd` check would have left all three attempts
+    identical, so a broken session could never be escaped.
+    """
+    argv, lock_file, stderr_log = main_argv
+    argv = argv[:6] + ["claude", "--resume", "old-id", "--model", "opus"]
+    calls: list[list[str]] = []
+
+    def track_run(cmd, *args, **kwargs):
+        calls.append(list(cmd))
+        return (1, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert len(calls) == 3
+    assert "--resume" in calls[0] and "--resume" in calls[1]
+    assert "--resume" not in calls[2]
+    assert "--session-id" in calls[2]
+
+
+def _run_main_capturing_pointer(monkeypatch, argv, landed_session):
+    """Drive main() to a clean exit with a result JSON naming `landed_session`."""
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        Path(stdout_log).write_text(json.dumps({"session_id": landed_session}), encoding="utf-8")
+        return (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+
+
+def test_main_does_not_adopt_a_pointer_after_a_successful_c_run(monkeypatch, main_argv, pointer_home):
+    """End-to-end of the ruling: a whole successful -c dispatch records nothing.
+
+    The fixture's command is `claude -c`, so the session it landed in was chosen
+    by file mtime. Writing that down would make the next dispatch resume it on
+    purpose — see test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c.
+    The branch stays on -c until something dispatches it --fresh.
+    """
+    argv, lock_file, _ = main_argv
+    branch_path = lock_file.parent.parent
+
+    _run_main_capturing_pointer(monkeypatch, argv, "landed-by-mtime")
+
+    assert mod.session_pointer.read_pointer(branch_path) is None
+
+
+def test_main_reconciles_the_pointer_after_a_successful_aimed_run(monkeypatch, main_argv, pointer_home):
+    """We aimed with --resume, so where the run actually landed IS recorded."""
+    argv, lock_file, _ = main_argv
+    branch_path = lock_file.parent.parent
+    argv = [arg if arg != "-c" else "--resume" for arg in argv]
+    argv.insert(argv.index("--resume") + 1, "aimed-id")
+
+    _run_main_capturing_pointer(monkeypatch, argv, "landed-here")
+
+    pointer = mod.session_pointer.read_pointer(branch_path)
+    assert pointer is not None
+    assert pointer["session_id"] == "landed-here"
+    assert pointer["set_by"] == "monitor-reconciled"
+
+
+def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, pointer_home):
+    """A failed run's result JSON names a session not worth returning to."""
+    argv, lock_file, stderr_log = main_argv
+    branch_path = lock_file.parent.parent
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        Path(stdout_log).write_text(json.dumps({"session_id": "bad-session"}), encoding="utf-8")
+        return (1, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    pointer = mod.session_pointer.read_pointer(branch_path)
+    assert pointer is None or pointer["session_id"] != "bad-session"

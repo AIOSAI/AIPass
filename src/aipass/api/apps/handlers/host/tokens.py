@@ -72,6 +72,7 @@ Functions:
     list_tokens()  - Records for display, hashes stripped
     load_tokens()  - Raw store read
     lock_path()    - Where the store's write lock lives
+    receipt_path() - Where a label's raw receipt belongs, fenced
 """
 
 import hashlib
@@ -179,6 +180,81 @@ def store_path() -> Path:
         Path to tokens.json, whether or not it exists yet.
     """
     return secrets_store.SECRETS_BASE / TOKEN_PROVIDER / f"{TOKEN_SLUG}.json"
+
+
+def prepare_receipt_dir(target: Path) -> None:
+    """
+    Make sure a receipt's directory exists and is owner-only.
+
+    Args:
+        target: The receipt file that is about to be written.
+
+    Raises:
+        OSError: The directory could not be created or secured.
+
+    Note:
+        Here rather than in the CLI because a secret's directory mode is part
+        of the store's contract, not part of how a command prints things — and
+        0700 is the same promise SECRETS_BASE already makes.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.name == "posix":
+        os.chmod(target.parent, 0o700)
+
+
+def receipt_path(label: str) -> Path:
+    """
+    Where a freshly minted token's raw value belongs, given its label.
+
+    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. Patrick found three
+    raw bearer receipts sitting in his home root on 2026-08-19 (43-byte files
+    from the August phone-setup mints), and they were there because this
+    branch's own help text said `--out ~/pixel.token`. Nobody chose the home
+    root; the documentation did. So the default is here, beside the hashed
+    store it belongs next to, and the examples now point at it.
+
+    Args:
+        label: The token's label, exactly as issued.
+
+    Returns:
+        SECRETS_BASE/host_api/<label>.token — the same 0o700 provider directory
+        the hashed store already lives in.
+
+    Raises:
+        TokenError: The label cannot be a filename. A label is a NAME and this
+            function turns it into a path, which is the one place a free-form
+            label could reach outside the secrets directory.
+
+    Note:
+        Fenced twice, and deliberately: a cheap up-front refusal that can NAME
+        what is wrong with the label, and a post-resolution containment check
+        that does not care how the escape was spelled. The same two-gate shape
+        the read lane uses (handlers/host/reads.py) — the first gate exists to
+        give a good sentence, the second to be right.
+    """
+    wanted = (label or "").strip()
+    if not wanted:
+        raise TokenError("Token label is required — an unlabelled token cannot be revoked with confidence")
+
+    if wanted != Path(wanted).name or wanted in (".", ".."):
+        raise TokenError(
+            f"Label {label!r} cannot name a receipt file — it looks like a path. "
+            f"Use a plain label, or choose the file yourself with --out FILE"
+        )
+
+    if wanted.startswith("."):
+        raise TokenError(
+            f"Label {label!r} would write a hidden receipt — a secret nobody can see is a secret nobody rotates"
+        )
+
+    provider_dir = secrets_store.SECRETS_BASE / TOKEN_PROVIDER
+    candidate = (provider_dir / f"{wanted}.token").resolve()
+
+    if candidate.parent != provider_dir.resolve():
+        raise TokenError(f"Label {label!r} resolves outside the token store — refused")
+
+    return candidate
 
 
 def lock_path() -> Path:
