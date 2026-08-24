@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-27
-# Modified: 2026-03-12
+# Modified: 2026-08-23
 # =============================================
 
 """
@@ -113,6 +113,35 @@ def _list_collections(db_path=None):
     return {"success": True, "collections": names, "count": len(names)}
 
 
+def _source_matches(source, pattern):
+    """Whether pattern occurs in source at a non-alphanumeric boundary.
+
+    A plain `pattern in source` test lets a label match inside a longer one --
+    DPLAN-0012 answers to a TDPLAN-0012 filename, so verification miscounts and
+    the search pin promotes the wrong plan. A hit only counts when the label
+    starts the string or follows a non-alphanumeric character.
+
+    Args:
+        source: The source_file value from a chunk's metadata
+        pattern: The label to look for (e.g. "DPLAN-0012")
+
+    Returns:
+        True if pattern occurs at a boundary in source
+    """
+    if not source or not pattern:
+        return False
+
+    idx = source.find(pattern)
+    while idx != -1:
+        # Keep scanning past a rejected hit: the same source may carry the
+        # label again at a real boundary ("TDPLAN-0012_supersedes_DPLAN-0012").
+        if idx == 0 or not source[idx - 1].isalnum():
+            return True
+        idx = source.find(pattern, idx + 1)
+
+    return False
+
+
 def _check_plan(plan_label, db_path=None):
     """Check if a plan has been vectorized in ChromaDB.
 
@@ -145,7 +174,7 @@ def _check_plan(plan_label, db_path=None):
     match_count = 0
     for metadata in metadatas:
         source_file = metadata.get("source_file", "")
-        if plan_label in source_file:
+        if _source_matches(source_file, plan_label):
             match_count += 1
             matching_files.add(source_file)
 
@@ -157,7 +186,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
 
     Args:
         collection_name: Name of the ChromaDB collection
-        source_pattern: Substring to match in source_file metadata
+        source_pattern: Label to match at a boundary in source_file metadata
         n_results: Maximum number of results to return
         db_path: Optional path to Chroma database
 
@@ -176,7 +205,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     matches = []
     for i, meta in enumerate(result.get("metadatas", [])):
         source = meta.get("source_file", "")
-        if source_pattern in source:
+        if _source_matches(source, source_pattern):
             matches.append(
                 {
                     "collection": collection_name,
@@ -197,7 +226,7 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
 
     Args:
         collection_name: Name of the ChromaDB collection
-        source_pattern: Substring to match in source_file metadata
+        source_pattern: Label to match at a boundary in source_file metadata
         db_path: Optional path to Chroma database
 
     Returns:
@@ -215,7 +244,7 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
     ids_to_delete = []
     for i, meta in enumerate(result.get("metadatas", [])):
         source = meta.get("source_file", "")
-        if source_pattern in source:
+        if _source_matches(source, source_pattern):
             ids_to_delete.append(result["ids"][i])
 
     if not ids_to_delete:
