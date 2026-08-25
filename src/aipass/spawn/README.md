@@ -213,10 +213,11 @@ spawn/
 3. **Copy** — Recursive copy of class template to target (skips `__pycache__`)
 4. **Rename** — Replace `{{BRANCH}}` in directory and file names
 5. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal)
-6. **Meta** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not)
-7. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only
-8. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`
-9. **Validate** — Scan for any remaining `{{...}}` patterns
+6. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the passport number) and written as the `registry_id` of its `branches[]` registry entry. Minting it at registration time instead would be too late — the passport is written earlier in this list, so the two copies would be different UUIDs for one citizen. Distinct from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is shared by every citizen in a project (Patrick's ruling, 2026-08-24)
+7. **Meta** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not)
+8. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only
+9. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`
+10. **Validate** — Scan for any remaining `{{...}}` patterns
 
 ### Update (class-aware, Phase 0)
 
@@ -318,6 +319,6 @@ mandate.
 
 ---
 
-*Last Updated: 2026-08-23*
+*Last Updated: 2026-08-24*
 
 [← Back to AIPass](../../../README.md)

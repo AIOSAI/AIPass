@@ -19,6 +19,7 @@ Orchestrates the full agent creation workflow:
 7. Validate no unreplaced placeholders remain
 """
 
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -277,6 +278,12 @@ def _spawn_agent(
         if reg_data:
             resolved_registry_id = reg_data.get("metadata", {}).get("id", "")
 
+    # Mint the citizen's own unique id ONCE, here, so the passport and the
+    # registry entry carry the same value. Minting it inside add_to_registry
+    # (step 4) would be too late: the passport is written at step 1, so the two
+    # facts would be two different UUIDs for one citizen.
+    citizen_id = str(uuid.uuid4())
+
     # Build placeholder replacements
     meta_tabs = _load_meta_tabs()
     replacements = build_replacements_dict(
@@ -290,6 +297,7 @@ def _spawn_agent(
         citizen_class=citizen_class,
         meta_tabs=meta_tabs,
         registry_id=resolved_registry_id,
+        citizen_id=citizen_id,
     )
 
     # Step 1: Copy template with placeholder replacement in content
@@ -350,6 +358,7 @@ def _spawn_agent(
         detected_profile,
         f"@{branch_lower}",
         purpose or "New agent - purpose TBD",
+        citizen_id=citizen_id,
     )
 
     # Step 5: Ensure at least one agent in the project is the owner

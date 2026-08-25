@@ -220,12 +220,18 @@ def _validate_path_containment(branch_path, registry_path):
         return False
 
 
-def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose=""):
+def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose="", citizen_id=""):
     """Add a new branch entry to the registry.
 
-    Always mints a fresh per-citizen UUID for the entry's ``registry_id``
-    (the citizen UID).  This is NOT the project credential — that lives
-    in ``metadata.id`` and is copied into passports separately.
+    Mints a fresh per-citizen UUID for the entry's ``registry_id`` (the citizen
+    UID) unless the caller supplies one.  This is NOT the project credential —
+    that lives in ``metadata.id`` and is copied into passports separately.
+
+    ``citizen_id`` exists so a caller that has ALREADY stamped the id into the
+    citizen's passport can hand the same value here: the passport's
+    ``citizenship.citizen_id`` and this entry's ``registry_id`` are two copies
+    of one fact, and minting twice would silently produce two different ids for
+    the same citizen.  Callers with no passport to match (adoption) omit it.
 
     Uses file locking around the entire read-modify-write cycle to prevent
     corruption from concurrent spawns. Skips locking on Windows.
@@ -237,6 +243,9 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         profile: Profile string (e.g. "AIPass Workshop")
         email: Branch email (e.g. "@my_agent")
         purpose: Optional purpose description
+        citizen_id: Optional pre-minted per-citizen UUID. Empty string mints a
+            fresh one, which is the correct behaviour when no passport carries
+            the id yet.
 
     Returns:
         True if added, False if already exists or error
@@ -280,7 +289,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
             "status": "active",
             "created": today,
             "last_active": today,
-            "registry_id": str(uuid.uuid4()),
+            "registry_id": citizen_id or str(uuid.uuid4()),
         }
 
         if isinstance(branches, dict):
