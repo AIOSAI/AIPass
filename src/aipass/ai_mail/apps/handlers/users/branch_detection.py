@@ -346,6 +346,39 @@ def detect_branch_from_pwd() -> Optional[Dict]:
         return None
 
 
+def _rooted(branch: Dict, registry_path: Path) -> Dict:
+    """Return *branch* with its ``path`` made absolute against its OWN registry.
+
+    A registry row's ``path`` is relative to THE REGISTRY THAT HOLDS IT, and a
+    row handed back raw carries no memory of which registry answered. Every
+    consumer then joins it to the AIPass repo root — right for AIPass citizens
+    by coincidence, wrong for every project citizen.
+
+    Found live 2026-08-24 (@devpulse 10400b9b, measured by @baud): a projects/*
+    citizen read "Inbox is empty" with four unread messages in the file under
+    his feet, and `reply <id>` answered "Message not found" for an id read out
+    of that same file. ``projects/baud`` + ``src/baud/baud`` had been resolved
+    as ``<aipass>/src/baud/baud``.
+
+    IT FABRICATED RATHER THAN FAILING. The wrong path sits inside the AIPass
+    tree, so the mail lane CREATED it — a phantom .ai_mail.local/sent/ holding
+    the reply he believed he had sent, in a directory belonging to no citizen.
+    A refusal would have been loud; a confident wrong address was not.
+
+    Absolutising HERE, at the one place a registry is read, rather than at the
+    nine call sites that join a registry path: a consumer cannot re-derive a
+    root it was never given, and nine copies of that join is how they drift.
+    Rows that are already absolute are returned untouched.
+    """
+    path = str(branch.get("path", ""))
+    if not path or Path(path).is_absolute():
+        return branch
+
+    rooted = dict(branch)
+    rooted["path"] = str((registry_path.parent / path).resolve())
+    return rooted
+
+
 def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
     """
     Look up branch in the registry by name (case-insensitive).
@@ -368,7 +401,7 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
-                    return branch
+                    return _rooted(branch, BRANCH_REGISTRY_PATH)
         except Exception as e:
             logger.warning("[identity] _lookup_branch_by_name(%s) failed: %s", branch_name, e)
 
@@ -380,7 +413,7 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
-                    return branch
+                    return _rooted(branch, caller_registry)
         except Exception as e:
             logger.warning(
                 "[identity] _lookup_branch_by_name(%s) caller registry %s failed: %s", branch_name, caller_registry, e
@@ -443,7 +476,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
                 else:
                     reg_path = reg_path.resolve()
                 if reg_path == branch_path_resolved:
-                    return branch
+                    return _rooted(branch, BRANCH_REGISTRY_PATH)
         except Exception as e:
             logger.warning("[identity] get_branch_info_from_registry(%s) failed: %s", branch_path, e)
 
@@ -461,7 +494,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
                 else:
                     reg_path = reg_path.resolve()
                 if reg_path == branch_path_resolved:
-                    return branch
+                    return _rooted(branch, caller_registry)
         except Exception as e:
             logger.warning("[identity] get_branch_info_from_registry(%s) caller registry failed: %s", branch_path, e)
 
