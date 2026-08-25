@@ -44,6 +44,7 @@ from aipass.spawn.apps.handlers.file_ops import (
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
 from aipass.spawn.apps.handlers.mint_verify import verify_mint
 from aipass.spawn.apps.handlers.registry import (
+    load_registry,
     find_registry,
     add_to_registry,
     get_next_citizen_number,
@@ -271,12 +272,16 @@ def _spawn_agent(
         reg_path = _find_project_registry(target)
     citizen_number = get_next_citizen_number(reg_path)
 
-    # Read registry_id from the resolved registry for credential linkage
-    resolved_registry_id = ""
-    if reg_path.exists():
-        reg_data = json_handler.read_json(reg_path)
-        if reg_data:
-            resolved_registry_id = reg_data.get("metadata", {}).get("id", "")
+    # Resolve the PROJECT credential (the registry's own metadata.id) for the
+    # passport's citizenship.registry_id. load_registry mints one when the
+    # registry does not exist yet, which is what a brand-new external project
+    # is — resolving it HERE rather than at registration time is the whole
+    # point: the passport is written at step 1 and the registry at step 4, so
+    # reading it later would stamp the passport with a credential that had not
+    # been minted yet and fall back to AIPass's own id. Same mint-once ordering
+    # as citizen_id below; the value is handed to add_to_registry so the file
+    # that eventually lands carries the id the passport already claims.
+    resolved_registry_id = load_registry(reg_path).get("metadata", {}).get("id", "")
 
     # Mint the citizen's own unique id ONCE, here, so the passport and the
     # registry entry carry the same value. Minting it inside add_to_registry
@@ -359,6 +364,7 @@ def _spawn_agent(
         f"@{branch_lower}",
         purpose or "New agent - purpose TBD",
         citizen_id=citizen_id,
+        credential=resolved_registry_id,
     )
 
     # Step 5: Ensure at least one agent in the project is the owner

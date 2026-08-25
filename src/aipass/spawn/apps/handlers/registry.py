@@ -134,9 +134,43 @@ def find_registry(start_path=None):
     return _common_find(start_path=start_path)
 
 
+def _default_registry_schema(credential=""):
+    """Return an empty registry document.
+
+    Args:
+        credential: The project's ``metadata.id``. Empty string omits the key
+            entirely — see load_registry for why that is not the same as
+            minting a fresh one.
+
+    Returns:
+        Dict with metadata and an empty branches list.
+    """
+    metadata = {
+        "version": "1.0.0",
+        "last_updated": datetime.now().strftime("%Y-%m-%d"),
+        "total_branches": 0,
+    }
+    if credential:
+        metadata["id"] = credential
+    return {"metadata": metadata, "branches": []}
+
+
 def load_registry(registry_path):
     """
     Load registry from JSON file. Returns empty schema if missing.
+
+    A registry that does not exist yet is a NEW PROJECT, and it is born with a
+    freshly minted ``metadata.id`` — the project credential every passport in
+    that project carries as ``citizenship.registry_id`` (rendered as
+    "Branch reg no."). Without it the project's first citizen falls back to
+    whatever registry discovery finds next, which is AIPass's own id: a
+    brand-new agent displaying a number from a project it was never part of.
+
+    The unreadable case deliberately does NOT mint one. A file that exists but
+    cannot be parsed is not a new project — it is a project whose credential we
+    failed to read, and inventing a replacement would re-credential a live
+    project and orphan every passport already carrying the real id. Missing
+    means regenerate; unreadable means do not clobber.
 
     Args:
         registry_path: Path to AIPASS_REGISTRY.json
@@ -146,26 +180,18 @@ def load_registry(registry_path):
     """
     registry_path = Path(registry_path)
     if not registry_path.exists():
-        return {
-            "metadata": {
-                "version": "1.0.0",
-                "last_updated": datetime.now().strftime("%Y-%m-%d"),
-                "total_branches": 0,
-            },
-            "branches": [],
-        }
+        return _default_registry_schema(credential=str(uuid.uuid4()))
 
     data = json_handler.read_json(registry_path)
     if data is not None:
         return data
-    return {
-        "metadata": {
-            "version": "1.0.0",
-            "last_updated": datetime.now().strftime("%Y-%m-%d"),
-            "total_branches": 0,
-        },
-        "branches": [],
-    }
+
+    logger.warning(
+        "[registry] %s exists but could not be read — returning an empty schema WITHOUT a credential "
+        "so a live project is never re-credentialled. Its branches are not in this result.",
+        registry_path.name,
+    )
+    return _default_registry_schema()
 
 
 def save_registry(registry_path, data):
@@ -220,7 +246,7 @@ def _validate_path_containment(branch_path, registry_path):
         return False
 
 
-def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose="", citizen_id=""):
+def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose="", citizen_id="", credential=""):
     """Add a new branch entry to the registry.
 
     Mints a fresh per-citizen UUID for the entry's ``registry_id`` (the citizen
@@ -246,6 +272,10 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         citizen_id: Optional pre-minted per-citizen UUID. Empty string mints a
             fresh one, which is the correct behaviour when no passport carries
             the id yet.
+        credential: Optional project credential (``metadata.id``) to write when
+            the registry does not carry one yet. Supplied by a caller that has
+            ALREADY stamped it into a passport, so the file and the passport
+            agree. NEVER overwrites an id the registry already has.
 
     Returns:
         True if added, False if already exists or error
@@ -268,7 +298,20 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
     try:
+        # Whether the FILE existed decides who owns the credential, not whether
+        # the loaded dict has an id: load_registry mints one for a missing file,
+        # so a freshly minted id would otherwise look "already set" and shadow
+        # the caller's — leaving the passport claiming one credential and the
+        # registry carrying another. Two mints, one project, no agreement.
+        registry_existed = registry_path.exists()
         registry = load_registry(registry_path)
+
+        # A registry the caller is creating adopts the caller's credential (the
+        # one already stamped into the passport). An EXISTING registry's id is
+        # the project's lock and is never touched here.
+        if credential and not registry_existed:
+            registry.setdefault("metadata", {})["id"] = credential
+
         branches = registry.get("branches", [])
 
         if isinstance(branches, dict):
