@@ -493,6 +493,32 @@ class TestExternalRepoVerbTranslation:
         monkeypatch.chdir(tmp_path)
         assert verify_git_access(command) == "devpulse"
 
+    @pytest.mark.parametrize("command", ["dev-pr", "pr", "merge", "fix"])
+    def test_warn_mode_does_not_lift_an_untranslated_verb(
+        self, vera_home: Path, monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> None:
+        """Warn-mode rolls back the AUTHORITY migration (F59 6.1), never this refusal.
+
+        The two were entangled: warn-mode tested one flag for every refusal, so the
+        authority rollback also re-armed a half-run of OUR dev→PR→main flow inside
+        someone else's repo — the exact mess _AIPASS_FLOW_VERBS exists to prevent.
+        Third scope limit on warn-mode, beside identification.
+        """
+        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
+        with pytest.raises(PermissionError, match="not translated for external repos"):
+            verify_git_access(command)
+
+    def test_untranslated_refusal_does_not_call_a_proven_owner_unauthorized(self, vera_home: Path) -> None:
+        """VERA cleared all four authority checks — 'not authorized' would be a false trail.
+
+        The wording decides where the reader goes next: audit a passport that is
+        fine, or wait for the verb to be translated.
+        """
+        with pytest.raises(PermissionError) as exc_info:
+            verify_git_access("pr")
+        assert "not authorized" not in str(exc_info.value)
+        assert "cannot run 'pr'" in str(exc_info.value)
+
 
 class TestGitAuthWarnMode:
     """One env var is the rollback (F59 6.1): warn logs the refusal and allows."""
@@ -587,6 +613,21 @@ class TestGitAccessLogSeverity:
             with pytest.raises(PermissionError, match="not authorized"):
                 verify_git_access("commit")
         mock_logger.error.assert_called_once()
+
+    def test_untranslated_verb_warns_instead_of_paging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A proven owner meeting an untranslated verb is a capability gap, not a fault.
+
+        Live incident (@trigger error 38439475, 2026-08-24): BAUD ran `pr` in its own
+        repo, cleared every authority check, hit the untranslated-verb wall — and the
+        refusal logged ERROR, paging @drone about a gate working exactly as designed.
+        """
+        home = make_owner_project(tmp_path, branch="BAUD", registry_name="BAUD_REGISTRY.json")
+        monkeypatch.chdir(home)
+        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
+            with pytest.raises(PermissionError, match="not translated for external repos"):
+                verify_git_access("pr")
+        mock_logger.warning.assert_called_once()
+        mock_logger.error.assert_not_called()
 
     def test_git_module_does_not_duplicate_denial_error(self, repo_dir: Path) -> None:
         """git_module re-logs the denial at WARNING — auth.py already logged it authoritatively."""
