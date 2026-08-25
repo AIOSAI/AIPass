@@ -59,7 +59,7 @@ src/aipass/devpulse/
 │   ├── integrations/            # Extension point (empty — README only)
 │   └── plugins/                 # Plugin extension point (empty — README only)
 ├── devpulse_json/               # JSON handler storage (config, data, logs per module)
-├── tests/                       # 598 tests (594 passed, 4 skipped — 2026-08-25)
+├── tests/                       # 495 test functions; pytest expands to 598 cases (594 passed, 4 skipped — 2026-08-25)
 ├── tools/                       # One-shot scanners & probes (~30 scripts) + reports/
 ├── prototypes/                  # Shape-exploration prototypes
 ├── templates/                   # Local templates
