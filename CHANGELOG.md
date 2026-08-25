@@ -9,6 +9,57 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-24] — post-v2.7.19 train (in progress)
+
+**fix(ai_mail)** — registry rows leave the reader ABSOLUTE, rooted against the
+registry that answered (`_rooted()` in both lanes of `_lookup_branch_by_name`
+and `get_branch_info_from_registry`). The defect: a projects/* citizen's
+relative registry row was joined to the AIPass repo root, so BAUD's mailbox
+resolved to a phantom dir inside our tree — inbox read empty against a full
+store, reply refused an id sitting in the file under his feet, and the lane
+FABRICATED the phantom on write: his answer to Patrick's continuity probe was
+silently swallowed into `src/baud/` (recovered, then removed via drone rm once
+re-sent on the live lane). Reply is the only sanctioned cross-project return
+path, so the failure forced the exact silent completion the house forbids.
+Three red-first tests including a guard for the six relative AIPass rows;
+verified live from BAUD's seat — inbox lists all messages, the id resolves,
+and his reply arrived through ai_mail itself. 1326 green. Rider: purge.py's
+gap comment updated — @memory shipped `vectorize_and_store` (1.4.0), the seam
+is verified live, and the four-month mail-loss loop is closed in practice.
+
+**feat(spawn)** — a brand-new external project's registry is born WITH its
+credential: `load_registry` mints `metadata.id` for a missing file (a registry
+that does not exist is a new project) and deliberately does NOT mint for an
+unreadable one (a live project whose credential failed to read must never be
+re-credentialled — four tests hold the asymmetry). Mint-once ordering moved
+into `_spawn_agent`: the passport writes at step 1, the registry at step 4, so
+the credential resolves at step 1 and `add_to_registry` adopts it only for a
+registry it is CREATING, keyed off file-existed-before-load rather than
+id-already-set. Live probe: fresh project mints its own credential, passport
+and registry agree, zero AIPass leak. 11 red-first tests, 506 green. Known and
+flagged, not fixed here: `add_to_registry` against an unreadable registry
+would write the empty schema over the real file — guard awaits its own GO.
+
+**fix(drone)** — owner-tier git refusals carry their species: authority (not
+this repo's owner) stays ERROR and warn-mode lifts it; capability (proven
+owner, verb untranslated for external repos) logs WARNING and warn-mode does
+NOT lift it — `AIPASS_GIT_AUTH_MODE=warn`, the AUTHORITY-migration rollback,
+was proven live re-arming `pr` inside BAUD's repo, a half-run of our flow in
+someone else's tree. Message honesty: a proven owner reads "cannot run pr in
+this repo", not "is not authorized". 6 tests, 1200 green, auth.py 1.1.0.
+
+**fix(devpulse)** — feedback's cross-store writes speak the host's dialect:
+`compose.py` 1.3.1 stamps ai_mail's canonical local format into recipients'
+inbox.json instead of UTC ISO-T (two timestamp shapes in one store, BAUD's
+report — measured NOT the cause of his dead inbox, but real pollution).
+Red-first test pins format and wall-clock, 70 feedback tests green.
+
+**docs(changelog)** — the v2.7.17 section header is restored at its splice
+point (VERA's find: the v2.7.18 merge glued the header's title onto a README
+paragraph mid-line, leaving tag v2.7.17 with no matching section). Kept the
+deliberate retitle over the 08-19 original; all released tags have sections
+again.
+
 ## [2026-08-23] — v2.7.19: the merge playbook grows teeth
 
 **docs(flow)** — README truth check and site parity become hard checkboxes in
@@ -258,7 +309,9 @@ to Linux/macOS/Windows (Git Bash or WSL) — both extra platforms run the full
 suite in CI on every PR. Verified clean and left alone: every badge and link
 (zero dead, LICENSE genuinely MIT, codecov live at 78%), and the whole
 Subscriptions & Compliance section — the subprocess claim is backed by code,
-zero credential handling in the tree.: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
+zero credential handling in the tree.
+
+## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own
 board from red to 21/21. Main was never red — the merge gate forbids it; these

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-11
-# Modified: 2026-08-07
+# Modified: 2026-08-24
 # =============================================
 
 """
@@ -224,7 +224,12 @@ def _deliver_to_ai_mail(
         logger.warning(f"[FEEDBACK] Failed to read {to_branch} ai_mail inbox: {e}")
         return False, reason
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    # ai_mail's canonical store format — local wall-clock, space-separated
+    # (their create.py / user timestamp_format). This module wrote UTC ISO-T
+    # into the same store, leaving two timestamp shapes in one inbox.json
+    # (BAUD report e8c235f8, 2026-08-24). A guest writing into another
+    # module's store writes in the HOST's format, not its own.
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mail_id = generate_id()
 
     # ai_mail v2 message schema (see ai_mail email/delivery.py) — the viewer
