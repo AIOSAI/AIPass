@@ -6,7 +6,7 @@
 **Module:** `aipass.flow`
 **Version:** 2.2.1
 **Created:** 2025-11-15
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -16,11 +16,11 @@ Flow is AIPass's plan management system. Every branch uses flow to create, track
 
 ### What I Do
 - Create numbered plans from type-specific templates
-- Close plans with foreground archival and vector intake verification
+- Close plans with foreground archival, then hand vectorisation to a detached background runner
 - List and filter plans across all registered types
-- Reopen closed plans whose file is still at its registered location
-  (recovery from the `.backup/processed_plans/` archive exists but is only
-  reached when the plan is absent from the registry entirely — see Known Issues)
+- Reopen closed plans, pulling the file back from the
+  `.backup/processed_plans/` archive when it is no longer at its registered
+  location — which after a normal close it never is (see Known Issues)
 - Manage plan types via filesystem-driven template registry
 - Aggregate plans across branches for central reporting
 - Self-heal registries (orphan detection, auto-close missing files, auto-register new template dirs)
@@ -47,6 +47,7 @@ drone @flow templates                                # List available plan types
 drone @flow create . "Subject"                  # Create FPLAN (default)
 drone @flow create . "Subject" master           # Create FPLAN master template
 drone @flow create . "Design topic" dplan       # Create DPLAN
+drone @flow create . "Field note" cplan         # Create CPLAN (any registered shorthand)
 
 # Close plans
 drone @flow close FPLAN-0042                    # Close specific plan
@@ -78,11 +79,21 @@ drone @flow --help                              # Full help
 drone @flow --version                           # Version string
 ```
 
-**Use the short verb.** Only the short form executes (`list`, `close`, `create`,
-`restore`, `registry`, `aggregate`, `templates`). The module's full name
+**Use the short verb.** Only the short form executes: `list`, `close`, `create`,
+`restore`, `registry`, `aggregate`, and — all four owned by `template_manager` —
+`templates`, `scan`, `register`, `unregister`. The module's full name
 (`list_plans`, `close_plan`, …) resolves for `--help` but is rejected by the
 dispatcher — `post`/`post_close_runner` is the sole module accepting both. The
 `--help` screen currently claims otherwise; see Known Issues.
+
+**A bare number is not an identity.** Every per-type registry numbers from
+`0001`, so `0012` names a row in each of them and a bare number resolves against
+`fplan_registry.json` by default. Pass the typed ID (`close TDPLAN-0012`) when
+the plan is not an FPLAN. The prefix is read by an **anchored** match
+(`^([A-Z]+PLAN)-` in `apps/handlers/plan/registry_routing.py`), so `TDPLAN-0012`
+resolves to `tdplan_registry.json` and never collides with `DPLAN-0012`. A row
+whose `file_path` carries no prefix offers no type evidence at all; the bulk and
+restore paths refuse such a row rather than guess.
 
 ---
 
@@ -94,7 +105,7 @@ flow/
 │   ├── flow.py                  # Entry point (auto-discovers modules)
 │   ├── modules/                 # Thin orchestrators (8 modules)
 │   │   ├── create_plan.py       # Plan creation with template support
-│   │   ├── close_plan.py        # Closure with foreground archival + vector verify
+│   │   ├── close_plan.py        # Closure: foreground archival, background vectorisation
 │   │   ├── list_plans.py        # Plan listing and filtering
 │   │   ├── restore_plan.py      # Reopen closed plans (+ backup recovery path)
 │   │   ├── registry_monitor.py  # Registry scanning and auto-healing
@@ -102,7 +113,8 @@ flow/
 │   │   ├── post_close_runner.py # Background post-processing with lock management
 │   │   └── template_manager.py  # Template registry management
 │   └── handlers/                # Implementation details
-│       ├── plan/                # Lifecycle: create, close, list, restore, display, validation
+│       ├── plan/                # Lifecycle: create, close, list, restore, display, validation, project scope
+│       ├── cli/                 # Shared --help flag detection (help_flags.py)
 │       ├── registry/            # Load, save, auto-heal registries
 │       ├── template/            # Plan type loader, template resolution, registry CRUD
 │       ├── dashboard/           # Status push to local, central, branch dashboards
@@ -119,7 +131,8 @@ flow/
 │   ├── research_plans/          # RPLAN templates (default)
 │   ├── team_dev_plans/          # TDPLAN templates (default)
 │   ├── audit_plans/             # APLAN templates (default)
-│   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
+│   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
+│   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
 ├── tests/                       # 950 tests across 27 files
 └── .archive/                    # Archived legacy code + orphaned registries
@@ -143,6 +156,7 @@ flow/
 | team_dev_plans | TDPLAN | tdplan_registry.json | default |
 | audit_plans | APLAN | aplan_registry.json | default |
 | playbook_plans | PPLAN | pplan_registry.json | default, merge, prompt_change, weekly_update |
+| capture_plans | CPLAN | cplan_registry.json | default |
 
 Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNNN auto-increments per type.
 
@@ -217,15 +231,34 @@ time.
 
 ## Close Pipeline
 
-On `drone @flow close`:
-1. **Template check** — fast-delete empty/template-only plans
-2. **Mark closed** — update plan registry with closure timestamp
-3. **Archive** — move to `.backup/processed_plans/` (foreground, sets processed/cleanup flags atomically)
-4. **Vector intake** — `drone @memory process-plans` + `is_plan_vectorized()` verification
-5. **Dashboard updates** — local, central, and branch dashboards
-6. **Append** — write to `CLOSED_PLANS.local.json`
+On `drone @flow close` — the console prints five numbered steps, with vector
+intake fired unlabelled between steps 3 and 4:
 
-Vector verification displays in console: "Vectorized: N chunks in chroma" or "NOT vectorized".
+1. **`[1/5]` Template check** — *reports only, never deletes.* An empty
+   template gets the warning "looks like an empty template — closing and
+   archiving normally" and then flows through the identical pipeline. The old
+   fast-delete branch was removed deliberately: `is_template_content()` is a
+   heuristic, and its false positives permanently destroyed FPLAN-0370 and
+   FPLAN-0371.
+2. **`[2/5]` Mark closed** — sets `status` and the `closed` timestamp, saves the
+   type's registry. **Close always succeeds from this point;** every later step
+   is non-blocking.
+3. **`[3/5]` Archive** — move to `.backup/processed_plans/` (foreground; sets
+   `processed`/`processed_date`/`cleanup_completed`/`cleanup_date` and saves in
+   one write)
+4. *(unlabelled)* **Vector intake** — spawns `apps/modules/post_close_runner.py`
+   detached; console shows only "Vectorizing in background"
+5. **`[4/5]` Dashboard updates** — local, central, and branch dashboards
+6. **`[5/5]` Finalizing** — append to `CLOSED_PLANS.local.json`, fire the
+   `plan_closed` trigger event
+
+**Close does not verify vectorisation, and cannot report it.** The runner is
+launched with `subprocess.Popen(..., stdout=DEVNULL, stderr=DEVNULL,
+start_new_session=True)` (`_spawn_background_runner`, `close_helpers.py`), so
+its result is unreadable by the closing process by construction — a failed
+vectorisation is silent. Nothing in flow calls `is_plan_vectorized()`; that
+function lives in `@memory` and is reached only by the separate
+`drone @memory verify <label>` command, which is where a real answer comes from.
 
 Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared runtime namespace managed by `@backup` (see `src/aipass/backup/README.md`) and consumed by `@memory` for vectorization.
 
@@ -322,37 +355,65 @@ aggregation untouched, plus anything auto-closed during the run.
 
 - **Seedgo:** 100% (46 standards, 44 files, no type errors)
 - **Tests:** 950 tests in 27 files — 969 cases collected after parametrisation, 968 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
-- **Source files:** 44 tracked by seedgo
+- **Source files:** 44 tracked by seedgo (61 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
-- **Last audit:** 2026-08-23 (every figure on this list re-measured, not carried forward)
+- **Registries:** 7 registered plan types + 1 orphan; **798 plans on disk, 23 open, 775 closed**
+- **Last audit:** 2026-08-25 (every figure on this list re-measured, not carried forward)
 
 ### Known Issues
-- **307 of 719 closed plans have no archived copy and cannot be restored.**
-  Fixed 2026-08-22: `restore` now reads `.backup/processed_plans/` when the
-  registered `file_path` is empty, which it always is after a close. Before
-  that fix restore failed for **719 of 719** closed plans while 412 archives
-  sat intact beside them. Coverage by close month: 2026-03 and 04 are 0%,
-  05 is 89%, 06–08 are 98–100%. The 307 pre-May rows have no artifact to
-  recover — that is a gap in the archive, not in restore, and it is not
-  recoverable by code.
+- **315 of 775 closed plans have no archived copy and cannot be restored.**
+  Fixed 2026-08-22: `restore` now falls back to `.backup/processed_plans/` when
+  the file is **not at** the registered `file_path`. Note the correction — the
+  row's `file_path` is *not* emptied by close; it is left pointing at where the
+  file used to be. Measured 2026-08-25: all 775 closed rows carry a
+  `file_path`, and **0 of 775** have a file there. Before that fix restore
+  failed for every closed plan while the archive sat intact beside it.
+  Coverage by close month: 2026-03 (198 rows) and 04 (97) are **0%**, 05 is
+  89%, 06 is 100%, 07 is 94%, 08 is 98%. The 295 pre-May rows have no artifact
+  to recover — that is a gap in the archive, not in restore, and it is not
+  recoverable by code. A second, narrower refusal also applies: restore copies
+  the archived file back to its *registered* directory, so a row whose original
+  directory no longer exists is refused by name rather than re-homed.
 - **`--help` advertises full module names that the dispatcher rejects.** It
   prints "Commands can be called by short name or full name", but 7 of 8
   modules match only their short verb. It also lists `template`, which no
   module accepts — the working verb is `templates`, absent from that list.
 - **`registry status` counts only FPLAN.** It reports the default registry's
-  totals under a system-wide label (354/1 where the true figures across all
-  types are 705/27), because `get_status_impl` calls a bare `load_registry()`.
-- `flow_json/PLAN_REGISTRY.json` is legacy — zero readers anywhere in the tree
+  totals under a system-wide label — measured 2026-08-25 it prints
+  **401 total / 4 open**, which is `fplan_registry.json` exactly, where the true
+  figures across every registry on disk are **798 / 23**. Cause:
+  `get_status_impl` calls a bare `load_registry()`. Its quarantine list and
+  `Ignored folders: 33` are branch-wide and correct; only the two totals are
+  scoped to one type.
+- **`flow_json/PLAN_REGISTRY.json` is legacy but NOT unread.** No flow code
+  touches it, but `@trigger`'s `apps/handlers/events/plan_file.py` both reads
+  and writes it (`_load_registry`/`_save_registry`), and the file's own contents
+  are the evidence — 1 plan row against `next_number: 402`, last written
+  2026-07-27. An earlier edition of this README claimed "zero readers anywhere
+  in the tree"; that was wrong. Whether @trigger's handler should be pointed at
+  the typed registries is a question for @trigger, not a flow-side fix.
 - `flow_json/pbplan_registry.json` is an orphaned type registry (see Auto-healing)
 - Registry scan fires trigger events that are never handled (by design — foreground close handles everything)
 - Dashboard push warns on some closes
 - `mbank/process.py` at 718 lines (over the 700 limit)
-- `close_ops.py` split into `close_ops.py` (614 lines) + `close_helpers.py` (257 lines)
+- **`CLOSED_PLANS.local.json` carries foreign keys on every branch that has
+  one.** Measured 2026-08-25: 16 of the 18 core citizens hold the file, and
+  **all 16** carry a `document_metadata` block whose `document_type` is
+  `session_history` — `local.json`'s schema, not this file's — plus an empty
+  `key_learnings` and `todos`. `append_to_closed_plans()` only ever appends to
+  the `closed_plans` list; it round-trips foreign keys but never creates them,
+  and no other writer exists in `src/aipass/`. @devpulse's DPLAN-0318 brief
+  attributes it to a past push from `@memory`'s pusher — *stated there, not
+  verifiable from flow's side.* Known and deliberately NOT cleaned: a rebuild
+  is scoped in DPLAN-0318.
+- `close_ops.py` was split into `close_ops.py` + `close_helpers.py` (257 lines),
+  but `close_ops.py` has since grown back to **848 lines** — over the 700 limit,
+  and now the longest file in the branch (`mbank/process.py` is 718)
 - `push_central.py` comprehensive rewrite (2026-06-02): now pushes all branches' plans, not just flow's — fixed dashboard refresh zeroing other branches' plan counts
 
 ---
 
-*Last Updated: 2026-08-23*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

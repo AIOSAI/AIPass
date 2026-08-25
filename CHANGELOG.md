@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**docs(fleet)** — README truth campaign, the 08-25 night shift (Patrick's GO):
+every citizen verified its OWN README against the code as it exists, waves of
+two, each pass re-audited to 100% after editing — 18 branch READMEs corrected
+in this repo (~120 claim families), plus the four resident projects in their
+own repos. The rule was measured-or-marked: every number rewritten tonight was
+counted tonight, and what couldn't be verified is now labeled unverified in the
+README itself instead of standing green. Headlines: commons documented a
+Reward-Drops feature that never existed in any code; baud's command-registry
+safety claim was false (26 listed, 29 registered — three write-capable commands
+invisible to an audit); aipass's own Quick Start pointed new users at bare
+`init`, which prints help; two project front doors misrepresented finished
+products as empty templates. Fleet pattern, both directions: dead features
+documented live AND real features/fixed debt undocumented — either would
+poison a post-reset agent, which is why this campaign was the precondition for
+the DPLAN-0318 fleet memory reset. Code defects found were flagged to owners,
+never smuggled into docs-only edits; the queue rides in devpulse's campaign
+log (dropbox/readme_night_shift.md) for the morning read.
+
 **fix(ai_mail)** — registry rows leave the reader ABSOLUTE, rooted against the
 registry that answered (`_rooted()` in both lanes of `_lookup_branch_by_name`
 and `get_branch_info_from_registry`). The defect: a projects/* citizen's

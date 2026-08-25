@@ -56,11 +56,15 @@ src/aipass/devpulse/
 │   │   ├── json/                # JSON operation logging (json_handler)
 │   │   ├── owner/               # Owner gate + admin grant (keygen, mint, 5-leg verify)
 │   │   └── watchdog/            # Agent, timer, schedule, registry
-│   └── plugins/                 # Plugin extension point
+│   ├── integrations/            # Extension point (empty — README only)
+│   └── plugins/                 # Plugin extension point (empty — README only)
 ├── devpulse_json/               # JSON handler storage (config, data, logs per module)
-├── tests/                       # 448 tests
+├── tests/                       # 598 tests (594 passed, 4 skipped — 2026-08-25)
+├── tools/                       # One-shot scanners & probes (~30 scripts) + reports/
+├── prototypes/                  # Shape-exploration prototypes
+├── templates/                   # Local templates
 ├── artifacts/                   # Birth certificate, reports
-├── dropbox/                     # Received files, archived plans, install audit
+├── dropbox/                     # Received files, archived plans, campaign logs
 ├── docs/                        # Transition notes
 └── DASHBOARD.local.json         # Live state (refreshed by prax)
 ```
@@ -138,19 +142,22 @@ registries.
 | Command | What it does |
 |---|---|
 | `watchdog baseline` | Sign this session in to receive dispatch reports (logs out any older session) |
+| `watchdog baseline --once` | Wire until the first delivered completion (run_in_background form) |
 | `watchdog agent @target [--timeout s]` | Stall-watch one dispatched agent (default 600 s) |
 | `watchdog timer <duration>` | Wake after duration (5m, 30s, 2h, 1h30m) |
 | `watchdog timer start/stop <name>` | Named duration tracking |
-| `watchdog schedule <HH:MM>` | Wait until a specific time |
+| `watchdog timer list / report` | Active + historical timers / formatted session summary |
+| `watchdog schedule <HH:MM \| +N> [command]` | Wait until a time (or +duration), optionally run a command |
 | `watchdog status` | Signed-in session, outstanding dispatches, overdue entries |
-| `watchdog cancel <id>` | Cancel a running watchdog |
-| `watchdog list` | List all watchdog entries |
+| `watchdog cancel <handle>` | Cancel one watch (`--all` kills every active watch) |
+| `watchdog list` | Alias for status |
 
 ### Feedback — the owner-to-owner channel (owner-only)
 
-ai_mail and dispatch stop at the project boundary — **cross-project comms is
-impossible by design, except feedback.** Project owners (managers) talk owner-to-owner
-through it: an external project's owner runs `drone @devpulse feedback send ...` from
+Dispatch crosses the project boundary in ONE direction only — devpulse's admin
+seat reaches out; a dispatched project citizen answers on ai_mail's reply lane
+(replies-only return path). For everything else, **feedback is the cross-project
+channel**: an external project's owner runs `drone @devpulse feedback send ...` from
 their project and it lands in devpulse's feedback mailbox; devpulse answers with
 `feedback reply`. Same owner gate as watchdog — unseated projects are refused until
 `aipass doctor --fix` seats them.
@@ -162,6 +169,7 @@ their project and it lands in devpulse's feedback mailbox; devpulse answers with
 | `feedback view <id>` | Read a message |
 | `feedback reply <id> "msg"` | Reply to sender |
 | `feedback send "subject" "body"` | Send feedback to devpulse (any project's owner may call) |
+| `feedback clear <id>` | Remove a message (`--all` removes all read) |
 
 ### Compass — rated decision store
 
@@ -169,8 +177,8 @@ Curated truth-store of rated decisions (`good` / `bad` / `impressive` / `interes
 
 | Command | What it does |
 |---|---|
-| `compass add "context" "decision" --rating R` | Store a rated decision (`--note`, `--tags`, `--source`) |
-| `compass query "question" [--rating R] [--limit N]` | Search decisions (rating shown per hit) |
+| `compass add "context" "decision" --rating R` | Store a rated decision (`--note`, `--tags`, `--source devpulse\|user`, `--supersedes N` archives+links the corrected entry) |
+| `compass query "question" [--rating R] [--limit N] [--include-archived]` | Search decisions (rating shown per hit) |
 | `compass stats` | Counts by rating / status |
 | `compass rate <id> <rating>` | Re-rate a decision |
 | `compass archive <id>` | Archive a decision |
@@ -219,7 +227,7 @@ drone @git log                   # Recent commits
 | drone | Command routing, subprocess, @branch resolution |
 | ai_mail | Dispatch (send + wake agents), email delivery |
 | flow | FPLANs (building), DPLANs (planning), APLANs (autonomous) |
-| seedgo | Standards audits, checkers (35 standards) |
+| seedgo | Standards audits, checkers (45 standards) |
 | prax | Monitoring, logs, dashboard |
 | memory | ChromaDB vectors, archival, search |
 
@@ -227,7 +235,16 @@ drone @git log                   # Recent commits
 
 All branches via dispatch orchestration. Watchdog reporting for every dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
 
-*Last Updated: 2026-08-19*
+## Status & Known Issues
+
+Verified 2026-08-25 (README truth pass — every command above run read-only, tests executed, counts measured).
+
+- **Live bug** — `watchdog/registry.py:425` `killed or True` is always True: `watchdog cancel` prints KILLED even when the process survived SIGTERM. No test covers it (all 3 assert True). Fix queued as its own commit.
+- **Refusals that exit 0** — feedback, admin_grant (×2) and compass (×3) use `warning()` for refusals, which skips `mark_command_failed()`, so a refused command exits 0. Fleet-wide sweep pending (@canary).
+- **statusline.sh untracked** — the watchdog statusline lives at `~/.claude/statusline.sh`, outside the repo; on any other machine watchdog paints red until hand-copied. Fix direction undecided (Patrick's call — provider config dir).
+- **Foreground-wire gap** — a `baseline` wire armed without the Monitor tool still paints `watchdog:in` green with no listener; `via=monitor` field offered, awaiting go-ahead.
+
+*Last Updated: 2026-08-25*
 
 ---
 

@@ -4,7 +4,7 @@
 **Module:** `aipass.backup`
 **Version:** 1.0.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -15,7 +15,7 @@
 - Back up any project directory on the system (not just AIPass projects)
 - Each project owns its backup config (`.backup/`) and ignore patterns (`.backupignore`)
 - Snapshot mode: full mirror copy
-- Versioned mode: incremental timestamped backups with automatic pruning
+- Versioned mode: incremental timestamped backups (append-only — there is no pruning; see "Store Cleanup")
 - Project registry for name-based lookups (`backup snapshot @AIPass`)
 
 ### How I Work
@@ -44,6 +44,7 @@ apps/
 │   ├── status.py          # Backup status display
 │   └── versioned.py       # Incremental timestamped backup
 └── handlers/
+    ├── cleanup/           # Mirror cleanup — removes snapshot files whose source is gone
     ├── copy/              # File copying (snapshot + versioned)
     ├── diff/              # Diff generation + restore from the versioned store
     ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
@@ -52,10 +53,14 @@ apps/
     ├── path/              # Backup path building + caller-CWD resolution
     ├── project/           # Config, registry, setup (.backup/)
     ├── report/            # Result formatting
-    ├── scan/              # Directory walking + filtering
+    ├── scan/              # Directory walking + filtering + the run ceiling
     ├── state/             # Changelog, metadata, timestamps
     └── ui/                # Settings window (archived — see ui/.archive/)
 ```
+
+`apps/integrations/` and `apps/plugins/` also exist on disk but are empty
+scaffolds (a README and an `__init__.py`, no code) — they are left out of the
+tree above deliberately, not by oversight.
 
 ---
 
@@ -65,7 +70,7 @@ apps/
 backup register <path> [--name <name>]   # Register a project for backup
 backup snapshot <path|@name>             # Full mirror backup
 backup versioned <path|@name>            # Incremental timestamped backup
-backup all <path|@name>                  # Snapshot + versioned + drive
+backup all <path|@name>                  # Snapshot + versioned + drive sync
 backup status <path|@name>              # Show backup info and history
 backup restore <path|@name> list <file>  # List available versions of a file
 backup restore <path|@name> file <f> <o> # Restore a file version to output path
@@ -77,7 +82,11 @@ backup drive_clear <path|@name> --force  # Clear the LOCAL tracker (remote files
 backup share <file> [--public]           # Upload one file to Drive, return share link
 ```
 
-All 12 commands are auto-discovered by the entry point router.
+The router auto-discovers every file in `apps/modules/` that exposes a
+`handle_command()`. That is 13 modules: the 12 verbs above, plus `display`,
+which is a rendering helper rather than a backup verb — it answers only to its
+own name (`drone @backup display` prints its introspection and does nothing
+else) and is intentionally undocumented as a command.
 
 **A `--help` anywhere in the arguments prints help and runs nothing** — `drone
 @backup snapshot @myapp --help` is a safe probe, not a backup.
@@ -155,6 +164,11 @@ There is no static fallback. The seed IS the safety mechanism — an empty or mi
 - To change ignores for an **existing** project → edit its `.backupignore`
 
 The repo-root `/.backupignore` ships intentionally as the curated default so users don't snapshot junk.
+It is hand-maintained, not generated from the seed, and it has **drifted**: as of
+2026-08-25 it is missing `target/` and `logs/`, and its header still cites the
+old source (`handlers/ignore/patterns.py`) instead of
+`templates/backupignore.template`. AIPass's own tree is therefore not covered
+against the exact runaway class the `target/` pattern was added for.
 
 **A miss in the seed is expensive.** The template covers `build/`, `dist/`, `target/`, `node_modules/`, `.venv/` and friends precisely because an uncovered build-artifact tree is indistinguishable from real source to the walker. `target/` was added on 2026-08-20 after a Rust `src-tauri/target` tree (33,093 files / 18GB) was walked and copied for 7.5h, writing 50GB into the stores. Patterns are unanchored on purpose: baud's tree was `app/src-tauri/target`, so an anchored `/target/` would have missed it.
 
@@ -194,7 +208,14 @@ Mirror cleanup (`handlers/cleanup/mirror.py`) removes snapshot files **whose sou
 There is **no lane** that removes files which are now *ignored* but still present in the source tree. A directory added to `.backupignore` after a backup stays in `snapshots/` and `versioned/` indefinitely:
 
 - `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. `cleanup_deleted_files()` accepts a `should_ignore` callback and **never calls it** — the ignore-aware sweep is unimplemented, not merely unused.
-- `versioned/` — has no cleanup path at all. The store is append-only by design, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
+- `versioned/` — has no cleanup path at all. The store is append-only, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
+
+**`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`
+key (default `10`), `register` writes it, and `status` prints it as "Max
+versions" — but no code reads it. Nothing prunes old versions. The only file
+deletion anywhere in this branch is `mirror.py:59`, the vanished-source snapshot
+sweep above. Treat the key as advertised-but-unimplemented until a pruning lane
+exists.
 
 Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
 
@@ -203,8 +224,9 @@ Removing a now-ignored tree from a store is currently a manual `rm -rf` of the c
 ## Integration Points
 
 ### Depends On
-- @prax — logging
-- @cli — Rich console output
+- @prax — logging (`logger`, `append_jsonl`)
+- @cli — Rich console output (`console`, `error`, `header`, `success`, `warning`)
+- @api — Google Drive auth + retry, via `google_client` (Drive commands only)
 
 ### Provides To
 - Any project on the PC — backups are project-owned (`.backup/` in target root)

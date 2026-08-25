@@ -2,7 +2,7 @@
 
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass. Audits all 11 core agents against 44 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
+**Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 45 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
 **Version:** 2.0.0
 **Created:** 2026-03-05
@@ -22,7 +22,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 ## Overview
 
 ### What I Do
-- Audit all 11 core agents against 44 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, etc.)
+- Audit all 18 citizen branches against 45 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, gateway boundary, etc.)
 - Score files 0-100 per standard and report violations with actionable details
 - Manage bypass rules (`.seedgo/bypass.json`) for deliberate exceptions
 - Run pyright diagnostics across branches for type error detection
@@ -39,7 +39,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 
 ## Commands
 
-All commands available via `drone @seedgo <command>` or `python3 -m aipass.seedgo <command>`.
+All commands available via `drone @seedgo <command>` or `python3 -m aipass.seedgo.apps.seedgo <command>`.
 
 ### Via Drone (primary)
 
@@ -49,14 +49,14 @@ drone @seedgo --help                                   # Full command listing
 drone @seedgo --version                                # Version string
 
 # Audit
-drone @seedgo audit aipass                             # Audit all 11 agents (44 standards + diagnostics)
+drone @seedgo audit aipass                             # Audit all 18 citizens (45 standards + diagnostics)
 drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
-drone @seedgo standard                                 # List all 44 standards
+drone @seedgo standard                                 # List all 45 standards
 drone @seedgo standard cli                             # Show standard content (short form)
-drone @seedgo standards_query aipass_standards         # List all 44 standards in pack
+drone @seedgo standards_query aipass_standards         # List all 45 standards in pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
 
 # Per-file Check
@@ -75,14 +75,24 @@ drone @seedgo test_map @seedgo                         # Function-level test cov
 
 # README
 drone @seedgo readme update @flow                      # README auto-generation for a branch
+drone @seedgo readme check @seedgo                     # Marker-driven freshness check
+
+# Introspection-only commands
+drone @seedgo permissions                              # TRUSTED_CROSS_WRITERS trust list
+drone @seedgo inbox_audit                              # Points at `audit inbox-ids`
 ```
 
 ### Via Python Module
 
 ```bash
-python3 -m aipass.seedgo audit aipass                  # Same commands, direct execution
-python3 -m aipass.seedgo standards_query aipass_standards cli
+python3 -m aipass.seedgo.apps.seedgo audit aipass      # Same commands, direct execution
+python3 -m aipass.seedgo.apps.seedgo standards_query aipass_standards cli
 ```
+
+> **Note:** the module path is the full entry point, `aipass.seedgo.apps.seedgo`. There is no
+> `__main__.py`, so the shorter `python3 -m aipass.seedgo` fails with *"'aipass.seedgo' is a
+> package and cannot be directly executed"* — this README advertised the short form until
+> 2026-08-25, and it never worked.
 
 > **Note:** `diagnostics` takes no branch argument despite what `--help` shows — standalone
 > diagnostics is disabled and runs through the audit pipeline (`audit aipass [@branch]`).
@@ -94,7 +104,7 @@ python3 -m aipass.seedgo standards_query aipass_standards cli
 ```
 seedgo/
 ├── apps/
-│   ├── seedgo.py                    # Entry point — thin router (~290 lines)
+│   ├── seedgo.py                    # Entry point — thin router (326 lines)
 │   │                                #   discover_modules() loads apps/modules/*.py
 │   │                                #   route_command() dispatches to first handler returning True
 │   ├── modules/                     # 10 business logic modules
@@ -108,12 +118,15 @@ seedgo/
 │   │   ├── permissions.py           # TRUSTED_CROSS_WRITERS list for hook + drone auth
 │   │   ├── readme_update.py         # README generation module
 │   │   └── test_map.py              # Custom function test coverage mapping
-│   └── handlers/                    # 9 handler directories
-│       ├── aipass_standards/        # 44 checker standards (129 files: 44 check + 44 content + 38 md, 6 missing)
+│   └── handlers/                    # 10 handler directories
+│       ├── aipass_standards/        # 45 checker standards (132 files: 45 check + 45 content
+│       │   │                        #   + 38 md + applicability.py, skip_dirs.py,
+│       │   │                        #   diagnostics.json, __init__.py)
 │       │   ├── *_check.py           # Checker implementations (score 0-100)
 │       │   ├── *_content.py         # Queryable standard content
-│       │   └── *.md                 # Standard documentation
-│       ├── aipass_proof/            # 5 proof validators (11 files)
+│       │   └── *.md                 # Standard docs — 7 standards ship none (see triplet, below)
+│       ├── aipass_proof/            # 5 proof validators (16 files: 5 validators + 5 _content.py
+│       │   │                        #   + 5 md + __init__.py)
 │       │   ├── triplet.py           # .trinity/ completeness
 │       │   ├── interface.py         # AUDIT_SCOPE + function signatures
 │       │   ├── plugin_integrity.py  # No hardcoded standard names
@@ -122,22 +135,25 @@ seedgo/
 │       ├── audit/                   # Audit implementation
 │       │   ├── branch_audit.py      # Per-branch scoring engine
 │       │   ├── discovery.py         # Branch discovery (CWD-first registry)
-│       │   └── audit_display.py     # Rich result formatting
+│       │   ├── audit_display.py     # Rich result formatting
+│       │   ├── incremental_cache.py # Content-hash cache — unchanged branch replays its score
+│       │   └── artifact.py          # Untruncated violation set -> .seedgo/last_audit_<branch>.json
 │       ├── bypass/                  # Bypass + ignore systems
 │       │   ├── bypass_handler.py    # .seedgo/bypass.json loader
 │       │   ├── ignore_handler.py    # Audit ignore patterns + .seedgoignore engine
 │       │   ├── utils.py             # matching_rule() — the single scope-aware rule matcher
 │       │   └── inert.py             # Derives inert (unreachable) bypass rules from checker ASTs
-│       ├── config/                  # Configuration handlers
+│       ├── cli/                     # help_flags.py — shared --help detection
+│       ├── config/                  # Package marker only — __init__.py, no handlers today
 │       ├── diagnostics/             # Pyright integration + branch discovery
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 51 test files, 1691 tests
+├── tests/                           # 50 test files, 1712 tests
 ├── .trinity/                        # Identity + memory
-├── .seedgo/                         # Self-bypass rules
-├── .ai_mail.local/                  # Mailbox
-└── CLAUDE.md                        # Branch startup instructions
+├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
+├── .seedgo/                         # Self-bypass rules + audit artifacts
+└── .ai_mail.local/                  # Mailbox
 ```
 
 ### Key Patterns
@@ -156,12 +172,13 @@ seedgo/
 
 ---
 
-## The 44 Standards
+## The 45 Standards
 
 `Scope` is the checker's own `AUDIT_SCOPE` (where a result is REPORTED); `Applies to`
 is its `APPLIES_TO` (which files are ELIGIBLE, default `everywhere`). These are two
 different axes — see `applicability.py`. Both columns below are read from the checker
-sources, not maintained by hand.
+sources, not maintained by hand — regenerated against them 2026-08-25, when the table was
+still 44 rows and the pack had been 45 since `gateway_boundary` landed on 08-18.
 
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
@@ -176,6 +193,7 @@ sources, not maintained by hand.
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | everywhere | Try/except patterns, error propagation |
+| gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door |
 | handler_import | branch_level | everywhere | apps/__init__.py contains `from . import handlers` |
 | handlers | all_files | production | Handler directory structure + handler independence |
 | hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
@@ -223,33 +241,38 @@ sources, not maintained by hand.
 
 ## Hook Architecture
 
-The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure — engine, bridge, and 14 native handlers. Seedgo audits hooks via standards but does not own the hook system.
+The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure — engine, bridge, and
+native handlers. Seedgo audits hooks via standards but does not own the hook system, and no
+longer mirrors its roster here: the hand-maintained table this section used to carry listed 14
+handlers when 29 existed, and named one — `prompt.global_loader` — that had already moved to
+`.archive/`. A copy of someone else's registry rots quietly; the directory does not.
 
-Provider settings route all events through the bridge (`claude.py`), which dispatches to native Python handlers:
+Counted from `src/aipass/hooks/apps/handlers/` on 2026-08-25:
 
-| Handler | Event | Category |
-|---------|-------|----------|
-| `prompt.global_loader` | UserPromptSubmit | prompt |
-| `prompt.branch_loader` | UserPromptSubmit | prompt |
-| `prompt.identity` | UserPromptSubmit | prompt |
-| `notification.email` | UserPromptSubmit | notification |
-| `security.edit_gate` | PreToolUse | security |
-| `security.git_gate` | PreToolUse | security |
-| `lifecycle.auto_fix` | PostToolUse | lifecycle |
-| `lifecycle.auto_watchdog` | PostToolUse | lifecycle |
-| `security.subagent_gate` | SubagentStop | security |
-| `notification.stop_sound` | Stop | notification |
-| `notification.announce` | Notification | notification |
-| `notification.tool_sound` | PreToolUse | notification |
-| `lifecycle.compact` | PreCompact | lifecycle |
-| `lifecycle.rollover` | PreCompact | lifecycle |
+| Category | Handlers | Directory |
+|----------|----------|-----------|
+| prompt | 9 | `apps/handlers/prompt/` |
+| lifecycle | 9 | `apps/handlers/lifecycle/` |
+| security | 6 | `apps/handlers/security/` |
+| notification | 5 | `apps/handlers/notification/` |
+| **Total** | **29** | |
+
+Provider settings route every event through the bridge (`claude.py`), which dispatches to those
+handlers. Event registrations live in `.claude/provider_manifest.json` (27 entries) and are keyed
+by **hook alias, not filename** — `UserPromptSubmit:branch_prompt` fires `prompt/branch_loader.py`,
+`identity_injector` fires `prompt/identity.py`. The two lists do not line up by name, which is the
+second reason not to restate them here. Read the directory, or ask @hooks.
+
+**The one that concerns this branch:** `lifecycle/auto_fix.py` (PostToolUse) runs
+`drone @seedgo checklist <file>` against every edited file. That gate is what `checklist` feeds.
+
 
 ---
 
 ## Tests
 
-- **51 test files, 1691 tests**, all passing
-- **0 type errors** (pyright)
+- **50 test files, 1712 tests** — 1712 passed, 0 failed (run 2026-08-25)
+- **0 type errors** (pyright, via the audit pipeline)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 
 ---
@@ -280,17 +303,20 @@ Full detail and status live in **APLAN-0005** (the standing branch health record
 - `seedgo proof aipass` reports **NOT CERTIFIED** — the auditor does not currently pass its own proof pack:
   - `readme_currency` fails on three counts, and only the first is a plain detector bug.
     (a) It recognises standard names only in a `pack checks:` prose format this README
-    does not use, so 43 of the 44 standards in the table above read as "undocumented".
+    does not use, so 44 of the 45 standards in the table above read as "undocumented".
     (b) It scrapes any number near a pack reference as the claimed check count, so the
-    "6 standards have no `.md`" line below is read as "README says 6, actual is 44".
+    "7 standards have no `.md`" line below is read as "README says 7, actual is 45".
     (c) It harvests **this bullet** into `stale_refs` — describing the detector's own bug
     in the README makes the detector fail harder. A checker cannot tell a document from
     a document *about* the document; see also `rich_markup` on `# BAD` examples.
-  - `triplet`: 6 standards have no `.md` (cli_ux, hardcoded_path, json_structure,
-    readme_quality, rich_markup, subcommand_help); the `ruff`/`ruff_check` name split
-    reports as 1 check-only + 1 missing-check. The 2 **orphans** are `applicability.py`
-    and `skip_dirs.py` — shared infrastructure that lives in the pack directory without
-    being standards, which the triplet proof has no category for.
+  - `triplet` (live 2026-08-25: 37 complete | 1 check-only | 1 missing-check |
+    7 other-incomplete | 2 orphaned | 46 total): **7** standards have no `.md` —
+    cli_ux, gateway_boundary, hardcoded_path, json_structure, readme_quality,
+    rich_markup, subcommand_help. `gateway_boundary` is the newest and shipped without
+    one on 08-18. The `ruff`/`ruff_check` name split reports as 1 check-only +
+    1 missing-check. The 2 **orphans** are `applicability.py` and `skip_dirs.py` —
+    shared infrastructure that lives in the pack directory without being standards,
+    which the triplet proof has no category for.
 - `standard ruff` returns "Unknown standard" while the audit displays the standard as `Ruff` (see the naming-split note above).
 - `--help` advertises `drone @seedgo diagnostics @flow`, but the module rejects a branch argument — standalone diagnostics runs only through the audit pipeline.
 - ~~`permissions.py` introspection leak~~ — **fixed 2026-08-13 (S80).** The gate keyed on
@@ -308,27 +334,37 @@ Full detail and status live in **APLAN-0005** (the standing branch health record
   `*_violations` list — removing it drops that standard 100 → 95. A rot detector must
   read both lanes and canary branch-level standards through `check_branch()`. See
   APLAN-0005.
-- `audit_display.py`: 16 hardcoded display blocks for specific standards (DPLAN-0047 tracks dynamic refactor)
-- `documentation_check.py` 5-line lookahead limitation for multi-line function signatures
-- `dead_code_check.py` doesn't recognize `iterdir()` as valid discovery pattern
-- Cross-branch file write detection recommended but not yet in standards (S73 finding)
+- `audit_display.py`: **the DPLAN-0047 dynamic refactor has landed** — this line claimed
+  16 hardcoded per-standard display blocks; the file now derives every standard from its
+  `<name>_violations` key and renders it generically, with exactly **one** special case left
+  (`architecture`, which needs its own renderer). Corrected 2026-08-25 by reading the file;
+  the change is not attributed here because this branch's memory does not record who made it.
+- `documentation_check.py` multi-line signature lookahead is **30 lines**, not the 5 this
+  line claimed (`documentation_check.py:146`). Still a bounded window, still a limitation —
+  just six times wider than documented.
+- `dead_code_check.py` recognises `glob("*.py")` as a discovery pattern but **not**
+  `iterdir()` — verified still true 2026-08-25.
+- ~~Cross-branch file write detection recommended but not yet in standards (S73 finding)~~ —
+  **shipped as the `gateway_boundary` standard, 2026-08-18.** It is the 45th checker and the
+  one this README's own table had been missing.
 
 ---
 
-## Latest Audit (2026-08-13)
+## Latest Audit (2026-08-25)
 
-- **Seedgo score:** 100% (44 standards + diagnostics, 124 files) — all standards green
-- **Tests:** 1502 passed, 0 failed, 0 skipped
-- **Coverage:** 243 public functions, 229 tested (94%)
+- **Seedgo score:** 100% (45 standards + diagnostics, 129 files) — all standards green
+- **Tests:** 1712 passed, 0 failed
+- **Coverage:** 267 public functions, 235 tested (88%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)
-- **Bypass:** 27 rules, all verified live in the lane each one names. With every rule
-  removed the branch scores **98%** (94 suppressed violations) — the 100% above is a
-  real score with 27 documented exceptions under it, not a clean sheet.
+- **Bypass:** 28 rules. The removed-rules measurement — every rule live in the lane it names,
+  and **98%** (94 suppressed violations) with all of them stripped — was taken on 08-13 at
+  27 rules and is **not re-run here**. The 100% above is still a real score with 28 documented
+  exceptions under it, not a clean sheet.
 
 ---
 
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-25
 
 ---
 [<- Back to AIPass](../../../README.md)

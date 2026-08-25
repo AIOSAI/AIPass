@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
-**Last Updated:** 2026-08-21
+**Seedgo:** 100% (46/46) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
+**Last Updated:** 2026-08-25
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -252,7 +252,7 @@ drone @api stats
 api/
 ├── apps/
 │   ├── api.py                         # Entry point — module discovery, command routing
-│   ├── modules/                       # Orchestration layer (9 modules)
+│   ├── modules/                       # Orchestration layer (10 modules)
 │   │   ├── api_key.py                 # Key retrieval, validation, provider listing
 │   │   ├── secrets.py                 # Cross-branch secrets door (in-process API)
 │   │   ├── openrouter_client.py       # OpenRouter client — calls, models, status
@@ -263,20 +263,21 @@ api/
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   ├── registry.py               # Driver auto-discovery (load_drivers)
 │   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
-│   ├── handlers/                      # Business logic (9 packages, 35 files)
+│   ├── handlers/                      # Business logic (8 packages, 34 files)
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
 │   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory)
 │   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
+│   │   ├── host/pump.py (the attach socket's two directions), settings.py (the desktop's two gears), memory_config.py (@memory's limits, served)
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py
 │   │   ├── openrouter/caller.py, client.py, models.py, provision.py
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1359 test functions across 46 files
+└── tests/                             # 1483 test functions across 49 files (1579 collected, parametrised)
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
@@ -809,9 +810,13 @@ argument to the shared half.
 **`ended` is a fact, not a success flag.** `ended: true` means a live session was
 ended; `ended: false` with `ok: true` means there was nothing to end, which is the
 goal state rather than a failure. Both travel, because the phone shows different
-sentences and flattening them here would make that impossible. An unknown branch
-is a *refusal*, never nothing-to-end — both show `room: null` and they are
-opposite facts, so `ok` is what tells them apart.
+sentences and flattening them here would make that impossible. A refusal is never
+nothing-to-end, and the two never share a shape: an unknown branch is refused
+before the exec by `citizen_address`, so it leaves as a **400 `verb_refused`**
+carrying no `room` and no `ok` at all, while a refusal spoken by @baud's own
+envelope comes back 200 with `ok: false` and their sentence in `detail`. Only
+the second one can be mistaken for nothing-to-end, and there `ok` is what tells
+them apart.
 
 The exec lives in `fleet.py`, which already owns @baud's binary — one resolution,
 one cwd rule, one parser for their envelope. That is what lets the verb lane keep
@@ -1073,10 +1078,10 @@ Private drivers in `apps/integrations/{project}/driver.py` (gitignored) register
 - Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`; legacy dir still present)
 - No rate limiting on OpenRouter calls (S117 finding)
 
-**Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-13.
+**Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-25 (`openai` 2.49.0, `google.auth` + `googleapiclient`), verified by import alone — no call goes out.
 
 ---
 
-*Last Updated: 2026-08-14*
+*Last Updated: 2026-08-25*
 
 [← Back to AIPass](../../../README.md)

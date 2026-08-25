@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-04-07
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -52,6 +52,7 @@ A `SKILL.md` plus a full AIPass 3-layer app structure for complex skills.
 ```
 my-skill/
   SKILL.md
+  handler.py
   apps/
     __init__.py
     modules/
@@ -59,6 +60,9 @@ my-skill/
     handlers/
       __init__.py
 ```
+
+Built-in examples: `drone_commands` and `telegram` are full-tier; `github` is
+markdown-only; the rest carry a `handler.py`.
 
 ## Creating a Skill
 
@@ -139,11 +143,15 @@ name: skill-name
 description: One-line description
 version: 1.0.0
 tags: [category1, category2]
+when_to_use:              # Trigger phrases — when an agent should reach for this
+  - phrase
 requires:
   pip: []        # Python packages needed
   bins: []       # CLI tools needed
   config: []     # Env vars / config keys needed
 has_handler: false
+switch:                   # Optional — what the off-switch owns (see above)
+  systemd_user: []
 ---
 # Skill Name
 
@@ -195,18 +203,26 @@ src/aipass/skills/
       switch.py            # Per-skill off-switch (on / off / switch)
     handlers/
       json/                # JSON handler (three-JSON pattern)
+      discovery_handler.py # Search paths, SKILL.md scanning, frontmatter parsing
+      loader_handler.py    # Full SKILL.md parse, dynamic handler import
+      runner_handler.py    # Handler dispatch + markdown-only output
       creator_handler.py   # Skill creation logic (name validation, orchestration)
       switch_handler.py    # Off-switch state, declaration parsing, systemd actuation
       registry.py          # Skill registry management
       validator.py         # Check requirements
       template.py          # Skill templates
-    plugins/               # Plugin extensions
+    integrations/          # External integration point (empty)
+    plugins/               # Plugin extensions (empty)
   lib/                     # Built-in skills (branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram)
-  templates/               # Skill creation templates
+  templates/               # Skill creation templates (markdown_only, with_handler, full)
   skills_json/             # JSON tracking directory (incl. switch_state.json)
   dropbox/                 # External storage sync
+  docs/                    # Branch documentation
+  tools/                   # Branch tooling (verify_branch.py, suspend grants)
+  artifacts/               # Birth certificate and branch artifacts
+  logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Test suite
+  tests/                   # Test suite (324 passing, 1 skipped)
 ```
 
 ---
@@ -214,7 +230,11 @@ src/aipass/skills/
 ## Integration Points
 
 ### Depends On
-- Python stdlib (`pathlib`, `json`, `shutil`, `importlib`, `re`, `yaml`)
+- Python stdlib (`pathlib`, `json`, `shutil`, `importlib`, `re`, `subprocess`)
+- PyYAML — **optional**. Frontmatter is parsed with `yaml` when importable;
+  otherwise a built-in fallback parser handles it (`discovery_handler.py`)
+- `systemctl --user` — only for the off-switch, and only for skills that
+  declare units
 - Filesystem: reads SKILL.md files from project, global, and built-in search paths
 
 ### Provides To
@@ -224,7 +244,7 @@ src/aipass/skills/
 
 ---
 
-*Last Updated: 2026-04-07*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

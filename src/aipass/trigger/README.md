@@ -2,10 +2,10 @@
 
 # Trigger
 
-**Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
+**Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through a 7-gate pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-19
+**Last Updated:** 2026-08-25
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ drone @trigger fire error_detected branch=api error_type=ImportError
 ## Commands
 
 ```bash
-drone @trigger                              # Introspection (modules, version)
+drone @trigger                              # Introspection (the 6 discovered modules)
 drone @trigger --help                       # Full command listing
 drone @trigger --version                    # Version string
 
@@ -41,18 +41,22 @@ drone @trigger status                       # Branch log watcher state (see note
 drone @trigger errors list                  # View tracked errors
 drone @trigger errors stats                 # Registry stats + circuit breaker
 drone @trigger errors circuit-breaker       # Circuit breaker state
+drone @trigger errors circuit-breaker reset # Force the breaker closed
 drone @trigger errors detail <fingerprint>  # Single error detail
 drone @trigger errors suppress <id> [why]   # Silence an error — no dispatch while suppressed
 drone @trigger errors unsuppress <id>       # Restore dispatch (existing backoff applies)
+drone @trigger errors resolve <id>          # Mark resolved — recurrence still dispatches
+drone @trigger errors clear-resolved [--days=N]  # Purge old resolved entries (default 7)
+drone @trigger errors purge [--days=N]      # Purge stale entries (default 30)
 drone @trigger errors --help                # Error subcommand help
 
 # Medic (error dispatch control)
 drone @trigger medic on                     # Enable auto-dispatch
-drone @trigger medic off                    # Disable auto-dispatch
+drone @trigger medic off [--forever]        # Disable dispatch 24h (detection continues); --forever also stops the watcher
 drone @trigger medic status                 # Medic state + suppression stats
-drone @trigger medic mute @branch           # Suppress error dispatch to a branch
+drone @trigger medic mute @branch [--for <dur>|--forever]   # Suppress error dispatch (default 24h)
 drone @trigger medic unmute @branch         # Resume error dispatch to a branch
-drone @trigger medic volume-mute @branch    # Suppress runaway alerts for a branch
+drone @trigger medic volume-mute @branch [--for <dur>|--forever]  # Suppress runaway alerts
 drone @trigger medic volume-unmute @branch  # Resume runaway alerts for a branch
 drone @trigger medic --help                 # Medic subcommand help
 
@@ -64,8 +68,13 @@ drone @trigger escalation --help            # Escalation subcommand help
 
 # Log watchers
 drone @trigger branch_log_events status     # Branch log watcher state
+drone @trigger branch_log_events start      # Start watching branch logs
+drone @trigger branch_log_events stop       # Stop the branch log watcher
+drone @trigger branch_log_events reset      # Clear error deduplication hashes
 drone @trigger branch_log_events --help     # Branch watcher help
 drone @trigger log_events status            # System log watcher state
+drone @trigger log_events start             # Declines by design — see system_logs ownership
+drone @trigger log_events stop              # Stop the system log watcher
 drone @trigger log_events --help            # System watcher help
 ```
 
@@ -137,32 +146,61 @@ result = report_error(
 
 ## Events
 
-16 events defined, 14 active (2 decommissioned by TDPLAN-0007). Registered via `handlers/events/registry.py` on first `Trigger.fire()`. All fire through the event bus.
+**10 events, 10 handlers.** That is the live count and `drone @trigger list` prints it.
+Registered via `handlers/events/registry.py` on first `Trigger.fire()`. All fire through
+the event bus.
+
+This section said "16 events defined, 14 active" until 2026-08-25, and that was never true
+in that shape. Three of the sixteen rows named handler files that **do not exist anywhere
+under `trigger/`** — `error_logged.py`, `memory_threshold_exceeded.py`, `memory.py` — and
+nothing in the fleet fires those three event names either. They were aspirations wearing a
+handler column, and they are gone from the table below. Retired and decommissioned rows are
+kept and marked, because those files are still on disk and the distinction is real.
 
 | Event | Handler | Trigger | Action |
 |-------|---------|---------|--------|
-| `startup` | `startup.py` | First prax log call in **any** process (`prax/apps/modules/logger.py:116`) | Error catch-up scan over `system_logs/` — that is the whole handler (`startup.py:369-377`). It does **not** check memory rollover; this table claimed it did until 2026-08-14 |
-| `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 8-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
-| `error_logged` | `error_logged.py` | System log error (fallback path) | Monitor-only: logs the event, no dispatch |
+| `startup` | `startup.py` | First prax log call in **any** process (`prax` `logger.py`, in `_ensure_watcher()`) | Error catch-up scan over `system_logs/` — that is the whole handler (`startup.py:369-377`). It does **not** check memory rollover; this table claimed it did until 2026-08-14. The scan fires `error_detected` for what it finds — the handler's own docstring says `error_logged`, which is wrong and is tracked as a code fix, not a README one |
+| `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 7-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
 | `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |
-| `plan_file_created` | `plan_file.py` | New PLAN file detected | Updates Flow's PLAN_REGISTRY.json |
-| `plan_file_deleted` | `plan_file.py` | PLAN file removed | Marks plan as deleted in registry |
-| `plan_file_moved` | `plan_file.py` | PLAN file relocated | Updates registry location |
-| `bulletin_created` | _(retired → .archive/)_ | New system bulletin posted | **Retired** — handler archived, no longer registered |
-| `memory_threshold_exceeded` | `memory_threshold_exceeded.py` | Memory file near limit (600 lines) | Emails compression notification to branch |
-| `memory_template_updated` | `memory_template_updated.py` | Memory template changed | Pushes template updates to branches |
-| `memory_saved` | `memory.py` | Memory file written | Placeholder for future rollover trigger |
+| `plan_file_created` | `plan_file.py` | New `FPLAN-NNNN.md` detected | Adds a row to Flow's **legacy** `flow_json/PLAN_REGISTRY.json` — see the caveat below the table |
+| `plan_file_deleted` | `plan_file.py` | PLAN file removed | Removes an open plan from that registry; a closed one is marked `archived` instead |
+| `plan_file_moved` | `plan_file.py` | PLAN file relocated | Updates location fields only, preserving status and all other metadata |
+| `memory_template_updated` | `memory_template_updated.py` | Memory template changed | **Stub — does nothing.** Writes one `json_handler` operation line and returns. Its own docstring claims it calls memory's `push_templates()`; there is no such import and no such call. The real build is planned in DPLAN-0318 |
 | `cli_header_displayed` | `cli.py` | CLI displays headers | Registration hook |
-| `pr_created` | `pr_status_sync.py` | PR opened on GitHub | ~~Runs `drone @prax status sync`~~ **Decommissioned** (TDPLAN-0007) |
-| `pr_merged` | `pr_status_sync.py` | PR merged on GitHub | ~~Runs `drone @prax status sync`~~ **Decommissioned** (TDPLAN-0007) |
 | `runaway_log_detected` | `runaway_handler.py` | Prax rate tracker detects sustained high log volume | Per-file cooldown dispatch to responsible branch; gated by VOLUME mutes only (CRITICAL bypasses); UNKNOWN attribution falls back to @prax; writes alert to `.aipass/alerts.json` |
 | `memory_pool_auto_processed` | `memory_pool.py` | Hook engine runs `auto_process()` | Logs result; on failure fires `error_detected` for Medic dispatch |
+
+**Not wired — files on disk, deliberately unregistered:**
+
+| Event | Handler | State |
+|-------|---------|-------|
+| `bulletin_created` | `.archive/bulletin_created.py` | **Retired** — moved to `.archive/`, never imported |
+| `pr_created` | `pr_status_sync.py` | **Decommissioned** (TDPLAN-0007) — file kept, `trigger.on(...)` commented out in `registry.py` |
+| `pr_merged` | `pr_status_sync.py` | **Decommissioned** (TDPLAN-0007) — same |
+
+**`error_logged` is a name with nothing behind it.** No handler file, no registration, and no
+`Trigger.fire("error_logged")` anywhere in the fleet. It survives only as *text*: a docstring
+in `handlers/watchers/log_watcher.py`, a docstring in `startup.py`, and — worse, because a
+human reads it — a line in `drone @trigger log_events --help` advertising it as a real event.
+The watchers fire `error_detected` and `warning_logged`, and nothing else. Correcting that
+help text is a code change, listed here so the README is not the last place the fiction lives.
+
+**The plan handlers write Flow's legacy registry, and only for FPLANs.** `plan_file.py`
+reads and writes `flow/flow_json/PLAN_REGISTRY.json` directly (no handler import), and
+`_get_plan_number()` matches `FPLAN-(\d{4})\.md` only — every handler returns immediately
+on a filename that does not match, so a DPLAN, PPLAN or APLAN path fired at these events is
+a no-op that reports nothing. Flow has since moved to typed
+per-kind registries (`aplan_registry.json` and siblings); the legacy file this branch still
+writes holds **1 plan row against `next_number: 402`**, which is what a registry looks like
+when everything real has moved elsewhere. Flow flagged the mismatch on 2026-08-24. Whether
+these handlers should point at the typed registries is an open call, not a settled fix —
+recorded here so nobody reads the rows above as "keeps Flow's registry current". It does not.
 
 ## Medic
 
 Error monitoring subsystem. Watches branch and system logs for errors, fingerprints them via SHA1, deduplicates, and dispatches fix-it notifications to the responsible branch.
 
-**Dispatch pipeline (8 gates):**
+**Dispatch pipeline — 7 sequential gates, then one either/or:**
 
 1. **Medic enabled** — global on/off toggle
 2. **Branch not muted** — per-branch suppression
@@ -171,7 +209,15 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 5. **Branch in registry** — target must be a registered citizen
 6. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown
 7. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
-8. **Rate limit** — prevents dispatch floods
+
+Gates 6 and 7 are the Medic v2 path and run only when the error registry is available
+*and* the event carried a fingerprint. When it is not, the handler takes the **legacy
+v1 fallback instead**: per-branch rate limiting, 3 dispatches per 10 minutes. This
+README counted that fallback as "gate 8" until 2026-08-25, which read as a flood guard
+sitting *after* the backoff check. It is not — it is the `else` arm of the same branch
+(`error_detected.py`, `--- Dispatch gating ---`), so the v2 and v1 arms never both run,
+and the healthy path has no rate limit at all. Escalation counting is upstream of every
+gate here and is not one of them.
 
 On successful dispatch: sends email via `deliver_email_to_branch()` then calls `wake_branch()` to spawn an agent in the target branch immediately.
 
@@ -339,6 +385,7 @@ trigger/
 │       ├── escalation.py           # Repeat-signature counting + digest email
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
 │       ├── medic_state.py          # Medic state persistence (medic_state.json)
+│       ├── reload_sentinel.py      # Restarts the service when handler code changes
 │       ├── cli/
 │       │   └── help_flags.py       # wants_help(): a help flag anywhere explains, never executes
 │       ├── json/
@@ -347,7 +394,7 @@ trigger/
 │       ├── events/
 │       │   ├── registry.py         # Auto-registers the 10 active event handlers
 │       │   ├── startup.py          # Startup catch-up scan
-│       │   ├── error_detected.py   # 8-gate Medic dispatch
+│       │   ├── error_detected.py   # 7-gate Medic dispatch + escalation counting
 │       │   ├── warning_logged.py   # Warning monitor + escalation counting
 │       │   ├── plan_file.py        # Plan lifecycle events
 │       │   ├── .archive/bulletin_created.py  # Retired
@@ -358,7 +405,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1068 tests across 27 modules
+├── tests/                          # 1068 tests across 28 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -369,6 +416,12 @@ trigger/
 │   └── .archive/                   # Retired state files, never deleted
 └── trigger_data.json               # Log watcher positions + dedup hashes
 ```
+
+Three package directories under `apps/` are deliberately not drawn above:
+`extensions/`, `json_templates/` and `plugins/`. Each holds a single `__init__.py`
+carrying one comment line and nothing else — spawn scaffolding this branch has never
+used. They are named here rather than drawn so the tree keeps showing code that runs,
+while the README still accounts for every directory a reader will actually find.
 
 Nothing under `trigger_json/` is in git — it is runtime state, written by the
 running system. The operator config lives at
@@ -421,13 +474,28 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-1068 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
+1068 tests across 28 test modules, all passing (`1068 passed`, 0 failed, 0 skipped —
+measured 2026-08-25). Coverage: 106/106 public functions (100%), as reported by
+`drone @seedgo audit aipass @trigger`.
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`, `test_help_flags`
+Test files: `test_branch_log_events`, `test_config_migration`, `test_core`,
+`test_error_detected`, `test_error_registry`, `test_error_reporter`, `test_errors`,
+`test_escalation`, `test_escalation_upsert`, `test_event_handlers`, `test_help_flags`,
+`test_json_durability`, `test_json_handler`, `test_log_events`, `test_log_watcher`,
+`test_log_watcher_service`, `test_medic`, `test_medic_state`, `test_memory_pool_handler`,
+`test_plan_file_handler`, `test_pr_status_sync`, `test_reload_sentinel`,
+`test_runaway_handler`, `test_scaffold`, `test_startup_handler`,
+`test_trigger_config_loader`, `test_trigger_entry`, `test_watchers_log_watcher`
+
+The count said "27 modules" and the list named only 24 of them until 2026-08-25 — four
+modules shipped without ever being added here (`test_escalation_upsert`,
+`test_json_durability`, `test_reload_sentinel`, `test_scaffold`). A hand-maintained list
+beside a hand-maintained count drifts in two directions at once; both are now taken from
+`find tests -name "test_*.py"` and `pytest -q`.
 
 ## Compliance
 
@@ -444,7 +512,7 @@ The largest single deduction is `handlers` on `handlers/escalation.py`: its five
 
 ---
 
-*Last Updated: 2026-08-19*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -5,7 +5,7 @@
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
 **Version:** 2.4.0
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -86,8 +86,11 @@ answered before reinstalling anything:
   **117MB unrotated** before it was archived. A long-lived unit needs a rotation
   story first.
 - **The ecosystem observer.** Any long-lived process that logs still lazy-starts
-  a recursive ~1413-watch observer over `src/aipass` (see DPLAN-0307). That design
-  is under review precisely because always-on processes multiply it.
+  a recursive observer over the ecosystem root (`start_file_watcher()` schedules
+  one `WatchdogObserver` with `recursive=True`). Re-read 2026-08-25: unchanged.
+  DPLAN-0307, which tracked it, was closed 2026-08-22 in a batch with three other
+  prax plans, and no prax commit since carries a change to this path — so the
+  plan is closed and the design is not. Always-on processes still multiply it.
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
@@ -99,16 +102,23 @@ Real-time unified console showing:
 - **Polling fallback** — automatic fallback when inotify watches are exhausted
 - **Soft start** — only shows new activity after launch (seeks to EOF on startup)
 
-Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`.
+Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`/`q`.
 
 **Who counts as a branch.** Names and paths come from declarations, never from
 path shape. Three sources, in precedence order: `AIPASS_REGISTRY.json` for
 `src/aipass/*` branches; then a sweep of `projects/*/*_REGISTRY.json` for in-repo
-project citizens (BAUD, EARMARK, MARKETSTAND, AIPASS_SITE, TESTING); then, for
-any file still unresolved, the nearest `.trinity/passport.json` walking up to the
-repo root. A relative registry path is resolved against *its own registry's*
-directory, not the process CWD. First registration wins, so a project cannot
+project citizens; then, for any file still unresolved, the nearest
+`.trinity/passport.json` walking up to the repo root. A relative registry path
+is resolved against *its own registry's* directory, not the process CWD. First registration wins, so a project cannot
 claim a name AIPass already uses.
+
+The project sweep resolves whoever the registries *declare*, not whoever has a
+directory. Measured 2026-08-25: 23 known branches — the 18 core plus BAUD,
+EARMARK, MARKETSTAND, AIPASS_SITE and FINCH. `projects/speakeasy(on_hold)/`
+has a registry with an empty `branches[]`, so it contributes no citizen and the
+monitor does not know the name; that is the declaration rule working, not a
+gap. Earlier revisions of this README listed a `TESTING` citizen — no such
+project registry exists, and none was found in the tree.
 
 That third shape was missing until 2026-08-14: `monitor run baud` answered "BAUD
 is not a known branch", and — worse — BAUD's files were labelled **AIPASS**,
@@ -400,8 +410,28 @@ with no `todo_count`, assigned the block wholesale rather than merging, and
 listed `commons_mentions` as a *deprecated key to delete*. prax did once own
 that key, but @flow took it over instead of retiring it, so the list outlived
 the ownership change: one push would have deleted a live key fleet-wide by
-declared policy. Fixed 2026-08-13 — the deprecation list now holds only
-`pending_bulletins`, and a key qualifies for it only when nobody writes it.
+declared policy. Fixed 2026-08-13 — `template_pusher.DEPRECATED_QUICK_STATUS_KEYS`
+now holds only `pending_bulletins`, and a key qualifies for it only when nobody
+writes it.
+
+**The fix reached the writer, not the adviser.** `template_differ.py` carries its
+own copy of that list and it still reads
+`["pending_bulletins", "commons_mentions"]`. The differ never writes, so nothing
+is deleted — but `diff-template` still *recommends* deleting a live key.
+Reproduced 2026-08-25 against prax's own dashboard:
+
+```
+  PRAX (needs_update)
+    + ai_mail section
+    ~ quick_status: remove commons_mentions
+```
+
+@flow writes `commons_mentions`; prax's own `calculate_quick_status` carries it
+through untouched. So the advice contradicts the invariant the writers already
+honour, and anyone who acts on it by hand does the deletion the pusher was fixed
+not to do. Two copies of one policy list is the defect underneath; a single
+shared constant is the fix. Not changed here — this pass documents, it does not
+rewrite handlers.
 
 ## Architecture
 
@@ -414,7 +444,7 @@ prax/
 │   │   ├── logger.py                  # SystemLogger — auto-routing, two-tier logging
 │   │   ├── monitor.py                 # Mission Control — 4-thread real-time monitoring
 │   │   ├── dashboard.py               # Dashboard — template management, refresh, write-through
-│   │   ├── status.py                  # System status — health display (STATUS.md sync dormant)
+│   │   ├── status.py                  # System status — health display (`status sync` still writes STATUS.md)
 │   │   ├── log_audit.py              # Log audit — scan, health summary, enforce, sweep
 │   │   └── log_health.py             # Log health — rate overview (scan/snapshot)
 │   ├── plugins/
@@ -428,13 +458,13 @@ prax/
 │       ├── json/                      # Auto-creating JSON handler (config/data/log per module)
 │       ├── json_templates/            # Default JSON templates for auto-creation
 │       ├── logging/                   # Setup, rotation, introspection, override, direct logger, log watchdog, jsonl writer
-│       ├── monitoring/                # Event queue, branch detector, branch scope, stream output, log watcher, rate tracker
+│       ├── monitoring/                # Event queue, branch detector, branch scope, stream output, log watcher, rate tracker, filters, commons feed, telegram relay, instance lock, CLI-session handler, pid cache
 │       ├── registry/                  # Module registry load/save
 │       ├── status/                    # STATUS.md sync handler (trigger unwired, but `status sync` still reaches it)
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1371 tests across 36 files
+└── tests/                             # 1372 tests across 36 files
 ```
 
 ### Design Pattern
@@ -463,7 +493,7 @@ drone @prax monitor run
 
 ## Tests
 
-1371 tests across 36 files (1370 pass, 1 skipped), covering all major components:
+1372 tests across 36 files (1371 pass, 1 skipped), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -484,7 +514,7 @@ drone @prax monitor run
 | test_rate_tracker.py | 34 | Rate tracking, thresholds, persistence (incl. rate history), suppression |
 | test_discovery.py | 25 | Module scanning |
 | test_registry.py | 24 | Module registry |
-| test_watcher.py | 39 | File watcher behavior; dispatcher survives handler failure (real observer), liveness reporting |
+| test_watcher.py | 40 | File watcher behavior; dispatcher survives handler failure (real observer), liveness reporting |
 | test_json_handler.py | 18 | JSON auto-creation |
 | test_central.py | 14 | Central reader |
 | test_log_audit.py | 13 | Log audit |
@@ -493,6 +523,8 @@ drone @prax monitor run
 | test_jsonl_writer.py | 9 | JSONL append writer |
 | test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
 | test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
+| test_flow_section_contract.py | 22 | `sections.flow` five-key contract; per-branch (not fleet-wide) recently_closed; total_plans carried, not derived |
+| test_json_durability.py | 10 | Atomic JSON swap; `_replace_with_retry` bounded retry (Windows sharing violation) |
 | test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
 | test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
 | test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
@@ -518,8 +550,8 @@ drone @prax monitor run
 - System — Log audit enforcement
 
 ## Known Issues
-- **inotify exhaustion** — System often near `max_user_watches` limit. Monitor uses polling fallback (functional but slower).
-- **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches to a system already near the watch limit (above). Verified 2026-08-13 by launching five alongside the then-live systemd service; none complained. That service is retired as of 2026-08-18 (monitor is on-request only), so the everyday risk is now several forgotten terminals rather than a daemon plus terminals — but the missing guard is unchanged.
+- **inotify pressure** — The monitor and log watcher fall back to polling when inotify watches run out (functional but slower). Earlier revisions said the system is "often near" the limit; measured on this machine 2026-08-25 it is not — **7,664 watches held against a `max_user_watches` of 65,536**, about 12%. The fallback is real and tested; the headroom claim was stale. It is a single-machine reading, not a fleet property.
+- **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches on top of every other watcher (see the inotify note above). Verified 2026-08-13 by launching five alongside the then-live systemd service; none complained. That service is retired as of 2026-08-18 (monitor is on-request only), so the everyday risk is now several forgotten terminals rather than a daemon plus terminals — but the missing guard is unchanged.
 - **Error paths exit 0.** `monitor bogus`, `log-audit bogus`, `log-health bogus` and `dashboard refresh @nosuchbranch` all print an error and return exit code 0. `status` is worse: an unknown subcommand or unknown flag is dropped silently and the normal status block prints. Nothing scripted can detect a prax command failure from `$?`.
 - **No runtime filtering in Mission Control** — `_handle_interactive_cmd` dispatches
   only `help` and `status`; `watch` and `filter` fall through to "Unknown command". Branch
@@ -529,7 +561,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

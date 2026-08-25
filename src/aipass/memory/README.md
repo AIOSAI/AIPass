@@ -14,7 +14,7 @@
 drone @memory search "query"            # Search archived memories across all branches
 drone @memory rollover status           # Show what needs archiving per branch
 drone @memory rollover check            # Dry run — preview pending rollovers
-drone @memory lint                      # Audit .trinity entries for limit violations
+drone @memory lint run                  # Audit .trinity entries for limit violations
 drone @memory watch                     # Auto-rollover watcher (Ctrl+C to stop)
 ```
 
@@ -28,6 +28,8 @@ drone @memory rollover status              # Show per-branch rollover statistics
 drone @memory rollover check               # Dry run — what needs rollover
 drone @memory rollover sync-lines          # Update line count metadata
 drone @memory rollover push                # ⚠ Reset ALL per_branch limits to defaults
+drone @memory push                         # ⚠ SAME COMMAND — top-level alias (apps/memory.py:249),
+                                           #   no confirmation prompt. See Known Issues.
 
 drone @memory config                       # Introspection — the three config verbs
 drone @memory config --help                # Full contract: types, bounds, semantics
@@ -42,20 +44,23 @@ drone @memory rollover push --json         # …and on push. `--help` still outr
 
 drone @memory search "query"               # Semantic search across all branch memories
 drone @memory search "query" --branch X    # Filter by branch
-drone @memory search "query" --n 10        # Limit results
+drone @memory search "query" --type local  # Filter by memory type (local, observations)
+drone @memory search "query" --n 10        # Limit results shown
 
-drone @memory symbolic                     # PARKED 2026-08-14 — explains the ruling, then exits 1
+drone @memory symbolic                     # PARKED 2026-08-14 — bare prints the ruling, exits 0
+drone @memory symbolic <subcommand>        # …a named subcommand is refused, exits 1
                                            # Curated truth lives in Compass: drone @devpulse compass
 
-drone @memory templates push-templates     # Push template updates to all branches
-drone @memory templates diff-templates     # Show template differences per branch
-drone @memory templates template-status    # Show template version and push status
+drone @memory templates push-templates     # ⚠ Writes against a dead pre-.trinity layout — see below
+drone @memory templates diff-templates     # ⚠ Same lane — reports phantom diffs, not real drift
+drone @memory templates template-status    # Reads .template_version.json (last push: 2026-06-25)
 
 drone @memory pool status                  # Pool file count, config, vector stats
 drone @memory pool process                 # Vectorize pool files + check rollover
 
-drone @memory lint                         # Audit .trinity entries for over-limit violations (read-only)
+drone @memory lint run                     # Audit .trinity entries for over-limit violations (read-only)
 drone @memory lint @devpulse               # Lint a specific branch
+drone @memory lint                         # Bare = introspection banner, NOT a scan
 
 drone @memory verify FPLAN-XXXX            # Check if plan is vectorized in ChromaDB
 drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+C to stop)
@@ -97,7 +102,7 @@ memory/
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1171 test functions — 1061 pass, 5 skip (parked symbolic tier)
+├── tests/                       # 1220 test functions on disk — 1119 collected, 1119 pass, 5 skip
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -106,12 +111,16 @@ memory/
 
 ```
 detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external registries
-→ _should_rollover(file)             # v1: line_count >= max_lines (600)
-                                     # v2: len(sessions) >= max_sessions (20)
+→ _should_rollover(file)             # ENTRY COUNTS ONLY — no line-count trigger, no 600 fallback
+                                     # len(sessions) >= count (default 15), auto-compact lane
+                                     # against auto_compact_cap (3), key_learnings, observations
+                                     # per_branch[branch][file_type] → defaults[file_type]
+                                     # no limit either place = CONFIG GAP, logged, skipped
+                                     # unparseable file = logged, skipped — never a fallback
 → orchestrator.execute_rollover()
   → create_rollover_backup()         # safety copy to branch/.backup/
   → extract_items()                  # v2: max(excess, 1) oldest entries
-  → embed via subprocess             # fastembed (ONNX) in memory .venv
+  → embed via subprocess             # fastembed (ONNX) — see Subprocess Isolation re: venv
   → upsert in ChromaDB               # content-hash IDs (sha256[:16]), no duplicates
   → trim source file                 # write back with oldest removed
 ```
@@ -183,6 +192,62 @@ All six are absolute now, and a contract test scans the whole directory.
 ### Subprocess Isolation
 
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these libraries. Python interpreter resolved via `_get_memory_python()` (env var `AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`).
+
+### `vectorize_and_store` — text in, this branch owns the model (1.4.0, 2026-08-23)
+
+`chroma_subprocess.py` gained a **text-in** operation so another branch can archive its own content
+without ever choosing an embedding model:
+
+```
+vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None)
+    → embeds via embed_subprocess.py, stores through the existing _store_vectors path
+    → content-hash IDs, upsert, dedup — same guarantees as rollover
+    → validates: branch and memory_type required, len(metadatas) == len(texts)
+    → timeout max(30, len(texts) * 3)s; always returns an explicit success flag
+```
+
+Caller today: `@ai_mail`'s `handlers/email/purge.py` — it sends sent/deleted mail as text before
+deleting the originals (`ai_mail_email_sent`, `ai_mail_email_deleted`). The model choice stays here
+because consistency across a collection is this branch's job, not the caller's.
+
+**Why it exists.** For four months `purge.py` called an operation that did not exist. The handler
+answered `success: false` on stdout and **exited 0**; the caller checked only the return code, so
+purge reported mail vectorized and deleted it. 55 purges across 11 branches into a collection that
+had never been created. An unknown operation that exits 0 is a lie — the operation now exists, and
+the caller reads the payload.
+
+### Anchored plan-ID matching (1.3.0)
+
+`_source_matches()` backs `drone @memory verify`. A plain `label in source_file` had no boundary
+check, so `DPLAN-0012` matched inside `TDPLAN-0012` — `verify DPLAN-0012` reported 27 chunks live
+that all belonged to a different plan. A hit now counts only at the string start or after a
+non-alphanumeric boundary, and scanning continues past a rejected hit so a real match later in the
+same string (`TDPLAN-0012_supersedes_DPLAN-0012`) is still found. The same predicate is shared by
+`_delete_by_source`, which **deletes** — that call site was the reason to fix it at the source.
+
+### The templates lane targets a layout no branch uses (2026-08-25)
+
+`push-templates`, `diff-templates` and `template-status` operate against a **pre-`.trinity`**
+naming convention. `pusher._find_memory_files()` (`handlers/templates/pusher.py:309-322`) and
+`differ` (`differ.py:236,275`) scan the **branch root** and match
+`f.name.endswith(".local.json")` / `.observations.json`. The live layout is
+`<branch>/.trinity/local.json` and `<branch>/.trinity/observations.json` — a file named
+`local.json` does not end with `.local.json`, and it is not in the directory being scanned.
+**Zero real matches are possible.**
+
+Measured live: `diff-templates` reports "16 branches have template differences" and not one of them
+is a `.trinity/` file — the only thing it ever matches is `CLOSED_PLANS.local.json`, an unrelated
+archive file that ends in the right suffix by coincidence. It has never seen an
+`observations.json`. `template-status` reads `.template_version.json`, whose `last_push` is
+2026-06-25 — a date only a push down this same dead lane could move.
+
+**The one part that is current:** `spawn_pusher.py` propagates memory's canonical templates into
+@spawn's template sets at `spawn/templates/*/.trinity/{local,observations}.json` — the real layout,
+verified live. It runs as a side effect of `push-templates` (`modules/templates.py:127-135`), so
+that half works while the branch-facing half does not.
+
+A rebuild against the current layout is DPLAN-0318 (@devpulse). **Not fixed here** — this section
+documents the defect, it does not repair it.
 
 ---
 
@@ -271,9 +336,15 @@ stops being rollover. Unknown branches are refused against the registry — regi
 would report a limit the engine does not enforce; `test_matches_the_detector_on_a_real_file` pins
 the two together with the engine as the oracle.
 
-**`[OVERRIDE]` is decided by VALUE**, not by provenance: all 17 branches carry a materialized
-`per_branch` entry, so marking every one an override would be pure noise. A value is an override
-when it differs from the corresponding default.
+**`[OVERRIDE]` is decided by VALUE**, not by provenance. `rollover push` materializes a
+`per_branch` entry for every active branch in the registry, so once it has run, provenance marks
+every branch an override — pure noise. A value is an override when it differs from the
+corresponding default.
+
+*Live state, measured 2026-08-25:* `per_branch` is **empty** in both `rollover` and `entry_limits`,
+so every branch resolves from `defaults` and `config get @branch` reports
+`source: "defaults"`. The registry carries **18** active branches, which is the number
+`rollover push` materializes and reports.
 
 **`set-default` does not touch `per_branch`.** It changes `defaults` only — which means already
 materialized branches keep their old numbers and start reporting as `[OVERRIDE]`. `rollover push`
@@ -336,7 +407,7 @@ the pipe.
 {"ok": true, "verb": "config set-default", "entry_type": "sessions", "count": 25, "pushed": false}
 
 // rollover push --json
-{"ok": true, "verb": "rollover push", "branches": 17}
+{"ok": true, "verb": "rollover push", "branches": 18}   // = active branches in AIPASS_REGISTRY.json
 
 // any refusal
 {"ok": false, "verb": "config set", "error": "Unknown branch: @wizard",
@@ -359,7 +430,9 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 **Depends on:**
 - `prax` — logging via `get_system_logger()`
-- `api` — API key for symbolic extraction (`get_api_key()`) — dormant while the symbolic tier is parked
+- ~~`api`~~ — **no longer a dependency.** `get_api_key()` was the symbolic tier's, and it left the
+  tree with it on 2026-08-14. Verified 2026-08-25: zero references anywhere under `apps/`; the only
+  survivors are in `tests/parked/` and in the skipped `test_symbolic_extras.py`
 - `AIPASS_REGISTRY.json` — branch discovery for rollover scanning
 - External `*_REGISTRY.json` — scanned via `AIPASS_CALLER_CWD`
 
@@ -369,7 +442,7 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 - All branches — `.trinity/` template distribution and sync
 - `@daemon` — branch health check (entry-count rollover status + entry-size cap violations) via `apps/modules/health.py`'s `get_branch_health(branch_name)`, since seedgo blocks handler-to-other-branch-handler imports and daemon's own handlers cannot reach `handlers/monitor/detector.py` / `handlers/json/lint_handler.py` directly
 
-**ML dependencies (memory `.venv/` only):**
+**ML dependencies (in whichever venv `_get_memory_python()` resolves to — repo root today):**
 - `fastembed` — ONNX embeddings (model: `sentence-transformers/all-MiniLM-L6-v2`)
 - `chromadb` — vector storage and semantic search
 - `numpy`
@@ -378,9 +451,10 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** 1086 passed, 0 failures, 5 skipped (2026-08-18). The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/`. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (see below).
-- **Seedgo:** 100%. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
-- **Bypass registry:** 113 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+- **Tests:** 1119 passed, 0 failures, 5 skipped, 14.2s (re-run 2026-08-25). The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout").
+  *Two different numbers, deliberately:* `grep def test_` over `tests/*.py` finds **1220 test functions** on disk, but 237 of those live in 5 modules that call `pytest.skip(allow_module_level=True)` at import, so pytest never collects them individually. **1119** is what actually runs. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1220 on disk, a green board counts the 1119 that execute.
+- **Seedgo:** 100% across all 45 rules, 0 type errors (re-run 2026-08-25). The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
+- **Bypass registry:** **114** rules in `.seedgo/bypass.json` (`last_updated: 2026-08-16`). The old claim here — "113 rules, all pointing at files that exist", verified 2026-08-13 — is **stale on both counts**: re-measured 2026-08-25, **37 of the 114 point at 10 files that are no longer in the tree**, all of them parked on 08-14 / 08-18 (`symbolic/*.py`, `vector/embedder.py`, `storage/chroma.py`, `search/vector_search.py`, `learnings/manager.py`). One duplicate `(file, standard)` pair as well. The rules are inert — a bypass for an absent file suppresses nothing — but the registry is now a record of a tree that stopped existing. Cleanup is an open item, not fixed tonight.
 
 ### A park in the disposal zone is not a park (2026-08-18)
 
@@ -493,16 +567,19 @@ unreferenced". See that directory's README for the full method.
 
 ## Known Issues
 
-- `search` requires fastembed in memory `.venv/` — fails without it
-- `drone @memory push` (and `rollover push`) overwrites every branch's `per_branch` limits with defaults, fleet-wide, with **no confirmation prompt**. Now that BAUD writes this config, an accidental `push` silently discards operator tuning. Open item — see APLAN-0010.
-- Entry point imports two `monitor/` handlers directly for the built-in `watch` command, which the `encapsulation` standard flags (66% on `apps/memory.py`). Deliberately unshielded — the fix is to move `watch` into a module. Open item — see APLAN-0010.
-- `pool.py` and `lint.py` score 85% on `introspection`: the checker only recognises a help guard whose `if` test contains a literal `"--help"`, so the shared `wants_help()` predicate is invisible to it. Both intercept help correctly (live-verified). Reported to @seedgo; not bypassed.
+- `search` requires `fastembed` in the venv `_get_memory_python()` resolves to — fails without it
+- **`drone @memory push` fires the fleet-wide reset with no confirmation prompt, and it is an *undocumented-looking* top-level alias.** `apps/memory.py:249` routes bare `push` straight to `rollover push`, which overwrites every branch's `per_branch` limits with defaults. **Demonstrated by accident on 2026-08-25:** a command run to check *whether the verb existed* performed the reset and printed `Pushed defaults to 18 branches`. No prompt, no dry-run, exit 0. Damage was nil that time — `per_branch` was empty, so the materialized values equalled the defaults already in force — and the file was restored to the empty state it was found in via `config_loader._write_config_file`. Now that BAUD writes this config, the same accident on a tuned fleet discards operator tuning silently. Open item — see APLAN-0010.
+- **The templates push/diff lane targets a dead pre-`.trinity` layout** and cannot match any live memory file — see [the section above](#the-templates-lane-targets-a-layout-no-branch-uses-2026-08-25). Rebuild tracked in DPLAN-0318 (@devpulse).
+- **`.seedgo/bypass.json` holds 37 rules for 10 files that no longer exist** (parked 08-14 / 08-18) plus one duplicate `(file, standard)` pair. Inert, but the registry no longer describes the tree.
+- Bare `drone @memory lint` prints the introspection banner rather than scanning — `lint run` or `lint @branch` is the scan. Consistent with every other module's no-args convention; noted because the Quick Start used to read as if bare `lint` audited.
 
-**Cleared 2026-08-13:** `rollover status` showing 0 branches did not reproduce (17 branches from two working directories). `memory_threshold_exceeded` appears nowhere in this branch's code — the previous note described @trigger's registry, not memory's.
+**Cleared 2026-08-25:** the entry-point `encapsulation` finding (66% on `apps/memory.py` for importing two `monitor/` handlers) — `watch` is a module now and a contract test fails the suite if any handler import returns to the entry point. Also cleared: `pool.py` / `lint.py` at 85% on `introspection`. Seedgo re-run 2026-08-25 reports **100% on all 45 rules**, both findings gone.
+
+**Cleared 2026-08-13:** `rollover status` showing 0 branches did not reproduce (19 branches across two working directories at the 08-25 re-run). `memory_threshold_exceeded` appears nowhere in this branch's code — the previous note described @trigger's registry, not memory's.
 
 ---
 
-*Last Updated: 2026-08-13 (full branch audit, APLAN-0010)*
+*Last Updated: 2026-08-25 (README truth pass, DPLAN-0318 pre-reset campaign — every claim re-measured against running code)*
 
 ---
 [← Back to AIPass](../../../README.md)
