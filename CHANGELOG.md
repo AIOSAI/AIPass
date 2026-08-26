@@ -11,6 +11,16 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(memory)** — trinity gold-source templates carry the agreed standard
+(DPLAN-0318, Patrick's line-by-line review): unique `_usage` per file (working
+draft vs memory-of-the-USER), meta lines become `{{PLACEHOLDER}} + one-sentence
+semantics` so every section shows its live caps AND its meaning where the agent
+writes, and the dead `status.health` block is deleted rather than revived — it
+had no consumer, stored a derivable fact, and always read healthy; health is
+now computed by the checker at run time, never stamped into the file. The
+standard itself (trinity_pattern.md, seedgo-format) governs; @memory machinery
+fixes and the @seedgo checker build ride separate dispatches.
+
 **docs(fleet)** — README truth campaign, the 08-25 night shift (Patrick's GO):
 every citizen verified its OWN README against the code as it exists, waves of
 two, each pass re-audited to 100% after editing — 18 branch READMEs corrected
