@@ -11,6 +11,19 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(memory)+feat(memory)** — the measurement bugs that let memory-file drift
+pass silently are dead, and the standard's text machinery is live (@memory's
+build). The law: a field the gate cannot measure is REFUSED loudly, never
+measured as zero. B1: non-string entries refused (new/edited only — legacy
+shapes grandfathered until the reset, deliberately); B2: lint's len-on-a-list
+path gone; B4 was TWO files — detector fired at >= while the extractor floored
+at 1, both moved together or the fix would have traded settle-at-14 for a
+drain-nothing loop. Renderer reads the gold-source templates (hardcoded text
+constants retired, refresh preserves the semantics prose); every health writer
+deleted per the ruling; new per-branch .template_version.json receipt writer
+(three sanctioned lanes, push lane awaits the pusher rebuild — flagged). 42
+red-first tests, 1115 green re-run independently.
+
 **feat(memory)** — trinity gold-source templates carry the agreed standard
 (DPLAN-0318, Patrick's line-by-line review): unique `_usage` per file (working
 draft vs memory-of-the-USER), meta lines become `{{PLACEHOLDER}} + one-sentence
