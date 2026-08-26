@@ -11,6 +11,28 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(seedgo)** — the trinity standard is LIVE: trinity_check.py joins the
+standards family (no bypass by design) and the fleet has its first honest
+memory-file scores — red-first bar hit exactly (clean set = the MASTER_LIST
+six, all 12 deviants flagged, pinned as a live test), fleet avg 72% with
+memory the only 100. The checker's own first draft broke the one law it
+enforces (zero denominator read as clean → silent pass of an unmeasurable) —
+caught by its test agent as strict xfail, fixed in the engine, kept as a named
+regression guard. Five contract ambiguities and two possibly-wrong rules
+flagged for Patrick rather than silently resolved; audit-cache engine defect
+(hashes only apps/*.py — stale scores for checkers reading outside) queued.
+1836 green + 1 known xfail, 25 rule-matched mutations.
+
+**fix(hooks)** — B3, the last of the four measurement bugs: edit_gate refuses
+a NEW/EDITED entry whose canonical field is missing — by name, with the rename
+instruction, never measured as zero. Exemption keys on raw-entry identity so
+one legacy entry cannot license ten more (mutation-pinned). Live-proven on
+hooks' own drifted file. Second defect fixed en route: @memory's unmeasurable
+refusals were rendering as "0/300 chars" through the over-cap formatter.
+Flagged honestly: the dodge originates in @memory's _extract_text (missing
+field still returns ""), so their own write path still dodges — repro
+dispatched to them. 7 red-first tests, 1688 green.
+
 **fix(memory)+feat(memory)** — the measurement bugs that let memory-file drift
 pass silently are dead, and the standard's text machinery is live (@memory's
 build). The law: a field the gate cannot measure is REFUSED loudly, never
