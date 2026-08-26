@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-08-08
+# Modified: 2026-08-25
 # =============================================
 
 """Tests for edit_gate .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -2084,3 +2084,237 @@ class TestThrottleScopeGuard:
             ):
                 results.append(handle(_hook_data(file_path, content, cwd=cwd)))
         assert all(r["exit_code"] == 2 for r in results), "a hard block went quiet under the throttle"
+
+
+# ---------------------------------------------------------------------------
+# B3 — the renamed-field dodge (DPLAN-0318 trinity standard, MASTER_LIST §2)
+# ---------------------------------------------------------------------------
+#
+# The cap check reads ONE canonical field name per entry type, taken from
+# @memory's memory.config.json entry_limits (file/container/field). When a
+# branch renamed that field — `learning` instead of `value` in ai_mail, api and
+# this branch — the extractor found no such key, answered "" and the entry
+# measured as ZERO characters. Three branches ran 2.7x over cap for the two
+# months AFTER the gate landed, and the gate reported compliance every time.
+#
+# `""` and "cannot read this" are different answers and must stay different.
+# An entry whose canonical field is MISSING is refused by NAME, never measured
+# as empty. The asymmetry mirrors @memory's entry_limits 1.3.0: only NEW or
+# EDITED entries are refused. Nine-plus branches carry legacy shapes until the
+# fleet reset wipes them, and bricking every memory write fleet-wide tonight
+# would cost more than the drift does.
+
+
+_LIMITS_LIST_ENFORCE = {
+    "enabled": True,
+    "enforce": True,
+    "entry_types": {
+        "key_learnings": {
+            "file": "local.json",
+            "container": "key_learnings",
+            "kind": "list",
+            "field": "value",
+            "max_chars": 200,
+        },
+        "sessions": {
+            "file": "local.json",
+            "container": "sessions",
+            "kind": "list",
+            "field": "summary",
+            "max_chars": 300,
+        },
+    },
+}
+
+_LIMITS_LIST_WARN = {**_LIMITS_LIST_ENFORCE, "enforce": False}
+
+
+class TestRenamedFieldDodge:
+    """An entry whose canonical field was renamed must not measure as empty."""
+
+    def test_renamed_field_over_cap_is_blocked(self, tmp_path):
+        """`learning` where the config says `value`: 500 chars read as 0 and passed.
+
+        This is B3 exactly as it shipped — the species this branch's own
+        local.json carries.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps(
+            {"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]}
+        )
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2, "renamed field dodged the cap"
+        parsed = json.loads(result["stdout"])
+        assert parsed["decision"] == "block"
+        assert "key_learnings" in parsed["reason"]
+        assert "value" in parsed["reason"], "refusal must name the field it could not find"
+
+    def test_missing_field_is_blocked(self, tmp_path):
+        """Canonical field absent with no replacement at all — same refusal."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"number": 9, "date": "2026-08-25"}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2, "missing field dodged the cap"
+        parsed = json.loads(result["stdout"])
+        assert "summary" in parsed["reason"]
+
+    def test_renamed_field_under_cap_is_still_blocked(self, tmp_path):
+        """The refusal is about UNREADABILITY, not length.
+
+        A short renamed field is still a field the gate cannot measure, and
+        letting it through because it happens to be small is how the shape
+        spreads.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": [{"number": 1, "learning": "short"}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+
+    def test_canonical_field_still_passes(self, tmp_path):
+        """Guard against over-refusal: the correct shape must stay allowed."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps(
+            {"key_learnings": [{"number": 1, "date": "2026-08-25", "value": "fine"}]}
+        )
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_empty_string_is_not_a_missing_field(self, tmp_path):
+        """`""` means there is no text — compliant. Only an ABSENT key refuses."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": [{"number": 1, "value": ""}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+
+class TestRenamedFieldLegacyAsymmetry:
+    """Only NEW or EDITED entries are refused — untouched legacy shapes pass."""
+
+    def test_untouched_legacy_entry_passes(self, tmp_path):
+        """A branch carrying the drifted shape can still write its file.
+
+        Nine-plus branches hold legacy entries until the fleet reset. Refusing
+        them on every write would brick memory updates fleet-wide, which costs
+        more than the drift it would be correcting.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
+        Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
+
+        # Same legacy entry, plus a NEW canonical one on top.
+        content = json.dumps(
+            {"key_learnings": [{"number": 2, "date": "2026-08-25", "value": "new and legal"}, legacy]}
+        )
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0, "an untouched legacy entry blocked an otherwise clean write"
+
+    def test_editing_a_legacy_entry_refuses_it(self, tmp_path):
+        """Touch the drifted entry and you own its shape."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
+        Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
+
+        edited = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-01", "learning": "y" * 500}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, edited, cwd=cwd))
+
+        assert result["exit_code"] == 2, "an edited legacy entry kept its exemption"
+
+    def test_new_legacy_shaped_entry_is_refused(self, tmp_path):
+        """Carrying one legacy entry must not license adding ten more."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
+        Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
+
+        content = json.dumps(
+            {"key_learnings": [{"number": 2, "date": "2026-08-25", "learning": "z" * 500}, legacy]}
+        )
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2, "a NEW entry in the legacy shape inherited the exemption"
+
+
+class TestUnreadableFieldWarnMode:
+    """enforce=False keeps the refusal advisory, and says why in the log."""
+
+    def test_warn_mode_allows_but_logs_field_name(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
+
+        with caplog.at_level(logging.WARNING):
+            with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_WARN)):
+                result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "value" in caplog.text
+
+
+class TestUnmeasurableReasonIsRendered:
+    """@memory's unmeasurable refusal must not render as '0/300 chars (+0)'.
+
+    A refusal that prints zeros reads like a bug in the gate. The reason it
+    carries is the whole point of refusing loudly.
+    """
+
+    def test_non_string_field_reason_reaches_the_agent(self, tmp_path):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"number": 1, "summary": [{"title": "a", "detail": "b"}]}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "list" in reason, "refusal did not say what it found"
+        assert "0/300 chars (+0)" not in reason, "refusal rendered as a zero-length measurement"
