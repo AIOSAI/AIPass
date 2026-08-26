@@ -196,12 +196,23 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
             branch_count = 0
 
         branch_count += 1
-        console.print(
-            f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
-            f"[dim]({v['entry_type']})[/dim] "
-            f"{v['length']}/{v['cap']} chars "
-            f"[red]+{v['over_by']} over[/red]"
-        )
+        # An unmeasurable field has no honest length to print: "0/300 chars"
+        # would read as compliant, which is the exact silence this violation
+        # exists to break. Say what was found instead.
+        if v.get("reason") == "unmeasurable":
+            console.print(
+                f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
+                f"[dim]({v['entry_type']})[/dim] "
+                f"[red]UNMEASURABLE[/red] — {v.get('found_type', 'unknown')}, expected str "
+                f"[dim](cap {v['cap']} chars cannot be applied)[/dim]"
+            )
+        else:
+            console.print(
+                f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
+                f"[dim]({v['entry_type']})[/dim] "
+                f"{v['length']}/{v['cap']} chars "
+                f"[red]+{v['over_by']} over[/red]"
+            )
 
     console.print()
     console.print(f"[dim]Scanned {scanned} branch(es), skipped {skipped}[/dim]")

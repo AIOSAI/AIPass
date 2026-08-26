@@ -308,6 +308,13 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
     All branches use v2 entry-count limits from config (per_branch with
     defaults fallback). No line-count fallbacks — errors over silent fallbacks.
 
+    Fires only ABOVE the limit, never at it: keep-15 means the file is allowed
+    to hold 15. This threshold and rollover/extractor.py's `_extract_tail_excess`
+    are one decision in two places — the extractor drains `len - limit`, so a
+    detector firing at `>=` would flag a file the extractor correctly refuses to
+    touch, and the pair would spin on it forever (NOTHING DRAINED). Pinned by
+    `test_detector_and_extractor_never_disagree`, swept across the boundary.
+
     Args:
         file_path: Path to memory JSON file
 
@@ -362,21 +369,21 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
         if isinstance(sessions, list):
             auto_count = sum(1 for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact")
             regular_count = len(sessions) - auto_count
-            if auto_compact_cap is not None and auto_count >= auto_compact_cap:
+            if auto_compact_cap is not None and auto_count > auto_compact_cap:
                 reasons.append(f"{auto_count}/{auto_compact_cap} auto-compact snapshots")
-            if max_sessions is not None and regular_count >= max_sessions:
+            if max_sessions is not None and regular_count > max_sessions:
                 reasons.append(f"{regular_count}/{max_sessions} sessions")
 
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None:
         key_learnings = data.get("key_learnings", [])
-        if isinstance(key_learnings, (list, dict)) and len(key_learnings) >= max_key_learnings:
+        if isinstance(key_learnings, (list, dict)) and len(key_learnings) > max_key_learnings:
             reasons.append(f"{len(key_learnings)}/{max_key_learnings} key_learnings")
 
     max_observations = file_limits.get("observations", {}).get("count")
     if max_observations is not None:
         observations = data.get("observations", [])
-        if isinstance(observations, list) and len(observations) >= max_observations:
+        if isinstance(observations, list) and len(observations) > max_observations:
             reasons.append(f"{len(observations)}/{max_observations} observations")
 
     if reasons:

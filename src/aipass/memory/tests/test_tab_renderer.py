@@ -195,8 +195,11 @@ class TestRenderTabTodos:
         assert "rollover OFF" in tab
         assert "cap ~10 entries" in tab
         assert "task ≤15" in tab  # ≤150
-        assert "RULE: DELETE" in tab
-        assert "BAU" in tab
+        # The RULE sentence moved to LOCAL.template.json on 2026-08-25: the tab
+        # carries numbers, the template carries prose, and compose_meta joins
+        # them. Pinned there by test_trinity_standard.py.
+        assert "RULE: DELETE" not in tab
+        assert tab.endswith("⟧")
 
     def test_todos_ignores_per_branch_rollover(self):
         """Todos are always rollover OFF regardless of per_branch config."""

@@ -31,6 +31,7 @@ from datetime import datetime
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.templates import receipt
 
 # Handler imports (same-branch allowed per handler boundaries)
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
@@ -428,6 +429,15 @@ def push_templates(dry_run: bool = False) -> dict:
         if branch_changed:
             result["branches_updated"] += 1
             result["branches_list"].append(branch_name)
+            if not dry_run:
+                # Stamp the per-branch receipt — but ONLY for a branch this run
+                # actually wrote. A branch the push skipped must keep its OLD
+                # stamp; a receipt that reports the fleet's intent rather than
+                # this branch's reality is worth less than no receipt, because
+                # it turns "who carries the standard" back into an audit.
+                stamp = receipt.write_receipt(branch_path / ".trinity", receipt.STAMPED_BY_PUSH)
+                if not stamp["success"]:
+                    result["errors"].append(f"{branch_name}: receipt not stamped — {stamp['error']}")
 
     if not dry_run and result["files_modified"] > 0:
         if not _update_version_file(result["branches_list"]):

@@ -183,7 +183,9 @@ class TestNormalizerNumberSort:
             f,
             {
                 "document_metadata": {
-                    "status": {"last_health_check": "2026-06-13"},
+                    # No status block: the gold-source templates stopped declaring one on
+                    # 2026-08-25, so a file carrying one is drifted and gets it
+                    # stripped — which is a change, and these tests assert none.
                 },
                 "sessions": [
                     {"number": 5, "date": "2026-01-05", "summary": "Fifth"},
@@ -214,7 +216,9 @@ class TestNormalizerUnsortableEntries:
         _write_json(
             f,
             {
-                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
+                # No status block — stripped by the template-conformance pass
+                # since 2026-08-25; see test_trinity_standard.py.
+                "document_metadata": {},
                 "sessions": sessions,
             },
         )

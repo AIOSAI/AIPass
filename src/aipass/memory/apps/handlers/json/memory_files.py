@@ -345,67 +345,6 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 # =============================================================================
 
 
-def update_metadata(
-    file_path: Path,
-    **updates: Any,
-) -> Dict[str, Any]:
-    """
-    Update document_metadata.status fields
-
-    Convenient helper for updating metadata without manual read-modify-write.
-    Only updates document_metadata.status fields, preserves rest of file.
-
-    Args:
-        file_path: Path to memory JSON file
-        **updates: Key-value pairs to update in status section
-
-    Returns:
-        Dict with success status: {'success': True} or {'success': False, 'error': '...'}
-
-    Example:
-        # Update health and line count
-        update_metadata(
-            path,
-            health="healthy",
-            current_lines=450,
-            last_health_check="2025-11-16"
-        )
-
-    Safety:
-        - Uses atomic write
-        - Creates metadata structure if missing
-        - Preserves all other data
-    """
-    # Read current data
-    read_result = read_memory_file(file_path)
-    if not read_result["success"]:
-        return read_result
-
-    data = read_result["data"]
-
-    # Ensure metadata structure exists
-    if "document_metadata" not in data:
-        data["document_metadata"] = {}
-
-    if "status" not in data["document_metadata"]:
-        data["document_metadata"]["status"] = {}
-
-    # Apply updates
-    status = data["document_metadata"]["status"]
-    for key, value in updates.items():
-        status[key] = value
-
-    # Write back
-    write_result = write_memory_file(file_path, data)
-
-    return write_result
-
-
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-
 def read_memory_file_data(file_path: Path) -> Optional[Dict[str, Any]]:
     """
     Read memory file and return data directly (no dict wrapper)
@@ -521,8 +460,8 @@ if __name__ == "__main__":
             file_data = result["data"]
             print("+ Read successful")
             print(f"   Document type: {file_data.get('document_metadata', {}).get('document_type')}")
-            file_status = file_data.get("document_metadata", {}).get("status", {}).get("health")
-            print(f"   Status: {file_status}")
+            entry_counts = {k: len(v) for k, v in file_data.items() if isinstance(v, list)}
+            print(f"   Entries: {entry_counts}")
 
             # Validate structure
             valid, error = validate_memory_file_structure(file_data)

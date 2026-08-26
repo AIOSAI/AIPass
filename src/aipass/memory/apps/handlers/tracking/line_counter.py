@@ -22,10 +22,8 @@ Independence:
 
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
 
 # Handler imports (relative within package)
-from aipass.memory.apps.handlers.json.memory_files import update_metadata
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -62,23 +60,30 @@ def _count_physical_lines(file_path: Path) -> int:
 
 def update_line_count(file_path: Path) -> Dict[str, Any]:
     """
-    Update health check metadata after file modification.
+    Count the physical lines of a memory file and report them.
+
+    **Reads only — this function no longer writes to the file.** Its single
+    write was a `status.last_health_check` date stamp, deleted from the
+    standard on 2026-08-25 (health is computed by the checker at run time,
+    never stored). The line count itself was never persisted: it was computed,
+    returned, and dropped, while the function's name and docstring both
+    implied otherwise.
+
+    That leaves `drone @memory rollover sync-lines` a read-only reporter. It
+    is reported as such rather than quietly retired — whether that verb should
+    still exist is a design question for its owner, not a call to smuggle into
+    a stamping-removal build.
 
     Args:
         file_path: Path to memory JSON file
 
     Returns:
-        Dict with success status
+        Dict with success status and the measured line count
     """
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
     line_count = _count_physical_lines(file_path)
-
-    result = update_metadata(file_path, last_health_check=datetime.now().strftime("%Y-%m-%d"))
-
-    if not result["success"]:
-        return {"success": False, "error": f"Failed to update metadata: {result['error']}"}
 
     json_handler.log_operation("update_line_count", {"file": file_path.name, "lines": line_count, "success": True})
 
