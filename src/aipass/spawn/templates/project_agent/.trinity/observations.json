@@ -1,33 +1,29 @@
 {
   "document_metadata": {
     "document_type": "collaboration_patterns",
-    "document_name": "{{BRANCHNAME}}.OBSERVATIONS",
+    "document_name": "{{BRANCH}}.OBSERVATIONS",
     "version": "1.0.0",
     "schema_version": "3.0.0",
     "created": "{{DATE}}",
     "last_updated": "{{DATE}}",
-    "managed_by": "{{BRANCHNAME}}",
+    "managed_by": "{{BRANCH}}",
     "tags": [
       "collaboration",
       "patterns",
-      "{{BRANCHNAME}}"
+      "{{BRANCH}}"
     ],
-    "_usage": "Automated file — add entries within your sections, newest on top. Rollover auto-archives sessions/key_learnings (+ observations.json) to @memory; todos[] are OPERATIONAL and NEVER rolled — prune done ones by hand at /prep. Limits live in @memory's memory.config.json.",
-    "status": {
-      "health": "healthy",
-      "last_health_check": "{{DATE}}"
-    }
+    "_usage": "Your memory of the USER — nontechnical collaboration patterns: how THIS user works, decides, prefers to collaborate. Every user is different; capture this one. Not a technical log (that is local.json). No cadence duty — add only when a real pattern shows; sessions without a new observation are normal. Newest on top; rollover archives the oldest to @memory. Caps: @memory memory.config.json → entry_limits, rendered into observations_meta."
   },
   "guidelines": {
-    "purpose": "Capture collaboration patterns and experiential insights over time",
+    "purpose": "Capture how THIS user and this agent work together — per-user, nontechnical. Example: 'user wants initial tests run before work is handed over — never say it works untested.'",
     "chronological_order": "Newest entries at TOP, oldest at BOTTOM - NEVER reorder"
   },
-  "observations_meta": "{{OBSERVATIONS_META}}",
+  "observations_meta": "{{OBSERVATIONS_META}} Patterns live for weeks — no duty to add one each session.",
   "observations": [
     {
       "number": 1,
       "date": "{{DATE}}",
-      "note": "Branch initialized. Ready to begin capturing collaboration patterns.",
+      "note": "Branch initialized. Watch how your user works — capture their patterns as they show; no duty to add one every session.",
       "tags": []
     }
   ]

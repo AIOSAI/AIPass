@@ -193,6 +193,7 @@ spawn/
 │   │   ├── registry.py                  # Registry CRUD, find_registry(), project credential mint
 │   │   ├── meta_ops.py                  # Branch metadata generation, hash computation
 │   │   ├── mint_verify.py               # Read-only completeness check of a mint vs the template manifest
+│   │   ├── receipt_ops.py               # Birth receipt — stamps .trinity/.template_version.json at mint
 │   │   ├── update_ops.py                # Update workflow (path-based template walk)
 │   │   ├── delete_ops.py                # Delete workflow (resolve → archive → cleanup → deregister)
 │   │   ├── sync_registry_ops.py         # Registry sync (CWD-aware, external project support)
@@ -207,7 +208,7 @@ spawn/
 ├── templates/
 │   ├── aipass_framework/                # Full scaffold template (50 files, 24 dirs)
 │   └── project_agent/                   # Minimal external-project template (17 files, 9 dirs)
-├── tests/                               # 22 test files, 507 tests
+├── tests/                               # 23 test files, 532 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -235,9 +236,10 @@ spawn/
 7. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the passport number) and written as the `registry_id` of its `branches[]` registry entry. Minting it at registration time instead would be too late — the passport is written before the registry, so the two copies would be different UUIDs for one citizen. Distinct from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is shared by every citizen in a project (Patrick's ruling, 2026-08-24)
 8. **Meta** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not)
 9. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only. The partial tree is deliberately left on disk for inspection
-10. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`
-11. **Owner** — Ensure at least one citizen in that project carries `owner: true`
-12. **Validate** — Scan for any remaining `{{...}}` patterns
+10. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version this citizen carries, in @memory's four-key shape (`template_versions`, `stamped`, `stamped_by: "spawn birth"`, `config_rendered`). The versions are read from the fleet's GOLD source (`memory/templates/*.template.json` → `document_metadata.schema_version`), never from spawn's own seeds — reading the seeds would let a drifted copy mint a receipt claiming a version the fleet never issued, and the lie would score green. Shape copied, never imported: birth must not fail because another branch's package does not import. A gold source that cannot be read stamps NOTHING and surfaces the miss in `validation_issues` — a receipt naming an unverifiable version is worse than an absent one, but a citizen unborn because @memory's files are unreadable is worse than both
+11. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`. Placed after step 10 deliberately: a registered citizen always carries a receipt
+12. **Owner** — Ensure at least one citizen in that project carries `owner: true`
+13. **Validate** — Scan for any remaining `{{...}}` patterns
 
 ### Update (path-based template walk, `update_ops.py` v2.1.0)
 
@@ -260,14 +262,15 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 1. **Fix** — Repair `registry_id` in passport if stale (from registry recreation)
 2. **Register** — Add to project registry, then ensure the project has an owner
-3. **Update** — Run template update to sync scaffold files
+3. **Receipt** — Stamp `.trinity/.template_version.json` **only if the directory has none**. Adoption fills a hole; it never restamps. A branch @memory's push already stamped carries `"memory push"`, and overwriting that with `"spawn birth"` would replace a true record of which lane last touched those files with a false one
+4. **Update** — Run template update to sync scaffold files
 
 ---
 
 ## Tests
 
-**506 passed | 1 skipped | 0 failed** across 22 test files (507 collected — parametrized cases expand),
-measured 2026-08-25 from the repo root. The one skip is `test_scaffold.py`: the shipped
+**531 passed | 1 skipped | 0 failed** across 23 test files (532 collected — parametrized cases expand),
+measured 2026-08-27 from the repo root. The one skip is `test_scaffold.py`: the shipped
 scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
 
 | File | Focus |
@@ -293,10 +296,11 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 | `test_citizen_id.py` | `citizen_id` minted once — passport and registry entry always agree |
 | `test_registry_credential.py` | Credential mint asymmetry: missing registry mints, unreadable never does |
 | `test_json_durability.py` | Torn-write durability — atomic writes across every JSON/text path |
+| `test_birth_receipt.py` | Birth receipt lane — gold versions, receipt shape, seed-vs-gold drift, retire carries `.trinity` |
 | `test_scaffold.py` | Shipped scaffold smoke test (skips once a real conftest exists) |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 58 total, 58 tested (100%)
+**Public functions:** 60 total, 60 tested (100%)
 
 ---
 
@@ -326,10 +330,16 @@ Before this the same mint scored 79% and failed the gate, having earned none of
 it (@canary's finding: their entry point was byte-identical to the template
 apart from name substitution).
 
-That measurement predates the 2026-08-24 template change that stamps
-`{{CITIZEN_ID}}` into both classes' passports; the mint itself is covered by
-`tests/test_citizen_id.py`, but the newborn's audit score has not been
-re-measured since.
+**Trinity: 100/100 on both classes, live-measured 2026-08-27** by minting a
+citizen and running @seedgo's trinity checker against it. It scored 77 before
+this: the receipt group at 0 and the file set at 80 (no
+`.trinity/.template_version.json` existed until birth stamped one), top-level
+keys at 78 (the seeds carried a `document_metadata.status` block the standard
+deletes, and stamped `managed_by` in the wrong case), and meta lines at 0 (the
+seeds' `_usage` prose and meta lines had drifted from @memory's gold templates).
+The `.trinity` seeds are now derived from those gold templates, and
+`tests/test_birth_receipt.py` pins them byte-for-byte — the pin goes red the
+moment @memory bumps, which is the only honest way to hold a copy.
 
 Two starter test suites ship at birth (`tests/test_cli_routing.py`,
 `tests/test_json_handler.py`) because `test_quality` cannot reach 100 without
@@ -352,7 +362,7 @@ mandate.
 ## Metrics
 
 - **Seedgo:** 100% with bypasses, 98% without — both re-measured 2026-08-25 (17 live bypass rules; the two newest, `atomic_write.py` and `mint_verify.py`, date from 2026-08-16/17)
-- **Tests:** 506 passed, 1 skipped, 0 failed
+- **Tests:** 531 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 files (100%)
 - **Template registry:** 50 files, 24 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)

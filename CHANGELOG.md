@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(spawn)** — newborns arrive with a receipt, retirees leave a named
+archive (DPLAN-0318 marker 7, spawn's leg): measured first — a minted
+citizen scored trinity 77, and only half of that was the missing receipt;
+spawn's own seeds carried a status block the standard deletes, wrong-case
+managed_by, and _usage/meta drift nobody had ever measured. receipt_ops
+stamps at birth AFTER mint-verify and BEFORE registration (ordering pinned),
+reading versions from @memory's GOLD templates, not its own seeds — a
+drifted seed must not mint a receipt claiming a version the fleet never
+issued. Shape copied not imported (ast test pins the constant; another
+asserts no aipass.memory import). Seeds rebuilt from gold with
+byte-identical pins that go red on the next template bump. Adoption stamps
+only-if-absent — restamping a push-stamped branch would replace a true
+record with a false one. Retire now SAYS what it carried (archive path +
+trinity files in the operation log — the fact a later reader can't
+re-derive). Newborn trinity 100 both classes, live-minted and scored with
+seedgo's real checker. 531 spawn tests, full repo 17589 passed, 12/12
+mutations bite.
+
 **fix(seedgo)** — the audit learns what a clean checkout is, and the cache
 learns to see directories (CI unblock for PR #743): trinity on a tree with no
 AIPASS_REGISTRY.json AND no citizen `.trinity/` anywhere now returns

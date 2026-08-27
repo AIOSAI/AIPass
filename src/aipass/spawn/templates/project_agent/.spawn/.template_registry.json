@@ -66,13 +66,13 @@
       "path": ".aipass/aipass_local_prompt.md"
     },
     "f004": {
-      "content_hash": "889e97929685",
+      "content_hash": "576f17a21838",
       "has_branch_placeholder": false,
       "name": "local.json",
       "path": ".trinity/local.json"
     },
     "f005": {
-      "content_hash": "e51a865855a6",
+      "content_hash": "7e5de8f0ee63",
       "has_branch_placeholder": false,
       "name": "observations.json",
       "path": ".trinity/observations.json"

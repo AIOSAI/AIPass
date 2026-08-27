@@ -189,13 +189,13 @@
       "path": ".trinity/README.md"
     },
     "f012": {
-      "content_hash": "a68a905541ee",
+      "content_hash": "57c074141ac6",
       "has_branch_placeholder": false,
       "name": "local.json",
       "path": ".trinity/local.json"
     },
     "f013": {
-      "content_hash": "e51a865855a6",
+      "content_hash": "7e5de8f0ee63",
       "has_branch_placeholder": false,
       "name": "observations.json",
       "path": ".trinity/observations.json"

@@ -43,6 +43,7 @@ from aipass.spawn.apps.handlers.file_ops import (
 )
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
 from aipass.spawn.apps.handlers.mint_verify import verify_mint
+from aipass.spawn.apps.handlers.receipt_ops import RECEIPT_NAME, write_birth_receipt
 from aipass.spawn.apps.handlers.registry import (
     load_registry,
     find_registry,
@@ -349,6 +350,18 @@ def _spawn_agent(
             f"Nothing was registered; the partial tree is left at {target} for inspection."
         )
 
+    # Step 3d: Stamp the trinity receipt. A newborn without one scores 0 on the
+    # receipt group and 80 on the file set from its first minute — born in
+    # violation of a standard it never had a chance to break. Placed AFTER mint
+    # verification (the receipt is spawn's own stamp, not a file the template
+    # claims) and BEFORE registration, so a registered citizen always carries one.
+    # A failure here does not abandon the birth: the gold templates belong to
+    # another branch, and a citizen that cannot be born because @memory's files
+    # are unreadable is a worse outcome than a citizen missing a receipt. It is
+    # surfaced instead of swallowed — validation_issues is what the CLI prints.
+    receipt_result = write_birth_receipt(target / ".trinity")
+    receipt_issues = [] if receipt_result["success"] else [f"Birth receipt not stamped: {receipt_result['error']}"]
+
     # Step 4: Register in project registry
     # Store path relative to registry location (works for both AIPass and external projects)
     try:
@@ -371,9 +384,27 @@ def _spawn_agent(
     ensure_project_has_owner(reg_path)
 
     # Step 6: Validate no unreplaced placeholders
-    issues = validate_no_placeholders(target)
+    issues = validate_no_placeholders(target) + receipt_issues
 
-    json_handler.log_operation("branch_created", data={"branch": branch_upper})
+    # Birth is observable: the log names who was born, where, and which trinity
+    # template version they carry. @trigger's bus has no subscriber for a birth
+    # event today, so a listener nobody fires for would be scaffolding, not signal.
+    logger.info(
+        "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
+        branch_upper,
+        target,
+        citizen_class,
+        citizen_number,
+        receipt_result.get("receipt", {}).get("template_versions") if receipt_result["success"] else "NOT STAMPED",
+    )
+    json_handler.log_operation(
+        "branch_created",
+        data={
+            "branch": branch_upper,
+            "citizen_class": citizen_class,
+            "receipt": receipt_result.get("receipt", {}).get("template_versions", {}),
+        },
+    )
 
     return {
         "success": True,
@@ -444,6 +475,16 @@ def _adopt_existing(target, purpose, profile, registry_path):
     )
 
     ensure_project_has_owner(reg_path)
+
+    # An adopted directory becomes a citizen here, so it needs a receipt too —
+    # but ONLY if it has none. A branch @memory's push already stamped carries
+    # "memory push"; restamping it "spawn birth" would overwrite a true record
+    # of which lane last touched those files with a false one. Adoption fills a
+    # hole; it does not rewrite history.
+    if not (target / ".trinity" / RECEIPT_NAME).exists():
+        adopt_receipt = write_birth_receipt(target / ".trinity")
+        if not adopt_receipt["success"]:
+            logger.warning("[spawn] Adopted %s without a trinity receipt: %s", branch_upper, adopt_receipt["error"])
 
     json_handler.log_operation("branch_adopted", data={"branch": branch_upper})
     logger.info("[spawn] Adopted existing branch: %s (registered in %s)", branch_upper, reg_path.name)
