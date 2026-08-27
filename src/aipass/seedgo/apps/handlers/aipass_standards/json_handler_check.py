@@ -35,6 +35,12 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "branch_level"
 
+# Ruling 6: the scored triplets live in {branch}_json/, outside apps/. PRESENCE
+# only -- this standard scores triplet completeness (which names exist) and
+# never reads the files, and they include *_log.json written during the audit
+# itself, so watching their content would mark every branch dirty every run.
+BRANCH_INPUT_NAMES = ("{branch}_json/*.json",)
+
 _TRIPLET_KINDS = ("config", "data", "log")
 
 _TRIPLET_RE = re.compile(r"^(?P<stem>.+)_(?P<kind>config|data|log)\.json$")

@@ -91,7 +91,36 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     ]
 
 
-def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
+def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, attribute: str) -> List[Path]:
+    """Existing files matching one declaration channel's globs.
+
+    Globs are relative to the branch root with ``{branch}`` standing in for
+    the branch directory name, so the cache hardcodes no path: a new
+    branch_level checker declares its inputs and invalidation follows.
+
+    Only the declaration is watched -- nothing widens incidentally -- and
+    directories matched by a glob are skipped, because a fingerprint is of a
+    file.
+
+    Args:
+        branch_path: Branch root.
+        checkers: Discovered checker modules, or None.
+        attribute: Declaration attribute to read off each module.
+
+    Returns:
+        Matching files, deduplicated and sorted.
+    """
+    if not checkers:
+        return []
+    found: set[Path] = set()
+    for module in checkers.values():
+        for pattern in getattr(module, attribute, ()) or ():
+            resolved = pattern.replace("{branch}", branch_path.name)
+            found.update(match for match in branch_path.glob(resolved) if match.is_file())
+    return sorted(found)
+
+
+def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = None) -> List[Dict[str, str]]:
     """Union of every file whose content can change audit output.
 
     Superset of _collect_py_files(include_init=True): also includes
@@ -102,6 +131,18 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     result gets served forever. .seedgo/bypass.json and .seedgoignore
     files are deliberately NOT included here — they're already covered
     by compute_bypass_stamp()'s separate whole-branch stamp-bust.
+
+    Branch_level checkers declare their own inputs, which live outside apps/
+    and so were invisible here (ruling 6). Two channels, because the two
+    checkers need different things:
+
+      * ``BRANCH_INPUTS`` -- CONTENT matters. trinity reads and scores the
+        bytes of ``.trinity/*``, so an edit must bust the cache.
+      * ``BRANCH_INPUT_NAMES`` -- PRESENCE only. json_handler scores triplet
+        completeness, i.e. which filenames exist, and never reads them. Those
+        files include the checkers' own ``*_log.json``, written DURING the
+        audit -- fingerprinting their content would mark every branch dirty on
+        every run and quietly disable the cache. Add and delete still bust it.
 
     Also fingerprints {branch}_json/custom_config/ entries: the audit's
     custom_config info line names those files, so an operator adding or
@@ -122,6 +163,17 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
         files.extend(
             {"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in custom_config.iterdir() if f.is_file()
         )
+    seen = {entry["rel"] for entry in files}
+    for f in _declared_input_files(branch_path, checkers, "BRANCH_INPUTS"):
+        rel = _rel_path(f, root)
+        if rel not in seen:
+            seen.add(rel)
+            files.append({"file": str(f), "name": f.name, "rel": rel})
+    for f in _declared_input_files(branch_path, checkers, "BRANCH_INPUT_NAMES"):
+        rel = _rel_path(f, root)
+        if rel not in seen:
+            seen.add(rel)
+            files.append({"file": str(f), "name": f.name, "rel": rel, "presence_only": "1"})
     return files
 
 
@@ -576,7 +628,7 @@ def audit_branch_incremental(
     branch_entry = incremental_cache.get_branch_entry(cache, cache_key)
     stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
 
-    watch_files = _collect_watch_files(branch_path)
+    watch_files = _collect_watch_files(branch_path, discover_checkers(pack_path))
     current_fp = incremental_cache.collect_fingerprints(watch_files)
 
     if not force_full and branch_entry and branch_entry.get("stamp") == stamp:

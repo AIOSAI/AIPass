@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(seedgo)** — marker 7 seedgo lane (DPLAN-0318 circle close): trinity was
+measured to ALREADY be a gate (non-ADVISORY, passes only at 100, failures land
+in failed_checks) — so instead of performing a flip, 6 regression pins now
+hold each gate property individually, including "ADVISORY still means
+non-gating" and "the gate is satisfiable." The ruling-6 audit-cache defect is
+dead declaratively: branch_level checkers declare their inputs as globs
+(trinity: `.trinity/*`), split into content-matters vs presence-only channels
+after the live tree caught the first cut always-dirty (json_handler's own
+`*_log.json` outputs are written during the audit — the audit disturbed what
+it measured). document_metadata extras now flagged by name (closed set,
+ruling 4), guidelines content byte-compared against the gold template —
+both calibrated against the pre-push `.pre_v3_backup` corpus since the push
+cured the live population first (preventive, not curative — said plainly).
+Fleet re-measured: 17/18 at 100, only daemon 98 (.recovery queued). 1911
+passed, trinity suite 166→189, 12/12 mutations bite, first all-standards-100
+audit of seedgo itself.
+
 **feat(api)** — host-api survives reboots (Patrick's ruling after the morning
 baud outage): a systemd user unit, deliberately NOT a home-grown supervisor —
 the 14 death-and-restart cycles of 08-19 came from one. `autostart.py`

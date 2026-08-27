@@ -911,6 +911,223 @@ class TestDriftClassRegressions:
 
 
 # ===========================================================================
+# Marker 7. The gate, pinned so it cannot be downgraded by accident
+# ===========================================================================
+
+
+class TestTrinityIsAGateNotAReport:
+    """Marker 7 asked for a REPORT -> GATE flip. Measured first: trinity was
+    already a gate and has been since it shipped. In this standards family a
+    gate is expressed by three things together, and trinity has all three --
+    so there was nothing to flip, and these tests exist so it stays that way.
+
+    The family's own vocabulary:
+      * ``ADVISORY = True`` marks a standard that never gates (ruff, template).
+        trinity does not set it, so it counts in the gating average.
+      * ``passed`` is the block signal. trinity requires a PERFECT 100, which
+        is stricter than every other branch_level standard -- json_handler,
+        the precedent named in the brief, passes at 75.
+      * failing groups surface in ``checks[]``, which the audit lifts into
+        ``failed_checks``.
+
+    Each is pinned separately because each could be lost on its own.
+    """
+
+    def test_trinity_is_not_advisory(self, checker):
+        """ADVISORY = True would silently drop trinity out of the average."""
+        assert getattr(checker, "ADVISORY", False) is False
+
+    def test_advisory_is_how_this_family_says_non_gating(self, checker):
+        """The pin is only meaningful if ADVISORY still means what it means."""
+        from aipass.seedgo.apps.handlers.aipass_standards import ruff_check, template_check
+
+        assert ruff_check.ADVISORY is True
+        assert template_check.ADVISORY is True
+
+    def test_a_gating_standard_is_counted_in_the_average(self, checker):
+        """The audit computes its average over non-ADVISORY standards only."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        source = Path(branch_audit.__file__).read_text(encoding="utf-8")
+        assert 'getattr(mod, "ADVISORY", False) is True' in source
+        assert "gating_scores = {k: v for k, v in scores.items() if k not in advisory_standards}" in source
+
+    def test_anything_short_of_perfect_fails(self, trinity, tmp_path):
+        """Not a threshold: 99 blocks. The push proved 100 is reachable."""
+        local = _canonical_local()
+        local["document_metadata"]["limits"] = {}
+        branch = _write_branch(tmp_path, local=local)
+
+        result = trinity.check_branch(str(branch))
+
+        assert 0 < result["score"] < 100
+        assert result["passed"] is False
+
+    def test_a_fully_canonical_branch_passes(self, trinity, tmp_path):
+        """The gate must be satisfiable, or it is a wall."""
+        result = trinity.check_branch(str(_write_branch(tmp_path)))
+
+        assert result["score"] == 100
+        assert result["passed"] is True
+
+    def test_failing_groups_reach_the_audits_failed_checks_channel(self, trinity, tmp_path):
+        """What the audit lifts into failed_checks is checks[] with passed False."""
+        branch = _write_branch(tmp_path, local={"document_metadata": {}})
+
+        result = trinity.check_branch(str(branch))
+
+        assert [c for c in result["checks"] if not c["passed"]]
+
+
+# ===========================================================================
+# D17. document_metadata is a CLOSED set (ruling 4, due after the fleet reset)
+# ===========================================================================
+
+
+class TestDocumentMetadataIsAClosedSet:
+    """Ruling 4: ``document_metadata`` is a closed set, and the push executed
+    it fleet-wide. The build deliberately deferred this -- the contract named
+    the required fields and deleted ``status`` but did not declare the block
+    closed, so extras were unflagged. The ruling closed it.
+
+    Live population today is ZERO: the push cured every branch, so nothing on
+    disk proves this rule can see. The real deviant corpus is the PRE-PUSH
+    state still sitting in ``*.pre_v3_backup`` -- 34 files carrying ``limits``
+    and ``status``. ``limits`` is the field this rule newly catches.
+    """
+
+    @pytest.mark.parametrize("file_key", ["local", "observations"])
+    def test_an_extra_metadata_field_is_flagged(self, trinity, tmp_path, file_key):
+        docs = {"local": _canonical_local(), "observations": _canonical_observations()}
+        docs[file_key]["document_metadata"]["limits"] = {"sessions": 15}
+        branch = _write_branch(tmp_path, local=docs["local"], observations=docs["observations"])
+
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Top-level keys"), "limits")
+
+    def test_the_violation_names_every_extra_field_not_just_the_first(self, trinity, tmp_path):
+        local = _canonical_local()
+        local["document_metadata"]["limits"] = {}
+        local["document_metadata"]["owner"] = "someone"
+        branch = _write_branch(tmp_path, local=local)
+
+        message = _group(trinity.check_branch(str(branch)), "Top-level keys")["message"]
+
+        assert "limits" in message and "owner" in message
+
+    def test_status_keeps_its_own_diagnostic_rather_than_folding_into_extras(self, trinity, tmp_path):
+        """``status`` was already deleted by name and says WHY -- health is
+        computed, never stored. A generic 'unexpected field' would lose that.
+        """
+        local = _canonical_local()
+        local["document_metadata"]["status"] = {"health": "green"}
+        branch = _write_branch(tmp_path, local=local)
+
+        message = _group(trinity.check_branch(str(branch)), "Top-level keys")["message"]
+
+        assert "computed at run time" in message
+        assert "unexpected field(s) status" not in message
+
+    def test_the_canonical_nine_fields_are_all_still_accepted(self, trinity, tmp_path):
+        """Over-refusal guard: closing the set must not reject the set."""
+        branch = _write_branch(tmp_path)
+
+        assert _group(trinity.check_branch(str(branch)), "Top-level keys")["passed"] is True
+
+    def test_the_real_pre_push_drift_is_seen(self, trinity, tmp_path):
+        """The exact shape found in 34 live *.pre_v3_backup files."""
+        local = _canonical_local()
+        local["document_metadata"]["limits"] = {"sessions": {"count": 15}}
+        local["document_metadata"]["status"] = {"current_session": 90}
+        branch = _write_branch(tmp_path, local=local)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Top-level keys"), "limits")
+
+
+# ===========================================================================
+# D18. guidelines content is scored (ruling 3, template-verbatim)
+# ===========================================================================
+
+
+class TestGuidelinesContentIsScored:
+    """Ruling 3 landed template-verbatim and the push rewrote every branch to
+    it, so the contract ambiguity the build flagged is resolved: the
+    ``guidelines`` block's CONTENT is now scored, not just its presence.
+
+    Pre-push corpus: 17 branches carried the right two KEYS with different
+    VALUES -- which is precisely why presence-only scoring saw nothing.
+    """
+
+    def test_a_divergent_purpose_value_is_flagged(self, trinity, tmp_path):
+        """The real pre-push shape: right keys, wrong text."""
+        observations = _canonical_observations()
+        observations["guidelines"]["purpose"] = "Capture collaboration patterns over time"
+        branch = _write_branch(tmp_path, observations=observations)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "guidelines")
+
+    def test_a_missing_guidelines_key_is_flagged(self, trinity, tmp_path):
+        observations = _canonical_observations()
+        del observations["guidelines"]["chronological_order"]
+        branch = _write_branch(tmp_path, observations=observations)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "guidelines")
+
+    def test_an_extra_guidelines_key_is_flagged(self, trinity, tmp_path):
+        observations = _canonical_observations()
+        observations["guidelines"]["extra"] = "invented"
+        branch = _write_branch(tmp_path, observations=observations)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "guidelines")
+
+    def test_a_non_dict_guidelines_is_flagged_by_type(self, trinity, tmp_path):
+        observations = _canonical_observations()
+        observations["guidelines"] = "Newest at TOP"
+        branch = _write_branch(tmp_path, observations=observations)
+
+        _assert_failed(
+            _group(trinity.check_branch(str(branch)), "Meta lines & _usage"),
+            "guidelines must be an object",
+            "found str",
+        )
+
+    def test_the_template_verbatim_block_passes(self, trinity, tmp_path):
+        """Over-refusal guard: the gold text itself must score clean."""
+        branch = _write_branch(tmp_path)
+
+        assert _group(trinity.check_branch(str(branch)), "Meta lines & _usage")["passed"] is True
+
+    def test_unreadable_templates_refuse_rather_than_score_guidelines_zero(self, trinity, tmp_path, monkeypatch):
+        """THE ONE LAW: a field that cannot be measured is refused, never
+        scored. Same rule the meta lines already follow.
+        """
+        monkeypatch.setattr(trinity, "_load_templates", lambda: None)
+        branch = _write_branch(tmp_path)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "never assumed")
+
+    @pytest.mark.parametrize("bad", [None, "a string", 42])
+    def test_a_gold_template_missing_its_guidelines_block_refuses(self, trinity, tmp_path, monkeypatch, bad):
+        """The refusal path that the all-templates-None case cannot reach.
+
+        When every template is unreadable the prose/usage guard fires one line
+        earlier, so nulling _load_templates never exercises THIS guard. A
+        template that parses but carries no usable guidelines block does --
+        and mutation testing is what surfaced the difference.
+        """
+        templates = copy.deepcopy(_TEMPLATES)
+        if bad is None:
+            del templates["observations"]["guidelines"]
+        else:
+            templates["observations"]["guidelines"] = bad
+        monkeypatch.setattr(trinity, "_load_templates", lambda: templates)
+        branch = _write_branch(tmp_path)
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "guidelines", "never assumed")
+
+
+# ===========================================================================
 # D14b. Versioned backups are LEGAL residents (Patrick's File set ruling)
 # ===========================================================================
 

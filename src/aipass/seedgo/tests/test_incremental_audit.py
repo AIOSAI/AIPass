@@ -921,3 +921,226 @@ class TestBranchEntry:
         cache: dict = {}
         incremental_cache.set_branch_entry(cache, "seedgo", {"stamp": "x"})
         assert incremental_cache.get_branch_entry(cache, "seedgo") == {"stamp": "x"}
+
+
+# ---------------------------------------------------------------------------
+# Ruling 6 -- branch_level checkers whose inputs live OUTSIDE apps/
+# ---------------------------------------------------------------------------
+
+
+class TestBranchLevelCheckerInputsInvalidateTheCache:
+    """The defect: the watch set covered apps/**/*.py, README.md, tests/**/*.py
+    and {branch}_json/custom_config/ -- but NOT the inputs branch_level
+    checkers actually score. trinity reads .trinity/; json_handler reads the
+    {branch}_json/ triplets. Edit one and the branch never looks dirty, so a
+    stale score is served until --full.
+
+    Same species the module docstring already names for README-only edits, one
+    lane over. The fix is declarative: a checker states BRANCH_INPUTS and the
+    watch set resolves them, so the cache hardcodes no path.
+    """
+
+    @staticmethod
+    def _watch_rels(branch_path, checkers):
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        return {f["rel"] for f in branch_audit._collect_watch_files(branch_path, checkers)}
+
+    def test_a_declared_input_is_watched(self, tmp_path, monkeypatch):
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        trinity_dir = branch_path / ".trinity"
+        trinity_dir.mkdir()
+        (trinity_dir / "local.json").write_text("{}\n", encoding="utf-8")
+
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        assert ".trinity/local.json" in self._watch_rels(branch_path, checkers)
+
+    def test_the_branch_placeholder_is_substituted(self, tmp_path, monkeypatch):
+        """json_handler's inputs are named after the branch, not a fixed dir."""
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        json_dir = branch_path / "mybranch_json"
+        json_dir.mkdir()
+        (json_dir / "thing_config.json").write_text("{}\n", encoding="utf-8")
+
+        checkers = {"json_handler": types.SimpleNamespace(BRANCH_INPUTS=("{branch}_json/*.json",))}
+
+        assert "mybranch_json/thing_config.json" in self._watch_rels(branch_path, checkers)
+
+    def test_a_checker_declaring_nothing_adds_nothing(self, tmp_path, monkeypatch):
+        """Over-refusal guard: the watch set must not widen for every checker."""
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+        (branch_path / ".trinity" / "local.json").write_text("{}\n", encoding="utf-8")
+
+        bare = {"other": types.SimpleNamespace()}
+
+        assert self._watch_rels(branch_path, bare) == self._watch_rels(branch_path, {})
+
+    def test_an_undeclared_path_is_still_not_watched(self, tmp_path, monkeypatch):
+        """The declaration is the whole allow-list -- no incidental widening."""
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / "random").mkdir()
+        (branch_path / "random" / "file.json").write_text("{}\n", encoding="utf-8")
+
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        assert "random/file.json" not in self._watch_rels(branch_path, checkers)
+
+    def test_directories_matched_by_a_glob_are_not_fingerprinted(self, tmp_path, monkeypatch):
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+        (branch_path / ".trinity" / "subdir").mkdir()
+
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        assert not any(r.endswith("subdir") for r in self._watch_rels(branch_path, checkers))
+
+    def test_a_missing_declared_directory_is_not_an_error(self, tmp_path, monkeypatch):
+        """A branch with no .trinity/ must audit, not raise."""
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        assert self._watch_rels(branch_path, checkers)  # apps/main.py still there
+
+    @pytest.mark.parametrize(
+        ("module_name", "attribute", "expected"),
+        [
+            ("trinity_check", "BRANCH_INPUTS", ".trinity/*"),
+            ("json_handler_check", "BRANCH_INPUT_NAMES", "{branch}_json/*.json"),
+        ],
+    )
+    def test_the_two_real_checkers_declare_their_inputs(self, module_name, attribute, expected):
+        """The shipped declarations, not a fixture: this is what closes ruling 6.
+
+        Read from SOURCE rather than imported: this module's autouse fixture
+        stubs the bypass package, so importing a real checker here fails for
+        reasons that have nothing to do with the declaration.
+        """
+        import ast
+
+        source = (
+            Path(__file__).resolve().parent.parent / "apps" / "handlers" / "aipass_standards" / f"{module_name}.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        declared = [
+            ast.literal_eval(node.value)
+            for node in tree.body
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == attribute for t in node.targets)
+        ]
+
+        assert declared, f"{module_name} declares no {attribute}"
+        assert expected in declared[0]
+
+    def test_editing_a_trinity_file_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        """End to end: the cache serves a hit, then must NOT after a .trinity edit."""
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        trinity_dir = branch_path / ".trinity"
+        trinity_dir.mkdir()
+        target = trinity_dir / "local.json"
+        target.write_text("{}\n", encoding="utf-8")
+
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+        before = incremental_cache.collect_fingerprints(
+            __import__("aipass.seedgo.apps.handlers.audit.branch_audit", fromlist=["x"])._collect_watch_files(
+                branch_path, checkers
+            )
+        )
+        target.write_text('{"changed": true, "padding": "xxxxxxxxxxxxxxxxxxxx"}\n', encoding="utf-8")
+        after = incremental_cache.collect_fingerprints(
+            __import__("aipass.seedgo.apps.handlers.audit.branch_audit", fromlist=["x"])._collect_watch_files(
+                branch_path, checkers
+            )
+        )
+
+        _, changed, _, _ = incremental_cache.diff_fileset(before, after)
+        assert ".trinity/local.json" in changed
+
+
+class TestPresenceOnlyInputsDoNotChurnTheCache:
+    """Found by running the real thing, not by a test: declaring
+    ``{branch}_json/*.json`` as a CONTENT input made the branch dirty on every
+    run, because the checkers write their own *_log.json files while the audit
+    is running. The audit disturbs what it measures.
+
+    json_handler scores triplet COMPLETENESS -- which filenames exist -- and
+    never reads a byte of them. So presence is the whole signal: add or delete
+    must bust the cache, a content write must not. Two channels, each named
+    for what it means.
+    """
+
+    @staticmethod
+    def _fps(branch_path, checkers):
+        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
+
+        return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
+
+    def _names_checker(self):
+        return {"json_handler": types.SimpleNamespace(BRANCH_INPUT_NAMES=("{branch}_json/*.json",))}
+
+    def test_a_content_write_does_not_make_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        json_dir = branch_path / "mybranch_json"
+        json_dir.mkdir()
+        log = json_dir / "thing_log.json"
+        log.write_text("{}\n", encoding="utf-8")
+
+        before = self._fps(branch_path, self._names_checker())
+        log.write_text('{"grew": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\n', encoding="utf-8")
+        after = self._fps(branch_path, self._names_checker())
+
+        added, changed, deleted, _ = incremental_cache.diff_fileset(before, after)
+        assert not (added or changed or deleted)
+
+    def test_adding_a_file_still_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        json_dir = branch_path / "mybranch_json"
+        json_dir.mkdir()
+        (json_dir / "thing_config.json").write_text("{}\n", encoding="utf-8")
+
+        before = self._fps(branch_path, self._names_checker())
+        (json_dir / "thing_data.json").write_text("{}\n", encoding="utf-8")
+        after = self._fps(branch_path, self._names_checker())
+
+        added, _, _, _ = incremental_cache.diff_fileset(before, after)
+        assert "mybranch_json/thing_data.json" in added
+
+    def test_deleting_a_file_still_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        json_dir = branch_path / "mybranch_json"
+        json_dir.mkdir()
+        victim = json_dir / "thing_config.json"
+        victim.write_text("{}\n", encoding="utf-8")
+
+        before = self._fps(branch_path, self._names_checker())
+        victim.unlink()
+        after = self._fps(branch_path, self._names_checker())
+
+        _, _, deleted, _ = incremental_cache.diff_fileset(before, after)
+        assert "mybranch_json/thing_config.json" in deleted
+
+    def test_content_inputs_still_react_to_content(self, tmp_path, monkeypatch):
+        """The two channels must not collapse into one another."""
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+        target = branch_path / ".trinity" / "local.json"
+        target.write_text("{}\n", encoding="utf-8")
+        checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        before = self._fps(branch_path, checkers)
+        target.write_text('{"changed": "yyyyyyyyyyyyyyyyyyyyyyyyyyyy"}\n', encoding="utf-8")
+        after = self._fps(branch_path, checkers)
+
+        _, changed, _, _ = incremental_cache.diff_fileset(before, after)
+        assert ".trinity/local.json" in changed

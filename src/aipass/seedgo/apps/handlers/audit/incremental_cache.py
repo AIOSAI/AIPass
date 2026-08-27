@@ -68,6 +68,10 @@ MACHINERY_DIRS: Tuple[Path, ...] = (
 )
 
 
+# Presence-only entries share one constant fingerprint: see collect_fingerprints().
+_PRESENCE_FINGERPRINT: List[int] = [0, 0]
+
+
 def fingerprint_file(path: Path) -> List[int]:
     """Return [mtime_ns, size] for a file. [-1, -1] if it can't be stat'd."""
     try:
@@ -84,8 +88,17 @@ def collect_fingerprints(files: List[Dict[str, str]]) -> Dict[str, List[int]]:
     Expects dicts shaped like _collect_py_files()'s output ({'file', 'rel'}).
     Reusing the caller's own 'rel' keeps cache keys identical to the ones
     branch_audit uses for per-file result lookups.
+
+    An entry flagged ``presence_only`` gets a CONSTANT fingerprint: its
+    existence is the signal, its bytes are not. diff_fileset() derives added
+    and deleted from the key sets, so both still bust the cache while content
+    churn stays invisible -- which is what a checker scoring "does this file
+    exist" actually depends on.
     """
-    return {fi["rel"]: fingerprint_file(Path(fi["file"])) for fi in files}
+    return {
+        fi["rel"]: _PRESENCE_FINGERPRINT if fi.get("presence_only") else fingerprint_file(Path(fi["file"]))
+        for fi in files
+    }
 
 
 def diff_fileset(cached: Dict[str, List[int]], current: Dict[str, List[int]]) -> Tuple[set, set, set, set]:

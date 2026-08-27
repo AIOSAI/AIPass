@@ -100,6 +100,10 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "branch_level"
 
+# Ruling 6: this checker scores files OUTSIDE apps/, so the audit cache must
+# watch them or a .trinity edit serves a stale score until --full.
+BRANCH_INPUTS = (".trinity/*",)
+
 GROUP_WEIGHTS: dict[str, int] = {
     "Entry shapes": 25,
     "Top-level keys": 15,
@@ -447,6 +451,25 @@ def _prose_from_templates(templates: dict | None) -> dict | None:
             return None
         prose[section] = parsed
     return prose
+
+
+def _guidelines_from_templates(templates: dict | None) -> dict | None:
+    """The gold observations ``guidelines`` block, or None if unreadable.
+
+    None means REFUSE, never score zero: an unreadable gold source makes the
+    field unmeasurable, and the standard's one law is that an unmeasurable
+    field is refused rather than assumed.
+
+    Args:
+        templates: Loaded gold templates, or None.
+
+    Returns:
+        The template's guidelines dict, or None when it cannot be read.
+    """
+    if templates is None:
+        return None
+    block = _as_dict(templates.get("observations")).get("guidelines")
+    return block if isinstance(block, dict) else None
 
 
 def _usage_from_templates(templates: dict | None) -> dict | None:
@@ -954,7 +977,21 @@ def _doc_meta_items(ctx: dict, file_key: str, data: dict) -> list:
         status_item if "status" in meta else (True, None),
         _document_name_item(name, meta, ctx["branch"], _DOC_NAME_SUFFIX[file_key]),
         _managed_by_item(name, meta, ctx["branch"]),
+        _extra_meta_fields_item(name, meta),
     ]
+
+
+def _extra_meta_fields_item(name: str, meta: dict) -> tuple:
+    """Item: document_metadata carries no field outside the closed set.
+
+    ``status`` is excluded here because it already has its own item, which
+    says WHY it is deleted (health is computed, never stored). Folding it into
+    a generic "unexpected field" line would lose that instruction.
+    """
+    extra = [key for key in meta if key not in _DOC_META_FIELDS and key != "status"]
+    if not extra:
+        return (True, None)
+    return (False, f"{name}: document_metadata has unexpected field(s) {', '.join(sorted(extra))} -- the set is closed")
 
 
 def _top_level_items(ctx: dict, file_key: str, order: list) -> list:
@@ -1159,6 +1196,25 @@ def _usage_item(ctx: dict, file_key: str) -> tuple:
     return (True, None)
 
 
+def _guidelines_item(ctx: dict) -> tuple:
+    """Item: observations.json's guidelines block matches the gold template.
+
+    Ruling 3 landed template-verbatim, so the block's CONTENT is scored and
+    not only its presence -- the pre-push fleet carried the right two keys
+    with different text, which presence-only scoring could never see.
+    """
+    name = _OBSERVATIONS_NAME
+    fileref = ctx["observations"]
+    if fileref["error"] is not None:
+        return (False, f"{name}: {fileref['error']} -- guidelines unmeasurable")
+    block = fileref["data"].get("guidelines")
+    if not isinstance(block, dict):
+        return (False, f"{name}: guidelines must be an object, found {_found(fileref['data'], 'guidelines')}")
+    if block != ctx["guidelines"]:
+        return (False, f"{name}: guidelines does not match the gold template text")
+    return (True, None)
+
+
 def _group_meta_lines(ctx: dict) -> dict:
     """Group 6: meta lines and _usage byte-match config plus gold templates."""
     if ctx["config"] is None:
@@ -1170,8 +1226,13 @@ def _group_meta_lines(ctx: dict) -> dict:
         )
         return _binary_check("Meta lines & _usage", False, message)
 
+    if ctx["guidelines"] is None:
+        message = "cannot read the gold guidelines block: memory/templates/*.template.json unreadable -- never assumed"
+        return _binary_check("Meta lines & _usage", False, message)
+
     items = [_meta_item(ctx, section) for section in _ALL_SECTIONS]
     items.extend(_usage_item(ctx, file_key) for file_key in _FILE_NAMES)
+    items.append(_guidelines_item(ctx))
     return _items_check("Meta lines & _usage", items, "All meta lines and _usage strings byte-match the gold source")
 
 
@@ -1354,6 +1415,7 @@ def _build_context(branch_path: Path) -> dict:
         "config": load_memory_config(),
         "prose": load_template_prose(templates),
         "usage": _usage_from_templates(templates),
+        "guidelines": _guidelines_from_templates(templates),
         "gold_versions": _gold_versions_from_templates(templates),
     }
 
