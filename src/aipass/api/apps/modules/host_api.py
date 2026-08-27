@@ -103,8 +103,11 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]COMMANDS:[/yellow]  [dim](via drone @api)[/dim]")
     console.print("  [cyan]host-api serve[/cyan]                 [dim]Run the server (loopback only in Phase 1)[/dim]")
-    console.print("  [cyan]host-api status[/cyan]                [dim]Is a detached server running, and where[/dim]")
-    console.print("  [cyan]host-api stop[/cyan]                  [dim]Ask a detached server to exit[/dim]")
+    console.print(
+        "  [cyan]host-api status[/cyan]                [dim]Is a server running, who holds it, and where[/dim]"
+    )
+    console.print("  [cyan]host-api stop[/cyan]                  [dim]Stop it, through whoever owns it[/dim]")
+    console.print("  [cyan]host-api autostart[/cyan]             [dim]Render the boot unit + the install steps[/dim]")
     console.print("  [cyan]host-api issue-token <label>[/cyan]   [dim]Mint a bearer token for a device[/dim]")
     console.print("  [cyan]host-api list-tokens[/cyan]           [dim]List tokens — values are never shown[/dim]")
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
@@ -116,6 +119,7 @@ def print_help() -> None:
     console.print("  [cyan]--port <n>[/cyan]       [dim]Port override[/dim]")
     console.print("  [cyan]--detach[/cyan]         [dim]serve: run in its own session, output to a log file[/dim]")
     console.print("  [dim]                a serve under drone dies on drone's exec timeout[/dim]")
+    console.print("  [dim]                and a detached one dies with the machine — see autostart[/dim]")
     console.print("  [cyan]--scope <s>[/cyan]      [dim]Token scope: read or operate (default: read)[/dim]")
     console.print("  [cyan]--out <file>[/cyan]     [dim]Override where the 0600 receipt lands[/dim]")
     console.print("  [dim]                default: ~/.secrets/aipass/host_api/<label>.token[/dim]")

@@ -48,12 +48,32 @@ hours with a fresh, empty log.
 Nor does it make detaching the default. `serve` in the foreground is still the
 right thing under a real supervisor, and is what every existing caller gets.
 
+THE REAL SUPERVISOR ARRIVED ON 2026-08-27, and that refusal is why it is
+systemd rather than something here. @baud's face went dark after a reboot took
+the detached server with it; the answer is a user unit (see autostart.py), not a
+loop in this file. What CHANGED here is only knowledge: two commands used to
+assume that a server they did not start does not exist.
+
+    running() asked a record file that a unit-managed server never writes, so a
+    perfectly healthy server read as absent.
+
+    stop() signalled a pid directly, which under a restart policy is a stop the
+    supervisor is entitled to undo — a command that works and then reverses
+    itself is worse than one that refuses.
+
+Both now ask who owns the process first. `serve` in the foreground is still what
+the unit itself runs, so the supervised path goes through the same code every
+other caller does.
+
 Functions:
+    serve_argv()      - The one spelling of how this server is started
+    write_unit()      - Render the supervisor unit into this branch
     serve_detached()  - Start the server in its own session, return its facts
     running()         - The live server's record, or None
-    stop()            - Ask the recorded server to exit
+    stop()            - Stop the running server, through its owner
     log_path()        - Where a detached server's output goes
     record_path()     - Where its facts are kept
+    unit_path()       - Where the rendered unit is written
 """
 
 import json
@@ -67,6 +87,7 @@ from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import autostart
 
 # logs/ is gitignored and is already where this branch's runtime output lives,
 # so a detached server's stdout and its pid record sit beside the prax logs
@@ -74,6 +95,17 @@ from aipass.api.apps.handlers.json import json_handler
 RUNTIME_DIRNAME = "logs"
 LOG_NAME = "host_api_serve.log"
 RECORD_NAME = "host_api_serve.json"
+
+# The rendered unit lands beside them, and is GITIGNORED along with the rest of
+# logs/ on purpose: it necessarily carries this machine's absolute paths and
+# this machine's bind address, and a file like that in a public tree is either a
+# hardcoded path or somebody else's broken install.
+UNIT_FILE_NAME = "aipass-host-api.service"
+
+# Who is holding the server. Reported rather than inferred at the point of use,
+# because both commands that care have to make a different decision on it.
+OWNER_SUPERVISOR = "systemd"
+OWNER_DETACHED = "detached"
 
 # How long to wait for a stopped server to actually go. Long enough for uvicorn
 # to finish its graceful shutdown, short enough that a caller is not left
@@ -164,6 +196,89 @@ def record_path() -> Path:
     return _runtime_dir() / RECORD_NAME
 
 
+def unit_path() -> Path:
+    """
+    Where the rendered supervisor unit is written.
+
+    Returns:
+        The unit file's path inside this branch. Installing it is a separate,
+        host-side step — nothing in this tree writes under ~/.config.
+    """
+    return _runtime_dir() / UNIT_FILE_NAME
+
+
+def serve_argv(host: str, port: int) -> list:
+    """
+    The one spelling of how this server is started.
+
+    Args:
+        host: The bind address.
+        port: The bind port.
+
+    Returns:
+        The argv, absolute in both the interpreter and the entry point.
+
+    Note:
+        SHARED BY THE DETACHED PATH AND THE UNIT ON PURPOSE. Two ways to start
+        one server is how a fix lands in one of them and the other keeps the
+        bug — and the unit's copy is the one nobody re-reads, because it lives
+        in a file under somebody's home directory that this tree cannot see.
+    """
+    entry = _branch_root() / "apps" / "api.py"
+    return [sys.executable, str(entry), "host-api", "serve", "--host", str(host), "--port", str(port)]
+
+
+def write_unit(host: Optional[str] = None, port: Optional[int] = None) -> Path:
+    """
+    Render the supervisor unit into this branch.
+
+    Args:
+        host: Bind address override. Defaults to the stored config.
+        port: Bind port override. Defaults to the stored config.
+
+    Returns:
+        The path the unit was written to.
+
+    Raises:
+        BindRefused: The address was refused. NOTHING is written.
+        AutostartUnsupported: There is no user-level systemd here.
+
+    Note:
+        THE BIND GATE RUNS HERE TOO, and for the same reason it runs before a
+        detached spawn: a unit is a spawn that happens at every boot from now
+        on, with nobody watching. An address refused at the CLI and then baked
+        into a unit would be D1 holding everywhere except the one place it
+        repeats forever.
+    """
+    from aipass.api.apps.handlers.host import config as host_config
+
+    if not autostart.is_supported():
+        raise autostart.AutostartUnsupported(
+            "Autostart needs a user-level systemd, which this platform does not have. "
+            "The server still runs with: drone @api host-api serve --detach"
+        )
+
+    config = host_config.load_config()
+    bind_host = host if host is not None else config["host"]
+    bind_port = int(port if port is not None else config["port"])
+
+    host_config.validate_bind(bind_host, bind_port)
+
+    target = unit_path()
+    target.write_text(
+        autostart.unit_text(serve_argv(bind_host, bind_port), _branch_root(), log_path()),
+        encoding="utf-8",
+    )
+
+    logger.info("[host_api] supervisor unit rendered: %s (%s:%s)", target, bind_host, bind_port)
+    json_handler.log_operation(
+        "host_api_autostart_unit_written",
+        {"unit": str(target), "host": bind_host, "port": bind_port},
+    )
+
+    return target
+
+
 def _alive(pid: int) -> bool:
     """
     Whether a process id is currently running.
@@ -234,14 +349,40 @@ def _alive(pid: int) -> bool:
 
 def running() -> Optional[Dict[str, Any]]:
     """
-    The detached server's record, if one is actually running.
+    The live server's record, whoever started it.
 
     Returns:
-        The record, or None when there is no server — including when a record
-        exists but names a process that has gone. A stale record is treated as
-        no server rather than as an error, because a machine that rebooted
-        leaves one behind and that is not a fault anybody needs to clear.
+        The record with an `owner` naming who holds it, or None when there is
+        no server — including when a record exists but names a process that has
+        gone. A stale record is treated as no server rather than as an error,
+        because a machine that rebooted leaves one behind and that is not a
+        fault anybody needs to clear.
+
+    Note:
+        THE SUPERVISOR IS ASKED FIRST, because when a unit is running it IS the
+        server and the record file is at best a leftover from before the reboot.
+        Reading the file first would answer with a dead pid while a healthy
+        server listened on the same port.
+
+        This is the whole of requirement four. Before today a unit-managed
+        server reported as "no detached server is running" — the command an
+        operator runs at exactly the moment they need it to be true, telling
+        them the opposite of the truth.
     """
+    supervised = autostart.supervised_pid()
+
+    if supervised and _alive(supervised):
+        unit_host, unit_port = autostart.supervised_bind()
+        return {
+            "pid": supervised,
+            "host": unit_host,
+            "port": unit_port,
+            "log": str(log_path()),
+            "started": None,
+            "owner": OWNER_SUPERVISOR,
+            "unit": autostart.unit_name(),
+        }
+
     record_file = record_path()
 
     if not record_file.is_file():
@@ -256,6 +397,7 @@ def running() -> Optional[Dict[str, Any]]:
     if not isinstance(record, dict) or not _alive(int(record.get("pid") or 0)):
         return None
 
+    record["owner"] = OWNER_DETACHED
     return record
 
 
@@ -286,6 +428,15 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
     existing = running()
 
     if existing is not None:
+        # Naming the OWNER, because the two cases need different commands from
+        # the operator and "already running" alone sends them to the wrong one:
+        # a supervised server signalled by hand comes straight back.
+        if existing.get("owner") == OWNER_SUPERVISOR:
+            raise LifetimeError(
+                f"The supervisor is already running this server (unit {existing.get('unit')}, "
+                f"pid {existing.get('pid')}). Stop it first: drone @api host-api stop"
+            )
+
         raise LifetimeError(
             f"A host-api server is already running (pid {existing.get('pid')}, "
             f"{existing.get('host')}:{existing.get('port')}). Stop it first: drone @api host-api stop"
@@ -297,8 +448,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
 
     host_config.validate_bind(bind_host, bind_port)
 
-    entry = _branch_root() / "apps" / "api.py"
-    command = [sys.executable, str(entry), "host-api", "serve", "--host", bind_host, "--port", str(bind_port)]
+    command = serve_argv(bind_host, bind_port)
 
     # Append, never truncate: a new server joining the same file is exactly the
     # continuity the restart churn destroyed.
@@ -337,7 +487,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
 
 def stop() -> Optional[Dict[str, Any]]:
     """
-    Ask the recorded server to exit.
+    Stop the running server, through whoever owns it.
 
     Returns:
         The record of the server that was stopped, or None if none was running.
@@ -347,6 +497,14 @@ def stop() -> Optional[Dict[str, Any]]:
             wait ran out. Said rather than escalated — SIGKILL would cut short a
             graceful shutdown, and this handler does not get to decide that a
             server taking its time is a server that has hung.
+
+    Note:
+        A SUPERVISED SERVER IS STOPPED THROUGH ITS SUPERVISOR, never by pid.
+        Requirement five, and it is not a formality: signalling the process
+        directly leaves the restart policy free to start it again, so `stop`
+        would print success and the server would be back before the operator
+        finished reading it. `systemctl stop` outranks Restart= by definition —
+        the unit stays down until somebody starts it.
     """
     record = running()
 
@@ -355,6 +513,9 @@ def stop() -> Optional[Dict[str, Any]]:
         # the next serve is not refused by a ghost.
         record_path().unlink(missing_ok=True)
         return None
+
+    if record.get("owner") == OWNER_SUPERVISOR:
+        return _stop_supervised(record)
 
     pid = int(record["pid"])
 
@@ -377,4 +538,63 @@ def stop() -> Optional[Dict[str, Any]]:
     raise LifetimeError(
         f"The server (pid {pid}) did not exit within {STOP_TIMEOUT_SECONDS}s. "
         f"It may still be shutting down — check again, or end it yourself."
+    )
+
+
+def _stop_supervised(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ask the supervisor to bring its unit down, and confirm that it did.
+
+    Args:
+        record: The running server's record, owned by the supervisor.
+
+    Returns:
+        The same record, once the process is actually gone.
+
+    Raises:
+        LifetimeError: The supervisor refused the stop, or the process was
+            still there afterwards.
+
+    Note:
+        THE PID IS RE-CHECKED AFTER systemctl RETURNS rather than trusted. A
+        supervisor that accepted the request and a process that has exited are
+        two facts, and this branch has already been caught once believing the
+        first implies the second — os.kill(pid, 0) answering yes to an unreaped
+        corpse, found by running the thing for real.
+    """
+    pid = int(record.get("pid") or 0)
+
+    try:
+        accepted = autostart.stop_unit()
+    except autostart.AutostartUnsupported as e:
+        raise LifetimeError(str(e)) from e
+
+    if not accepted:
+        raise LifetimeError(
+            f"The supervisor would not stop {record.get('unit')}. "
+            f"Ask it directly: systemctl --user status {record.get('unit')}"
+        )
+
+    # The SUPERVISOR'S budget, not this module's ten seconds. systemd gives the
+    # server TimeoutStopSec to shut down gracefully; waiting less than that here
+    # would report a failure while the supervisor was still doing exactly what
+    # it was told to, and the operator would go looking for a hang that is a
+    # graceful shutdown halfway through.
+    deadline = time.monotonic() + autostart.STOP_TIMEOUT_SECONDS
+
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            # No record file to clear: a supervised server never wrote one.
+            logger.info("[host_api] the supervisor stopped the server: pid=%s", pid)
+            json_handler.log_operation(
+                "host_api_serve_stopped",
+                {"pid": pid, "owner": OWNER_SUPERVISOR, "unit": record.get("unit")},
+            )
+            return record
+
+        time.sleep(STOP_POLL_SECONDS)
+
+    raise LifetimeError(
+        f"The supervisor accepted the stop but the server (pid {pid}) is still running "
+        f"after {autostart.STOP_TIMEOUT_SECONDS}s. Check it: systemctl --user status {record.get('unit')}"
     )

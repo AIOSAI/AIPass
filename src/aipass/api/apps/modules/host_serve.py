@@ -28,8 +28,9 @@ Functions:
     print_introspection() - This module's live self-map
     flag_value()          - Read the value following a flag
     cmd_serve()   - Run the server, in this process or its own
-    cmd_status()  - Whether a detached server is running, and where to read it
-    cmd_stop()    - Ask a detached server to exit
+    cmd_status()  - Whether a server is running, who holds it, and where to read it
+    cmd_stop()    - Stop the running server through whoever owns it
+    cmd_autostart() - Render the boot unit and print the host-side install steps
 """
 
 from typing import List, Optional
@@ -40,6 +41,7 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import autostart as host_autostart
 
 
 def flag_value(args: List[str], flag: str) -> Optional[str]:
@@ -159,18 +161,32 @@ def cmd_status() -> None:
     record = host_lifetime.running()
 
     if record is None:
-        warning("No detached server is running")
+        warning("No server is running")
         console.print()
-        # NOT a restart. A dead server that stays dead and says so is the
-        # honest failure; a supervisor of my own would be the second one in
-        # this system, and the first is in somebody's pane.
-        console.print("[dim]Start one: drone @api host-api serve --detach[/dim]")
+        # NOT a restart. A dead server that stays dead and says so is the honest
+        # failure — and the answer to "who restarts it" is now systemd, named
+        # here so nobody has to find the autostart verb by accident.
+        console.print("[dim]Start one now:      drone @api host-api serve --detach[/dim]")
+        console.print("[dim]Start one at boot:  drone @api host-api autostart[/dim]")
         console.print(f"[dim]Its last output, if any: {host_lifetime.log_path()}[/dim]")
         return
 
-    success(f"Running: {record.get('host')}:{record.get('port')}")
+    # An unknown bind prints as a word rather than as None. A status line
+    # reading "None:None" is a bug report waiting to be filed against the wrong
+    # thing.
+    bind_host = record.get("host") or "unknown"
+    bind_port = record.get("port") or "unknown"
+
+    success(f"Running: {bind_host}:{bind_port}")
     console.print(f"  [cyan]pid:[/cyan]      {record.get('pid')}")
-    console.print(f"  [cyan]started:[/cyan]  {record.get('started')}")
+
+    if record.get("owner") == host_lifetime.OWNER_SUPERVISOR:
+        console.print(f"  [cyan]owner:[/cyan]    systemd [dim]({record.get('unit')})[/dim]")
+        console.print("  [cyan]restart:[/cyan]  [dim]on failure, and at boot[/dim]")
+    else:
+        console.print("  [cyan]owner:[/cyan]    detached [dim](started by hand — dies with a reboot)[/dim]")
+        console.print(f"  [cyan]started:[/cyan]  {record.get('started')}")
+
     console.print(f"  [cyan]log:[/cyan]      {record.get('log')}")
     console.print()
 
@@ -188,11 +204,101 @@ def cmd_stop() -> None:
         return
 
     if record is None:
-        warning("No detached server was running")
+        warning("No server was running")
         console.print()
         return
 
     success(f"Stopped pid {record.get('pid')}")
+
+    if record.get("owner") == host_lifetime.OWNER_SUPERVISOR:
+        # Said plainly, because a supervised stop is the one an operator is
+        # entitled to distrust: it is the case where a naive implementation
+        # would have been undone seconds later.
+        console.print(f"  [dim]through systemd ({record.get('unit')}) — it stays down until started[/dim]")
+        console.print(f"  [dim]Start it again: systemctl --user start {record.get('unit')}[/dim]")
+
+    console.print()
+
+
+def cmd_autostart(args: List[str]) -> None:
+    """Render the boot unit into this branch and print the host-side steps."""
+    header("Host API Autostart")
+    console.print()
+
+    host = flag_value(args, "--host")
+    port_raw = flag_value(args, "--port")
+
+    port = None
+    if port_raw is not None:
+        try:
+            port = int(port_raw)
+        except ValueError:
+            logger.warning("[host_api] non-numeric port rejected: %s", port_raw)
+            error(f"Port must be a number, got: {port_raw}")
+            return
+
+    try:
+        unit = host_lifetime.write_unit(host, port)
+    except host_autostart.AutostartUnsupported as e:
+        logger.warning("[host_api] autostart is unavailable on this platform: %s", e)
+        error("Autostart is not available here", suggestion=str(e))
+        return
+    except host_config.BindRefused as e:
+        # D1 reaches the unit too: an address refused at the CLI must not be
+        # baked into something that retries it at every boot forever.
+        logger.error("[host_api] bind refused, no unit written: %s", e)
+        error("Bind refused — no unit written", suggestion=str(e))
+        json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
+        return
+    except OSError as e:
+        logger.error("[host_api] the unit could not be written: %s", e)
+        error(f"The unit could not be written: {e}")
+        return
+
+    _show_installation(host_autostart.installation_report(unit), host_lifetime.running())
+
+
+def _show_installation(report: dict, current: Optional[dict]) -> None:
+    """
+    Print a rendered unit's install steps and what stands in their way.
+
+    Args:
+        report: The handler's installation report.
+        current: The server running right now, if any.
+    """
+    success(f"Unit rendered: {report['unit']}")
+    console.print()
+    console.print("[dim]It is NOT installed — these steps run outside this tree, and are yours:[/dim]")
+    console.print()
+
+    for step in report["steps"]:
+        console.print(f"  [cyan]{step}[/cyan]")
+
+    console.print()
+
+    linger = report["linger"]
+
+    if linger is True:
+        console.print("[dim]Lingering is already on for this account — the unit starts at boot without a login.[/dim]")
+    elif linger is False:
+        # A real warning, routed as one: without the last step the unit waits
+        # for a login that a headless reboot never provides, which is the exact
+        # failure this build exists to end.
+        warning("Lingering is OFF — without the last step the unit waits for a login that a reboot never brings")
+    else:
+        console.print("[dim]Lingering could not be read — run the last step anyway, it is idempotent.[/dim]")
+
+    # THE TRAP THIS CATCHES, and it is live on this host right now: a
+    # hand-started server already holds the port, so `enable --now` starts a
+    # unit that cannot bind, exits non-zero, retries its whole window and ends
+    # in `failed`. The operator reads that as "autostart is broken" when the
+    # actual cause is the server they started themselves this morning.
+    if current is not None and current.get("owner") == host_lifetime.OWNER_DETACHED:
+        console.print()
+        warning(f"A hand-started server is on the port now (pid {current.get('pid')})")
+        console.print("  [dim]Stop it BEFORE 'enable --now', or the unit cannot bind and ends in failed:[/dim]")
+        console.print("  [cyan]drone @api host-api stop[/cyan]")
+
     console.print()
 
 
@@ -201,7 +307,7 @@ def cmd_stop() -> None:
 # =============================================
 
 
-SUBCOMMANDS = {"serve", "status", "stop"}
+SUBCOMMANDS = {"serve", "status", "stop", "autostart"}
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -246,6 +352,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         cmd_serve(rest)
     elif subcommand == "status":
         cmd_status()
+    elif subcommand == "autostart":
+        cmd_autostart(rest)
     else:
         cmd_stop()
 
@@ -258,6 +366,7 @@ def print_introspection() -> None:
     console.print("[bold cyan]host_serve — the host API server's lifecycle[/bold cyan]")
     console.print()
     console.print("  [cyan]host-api serve [--detach][/cyan]  [dim]Run it, here or in its own session[/dim]")
-    console.print("  [cyan]host-api status[/cyan]            [dim]Is a detached server up, and where[/dim]")
-    console.print("  [cyan]host-api stop[/cyan]              [dim]Ask a detached server to exit[/dim]")
+    console.print("  [cyan]host-api status[/cyan]            [dim]Is a server up, who holds it, and where[/dim]")
+    console.print("  [cyan]host-api stop[/cyan]              [dim]Stop it, through whoever owns it[/dim]")
+    console.print("  [cyan]host-api autostart[/cyan]         [dim]Render the boot unit + the install steps[/dim]")
     console.print()

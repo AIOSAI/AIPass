@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(api)** — host-api survives reboots (Patrick's ruling after the morning
+baud outage): a systemd user unit, deliberately NOT a home-grown supervisor —
+the 14 death-and-restart cycles of 08-19 came from one. `autostart.py`
+supervises nothing: renders the unit, reports whether systemd holds the
+server, asks it to stop. `status` stops lying by construction (asks the
+supervisor first — a unit-managed server previously reported "no server
+running"); `stop` routes supervised stops through systemctl (a SIGTERM is a
+stop the restart policy may undo) and re-checks the pid rather than trusting
+the accept. Unit details each an avoided trap: `append:` logs (file:
+truncates the outage evidence), `Restart=on-failure` never always,
+StartLimit* under [Unit] (systemd silently ignores the [Service] spelling),
+a 10-min retry window wide enough for tailscaled to assign the bind address
+at boot. Installed live: pid 227641 under `aipass-host-api.service`, tailnet
+200, enabled at boot with linger. 1611 tests green (re-run independently),
+46/46 standards, 10/10 mutations bite.
+
 **fix(devpulse)** — the watchdog pair moves out of `.trinity/` (File set
 ruling, DPLAN-0318 circle close): `watchdog_active.json` + lock and
 `watchdog_timers.json` now resolve to a dedicated `.watchdog/` dot-dir
