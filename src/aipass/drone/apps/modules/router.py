@@ -99,10 +99,18 @@ def route_command(
     When command is None, runs the branch with no args (introspection).
 
     Timeout resolution: explicit value > per-command policy > DEFAULT_TIMEOUT.
+
+    Output-extends-life applies only when NOBODY named a number. ``timeout`` is
+    None exactly when the operator left it alone, which makes this the one place
+    that can tell "the system's generous default" from "the operator's cap" — the
+    handler below sees only an integer. An explicit ``--drone-timeout N`` means
+    exactly N: extension would turn a deliberate tight cap into an unpredictable
+    one, and an operator who asks for 5 seconds is usually probing, not waiting.
     """
     branch_path = resolve_branch(target)
     branch_name = target.lstrip("@").lower()
     resolved_timeout = resolve_timeout(branch_name, command, timeout)
+    extend_on_output = timeout is None
 
     # Same resolver execute_branch_command uses — logging its own precedence
     # here would let the CALLER: tag name someone other than the branch actually
@@ -112,12 +120,13 @@ def route_command(
     # hides the gap. detect_caller_signal already logged the cwd.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
-        "Routing @%s%s → %s %s (timeout=%ds)",
+        "Routing @%s%s → %s %s (timeout=%ds, extend_on_output=%s)",
         branch_name,
         caller_tag,
         command or "(introspection)",
         args or [],
         resolved_timeout,
+        extend_on_output,
     )
     return execute_branch_command(
         branch_path=branch_path,
@@ -126,6 +135,7 @@ def route_command(
         args=args,
         timeout=resolved_timeout,
         interactive=interactive,
+        extend_on_output=extend_on_output,
     )
 
 

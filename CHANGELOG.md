@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(drone)** — timeouts stop killing legitimate work (Patrick's ruling,
+DPLAN-0318 circle close): the seam is a HANG GUARD, not a per-verb budget —
+default 60s→600s, and a child still producing output at its deadline buys
+repeated 120s extensions up to an absolute 1800s ceiling, so a chattering
+hang can't live forever while a long silent job never gets *shortened*.
+Explicit `--drone-timeout N` means exactly N (extension off). On timeout the
+error now replays both streams tail-first ("partial stdout (N bytes)"
+banners) instead of discarding the evidence. TIMEOUT_OVERRIDES emptied: its
+three raise-entries (memory 120/100, flow 90) would have inverted into CAPS
+under the new base — the known-slow commands getting the least time.
+Beyond the brief: `--drone-timeout` was silently INERT on interactive and
+in-process lanes (found by live-proving, not tests) — both now warn; and a
+checklist catch turned a restructured KeyboardInterrupt handler from
+compliant to silent — seven silent catches now log. 1238 passed, 22/22
+mutations bite (two equivalent mutants removed rather than tested around).
+Honest edge on record: output-extension is test-proven with scaled
+constants, not yet end-to-end past 600s live.
+
 **feat(ai_mail)** — verified-admin `@all` reaches the residents + the
 ambiguity warning goes quiet on proven-good cases (DPLAN-0318 circle close):
 behind the DPLAN-0288 five-leg admin verification only, `@all` now adds the

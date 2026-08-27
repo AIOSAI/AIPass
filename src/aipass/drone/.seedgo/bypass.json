@@ -9,14 +9,14 @@
       "file": "apps/drone.py",
       "standard": "cli",
       "lines": [
-        270,
-        272,
-        388,
-        390,
-        543,
-        545,
-        662,
-        664
+        287,
+        289,
+        407,
+        409,
+        566,
+        568,
+        685,
+        687
       ],
       "reason": "Raw passthrough of routed command stdout/stderr \u2014 console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },

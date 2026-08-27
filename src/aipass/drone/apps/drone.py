@@ -66,6 +66,23 @@ def _extract_timeout(args: list[str]) -> tuple[list[str], int | None]:
     return args[:idx] + args[idx + 2 :], timeout
 
 
+def _report_inert_timeout(explicit_timeout: int | None, reason: str) -> None:
+    """Say so when an accepted ``--drone-timeout`` cannot be applied.
+
+    Two lanes take no timeout at all: module routing runs in-process, and
+    interactive commands inherit the terminal instead of being captured. The
+    flag parses fine in both, so an operator who names a number there is
+    silently ignored — and a silently discarded cap is the same species of
+    defect as a silent kill. It is a WARNING, not an error: the command still
+    runs, it just runs unbounded.
+    """
+    if explicit_timeout is None:
+        return
+    message = f"--drone-timeout {explicit_timeout} not applied — {reason}"
+    logger.warning("%s", message)
+    err_console.print(f"drone: {message}")
+
+
 # =============================================================================
 # AUTO-DISCOVERY
 # =============================================================================
@@ -109,7 +126,7 @@ def print_help() -> None:
     table.add_row("rm <path> [<path>...]", "Contained safe-delete (project + tmp)")
     table.add_row(
         "@target ... --drone-timeout <n>",
-        "Override subprocess timeout, default 60s (must come AFTER @target)",
+        "Override subprocess timeout, default 600s (must come AFTER @target)",
     )
     table.add_row("--help", "Show this help")
     table.add_row("--version", "Show version")
@@ -363,6 +380,8 @@ def _handle_custom_command(args: list[str]) -> int:
     module_name = target.lstrip("@").lower()
 
     interactive = command in INTERACTIVE_COMMANDS or module_name in INTERACTIVE_BRANCHES
+    if interactive:
+        _report_inert_timeout(explicit_timeout, "interactive commands inherit the terminal and are not timed")
 
     try:
         result = route_command(
@@ -485,7 +504,11 @@ def _handle_target(args: List[str]) -> int:
     # happy path (DPLAN-0315). @seedgo and @cli are both module and branch, and
     # still take the subprocess lane so their Rich output renders live.
     if is_module(module_name) and not (needs_interactive and branch_exists(target)):
+        _report_inert_timeout(explicit_timeout, "module routing runs in-process and is not timed")
         return _handle_module(module_name, rest)
+
+    if needs_interactive:
+        _report_inert_timeout(explicit_timeout, "interactive commands inherit the terminal and are not timed")
 
     # No args = pass through to branch (introspection — inherit terminal for color)
     if not rest:

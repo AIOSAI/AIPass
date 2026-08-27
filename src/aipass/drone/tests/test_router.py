@@ -330,6 +330,84 @@ class TestRouteCommand:
 # ---------------------------------------------------------------------------
 
 
+class TestExtensionIsOnlyForTheDefault:
+    """An explicit --drone-timeout means EXACTLY that number.
+
+    route_command already knows whether the operator supplied one: `timeout`
+    arrives as None when nobody said. Extension is switched off when they did,
+    because a deliberate tight cap that silently stretches is unpredictable —
+    the operator's number is the operator's number.
+    """
+
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
+    @patch("aipass.drone.apps.modules.router.resolve_branch")
+    def test_explicit_timeout_disables_extension(self, mock_resolve, mock_exec):
+        mock_resolve.return_value = "/fake/path"
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
+
+        route_command("@somebranch", "cmd", timeout=30)
+
+        assert mock_exec.call_args.kwargs["extend_on_output"] is False
+
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
+    @patch("aipass.drone.apps.modules.router.resolve_branch")
+    def test_default_timeout_keeps_extension(self, mock_resolve, mock_exec):
+        mock_resolve.return_value = "/fake/path"
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
+
+        route_command("@somebranch", "cmd")
+
+        assert mock_exec.call_args.kwargs["extend_on_output"] is True
+
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
+    @patch("aipass.drone.apps.modules.router.resolve_branch")
+    def test_routing_line_states_the_extension_state(self, mock_resolve, mock_exec):
+        """The routing log says whether this call can stretch.
+
+        The timeout is already logged; a number without its policy is half the
+        fact, and the missing half is what made a 60s kill look like a hang.
+        """
+        mock_resolve.return_value = "/fake/path"
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
+
+        with patch("aipass.drone.apps.modules.router.logger") as mock_logger:
+            route_command("@somebranch", "cmd")
+
+        call_args = mock_logger.info.call_args[0]
+        rendered = call_args[0] % tuple(call_args[1:])
+        assert "extend_on_output=True" in rendered
+
+    @pytest.fixture
+    def branch_dir(self, temp_test_dir: Path) -> Path:
+        """Create a fake branch directory with a valid entry point."""
+        apps_dir = temp_test_dir / "apps"
+        apps_dir.mkdir()
+        entry = apps_dir / "fakebranch.py"
+        entry.write_text("# stub", encoding="utf-8")
+        return temp_test_dir
+
+    @patch("aipass.drone.apps.handlers.router_handler.execute_command")
+    def test_handler_forwards_extend_on_output(self, mock_exec, branch_dir: Path):
+        """router_handler passes the flag down instead of swallowing it."""
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
+
+        execute_branch_command(
+            branch_path=str(branch_dir),
+            branch_name="fakebranch",
+            command="slow",
+            extend_on_output=False,
+        )
+
+        assert mock_exec.call_args.kwargs["extend_on_output"] is False
+
+    def test_handler_extends_by_default(self):
+        """The handler's own default must not silently disable extension."""
+        import inspect
+
+        sig = inspect.signature(execute_branch_command)
+        assert sig.parameters["extend_on_output"].default is True
+
+
 class TestRouteAll:
     """Tests for route_all() in the router module."""
 
