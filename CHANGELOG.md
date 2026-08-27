@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(hooks)** — edit_gate grandfather narrowed to todos only (1.6.0,
+DPLAN-0318 circle close): the migration-era blanket exemption is retired —
+exempt containers are now read off @memory's RESHAPE_ONLY_SECTIONS at call
+time from the module the gate already imports (one list, no drift; a
+hardcoded-copy mutation bites), with a loud-warning fallback for an old
+entry_limits because exempting nothing would brick every branch carrying one
+drifted todo. Pinned both directions: a drifted todo on disk blocks nothing
+elsewhere, a NEW drifted todo is refused, editing a drifted todo forfeits
+its exemption. Four migration-era tests REVERSED with banners saying what
+expired ("the critical no-false-reject test" was right while the fleet was
+mid-migration; that state ended). Verified its half was dead weight on the
+blanket path before — not riding @memory's measurement now. Rider:
+auto_fix's open_no_encoding matched the open( inside Popen( as a substring
+— word-boundary fix after @drone hit 6 false demands on a file with no
+open() at all. Hooks' own trinity 68→100; its restore mistake (top-down
+numbering) was caught by the live checker, not the builder — the gate
+gating its own consumer.
+
 **feat(drone)** — timeouts stop killing legitimate work (Patrick's ruling,
 DPLAN-0318 circle close): the seam is a HANG GUARD, not a per-verb budget —
 default 60s→600s, and a child still producing output at its deadline buys

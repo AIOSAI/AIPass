@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.5.1
+# Version: 1.6.0
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-25
+# Modified: 2026-08-27
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -172,26 +172,62 @@ def _entries_of(container: Any, kind: str) -> list[tuple[str, Any]]:
     return []
 
 
-def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[dict]:
+_RESHAPE_ONLY_FALLBACK: tuple[str, ...] = ("todos",)
+
+
+def _reshape_only_sections(el: Any) -> tuple[str, ...]:
+    """The containers where on-disk drift may legitimately persist.
+
+    Read off @memory's already-imported ``entry_limits`` at call time rather
+    than restated here. Two lists of "containers we may not prune" would
+    disagree within a release, and this gate and @memory's push must exempt the
+    same set or one of them is wrong about the other.
+
+    This is not a new dependency — ``_check_trinity_change`` already imports the
+    module for ``load_entry_limits`` and ``changed_entries``; this reads an
+    attribute off the object it already holds.
+
+    On an @memory too old to publish the constant, fall back to todos and SAY
+    SO. The alternative default — exempting nothing — would refuse every write
+    to a file carrying one drifted todo, bricking the branch the exemption
+    exists to protect.
+    """
+    sections = getattr(el, "RESHAPE_ONLY_SECTIONS", None)
+    if isinstance(sections, (tuple, list)):
+        return tuple(sections)
+    logger.warning(
+        "[HOOKS] edit_gate: entry_limits publishes no RESHAPE_ONLY_SECTIONS — falling back to %s",
+        _RESHAPE_ONLY_FALLBACK,
+    )
+    return _RESHAPE_ONLY_FALLBACK
+
+
+def _missing_field_violations(before: dict, after: dict, limits: dict, el: Any) -> list[dict]:
     """Refuse entries whose CANONICAL field is absent (DPLAN-0318 bug B3).
 
     The cap check reads one field name per entry type, taken from @memory's
     memory.config.json ``entry_limits`` (file/container/field). A renamed field
     — ``learning`` where the config says ``value``, the shape ai_mail, api and
-    this branch carry — leaves the extractor with no such key. It answered
+    this branch carried — leaves the extractor with no such key. It answered
     ``""``, the entry measured as zero characters, and three branches ran 2.7x
     over cap for the two months AFTER the gate landed while it reported
     compliance. ``""`` and "cannot read this" are different answers; a field the
     gate cannot find is named, not measured.
 
-    Only NEW or EDITED entries are refused. The exemption is keyed on raw-value
-    identity — byte-for-byte what is already on disk — mirroring @memory's
-    entry_limits 1.3.0 asymmetry. Nine-plus branches carry legacy shapes until
-    the fleet reset wipes them, and refusing those on every write would brick
-    memory updates fleet-wide, which costs more than the drift it corrects.
-    Identity is per raw entry and not per field name: carrying one drifted entry
-    must not license adding ten more in the same shape.
+    The on-disk exemption is now TODOS ONLY, matching @memory's narrowing. It
+    existed so a drifted fleet would not be bricked mid-migration; the fleet
+    converged, so everywhere else it protects nothing real and hides everything
+    new — a drifted entry written straight to disk would read as "already
+    there" on the next write and never surface again.
+
+    todos keep it because no machine may prune them: the push is forbidden to
+    archive open work, so only the branch's own agent can cure a drifted todo,
+    and refusing every write until it does would brick the rollover that
+    preserves everything else. Even there the exemption covers only what is
+    ALREADY ON DISK, by raw-entry identity — carrying one drifted todo must not
+    license adding ten more in the same shape.
     """
+    exempt_sections = _reshape_only_sections(el)
     hits: list[dict] = []
     for type_name, type_def in limits.get("entry_types", {}).items():
         if not isinstance(type_def, dict):
@@ -204,15 +240,16 @@ def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[d
         if after_container is None:
             continue
 
-        legacy = [entry for _, entry in _entries_of(before.get(container_key), kind)]
+        exempt = container_key in exempt_sections
+        legacy = [entry for _, entry in _entries_of(before.get(container_key), kind)] if exempt else []
 
         for key, entry in _entries_of(after_container, kind):
             # Plain-string entries carry their own text — measurable, and
             # @memory's extractor already handles them.
             if not isinstance(entry, dict) or field in entry:
                 continue
-            if entry in legacy:
-                continue  # Untouched legacy drift — not this write's doing
+            if exempt and entry in legacy:
+                continue  # Already on disk in a container nothing may prune
             hits.append(
                 {
                     "entry_type": type_name,
@@ -303,7 +340,7 @@ def _dedupe_violations(violations: list[dict]) -> list[dict]:
 def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict | None:
     """Diff changed entries and return block dict or None (allow)."""
     over = el.changed_entries(before, after, limits)
-    over = _dedupe_violations(over + _missing_field_violations(before, after, limits))
+    over = _dedupe_violations(over + _missing_field_violations(before, after, limits, el))
     if not over:
         return None
     if limits.get("enforce"):
