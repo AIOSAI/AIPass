@@ -11,6 +11,25 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(memory)** — the trinity PUSH is built and live-proven on canary
+(@memory's build): one lane per branch — re-render the machine frame, prune
+every non-canonical entry (vectorize verbatim → read back BY ID and compare
+byte-for-byte → only then prune; verification failure means nothing is pruned),
+and write one canonical session entry telling the agent where its memories
+went. Canary live: 15 pruned, 25 carried, trinity 77→100, idempotent on
+re-run, and the note's promise was tested not assumed — search returns a
+pruned entry verbatim. Fleet dry-run: 366 to archive / 560 carry over across
+22 branches (the push resolves residents from a named constant — the registry
+lane reaches only 19), measured post-push projection 70.1→97.2 with only
+stray-file/README rulings blocking 100. Over-cap entries prune like any other
+(size and shape are different scan groups — the grandfathered 315-char summary
+would otherwise hold branches at 96). refresh_all_tabs now scopes to the
+rolled branch, closing the any-PreCompact-rewrites-the-fleet hazard; the bare
+`push` alias that once fired a fleet-wide config reset is gone, and the fleet
+lane refuses without --confirm. 69 new tests, 10/10 mutations bite, the
+strongest pin runs seedgo's real checker over pushed output and requires all
+nine groups at 100.
+
 **fix(memory)+fix(hooks)+docs(seedgo)** — the morning-after round, all three
 verified independently before commit. @memory entry_limits 1.4.0 closes the
 half of B1 that @hooks proved still open: a MISSING canonical field now

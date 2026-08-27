@@ -245,9 +245,11 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    # Built-in commands handled by entry point
-    if command == "push":
-        return route_command("rollover", ["push"], modules)
+    # `push` used to alias `rollover push` here, firing the fleet-wide
+    # per_branch CONFIG reset from a bare unprompted word — demonstrated by
+    # accident on 18 branches. It is now the trinity push (modules/push.py),
+    # which gates a fleet write behind --confirm; the config reset keeps its
+    # own explicit `rollover push` verb.
 
     for module in modules:
         try:

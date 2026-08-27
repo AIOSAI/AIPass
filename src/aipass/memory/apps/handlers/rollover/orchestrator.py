@@ -467,6 +467,7 @@ def execute_rollover() -> Dict[str, Any]:
         results.append(
             {
                 "trigger": str(trigger),
+                "branch": branch_str,
                 "memories_count": len(memories),
                 "old_lines": old_lines,
                 "new_lines": new_lines,

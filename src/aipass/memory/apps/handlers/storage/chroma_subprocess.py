@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-27
 # Modified: 2026-08-23
 # =============================================
@@ -336,6 +336,43 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
     return {"success": True, "deleted": len(ids_to_delete), "ids": ids_to_delete}
 
 
+def _get_by_ids(collection_name, ids, db_path=None):
+    """Fetch documents by their exact IDs -- the read-back behind verification.
+
+    Exists so a caller that is about to DELETE its originals can prove the copy
+    landed instead of trusting the writer's own success flag. ``get_by_source``
+    could not serve that role: it matches on a metadata substring and caps at
+    n_results, so a partial hit reads like a full one.
+
+    Args:
+        collection_name: Name of the ChromaDB collection
+        ids: Exact vector IDs to fetch
+        db_path: Optional path to Chroma database
+
+    Returns:
+        Dict with success and a documents map {id: document}. Missing IDs are
+        simply absent from the map -- the caller decides what that means.
+    """
+    client = _get_client(db_path)
+
+    try:
+        collection = client.get_collection(collection_name, embedding_function=None)
+    except Exception as e:
+        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found in get_by_ids: {e}")
+        return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
+
+    ids = list(ids or [])
+    if not ids:
+        return {"success": True, "documents": {}, "count": 0}
+
+    result = collection.get(ids=ids, include=["documents"])
+    documents = {}
+    for i, found_id in enumerate(result.get("ids", [])):
+        documents[found_id] = result["documents"][i]
+
+    return {"success": True, "documents": documents, "count": len(documents)}
+
+
 def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None):
     """Search for similar vectors."""
     client = _get_client(db_path)
@@ -429,6 +466,12 @@ def main():
                 collection_name=input_data.get("collection_name"),
                 source_pattern=input_data.get("source_pattern"),
                 n_results=input_data.get("n_results", 5),
+                db_path=input_data.get("db_path"),
+            )
+        elif operation == "get_by_ids":
+            result = _get_by_ids(
+                collection_name=input_data.get("collection_name"),
+                ids=input_data.get("ids"),
                 db_path=input_data.get("db_path"),
             )
         elif operation == "delete_by_source":

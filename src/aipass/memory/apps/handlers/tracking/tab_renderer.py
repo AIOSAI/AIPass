@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-25
 # Modified: 2026-08-26
 # =============================================
@@ -267,12 +267,24 @@ def _refresh_observations(branch_name, obs_path, rollover_cfg, entry_limits_cfg)
 # =============================================================================
 
 
-def refresh_all_tabs() -> dict:
-    """Render and write state-tabs to all branch .trinity files.
+def refresh_all_tabs(branches: list[str] | None = None) -> dict:
+    """Render and write state-tabs to branch .trinity files.
 
-    Walks the registry, reads each branch's memory files, computes tab
-    strings from config, injects them as ``*_meta`` keys, and writes back
-    with correct key ordering.
+    Reads each branch's memory files, computes tab strings from config,
+    injects them as ``*_meta`` keys, and writes back with correct key
+    ordering.
+
+    SCOPE IS AN ARGUMENT, and callers should pass one. Unscoped, this walks
+    the whole registry — which is how one citizen's PreCompact hook rolling
+    ONE overdue file rewrote all 38 memory files fleet-wide at 23:37 on
+    2026-08-25, delivering a just-shipped renderer change to every branch
+    ahead of any gated review. Rollover now names the branch it rolled, so a
+    per-branch maintenance verb has a per-branch tail.
+
+    Args:
+        branches: Branch names to refresh (case-insensitive). None means the
+            whole registry — reserve that for lanes that genuinely are
+            fleet-wide, like the trinity push.
 
     Returns:
         Dict with success status and counts.
@@ -289,8 +301,8 @@ def refresh_all_tabs() -> dict:
     rollover_cfg = config.get("rollover", {})
     entry_limits_cfg = config.get("entry_limits", {})
 
-    branches = _read_registry()
-    if not branches:
+    registry = _read_registry()
+    if not registry:
         return {
             "success": True,
             "updated": 0,
@@ -298,11 +310,22 @@ def refresh_all_tabs() -> dict:
             "message": "No branches in registry",
         }
 
+    if branches is not None:
+        wanted = {name.lstrip("@").lower() for name in branches}
+        registry = [item for item in registry if item.get("name", "").lower() in wanted]
+        if not registry:
+            return {
+                "success": True,
+                "updated": 0,
+                "skipped": 0,
+                "message": f"No registry match for {', '.join(sorted(wanted))}",
+            }
+
     updated = 0
     skipped = 0
     errors: list[str] = []
 
-    for branch in branches:
+    for branch in registry:
         branch_name = branch.get("name", "UNKNOWN").lower()
         for mem_type in ("local", "observations"):
             u, s, e = _refresh_one_file(
@@ -319,7 +342,7 @@ def refresh_all_tabs() -> dict:
 
     json_handler.log_operation(
         "refresh_all_tabs",
-        {"updated": updated, "skipped": skipped, "errors": len(errors)},
+        {"updated": updated, "skipped": skipped, "errors": len(errors), "scoped": branches is not None},
         module_name="tab_renderer",
     )
     logger.info(

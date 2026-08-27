@@ -898,13 +898,18 @@ def run_rollover() -> bool:
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
-    # Refresh state-tabs after rollover (counts may have changed)
-    try:
-        from aipass.memory.apps.handlers.tracking.tab_renderer import refresh_all_tabs
+    # Refresh state-tabs for the branches THIS run actually rolled (counts may
+    # have changed). Scoped deliberately: unscoped, one citizen's overdue file
+    # rewrote all 38 memory files fleet-wide on 2026-08-25, shipping a renderer
+    # change to every branch from a PreCompact hook nobody was watching.
+    rolled = sorted({item["branch"] for item in result.get("results", []) if item.get("branch")})
+    if rolled:
+        try:
+            from aipass.memory.apps.handlers.tracking.tab_renderer import refresh_all_tabs
 
-        refresh_all_tabs()
-    except Exception as e:
-        logger.warning(f"[rollover] Tab refresh failed: {e}")
+            refresh_all_tabs(branches=rolled)
+        except Exception as e:
+            logger.warning(f"[rollover] Tab refresh failed: {e}")
 
     return success_count > 0
 
