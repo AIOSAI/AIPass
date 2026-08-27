@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
-# Description: The trinity push — canonical frame rebuild, vectorize-verify-prune, and the in-file note
-# Version: 1.0.0
+# Description: The trinity push — frame rebuild, vectorize-verify-prune, todos reported not archived
+# Version: 1.1.0
 # Created: 2026-08-27
 # Modified: 2026-08-27
 # =============================================
@@ -16,14 +16,36 @@ standard.  A full push does three things per branch, in this order:
    them — ``managed_by`` takes the exact branch directory name, ``_usage`` and
    the ``guidelines`` block come verbatim from the gold-source templates, and
    all four ``*_meta`` lines are re-composed from config + template prose.
-2. **Prune every non-canonical entry.**  Pruning is a safety feature, not a
-   deletion: the entry is vectorized VERBATIM to this branch's store first,
-   the ingestion is VERIFIED by reading it back, and only then is it removed
-   from the live file.  Nothing is ever transformed or summarized — a machine
-   that cannot faithfully transform must not transform.  Canonical entries
-   carry over untouched.
+2. **Prune every non-canonical entry — except a todo.**  Pruning is a safety
+   feature, not a deletion: the entry is vectorized VERBATIM to this branch's
+   store first, the ingestion is VERIFIED by reading it back, and only then is
+   it removed from the live file.  Nothing is ever transformed or summarized —
+   a machine that cannot faithfully transform must not transform.  Canonical
+   entries carry over untouched.
 3. **Write one canonical session note** in the pruned branch's own
    ``sessions[]`` saying where its entries went and how to recall them.
+
+THE ONE SPECIES THAT IS NEVER ARCHIVED
+--------------------------------------
+``todos`` are exempt from the prune lane, and the exemption is not a softening
+of the standard — it is the standard.  Sessions, key_learnings and
+observations are RECORDS, and a record in a vector is still a record: it is
+recallable by ``drone @memory search`` the moment anyone wants it.  A todo is
+a DEBT, and a debt only works if it resurfaces UNBIDDEN on the next load.
+Vectorized, it never does — the agent opens a clean file, sees nothing owed,
+and silently forgets what it promised.  For this one container, archiving IS
+losing, and the trinity standard says so in its own words: todos never roll.
+
+So a non-canonical todo is REPORTED for reshape-in-place — named per entry in
+the push report and counted in the in-file note — and left in the file
+byte-identical.  Reshaping it mechanically was considered and refused for the
+same reason the rest of this module refuses to transform: the canonical shape
+needs ``priority`` and ``status``, and a machine that invents someone else's
+priority has not preserved their open work, it has rewritten it.
+
+The cost is stated rather than hidden: a branch carrying a drifted todo does
+not reach trinity 100 until its own agent reshapes it.  That is the correct
+trade — a debt visible and non-canonical beats a debt canonical and gone.
 
 THE ONE LAW, wearing a new hat
 ------------------------------
@@ -140,6 +162,11 @@ _KEY_ORDER = {
 }
 
 _SECTIONS = {"local": ("todos", "key_learnings", "sessions"), "observations": ("observations",)}
+
+# The containers the prune lane may not touch. See the module docstring: for
+# open work, archiving IS losing, so these are reported for reshape-in-place
+# and left in the file exactly as found.
+RESHAPE_ONLY_SECTIONS = ("todos",)
 
 _TYPE_INT = "int"
 _TYPE_STR = "str"
@@ -462,6 +489,7 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         "path": path,
         "error": None,
         "prunes": [],
+        "reshapes": [],
         "carried": 0,
         "frame_changes": [],
         "before": None,
@@ -490,21 +518,28 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         kept = []
         for index, entry in enumerate(raw):
             problems = entry_problems(section, entry, caps.get(section))
-            if problems:
-                plan["prunes"].append(
-                    {
-                        "file_key": file_key,
-                        "container": section,
-                        "index": index,
-                        "number": entry.get("number") if isinstance(entry, dict) else None,
-                        "reason": "; ".join(problems),
-                        "entry": entry,
-                    }
-                )
-            else:
+            if not problems:
                 kept.append(entry)
+                plan["carried"] += 1
+                continue
+            record = {
+                "file_key": file_key,
+                "container": section,
+                "index": index,
+                "number": entry.get("number") if isinstance(entry, dict) else None,
+                "reason": "; ".join(problems),
+                "entry": entry,
+            }
+            if section in RESHAPE_ONLY_SECTIONS:
+                # Open work never leaves the file — it is kept exactly as
+                # found and reported so its own agent can reshape it. It is
+                # deliberately NOT counted as carry-over: "carried" means
+                # canonical, and calling a debt clean is how it goes unseen.
+                kept.append(entry)
+                plan["reshapes"].append(record)
+            else:
+                plan["prunes"].append(record)
         survivors[section] = kept
-        plan["carried"] += len(kept)
 
     after = build_frame(before, file_key, branch_name, survivors, config)
     plan["before"] = before
@@ -523,7 +558,8 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
 
     Returns:
         ``{"branch", "path", "files": [file plans], "errors": [...],
-        "prunes": [...], "carried": int, "strays": [...]}``.
+        "prunes": [...], "reshapes": [...], "carried": int, "strays": [...]}``.
+        ``reshapes`` are the non-canonical todos left IN the file.
     """
     trinity = Path(branch_path) / TRINITY_DIR
     plan: dict[str, Any] = {
@@ -534,6 +570,7 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
         "files": [],
         "errors": [],
         "prunes": [],
+        "reshapes": [],
         "carried": 0,
         "strays": [],
     }
@@ -551,6 +588,7 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
             plan["errors"].append(f"{branch_name}: {file_plan['error']}")
             continue
         plan["prunes"].extend(file_plan["prunes"])
+        plan["reshapes"].extend(file_plan["reshapes"])
         plan["carried"] += file_plan["carried"]
 
     return plan
@@ -726,18 +764,65 @@ def archive_prunes(store_client, branch_name: str, prunes: list[dict], destinati
 NOTE_STATUS = "completed"
 NOTE_TAGS = ["system_push"]
 
+NOTE_ARCHIVED = (
+    "{count} non-canonical entries were safely vectorized to @memory in a system-wide "
+    "trinity push, then pruned from these files — recall any of them anytime with "
+    "drone @memory search."
+)
+NOTE_TODOS_NAMED = "{count} todo(s) {labels} were LEFT here — open work is never archived; reshape them in place."
+NOTE_TODOS_COUNTED = "{count} todo(s) were LEFT here — open work is never archived; reshape them in place."
 
-def build_note(prune_count: int, sessions: list) -> dict:
-    """Compose the canonical session entry recording what was archived.
+
+def _reshape_label(record: dict) -> str:
+    """How one left-behind todo is named in the note.
+
+    Its entry ``number`` when it has one, otherwise its position — because the
+    commonest drifted shape is missing ``number`` entirely, and "the third one
+    down" is still an address its agent can act on.
+    """
+    number = record.get("number")
+    if isinstance(number, int) and not isinstance(number, bool):
+        return f"#{number}"
+    return f"[{record.get('index')}]"
+
+
+def _fitting(candidates: list, max_chars: Any) -> str:
+    """The first candidate summary that fits the cap; the shortest if none do.
+
+    The note is measured by the same gate everything else was pruned against,
+    so it degrades on purpose rather than being refused whole: naming forty
+    todos will not fit 300 chars, and a branch told nothing is worse off than
+    a branch told the count.
+    """
+    usable = [text for text in candidates if text]
+    if not usable:
+        return ""
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool):
+        return usable[0]
+    for text in usable:
+        if len(text) <= max_chars:
+            return text
+    return min(usable, key=len)
+
+
+def build_note(prune_count: int, sessions: list, reshapes: list | None = None, max_chars: Any = None) -> dict:
+    """Compose the canonical session entry recording what the push did.
 
     The note is written in the pruned branch's OWN sessions[] because that is
     where its agent will look. It is a canonical entry like any other — same
     four fields, same cap — so the note announcing the standard cannot itself
     violate it.
 
+    It carries two independent facts. What was ARCHIVED (and how to get it
+    back), and what was LEFT — the todos the push refused to archive, named
+    so their owner knows exactly which lines it still owes a reshape.
+
     Args:
         prune_count: How many entries were vectorized and removed.
         sessions: The surviving sessions, used only to continue the numbering.
+        reshapes: The non-canonical todos left in the file, if any.
+        max_chars: This branch's session-summary cap, so the enumeration can
+            step down to a count instead of busting the cap it announces.
 
     Returns:
         A canonical session entry.
@@ -745,14 +830,25 @@ def build_note(prune_count: int, sessions: list) -> dict:
     numbers = [
         entry["number"] for entry in sessions if isinstance(entry, dict) and _type_ok(entry.get("number"), _TYPE_INT)
     ]
+    archived = NOTE_ARCHIVED.format(count=prune_count) if prune_count else ""
+
+    left = list(reshapes or [])
+    if left:
+        labels = ", ".join(_reshape_label(record) for record in left)
+        named = NOTE_TODOS_NAMED.format(count=len(left), labels=labels)
+        counted = NOTE_TODOS_COUNTED.format(count=len(left))
+        candidates = [
+            " ".join(part for part in (archived, named) if part),
+            " ".join(part for part in (archived, counted) if part),
+            archived,
+        ]
+    else:
+        candidates = [archived]
+
     return {
         "number": (max(numbers) + 1) if numbers else 1,
         "date": _today(),
-        "summary": (
-            f"{prune_count} non-canonical entries were safely vectorized to @memory in a system-wide "
-            f"trinity push, then pruned from these files — recall any of them anytime with "
-            f"drone @memory search."
-        ),
+        "summary": _fitting(candidates, max_chars),
         "status": NOTE_STATUS,
         "tags": list(NOTE_TAGS),
     }
@@ -794,13 +890,14 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
         destinations: ``[(label, db_path)]`` for the archive.
 
     Returns:
-        ``{"branch", "pruned", "carried", "written", "noted", "receipt",
-        "errors", "refused"}``.
+        ``{"branch", "pruned", "carried", "reshapes", "written", "noted",
+        "receipt", "errors", "refused"}``.
     """
     result = {
         "branch": plan["branch"],
         "pruned": 0,
         "carried": plan["carried"],
+        "reshapes": list(plan.get("reshapes", [])),
         "written": 0,
         "noted": False,
         "receipt": False,
@@ -824,16 +921,23 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
         return result
 
     note = None
+    # The note is minted only when something was actually ARCHIVED. A branch
+    # whose only finding is a drifted todo lost nothing and had nothing moved
+    # — and since that todo stays non-canonical until its agent reshapes it,
+    # noting it on every run would stack a fresh session entry each push and
+    # break the idempotency the canary proved. The report says it every time;
+    # the file says it once, alongside the entries that did move.
     if plan["prunes"]:
         local_plan = next((item for item in plan["files"] if item["file_key"] == "local"), None)
         sessions = local_plan["after"].get("sessions", []) if local_plan and not local_plan["error"] else []
-        note = build_note(len(plan["prunes"]), sessions)
+        note_cap = resolve_caps(plan["config"], plan["branch"]).get("sessions")
+        cap_chars = note_cap.get("max_chars") if isinstance(note_cap, dict) else None
+        note = build_note(len(plan["prunes"]), sessions, plan.get("reshapes"), cap_chars)
         # The note is measured by the same gate everything else was pruned
         # against. A push that leaves behind a note the standard would refuse
         # has re-introduced, in its own hand, the exact violation it came to
         # remove — and the branch would fail the checker on the one entry the
         # push authored. Refusing to write it beats writing it and lying.
-        note_cap = resolve_caps(plan["config"], plan["branch"]).get("sessions")
         if not is_canonical("sessions", note, note_cap):
             reasons = "; ".join(entry_problems("sessions", note, note_cap))
             result["errors"].append(f"{plan['branch']}: note NOT written — it is not canonical ({reasons})")
@@ -914,6 +1018,7 @@ def push(branch: str | None = None, dry_run: bool = True, store_client=None) -> 
             "scope": out["scope"],
             "branch": branch or "fleet",
             "pruned": sum(entry.get("pruned", 0) for entry in out["branches"]),
+            "todos_left_to_reshape": sum(len(entry.get("reshapes", [])) for entry in out["branches"]),
             "errors": len(out["errors"]),
         },
         module_name="trinity_push",
@@ -945,6 +1050,7 @@ def _dry_entry(plan: dict) -> dict:
         "pruned": len(plan["prunes"]),
         "carried": plan["carried"],
         "prunes": plan["prunes"],
+        "reshapes": plan["reshapes"],
         "frame_changes": {item["file_key"]: item["frame_changes"] for item in plan["files"] if not item["error"]},
         "strays": plan["strays"],
         "errors": plan["errors"],

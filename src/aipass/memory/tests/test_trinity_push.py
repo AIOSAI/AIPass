@@ -482,7 +482,7 @@ class TestTheNote:
         """
         root = _branch(tmp_path, "guinea", {"sessions": [_entry(1, extra="drift")]})
         plan = tp.plan_branch("guinea", root, _config())
-        monkeypatch.setattr(tp, "build_note", lambda count, sessions: {"number": 2, "summary": "x" * 400})
+        monkeypatch.setattr(tp, "build_note", lambda *args, **kwargs: {"number": 2, "summary": "x" * 400})
 
         result = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
@@ -828,3 +828,205 @@ class TestTheFleetGate:
         """`push` fired a fleet-wide per_branch reset from a bare word. It must not again."""
         source = (_MEMORY_ROOT / "apps" / "memory.py").read_text(encoding="utf-8")
         assert 'route_command("rollover", ["push"], modules)' not in source
+
+
+# =============================================================================
+# THE ONE SPECIES THAT IS NEVER ARCHIVED
+# =============================================================================
+
+
+class TestTodosAreReportedNeverArchived:
+    """A todo is OPEN WORK, and archiving open work IS losing it.
+
+    Sessions and key_learnings and observations are RECORDS — a record in a
+    vector is still a record, recallable by search whenever it is wanted.  A
+    todo is a debt, and a debt only works if it resurfaces unbidden on the
+    next load.  Vectorized, it never does: the agent opens a clean file, sees
+    nothing owed, and silently forgets what it promised.  @spawn's three open
+    todos went that way in the fleet push before anyone noticed the shape rule
+    had quietly outranked the standard's own "todos NEVER roll".
+
+    So the prune lane is closed to ``todos``: a non-canonical todo is REPORTED
+    for reshape-in-place — named in the report and in the in-file note — and
+    left byte-identical in the file.  Reshaping it mechanically is not on the
+    table either, for the reason the module already gives about everything
+    else: the canonical shape needs ``priority`` and ``status``, and a machine
+    that invents someone else's priority has transformed their open work, not
+    preserved it.
+
+    Mutation notes — each pin dies against a specific wrong implementation:
+    routing todos back into ``prunes`` (1, 2, 4, 6), dropping them from the
+    file while still reporting them (3), counting them as clean carry-over
+    (5), letting the enumeration bust the note's own cap (8), or leaving the
+    report silent about them (9, 10).
+    """
+
+    @staticmethod
+    def _drifted_todo(task: str = "restore the fleet") -> dict:
+        """@spawn's real shape: task + added, no number/date/priority/status."""
+        return {"task": task, "added": "2026-08-20"}
+
+    def test_a_non_canonical_todo_is_reported_for_reshape_not_pruned(self, tmp_path):
+        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert plan["prunes"] == []
+        assert len(plan["reshapes"]) == 1
+        assert plan["reshapes"][0]["container"] == "todos"
+
+    def test_a_non_canonical_session_still_prunes_in_the_very_same_file(self, tmp_path):
+        """The exemption is one container wide, not a hole in the prune lane."""
+        root = _branch(
+            tmp_path,
+            "guinea",
+            {"todos": [self._drifted_todo()], "sessions": [_entry(1, findings=["drift"])]},
+        )
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert [prune["container"] for prune in plan["prunes"]] == ["sessions"]
+        assert [item["container"] for item in plan["reshapes"]] == ["todos"]
+
+    def test_the_todo_is_still_in_the_file_byte_identical_after_the_push(self, tmp_path):
+        todo = self._drifted_todo()
+        root = _branch(tmp_path, "guinea", {"todos": [todo], "sessions": [_entry(1, findings=["drift"])]})
+        plan = tp.plan_branch("guinea", root, _config())
+
+        tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+
+        on_disk = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))
+        assert on_disk["todos"] == [copy.deepcopy(todo)]
+
+    def test_the_todo_never_reaches_the_vector_store(self, tmp_path):
+        """Reported, not archived — nothing about it is sent to be embedded."""
+        root = _branch(
+            tmp_path,
+            "guinea",
+            {"todos": [self._drifted_todo("do not archive me")], "sessions": [_entry(1, findings=["drift"])]},
+        )
+        plan = tp.plan_branch("guinea", root, _config())
+        store = FakeStore("honest")
+
+        tp.apply_plan(plan, store, [("global", None)])
+
+        sent = [text for call in store.store_calls for text in call["texts"]]
+        assert sent, "the drifted session should still have been archived"
+        assert all("do not archive me" not in text for text in sent)
+
+    def test_a_todo_awaiting_reshape_is_not_counted_as_clean_carry_over(self, tmp_path):
+        """`carried` means canonical. Counting a debt as carried hides it."""
+        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()], "sessions": [_entry(1)]})
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert plan["carried"] == 1
+        assert len(plan["reshapes"]) == 1
+
+    def test_an_over_cap_todo_is_also_reshape_not_prune(self, tmp_path):
+        """Size is the other scan group, and it prunes everything BUT todos."""
+        long_todo = {
+            "number": 1,
+            "date": "2026-08-27",
+            "task": "x" * 400,
+            "priority": "high",
+            "status": "open",
+        }
+        root = _branch(tmp_path, "guinea", {"todos": [long_todo]})
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert plan["prunes"] == []
+        assert len(plan["reshapes"]) == 1
+        assert "over its 150-char cap" in plan["reshapes"][0]["reason"]
+
+    def test_a_todo_that_is_not_even_an_object_is_still_kept(self, tmp_path):
+        """Unparseable open work is still open work — never quietly deleted."""
+        root = _branch(tmp_path, "guinea", {"todos": ["remember the milk"]})
+        plan = tp.plan_branch("guinea", root, _config())
+
+        tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+
+        on_disk = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))
+        assert on_disk["todos"] == ["remember the milk"]
+
+    def test_a_canonical_todo_carries_over_and_is_never_reported(self, tmp_path):
+        todo = {"number": 1, "date": "2026-08-27", "task": "ship it", "priority": "high", "status": "open"}
+        root = _branch(tmp_path, "guinea", {"todos": [todo]})
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert plan["reshapes"] == []
+        assert plan["carried"] == 1
+
+    def test_the_note_names_the_todos_that_stayed(self):
+        reshapes = [
+            {"container": "todos", "index": 0, "number": 7, "reason": "missing 'priority'"},
+            {"container": "todos", "index": 1, "number": None, "reason": "missing 'number'"},
+        ]
+        summary = tp.build_note(3, [], reshapes=reshapes, max_chars=300)["summary"]
+
+        assert "todo" in summary
+        assert "#7" in summary
+        assert "[1]" in summary
+
+    def test_the_note_drops_the_names_before_it_busts_its_own_cap(self):
+        """40 named todos will not fit 300 chars; the count still must."""
+        reshapes = [
+            {"container": "todos", "index": index, "number": index, "reason": "missing 'priority'"}
+            for index in range(40)
+        ]
+        cap = {"field": "summary", "max_chars": 300}
+
+        note = tp.build_note(12, [], reshapes=reshapes, max_chars=300)
+
+        assert tp.is_canonical("sessions", note, cap)
+        assert "40 todo" in note["summary"]
+
+    def test_the_dry_run_report_names_every_todo_awaiting_reshape(self, tmp_path):
+        from aipass.memory.apps.handlers.templates import push_report
+
+        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
+        plan = tp.plan_branch("guinea", root, _config())
+        rendered = "\n".join(
+            push_report.render(
+                {"dry_run": True, "scope": 1, "errors": [], "branches": [tp._dry_entry(plan)]}, "@guinea"
+            )
+        )
+
+        assert "reshape" in rendered.lower()
+        assert "todos[0]" in rendered
+
+    def test_the_executed_report_names_them_too(self, tmp_path):
+        from aipass.memory.apps.handlers.templates import push_report
+
+        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
+        plan = tp.plan_branch("guinea", root, _config())
+        applied = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+        rendered = "\n".join(
+            push_report.render({"dry_run": False, "scope": 1, "errors": [], "branches": [applied]}, "@guinea")
+        )
+
+        assert "reshape" in rendered.lower()
+        assert "todos[0]" in rendered
+
+    def test_the_written_note_fits_the_branchs_own_cap_end_to_end(self, tmp_path):
+        """The cap must reach build_note through apply_plan, not just in unit calls.
+
+        Written after a surviving mutation: cutting the resolved cap on the
+        wire (``build_note(..., None)``) left every direct-call pin green,
+        because they hand build_note a cap themselves. The damage only shows
+        end to end — an un-stepped-down enumeration busts 300 chars, the
+        canonical-note guard refuses it, and the branch is told NOTHING about
+        entries that really did move. A note refused is a promise unkept.
+        """
+        todos = [self._drifted_todo(f"task {index}") for index in range(30)]
+        root = _branch(tmp_path, "guinea", {"todos": todos, "sessions": [_entry(1, findings=["drift"])]})
+        plan = tp.plan_branch("guinea", root, _config())
+
+        result = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+
+        assert result["noted"] is True, result["errors"]
+        written = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"][0]
+        assert tp.is_canonical("sessions", written, {"field": "summary", "max_chars": 300})
+        assert "30 todo" in written["summary"]

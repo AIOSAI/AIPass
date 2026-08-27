@@ -433,9 +433,11 @@ standard. Per branch it does exactly three things:
    **directory** name (what @seedgo's checker compares against — the registry's own `name` field
    disagrees in casing for six citizens); `_usage` and the `guidelines` block come **verbatim** from
    the gold-source templates; all four `*_meta` lines are re-composed from config + template prose.
-2. **Prunes every non-canonical entry** — see the law below.
+2. **Prunes every non-canonical entry — except a todo.** See the law below, and *Todos are never
+   archived* under it.
 3. **Writes one canonical session note** in the pruned branch's own `sessions[]` saying where its
-   entries went and how to get them back. Skipped entirely when nothing was pruned.
+   entries went, how to get them back, and which todos were left behind for it to reshape. Skipped
+   entirely when nothing was pruned.
 
 Then it stamps `.template_version.json` via `receipt.py` with `stamped_by: "memory push"` — the
 push-lane wiring the receipt build left pending.
@@ -473,6 +475,46 @@ The note the push writes is itself measured against that same gate before it is 
 left behind a note the standard would refuse would have re-introduced, in its own hand, the exact
 violation it came to remove.
 
+### Todos are never archived (1.1.0, 2026-08-27)
+
+`todos` are **exempt from the prune lane**, and the exemption is not a softening of the standard — it
+*is* the standard, which says in its own words that todos never roll.
+
+Sessions, key_learnings and observations are **records**, and a record in a vector is still a record:
+`drone @memory search` returns it the moment anyone wants it. A todo is a **debt**, and a debt only
+works if it resurfaces **unbidden** on the next load. Vectorized, it never does — the agent opens a
+clean file, sees nothing owed, and silently forgets what it promised. For this one container,
+archiving *is* losing.
+
+Found by @spawn after the fleet push: its three open todos were `{task, added}` shaped, so the shape
+rule archived them like everything else. The archive half worked perfectly — @spawn verified verbatim
+recall before restoring them by hand — which is exactly what made it dangerous: an agent that had not
+gone looking would never have known.
+
+So a non-canonical todo is **REPORTED for reshape-in-place**:
+
+- kept in the file **byte-identical**, never vectorized, never removed;
+- named **per entry, uncapped** in the push report (`~ todos[0] #? : missing 'priority'; …`) — unlike
+  prune samples, which are capped at 6 because the vector store holds the full entry; this is the only
+  place the left-behind work is named;
+- **counted in the in-file note**, with the entry numbers enumerated when they fit the note's own cap
+  and stepped down to a bare count when they do not;
+- rolled up in the report totals as `TODOS LEFT TO RESHAPE: N across M branch(es)`.
+
+**Reshaping it mechanically was considered and refused.** The canonical shape needs `priority` and
+`status`, and a machine that invents someone else's priority has not preserved their open work — it has
+rewritten it. That is the same rule this module already applies to everything it archives.
+
+**The note is minted only when something was actually archived.** A branch whose only finding is a
+drifted todo lost nothing and had nothing moved — and since that todo stays non-canonical until its
+agent reshapes it, noting it on every run would stack a fresh session entry on every push and break the
+idempotency the canary proved. The report says it every time; the file says it once, alongside the
+entries that did move.
+
+**The cost is stated, not hidden:** a branch carrying a drifted todo does not reach trinity 100 until
+its own agent reshapes it. That is the correct trade — a debt visible and non-canonical beats a debt
+canonical and gone.
+
 ### Scope
 
 `--branch` pushes one branch. Fleet mode covers the DPLAN scope: the **18** active citizens in
@@ -507,6 +549,19 @@ verbatim**. Re-running the push prunes 0 and holds 100: the lane is idempotent.
 Fleet dry-run: **366 entries to archive, 560 carry over, 22 branches, 0 refused, 0 errors.**
 Projected by applying the push into a temp copy of each branch's real `.trinity/` and scoring it with
 @seedgo's own checker: **fleet average 70.1 → 97.2**.
+
+### Measured again, 2026-08-27 (the todo exemption)
+
+The exemption was proven by replaying @spawn's real incident: its three archived todos recovered
+**verbatim from the vectors they were pruned into**, re-inserted into a temp copy of @spawn's live
+`.trinity/`, plus one drifted session so the archive lane fired in the same run. Through the real
+handler and the real `push_store` against a throwaway `.chroma`: **1 session pruned, 3 todos left in
+place byte-identical, note written at 266/300 chars naming all three, report roll-call correct.**
+Nothing under `src/aipass/spawn/` was touched.
+
+Fleet dry-run after the change: **0 entries to archive, 582 carry over, 22 branches, 0 todos to
+reshape** — the fleet is already canonical, so the fix protects future pushes; the sweep is what
+healed today's.
 
 The one remaining blocker is the **File set** group, and it is **not push scope**: 16 branches carry
 stray files in `.trinity/` (mostly `*.pre_v3_backup` migration leftovers, plus `daemon/.recovery`,

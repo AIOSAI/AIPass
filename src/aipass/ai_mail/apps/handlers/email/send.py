@@ -125,12 +125,23 @@ def send_to_broadcast(
     create_email_file_fn,
     load_email_file_fn,
     deliver_email_to_branch_fn,
-    on_delivered_callback,
     log_operation_fn,
     update_central_fn,
 ) -> Tuple[bool, int, int, Any]:
     """
     Execute broadcast send to all branches.
+
+    Takes no per-recipient on_delivered callback, deliberately. The only thing
+    that callback ever did was update_central(), which takes no arguments and
+    rescans every branch inbox from the repo root — so running it per recipient
+    recomputes one global answer N times and the last run is the only one any
+    reader sees. An 18-recipient @all did 19 of those scans, ~55s of its ~60s,
+    and drone killed it at the 60s cap with every message already delivered.
+    The single call after the loop leaves exactly the same central file.
+
+    A broadcast that ever needs genuine per-recipient side effects should be
+    given a broadcast-aware callback on purpose, not inherit the single-send
+    one by accident.
 
     Returns:
         Tuple of (success, success_count, total_count, results_or_error).
@@ -154,9 +165,7 @@ def send_to_broadcast(
         if no_memory_save:
             delivery_data["no_memory_save"] = True
 
-        success, error_msg = deliver_email_to_branch_fn(
-            branch["email"], delivery_data, on_delivered=on_delivered_callback
-        )
+        success, error_msg = deliver_email_to_branch_fn(branch["email"], delivery_data)
         results.append((branch.get("name", branch["email"]), success, error_msg))
 
     success_count = sum(1 for _, s, _ in results if s)
@@ -176,7 +185,7 @@ def send_to_broadcast(
     except ImportError as e:
         logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
 
-    # Update central (best-effort)
+    # The one central aggregation for the whole broadcast (best-effort).
     try:
         if update_central_fn:
             update_central_fn()

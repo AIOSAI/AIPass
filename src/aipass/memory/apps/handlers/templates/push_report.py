@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: push_report.py
 # Description: Renders and persists the trinity push report — the artifact the dry-run exists to produce
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-27
 # Modified: 2026-08-27
 # =============================================
@@ -12,7 +12,7 @@ The dry-run's whole purpose is a report a human reads before granting a fleet
 GO, so the rendering lives in a handler rather than in the CLI module: it is
 domain work with its own rules, not display sugar.
 
-Two of those rules earn their keep:
+Three of those rules earn their keep:
 
 - **Per branch, never a wall.** The fleet report covers 22 branches; a flat
   list of 366 prune lines is technically complete and practically unreadable.
@@ -22,6 +22,11 @@ Two of those rules earn their keep:
   are reported in the same breath as the prunes and explicitly marked as
   outside the push's mandate, so a reader cannot mistake the push's silence
   about them for the push having handled them.
+- **Left-behind work is named, never merely counted.** A non-canonical todo is
+  the one thing the push refuses to archive, so the report is the only place
+  its owner learns which lines still need reshaping. Those lines are printed
+  in full — uncapped, unlike the prune samples — because there are a handful
+  of them fleet-wide and each one is somebody's open debt.
 """
 
 from datetime import datetime
@@ -77,16 +82,23 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
         lines.append("")
         return lines
 
+    reshapes = entry.get("reshapes", [])
     if dry_run:
-        lines.append(f"   would prune {entry['pruned']} entries · {entry['carried']} carry over untouched")
+        lines.append(
+            f"   would prune {entry['pruned']} entries · {entry['carried']} carry over untouched"
+            + (f" · {len(reshapes)} todo(s) to reshape in place" if reshapes else "")
+        )
         lines.extend(_prune_lines(entry.get("prunes", [])))
+        lines.extend(_reshape_lines(reshapes))
         lines.extend(_frame_lines(entry.get("frame_changes", {})))
     else:
         lines.append(
             f"   pruned {entry['pruned']} · carried {entry['carried']} · files written {entry['written']}"
             f" · note {'written' if entry['noted'] else 'not needed'}"
             f" · receipt {'stamped' if entry['receipt'] else 'NOT stamped'}"
+            + (f" · {len(reshapes)} todo(s) left to reshape" if reshapes else "")
         )
+        lines.extend(_reshape_lines(reshapes))
         lines.extend(f"     ! {message}" for message in entry.get("errors", []))
 
     strays = entry.get("strays", [])
@@ -109,6 +121,23 @@ def _prune_lines(prunes: List[dict]) -> List[str]:
     return lines
 
 
+def _reshape_lines(reshapes: List[dict]) -> List[str]:
+    """Every todo the push refused to archive, named in full.
+
+    Not capped like the prune samples: a prune sample is a pointer into a
+    vector store that holds the whole entry, while this is the ONLY place the
+    left-behind work is named. Dropping the tail here would leave an agent
+    believing it owed fewer debts than it does.
+    """
+    if not reshapes:
+        return []
+    lines = ["   LEFT IN PLACE — open work is never archived; reshape these here:"]
+    for record in reshapes:
+        number = record["number"] if record.get("number") is not None else "?"
+        lines.append(f"     ~ {record['container']}[{record['index']}] #{number}: {record['reason']}")
+    return lines
+
+
 def _frame_lines(frame_changes: dict) -> List[str]:
     """What the machine-frame rewrite changes, per file."""
     lines = []
@@ -125,10 +154,15 @@ def _summary_block(result: dict) -> List[str]:
     pruned = sum(entry.get("pruned", 0) for entry in result["branches"])
     carried = sum(entry.get("carried", 0) for entry in result["branches"])
     refused = [entry["branch"] for entry in result["branches"] if entry.get("refused")]
+    reshaping = [entry for entry in result["branches"] if entry.get("reshapes")]
+    reshaped = sum(len(entry["reshapes"]) for entry in reshaping)
     lines = [
         "─" * 64,
         f"TOTAL: {pruned} entries to archive · {carried} carry over · {len(result['branches'])} branches",
     ]
+    if reshaping:
+        roll = ", ".join(f"{entry['branch']} ({len(entry['reshapes'])})" for entry in reshaping)
+        lines.append(f"TODOS LEFT TO RESHAPE: {reshaped} across {len(reshaping)} branch(es) — {roll}")
     if refused:
         lines.append(f"REFUSED ({len(refused)}): {', '.join(refused)}")
     if result["errors"]:

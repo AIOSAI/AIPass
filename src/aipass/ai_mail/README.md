@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-27
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1326 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1329 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -84,6 +84,46 @@ the worst failure shape mail has, because the sender believes it was delivered.
   raises `MarkupError` that aborts the whole listing.
 - **Fail honest** — a row that still cannot render is reprinted raw behind a marker, and
   an unreadable `sent/` file lists as a placeholder. Never a silent skip.
+
+## Broadcast Costs What It Delivers, Not More
+
+`email @all` fans out sequentially to every fleet citizen. The per-recipient work
+is real and it is allowed to take the time it takes. What is **not** allowed is
+paying a global cost per recipient.
+
+- **One central aggregation per broadcast, not one per recipient.**
+  `update_central()` takes no arguments — it rescans every branch inbox from the
+  repo root and derives the whole answer itself. Running it per delivery
+  recomputes one global result N times, and only the last run is ever read.
+  `send_to_broadcast` therefore passes **no** `on_delivered` callback and calls
+  `update_central_fn()` once after the loop. The central file is byte-identical
+  either way; the 18 discarded recomputations are not.
+- **The inbox scan prunes, it does not filter.** `find_all_inbox_files()` walks
+  with `os.walk` and drops excluded directories from `dirnames` in place, which
+  is what stops the descent. It used to `rglob` the entire tree and then discard
+  results whose path *contained* an excluded word — but discarding a result does
+  not save the walk. Measured on the live repo: **2.9s → 0.34s** for the same 26
+  inboxes, because 57GB of `.backup` and 68GB of `projects/` are no longer
+  traversed to be thrown away.
+- **Exclusions are path components, not substrings** (`EXCLUDED_DIR_NAMES`). The
+  substring form hid any branch whose directory merely contained the word —
+  `my.backup.tools/` read as an archive and vanished from central stats with no
+  error anywhere. It was also the only reason `/backups/` behaved differently on
+  Windows: that check was a literal forward-slash match, so the same tree counted
+  on POSIX and not on Windows. Component names have no separator to disagree on.
+
+**What this cost, stated plainly.** On 2026-08-27 a fleet announcement to 18
+inboxes spent ~55 of its ~60 seconds doing 19 full-repo scans, and the router
+killed it at its 60s default *after every message had already been delivered*.
+The caller saw a timeout for a send that worked — worse than either a clean
+success or a clean failure, because the work was done and only the report died.
+
+**The timeout is still the router's to fix.** Speed here removes today's
+symptom, not the failure shape: `resolve_timeout(branch, command, explicit)`
+never sees the command's arguments, so no per-verb integer can distinguish
+`email @seedgo` from `email @all`, and there is no mechanism for a target to
+declare what a call actually needs. Raised with @drone separately; a bigger
+constant is not the fix.
 
 ## Repeat Signals (`upsert_key`)
 

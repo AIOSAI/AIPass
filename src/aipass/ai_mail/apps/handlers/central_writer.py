@@ -56,6 +56,17 @@ if sys.platform == "win32":
 _REPO_ROOT = find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
 CENTRAL_FILE = AI_CENTRAL_DIR / "AI_MAIL.central.json"
+
+# Directory NAMES whose subtrees hold archived copies of live mailboxes. They
+# are pruned from the walk, never merely filtered out of its results.
+#
+# Matched as exact path components, not substrings. The substring form hid a
+# real branch whose directory merely CONTAINED the word: `my.backup.tools/`
+# read as an archive and vanished from central stats with no error anywhere.
+# It was also the only reason `/backups/` behaved differently on Windows —
+# that check was a literal forward-slash match, so the same tree counted on
+# POSIX and did not on Windows. Names have no separators, so both agree now.
+EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups"})
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
@@ -69,7 +80,18 @@ def find_all_inbox_files() -> List[Path]:
     Find all inbox.json files in .ai_mail.local directories.
 
     Scans the repo root directory for .ai_mail.local/inbox.json files.
-    Excludes backup directories to avoid counting archived data.
+    Excludes backup/archive subtrees to avoid counting archived data.
+
+    PRUNES rather than filters. The previous implementation walked the whole
+    tree with rglob() and then discarded results whose path contained an
+    excluded word — but discarding a RESULT does not save the WALK. On the live
+    repo that meant traversing 57GB of .backup and 68GB of projects/ to return
+    26 inboxes: 2.9s per call, against 0.13s for the same 26 once the excluded
+    subtrees are pruned at the branch instead of at the leaf.
+
+    That cost was not paid once. update_central() calls this on every delivery,
+    so an 18-recipient broadcast spent ~55 of its ~60 seconds here and was
+    killed by the router's timeout after all the mail had already landed.
 
     Returns:
         List of Path objects to inbox.json files
@@ -79,15 +101,15 @@ def find_all_inbox_files() -> List[Path]:
     """
     inbox_files = []
 
-    # Search pattern: any directory ending in .ai_mail.local containing inbox.json
-    for ai_mail_dir in _REPO_ROOT.rglob(".ai_mail.local"):
-        # Skip backup/archive directories (but NOT backup branch itself)
-        path_str = str(ai_mail_dir)
-        if ".backup" in path_str or ".archive" in path_str or "/backups/" in path_str:
+    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT):
+        # Mutating dirnames in place is what stops os.walk descending.
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
+
+        if ".ai_mail.local" not in dirnames:
             continue
 
-        inbox_path = ai_mail_dir / "inbox.json"
-        if inbox_path.exists() and inbox_path.is_file():
+        inbox_path = Path(dirpath) / ".ai_mail.local" / "inbox.json"
+        if inbox_path.is_file():
             inbox_files.append(inbox_path)
 
     return inbox_files

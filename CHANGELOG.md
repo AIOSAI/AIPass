@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(memory)** — todos are never archived (memory 1.1.0): spawn caught the
+push's one real defect — non-canonical todos were pruned to vectors like any
+entry, but a todo in a vector is silently forgotten open work ("never rolls"
+must outrank the shape rule). Mechanical reshape was considered and refused on
+the module's own law: a machine that invents someone's `priority` has
+rewritten their open work, not rescued it. Non-canonical todos now stay
+byte-identical in the file and are REPORTED per entry (uncapped — the report
+is the only place left-behind work is named); `carried[]` deliberately doesn't
+count them, because calling a debt clean is how it goes unseen. Blast-radius
+sweep measured from the vector stamps, not the reports (catching the 46
+entries the first timeout-killed fire had already cured): 388 total archived,
+67 todos across 8 branches (baud 41), every affected branch mailed its own
+todos verbatim with the recovery command — three via devpulse's admin lane,
+since fleet-to-project mail is replies-only by ruling. The best mutation
+survived the unit pins and only an end-to-end test caught it: without the cap,
+the note enumeration busts 300 chars, the canonical-note guard refuses it, and
+the branch is told nothing — that test now exists and bites.
+
 **feat(fleet)** — THE FLEET PUSH EXECUTED: five months of memory-file drift
 cured in one gated run. 22/22 branches pushed, ~366 non-canonical entries
 vectorized-verified-pruned (every one recallable via `drone @memory search`),

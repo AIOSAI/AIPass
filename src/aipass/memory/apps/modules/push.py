@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: push.py
 # Description: The trinity push lane — dry-run reporting and gated execution
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-27
 # Modified: 2026-08-27
 # =============================================
@@ -25,6 +25,11 @@ prompt and exit 0.
 **``--dry-run`` writes nothing anywhere** — not the memory files, not the
 vector store, not the receipts.  Its report is the artifact Patrick reads, so
 it is written to a file as well as to the terminal and the path is printed.
+
+The report also carries the one thing the push refuses to do.  ``todos`` are
+exempt from the prune lane — for open work, archiving IS losing — so a
+drifted todo is named in the report for its owner to reshape in place, and
+the fleet roll-call of who owes what is printed with the totals.
 
 Note that ``push`` no longer aliases ``rollover push``.  That alias fired the
 fleet-wide per-branch CONFIG reset from a bare, unprompted word; the config
@@ -178,7 +183,8 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold]PURPOSE:[/bold]")
     console.print("  Bring a branch's .trinity/ files to the trinity standard: re-render the")
-    console.print("  machine frame, archive-then-prune every non-canonical entry, leave one note.")
+    console.print("  machine frame, archive-then-prune every non-canonical entry EXCEPT a todo,")
+    console.print("  report those for reshape-in-place, and leave one note.")
     console.print()
     console.print("[bold]HANDLERS:[/bold]")
     console.print("  handlers/templates/trinity_push.py   plan, archive-verify-prune, apply")
@@ -192,6 +198,8 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold]SAFETY:[/bold] a pruned entry is vectorized and read back BEFORE it is removed.")
     console.print("  If the read-back does not match, NOTHING is pruned from that branch.")
+    console.print("  Todos are exempt from the prune lane entirely — for open work, archiving")
+    console.print("  IS losing: a debt in a vector never resurfaces on load.")
     console.print()
 
 
@@ -212,7 +220,15 @@ def print_help() -> None:
     console.print("     verbatim from the templates, all four meta lines from config.")
     console.print("  2. Vectorizes every non-canonical entry VERBATIM, VERIFIES the ingestion")
     console.print("     by reading it back, and only then prunes it from the live file.")
-    console.print("  3. Writes one canonical session note saying where those entries went.")
+    console.print("  3. Writes one canonical session note saying where those entries went")
+    console.print("     and which todos were left behind for their owner to reshape.")
+    console.print()
+    console.print("[bold]TODOS ARE NEVER ARCHIVED:[/bold] a session is a record and a record in a")
+    console.print("  vector is still recallable; a todo is OPEN WORK, and open work only")
+    console.print("  functions if it resurfaces unbidden on the next load. A non-canonical")
+    console.print("  todo is REPORTED for reshape-in-place — named per entry in the report —")
+    console.print("  and left in the file byte-identical. The push does not reshape it for")
+    console.print("  you: inventing someone else's priority is a transform, not a rescue.")
     console.print()
     console.print("[bold]SCOPE:[/bold] 18 active citizens + the resident projects baud, earmark,")
     console.print("  finch and aipass_site. Named explicitly — never a glob over projects/.")

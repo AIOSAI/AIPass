@@ -294,7 +294,6 @@ def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, r
         create_email_file,
         load_email_file,
         deliver_email_to_branch,
-        _delivery_callback,
         json_handler.log_operation,
         update_central,
     )

@@ -198,7 +198,6 @@ def test_send_to_broadcast_happy_path():
         create_email_file_fn=mock_create,
         load_email_file_fn=mock_load,
         deliver_email_to_branch_fn=mock_deliver,
-        on_delivered_callback=None,
         log_operation_fn=mock_log,
         update_central_fn=None,
     )
@@ -229,7 +228,6 @@ def test_send_to_broadcast_load_fails():
         create_email_file_fn=mock_create,
         load_email_file_fn=mock_load,
         deliver_email_to_branch_fn=MagicMock(),
-        on_delivered_callback=None,
         log_operation_fn=mock_log,
         update_central_fn=None,
     )
@@ -264,7 +262,6 @@ def test_send_to_broadcast_partial_failure():
         create_email_file_fn=mock_create,
         load_email_file_fn=mock_load,
         deliver_email_to_branch_fn=mock_deliver,
-        on_delivered_callback=None,
         log_operation_fn=mock_log,
         update_central_fn=None,
     )
@@ -422,3 +419,55 @@ def test_parse_send_args_multiline_body_preserved():
     body = "First line\nSecond line\nThird line"
     result = parse_send_args(["@target", "Subject", body])
     assert result["message"] == body
+
+
+# ---- Broadcast aggregates ONCE -------------------------------------
+#
+# update_central() rescans every branch inbox from the repo root; it takes no
+# arguments and derives everything itself, so calling it per recipient computes
+# the same global answer N times over. On 2026-08-27 an 18-recipient @all spent
+# ~55s of its ~60s doing exactly that -- 19 full-tree scans -- and was killed by
+# drone's 60s cap after every message had already been delivered.
+
+
+def test_broadcast_aggregates_central_once_not_per_recipient():
+    """One @all send = one central aggregation, whatever the recipient count.
+
+    Red-first: the loop passed on_delivered to every delivery, so an 18-branch
+    broadcast aggregated 19 times (once per recipient, once after the loop).
+    """
+    branches = [{"email": f"@b{i}", "name": f"B{i}"} for i in range(18)]
+
+    # One counter for EVERY aggregation, whoever triggers it.
+    aggregations = MagicMock()
+
+    def per_recipient_callback(*_args, **_kwargs):
+        aggregations()
+
+    def deliver(_email, _data, on_delivered=None):
+        if on_delivered is not None:
+            on_delivered("/branch/path", 1, 0, 1)
+        return True, ""
+
+    ok, success_count, total, results = send_to_broadcast(
+        subject="Announce",
+        message="Hello all",
+        user_info=_make_user_info(),
+        auto_execute=False,
+        no_memory_save=False,
+        reply_to=None,
+        dispatched_to=None,
+        branches=branches,
+        create_email_file_fn=MagicMock(return_value="/tmp/broadcast.json"),
+        load_email_file_fn=MagicMock(return_value={"subject": "Announce", "message": "Hello all"}),
+        deliver_email_to_branch_fn=deliver,
+        log_operation_fn=MagicMock(),
+        update_central_fn=per_recipient_callback,
+    )
+
+    assert ok is True
+    assert success_count == 18, "every recipient must still be delivered"
+    assert len(results) == 18
+    assert aggregations.call_count == 1, (
+        f"broadcast aggregated {aggregations.call_count}x for 18 recipients; the scan is global and must run once"
+    )
