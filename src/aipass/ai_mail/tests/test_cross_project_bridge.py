@@ -505,8 +505,7 @@ class TestResidentScopeIsANamedConstant:
         other does not maintain.
         """
         scope = (
-            reg.find_repo_root()
-            / "src" / "aipass" / "memory" / "apps" / "handlers" / "memory" / "registry_scope.py"
+            reg.find_repo_root() / "src" / "aipass" / "memory" / "apps" / "handlers" / "memory" / "registry_scope.py"
         )
         if not scope.is_file():
             matches = list((reg.find_repo_root() / "src" / "aipass" / "memory").rglob("registry_scope.py"))

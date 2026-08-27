@@ -1201,9 +1201,7 @@ class TestIdentityResolutionLogging:
         -- the provenance only says who STAMPED it, not that it resolves.
         """
         branch_dir, registry_path = list_format_registry
-        warnings = self._warn_with_source(
-            registry_path, branch_dir, "assigned", caller_branch="nobody_by_that_name"
-        )
+        warnings = self._warn_with_source(registry_path, branch_dir, "assigned", caller_branch="nobody_by_that_name")
         assert any("AMBIGUOUS" in w for w in warnings), warnings
 
 

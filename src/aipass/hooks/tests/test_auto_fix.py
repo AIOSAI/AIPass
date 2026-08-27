@@ -459,11 +459,7 @@ class TestOpenPatternWordBoundary:
 
         target = tmp_path / "suffixed.py"
         target.write_text(
-            "import os\n"
-            "def f(fd):\n"
-            "    a = os.fdopen(fd)\n"
-            "    b = os.popen('ls')\n"
-            "    return a, b\n",
+            "import os\ndef f(fd):\n    a = os.fdopen(fd)\n    b = os.popen('ls')\n    return a, b\n",
             encoding="utf-8",
         )
         assert _check_patterns(str(target)) == []
