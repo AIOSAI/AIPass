@@ -1139,6 +1139,73 @@ class TestIdentityResolutionLogging:
 
         assert not any("AMBIGUOUS" in w for w in warnings), warnings
 
+    # --- A credential is not an ambiguity -------------------------------
+    #
+    # The warning exists to name a DISAGREEMENT between two signals. When the
+    # env var carries a credential provenance, there is no disagreement to
+    # name: a credential travels and a location does not, so an agent that
+    # stands in another branch's directory is still itself (S102). 68 of these
+    # fired on correctly-resolved sweeps -- every one CALLER_BRANCH='ai_mail'
+    # with the cwd walking every branch in the fleet -- burying the signal the
+    # warning is for.
+
+    def _warn_with_source(self, registry_path, branch_dir, source, caller_branch="TEST_CWD_BRANCH"):
+        """Run detection with a disagreeing cwd and a given identity provenance."""
+        warnings = []
+        other = branch_dir.parent / "some_other_branch"
+        (other / ".trinity").mkdir(parents=True, exist_ok=True)
+        (other / ".trinity" / "passport.json").write_text("{}")
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.logger.warning",
+                side_effect=lambda msg, *a: warnings.append(msg % a if a else msg),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_BRANCH"] = caller_branch
+            os.environ["AIPASS_CALLER_CWD"] = str(other)
+            if source is not None:
+                os.environ["AIPASS_CALLER_IDENTITY_SOURCE"] = source
+            detect_branch_from_pwd()
+        return warnings
+
+    @pytest.mark.parametrize("source", ["assigned", "passport"])
+    def test_credential_provenance_is_not_ambiguous(self, clean_env, list_format_registry, source):
+        """assigned/passport vouch for the env var: the cwd disagreeing is expected."""
+        branch_dir, registry_path = list_format_registry
+        warnings = self._warn_with_source(registry_path, branch_dir, source)
+        assert not any("AMBIGUOUS" in w for w in warnings), warnings
+
+    def test_project_provenance_still_warns(self, clean_env, list_format_registry):
+        """'project' names a DIRECTORY, never a citizen -- this is the $1.41 wake.
+
+        @aipass the project directory and @aipass the citizen spell the same.
+        Silencing this one would hide the exact misattribution the warning was
+        written for, so provenance is the discriminator, not "did it resolve".
+        """
+        branch_dir, registry_path = list_format_registry
+        warnings = self._warn_with_source(registry_path, branch_dir, "project")
+        assert any("AMBIGUOUS" in w for w in warnings), warnings
+
+    def test_unknown_provenance_still_warns(self, clean_env, list_format_registry):
+        """Unprovable is not proven-good: an unstamped caller keeps the warning."""
+        branch_dir, registry_path = list_format_registry
+        warnings = self._warn_with_source(registry_path, branch_dir, "unknown")
+        assert any("AMBIGUOUS" in w for w in warnings), warnings
+
+    def test_credential_naming_an_unregistered_branch_still_warns(self, clean_env, list_format_registry):
+        """A credential for a citizen nobody has heard of is a genuine conflict.
+
+        Resolution falls through to synthesis, so nothing vouched for the name
+        -- the provenance only says who STAMPED it, not that it resolves.
+        """
+        branch_dir, registry_path = list_format_registry
+        warnings = self._warn_with_source(
+            registry_path, branch_dir, "assigned", caller_branch="nobody_by_that_name"
+        )
+        assert any("AMBIGUOUS" in w for w in warnings), warnings
+
 
 class TestResolvedSenderLogging:
     """resolve_sender_info() logged only its input; the sender it produced was never recorded."""

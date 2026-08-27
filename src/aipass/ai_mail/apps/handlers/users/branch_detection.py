@@ -44,6 +44,11 @@ BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 # how a dispatch from the repo root sent as @aipass (@devpulse, 0bb77ec2).
 _CREDENTIAL_SOURCES = frozenset({"assigned", "passport"})
 
+# Strategies where AIPASS_CALLER_BRANCH did not merely exist but actually RESOLVED
+# against a catalog. `caller_branch:synthesized` is deliberately absent: it invents
+# a citizen from env vars alone, so nothing vouched for the name.
+_ENV_VAR_RESOLVED_STRATEGIES = frozenset({"caller_branch:registry", "caller_branch:contact"})
+
 
 def _get_contact_info(branch_name: str) -> Optional[Dict]:
     """Look up branch info from the contacts address book.
@@ -235,10 +240,34 @@ def _record_resolution(branch_info: Optional[Dict], strategy: str, confidence: s
     # pick AIPASS_CALLER_BRANCH. Legitimate when the caller stood outside any branch
     # (drone falls back to the env var), so this warns rather than raises — but it is
     # the one disagreement visible from inside this process, so it gets recorded.
+    #
+    # UNLESS THE ENV VAR CARRIES A CREDENTIAL, in which case there is no disagreement
+    # to name. A credential travels and a location does not: an agent that cds into
+    # another branch is still itself (S102), so `assigned`/`passport` naming one
+    # branch while the cwd sits in another is the DESIGNED precedence working, not a
+    # conflict. 104 lifetime warnings said AMBIGUOUS about correctly-resolved sweeps
+    # — every one CALLER_BRANCH='ai_mail' with the cwd walking the whole fleet — and
+    # a warning that fires on the known-good case buries the one it exists for.
+    #
+    # Two things deliberately keep warning, because neither is proven good:
+    #   • provenance `project` — a registry-derived DIRECTORY name, which answers
+    #     "which project am I in", never "who am I". @aipass the directory and
+    #     @aipass the citizen spell the same; that is the $1.41 wake, and it must
+    #     stay loud forever.
+    #   • provenance missing or `unknown` (an older drone, or no drone) — unprovable
+    #     is not proven, and this lane fails toward noise rather than toward silence.
+    # A credential naming a citizen the registry has never heard of also still warns:
+    # resolution falls through to synthesis, and the provenance only says who STAMPED
+    # the name, never that anything vouched for it.
     if caller_branch and caller_cwd:
         cwd_root = find_branch_root(Path(caller_cwd))
         if cwd_root and cwd_root.name.lower() != caller_branch.lstrip("@").lower():
-            logger.warning(
+            vouched = (
+                os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") in _CREDENTIAL_SOURCES
+                and strategy in _ENV_VAR_RESOLVED_STRATEGIES
+            )
+            log_disagreement = logger.debug if vouched else logger.warning
+            log_disagreement(
                 "[identity] AMBIGUOUS: AIPASS_CALLER_BRANCH=%r but AIPASS_CALLER_CWD sits in branch %r "
                 "— resolved as %s from the env var. If this message is misattributed, the caller's cwd is why.",
                 caller_branch,

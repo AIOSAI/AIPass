@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1329 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1340 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -614,6 +614,39 @@ FPLAN-0401 puts one door in each — openable only with the grant:
   is out of scope — this reads the projects the repo already hosts, and is not a
   multi-root discovery layer.
 
+### `@all` Scope: Fleet, Plus Residents for a Verified Admin
+
+`@all` resolves the 18 core citizens. A **verified-admin** `@all` also reaches the
+four resident projects — baud, earmark, finch, aipass_site (ruled 2026-08-27,
+DPLAN-0318 circle close). Ordinary citizens' `@all` is byte-identical to what it
+was: the widening rides the same five-leg verification that already permits
+admin-initiated direct mail into projects, and grants no new authority — every
+recipient still passes the per-delivery boundary check.
+
+The case that decided it: the fleet-push announcement had to be hand-sent to the
+four residents in four separate admin sends, because `@all` could not carry it.
+An announcement every citizen should hear is exactly what the asymmetry was
+built for.
+
+- **The resident list is a NAMED CONSTANT, never a glob** (`RESIDENT_REGISTRIES`
+  in `registry/read.py`, read by `get_resident_branches()`). `projects/` also
+  holds `marketstand(on _hold)` and `speakeasy(on_hold)`, and marketstand's
+  registry still marks its branch `active` while its directory name says parked —
+  a glob would broadcast into a held project on the strength of a stale field.
+- **Broadcast scope and resolution scope are different questions.**
+  `get_project_tree_branches()` still globs, and should: a held project's citizen
+  legitimately has an *address*. Being reachable is not the same as being on the
+  announcement list.
+- **It mirrors @memory's `registry_scope.RESIDENT_REGISTRIES`**, the single fleet
+  definition, and is deliberately a copy rather than an import — reaching into
+  another branch's handlers is an encapsulation violation, and `@all` must not
+  acquire a runtime dependency on @memory to know who it is talking to. A test
+  parses their constant and fails on drift, so the copy cannot rot quietly.
+- **Fails closed in both directions.** An unverified caller widens nothing, and a
+  verifier that *raises* is a refusal, not an opening.
+- **One inbox, one copy** — a resident already in the core registry is not added
+  twice.
+
 ### Out-of-Scope Addresses Are Explained, Not Denied
 
 An address can fail to resolve for two different reasons, and reporting both as
@@ -783,6 +816,28 @@ could run `dispatch @manager --from @daemon` and wake a manager (found by a
   `wake_branch` cannot: its in-process callers (@daemon's `run.py`) have no
   caller env and are trusted by import instead. A test scans `wake.py` for
   `sender == "@x"` gates and fails if one is missing from the set.
+
+### A Credential Is Not an Ambiguity
+
+`_record_resolution()` warns when `AIPASS_CALLER_BRANCH` and `AIPASS_CALLER_CWD`
+name different branches — the one disagreement visible from inside this process.
+It logs that at **debug** when the env var carries a credential provenance
+(`assigned` / `passport`) *and* actually resolved against a catalog.
+
+A credential travels and a location does not: an agent that cds into another
+branch is still itself. So `assigned` naming one branch while the cwd sits in
+another is the designed precedence working, not a conflict. 104 lifetime
+warnings said AMBIGUOUS about correctly-resolved sweeps — every one
+`CALLER_BRANCH='ai_mail'` with the cwd walking the whole fleet — and a warning
+that fires on the known-good case buries the one it exists for.
+
+Three cases deliberately keep the warning, because none is proven good:
+
+| Case | Why it stays loud |
+|---|---|
+| provenance `project` | a registry-derived **directory** name — @aipass the directory and @aipass the citizen spell the same. This is the $1.41 wake |
+| provenance missing / `unknown` | unprovable is not proven; this lane fails toward noise, not silence |
+| resolved via `caller_branch:synthesized` | the name resolved against nothing — provenance says who *stamped* it, never that anything vouched for it |
 
 ### Address Derivation Hazard
 

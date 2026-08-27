@@ -194,6 +194,52 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
     return result
 
 
+# The DPLAN-0318 resident projects, named one by one on purpose. This MIRRORS
+# @memory's registry_scope.RESIDENT_REGISTRIES -- the single fleet definition --
+# and is deliberately a copy rather than an import: reaching into another
+# branch's handlers is an encapsulation violation, and @all must not acquire a
+# runtime dependency on @memory to know who it is talking to. A test compares
+# the two and fails on drift, so the copy cannot rot quietly.
+#
+# NAMED, NEVER GLOBBED. projects/ also holds `marketstand(on _hold)` and
+# `speakeasy(on_hold)`. marketstand's registry still marks its branch active
+# while the directory name says the project is parked, so a glob would broadcast
+# into a held project on the strength of a stale status field. Adding a resident
+# is a deliberate edit here -- the correct amount of friction for "this project
+# now receives fleet announcements".
+RESIDENT_REGISTRIES = (
+    "projects/baud/BAUD_REGISTRY.json",
+    "projects/earmark/EARMARK_REGISTRY.json",
+    "projects/finch/FINCH_REGISTRY.json",
+    "projects/aipass-site/AIPASS-SITE_REGISTRY.json",
+)
+
+
+def get_resident_branches() -> Dict[str, str]:
+    """Load email->path for the named resident projects only.
+
+    Distinct from get_project_tree_branches(), which globs every registry under
+    projects/ and therefore also answers for held projects. Resolution may
+    legitimately be that wide -- a held project's citizen still has an address --
+    but BROADCAST may not: reaching a parked project is a delivery nobody asked
+    for. Same tree, two different questions.
+
+    Returns:
+        Dict mapping email address to absolute path string. A resident whose
+        registry is missing or unreadable contributes nothing and is logged by
+        _branches_from_registry; it never becomes an empty-but-present entry.
+    """
+    repo_root = find_repo_root()
+    result: Dict[str, str] = {}
+    for rel in RESIDENT_REGISTRIES:
+        reg_file = repo_root / rel
+        if reg_file.is_file():
+            result.update(_branches_from_registry(reg_file))
+        else:
+            logger.warning("[registry] resident registry absent: %s", rel)
+    return result
+
+
 def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
     """Load branch email->path mappings from every sealed project under repo_root.
 

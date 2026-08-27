@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(ai_mail)** — verified-admin `@all` reaches the residents + the
+ambiguity warning goes quiet on proven-good cases (DPLAN-0318 circle close):
+behind the DPLAN-0288 five-leg admin verification only, `@all` now adds the
+four resident projects — via a named RESIDENT_REGISTRIES constant mirroring
+@memory's registry_scope (copy not import; an ast-parsing test fails on
+drift), NOT the existing projects glob, which would have silently broadcast
+into two on-hold projects on the strength of a stale ACTIVE flag. Ordinary
+citizens' @all unchanged; a verifier that raises fails toward fleet-only.
+The 104× captured_branch_detection warning was a fleet sweep from ai_mail's
+own process (premise corrected by reading all 104), and the quiet-gate is
+PROVENANCE not success — identity source in {assigned, passport} resolved
+against a catalog; a directory-name identity that resolves "successfully"
+keeps warning, because that is the misattribution the warning exists for.
+1340 passed, 6/6 mutations bite. New ruling banked: should resolution (not
+broadcast) also stop at held projects.
+
 **feat(memory)** — marker 7 memory lane (DPLAN-0318 circle close): the
 self-healing triggers, trigger-driven never a daemon. `templates bump` fires
 the trinity push (dry-run default, only a push that actually succeeded stamps
