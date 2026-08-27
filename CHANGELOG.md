@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(fleet)** — THE FLEET PUSH EXECUTED: five months of memory-file drift
+cured in one gated run. 22/22 branches pushed, ~366 non-canonical entries
+vectorized-verified-pruned (every one recallable via `drone @memory search`),
+563 carried, 0 refusals, receipts stamped everywhere, a canonical session note
+written into every pruned branch's own chronicle. The first fire hit drone's
+60s default timeout mid-run; the fleet parsed clean and the re-run pruned 0 on
+already-cured branches — the idempotency canary proved, proven again in anger.
+Seedgo's live acceptance guard now skips itself with the best sentence of the
+night: "no drifted citizens on disk". Full fresh audit: trinity 100 on 20/22,
+the two below are the deliberately-flagged operational strays (daemon
+.recovery/, devpulse watchdog pair) whose relocation is owned work; every
+other standard 100 fleet-wide. The README species closed the same hour — all
+22 .trinity/README.md files byte-identical (spawn's md5-before-writing caught
+that a template edit reaches newborns only; living branches took an explicit
+copy). _CANONICAL_OBSERVATION_BRANCHES flipped from the six to all eighteen.
+
 **feat(seedgo)+feat(spawn)** — the File set ruling executed on both sides.
 Seedgo: versioned old files are legal residents of .trinity/ — the rule
 matches the shape `<canonical>.pre<sep><token>` (dotless token, canonical base

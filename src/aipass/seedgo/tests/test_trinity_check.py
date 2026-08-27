@@ -176,7 +176,28 @@ _TEMPLATES = {
 
 # Fleet acceptance bar -- see TestFleetAcceptanceBar for why this is coupled
 # to live state and what to do when a branch is migrated.
-_CANONICAL_OBSERVATION_BRANCHES = frozenset({"aipass", "backup", "canary", "devpulse", "hooks", "memory"})
+_CANONICAL_OBSERVATION_BRANCHES = frozenset(
+    {
+        "ai_mail",
+        "aipass",
+        "api",
+        "backup",
+        "canary",
+        "cli",
+        "commons",
+        "daemon",
+        "devpulse",
+        "drone",
+        "flow",
+        "hooks",
+        "memory",
+        "prax",
+        "seedgo",
+        "skills",
+        "spawn",
+        "trigger",
+    }
+)
 
 _UNSET = object()
 
