@@ -11,6 +11,15 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(devpulse)** — the watchdog pair moves out of `.trinity/` (File set
+ruling, DPLAN-0318 circle close): `watchdog_active.json` + lock and
+`watchdog_timers.json` now resolve to a dedicated `.watchdog/` dot-dir
+(gitignored) — `.trinity/` holds identity and memory only. registry.py +
+timer.py resolvers changed, statusline reader repointed, live wire re-armed on
+the new path, 99 watchdog tests green, devpulse trinity 100 on a fresh --full
+audit. 21 of 22 branches now at trinity 100; the last stray (`daemon/.recovery`)
+is queued with its owner.
+
 **fix(memory)** — todos are never archived (memory 1.1.0): spawn caught the
 push's one real defect — non-canonical todos were pruned to vectors like any
 entry, but a todo in a vector is silently forgotten open work ("never rolls"

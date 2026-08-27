@@ -6,7 +6,9 @@
 # Modified: 2026-04-14
 # =============================================
 
-# Storage: .trinity/watchdog_active.json with atomic write (tmp + os.replace).
+# Storage: .watchdog/watchdog_active.json with atomic write (tmp + os.replace).
+# Relocated out of .trinity/ (2026-08-27, File set ruling): .trinity/ holds
+# identity and memory only — operational state lives in its own dot-dir.
 # Devpulse root resolved same way timer.py does (walk upward to AIPASS_REGISTRY.json).
 # Linux-only zombie detection via /proc/<pid>/status. Concurrent register/deregister
 # uses fcntl.flock for a cross-process write lock — simple and correct on Linux,
@@ -76,11 +78,11 @@ def _find_devpulse_root(start: Path | None = None) -> Path | None:
 
 
 def _default_storage_path() -> Path:
-    """Resolve `.trinity/watchdog_active.json` relative to the devpulse root."""
+    """Resolve `.watchdog/watchdog_active.json` relative to the devpulse root."""
     root = _find_devpulse_root()
     if root is None:
         root = Path.cwd()
-    return root / ".trinity" / _STORAGE_FILENAME
+    return root / ".watchdog" / _STORAGE_FILENAME
 
 
 def _empty_store() -> dict:

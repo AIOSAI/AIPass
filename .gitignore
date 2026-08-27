@@ -26,6 +26,7 @@ build/
 AIPASS_REGISTRY.json
 .trinity/
 !src/aipass/spawn/templates/*/.trinity/
+.watchdog/
 .ai_mail.local/
 ai_mail.local/
 .feedback.local/
