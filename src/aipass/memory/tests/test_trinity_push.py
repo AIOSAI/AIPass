@@ -510,13 +510,17 @@ class TestTheNote:
 class TestScope:
     """Fleet mode covers a named list, and an unknown branch is an error."""
 
-    def test_the_fleet_scope_holds_the_core_citizens_and_the_named_residents(self):
+    def test_the_fleet_scope_holds_the_core_citizens_and_the_named_residents(self, live_fleet):
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert {"memory", "canary", "hooks"} <= names
         assert {"baud", "earmark", "finch", "aipass_site"} <= names
 
-    def test_on_hold_projects_are_not_swept_in(self):
-        """marketstand is 'active' inside a directory named (on _hold) — a glob would take it."""
+    def test_on_hold_projects_are_not_swept_in(self, live_fleet):
+        """marketstand is 'active' inside a directory named (on _hold) — a glob would take it.
+
+        Guarded although it passes on a clean checkout: an EMPTY scope also
+        contains no marketstand, and passing for that reason measures nothing.
+        """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert "marketstand" not in names
 
@@ -525,7 +529,7 @@ class TestScope:
         assert 'glob("projects' not in source
         assert len(tp.RESIDENT_REGISTRIES) == 4
 
-    def test_a_single_branch_resolves_with_or_without_the_at_sign(self):
+    def test_a_single_branch_resolves_with_or_without_the_at_sign(self, live_fleet):
         assert tp.resolve_scope("@canary")["branches"][0]["name"] == "canary"
         assert tp.resolve_scope("canary")["branches"][0]["name"] == "canary"
 
@@ -535,7 +539,7 @@ class TestScope:
         assert result["branches"] == []
         assert "Unknown branch" in result["error"]
 
-    def test_the_branch_name_is_the_directory_not_the_registry_label(self):
+    def test_the_branch_name_is_the_directory_not_the_registry_label(self, live_fleet):
         """The checker compares managed_by to the directory name; BACKUP vs backup would fail it."""
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert "backup" in names

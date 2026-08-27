@@ -161,3 +161,44 @@ def temp_registry(tmp_path, sample_registry_data):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(sample_registry_data, indent=2), encoding="utf-8")
     return registry_path
+
+
+@pytest.fixture
+def live_fleet():
+    """The real installation's repo root, or SKIP if this machine has no fleet.
+
+    A handful of tests are valuable precisely because they measure the fleet
+    that exists — that the resident projects really are reachable, that
+    `backup` resolves to its directory name and not the registry's `BACKUP`.
+    Rebuilding those against a synthetic registry would test the parser and
+    stop testing the fleet, so they are guarded rather than converted.
+
+    The ground truth is `AIPASS_REGISTRY.json`, which is gitignored: a clean
+    CI checkout has no registry and no citizen `.trinity/`, so every fleet
+    lane resolves EMPTY there. Empty is not a measurement — it is the absence
+    of one, and a test that reports green over it is claiming to have checked
+    something it never saw.
+
+    ONE discriminator, one place. Two copies of "is there a fleet here" would
+    disagree within a release, and this is a fixture rather than an importable
+    helper because a test module importing a sibling by dotted path resolves
+    only on a branch-dir rootdir — red on CI's repo-root run, a trap this
+    branch has already been caught by once.
+
+    BOTH roots are checked, not one. `registry_scope` and `trinity_push` each
+    resolve their own repo root, and the guarded tests are split across the
+    two: on a real installation the walk-up finds the same registry for both,
+    but a guard that checked only one would report "fleet present" while the
+    other lane was blind — the same one-lane-sees-22-the-other-19 asymmetry
+    this whole marker was built to close.
+
+    Returns:
+        The repo root holding the core registry.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+    from aipass.memory.apps.handlers.templates import trinity_push
+
+    for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
+        if not (root / registry_scope.CORE_REGISTRY).is_file():
+            pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+    return registry_scope.REPO_ROOT

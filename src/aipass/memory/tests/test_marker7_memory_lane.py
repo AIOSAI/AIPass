@@ -73,18 +73,28 @@ class TestOneFleetOneDefinition:
         for project in ("baud", "earmark", "finch", "aipass-site"):
             assert project in named
 
-    def test_a_held_project_is_never_swept_in(self):
-        """marketstand marks its branch active INSIDE a directory named (on _hold)."""
+    def test_a_held_project_is_never_swept_in(self, live_fleet):
+        """marketstand marks its branch active INSIDE a directory named (on _hold).
+
+        Guarded even though it passes on a clean checkout: with no registry the
+        scope is EMPTY, and `"marketstand" not in set()` is true for the one
+        reason that makes the assertion worthless. A green that measures
+        nothing is the failure mode this branch keeps finding in other lanes.
+        """
         names = [item["name"] for item in registry_scope.fleet_branches()]
         assert "marketstand" not in names
         assert not any("hold" in name for name in names)
 
-    def test_the_shared_scope_reaches_every_resident(self):
+    def test_the_shared_scope_reaches_every_resident(self, live_fleet):
         names = {item["name"] for item in registry_scope.fleet_branches()}
         assert {"earmark", "finch", "aipass_site", "baud"} <= names
 
-    def test_the_push_and_the_registry_lane_agree_on_the_fleet(self):
-        """The two lanes disagreeing by three citizens is the defect being closed."""
+    def test_the_push_and_the_registry_lane_agree_on_the_fleet(self, live_fleet):
+        """The two lanes disagreeing by three citizens is the defect being closed.
+
+        Guarded for the same reason as the held-project pin: two empty sets
+        satisfy `<=` and agree about nothing.
+        """
         push_names = {item["name"].lower() for item in trinity_push.resolve_scope()["branches"]}
         registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
@@ -630,8 +640,11 @@ class TestTheDeadTemplateLaneIsRetired:
     def test_the_spawn_scaffold_lane_survives(self):
         assert hasattr(spawn_pusher, "push_to_spawn_templates")
 
-    def test_template_status_reports_the_live_receipts(self):
-        """The old status read a push log only the dead lane could ever move."""
+    def test_template_status_reports_the_live_receipts(self, live_fleet):
+        """The old status read a push log only the dead lane could ever move.
+
+        Reads every citizen's receipt off disk, so it needs a real fleet.
+        """
         status = template_bump.receipt_status()
 
         assert status["gold"] == template_bump.gold_versions()

@@ -230,6 +230,54 @@ class TestReshapeOnlyKeepsTheExemption:
         assert len(result) == 1
         assert result[0]["entry_type"] == "todos"
 
+    _TODOS_AS_DICT = {
+        "enabled": True,
+        "enforce": True,
+        "entry_types": {"todos": {"container": "todos", "field": "task", "max_chars": 150, "kind": "dict"}},
+    }
+
+    def test_editing_a_drifted_todo_into_another_drifted_shape_is_caught(self) -> None:
+        """@hooks' M5, and it SURVIVED my set until they named it (2026-08-27).
+
+        The exemption is for the entry that is ALREADY ON DISK — not for "the
+        canonical field is missing on both sides". Both values here are
+        unmeasurable (a list where a string belongs) and they are DIFFERENT
+        values under the same key, so this write really did change the entry
+        and must be reported. Keying identity on the field name instead of the
+        raw value reads the second as untouched and exempts a drift this write
+        introduced: one drifted todo would license every future edit of it.
+
+        A NEW key never reaches this comparison at all (`key_known` is False
+        and the entry is checked outright), which is why the obvious two-key
+        version of this test does NOT bite the mutant — the surviving line is
+        only reachable when the key exists and the value moved.
+
+        HONEST ABOUT THE COVERAGE: this exercises the DICT container path,
+        which no shipped entry type reaches — all four are `kind: list` since
+        the grandfather clause narrowed to todos, so `_is_unchanged`'s exempt
+        branch is currently unreachable in production. That is the other half
+        of why the mutation survived. Pinned at the contract rather than end
+        to end, because the branch is one config edit from live and a dead
+        branch that is also unpinned comes back wrong.
+        """
+        mod = _get_entry_limits()
+        on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+        written = {"todos": {"a": {"task": ["a completely different malformed todo"]}}}
+
+        result = mod.changed_entries(on_disk, written, self._TODOS_AS_DICT)
+
+        assert [hit["key"] for hit in result] == ["a"], "a drifted todo exempted a different value under its own key"
+
+    def test_the_same_drifted_todo_is_still_exempt_in_the_dict_path(self) -> None:
+        """The other half of the contract: identical raw value, still skipped."""
+        mod = _get_entry_limits()
+        on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+        rewritten = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+
+        result = mod.changed_entries(on_disk, rewritten, self._TODOS_AS_DICT)
+
+        assert result == []
+
 
 # ===========================================================================
 # 4. changed_entries: shrinking an entry is not flagged
