@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(memory)** — marker 7 memory lane (DPLAN-0318 circle close): the
+self-healing triggers, trigger-driven never a daemon. `templates bump` fires
+the trinity push (dry-run default, only a push that actually succeeded stamps
+the fleet ledger); rollover normalizes the rolled branch's machine frame on
+touch (entries byte-identical, sibling branches untouched); the dead
+pre-trinity pusher/differ lane retired to the archive with its 67 tests;
+ruling 5 confirmed (schema_version IS the receipt field, both sides already
+agree); sync-lines renamed report-lines and made genuinely read-only; the
+grandfather clauses narrowed to todos only (one RESHAPE_ONLY list shared by
+gate and push); the fleet defined once in registry_scope.py — residents now
+visible to monitor/report (44 files seen, was 38). The wifi outage's one red
+test led to the find of the build: `_announce_bump` hit a NameError (json
+never imported) that a broad catch logged as "Event bus unavailable" — the
+bump had never announced anything; catch split so environment facts and bugs
+stop wearing the same clothes. Push reports now always state todos ("N seen,
+M to reshape") so silence can't hide open work again. 1225 passed from repo
+root, seedgo --full 100% including trinity, mutations bite ×4.
+
 **feat(seedgo)** — marker 7 seedgo lane (DPLAN-0318 circle close): trinity was
 measured to ALREADY be a gate (non-ADVISORY, passes only at 100, failures land
 in failed_checks) — so instead of performing a flip, 6 regression pins now

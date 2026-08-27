@@ -83,11 +83,9 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
         return lines
 
     reshapes = entry.get("reshapes", [])
+    todos = _todo_clause(entry.get("todos_seen", 0), len(reshapes), dry_run)
     if dry_run:
-        lines.append(
-            f"   would prune {entry['pruned']} entries · {entry['carried']} carry over untouched"
-            + (f" · {len(reshapes)} todo(s) to reshape in place" if reshapes else "")
-        )
+        lines.append(f"   would prune {entry['pruned']} entries · {entry['carried']} carry over untouched · {todos}")
         lines.extend(_prune_lines(entry.get("prunes", [])))
         lines.extend(_reshape_lines(reshapes))
         lines.extend(_frame_lines(entry.get("frame_changes", {})))
@@ -96,7 +94,7 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
             f"   pruned {entry['pruned']} · carried {entry['carried']} · files written {entry['written']}"
             f" · note {'written' if entry['noted'] else 'not needed'}"
             f" · receipt {'stamped' if entry['receipt'] else 'NOT stamped'}"
-            + (f" · {len(reshapes)} todo(s) left to reshape" if reshapes else "")
+            f" · {todos}"
         )
         lines.extend(_reshape_lines(reshapes))
         lines.extend(f"     ! {message}" for message in entry.get("errors", []))
@@ -106,6 +104,20 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
         lines.append(f"   NOT push scope — {len(strays)} stray file(s) in .trinity/: {', '.join(strays)}")
     lines.append("")
     return lines
+
+
+def _todo_clause(seen: int, reshaping: int, dry_run: bool) -> str:
+    """What the push saw in ``todos`` — stated on EVERY branch, every run.
+
+    Silence used to be the report's answer for a branch with no drifted todos,
+    which made "this agent owes nothing" and "this agent's open work is gone"
+    render identically. That is the exact blindness the morning of 2026-08-27
+    ran into: 67 todos were archived across 8 branches and every affected
+    agent loaded an empty list that read as a clean desk. A count nobody asked
+    for is cheap; a zero you cannot interpret costs a fleet a morning.
+    """
+    tense = "to reshape in place" if dry_run else "left to reshape"
+    return f"todos {seen} seen, {reshaping} {tense}"
 
 
 def _prune_lines(prunes: List[dict]) -> List[str]:

@@ -550,19 +550,26 @@ def execute_rollover() -> Dict[str, Any]:
 
 def sync_line_counts() -> Dict[str, Any]:
     """
-    Update line count metadata for all branch memory files.
+    Measure line counts for every branch memory file. READ-ONLY.
 
-    Reads actual line counts and updates document_metadata.status.current_lines
-    for all *.local.json and *.observations.json files in AIPASS_REGISTRY.
+    The name is kept because this is the handler seam the module still calls;
+    the behaviour is a report. Nothing is written: the one write this lane ever
+    had was `document_metadata.status.last_health_check`, and the whole `status`
+    block left the standard on 2026-08-25 (health is computed at run time, never
+    stored). The `current_lines` field it claimed to update never existed in the
+    files either — the count was computed, returned, and dropped.
+
+    The verb in front of it is now `rollover report-lines`; see
+    `modules/rollover.RENAMED_VERBS`.
 
     Returns:
-        Dict with success status, updated count, and failures
+        Dict with success status, measured count, and failures
     """
     result = line_counter.update_all_memory_files()
 
     if result["success"]:
-        logger.info(f"[rollover] Synced line counts: {result['updated']} updated, {result['failed']} failed")
+        logger.info(f"[rollover] Measured line counts: {result['updated']} read, {result['failed']} failed")
     else:
-        logger.error("[rollover] Failed to sync line counts")
+        logger.error("[rollover] Failed to measure line counts")
 
     return result

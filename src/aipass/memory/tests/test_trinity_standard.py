@@ -86,31 +86,55 @@ class TestUnmeasurableFieldIsAViolation:
         assert hits[0]["reason"] == "unmeasurable"
         assert hits[0]["found_type"] == "list"
 
-    def test_a_legacy_unchanged_list_entry_is_left_alone(self):
-        """Rollover-safety is not sacrificed to catch the drift.
+    def test_a_legacy_unchanged_list_entry_is_now_refused(self):
+        """Rewritten 2026-08-27 — the fleet the exemption protected no longer exists.
 
-        Nine branches carry list-shaped notes today and enforce is ON. If an
-        unmeasurable entry already on disk were refused, every one of those
-        branches would be unable to write its memory file at all — the fix
-        would brick the citizens it is meant to protect.
+        The nine branches carrying list-shaped notes were cured by the trinity
+        push; every one of those entries is in vectors and out of the files.
+        Keeping the exemption past that point protects nothing and hides the
+        next list-shaped note somebody writes. `todos` keep it, and only todos:
+        that is the one container no machine may prune, so refusing writes
+        there would brick the branch's rollover.
         """
         legacy = {"number": 1, "note": [{"title": "x" * 500}]}
         before = {"observations": [legacy]}
         after = {"observations": [dict(legacy)]}
-        assert el.changed_entries(before, after, _limits()) == []
+        hits = el.changed_entries(before, after, _limits())
+        assert len(hits) == 1
+        assert hits[0]["key"] == "0"
 
-    def test_a_second_list_entry_beside_a_legacy_one_is_still_refused(self):
-        """The hole a text-identity dedup would leave.
+    def test_the_exemption_survives_for_todos_alone(self):
+        """The container the push may not cure keeps its rollover-safety."""
+        limits = _limits(max_chars=150, field="task", container="todos")
+        legacy = {"number": 1, "task": [{"title": "x" * 500}]}
+        before = {"todos": [legacy]}
+        after = {"todos": [dict(legacy)]}
+        assert el.changed_entries(before, after, limits) == []
 
-        If unmeasurable entries all collapse to one sentinel, a branch with a
-        single legacy list-note could add ten more and every one would read as
-        'already on disk'. Identity must be the raw value, not the sentinel.
-        """
+    def test_both_list_entries_are_refused_in_an_archivable_container(self):
+        """Post-narrowing there is nothing to exempt here: both are reported."""
         legacy = {"number": 1, "note": [{"title": "old"}]}
         before = {"observations": [legacy]}
         after = {"observations": [{"number": 2, "note": [{"title": "new"}]}, dict(legacy)]}
         hits = el.changed_entries(before, after, _limits())
+        assert {hit["key"] for hit in hits} == {"0", "1"}
+
+    def test_a_second_list_shaped_todo_beside_a_legacy_one_is_still_refused(self):
+        """The hole a text-identity dedup would leave, in the container that kept the exemption.
+
+        If unmeasurable entries all collapse to one sentinel, a branch with a
+        single legacy list-shaped todo could add ten more and every one would
+        read as 'already on disk'. Identity must be the raw value, not the
+        sentinel. Moved here from observations when the clause was narrowed —
+        `todos` is now the only place the exemption can be exploited at all.
+        """
+        limits = _limits(max_chars=150, field="task", container="todos")
+        legacy = {"number": 1, "task": [{"title": "old"}]}
+        before = {"todos": [legacy]}
+        after = {"todos": [{"number": 2, "task": [{"title": "new"}]}, dict(legacy)]}
+        hits = el.changed_entries(before, after, limits)
         assert len(hits) == 1
+        assert hits[0]["key"] == "0"
         assert hits[0]["key"] == "0"
 
     def test_a_dict_container_entry_that_changed_shape_is_refused(self):
@@ -601,15 +625,18 @@ class TestReceiptWiring:
         assert receipt.read_receipt(trinity) is None
 
     def test_the_push_lane_stamps_only_branches_it_changed(self):
-        """Source-level pin: the stamp sits inside the `branch_changed` arm.
+        """Source-level pin: the stamp sits inside the `if written:` arm.
 
         Stamping every scanned branch would make the receipt report the run's
         INTENT rather than the branch's reality — the one thing the standard
         says it must never do.
+
+        Repointed 2026-08-27: the stamping lane moved from the retired
+        pre-.trinity `pusher.py` (archived) to `trinity_push.apply_plan`, which
+        is what actually stamped all 22 receipts in the fleet push.
         """
-        source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "pusher.py").read_text(encoding="utf-8")
-        arm = source[source.index("if branch_changed:") :]
-        arm = arm[: arm.index("\n    if not dry_run and result")]
+        source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
+        arm = source[source.index("    if written:") :]
         assert "receipt.write_receipt(" in arm
         assert "STAMPED_BY_PUSH" in arm
 
@@ -690,20 +717,26 @@ class TestMissingFieldIsAViolation:
         for key in ("entry_type", "container", "key"):
             assert isinstance(hit[key], str)
 
-    def test_untouched_legacy_drift_still_writes(self):
-        """9+ branches carry the renamed shape until the reset — they must keep writing."""
+    def test_untouched_legacy_drift_is_now_refused_too(self):
+        """Rewritten 2026-08-27: the push cured the renamed shape fleet-wide.
+
+        The exemption existed so drifted branches could keep writing while the
+        reset was pending. The reset happened. What is left in an archivable
+        container is not legacy, it is new.
+        """
         legacy = {"number": 1, "observation": "x" * 500}
         before = {"observations": [legacy]}
         after = {"observations": [dict(legacy)]}
-        assert el.changed_entries(before, after, _limits()) == []
+        hits = el.changed_entries(before, after, _limits())
+        assert len(hits) == 1
 
     def test_carrying_one_drifted_entry_does_not_license_a_second(self):
+        """Both are reported now — the new one, and the one that was tolerated."""
         legacy = {"number": 1, "observation": "x" * 500}
         before = {"observations": [legacy]}
         after = {"observations": [{"number": 2, "observation": "y" * 500}, dict(legacy)]}
         hits = el.changed_entries(before, after, _limits())
-        assert len(hits) == 1
-        assert hits[0]["key"] == "0"
+        assert {hit["key"] for hit in hits} == {"0", "1"}
 
     def test_a_dict_container_refuses_a_missing_field_too(self):
         limits = _limits(max_chars=200, field="value", container="key_learnings")

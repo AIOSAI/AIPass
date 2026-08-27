@@ -82,6 +82,7 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
+from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.tracking import tab_renderer
@@ -105,16 +106,12 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 
-CORE_REGISTRY = "AIPASS_REGISTRY.json"
-
-# The DPLAN scope's resident projects, named one by one on purpose. See the
-# module docstring: a glob here would widen the fleet without a ruling.
-RESIDENT_REGISTRIES = (
-    "projects/baud/BAUD_REGISTRY.json",
-    "projects/earmark/EARMARK_REGISTRY.json",
-    "projects/finch/FINCH_REGISTRY.json",
-    "projects/aipass-site/AIPASS-SITE_REGISTRY.json",
-)
+# The fleet is defined ONCE, in registry_scope — the push resolved its own
+# scope from a private constant while rollover/lint/health walked the registry
+# lane and reached three branches fewer. Re-exported here because this module's
+# readers look for it here, but there is only one list.
+CORE_REGISTRY = registry_scope.CORE_REGISTRY
+RESIDENT_REGISTRIES = registry_scope.RESIDENT_REGISTRIES
 
 # =============================================================================
 # THE CANONICAL SHAPE (mirrors seedgo/apps/handlers/aipass_standards/trinity.md)
@@ -165,8 +162,9 @@ _SECTIONS = {"local": ("todos", "key_learnings", "sessions"), "observations": ("
 
 # The containers the prune lane may not touch. See the module docstring: for
 # open work, archiving IS losing, so these are reported for reshape-in-place
-# and left in the file exactly as found.
-RESHAPE_ONLY_SECTIONS = ("todos",)
+# and left in the file exactly as found. Defined in entry_limits — the write
+# gate grandfathers exactly these same containers, and two lists would drift.
+RESHAPE_ONLY_SECTIONS = entry_limits.RESHAPE_ONLY_SECTIONS
 
 _TYPE_INT = "int"
 _TYPE_STR = "str"
@@ -491,6 +489,7 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         "prunes": [],
         "reshapes": [],
         "carried": 0,
+        "todos_seen": 0,
         "frame_changes": [],
         "before": None,
         "after": None,
@@ -515,6 +514,13 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         if not isinstance(raw, list):
             plan["error"] = f"{_FILE_NAMES[file_key]}: '{section}' must be a list, found {type(raw).__name__}"
             return plan
+        if section in RESHAPE_ONLY_SECTIONS:
+            # Counted whether or not any of them drifted. A branch that owes
+            # nothing and a branch whose debts vanished both show zero
+            # reshapes; only the count SEEN tells those two apart, and the
+            # push that archived 67 todos is the reason that distinction is
+            # load-bearing rather than decorative (@ai_mail, 2026-08-27).
+            plan["todos_seen"] += len(raw)
         kept = []
         for index, entry in enumerate(raw):
             problems = entry_problems(section, entry, caps.get(section))
@@ -572,6 +578,7 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
         "prunes": [],
         "reshapes": [],
         "carried": 0,
+        "todos_seen": 0,
         "strays": [],
     }
 
@@ -590,6 +597,7 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
         plan["prunes"].extend(file_plan["prunes"])
         plan["reshapes"].extend(file_plan["reshapes"])
         plan["carried"] += file_plan["carried"]
+        plan["todos_seen"] += file_plan["todos_seen"]
 
     return plan
 
@@ -897,6 +905,7 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
         "branch": plan["branch"],
         "pruned": 0,
         "carried": plan["carried"],
+        "todos_seen": plan.get("todos_seen", 0),
         "reshapes": list(plan.get("reshapes", [])),
         "written": 0,
         "noted": False,
@@ -1049,6 +1058,7 @@ def _dry_entry(plan: dict) -> dict:
         "branch": plan["branch"],
         "pruned": len(plan["prunes"]),
         "carried": plan["carried"],
+        "todos_seen": plan["todos_seen"],
         "prunes": plan["prunes"],
         "reshapes": plan["reshapes"],
         "frame_changes": {item["file_key"]: item["frame_changes"] for item in plan["files"] if not item["error"]},

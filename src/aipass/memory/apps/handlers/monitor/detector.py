@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-16
 # Modified: 2026-03-06
 # =============================================
@@ -173,17 +173,36 @@ def _read_single_registry(registry_path: Path, root: Path) -> List[Dict[str, Any
 
 def _read_registry() -> List[Dict[str, Any]]:
     """
-    Read all project registries (AIPass + external projects from caller CWD).
+    Read every registry this fleet covers: core, residents, then callers.
+
+    THE RESIDENTS ARE NOT DISCOVERED, THEY ARE NAMED. Until 2026-08-27 this
+    function reached 19 of the fleet's 22 branches: the core citizens plus
+    whatever external registry a caller's cwd had once persisted into
+    known_registries.json. `baud` was in there by accident of where somebody
+    happened to stand; `earmark`, `finch` and `aipass_site` were not, so their
+    memory files could overflow with no rollover ever running on them while
+    the trinity push — which resolved its own scope from a named constant —
+    saw all 22. A gap that depends on a caller's working directory is not a
+    policy, and a citizen whose memories can overflow unattended is
+    slow-motion data loss.
+
+    Both lanes now read `registry_scope.RESIDENT_REGISTRIES`, so the fleet has
+    exactly one definition. Caller discovery is unchanged and still runs after
+    the residents — an external project calling in from its own tree is a
+    different mechanism with a different purpose.
 
     Registry paths are relative — resolved against their respective project root.
 
     Returns:
         List of branch dictionaries with absolute paths
     """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
     branches = _read_single_registry(_REPO_ROOT / "AIPASS_REGISTRY.json", _REPO_ROOT)
 
     seen_paths = {b.get("path") for b in branches}
-    for reg_path in _find_caller_registries():
+    resident_paths = registry_scope.resident_registry_paths(_REPO_ROOT)
+    for reg_path in resident_paths + _find_caller_registries():
         for branch in _read_single_registry(reg_path, reg_path.parent):
             if branch.get("path") not in seen_paths:
                 branches.append(branch)

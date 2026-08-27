@@ -120,7 +120,7 @@ def print_help():
     table.add_row("rollover run", "Execute memory rollover")
     table.add_row("rollover status", "Show rollover statistics")
     table.add_row("rollover check", "Dry run — check what needs rollover")
-    table.add_row("rollover sync-lines", "Update line count metadata")
+    table.add_row("rollover report-lines", "Report line counts (read-only)")
     table.add_row("rollover push [--json]", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
     table.add_row("config get [@branch] [--json]", "Show effective rollover limits (defaults + deviations)")
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
@@ -130,7 +130,8 @@ def print_help():
     # itself instead of reading as an unknown command. Active curated-truth piece:
     # Compass, @devpulse-owned — drone @devpulse compass.
     table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
-    table.add_row("templates <subcommand>", "Living template push, diff, and status")
+    table.add_row("push [--branch @b] [--confirm]", "Trinity push — rebuild frames, archive drift, gated")
+    table.add_row("templates <subcommand>", "Gold templates: spawn-templates, template-status, bump")
     table.add_row("pool process", "Process pool files + check/run rollover")
     table.add_row("pool status", "Show pool file count, config, vector stats")
     table.add_row("verify <plan_label>", "Check if a plan is vectorized in ChromaDB")
@@ -181,7 +182,7 @@ def print_help():
     console.print()
 
     console.print(
-        "Commands: search, rollover \\[run|status|check|sync-lines|push],"
+        "Commands: search, push, rollover \\[run|status|check|report-lines|push],"
         " config \\[get|set|set-default], lint,"
         " pool \\[process|status], templates, verify, watch"
     )

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-13
 # Modified: 2026-06-13
 # =============================================
@@ -18,8 +18,35 @@ single entry text exceeds its character cap.
 
 Provides ``changed_entries()`` — a pure diff helper that compares
 before/after file dicts and returns only NEW or CHANGED entries that
-exceed their character cap.  Unchanged legacy over-limit entries pass
-untouched (rollover-safe).
+exceed their character cap.
+
+THE GRANDFATHER CLAUSE, NARROWED 2026-08-27
+-------------------------------------------
+"Unchanged and over cap passes untouched" was written for a fleet full of
+legacy drift: without it a maintenance write — a rollover, a frame
+re-render — would be refused whole because of an entry it was not touching,
+and the branch's memories would stop rolling.  The trinity push has since
+cured that drift fleet-wide, so for the three ARCHIVABLE containers the
+clause now protects nothing real and hides everything new: a fresh over-cap
+session written straight to disk reads as "already there" on the next write
+and never surfaces.
+
+``todos`` keep the exemption, and only todos.  A non-canonical todo can sit
+in a branch indefinitely BY DESIGN — the push is forbidden to archive open
+work (1.1.0), so nothing but that branch's own agent can ever cure it.
+Refusing every write to such a file would brick its rollover, which is
+slow-motion data loss: the debt would be preserved by destroying the lane
+that preserves everything else.  The gate and the push share ONE
+``RESHAPE_ONLY_SECTIONS`` rather than each restating it, because two lists of
+"the containers we may not prune" would disagree within a release.
+
+The exemption covers what is ALREADY ON DISK.  A newly written over-cap todo
+is refused like anything else.
+
+The constant lives HERE rather than beside the push's prune lane only because
+``trinity_push`` already imports this module: defining it there and importing
+it back would close a cycle (entry_limits -> trinity_push -> memory_files ->
+entry_limits). The push re-exports it, so both lanes still read one list.
 
 Usage:
     from aipass.memory.apps.handlers.json.entry_limits import (
@@ -44,6 +71,12 @@ from aipass.memory.apps.handlers.json import config_loader
 
 # Resolve paths relative to handler location (same pattern as memory_files.py)
 _MEMORY_ROOT = Path(__file__).resolve().parents[3]
+
+# Containers where a non-canonical entry may legitimately persist, because no
+# machine is allowed to remove it. Today: todos — open work is never archived,
+# so only the branch's own agent can cure a drifted one. See the module
+# docstring; ``trinity_push`` re-exports this as its prune-lane exemption.
+RESHAPE_ONLY_SECTIONS = ("todos",)
 
 
 def _deep_merge_entry_types(
@@ -352,17 +385,20 @@ def _check_dict_container(
         limits: The dict returned by :func:`load_entry_limits`.
 
     Returns:
-        List of violation dicts for new/changed entries that exceed cap.
+        List of violation dicts for over-cap entries. In a RESHAPE_ONLY
+        container, entries already on disk are skipped; everywhere else an
+        over-cap entry is a violation whether or not this write created it.
     """
     if not isinstance(after_container, dict):
         return []
     before_dict = before_container if isinstance(before_container, dict) else {}
     hits: list[dict[str, Any]] = []
 
+    exempt = container in RESHAPE_ONLY_SECTIONS
     for key, after_value in after_container.items():
         after_text = _extract_text(after_value, field)
-        if _is_unchanged(after_text, after_value, key in before_dict, before_dict.get(key), field):
-            continue  # Unchanged — skip even if over-limit
+        if exempt and _is_unchanged(after_text, after_value, key in before_dict, before_dict.get(key), field):
+            continue  # Already on disk in a container nothing may prune
         verdict = check_entry(type_name, after_text, limits)
         if not verdict["ok"]:
             hits.append(_violation(type_name, container, str(key), verdict, _found_type(after_value, field), field))
@@ -388,7 +424,9 @@ def _check_list_container(
         limits: The dict returned by :func:`load_entry_limits`.
 
     Returns:
-        List of violation dicts for new/changed entries that exceed cap.
+        List of violation dicts for over-cap entries. In a RESHAPE_ONLY
+        container, entries already on disk are skipped; everywhere else an
+        over-cap entry is a violation whether or not this write created it.
     """
     if not isinstance(after_container, list):
         return []
@@ -401,13 +439,15 @@ def _check_list_container(
     before_unmeasurable = [item for item in before_list if _extract_text(item, field) is None]
     hits: list[dict[str, Any]] = []
 
+    exempt = container in RESHAPE_ONLY_SECTIONS
     for idx, after_item in enumerate(after_container):
         after_text = _extract_text(after_item, field)
-        if after_text is None:
-            if after_item in before_unmeasurable:
-                continue  # Legacy drift already on disk — not this write's doing
-        elif after_text in before_texts:
-            continue  # Already on disk — not new/changed; skip even if over cap
+        if exempt:
+            if after_text is None:
+                if after_item in before_unmeasurable:
+                    continue  # Already on disk, and nothing may prune it
+            elif after_text in before_texts:
+                continue  # Already on disk, and nothing may prune it
         verdict = check_entry(type_name, after_text, limits)
         if not verdict["ok"]:
             hits.append(_violation(type_name, container, str(idx), verdict, _found_type(after_item, field), field))
@@ -422,9 +462,13 @@ def changed_entries(
     """Return over-limit entries that are NEW or CHANGED between *before* and *after*.
 
     This is a **pure function** — no I/O, no file reads, no side effects.
-    Unchanged entries (even if over-limit) are intentionally skipped so
-    that rollover and other maintenance writes are never blocked by
-    legacy fat entries.
+
+    In a ``RESHAPE_ONLY_SECTIONS`` container (todos) an entry already on disk
+    is skipped even when over cap, so a maintenance write is never blocked by
+    a debt no machine is allowed to prune. Everywhere else an over-cap entry
+    is reported whether or not this write created it — the fleet is canonical,
+    so "unchanged" no longer means "legacy", it means "written and not yet
+    caught".
 
     Args:
         before: Parsed .trinity file dict (current on-disk content).

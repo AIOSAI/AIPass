@@ -1010,6 +1010,61 @@ class TestTodosAreReportedNeverArchived:
         assert "reshape" in rendered.lower()
         assert "todos[0]" in rendered
 
+    # -- @ai_mail's catch: silence about todos is the shape the defect wore ---
+
+    @staticmethod
+    def _canonical_todo(number: int) -> dict:
+        return {"number": number, "date": "2026-08-27", "task": "ship it", "priority": "high", "status": "open"}
+
+    def test_the_plan_counts_every_todo_it_saw_not_only_the_drifted_ones(self, tmp_path):
+        root = _branch(tmp_path, "guinea", {"todos": [self._canonical_todo(1), self._drifted_todo()]})
+
+        plan = tp.plan_branch("guinea", root, _config())
+
+        assert plan["todos_seen"] == 2
+        assert len(plan["reshapes"]) == 1
+
+    def test_a_clean_desk_and_an_emptied_one_do_not_render_the_same(self, tmp_path):
+        """@ai_mail, 2026-08-27: 'an empty todos[] reads as a clean desk'.
+
+        That is exactly how the archived-todos defect stayed invisible for a
+        morning — the branch saw a zero and had no way to tell "I owe nothing"
+        from "something took what I owed". The report states the count it saw
+        EVERY run, so the two answers can never render identically again.
+        """
+        from aipass.memory.apps.handlers.templates import push_report
+
+        def rendered(todos):
+            root = _branch(tmp_path / str(len(todos)), "guinea", {"todos": todos})
+            plan = tp.plan_branch("guinea", root, _config())
+            return "\n".join(
+                push_report.render(
+                    {"dry_run": True, "scope": 1, "errors": [], "branches": [tp._dry_entry(plan)]}, "@guinea"
+                )
+            )
+
+        empty = rendered([])
+        clean = rendered([self._canonical_todo(1), self._canonical_todo(2)])
+
+        assert empty != clean
+        assert "todos 0" in empty
+        assert "todos 2" in clean
+
+    def test_the_executed_report_states_the_count_with_nothing_to_reshape(self, tmp_path):
+        """Nothing to reshape is a MEASUREMENT, and it has to be spoken."""
+        from aipass.memory.apps.handlers.templates import push_report
+
+        contents = {"todos": [self._canonical_todo(1)], "sessions": [_entry(1, findings=["d"])]}
+        root = _branch(tmp_path, "guinea", contents)
+        plan = tp.plan_branch("guinea", root, _config())
+        applied = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+        rendered = "\n".join(
+            push_report.render({"dry_run": False, "scope": 1, "errors": [], "branches": [applied]}, "@guinea")
+        )
+
+        assert "todos 1" in rendered
+        assert "0 left to reshape" in rendered
+
     def test_the_written_note_fits_the_branchs_own_cap_end_to_end(self, tmp_path):
         """The cap must reach build_note through apply_plan, not just in unit calls.
 
