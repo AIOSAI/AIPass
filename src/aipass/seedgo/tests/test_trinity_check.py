@@ -428,6 +428,11 @@ class TestTheOneLaw:
     """Nothing unmeasurable may ever produce a passing group."""
 
     def test_missing_trinity_dir_fails_every_group(self, trinity, tmp_path):
+        # The registry marks this a LIVE installation. Without it the tree is
+        # indistinguishable from a fresh clone, where an absent .trinity is an
+        # environment fact rather than a violation -- see
+        # TestACleanCheckoutIsNotAViolatingFleet.
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         branch = tmp_path / "nobody"
         branch.mkdir()
 
@@ -441,6 +446,7 @@ class TestTheOneLaw:
             assert check["message"], f"{check['name']} failed without saying why"
 
     def test_missing_trinity_dir_names_the_missing_directory(self, trinity, tmp_path):
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         branch = tmp_path / "nobody"
         branch.mkdir()
 
@@ -911,6 +917,97 @@ class TestDriftClassRegressions:
 
 
 # ===========================================================================
+# CI. A clean checkout is an environment fact, not 18 simultaneous violations
+# ===========================================================================
+
+
+class TestACleanCheckoutIsNotAViolatingFleet:
+    """CI ran seedgo-audit on a GitHub runner and every one of the 18 branches
+    came back trinity 0 / FAILED. Nothing was wrong with the fleet: .trinity/
+    and AIPASS_REGISTRY.json are BOTH gitignored by design -- memories never
+    ship -- so a fresh clone has no memory files at all and the checker refused
+    every group, which branch_audit turned into a score of 0.
+
+    THE ONE LAW says unmeasurable is REFUSED, never zeroed, and a whole SPECIES
+    missing on a tree that also has no registry is an environment fact. So the
+    standard reports itself not-applicable for the run and is left out of the
+    gating average entirely -- not scored 0 (a lie about the branch) and not
+    scored 100 (a lie about the measurement).
+
+    The discrimination is deliberately conservative: BOTH signals must be
+    absent. A live installation missing .trinity on one branch still has the
+    registry, so that stays exactly the violation it always was.
+    """
+
+    @staticmethod
+    def _ci_tree(root: Path, name: str = _BRANCH) -> Path:
+        """A branch as a fresh clone has it: code, no memories, no registry."""
+        branch = root / name
+        (branch / "apps").mkdir(parents=True)
+        return branch
+
+    def test_a_clean_checkout_is_not_applicable_rather_than_zero(self, trinity, tmp_path):
+        result = trinity.check_branch(str(self._ci_tree(tmp_path)))
+
+        assert result["not_applicable"] is True
+        assert result["score"] != 0
+
+    def test_a_clean_checkout_does_not_report_a_failure(self, trinity, tmp_path):
+        """FAILED on a clean clone is what turned CI red."""
+        assert trinity.check_branch(str(self._ci_tree(tmp_path)))["passed"] is not False
+
+    def test_the_skip_announces_itself_loudly(self, trinity, tmp_path):
+        """A silent skip is how a broken standard hides. Say why, by name."""
+        lines = trinity.check_branch_info(str(self._ci_tree(tmp_path)))
+
+        assert any("not measured" in line.lower() for line in lines)
+        assert any("checkout" in line.lower() for line in lines)
+
+    def test_a_live_installation_missing_trinity_is_still_a_violation(self, trinity, tmp_path):
+        """The whole point of the discrimination -- a registry means a real
+        install, so an absent .trinity there is a real finding.
+        """
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
+        result = trinity.check_branch(str(self._ci_tree(tmp_path)))
+
+        assert result.get("not_applicable") is not True
+        assert result["passed"] is False
+
+    def test_a_sibling_with_memories_also_means_a_live_installation(self, trinity, tmp_path):
+        """Registry absent but the fleet clearly has citizens -- not a clone."""
+        _write_branch(tmp_path, name="othercitizen")
+        result = trinity.check_branch(str(self._ci_tree(tmp_path)))
+
+        assert result.get("not_applicable") is not True
+        assert result["passed"] is False
+
+    def test_a_populated_branch_is_scored_normally(self, trinity, tmp_path):
+        """Over-refusal guard: the escape hatch must not swallow real runs."""
+        result = trinity.check_branch(str(_write_branch(tmp_path)))
+
+        assert result.get("not_applicable") is not True
+        assert result["score"] == 100
+
+    def test_the_spawn_template_trinity_does_not_look_like_a_citizen(self, trinity, tmp_path):
+        """The ONE .trinity that DOES ship: spawn/templates/*/.trinity is
+        un-ignored in .gitignore. It sits two levels down, not at
+        <fleet>/<branch>/.trinity, so it must not make a clone look live.
+        """
+        template = tmp_path / "spawn" / "templates" / "aipass_framework" / ".trinity"
+        template.mkdir(parents=True)
+        (template / "local.json").write_text("{}\n", encoding="utf-8")
+
+        assert trinity.check_branch(str(self._ci_tree(tmp_path)))["not_applicable"] is True
+
+    def test_a_not_applicable_result_still_names_the_standard(self, trinity, tmp_path):
+        """Downstream readers key on it; a bare dict would break them."""
+        result = trinity.check_branch(str(self._ci_tree(tmp_path)))
+
+        assert result["standard"] == "TRINITY"
+        assert isinstance(result.get("checks"), list)
+
+
+# ===========================================================================
 # Marker 7. The gate, pinned so it cannot be downgraded by accident
 # ===========================================================================
 
@@ -1311,6 +1408,10 @@ class TestVersionedBackupsAreLegalResidents:
         assert trinity.is_versioned_backup(name) is expected
 
     def test_d14_check_branch_info_is_empty_when_trinity_is_absent(self, trinity, tmp_path):
+        # Registry present: a LIVE installation whose branch has no .trinity.
+        # On a fresh clone the same shape announces itself instead of staying
+        # silent -- see TestACleanCheckoutIsNotAViolatingFleet.
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         branch = tmp_path / "nobody"
         branch.mkdir()
 
@@ -1977,3 +2078,59 @@ class TestKnownSilentPassHole:
         check = _group(result, "Char caps")
         assert check["passed"] is False, f"silent pass: {check['message']}"
         assert check["score"] < 100
+
+
+# ===========================================================================
+# A RELATIVE BRANCH PATH NAMES THE SAME BRANCH AN ABSOLUTE ONE DOES
+# ===========================================================================
+
+
+class TestARelativeBranchPathStillNamesTheBranch:
+    """Found while verifying my own memories after a write: running the checker
+    on "." reported score 93 with 'document_name seedgo.LOCAL does not name
+    branch ' and 'managed_by seedgo != branch directory name ' -- note the
+    empty branch in both messages. The same tree on an absolute path scored
+    100.
+
+    Cause: _build_context took branch_path.name verbatim, and Path(".").name
+    is the empty string. Every relative invocation -- a caller standing in the
+    branch, a test helper, anything shelling out with cwd -- silently measured
+    Top-level keys against a branch called "". The failure is worse than a
+    crash because it looks like real drift and names files that are correct.
+
+    Fix: resolve the path before deriving the name. These tests pin that a
+    relative and an absolute path answer identically.
+    """
+
+    def test_a_relative_path_scores_the_same_as_an_absolute_one(self, trinity, tmp_path, monkeypatch):
+        branch = _write_branch(tmp_path)
+
+        absolute = trinity.check_branch(str(branch))
+        monkeypatch.chdir(branch)
+        relative = trinity.check_branch(".")
+
+        assert relative["score"] == absolute["score"]
+        assert relative["passed"] == absolute["passed"]
+
+    def test_dot_does_not_invent_an_empty_branch_name(self, trinity, tmp_path, monkeypatch):
+        branch = _write_branch(tmp_path)
+        monkeypatch.chdir(branch)
+
+        result = trinity.check_branch(".")
+
+        top = _group(result, "Top-level keys")
+        assert "branch " not in top["message"], f"empty branch name leaked: {top['message']}"
+        assert top["passed"] is True
+
+    def test_a_trailing_dot_segment_resolves_to_the_branch(self, trinity, tmp_path):
+        """Green before the fix as well as after, and kept deliberately: it
+        pins WHY the bug was only ever a bare "." -- pathlib drops interior and
+        trailing "." segments when it parses, so "<branch>/." already carried
+        the name. Without this the reader would reasonably assume every dotted
+        form was broken.
+        """
+        branch = _write_branch(tmp_path)
+
+        result = trinity.check_branch(f"{branch}/.")
+
+        assert result["score"] == 100

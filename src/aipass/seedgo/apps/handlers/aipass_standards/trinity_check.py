@@ -119,6 +119,14 @@ GROUP_WEIGHTS: dict[str, int] = {
 # -- Names on disk -----------------------------------------------------------
 
 _TRINITY_DIR = ".trinity"
+_REGISTRY_NAME = "AIPASS_REGISTRY.json"
+
+_CLEAN_CHECKOUT_REASON = (
+    "trinity: NOT MEASURED -- this tree is a clean checkout (no AIPASS_REGISTRY.json and no "
+    "citizen .trinity/ anywhere). Memories are gitignored by design, so a fresh clone carries "
+    "none. Not scored and not gating for this run; a live installation missing .trinity is "
+    "still a violation."
+)
 _LOCAL_NAME = "local.json"
 _OBSERVATIONS_NAME = "observations.json"
 _RECEIPT_NAME = ".template_version.json"
@@ -851,6 +859,60 @@ def is_versioned_backup(name: str) -> bool:
     return base in _CANONICAL_FILES and bool(_VERSION_SUFFIX_RE.match(suffix))
 
 
+def is_clean_checkout(branch_path: Path) -> bool:
+    """Whether this tree is a fresh clone rather than a live installation.
+
+    Both signals must be absent, because either one alone is ambiguous:
+
+      * ``AIPASS_REGISTRY.json`` -- gitignored, so a clone has none. Searched
+        upward from the branch, since it lives at the repo root.
+      * any ``<fleet>/<branch>/.trinity/`` -- also gitignored. Checked at
+        exactly one level down, which is where a citizen's memories live.
+        ``spawn/templates/*/.trinity`` IS tracked and does ship, and it sits
+        deeper than that, so it correctly does not make a clone look live.
+
+    Requiring both keeps the discrimination conservative: a real installation
+    that has lost one branch's .trinity still has the registry, so that stays
+    the violation it is.
+
+    Args:
+        branch_path: The branch being audited.
+
+    Returns:
+        True when no registry and no citizen memories exist anywhere.
+    """
+    branch_path = Path(branch_path).resolve()
+    for parent in [branch_path, *branch_path.parents]:
+        if (parent / _REGISTRY_NAME).is_file():
+            return False
+    fleet = branch_path.parent
+    try:
+        siblings = list(fleet.iterdir())
+    except OSError as exc:
+        # Unreadable fleet dir: answer "not a clean checkout", which keeps a
+        # missing .trinity a violation. Failing toward the strict answer is
+        # right here -- the loose one would silence the standard fleet-wide.
+        logger.warning("trinity_check: cannot list %s (%s) -- assuming a live installation", fleet, exc)
+        return False
+    return not any((sibling / _TRINITY_DIR).is_dir() for sibling in siblings if sibling.is_dir())
+
+
+def _not_applicable_result(reason: str) -> dict:
+    """A refusal that is neither a 0 nor a 100 -- the standard steps out.
+
+    ``not_applicable`` tells branch_audit to leave this standard out of the
+    gating average entirely. Scoring 0 would blame the branch for the
+    environment; scoring 100 would claim a measurement that never happened.
+    """
+    return {
+        "standard": "TRINITY",
+        "score": None,
+        "passed": None,
+        "not_applicable": True,
+        "checks": [{"name": "Measurable", "passed": None, "message": reason}],
+    }
+
+
 def _stray_names(trinity: Path) -> list[str]:
     """Names in .trinity/ that are neither canonical nor a versioned backup."""
     try:
@@ -891,8 +953,11 @@ def check_branch_info(branch_path: str) -> list[str]:
         branch_path: Branch root to inspect.
 
     Returns:
-        One line per stray, empty when .trinity/ is clean or absent.
+        One line per stray, the not-applicable announcement on a clean
+        checkout, or empty when .trinity/ is clean or absent.
     """
+    if is_clean_checkout(Path(branch_path)):
+        return [_CLEAN_CHECKOUT_REASON]
     trinity = Path(branch_path) / _TRINITY_DIR
     if not trinity.is_dir():
         return []
@@ -1403,7 +1468,13 @@ def _group_receipt(ctx: dict) -> dict:
 
 
 def _build_context(branch_path: Path) -> dict:
-    """Read every input once: the three files, the config, the gold templates."""
+    """Read every input once: the three files, the config, the gold templates.
+
+    The path is resolved first: Path(".").name is the empty string, so a
+    relative branch_path would measure Top-level keys against a branch called
+    "" and report correct files as drifted.
+    """
+    branch_path = branch_path.resolve()
     trinity = branch_path / _TRINITY_DIR
     templates = _load_templates()
     return {
@@ -1454,6 +1525,10 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         ``{"standard": "TRINITY", "score": int, "passed": bool,
         "checks": [nine group dicts]}``.
     """
+    if is_clean_checkout(Path(branch_path)):
+        logger.info("trinity_check: %s -- clean checkout, standard not applicable", branch_path)
+        return _not_applicable_result(_CLEAN_CHECKOUT_REASON)
+
     ctx = _build_context(Path(branch_path))
     checks = [
         _group_entry_shapes(ctx),

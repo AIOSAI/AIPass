@@ -98,9 +98,14 @@ def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, at
     the branch directory name, so the cache hardcodes no path: a new
     branch_level checker declares its inputs and invalidation follows.
 
-    Only the declaration is watched -- nothing widens incidentally -- and
-    directories matched by a glob are skipped, because a fingerprint is of a
-    file.
+    Only the declaration is watched -- nothing widens incidentally.
+
+    Directories ARE included, because trinity's File set group scores stray
+    DIRECTORIES as well as files; leaving them out made the one stray shape
+    the ruling is about invisible to the cache, so a branch growing a stray
+    directory read 100 on cached audits until someone ran --full. The caller
+    watches them by PRESENCE -- a directory's mtime moves whenever any child
+    changes, and those children are already tracked as their own entries.
 
     Args:
         branch_path: Branch root.
@@ -108,7 +113,7 @@ def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, at
         attribute: Declaration attribute to read off each module.
 
     Returns:
-        Matching files, deduplicated and sorted.
+        Matching paths, files and directories, deduplicated and sorted.
     """
     if not checkers:
         return []
@@ -116,7 +121,7 @@ def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, at
     for module in checkers.values():
         for pattern in getattr(module, attribute, ()) or ():
             resolved = pattern.replace("{branch}", branch_path.name)
-            found.update(match for match in branch_path.glob(resolved) if match.is_file())
+            found.update(branch_path.glob(resolved))
     return sorted(found)
 
 
@@ -137,7 +142,9 @@ def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = No
     checkers need different things:
 
       * ``BRANCH_INPUTS`` -- CONTENT matters. trinity reads and scores the
-        bytes of ``.trinity/*``, so an edit must bust the cache.
+        bytes of ``.trinity/*``, so an edit must bust the cache. Directories
+        matched by such a glob are watched by presence instead, because the
+        File set group scores a stray DIRECTORY's existence, not its bytes.
       * ``BRANCH_INPUT_NAMES`` -- PRESENCE only. json_handler scores triplet
         completeness, i.e. which filenames exist, and never reads them. Those
         files include the checkers' own ``*_log.json``, written DURING the
@@ -168,7 +175,12 @@ def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = No
         rel = _rel_path(f, root)
         if rel not in seen:
             seen.add(rel)
-            files.append({"file": str(f), "name": f.name, "rel": rel})
+            entry = {"file": str(f), "name": f.name, "rel": rel}
+            if f.is_dir():
+                # Presence only: existence is what the File set group scores,
+                # and a directory mtime would re-report every child edit.
+                entry["presence_only"] = "1"
+            files.append(entry)
     for f in _declared_input_files(branch_path, checkers, "BRANCH_INPUT_NAMES"):
         rel = _rel_path(f, root)
         if rel not in seen:
@@ -417,7 +429,16 @@ def audit_branch(
         if scope == "branch_level" or (not hasattr(checker, "check_module") and hasattr(checker, "check_branch")):
             try:
                 r = checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
-                results[name], scores[name] = r, r.get("score", 0)
+                results[name] = r
+                # A standard that reports not_applicable measured NOTHING, so it
+                # never enters scores[]: a 0 would blame the branch for an
+                # environment fact and a 100 would claim a measurement that did
+                # not happen. It stays in results[] so the display and the
+                # info channel can still say why it stood down.
+                if r.get("not_applicable") is True:
+                    logger.info("Branch-level checker %s is not applicable for %s", name, branch_path)
+                else:
+                    scores[name] = r.get("score", 0)
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
                 # A crashed checker scores 0, which is indistinguishable from an honest

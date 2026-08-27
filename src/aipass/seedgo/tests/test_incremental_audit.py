@@ -987,14 +987,22 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
 
         assert "random/file.json" not in self._watch_rels(branch_path, checkers)
 
-    def test_directories_matched_by_a_glob_are_not_fingerprinted(self, tmp_path, monkeypatch):
+    def test_directories_matched_by_a_glob_ARE_watched(self, tmp_path, monkeypatch):
+        """REVERSED 2026-08-27. This test previously asserted the opposite --
+        that directories are skipped -- and that was the defect @daemon found
+        hours later: the File set group scores stray DIRECTORIES, so excluding
+        them made the one stray shape the ruling is about invisible to the
+        cache. Reversed rather than deleted, so the history stays readable.
+        Directories are watched by PRESENCE -- see
+        TestTheCacheSeesStrayDirectories for why not by content.
+        """
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         (branch_path / ".trinity").mkdir()
         (branch_path / ".trinity" / "subdir").mkdir()
 
         checkers = {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
 
-        assert not any(r.endswith("subdir") for r in self._watch_rels(branch_path, checkers))
+        assert any(r.endswith("subdir") for r in self._watch_rels(branch_path, checkers))
 
     def test_a_missing_declared_directory_is_not_an_error(self, tmp_path, monkeypatch):
         """A branch with no .trinity/ must audit, not raise."""
@@ -1144,3 +1152,208 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
 
         _, changed, _, _ = incremental_cache.diff_fileset(before, after)
         assert ".trinity/local.json" in changed
+
+
+class TestNotApplicableStandardsLeaveTheGatingAverage:
+    """A standard that reports ``not_applicable`` measured nothing, so it must
+    not appear in scores[] at all -- a 0 would blame the branch for the
+    environment and a 100 would claim a measurement that never happened.
+
+    This is what turned CI red: trinity refused every group on a fresh clone
+    (memories are gitignored) and branch_audit converted that into 0/FAILED
+    for all 18 branches.
+    """
+
+    @staticmethod
+    def _run(tmp_path, monkeypatch, result):
+        """One standard under test alongside a healthy one.
+
+        The healthy peer is not decoration: in CI the other 44 standards still
+        measure and score, so the realistic question is whether the average
+        reflects THEM once trinity stands down.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, branch_path = _setup_branch(tmp_path, {})
+        checker = types.SimpleNamespace(
+            AUDIT_SCOPE="branch_level",
+            check_branch=lambda p, bypass_rules=None: result,
+        )
+        healthy = types.SimpleNamespace(
+            AUDIT_SCOPE="branch_level",
+            check_branch=lambda p, bypass_rules=None: {"standard": "OTHER", "score": 100, "passed": True, "checks": []},
+        )
+        monkeypatch.setattr(branch_audit, "discover_checkers", lambda _p=None: {"trinity": checker, "other": healthy})
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+        return branch_audit.audit_branch(branch, [])
+
+    def test_a_not_applicable_standard_is_absent_from_scores(self, tmp_path, monkeypatch):
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            {
+                "standard": "TRINITY",
+                "score": None,
+                "passed": None,
+                "not_applicable": True,
+                "checks": [],
+            },
+        )
+
+        assert "trinity" not in out["scores"]
+
+    def test_it_does_not_drag_the_average_to_zero(self, tmp_path, monkeypatch):
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            {
+                "standard": "TRINITY",
+                "score": None,
+                "passed": None,
+                "not_applicable": True,
+                "checks": [],
+            },
+        )
+
+        # 100, not 50: the healthy peer is the whole gating population once
+        # trinity steps out. A 0 or a 50 would both be trinity still counting.
+        assert out["average"] == 100
+
+    def test_the_result_is_still_carried_for_display(self, tmp_path, monkeypatch):
+        """Excluded from scoring is not the same as hidden."""
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            {
+                "standard": "TRINITY",
+                "score": None,
+                "passed": None,
+                "not_applicable": True,
+                "checks": [],
+            },
+        )
+
+        assert out["results"]["trinity"]["not_applicable"] is True
+
+    def test_an_ordinary_failing_standard_still_scores_zero(self, tmp_path, monkeypatch):
+        """Over-refusal guard: only not_applicable steps out, never a failure."""
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            {
+                "standard": "TRINITY",
+                "score": 0,
+                "passed": False,
+                "checks": [],
+            },
+        )
+
+        assert out["scores"]["trinity"] == 0
+
+
+class TestTheCacheSeesStrayDirectories:
+    """@daemon's finding: _declared_input_files ended with ``if
+    match.is_file()``, so the cache fingerprinted files only -- while the File
+    set group scores stray DIRECTORIES (_stray_names appends a slash to them).
+    The one stray shape the cache could not see was the exact shape the File
+    set ruling is about.
+
+    Their repro, both directions: after removing .trinity/.recovery the cached
+    audit still said 98 naming the gone directory, and after creating a stray
+    directory the cached audit said 100 in 0.3s. --full disagreed with both.
+
+    A directory is watched by PRESENCE, never content: its mtime moves every
+    time a child changes, so content-watching it would churn the cache for
+    edits that are already tracked file by file. The cache and the checker
+    must see the same world, and now they do.
+    """
+
+    @staticmethod
+    def _fps(branch_path, checkers):
+        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
+
+        return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
+
+    def _checkers(self):
+        return {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+    def test_a_new_stray_directory_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+
+        before = self._fps(branch_path, self._checkers())
+        (branch_path / ".trinity" / ".recovery").mkdir()
+        added, _, _, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers()))
+
+        assert ".trinity/.recovery" in added
+
+    def test_a_removed_stray_directory_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+        (branch_path / ".trinity" / ".recovery").mkdir()
+
+        before = self._fps(branch_path, self._checkers())
+        (branch_path / ".trinity" / ".recovery").rmdir()
+        _, _, deleted, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers()))
+
+        assert ".trinity/.recovery" in deleted
+
+    def test_a_directorys_own_churn_does_not_dirty_the_branch(self, tmp_path, monkeypatch):
+        """Presence, not content: a child write already shows as its own file,
+        and a directory mtime would double-report it.
+        """
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        sub = branch_path / ".trinity" / "sub"
+        sub.mkdir(parents=True)
+
+        before = self._fps(branch_path, self._checkers())
+        # A file created inside is reported as that file, never as the dir.
+        (sub / "child.json").write_text("{}\n", encoding="utf-8")
+        added, changed, _, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers()))
+
+        assert ".trinity/sub" not in changed
+
+    def test_files_are_still_watched_by_content(self, tmp_path, monkeypatch):
+        """Over-refusal guard: adding directories must not blind the file lane."""
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        (branch_path / ".trinity").mkdir()
+        target = branch_path / ".trinity" / "local.json"
+        target.write_text("{}\n", encoding="utf-8")
+
+        before = self._fps(branch_path, self._checkers())
+        target.write_text('{"changed": "zzzzzzzzzzzzzzzzzzzzzzzzzzzz"}\n', encoding="utf-8")
+        _, changed, _, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers()))
+
+        assert ".trinity/local.json" in changed
+
+    def test_the_cache_and_the_checker_see_the_same_strays(self, tmp_path, monkeypatch):
+        """The invariant the defect broke, asserted directly."""
+        from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        trinity_dir = branch_path / ".trinity"
+        trinity_dir.mkdir()
+        (trinity_dir / ".recovery").mkdir()
+        (trinity_dir / "STATUS.local.md").write_text("x\n", encoding="utf-8")
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
+
+        seen_by_checker = {
+            line.rstrip("/").split("/")[-1] for line in trinity_check.check_branch_info(str(branch_path))
+        }
+        watched = {
+            f["rel"].split("/")[-1]
+            for f in branch_audit._collect_watch_files(branch_path, self._checkers())
+            if f["rel"].startswith(".trinity/")
+        }
+
+        assert seen_by_checker <= watched, f"checker sees {seen_by_checker - watched} that the cache cannot"

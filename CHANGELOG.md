@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(seedgo)** — the audit learns what a clean checkout is, and the cache
+learns to see directories (CI unblock for PR #743): trinity on a tree with no
+AIPASS_REGISTRY.json AND no citizen `.trinity/` anywhere now returns
+not_applicable with score None — left OUT of scores entirely, because a 0
+blames the branch for an environment fact and a 100 claims a measurement that
+never happened (the old path actually CRASHED on None; red-first surfaced
+it). Both signals must be absent — a live installation missing one branch's
+.trinity still scores 0, pinned. The one `.trinity` that DOES ship (spawn's
+un-ignored template, two levels down) is a named test, not a lucky accident.
+The skip announces itself in the report. Defect 2, @daemon's find: the
+incremental cache excluded directories (`is_file()`), blinding it to the
+exact stray shape the File set rule scores — directories now watched by
+presence, the morning's opposite-asserting test reversed with a banner.
+1931 passed, 7/7 mutations bite. Flagged honestly: trinity_check.py now
+1550 lines vs its own 1500 limit (seedgo 99 architecture — split queued,
+not smuggled into a CI fix), and 2 branches drifted to 99 since the push.
+
 **feat(hooks)** — edit_gate grandfather narrowed to todos only (1.6.0,
 DPLAN-0318 circle close): the migration-era blanket exemption is retired —
 exempt containers are now read off @memory's RESHAPE_ONLY_SECTIONS at call
