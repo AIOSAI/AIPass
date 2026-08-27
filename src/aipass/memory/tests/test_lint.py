@@ -14,7 +14,7 @@ Covers:
   - Character-not-byte counting (em-dash, tree glyphs)
   - Unknown entry_type handling
   - Dict container measurement (plain string + dict-with-field)
-  - List container measurement + missing field skip
+  - List container measurement + missing-field refusal
   - Lint handler finds violations with correct counts
   - Lint handler is read-only (files unchanged after scan)
 """
@@ -271,9 +271,19 @@ class TestListContainer:
 
 
 class TestListContainerMissingField:
-    """Missing field in a list item is skipped, no crash."""
+    """A missing canonical field is REPORTED, not skipped (reversed 2026-08-26).
 
-    def test_missing_field_skipped(self, tmp_path: Path) -> None:
+    This class used to pin the opposite: an item lacking the field was dropped
+    on the reading that shape belongs to the trinity checker, not to a char-cap
+    scanner. @hooks proved what that boundary cost — the write gate refuses
+    those entries, so lint could tell a branch it was compliant and the branch
+    would then be blocked on its next write for a shape lint had already seen.
+    An audit that stays quiet about a shape the gate blocks is not a narrower
+    audit, it is a wrong one. The no-crash guarantee the old name promised is
+    kept: the scan completes and names every entry it cannot measure.
+    """
+
+    def test_missing_field_is_reported(self, tmp_path: Path) -> None:
         handler = _get_lint_handler()
 
         trinity = tmp_path / "branch" / ".trinity"
@@ -299,9 +309,14 @@ class TestListContainerMissingField:
             }
         )
 
-        # Should not crash, and no violations (all within cap)
+        # The two measurable notes are within cap; the third has no 'note' field
+        # at all, so its cap cannot be applied and it is named rather than passed.
         violations = handler._lint_branch("test", str(tmp_path / "branch"), limits)
-        assert len(violations) == 0
+        assert len(violations) == 1
+        assert violations[0]["key"] == "[1]"
+        assert violations[0]["reason"] == "missing_field"
+        assert violations[0]["field"] == "note"
+        assert violations[0]["found_type"] == "missing"
 
 
 # ===========================================================================

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -275,10 +275,35 @@ def _log_violation(v: dict) -> None:
     )
 
 
+def _dedupe_violations(violations: list[dict]) -> list[dict]:
+    """Collapse violations naming the same entry, first record wins.
+
+    Two checkers now find the missing-field species: @memory's extractor (1.4.0,
+    which stopped answering ``""`` for an absent key) and this gate's own
+    ``_missing_field_violations``. The overlap is deliberate — a gate that
+    outsources ALL of its measurement inherits its supplier's blind spots
+    silently, which is how the renamed-field dodge survived two months — but one
+    defect must still read as one defect. Two identical lines in a refusal send
+    the agent hunting for a second problem that does not exist.
+
+    Keyed on (entry_type, container, key): the container matters because two
+    entry types both index their first entry as ``"0"``.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[dict] = []
+    for v in violations:
+        ident = (v.get("entry_type", ""), v.get("container", ""), v.get("key", ""))
+        if ident in seen:
+            continue
+        seen.add(ident)
+        unique.append(v)
+    return unique
+
+
 def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict | None:
     """Diff changed entries and return block dict or None (allow)."""
     over = el.changed_entries(before, after, limits)
-    over = over + _missing_field_violations(before, after, limits)
+    over = _dedupe_violations(over + _missing_field_violations(before, after, limits))
     if not over:
         return None
     if limits.get("enforce"):

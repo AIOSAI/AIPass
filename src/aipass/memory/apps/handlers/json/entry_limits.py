@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-13
 # Modified: 2026-06-13
 # =============================================
@@ -73,6 +73,35 @@ def _deep_merge_entry_types(
     return merged
 
 
+def resolve_entry_types(section: dict[str, Any], branch: str) -> dict[str, Any]:
+    """Return the entry_types a branch is actually held to — the ONE resolver.
+
+    Pure: takes the ``entry_limits`` section already in hand, does no I/O, and
+    deep-merges ``per_branch[branch]`` over the defaults.
+
+    It exists because two callers must never disagree. The write gate measures
+    against ``load_entry_limits``; the state-tab renderer prints a cap INTO the
+    agent's memory file as an instruction. @seedgo's trinity checker found them
+    resolving differently — the renderer read ``entry_types`` straight off the
+    config and ignored ``per_branch`` — so the first branch to take a char-cap
+    override would have been told one number, measured against another, and
+    failed the Meta-lines rule forever while the renderer rewrote the line the
+    checker kept rejecting. Latent only because that map is empty today.
+
+    Args:
+        section: The ``entry_limits`` section from memory.config.json.
+        branch: Branch name, any casing.
+
+    Returns:
+        A deep copy of the effective ``entry_types`` map.
+    """
+    base_types = section.get("entry_types", {})
+    branch_overrides = section.get("per_branch", {}).get(branch.lower(), {})
+    if branch_overrides:
+        return _deep_merge_entry_types(base_types, branch_overrides)
+    return copy.deepcopy(base_types)
+
+
 def load_entry_limits(branch: str) -> dict[str, Any]:
     """Load effective entry limits for *branch*.
 
@@ -102,15 +131,8 @@ def load_entry_limits(branch: str) -> dict[str, Any]:
 
     enabled = section.get("enabled", True)
     enforce = section.get("enforce", False)
-    base_types = section.get("entry_types", {})
 
-    per_branch = section.get("per_branch", {})
-    branch_overrides = per_branch.get(branch_key, {})
-
-    if branch_overrides:
-        effective_types = _deep_merge_entry_types(base_types, branch_overrides)
-    else:
-        effective_types = copy.deepcopy(base_types)
+    effective_types = resolve_entry_types(section, branch_key)
 
     result: dict[str, Any] = {
         "enabled": enabled,
@@ -227,12 +249,18 @@ def _extract_text(value: Any, field: str) -> str | None:
         cannot be read* — a violation. Collapsing the second into the first is
         the defect: a ``note`` holding a list of dicts came back as ``""``,
         measured as zero characters, and passed every cap it should have failed.
+
+        A MISSING field is the same species and was fixed a version late.
+        1.3.0 refused the wrong-type case and still answered ``""`` when the
+        canonical key was simply absent — so a ``key_learning`` carrying its
+        text under ``learning`` where the config says ``value`` measured as
+        zero characters and cleared a 200-char cap while three branches ran
+        2.7x over it. A renamed field is not an absent text; it is a text the
+        reader cannot find. Only a field that is present and empty says ``""``.
     """
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        if field not in value:
-            return ""
         text = value.get(field)
         return text if isinstance(text, str) else None
     return None
@@ -273,6 +301,7 @@ def _violation(
     key: str,
     verdict: dict[str, Any],
     found_type: str = "",
+    field: str = "",
 ) -> dict[str, Any]:
     """Build a violation record from a refusal verdict.
 
@@ -280,6 +309,11 @@ def _violation(
     ``length``/``cap``/``over_by`` with ``%d`` — so an unmeasurable refusal
     still carries ints there and adds its explanation in ``reason`` /
     ``found_type`` beside them rather than in place of them.
+
+    Two refusal species, two reasons, because the consumer renders them
+    differently and the agent can only act on one of them: ``missing_field``
+    names the key to rename, ``unmeasurable`` names the type that arrived.
+    "expected a string, found missing" would be true and useless.
     """
     hit = {
         "entry_type": type_name,
@@ -290,7 +324,11 @@ def _violation(
         "over_by": verdict["over_by"],
     }
     if verdict.get("reason"):
-        hit["reason"] = verdict["reason"]
+        if found_type == "missing":
+            hit["reason"] = "missing_field"
+            hit["field"] = field
+        else:
+            hit["reason"] = verdict["reason"]
         hit["found_type"] = found_type
     return hit
 
@@ -327,7 +365,7 @@ def _check_dict_container(
             continue  # Unchanged — skip even if over-limit
         verdict = check_entry(type_name, after_text, limits)
         if not verdict["ok"]:
-            hits.append(_violation(type_name, container, str(key), verdict, _found_type(after_value, field)))
+            hits.append(_violation(type_name, container, str(key), verdict, _found_type(after_value, field), field))
     return hits
 
 
@@ -372,7 +410,7 @@ def _check_list_container(
             continue  # Already on disk — not new/changed; skip even if over cap
         verdict = check_entry(type_name, after_text, limits)
         if not verdict["ok"]:
-            hits.append(_violation(type_name, container, str(idx), verdict, _found_type(after_item, field)))
+            hits.append(_violation(type_name, container, str(idx), verdict, _found_type(after_item, field), field))
     return hits
 
 

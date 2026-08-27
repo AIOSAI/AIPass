@@ -1436,17 +1436,6 @@ class TestMetaComposition:
 
         assert mine == theirs
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "KNOWN CROSS-IMPLEMENTATION BUG (reported, not fixed here): the contract "
-            "makes entry_limits per-branch overrides part of the one source, and both "
-            "this checker and @memory's entry_limits gate honour them -- but "
-            "tab_renderer.render_tab reads entry_types directly and ignores per_branch, "
-            "so the moment anyone adds an entry_limits override the rendered line and "
-            "the expected line diverge and that branch fails Meta lines forever."
-        ),
-    )
     def test_per_branch_char_cap_override_survives_the_renderer(self, checker):
         if _compose_meta is None:
             pytest.skip(f"@memory tab_renderer unavailable: {_COMPOSE_META_IMPORT_ERROR}")

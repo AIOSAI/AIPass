@@ -23,13 +23,6 @@ The fix: each test pops the cached ``memory_files`` module from
 is in place AND the real ``memory_files`` module is registered.
 """
 
-import json
-import sys
-import importlib
-from pathlib import Path
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Per-test fixture: force-reimport memory_files with fresh mocks

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lint_handler.py
 # Description: Read-only lint handler for .trinity entry limit violations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-13
 # Modified: 2026-06-13
 # =============================================
@@ -36,8 +36,8 @@ from aipass.memory.apps.handlers.json.entry_limits import (
 def _measure_dict_container(
     data: dict[str, Any],
     field: str,
-) -> list[tuple[str, Any]]:
-    """Extract (key, payload) pairs from a dict-style container.
+) -> list[tuple[str, Any, bool]]:
+    """Extract (key, payload, field_present) triples from a dict-style container.
 
     Each value may be:
       - a plain string (the entry itself), or
@@ -47,26 +47,29 @@ def _measure_dict_container(
     Judging it is ``check_entry``'s job, and it refuses anything it cannot
     measure — filtering non-strings out here would restore the silence this
     scanner exists to break.
+
+    ``field_present`` distinguishes the two refusal species: a value the
+    scanner cannot READ from a field it cannot FIND. An entry that lacks the
+    canonical key used to be dropped here, so lint answered "compliant" for a
+    shape the write gate refuses.
     """
-    pairs: list[tuple[str, Any]] = []
+    pairs: list[tuple[str, Any, bool]] = []
     for key, value in data.items():
-        if isinstance(value, str):
-            pairs.append((key, value))
-        elif isinstance(value, dict):
-            if field in value:
-                pairs.append((key, value[field]))
+        if isinstance(value, dict):
+            pairs.append((key, value.get(field), field in value))
+        else:
+            pairs.append((key, value, True))
     return pairs
 
 
 def _measure_list_container(
     data: list[Any],
     field: str,
-) -> list[tuple[str, Any]]:
-    """Extract (index-label, payload) pairs from a list-style container.
+) -> list[tuple[str, Any, bool]]:
+    """Extract (index-label, payload, field_present) triples from a list container.
 
-    Each item is expected to be a dict containing *field*.  Items that are
-    not dicts or lack the field are skipped — a missing field is a shape
-    question for the trinity checker, not a char-cap question for lint.
+    Each item is expected to be a dict containing *field*; a bare string item
+    carries its own text, matching ``_extract_text``.
 
     The payload is returned untyped, on purpose. This function used to hand
     ``item[field]`` straight to ``len()``: a ``note`` holding three dicts
@@ -74,17 +77,74 @@ def _measure_list_container(
     independent silent pass over the same corruption (the first being the
     edit-time gate), and two blind measurements agreeing is what made the
     drift look verified.
+
+    Items lacking the canonical field used to be skipped here, on the reading
+    that a missing field is a shape question for the trinity checker. That
+    boundary cost more than it bought: the write gate refuses those entries,
+    so a branch could be told it was compliant and then be blocked on its next
+    write for a shape lint had already seen and said nothing about.
     """
-    pairs: list[tuple[str, Any]] = []
+    pairs: list[tuple[str, Any, bool]] = []
     for idx, item in enumerate(data):
-        if isinstance(item, dict) and field in item:
-            pairs.append((f"[{idx}]", item[field]))
+        if isinstance(item, dict):
+            pairs.append((f"[{idx}]", item.get(field), field in item))
+        else:
+            pairs.append((f"[{idx}]", item, True))
     return pairs
 
 
 # ---------------------------------------------------------------------------
 # Core lint logic
 # ---------------------------------------------------------------------------
+
+
+def _violation_record(
+    branch_name: str,
+    file_name: str,
+    container: str,
+    key: str,
+    type_name: str,
+    verdict: dict[str, Any],
+    text: Any,
+    field: str,
+    present: bool,
+) -> dict[str, Any]:
+    """Build one violation record and log the cause it names.
+
+    Two refusal species share the eight base keys and differ in what the agent
+    must DO about them: ``missing_field`` names the key to rename,
+    ``unmeasurable`` names the type that arrived where a string belongs.
+    """
+    violation: dict[str, Any] = {
+        "branch": branch_name,
+        "file": file_name,
+        "container": container,
+        "key": key,
+        "length": verdict["length"],
+        "cap": verdict["cap"],
+        "over_by": verdict["over_by"],
+        "entry_type": type_name,
+    }
+    if not verdict.get("reason"):
+        return violation
+
+    if not present:
+        violation["reason"] = "missing_field"
+        violation["found_type"] = "missing"
+        violation["field"] = field
+        logger.warning(
+            f"[lint] {branch_name}/{file_name} {container}{key}: "
+            f"{type_name} has no '{field}' field — cannot be measured"
+        )
+        return violation
+
+    violation["reason"] = verdict["reason"]
+    violation["found_type"] = type(text).__name__
+    logger.warning(
+        f"[lint] {branch_name}/{file_name} {container}{key}: "
+        f"{type_name} is {type(text).__name__}, not str — cannot be measured"
+    )
+    return violation
 
 
 def _lint_branch(
@@ -96,7 +156,8 @@ def _lint_branch(
 
     Each violation dict has keys:
         branch, file, container, key, length, cap, over_by, entry_type
-    An unmeasurable payload adds ``reason`` and ``found_type``.
+    An unmeasurable payload adds ``reason`` and ``found_type``; a missing
+    canonical field adds ``field`` beside them.
     """
     violations: list[dict[str, Any]] = []
     trinity_dir = Path(branch_path) / ".trinity"
@@ -137,27 +198,12 @@ def _lint_branch(
         else:
             continue
 
-        for key, text in pairs:
+        for key, text, present in pairs:
             verdict = check_entry(type_name, text, limits)
             if not verdict["ok"]:
-                violation = {
-                    "branch": branch_name,
-                    "file": file_name,
-                    "container": container,
-                    "key": key,
-                    "length": verdict["length"],
-                    "cap": verdict["cap"],
-                    "over_by": verdict["over_by"],
-                    "entry_type": type_name,
-                }
-                if verdict.get("reason"):
-                    violation["reason"] = verdict["reason"]
-                    violation["found_type"] = type(text).__name__
-                    logger.warning(
-                        f"[lint] {branch_name}/{file_name} {container}{key}: "
-                        f"{type_name} is {type(text).__name__}, not str — cannot be measured"
-                    )
-                violations.append(violation)
+                violations.append(
+                    _violation_record(branch_name, file_name, container, key, type_name, verdict, text, field, present)
+                )
 
     return violations
 

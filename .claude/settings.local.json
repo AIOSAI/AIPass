@@ -1,3 +1,4 @@
 {
-  "teammateMode": "in-process"
+  "teammateMode": "in-process",
+  "outputStyle": "Concise"
 }

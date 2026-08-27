@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
@@ -2142,9 +2142,7 @@ class TestRenamedFieldDodge:
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
-        content = json.dumps(
-            {"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]}
-        )
+        content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]})
 
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
@@ -2194,9 +2192,7 @@ class TestRenamedFieldDodge:
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
-        content = json.dumps(
-            {"key_learnings": [{"number": 1, "date": "2026-08-25", "value": "fine"}]}
-        )
+        content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "value": "fine"}]})
 
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
@@ -2235,9 +2231,7 @@ class TestRenamedFieldLegacyAsymmetry:
         Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
 
         # Same legacy entry, plus a NEW canonical one on top.
-        content = json.dumps(
-            {"key_learnings": [{"number": 2, "date": "2026-08-25", "value": "new and legal"}, legacy]}
-        )
+        content = json.dumps({"key_learnings": [{"number": 2, "date": "2026-08-25", "value": "new and legal"}, legacy]})
 
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
@@ -2269,9 +2263,7 @@ class TestRenamedFieldLegacyAsymmetry:
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
         Path(file_path).write_text(json.dumps({"key_learnings": [legacy]}), encoding="utf-8")
 
-        content = json.dumps(
-            {"key_learnings": [{"number": 2, "date": "2026-08-25", "learning": "z" * 500}, legacy]}
-        )
+        content = json.dumps({"key_learnings": [{"number": 2, "date": "2026-08-25", "learning": "z" * 500}, legacy]})
 
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
@@ -2318,3 +2310,68 @@ class TestUnmeasurableReasonIsRendered:
         reason = json.loads(result["stdout"])["reason"]
         assert "list" in reason, "refusal did not say what it found"
         assert "0/300 chars (+0)" not in reason, "refusal rendered as a zero-length measurement"
+
+
+class TestNoDuplicateViolationLines:
+    """One defect, one line — even when two checkers both find it.
+
+    @memory's entry_limits 1.4.0 closed the missing-field hole in their
+    extractor on the same night this gate grew its own check, so both now
+    report the same entry. Two identical lines in a refusal read as two
+    problems and cost the agent a hunt for the second one.
+
+    The independent check is KEPT rather than deleted. A gate that outsources
+    all of its measurement inherits its supplier's blind spots silently — which
+    is exactly how this bug survived two months. The union is the safe
+    direction for a gate (strictly more refusals, never fewer); the dedupe just
+    stops it being said twice.
+    """
+
+    def test_missing_field_reported_once(self, tmp_path):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert reason.count("no 'value' field") == 1, f"violation reported {reason.count(chr(39) + 'value' + chr(39))}x"
+
+    def test_distinct_entries_both_survive_dedupe(self, tmp_path):
+        """Dedupe must key on container too — two types can share key '0'."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps(
+            {
+                "key_learnings": [{"number": 1, "learning": "x" * 500}],
+                "sessions": [{"number": 1, "chronicle": "y" * 500}],
+            }
+        )
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        reason = json.loads(result["stdout"])["reason"]
+        assert "no 'value' field" in reason
+        assert "no 'summary' field" in reason, "dedupe swallowed a distinct container's violation"
+
+    def test_over_cap_and_missing_field_both_reported(self, tmp_path):
+        """Different species on different entries must both reach the agent."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": [{"number": 2, "value": "x" * 201}, {"number": 1, "learning": "short"}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        reason = json.loads(result["stdout"])["reason"]
+        assert "201/200" in reason
+        assert "no 'value' field" in reason

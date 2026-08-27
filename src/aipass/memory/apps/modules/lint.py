@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lint.py
 # Description: Lint module — CLI routing for entry limit auditing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-13
 # Modified: 2026-06-13
 # =============================================
@@ -199,7 +199,14 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
         # An unmeasurable field has no honest length to print: "0/300 chars"
         # would read as compliant, which is the exact silence this violation
         # exists to break. Say what was found instead.
-        if v.get("reason") == "unmeasurable":
+        if v.get("reason") == "missing_field":
+            console.print(
+                f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
+                f"[dim]({v['entry_type']})[/dim] "
+                f"[red]NO '{v.get('field', '?')}' FIELD[/red] — rename it to the canonical key "
+                f"[dim](cap {v['cap']} chars cannot be applied)[/dim]"
+            )
+        elif v.get("reason") == "unmeasurable":
             console.print(
                 f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
                 f"[dim]({v['entry_type']})[/dim] "

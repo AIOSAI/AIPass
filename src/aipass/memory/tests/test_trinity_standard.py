@@ -621,3 +621,238 @@ class TestLintNamesWhatItCannotMeasure:
         source = (_MEMORY_ROOT / "apps" / "modules" / "lint.py").read_text(encoding="utf-8")
         assert "UNMEASURABLE" in source
         assert 'v.get("reason") == "unmeasurable"' in source
+
+    def test_the_display_names_a_missing_field_separately(self):
+        """ "UNMEASURABLE — missing, expected str" would be true and unactionable.
+
+        The agent can only fix what it is told: the missing-field line names the
+        canonical key to rename, which is the whole repair.
+        """
+        source = (_MEMORY_ROOT / "apps" / "modules" / "lint.py").read_text(encoding="utf-8")
+        assert 'v.get("reason") == "missing_field"' in source
+        assert "FIELD" in source
+
+
+# =============================================================================
+# B3 (second half) — a field the gate cannot FIND is also a violation
+# =============================================================================
+
+
+class TestMissingFieldIsAViolation:
+    """The other half of B1, reported by @hooks 2026-08-25 after 1.3.0 shipped.
+
+    1.3.0 fixed the WRONG-TYPE case and left the MISSING-FIELD case answering
+    ``""`` — so a ``key_learning`` whose text sits under ``learning`` where the
+    config says ``value`` measured as zero characters and cleared its cap. Same
+    species, same silence: a renamed field is not an absent text, it is a text
+    the reader cannot find.
+    """
+
+    def test_a_missing_field_says_it_cannot_be_read(self):
+        assert el._extract_text({"key": "k", "learning": "x" * 500}, "value") is None
+
+    def test_an_entry_with_the_field_empty_is_still_compliant(self):
+        """ "" stays a legitimate answer when the field is genuinely there."""
+        assert el._extract_text({"key": "k", "value": ""}, "value") == ""
+
+    def test_the_hooks_repro_is_refused(self):
+        """The exact case @hooks proved live: 500 chars under a 200-char cap, 0 violations."""
+        limits = _limits(max_chars=200, field="value", container="key_learnings")
+        limits["entry_types"]["key_learnings"] = limits["entry_types"].pop("observations")
+        before = {"key_learnings": [{"number": 1, "key": "k", "value": "ok"}]}
+        after = {"key_learnings": [{"number": 2, "key": "drifted", "learning": "x" * 500}] + before["key_learnings"]}
+        hits = el.changed_entries(before, after, limits)
+        assert len(hits) == 1
+        assert hits[0]["entry_type"] == "key_learnings"
+
+    def test_the_refusal_names_the_canonical_field(self):
+        """@hooks' formatter prints "no 'value' field — rename it"; it needs the name.
+
+        Reason is ``missing_field``, not ``unmeasurable``: the consumer renders
+        the two differently and "expected a string, found missing" tells the
+        agent nothing it can act on.
+        """
+        before = {"observations": []}
+        after = {"observations": [{"number": 1, "observation": "x" * 500}]}
+        hits = el.changed_entries(before, after, _limits())
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "missing_field"
+        assert hits[0]["found_type"] == "missing"
+        assert hits[0]["field"] == "note"
+
+    def test_the_six_published_keys_are_still_ints(self):
+        """@hooks' edit_gate formats length/cap/over_by with %d — a str would raise."""
+        before = {"observations": []}
+        after = {"observations": [{"number": 1, "observation": "x" * 500}]}
+        hit = el.changed_entries(before, after, _limits())[0]
+        for key in ("length", "cap", "over_by"):
+            assert isinstance(hit[key], int)
+        for key in ("entry_type", "container", "key"):
+            assert isinstance(hit[key], str)
+
+    def test_untouched_legacy_drift_still_writes(self):
+        """9+ branches carry the renamed shape until the reset — they must keep writing."""
+        legacy = {"number": 1, "observation": "x" * 500}
+        before = {"observations": [legacy]}
+        after = {"observations": [dict(legacy)]}
+        assert el.changed_entries(before, after, _limits()) == []
+
+    def test_carrying_one_drifted_entry_does_not_license_a_second(self):
+        legacy = {"number": 1, "observation": "x" * 500}
+        before = {"observations": [legacy]}
+        after = {"observations": [{"number": 2, "observation": "y" * 500}, dict(legacy)]}
+        hits = el.changed_entries(before, after, _limits())
+        assert len(hits) == 1
+        assert hits[0]["key"] == "0"
+
+    def test_a_dict_container_refuses_a_missing_field_too(self):
+        limits = _limits(max_chars=200, field="value", container="key_learnings")
+        limits["entry_types"]["observations"]["kind"] = "dict"
+        before = {"key_learnings": {}}
+        after = {"key_learnings": {"drifted": {"learning": "x" * 500}}}
+        hits = el.changed_entries(before, after, limits)
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "missing_field"
+        assert hits[0]["found_type"] == "missing"
+        assert hits[0]["field"] == "value"
+
+    def test_lint_reports_the_entry_it_cannot_find_a_field_in(self, tmp_path):
+        """Read-only lint stayed silent while the write gate refused — the audit lied.
+
+        A branch could ask "am I compliant?", be told yes, and then be blocked
+        on its next write for a shape lint had already seen.
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / "observations.json").write_text(
+            json.dumps({"observations": [{"number": 1, "observation": "x" * 500}]}),
+            encoding="utf-8",
+        )
+        hits = lint_handler._lint_branch("b", str(tmp_path), _limits())
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "missing_field"
+        assert hits[0]["field"] == "note"
+
+    def test_lint_reports_a_dict_container_missing_its_field(self, tmp_path):
+        """Both container kinds, or the audit is only half honest.
+
+        key_learnings is dict-shaped on several branches; a scanner that catches
+        the list shape and not the dict one still tells those branches nothing.
+        """
+        limits = _limits(max_chars=200, field="value", container="key_learnings")
+        limits["entry_types"]["observations"]["kind"] = "dict"
+        limits["entry_types"]["observations"]["file"] = "local.json"
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / "local.json").write_text(
+            json.dumps({"key_learnings": {"drifted": {"learning": "x" * 500}}}),
+            encoding="utf-8",
+        )
+        hits = lint_handler._lint_branch("b", str(tmp_path), limits)
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "missing_field"
+        assert hits[0]["found_type"] == "missing"
+        assert hits[0]["field"] == "value"
+
+
+class TestTheTabHonoursPerBranchCharCaps:
+    """One source, or the tab instructs an agent to break the rule it enforces.
+
+    Reported by @seedgo 2026-08-26 from the other side of the contract: their
+    ``expected_meta_line()`` resolves ``entry_limits.per_branch``; ``render_tab``
+    read ``entry_types`` straight off the config and never consulted it. Latent
+    only because that map is empty today — the day anyone sets one override, the
+    rendered line names the default cap, the gate enforces the override, and the
+    branch fails the Meta-lines rule permanently because the renderer keeps
+    rewriting the line the checker keeps rejecting.
+
+    Note the asymmetry that made it an oversight rather than a decision:
+    ``rollover.per_branch`` was already honoured here, ``entry_limits`` was not.
+    """
+
+    @staticmethod
+    def _cfg() -> dict:
+        return {
+            "entry_types": {"sessions": {"max_chars": 300, "field": "summary"}},
+            "per_branch": {"baud": {"sessions": {"max_chars": 500}}},
+        }
+
+    @staticmethod
+    def _rollover() -> dict:
+        return {"defaults": {"local": {"sessions": {"count": 15}}}, "per_branch": {}}
+
+    @pytest.fixture(autouse=True)
+    def _real_resolver(self, monkeypatch):
+        """conftest mocks the whole `handlers.json` package, so the renderer's
+        `entry_limits` binds a MagicMock whose every attribute answers another
+        MagicMock — a cap assertion would then pass or fail for reasons that have
+        nothing to do with the resolver. Hand it the real module.
+        """
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        monkeypatch.setattr(tab_renderer, "entry_limits", el)
+
+    def test_an_overridden_cap_reaches_the_rendered_tab(self):
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "baud")
+        assert "≤500 chars" in tab
+
+    def test_a_branch_without_an_override_still_reads_the_default(self):
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "memory")
+        assert "≤300 chars" in tab
+
+    def test_the_branch_name_is_matched_case_insensitively(self):
+        """Registry casing varies (MEMORY vs memory); the override must not."""
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "BAUD")
+        assert "≤500 chars" in tab
+
+    def test_todos_honours_it_too(self):
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        cfg = {
+            "entry_types": {"todos": {"max_chars": 150, "field": "task"}},
+            "per_branch": {"baud": {"todos": {"max_chars": 80}}},
+        }
+        assert "≤80 chars" in tab_renderer.render_tab("todos", self._rollover(), cfg, "baud")
+
+    def test_the_renderer_and_the_enforcer_resolve_identically(self):
+        """The two must never disagree — that divergence IS the drift.
+
+        load_entry_limits() is what the write gate measures against; whatever it
+        calls the cap is what the tab must print.
+        """
+        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+
+        section = self._cfg()
+        merged = el.resolve_entry_types(section, "baud")
+        assert merged["sessions"]["max_chars"] == 500
+        assert f"≤{merged['sessions']['max_chars']} chars" in tab_renderer.render_tab(
+            "sessions", self._rollover(), section, "baud"
+        )
+
+
+class TestTheReceiptsGoldVersionIsSchemaVersion:
+    """@seedgo inferred it and asked to be pinned by the owner, not by itself."""
+
+    def test_the_receipt_reads_schema_version_not_document_version(self):
+        """The two templates disagree on `version` (2.0.0 / 1.0.0) and agree on
+        schema_version (3.0.0). The contract's example shows two EQUAL values, so
+        only schema_version reproduces it — and the receipt reports the STRUCTURE
+        a branch was stamped with, which is what schema_version names.
+        """
+        from aipass.memory.apps.handlers.templates import receipt  # noqa: PLC0415
+
+        local = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
+        obs = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))
+        assert local["document_metadata"]["version"] != obs["document_metadata"]["version"]
+        versions = receipt.template_versions()
+        assert versions == {
+            "local": local["document_metadata"]["schema_version"],
+            "observations": obs["document_metadata"]["schema_version"],
+        }
+        assert versions["local"] == versions["observations"]

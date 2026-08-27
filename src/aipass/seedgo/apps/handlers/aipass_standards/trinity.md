@@ -73,6 +73,12 @@ The ⟦⟧ tab carries the live numbers (rendered from config — a config chang
 - **key_learnings** = transferable technical lessons — what future-you needs to know again; the story itself lives in sessions[].
 - **todos** = operational sticky notes — user asides, oddities spotted mid-task; capture the note, stay on task. DELETE when done (never leave `status: done`); reconcile against reality on load.
 
+**Where the full story goes** — the session entry is a headline, not a container:
+- `summary` holds the headline and nothing more. Extra fields bolted onto a session entry (`findings[]`, `verification`, …) are shape violations, however well-intentioned — the shape is closed.
+- A transferable lesson from the session → its own `key_learnings` entry.
+- The depth is already kept: rollover archives whole entries to @memory's vector store — recall with `drone @memory search "query"` (own branch first, global when needed). Nothing is lost by keeping the entry small.
+- `tags` is the findability hook — tag the session with related files/topics so search lands on it later.
+
 **Forbidden:** any other top-level section; duplicate keys; renamed fields; text fields holding anything but a string; entries without `number` + `date`.
 
 ---

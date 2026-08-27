@@ -3,7 +3,7 @@
 # Description: Config-generated state-tabs for .trinity memory files
 # Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-08-26
 # =============================================
 
 """
@@ -30,6 +30,7 @@ from typing import Any, Dict
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.json import entry_limits
 
 logger = get_system_logger()
 
@@ -174,7 +175,13 @@ def render_tab(
         for the full ``*_meta`` value.
     """
     # --- Resolve entry-limits for this section --------------------------------
-    entry_types = entry_limits_cfg.get("entry_types", {})
+    # Through the SAME resolver the write gate uses. Reading `entry_types` off
+    # the config directly ignored `entry_limits.per_branch`, so an overridden
+    # cap would have been enforced but never printed — the tab instructing an
+    # agent to break the rule measured against it (@seedgo, 2026-08-26). Note
+    # `rollover.per_branch` was honoured below all along; the asymmetry is what
+    # marked this an oversight rather than a decision.
+    entry_types = entry_limits.resolve_entry_types(entry_limits_cfg, branch_name)
     section_limits = entry_types.get(section_name, {})
     max_chars = section_limits.get("max_chars", 300)
     field = section_limits.get("field", "value")

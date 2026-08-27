@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(memory)+fix(hooks)+docs(seedgo)** — the morning-after round, all three
+verified independently before commit. @memory entry_limits 1.4.0 closes the
+half of B1 that @hooks proved still open: a MISSING canonical field now
+returns None like any other unreadable payload (present-and-empty still
+answers "") with its own reason=missing_field naming the field — 42 previously
+invisible violations surfaced fleet-wide (hooks/ai_mail/api, 14 each, all
+learning-shape key_learnings; grandfathered until the fleet push, like B1).
+This retires 8d31a646's "memory_files.py:116 still dodges" note — true when
+written, closed within the hour. @memory also fixed tab_renderer's per_branch
+override blindness (one resolver shared with the write gate), so @seedgo's
+known xfail flipped to a plain passing test and the marker is removed.
+@hooks edit_gate 1.5.1 dedupes the double-report that appeared once both
+missing-field checks ran (union of checks kept deliberately — a gate that
+outsources all measurement inherits its supplier's blind spots). And Patrick's
+session-shape ruling landed in the contract + graduated trinity.md verbatim:
+the shape stays closed — summary is the headline, lessons go to
+key_learnings, depth lives in @memory vectors (rollover + search), tags are
+the findability hook. Suites re-run together pre-commit: memory + hooks +
+trinity checker all green.
+
 **feat(seedgo)** — the trinity standard is LIVE: trinity_check.py joins the
 standards family (no bypass by design) and the fleet has its first honest
 memory-file scores — red-first bar hit exactly (clean set = the MASTER_LIST
