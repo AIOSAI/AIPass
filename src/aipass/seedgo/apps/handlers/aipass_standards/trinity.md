@@ -120,7 +120,7 @@ Written only by @memory/@spawn machinery. Its entire job: "who actually carries 
 
 Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, never a silent pass.
 
-1. **File set** — `.trinity/` contains exactly `passport.json`, `local.json`, `observations.json`, `README.md`, `.template_version.json`. Stray files and dirs (runtime state, backups, status notes) flagged.
+1. **File set** — `.trinity/` contains exactly `passport.json`, `local.json`, `observations.json`, `README.md`, `.template_version.json`, plus **versioned backups** of those files. A versioned backup is `<canonical name>.pre<sep><token>` (`local.json.pre_v3_backup`, `observations.json.pre-aipl`), where `<sep>` is `-` or `_` and `<token>` is `[A-Za-z0-9][A-Za-z0-9_-]*`. Renaming the current file as a version and leaving it in place is the house convention, so those are expected residents, not strays; the rule matches the SHAPE rather than a list of suffixes, so the next migration's token needs no code change. Still strays: a dotted token (`local.json.pre_v3_backup.tmp`), a non-canonical base (`STATUS.local.md.pre_v3_backup`), a directory whatever its name, and all other runtime state, lock files and status notes — a rule loose enough to admit `local.json.tmp` would hide torn writes in the one directory whose job is durable memory.
 2. **Top-level keys** — exact set and order per file; stray sections and duplicate keys flagged.
 3. **Entry shapes** — required fields present with required TYPES; renamed fields flagged by name; entries missing `number`/`date` flagged.
 4. **Ordering & numbering** — newest-first, numbers strictly descending, no reuse.

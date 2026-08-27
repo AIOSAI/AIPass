@@ -888,6 +888,190 @@ class TestDriftClassRegressions:
 
         assert trinity.check_branch_info(str(branch)) == []
 
+
+# ===========================================================================
+# D14b. Versioned backups are LEGAL residents (Patrick's File set ruling)
+# ===========================================================================
+
+
+class TestVersionedBackupsAreLegalResidents:
+    """The ruling: renaming the current file as a version left in place while
+    the new file is created IS the house convention, so those old versions are
+    expected residents of .trinity/ -- not strays.
+
+    The rule is a SHAPE, deliberately not a list of today's two suffixes: a
+    canonical filename, then ``.pre``, then a separator, then a version token.
+    The next migration mints its own token and passes without a code change.
+
+    The opposite error is the one that matters for a checker: a rule loose
+    enough to admit ``local.json.tmp`` would make torn-write staging files
+    invisible in the one directory whose whole job is durable memory. Every
+    guard below is a live species -- seedgo found a 4.3MB truncated .tmp
+    staging file in a json dir in session 90.
+    """
+
+    # -- the ruling: these must STOP flagging ------------------------------
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "local.json.pre_v3_backup",
+            "observations.json.pre_v3_backup",
+            "local.json.pre-aipl",
+            "observations.json.pre-aipl",
+        ],
+    )
+    def test_todays_live_versioned_backups_are_not_strays(self, trinity, tmp_path, name):
+        """The four shapes actually on disk across the fleet today."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / name).write_text("{}\n", encoding="utf-8")
+
+        result = trinity.check_branch(str(branch))
+
+        assert _group(result, "File set")["passed"] is True, _group(result, "File set")["message"]
+        assert trinity.check_branch_info(str(branch)) == []
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "local.json.pre_v4_backup",
+            "passport.json.pre-trinity",
+            "README.md.pre_v9",
+            ".template_version.json.pre-whatever2",
+        ],
+    )
+    def test_a_suffix_no_one_has_minted_yet_is_admitted_by_shape(self, trinity, tmp_path, name):
+        """The point of a shape rule: the NEXT migration needs no code change."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / name).write_text("{}\n", encoding="utf-8")
+
+        assert _group(trinity.check_branch(str(branch)), "File set")["passed"] is True
+
+    def test_a_branch_of_canonicals_plus_backups_scores_file_set_100(self, trinity, tmp_path):
+        """devpulse's real .trinity shape: five canonicals + two generations."""
+        branch = _write_branch(tmp_path)
+        for name in (
+            "local.json.pre_v3_backup",
+            "local.json.pre-aipl",
+            "observations.json.pre_v3_backup",
+            "observations.json.pre-aipl",
+        ):
+            (branch / ".trinity" / name).write_text("{}\n", encoding="utf-8")
+
+        assert _group(trinity.check_branch(str(branch)), "File set")["score"] == 100
+
+    # -- over-refusal guards: these must STILL flag ------------------------
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "local.json.tmp",  # torn-write staging -- the species seedgo found live
+            "local.json.bak",
+            "local.json.swp",
+            "local.json.orig",
+            "observations.json.lock",
+            "tmp2ay2d070.tmp",
+        ],
+    )
+    def test_machine_artifacts_are_still_strays(self, trinity, tmp_path, name):
+        """A backup rule that swallows temp files hides torn writes."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), f"stray {name}")
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "STATUS.local.md",  # seedgo's own, still mine to relocate or defend
+            "watchdog_active.json",  # devpulse's, banked as their todo
+            "watchdog_active.json.lock",
+        ],
+    )
+    def test_the_deliberately_flagged_operational_files_still_flag(self, trinity, tmp_path, name):
+        """The ruling kept these violations on purpose -- owners relocate."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), f"stray {name}")
+
+    def test_a_backup_of_a_non_canonical_base_is_still_a_stray(self, trinity, tmp_path):
+        """Versioning a stray does not launder it into a resident."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / "STATUS.local.md.pre_v3_backup").write_text("x\n", encoding="utf-8")
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), "stray STATUS.local.md.pre_v3_backup")
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "local.json.pre",  # no separator, no token -- ambiguous
+            "local.json.pre_",  # token must start alphanumeric
+            "local.json.pre-",
+            "local.json.pre_v3_backup.tmp",  # a temp file wearing a backup's name
+            "local.jsonpre_v3",  # no dot before the marker
+            "local.json.post_v3",  # 'pre' is the anchor the convention uses
+        ],
+    )
+    def test_near_misses_of_the_pattern_are_still_strays(self, trinity, tmp_path, name):
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), f"stray {name}")
+
+    def test_a_directory_named_like_a_backup_is_still_a_stray(self, trinity, tmp_path):
+        """The convention renames a FILE. A directory of junk is not a version."""
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / "local.json.pre_v3_backup").mkdir()
+
+        _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), "stray local.json.pre_v3_backup/")
+
+    # -- the two lanes must agree -----------------------------------------
+
+    def test_both_lanes_agree_on_what_a_stray_is(self, trinity, tmp_path):
+        """seedgo S88/S90 lesson: a shared rule fixed in one lane and not the
+        other is this branch's own recurring defect. The scored group and the
+        info channel read the same helper -- pinned so they cannot diverge.
+        """
+        branch = _write_branch(tmp_path)
+        (branch / ".trinity" / "local.json.pre_v3_backup").write_text("{}\n", encoding="utf-8")
+        (branch / ".trinity" / "STATUS.local.md").write_text("x\n", encoding="utf-8")
+
+        result = trinity.check_branch(str(branch))
+        info = trinity.check_branch_info(str(branch))
+
+        assert info == ["trinity: stray .trinity/STATUS.local.md"]
+        _assert_failed(_group(result, "File set"), "stray STATUS.local.md")
+        assert "pre_v3_backup" not in _group(result, "File set")["message"]
+
+    # -- the predicate itself, directly ------------------------------------
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("local.json.pre_v3_backup", True),
+            ("observations.json.pre-aipl", True),
+            ("passport.json.pre_v4", True),
+            ("README.md.pre-anything", True),
+            (".template_version.json.pre_v2_backup", True),
+            ("local.json", False),  # a canonical file is not a backup of one
+            ("local.json.tmp", False),
+            ("local.json.pre", False),
+            ("local.json.pre_", False),
+            ("local.json.pre_v3_backup.tmp", False),
+            ("STATUS.local.md.pre_v3_backup", False),
+            ("local.json.PRE_V3", False),  # convention is lowercase
+            ("pre_v3_backup", False),  # no base at all
+            ("", False),
+        ],
+    )
+    def test_the_predicate_reads_names_only(self, trinity, name, expected):
+        """Pure name predicate -- no filesystem, so the caller owns the
+        directory rule. Called directly because it is public API and seedgo's
+        own test_map scores public functions on having a direct test.
+        """
+        assert trinity.is_versioned_backup(name) is expected
+
     def test_d14_check_branch_info_is_empty_when_trinity_is_absent(self, trinity, tmp_path):
         branch = tmp_path / "nobody"
         branch.mkdir()

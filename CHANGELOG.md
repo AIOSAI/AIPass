@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**feat(seedgo)+feat(spawn)** — the File set ruling executed on both sides.
+Seedgo: versioned old files are legal residents of .trinity/ — the rule
+matches the shape `<canonical>.pre<sep><token>` (dotless token, canonical base
+required) rather than a suffix list, so the next migration needs no code
+change; deliberately narrow because an allow-rule fails toward blindness — a
+rule loose enough to admit `local.json.tmp` would hide torn writes in the one
+directory whose job is durable memory. Fleet strays 38→4 with zero collateral
+(the 4 = the deliberately-flagged operational files); seedgo relocated its own
+stale STATUS.local.md while it was there. 10 red-first tests + 23 over-refusal
+guards written first, 6/6 mutations bite, trinity suite 125→166. Spawn: one
+generic .trinity/README.md (no numbers, no branch names — points at meta lines
+and the standard instead of restating them), added to BOTH scaffold classes and
+backfilled to the 6 missing branches, 8 files byte-identical; passports
+surveyed first so the new template file red-boards nobody (the August lesson,
+applied). The 4 outlier core READMEs (one literally says "README.md
+placeholder", one hardcodes a cap) get the same file in a follow-up copy.
+
 **feat(memory)** — the trinity PUSH is built and live-proven on canary
 (@memory's build): one lane per branch — re-render the machine frame, prune
 every non-canonical entry (vectorize verbatim → read back BY ID and compare

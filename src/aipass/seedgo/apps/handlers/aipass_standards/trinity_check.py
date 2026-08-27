@@ -129,6 +129,19 @@ _CANONICAL_FILES = (
 
 _FILE_NAMES = {"local": _LOCAL_NAME, "observations": _OBSERVATIONS_NAME}
 
+# A versioned backup is a LEGAL resident of .trinity/ (Patrick's File set ruling):
+# the house convention renames the current file as a version and leaves it in
+# place while the new file is written. The rule is a SHAPE, not a list of the two
+# suffixes minted so far -- the next migration mints its own and must pass without
+# a code change here. Anchored on ``pre`` because that is what the convention
+# means (what the file was BEFORE the migration) and it is what both live
+# generations use; the version token itself is free.
+#
+# Deliberately tight on the token: no dots, so ``local.json.pre_v3_backup.tmp``
+# stays a stray. A rule loose enough to admit ``local.json.tmp`` would make
+# torn-write staging files invisible inside the fleet's own memory directory.
+_VERSION_SUFFIX_RE = re.compile(r"^pre[-_][A-Za-z0-9][A-Za-z0-9_-]*$")
+
 # -- Canonical structure -----------------------------------------------------
 
 _LOCAL_KEY_ORDER = [
@@ -795,18 +808,42 @@ def _run_probe(section: str, entries: list, problem_of) -> tuple[int, list]:
 # =============================================================================
 
 
+def is_versioned_backup(name: str) -> bool:
+    """Whether a filename is a legal versioned backup of a canonical file.
+
+    The shape is ``<canonical filename>.pre<sep><token>`` -- for example
+    ``local.json.pre_v3_backup`` or ``observations.json.pre-aipl``. Versioning
+    a non-canonical name does not launder it into a resident.
+
+    Pure name predicate, no I/O: the caller decides what to do about
+    directories, which are never versioned backups whatever they are called.
+
+    Args:
+        name: A bare filename, no path separators.
+
+    Returns:
+        True when the name is a versioned backup of a canonical file.
+    """
+    base, _, suffix = name.rpartition(".")
+    return base in _CANONICAL_FILES and bool(_VERSION_SUFFIX_RE.match(suffix))
+
+
 def _stray_names(trinity: Path) -> list[str]:
-    """Names of everything in .trinity/ that is not one of the five canonicals."""
+    """Names in .trinity/ that are neither canonical nor a versioned backup."""
     try:
         found = sorted(trinity.iterdir(), key=lambda item: item.name)
     except OSError as exc:
         logger.warning("trinity_check: cannot list %s: %s", trinity, exc)
         return []
-    return [item.name + ("/" if item.is_dir() else "") for item in found if item.name not in _CANONICAL_FILES]
+    return [
+        item.name + ("/" if item.is_dir() else "")
+        for item in found
+        if item.name not in _CANONICAL_FILES and not (is_versioned_backup(item.name) and not item.is_dir())
+    ]
 
 
 def _group_file_set(ctx: dict) -> dict:
-    """Group 1: exactly the five canonical files, no strays."""
+    """Group 1: the five canonical files, plus versioned backups, no strays."""
     trinity = ctx["trinity"]
     if not trinity.is_dir():
         return _binary_check("File set", False, ".trinity/ directory not found -- nothing to measure")

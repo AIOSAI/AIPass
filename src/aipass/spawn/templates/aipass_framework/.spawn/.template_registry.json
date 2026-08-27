@@ -183,7 +183,7 @@
       "path": ".seedgo/bypass.json"
     },
     "f011": {
-      "content_hash": "f461c9b16fc5",
+      "content_hash": "532ebc592507",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": ".trinity/README.md"
@@ -425,7 +425,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-08-24",
+    "last_updated": "2026-08-27",
     "version": "1.0.0"
   }
 }
