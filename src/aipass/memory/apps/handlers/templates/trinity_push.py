@@ -110,6 +110,10 @@ _REPO_ROOT = _find_repo_root()
 # scope from a private constant while rollover/lint/health walked the registry
 # lane and reached three branches fewer. Re-exported here because this module's
 # readers look for it here, but there is only one list.
+#
+# RESIDENT_REGISTRIES is a DEMOTED re-export as of 2026-08-28: registry_scope
+# classifies by passport residency now and nothing here selects on this tuple.
+# It stays only while @ai_mail's mirror still pins against it.
 CORE_REGISTRY = registry_scope.CORE_REGISTRY
 RESIDENT_REGISTRIES = registry_scope.RESIDENT_REGISTRIES
 
@@ -282,32 +286,6 @@ def is_canonical(section: str, entry: Any, cap_spec: Any = None) -> bool:
 # =============================================================================
 
 
-def _registry_branches(registry_path: Path) -> list[dict]:
-    """Read one registry and return its active branches with absolute paths."""
-    try:
-        data = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        logger.error(f"[trinity_push] Unreadable registry {registry_path}: {exc}")
-        return []
-
-    found = []
-    for branch in data.get("branches", []):
-        if branch.get("status") != "active":
-            continue
-        raw = branch.get("path", "")
-        if not raw:
-            continue
-        path = Path(raw)
-        if not path.is_absolute():
-            path = registry_path.parent / raw
-        # The branch's NAME for every standard purpose is its directory name:
-        # that is what the trinity checker compares managed_by against, and
-        # what per-branch config lookups key on. The registry's own `name`
-        # field disagrees in casing for several citizens (BACKUP vs backup).
-        found.append({"name": path.name, "path": path, "registry": registry_path.name})
-    return found
-
-
 def resolve_scope(branch: str | None = None) -> dict:
     """Resolve which branches this run covers.
 
@@ -319,17 +297,13 @@ def resolve_scope(branch: str | None = None) -> dict:
         An unknown ``branch`` is an error, never an empty run: silence would
         read as "nothing to do" for a name that was simply mistyped.
     """
-    branches = _registry_branches(_REPO_ROOT / CORE_REGISTRY)
-    seen = {str(item["path"]) for item in branches}
-    for relative in RESIDENT_REGISTRIES:
-        registry_path = _REPO_ROOT / relative
-        if not registry_path.is_file():
-            logger.warning(f"[trinity_push] Resident registry not found: {registry_path}")
-            continue
-        for item in _registry_branches(registry_path):
-            if str(item["path"]) not in seen:
-                branches.append(item)
-                seen.add(str(item["path"]))
+    # Converged on registry_scope 2026-08-28 (DPLAN-0319). This lane used to
+    # walk RESIDENT_REGISTRIES itself, which meant the "one definition of the
+    # fleet" had two implementations that only agreed by coincidence — and this
+    # copy did no residency classification at all, so the push would have kept
+    # sweeping projects by the retired rules while every other lane read the
+    # passport. Same list, same order, one place.
+    branches = registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
 
     if branch is None:
         return {"branches": branches, "error": None}
