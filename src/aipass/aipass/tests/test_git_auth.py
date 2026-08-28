@@ -174,16 +174,36 @@ def test_realigns_a_passport_that_belongs_to_another_registry(tmp_path: Path) ->
     assert result["verified"] is True
 
 
-def test_seats_owner_flag_from_a_passport_claim(tmp_path: Path) -> None:
-    """Registry entry lacks owner: true but the passport claims it — never guessed."""
+def test_a_passport_owner_claim_no_longer_seats_the_flag(tmp_path: Path) -> None:
+    """The passport-side fallback retired with passport 2.0 (DPLAN-0319).
+
+    ``citizenship.owner`` is DROPPED by the migration, so a passport carrying
+    it is a pre-2.0 fossil, not an authority. It refuses, and it does not
+    quietly write ``owner: true`` into the registry off a dead field.
+    """
     registry_path = build_project(tmp_path, owner_flag=False, passport_owner=True)
 
-    result = provision_git_auth(tmp_path)
+    with pytest.raises(GitAuthRefusal) as exc:
+        provision_git_auth(tmp_path)
 
-    assert owner_entry(registry_path)["owner"] is True
-    assert result["owner"] == "VERA"
-    assert any("owner: true" in r for r in result["repairs"])
-    assert result["verified"] is True
+    assert '"owner": true' in str(exc.value)
+    assert "owner" not in owner_entry(registry_path)
+
+
+def test_no_owner_refusal_names_the_retired_passport_fallback(tmp_path: Path) -> None:
+    """Loud, not silent: the refusal says WHY a passport claim stopped working.
+
+    Without this sentence, a project whose passport used to seat the flag reads
+    "nobody is marked" and has no way to know the rule changed under it.
+    """
+    build_project(tmp_path, owner_flag=False, passport_owner=True)
+
+    with pytest.raises(GitAuthRefusal) as exc:
+        provision_git_auth(tmp_path)
+
+    message = str(exc.value)
+    assert "citizenship.owner" in message
+    assert "registry" in message
 
 
 def test_records_missing_path_from_the_citizens_own_passport(tmp_path: Path) -> None:
@@ -350,8 +370,13 @@ def test_refuses_when_two_citizens_are_marked_owner(tmp_path: Path) -> None:
     assert "VERA, WRITER" in str(exc.value)
 
 
-def test_refuses_when_two_passports_claim_ownership(tmp_path: Path) -> None:
-    """Two passport claims are ambiguous — the registry must settle it."""
+def test_two_passport_claims_are_one_plain_no_owner_refusal(tmp_path: Path) -> None:
+    """With the fallback retired, N passport claims are not an ambiguity at all.
+
+    The old "more than one passport claims" branch existed only because
+    passports could seat the flag. They cannot, so two claims are simply two
+    citizens nobody marked — and the refusal says the one thing that fixes it.
+    """
     build_project(tmp_path, owner_flag=False, passport_owner=True)
     _write(
         tmp_path / "src" / "demo" / "writer" / ".trinity" / "passport.json",
@@ -365,7 +390,28 @@ def test_refuses_when_two_passports_claim_ownership(tmp_path: Path) -> None:
     with pytest.raises(GitAuthRefusal) as exc:
         provision_git_auth(tmp_path)
 
-    assert "more than one passport" in str(exc.value)
+    message = str(exc.value)
+    assert "more than one passport" not in message
+    assert '"owner": true' in message
+    assert "VERA" in message and "WRITER" in message
+
+
+def test_registry_flag_wins_over_a_contradicting_passport(tmp_path: Path) -> None:
+    """A stale passport claim on ANOTHER citizen cannot deflect the seated owner."""
+    build_project(tmp_path)  # VERA flagged in the registry
+    _write(
+        tmp_path / "src" / "demo" / "writer" / ".trinity" / "passport.json",
+        {
+            "branch_info": {"branch_name": "WRITER"},
+            "identity": {"citizen_class": "builder"},
+            "citizenship": {"owner": True},
+        },
+    )
+
+    result = provision_git_auth(tmp_path)
+
+    assert result["owner"] == "VERA"
+    assert result["verified"] is True
 
 
 # =============================================================================

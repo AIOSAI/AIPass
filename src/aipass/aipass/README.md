@@ -63,7 +63,7 @@ aipass/
 │   └── plugins/                           # Placeholder — no code yet
 ├── shared/                                # Cross-handler code — json_handler, json_ops,
 │                                          #   project_home, registry_discovery, scaffold_content
-├── tests/                                 # 1034 passing
+├── tests/                                 # 1061 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -105,7 +105,7 @@ aipass/
 | `aipass handoff --info` | Show stored CLI + platform status |
 | `aipass handoff launch [--cli claude\|codex] [--cwd PATH] [--flag VARIANT]` | Launch chosen CLI in a new session (tmux / wt.exe) |
 | `aipass <free text>` | Multi-word unknown input falls through to `aipass help` |
-| `aipass new <name>` | Create a project in projects/ — own repo, AIPass scaffold, resident agent |
+| `aipass new <name>` | Create a project in projects/ — own repo (`main` + `dev`, left on `dev`), AIPass scaffold, resident manager-class agent |
 | `aipass new <name> --template python` | Create with Python template (pyproject + src/) |
 | `aipass new <name> --no-agent` | Create without resident agent |
 | `aipass adopt <name>` | Turn an existing `projects/<name>` directory into a full project — additive scaffold only |
@@ -137,7 +137,7 @@ Humans only. No `.py` source elsewhere in AIPass imports this branch.
 
 ## Tests
 
-1034 passing — `pytest src/aipass/aipass/tests/`
+1061 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 

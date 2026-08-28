@@ -13,6 +13,9 @@ filesystem. Tests mock subprocess calls to avoid real git/drone invocations.
 """
 
 import json
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +23,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.new_project import (
     _agent_home,
+    _git_init,
     _registry_name,
     _spawn_project_agent,
     _validate_name,
@@ -338,7 +342,9 @@ def test_create_project_registry_before_scaffold(host_env, monkeypatch):
 _SPAWN_SUCCESS = {
     "success": True,
     "branch_name": "DEMO",
-    "path": "/tmp/demo",
+    # Never touched by the filesystem — it is the mock's payload. Built from
+    # tempfile so the literal stays portable (windows_compat).
+    "path": str(Path(tempfile.gettempdir()) / "demo"),
     "files_copied": 12,
     "registry_updated": True,
     "validation_issues": [],
@@ -362,7 +368,7 @@ def test_agent_home_hyphenated():
 
 
 def test_spawn_project_agent_calls_spawn(tmp_path):
-    """Calls spawn_agent with correct citizen_class, purpose, and agent_home path."""
+    """Calls spawn_agent with the agent_home path, role and purpose — and no class."""
     with patch(
         "aipass.aipass.apps.handlers.new_project.spawn_agent",
         return_value=_SPAWN_SUCCESS,
@@ -371,9 +377,8 @@ def test_spawn_project_agent_calls_spawn(tmp_path):
     expected_home = str(tmp_path / "src" / "demo" / "demo")
     mock_spawn.assert_called_once_with(
         target_path=expected_home,
-        role="project_agent",
+        role="project_manager",
         purpose="Resident agent of the demo project.",
-        citizen_class="project_agent",
     )
     assert result["success"] is True
     assert result["branch_name"] == "DEMO"
@@ -439,7 +444,7 @@ def test_create_project_with_agent(host_env, monkeypatch):
     mock_spawn.assert_called_once()
     call_kwargs = mock_spawn.call_args[1]
     assert call_kwargs["target_path"] == expected_home
-    assert call_kwargs["citizen_class"] == "project_agent"
+    assert "citizen_class" not in call_kwargs
 
 
 def test_create_project_spawn_failure_cleans_up(host_env, monkeypatch):
@@ -758,3 +763,207 @@ def test_aipass_print_help():
     from aipass.aipass.apps.aipass import print_help
 
     print_help([])
+
+
+# ---------------------------------------------------------------------------
+# _git_init — main + dev at mint (DPLAN-0319 R6)
+#
+# These run REAL git in a temp dir. subprocess.run is deliberately NOT mocked:
+# the ordering claim ("dev is cut from the birth commit, HEAD lands on dev") is
+# only provable against a real repo — a mocked subprocess would happily pass
+# whatever argv it was handed.
+# ---------------------------------------------------------------------------
+
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+
+
+def _git_env(monkeypatch):
+    """Make commits work without any global git identity."""
+    for var, value in (
+        ("GIT_AUTHOR_NAME", "AIPass Test"),
+        ("GIT_AUTHOR_EMAIL", "test@aipass.invalid"),
+        ("GIT_COMMITTER_NAME", "AIPass Test"),
+        ("GIT_COMMITTER_EMAIL", "test@aipass.invalid"),
+    ):
+        monkeypatch.setenv(var, value)
+
+
+def _run_git(args: list[str], repo: Path) -> str:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _branches(repo: Path) -> list[str]:
+    out = _run_git(["branch", "--format=%(refname:short)"], repo)
+    return sorted(line.strip() for line in out.splitlines() if line.strip())
+
+
+@requires_git
+def test_git_init_creates_main_and_dev(tmp_path, monkeypatch):
+    """R6: a new project is born with BOTH branches, not just main."""
+    _git_env(monkeypatch)
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    _git_init(tmp_path, "demo", "empty")
+
+    assert _branches(tmp_path) == ["dev", "main"]
+
+
+@requires_git
+def test_git_init_leaves_head_on_dev(tmp_path, monkeypatch):
+    """R6: the repo is LEFT on dev — agents default to dev, main trails."""
+    _git_env(monkeypatch)
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    _git_init(tmp_path, "demo", "empty")
+
+    assert _run_git(["rev-parse", "--abbrev-ref", "HEAD"], tmp_path) == "dev"
+
+
+@requires_git
+def test_git_init_cuts_dev_from_the_birth_commit(tmp_path, monkeypatch):
+    """dev and main share one root — dev is cut AFTER the birth commit.
+
+    Cutting dev from an empty repo would give it no history in common with
+    main, so the first merge back would be an unrelated-histories refusal.
+    """
+    _git_env(monkeypatch)
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    _git_init(tmp_path, "demo", "empty")
+
+    main = _run_git(["rev-parse", "main"], tmp_path)
+    dev = _run_git(["rev-parse", "dev"], tmp_path)
+    assert main and main == dev
+
+
+@requires_git
+def test_git_init_birth_commit_carries_the_project_files(tmp_path, monkeypatch):
+    """The birth commit is real — dev's tree has the scaffolded file in it."""
+    _git_env(monkeypatch)
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    _git_init(tmp_path, "demo", "empty")
+
+    assert "README.md" in _run_git(["ls-tree", "--name-only", "dev"], tmp_path).split()
+
+
+def test_git_init_still_refuses_an_existing_repo(tmp_path):
+    """The re-init guard survives the R6 change — no branch work on a live repo."""
+    (tmp_path / ".git").mkdir()
+
+    with pytest.raises(RuntimeError, match="already has a .git"):
+        _git_init(tmp_path, "demo", "empty")
+
+
+# ---------------------------------------------------------------------------
+# first-agent class flows free (DPLAN-0319 R3)
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_project_agent_passes_no_citizen_class(tmp_path):
+    """The class is spawn's to decide at mint — naming one here overrides R3.
+
+    The project agent is always citizen #1 of a registry minted moments
+    earlier, so spawn's first-agent rule mints ``manager`` on its own. Passing
+    a class would replace that rule with a guess, and the value this used to
+    pass ("project_agent") is a retired name spawn now refuses by name.
+    """
+    with patch(
+        "aipass.aipass.apps.handlers.new_project.spawn_agent",
+        return_value={"success": True, "branch_name": "DEMO", "files_copied": 1},
+    ) as mock_spawn:
+        _spawn_project_agent(tmp_path, "demo")
+
+    assert "citizen_class" not in mock_spawn.call_args.kwargs
+    assert not mock_spawn.call_args.args
+
+
+def test_spawn_project_agent_never_sends_a_retired_class(tmp_path):
+    """Guard the species, not the one string: no retired name reaches spawn."""
+    from aipass.spawn.apps.handlers.class_registry import LEGACY_CLASSES
+
+    with patch(
+        "aipass.aipass.apps.handlers.new_project.spawn_agent",
+        return_value={"success": True, "branch_name": "DEMO", "files_copied": 1},
+    ) as mock_spawn:
+        _spawn_project_agent(tmp_path, "demo")
+
+    sent = {str(v) for v in mock_spawn.call_args.kwargs.values()}
+    assert sent.isdisjoint(set(LEGACY_CLASSES) | {"admin"})
+
+
+def test_spawn_still_refuses_the_class_this_used_to_pass():
+    """Live proof the old value is a refusal, not a slow rename — red if spawn softens."""
+    from aipass.spawn.apps.handlers.class_registry import refuse_retired_or_forbidden
+
+    assert refuse_retired_or_forbidden("project_agent")
+    assert not refuse_retired_or_forbidden("manager")
+
+
+# ---------------------------------------------------------------------------
+# END TO END — the real door (DPLAN-0319 wave 2)
+#
+# Nothing mocked but the host-enrolment side effects: real git, real @spawn,
+# real template. This is the first proof of spawn's passport-2.0 mint path
+# driven from `aipass new`, so mocking either half would prove nothing.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _e2e_project(host_env, monkeypatch):
+    """Run the real `aipass new` once; yield (result, project_root)."""
+    _git_env(monkeypatch)
+    monkeypatch.chdir(host_env)
+    with (
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("e2edemo", template="empty", no_agent=False)
+    return result, Path(result["target"])
+
+
+@requires_git
+def test_e2e_new_project_is_born_on_dev_with_both_branches(_e2e_project):
+    """R6 end to end: main AND dev exist, and the project is left on dev."""
+    _result, project = _e2e_project
+
+    assert _branches(project) == ["dev", "main"]
+    assert _run_git(["rev-parse", "--abbrev-ref", "HEAD"], project) == "dev"
+
+
+@requires_git
+def test_e2e_project_agent_mints_manager_on_schema_2(_e2e_project):
+    """R3 end to end: citizen #1 of a fresh registry mints manager, schema 2.0.0.
+
+    Read off the passport spawn actually wrote — the class is never typed by
+    this branch, so a `specialist` here would mean R3 did not fire at the door.
+    """
+    result, _project = _e2e_project
+    passport = json.loads((Path(result["agent_home"]) / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+
+    assert passport["identity"]["citizen_class"] == "manager"
+    assert passport["branch_info"]["git_branch"] == "dev"
+    assert passport["document_metadata"]["schema_version"] == "2.0.0"
+
+
+@requires_git
+def test_e2e_minted_passport_carries_no_retired_or_dropped_fields(_e2e_project):
+    """The 2.0 shape as this door produces it: no owner key, no legacy class."""
+    from aipass.spawn.apps.handlers.class_registry import LEGACY_CLASSES
+
+    result, _project = _e2e_project
+    passport = json.loads((Path(result["agent_home"]) / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+
+    assert "owner" not in passport["citizenship"]
+    assert passport["identity"]["citizen_class"] not in LEGACY_CLASSES
+    assert "principles" in passport["identity"]
+
+
+@requires_git
+def test_e2e_agent_files_are_in_the_birth_commit(_e2e_project):
+    """The agent is spawned BEFORE git init, so dev's tree already carries it."""
+    result, project = _e2e_project
+    tracked = _run_git(["ls-tree", "-r", "--name-only", "dev"], project).splitlines()
+    rel = Path(result["agent_home"]).relative_to(project).as_posix()
+
+    assert any(line.startswith(rel) for line in tracked)
