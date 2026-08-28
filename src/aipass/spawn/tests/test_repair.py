@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -748,13 +750,23 @@ class TestTemplateFiles:
     def test_retired_class_named_template_dirs_are_archived_not_live(self):
         """R3: the class-named template dirs were ARCHIVED, never straight-deleted.
 
-        Pins both halves — nothing mints from a class-named dir any more, and the
-        old trees are still on disk under .archive/ where house rules put them.
+        Two halves with different reach: nothing-mints-from-a-class-named-dir is
+        the shipped contract and holds everywhere; the archived-trees-still-on-disk
+        half is a LIVE-MACHINE fact — .archive/ is gitignored by design, so a
+        clean checkout legitimately has none. Absent archive = environment fact,
+        skipped loudly, never scored as a deletion (the clean-checkout
+        discriminator; this exact test was CI-red on a tree that never carried
+        the archive).
         """
         templates = Path(__file__).resolve().parent.parent / "templates"
 
         for retired in ("aipass_framework", "project_agent"):
             assert not (templates / retired).exists(), f"templates/{retired}/ is live again"
-            assert (templates / ".archive" / retired).is_dir(), f"templates/{retired}/ was deleted, not archived"
 
         assert (templates / "citizen").is_dir()
+
+        archive = templates / ".archive"
+        if not archive.is_dir():
+            pytest.skip("templates/.archive/ absent — clean checkout; the archive half is a live-machine fact")
+        for retired in ("aipass_framework", "project_agent"):
+            assert (archive / retired).is_dir(), f"templates/{retired}/ was deleted, not archived"
