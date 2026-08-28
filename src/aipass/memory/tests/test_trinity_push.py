@@ -534,10 +534,22 @@ class TestScope:
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert "marketstand" not in names
 
-    def test_the_resident_list_is_explicit_not_a_glob(self):
+    def test_this_lane_owns_no_resident_resolution_of_its_own(self):
+        """INVERTED 2026-08-28, deliberately, and worth saying why.
+
+        This test used to assert the opposite ruling: that the resident list
+        was explicit and `glob("projects` appeared nowhere. DPLAN-0319 replaced
+        the named list with a glob made safe by passport classification, so the
+        old assertion now pins a design that was retired on purpose — the
+        dangerous kind of green.
+
+        What survives is the part that was really being protected: this lane
+        must not resolve residents itself. It asks registry_scope, which globs
+        AND classifies, instead of carrying a second answer.
+        """
         source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
-        assert 'glob("projects' not in source
-        assert len(tp.RESIDENT_REGISTRIES) == 4
+        assert 'glob("projects' not in source, "the push lane grew its own discovery"
+        assert "registry_scope.fleet_branches(" in source
 
     def test_a_single_branch_resolves_with_or_without_the_at_sign(self, live_fleet):
         assert tp.resolve_scope("@canary")["branches"][0]["name"] == "canary"

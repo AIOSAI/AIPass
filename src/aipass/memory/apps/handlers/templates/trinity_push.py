@@ -111,11 +111,10 @@ _REPO_ROOT = _find_repo_root()
 # lane and reached three branches fewer. Re-exported here because this module's
 # readers look for it here, but there is only one list.
 #
-# RESIDENT_REGISTRIES is a DEMOTED re-export as of 2026-08-28: registry_scope
-# classifies by passport residency now and nothing here selects on this tuple.
-# It stays only while @ai_mail's mirror still pins against it.
+# There is no resident LIST to re-export any more. registry_scope discovers
+# candidates under projects/ and classifies them on the passport's declared
+# residency, so this lane asks it a question instead of copying an answer.
 CORE_REGISTRY = registry_scope.CORE_REGISTRY
-RESIDENT_REGISTRIES = registry_scope.RESIDENT_REGISTRIES
 
 # =============================================================================
 # THE CANONICAL SHAPE (mirrors seedgo/apps/handlers/aipass_standards/trinity.md)
@@ -298,7 +297,7 @@ def resolve_scope(branch: str | None = None) -> dict:
         read as "nothing to do" for a name that was simply mistyped.
     """
     # Converged on registry_scope 2026-08-28 (DPLAN-0319). This lane used to
-    # walk RESIDENT_REGISTRIES itself, which meant the "one definition of the
+    # walk a named resident tuple itself, which meant the "one definition of the
     # fleet" had two implementations that only agreed by coincidence — and this
     # copy did no residency classification at all, so the push would have kept
     # sweeping projects by the retired rules while every other lane read the

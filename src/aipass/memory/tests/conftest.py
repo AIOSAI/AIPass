@@ -243,15 +243,28 @@ def live_residents(live_fleet):
     to expose. The ground truth has to be read independently of the thing
     being judged.
 
+    THE FOUR PATHS ARE LITERALS HERE, and that is the same argument one step
+    further. They used to be read from `registry_scope.RESIDENT_REGISTRIES`,
+    which was fine while that tuple was the definition. On 2026-08-28 the
+    definition became a glob plus a passport field, and the tuple was deleted;
+    reading the new discovery function instead would have handed the guard
+    back to the code it guards. So the expected residents are written out
+    here, in the guard, where a change to them is a deliberate edit to a test
+    fixture rather than a silent consequence of a resolver change.
+
     Returns:
         The repo root holding the core registry and all four residents.
     """
-    from aipass.memory.apps.handlers.monitor import registry_scope
-
-    missing = [relative for relative in registry_scope.RESIDENT_REGISTRIES if not (live_fleet / relative).is_file()]
+    expected = (
+        "projects/baud/BAUD_REGISTRY.json",
+        "projects/earmark/EARMARK_REGISTRY.json",
+        "projects/finch/FINCH_REGISTRY.json",
+        "projects/aipass-site/AIPASS-SITE_REGISTRY.json",
+    )
+    missing = [relative for relative in expected if not (live_fleet / relative).is_file()]
     if missing:
         pytest.skip(
-            f"{len(missing)} of {len(registry_scope.RESIDENT_REGISTRIES)} resident registries "
+            f"{len(missing)} of {len(expected)} resident registries "
             f"not installed at {live_fleet} ({', '.join(missing)}) -- live-state guard skipped"
         )
     return live_fleet

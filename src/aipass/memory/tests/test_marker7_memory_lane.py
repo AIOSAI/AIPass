@@ -70,10 +70,16 @@ class TestOneFleetOneDefinition:
     marketstand), or leaving detector reading only the core registry.
     """
 
-    def test_the_resident_constant_names_all_four_projects(self):
-        named = " ".join(registry_scope.RESIDENT_REGISTRIES)
-        for project in ("baud", "earmark", "finch", "aipass-site"):
-            assert project in named
+    def test_the_fleet_reaches_all_four_resident_projects(self, live_residents):
+        """Repointed 2026-08-28: there is no constant to read any more.
+
+        This used to join the named tuple into a string and look for four
+        substrings — a test that two literals agreed, which would have passed
+        just as happily if the resolver had stopped working entirely. It now
+        asks the resolver, which is the thing that has to be right.
+        """
+        names = {item["name"] for item in registry_scope.fleet_branches(live_residents)}
+        assert {"baud", "earmark", "finch", "aipass_site"} <= names
 
     def test_a_held_project_is_never_swept_in(self, live_fleet):
         """marketstand marks its branch active INSIDE a directory named (on _hold).
@@ -110,8 +116,17 @@ class TestOneFleetOneDefinition:
         registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
 
-    def test_the_push_still_resolves_its_own_scope_from_the_shared_constant(self):
-        assert trinity_push.RESIDENT_REGISTRIES == registry_scope.RESIDENT_REGISTRIES
+    def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
+        """Repointed 2026-08-28: the shared constant is gone, the agreement is not.
+
+        Comparing two re-exported tuples proved they were the same object. The
+        claim worth holding is that the two LANES answer the same question the
+        same way, which survives the constant and would have caught the split
+        this module was built to end.
+        """
+        assert {item["name"] for item in trinity_push.resolve_scope()["branches"]} == {
+            item["name"] for item in registry_scope.fleet_branches(live_fleet)
+        }
 
     def test_a_missing_resident_registry_is_skipped_not_raised(self, tmp_path):
         """A checkout with no projects/ must not take out every fleet lane."""

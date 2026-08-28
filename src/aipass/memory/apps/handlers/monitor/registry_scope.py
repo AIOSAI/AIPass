@@ -23,8 +23,11 @@ on them.  A gap that depends on a caller's working directory is not a policy.
 DECLARED IN A PASSPORT, ANCHORED IN A REGISTRY (2.0.0, DPLAN-0319)
 ------------------------------------------------------------------
 Passport 2.0 gives every citizen ``citizenship.residency`` — ``core`` or
-``resident``.  Classification now reads that field instead of a named
-4-tuple.  Discovery still globs, but it globs REGISTRIES, never passports,
+``resident``.  Classification reads that field.  The named 4-tuple that used
+to hold the answer is GONE as of 2026-08-28: it survived one wave as a drift
+anchor only because @ai_mail's mirror pinned against it, and it went the
+moment that mirror did.  There is no list of residents anywhere now — there
+is a rule, and the passports answer it.  Discovery still globs, but it globs REGISTRIES, never passports,
 and the distinction is load-bearing rather than stylistic: a passport walk
 under ``projects/`` on this machine returns EIGHT passports for FOUR
 residents, because ``baud`` carries two more under ``.backup/versioned/`` and
@@ -88,20 +91,6 @@ PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 # The two values passport 2.0 defines for citizenship.residency.
 RESIDENCY_CORE = "core"
 RESIDENCY_RESIDENT = "resident"
-
-# DEMOTED 2026-08-28: this was the classifier, it is now only a drift anchor.
-# Nothing is included or excluded on the strength of this tuple — it is compared
-# against what discovery actually found and a disagreement is logged. It
-# survives this wave because @ai_mail's cross-project bridge AST-parses this
-# very assignment to pin its own mirror; deleting it here turns another
-# citizen's suite red for a reason that has nothing to do with them. Delete it
-# the moment @ai_mail lands the same semantics.
-RESIDENT_REGISTRIES = (
-    "projects/baud/BAUD_REGISTRY.json",
-    "projects/earmark/EARMARK_REGISTRY.json",
-    "projects/finch/FINCH_REGISTRY.json",
-    "projects/aipass-site/AIPASS-SITE_REGISTRY.json",
-)
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -288,24 +277,6 @@ def accepted_resident_paths(repo_root: Path | None = None) -> set[str]:
     return accepted
 
 
-def _report_drift(discovered: list[Path], root: Path) -> None:
-    """Log when discovery and the demoted constant disagree.
-
-    The constant decides nothing now.  It is kept as a tripwire so the
-    transition is observable: if discovery ever stops finding a project the
-    old list named, or finds one it did not, that is worth a line in the log
-    rather than a silent change in fleet size.
-    """
-    expected = {str(root / relative) for relative in RESIDENT_REGISTRIES}
-    actual = {str(path) for path in discovered}
-    if expected == actual:
-        return
-    logger.warning(
-        f"[registry_scope] Discovery differs from the demoted RESIDENT_REGISTRIES anchor — "
-        f"only in discovery: {sorted(actual - expected)}; only in the anchor: {sorted(expected - actual)}"
-    )
-
-
 def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> list[dict[str, Any]]:
     """Every branch @memory maintains: the core citizens plus declared residents.
 
@@ -339,9 +310,7 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
             )
 
     seen = {str(item["path"]) for item in branches}
-    discovered = resident_registry_paths(root)
-    _report_drift(discovered, root)
-    for registry_path in discovered:
+    for registry_path in resident_registry_paths(root):
         for item in _accepted_residents(registry_path, name_from):
             if str(item["path"]) not in seen:
                 branches.append(item)

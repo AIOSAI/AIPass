@@ -288,47 +288,22 @@ class TestEveryLaneReadsTheOneDefinition:
 
     _APPS = Path(__file__).resolve().parents[1] / "apps"
 
-    def test_no_lane_selects_on_the_demoted_constant(self):
-        """It may be re-exported and compared. It may not decide anything.
+    def test_the_named_resident_tuple_is_gone_from_the_branch(self):
+        """It decided nothing for a wave; now it does not exist.
 
-        ``RESIDENT_REGISTRIES`` survives only as a drift anchor for @ai_mail's
-        mirror. The moment a LANE iterates it again, classification has been
-        quietly reverted there while every other lane reads passports — the
-        two-implementations-that-agree-by-coincidence state, restored.
-
-        ``registry_scope.py`` is exempt and checked separately below: it owns
-        the constant, and one function in it is supposed to read the thing.
+        The constant survived DPLAN-0319 only because @ai_mail's mirror
+        AST-parsed the assignment. That mirror landed on 2026-08-28, so the
+        anchor went with it. This is the pin that used to say "no lane may
+        SELECT on it" — with the tuple deleted the honest claim is stronger and
+        simpler: the name appears nowhere, so nothing can quietly grow a second
+        definition out of it again.
         """
         offenders = []
         for path in sorted(self._APPS.rglob("*.py")):
-            if path.name == "registry_scope.py":
-                continue
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if "RESIDENT_REGISTRIES" not in line:
-                    continue
-                if line.lstrip().startswith(("#", "*", '"')) or "= registry_scope." in line:
-                    continue
-                offenders.append(f"{path.name}:{number}: {line.strip()}")
-        assert not offenders, "a lane is selecting on the demoted constant again:\n  " + "\n  ".join(offenders)
-
-    def test_only_the_drift_reporter_reads_it_inside_the_definition_module(self):
-        """The exemption above, bounded — otherwise it is a hole rather than a rule.
-
-        Exactly one function may mention the constant: ``_report_drift``, whose
-        whole job is to compare it against what discovery found and say so when
-        they disagree. Anything else reading it there is selection wearing a
-        comparison's clothes.
-        """
-        source = (self._APPS / "handlers" / "monitor" / "registry_scope.py").read_text(encoding="utf-8")
-        body = source[source.index("RESIDENT_REGISTRIES = (") :]
-        readers = []
-        current = "<module level>"
-        for line in body.splitlines():
-            if line.startswith("def "):
-                current = line[4:].split("(")[0]
-            if "RESIDENT_REGISTRIES" in line and not line.lstrip().startswith("#"):
-                readers.append(current)
-        assert set(readers) <= {"<module level>", "_report_drift"}, f"unexpected readers: {sorted(set(readers))}"
+                if "RESIDENT_REGISTRIES" in line:
+                    offenders.append(f"{path.relative_to(self._APPS)}:{number}: {line.strip()}")
+        assert not offenders, "the retired resident tuple is back:\n  " + "\n  ".join(offenders)
 
     def test_the_push_lane_resolves_through_registry_scope(self):
         source = (self._APPS / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
@@ -375,11 +350,15 @@ class TestEveryLaneReadsTheOneDefinition:
 class TestTheLiveFleetStillCountsTwentyTwo:
     """The receipt the dispatch asked for, measured rather than asserted."""
 
-    def test_discovery_and_the_demoted_anchor_still_agree(self, live_residents):
-        """If these ever diverge, the transition changed the fleet — say so here."""
-        discovered = {str(path) for path in rs.resident_registry_paths(live_residents)}
-        anchored = {str(live_residents / relative) for relative in rs.RESIDENT_REGISTRIES}
-        assert discovered == anchored
+    def test_discovery_names_exactly_the_four_resident_projects(self, live_residents):
+        """What the deleted anchor used to be compared against, measured directly.
+
+        The old version diffed discovery against the demoted tuple, which made
+        it a test of two constants agreeing. With the tuple gone the claim is
+        about the machine: these four projects, no more, no fewer.
+        """
+        found = {path.parent.name for path in rs.resident_registry_paths(live_residents)}
+        assert found == {"baud", "earmark", "finch", "aipass-site"}
 
     def test_the_live_fleet_is_eighteen_core_and_four_residents(self, live_residents):
         branches = rs.fleet_branches(live_residents)
