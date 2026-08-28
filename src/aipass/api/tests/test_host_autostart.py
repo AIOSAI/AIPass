@@ -42,8 +42,33 @@ from aipass.api.apps.handlers.host import lifetime as host_lifetime
 def quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     """No real logging or operation records out of a unit test."""
     monkeypatch.setattr(host_autostart, "logger", MagicMock())
+    monkeypatch.setattr(host_autostart, "json_handler", MagicMock())
     monkeypatch.setattr(host_lifetime, "logger", MagicMock())
     monkeypatch.setattr(host_lifetime, "json_handler", MagicMock())
+
+
+@pytest.fixture
+def has_systemd(quiet: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A machine that HAS a user-level systemd, whatever machine this really is.
+
+    WHY THIS EXISTS, and it is the whole of the 2026-08-27 CI red. Every test
+    below patches subprocess.run to script what the supervisor says — but
+    `_systemctl` asks `is_supported()` BEFORE it runs anything, so on the
+    Windows runner the platform gate returned first and the mock was never
+    reached. Five tests failed there and SIX MORE PASSED FOR THE WRONG REASON:
+    they assert 0 or (None, None), which is exactly what the untouched gate
+    returns, so they were green while measuring nothing at all.
+
+    The vacuous ones are the reason this is a fixture rather than five patches.
+    A red test tells you it is broken; a test that passes without running its
+    subject tells you nothing, forever, and looks like coverage while doing it.
+
+    These tests are about what the probe DOES WITH an answer. Whether the
+    platform can be asked at all is a separate question with its own tests
+    below, which patch the gate in the other direction.
+    """
+    monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> MagicMock:
@@ -154,16 +179,16 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
     could-not-ask.
     """
 
-    def test_no_unit_is_zero_not_an_error(self, quiet: None) -> None:
+    def test_no_unit_is_zero_not_an_error(self, has_systemd: None) -> None:
         """An uninstalled unit answers MainPID=0 with a successful exit."""
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("0\n")):
             assert host_autostart.supervised_pid() == 0
 
-    def test_a_live_unit_reports_its_pid(self, quiet: None) -> None:
+    def test_a_live_unit_reports_its_pid(self, has_systemd: None) -> None:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("4242\n")):
             assert host_autostart.supervised_pid() == 4242
 
-    def test_an_unreadable_pid_is_zero_and_never_raises(self, quiet: None) -> None:
+    def test_an_unreadable_pid_is_zero_and_never_raises(self, has_systemd: None) -> None:
         """
         Garbage from a probe is a not-supervised answer, not a traceback.
 
@@ -173,7 +198,7 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("banana")):
             assert host_autostart.supervised_pid() == 0
 
-    def test_a_negative_pid_is_zero_because_the_contract_says_zero(self, quiet: None) -> None:
+    def test_a_negative_pid_is_zero_because_the_contract_says_zero(self, has_systemd: None) -> None:
         """
         Found by a mutation that SURVIVED: dropping the `> 0` guard changed
         nothing any test could see, because systemd never emits a negative
@@ -187,16 +212,48 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("-1")):
             assert host_autostart.supervised_pid() == 0
 
-    def test_a_probe_that_cannot_run_is_zero(self, quiet: None) -> None:
-        with patch.object(host_autostart.subprocess, "run", side_effect=OSError("no systemctl")):
-            assert host_autostart.supervised_pid() == 0
+    def test_a_probe_that_cannot_run_refuses_rather_than_answering_zero(self, has_systemd: None) -> None:
+        """
+        REVERSED 2026-08-27, deliberately, from "is zero" to "refuses".
 
-    def test_a_probe_that_times_out_is_zero(self, quiet: None) -> None:
-        """A hung supervisor must not hang the command asking about it."""
+        The old assertion was wrong in the way this whole lane exists to catch.
+        A systemctl that IS here and cannot be run leaves the question
+        unanswered, and zero does not mean unanswered — it means no unit is
+        holding the server. On the tailnet host the unit writes NO record file,
+        so a swallowed probe sends running() down the record path and status
+        prints "No server is running" about a server answering requests.
+
+        The no-systemd platform still answers zero. That case is a MEASUREMENT:
+        there is no unit and there cannot be one. This one is the ABSENCE of a
+        measurement, and the two must not share an answer.
+        """
+        with patch.object(host_autostart.subprocess, "run", side_effect=OSError("cannot exec")):
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_autostart.supervised_pid()
+
+    def test_a_hung_supervisor_refuses_and_does_not_hang_the_caller(self, has_systemd: None) -> None:
+        """A hung supervisor must not hang the caller, nor read as an empty one."""
         timeout = host_autostart.subprocess.TimeoutExpired(cmd="systemctl", timeout=5)
 
         with patch.object(host_autostart.subprocess, "run", side_effect=timeout):
-            assert host_autostart.supervised_pid() == 0
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_autostart.supervised_pid()
+
+    def test_a_platform_with_no_systemd_still_answers_zero(self, quiet: None) -> None:
+        """
+        THE RULING'S OTHER HALF, pinned so it cannot drift into a refusal.
+
+        Zero here is the strongest answer available, not a dodge: a machine
+        without systemd cannot have a unit, so "no unit is holding the server"
+        has no uncertainty in it. running() then falls through to the detached
+        record — the only kind of server that can exist there — and a caller
+        gets the truth instead of an exception it would have to translate back
+        into the same truth.
+        """
+        with patch.object(host_autostart, "is_supported", lambda: False):
+            with patch.object(host_autostart.subprocess, "run") as run:
+                assert host_autostart.supervised_pid() == 0
+                run.assert_not_called()
 
     def test_a_platform_without_systemd_never_shells_out(self, quiet: None) -> None:
         """
@@ -219,13 +276,13 @@ class TestTheBindIsReadFromTheUnitNotTheConfig:
     the NEXT install would use and nothing about the process listening now.
     """
 
-    def test_the_bind_comes_out_of_execstart(self, quiet: None) -> None:
+    def test_the_bind_comes_out_of_execstart(self, has_systemd: None) -> None:
         exec_start = "{ path=/py ; argv[]=/py /app.py host-api serve --host 10.9.8.7 --port 9001 ; ignore_errors=no }"
 
         with patch.object(host_autostart.subprocess, "run", return_value=_completed(exec_start)):
             assert host_autostart.supervised_bind() == ("10.9.8.7", 9001)
 
-    def test_an_unreadable_execstart_is_unknown_never_guessed(self, quiet: None) -> None:
+    def test_an_unreadable_execstart_is_unknown_never_guessed(self, has_systemd: None) -> None:
         """
         A status line that invents a port is worse than one that says unknown.
 
@@ -235,7 +292,20 @@ class TestTheBindIsReadFromTheUnitNotTheConfig:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("")):
             assert host_autostart.supervised_bind() == (None, None)
 
-    def test_a_non_numeric_port_does_not_raise(self, quiet: None) -> None:
+    def test_an_unreachable_probe_costs_the_bind_and_not_the_verdict(self, has_systemd: None) -> None:
+        """
+        Found by a SURVIVING mutation: nothing pinned this tolerance.
+
+        The pid probe has already established that a unit is live by the time
+        this runs. If the bind probe propagated its refusal instead of
+        swallowing it, a live server plus one wedged second call would make
+        status REFUSE — trading a known-running server for "cannot tell", which
+        is strictly worse than printing its address as unknown.
+        """
+        with patch.object(host_autostart.subprocess, "run", side_effect=OSError("wedged")):
+            assert host_autostart.supervised_bind() == (None, None)
+
+    def test_a_non_numeric_port_does_not_raise(self, has_systemd: None) -> None:
         exec_start = "argv[]=/py /app.py host-api serve --host 10.0.0.1 --port eighty"
 
         with patch.object(host_autostart.subprocess, "run", return_value=_completed(exec_start)):
@@ -245,11 +315,11 @@ class TestTheBindIsReadFromTheUnitNotTheConfig:
 class TestStoppingGoesThroughTheSupervisor:
     """`systemctl stop` outranks Restart= by definition. A signal does not."""
 
-    def test_a_refused_stop_is_false_not_an_exception(self, quiet: None) -> None:
+    def test_a_refused_stop_is_false_not_an_exception(self, has_systemd: None) -> None:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed(returncode=1)):
             assert host_autostart.stop_unit() is False
 
-    def test_an_accepted_stop_is_true(self, quiet: None) -> None:
+    def test_an_accepted_stop_is_true(self, has_systemd: None) -> None:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed()):
             assert host_autostart.stop_unit() is True
 

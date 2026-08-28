@@ -68,6 +68,8 @@ other caller does.
 Functions:
     serve_argv()      - The one spelling of how this server is started
     write_unit()      - Render the supervisor unit into this branch
+    autostart_report() - Render the unit and gather everything an install needs
+    server_state()    - The status lane's answer, including "cannot tell"
     serve_detached()  - Start the server in its own session, return its facts
     running()         - The live server's record, or None
     stop()            - Stop the running server, through its owner
@@ -358,6 +360,17 @@ def running() -> Optional[Dict[str, Any]]:
         because a machine that rebooted leaves one behind and that is not a
         fault anybody needs to clear.
 
+    Raises:
+        SupervisorUnreachable: There is a systemctl here and it did not answer,
+            so whether a unit holds the server is UNKNOWN. Propagated rather
+            than flattened to None: on the tailnet host the unit writes no
+            record file, so returning None would send every caller down the
+            record path and report "no server is running" about a server that
+            is answering requests. Each of the three callers wants to refuse
+            here — status must say it cannot tell, stop must not signal into the
+            dark, and serve must not start a second listener on a port it
+            cannot see.
+
     Note:
         THE SUPERVISOR IS ASKED FIRST, because when a unit is running it IS the
         server and the record file is at best a leftover from before the reboot.
@@ -415,6 +428,10 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
     Raises:
         BindRefused: The address was refused. NOTHING is spawned.
         LifetimeError: A server is already running, or the child died on start.
+        SupervisorUnreachable: Whether a unit holds the server is unknown, so
+            nothing is spawned — a second listener started blind is how you get
+            two servers fighting over one port and a log that cannot say which
+            one wrote a line.
 
     Note:
         THE BIND IS VALIDATED IN THIS PROCESS, BEFORE ANY SPAWN. D1 says a
@@ -598,3 +615,66 @@ def _stop_supervised(record: Dict[str, Any]) -> Dict[str, Any]:
         f"The supervisor accepted the stop but the server (pid {pid}) is still running "
         f"after {autostart.STOP_TIMEOUT_SECONDS}s. Check it: systemctl --user status {record.get('unit')}"
     )
+
+
+def autostart_report(host: Optional[str] = None, port: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Render the unit and gather everything an install needs to be safe.
+
+    Args:
+        host: Bind address override. Defaults to the stored config.
+        port: Bind port override. Defaults to the stored config.
+
+    Returns:
+        The supervisor's own report plus `conflict` — the hand-started server
+        currently holding the port, or None.
+
+    Raises:
+        BindRefused: The address was refused. NOTHING is written.
+        AutostartUnsupported: There is no user-level systemd here.
+
+    Note:
+        The conflict check is a COURTESY and cannot retract a unit that was
+        already written, so an unreachable supervisor is caught here rather than
+        propagated: by this line the file exists, and failing the command after
+        a successful write would leave the operator with a rendered unit and an
+        error telling them it did not happen.
+    """
+    unit = write_unit(host, port)
+    report = autostart.installation_report(unit)
+
+    try:
+        current = running()
+    except autostart.SupervisorUnreachable as e:
+        logger.warning("[host_api] the port-conflict check could not reach the supervisor: %s", e)
+        current = None
+
+    report["conflict"] = current if (current or {}).get("owner") == OWNER_DETACHED else None
+    return report
+
+
+def server_state() -> Dict[str, Any]:
+    """
+    The status lane's answer, including the one running() cannot return.
+
+    Returns:
+        A dict with `state` — "running", "none" or "unknown" — and `record` for
+        the running case.
+
+    Note:
+        running() RAISES when the supervisor cannot be asked, which is right for
+        stop and serve: both must refuse rather than act blind. Status is the
+        one caller whose whole job is to report a state, and "I cannot tell" IS
+        a state — so it is data here rather than an exception, and the module
+        above renders three cases without branching on an exception type.
+    """
+    try:
+        record = running()
+    except autostart.SupervisorUnreachable as e:
+        logger.warning("[host_api] status could not reach the supervisor: %s", e)
+        return {"state": "unknown", "record": None, "reason": str(e)}
+
+    if record is None:
+        return {"state": "none", "record": None, "reason": ""}
+
+    return {"state": "running", "record": record, "reason": ""}

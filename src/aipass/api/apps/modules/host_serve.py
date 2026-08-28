@@ -132,6 +132,10 @@ def _serve_detached(host: Optional[str], port: Optional[int]) -> None:
     """
     try:
         record = host_lifetime.serve_detached(host=host, port=port)
+    except host_autostart.SupervisorUnreachable as e:
+        logger.warning("[host_api] detach could not reach the supervisor: %s", e)
+        error("Cannot start — the supervisor did not answer", suggestion=str(e))
+        return
     except host_config.BindRefused as e:
         # D1 again, and it fires HERE rather than inside the child on purpose:
         # a refusal an operator has to go and find in a log file is a refusal
@@ -154,13 +158,23 @@ def _serve_detached(host: Optional[str], port: Optional[int]) -> None:
 
 
 def cmd_status() -> None:
-    """Say whether a detached server is running, and where to read it."""
+    """Say whether a server is running, who holds it, and where to read it."""
     header("Host API Server Status")
     console.print()
 
-    record = host_lifetime.running()
+    answer = host_lifetime.server_state()
 
-    if record is None:
+    if answer["state"] == "unknown":
+        # NOT "no server". This host runs the server under a unit that writes no
+        # record file, so a swallowed probe would print a confident "nothing is
+        # running" about a server answering requests.
+        error("Cannot tell — the supervisor did not answer", suggestion=answer["reason"])
+        console.print()
+        console.print(f"[dim]Ask it directly: systemctl --user status {host_autostart.unit_name()}[/dim]")
+        console.print(f"[dim]Its output, either way: {host_lifetime.log_path()}[/dim]")
+        return
+
+    if answer["state"] == "none":
         warning("No server is running")
         console.print()
         # NOT a restart. A dead server that stays dead and says so is the honest
@@ -171,6 +185,16 @@ def cmd_status() -> None:
         console.print(f"[dim]Its last output, if any: {host_lifetime.log_path()}[/dim]")
         return
 
+    _show_server(answer["record"])
+
+
+def _show_server(record: dict) -> None:
+    """
+    Print a running server's facts.
+
+    Args:
+        record: The live server's record.
+    """
     # An unknown bind prints as a word rather than as None. A status line
     # reading "None:None" is a bug report waiting to be filed against the wrong
     # thing.
@@ -198,6 +222,12 @@ def cmd_stop() -> None:
 
     try:
         record = host_lifetime.stop()
+    except host_autostart.SupervisorUnreachable as e:
+        # Refusing beats signalling into the dark: if a unit IS holding the
+        # server, a bare SIGTERM is a stop its restart policy may undo.
+        logger.warning("[host_api] stop could not reach the supervisor: %s", e)
+        error("Cannot stop — the supervisor did not answer", suggestion=str(e))
+        return
     except host_lifetime.LifetimeError as e:
         logger.warning("[host_api] stop did not complete: %s", e)
         error(str(e))
@@ -238,7 +268,7 @@ def cmd_autostart(args: List[str]) -> None:
             return
 
     try:
-        unit = host_lifetime.write_unit(host, port)
+        report = host_lifetime.autostart_report(host, port)
     except host_autostart.AutostartUnsupported as e:
         logger.warning("[host_api] autostart is unavailable on this platform: %s", e)
         error("Autostart is not available here", suggestion=str(e))
@@ -255,16 +285,15 @@ def cmd_autostart(args: List[str]) -> None:
         error(f"The unit could not be written: {e}")
         return
 
-    _show_installation(host_autostart.installation_report(unit), host_lifetime.running())
+    _show_installation(report)
 
 
-def _show_installation(report: dict, current: Optional[dict]) -> None:
+def _show_installation(report: dict) -> None:
     """
     Print a rendered unit's install steps and what stands in their way.
 
     Args:
-        report: The handler's installation report.
-        current: The server running right now, if any.
+        report: The handler's installation report, including any conflict.
     """
     success(f"Unit rendered: {report['unit']}")
     console.print()
@@ -293,9 +322,11 @@ def _show_installation(report: dict, current: Optional[dict]) -> None:
     # unit that cannot bind, exits non-zero, retries its whole window and ends
     # in `failed`. The operator reads that as "autostart is broken" when the
     # actual cause is the server they started themselves this morning.
-    if current is not None and current.get("owner") == host_lifetime.OWNER_DETACHED:
+    conflict = report.get("conflict")
+
+    if conflict is not None:
         console.print()
-        warning(f"A hand-started server is on the port now (pid {current.get('pid')})")
+        warning(f"A hand-started server is on the port now (pid {conflict.get('pid')})")
         console.print("  [dim]Stop it BEFORE 'enable --now', or the unit cannot bind and ends in failed:[/dim]")
         console.print("  [cyan]drone @api host-api stop[/cyan]")
 

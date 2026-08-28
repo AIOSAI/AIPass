@@ -104,6 +104,20 @@ class AutostartUnsupported(Exception):
     """This platform has no user-level systemd to hand the server to."""
 
 
+class SupervisorUnreachable(Exception):
+    """
+    There IS a supervisor here and it did not answer.
+
+    Deliberately separate from AutostartUnsupported, because the two look
+    identical at the call site and mean opposite things. No systemd at all is a
+    MEASUREMENT — there is no unit and there cannot be one, so zero is the
+    truth. A systemctl that hangs, times out or cannot be executed on a machine
+    that has one is an ABSENCE of measurement, and reporting that as "no unit is
+    running" is the same defect the status lane was just fixed for: answering
+    absence when the honest answer is I could not ask.
+    """
+
+
 def is_supported() -> bool:
     """
     Whether the supervisor lane can work on this platform at all.
@@ -207,11 +221,12 @@ def _systemctl(arguments: List[str], timeout: float) -> Optional[subprocess.Comp
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        # Never fatal. Not being able to ASK the supervisor is a different fact
-        # from the supervisor saying no, and neither one may take down the
-        # command that asked.
+        # RAISED, not swallowed into None. This machine HAS a systemctl and it
+        # did not answer — folding that into the same None the no-systemd
+        # platform returns is what turned "I could not ask" into "nothing is
+        # running" one layer up.
         logger.warning("[host_api] the supervisor could not be reached: %s", e)
-        return None
+        raise SupervisorUnreachable(f"systemctl is here but did not answer: {e}") from e
 
 
 def supervised_pid() -> int:
@@ -219,10 +234,38 @@ def supervised_pid() -> int:
     The unit's live main process id.
 
     Returns:
-        The pid, or 0 when the supervisor is not holding the server — including
-        when there is no systemd here at all.
+        The pid, or 0 when no unit is holding the server — including on a
+        platform that has no systemd at all.
+
+    Raises:
+        SupervisorUnreachable: There is a systemctl here and it did not answer.
 
     Note:
+        THE RULING, asked for by @devpulse 2026-08-27 and split in two because
+        the question has two answers.
+
+        NO SYSTEMD ON THIS PLATFORM ANSWERS ZERO, and that is not a refusal
+        dodged. Zero means "no unit is holding the server", and on a machine
+        that cannot have a unit that is a fact with no uncertainty in it — the
+        strongest answer this probe can give. running() then falls through to
+        the detached record, which is the only kind of server that can exist
+        there, so the caller gets the truth rather than an exception it would
+        have to translate back into the same truth.
+
+        A PROBE THAT FAILED ON A CAPABLE MACHINE DOES NOT ANSWER ZERO. That one
+        does deserve refuse-dont-zero: on the tailnet host the unit is live and
+        writes NO record file, so a swallowed probe would send running() to a
+        record that does not exist and status would print "No server is
+        running" while the server was answering requests. That is the exact
+        defect this lane was built to close, one layer down from where it was
+        found.
+
+        `show -p MainPID` rather than `is-active`. is-active EXITS NON-ZERO for
+        an unknown or inactive unit, so a caller has to read an exit code to
+        tell "no" from "could not ask"; show answers 0 with MainPID=0 in both
+        of those cases and reserves a non-zero exit for a real failure to run.
+        A probe whose absence-answer and error-answer look different is worth
+        the extra parsing.
         `show -p MainPID` rather than `is-active`. is-active EXITS NON-ZERO for
         an unknown or inactive unit, so a caller has to read an exit code to
         tell "no" from "could not ask"; show answers 0 with MainPID=0 in both
@@ -265,7 +308,18 @@ def supervised_bind() -> Tuple[Optional[str], Optional[int]]:
         exactly once — after somebody changes the port and before they reinstall
         — which is the worst possible time for it.
     """
-    result = _systemctl(["show", UNIT_NAME, "-p", "ExecStart", "--value"], PROBE_TIMEOUT_SECONDS)
+    # Tolerant on purpose, and it is not the same call as the pid probe: this
+    # only decorates a status line that has ALREADY established a live unit, so
+    # an unreachable supervisor here cannot produce a wrong verdict — only a
+    # missing bind, which prints as "unknown".
+    try:
+        result = _systemctl(["show", UNIT_NAME, "-p", "ExecStart", "--value"], PROBE_TIMEOUT_SECONDS)
+    except SupervisorUnreachable as e:
+        # Swallowed HERE and nowhere else, and it leaves a record saying so. The
+        # verdict was already established by the pid probe; losing the bind only
+        # costs a status line its address, which prints as "unknown".
+        logger.warning("[host_api] the unit's bind could not be read: %s", e)
+        return (None, None)
 
     if result is None or result.returncode != 0:
         return (None, None)

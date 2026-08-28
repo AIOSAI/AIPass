@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (46/46) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
-**Last Updated:** 2026-08-25
+**Seedgo:** 100% (46/46) | **Tests:** 1625 pass | **Functions:** 240 public (218 tested)
+**Last Updated:** 2026-08-27
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -593,6 +593,40 @@ Lingering is reported, not assumed: without it a user unit waits for a login,
 which on a headless reboot never comes — the exact failure this build exists to
 end. It is set outside this tree and can be turned off by someone who never reads
 this file.
+
+---
+
+**A probe that cannot answer is not a probe that answered "nothing" (2026-08-27).**
+The Windows CI lane went red on this lane the day it shipped, and the failure was
+worth more than the fix. `_systemctl` asks `is_supported()` before it runs
+anything, so on a runner with no systemd the platform gate returned first and
+every test that scripted `subprocess.run` never reached its mock. Five failed —
+and **six more passed for the wrong reason**, because they assert `0` or
+`(None, None)`, which is exactly what the untouched gate returns. Those six were
+the real finding: a red test tells you it is broken, while a test that passes
+without running its subject tells you nothing forever and looks like coverage
+doing it.
+
+Under it sat a live defect. `_systemctl` returned `None` for two different facts:
+*this platform has no systemd*, and *this machine has one and it did not answer*.
+Both became `supervised_pid() == 0`, "no unit is holding the server". **The
+ruling, split in two because the question has two answers.** No systemd on the
+platform still answers zero — a machine that cannot have a unit has no
+uncertainty to report, so zero is the strongest available answer and `running()`
+correctly falls through to the detached record, the only kind of server that can
+exist there. But a probe that FAILED on a capable machine now raises
+`SupervisorUnreachable`, because the tailnet host runs under a unit that writes
+**no record file**: a swallowed probe sends `running()` down the record path and
+prints "No server is running" about a server answering requests. Proven live
+rather than argued — with the unit genuinely holding pid 227641, forcing the
+probe to fail made the old path return `None`.
+
+Each of the three callers wants that refusal: `status` says it cannot tell rather
+than inventing an absence, `stop` will not signal into the dark where a restart
+policy may undo it, and `serve` will not start a second listener on a port it
+cannot see. Only `supervised_bind` swallows it, and only because the pid probe
+has already established the verdict — losing the bind costs a status line its
+address, not its truth.
 
 ---
 
