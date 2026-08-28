@@ -1,15 +1,23 @@
 # =================== AIPass ====================
 # Name: profile.py
 # Description: User profile read/write — aipass profile command
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-08-27
 # =============================================
 
 """
 aipass profile — show/edit what aipass remembers about the user
 
-Reads and writes the `user` section of .trinity/local.json.
+Reads and writes ``aipass_json/user_profile.json``.
+
+The profile used to live as a top-level ``user`` section inside
+.trinity/local.json. It does not any more: .trinity/local.json's top-level
+key set is a CLOSED set under the trinity standard, so a module writing its
+own section there drifts the branch off 100 every time it runs. The profile
+is module state, not memory, so it lives in this module's own data dir with
+the rest of the branch's json. A legacy ``user`` section is still READ as a
+fallback so no profile is lost on an old file -- never written back.
 Commands:
     aipass profile               — pretty-print current profile
     aipass profile set <f> <v>   — update a field
@@ -32,16 +40,28 @@ from aipass.aipass.apps.handlers.json import json_handler
 
 COMMAND = "profile"
 _BRANCH_ROOT = Path(__file__).resolve().parents[2]
-_LOCAL_JSON = _BRANCH_ROOT / ".trinity" / "local.json"
+# NOT profile_data.json: <module>_{config,data,log}.json is json_handler's OWN
+# managed triplet, and ensure_module_jsons REGENERATES any of the three that
+# fails its shape check. save_profile's own log_operation call auto-detects
+# module "profile" and would therefore destroy the profile it had just written
+# -- observed 2026-08-27, the store came back as {created, last_updated}.
+_PROFILE_FILENAME = "user_profile.json"
+_PROFILE_JSON = _BRANCH_ROOT / "aipass_json" / _PROFILE_FILENAME
+
+# Read-only legacy source. Pre-1.1.0 the profile was a top-level "user" section
+# in local.json; a file still carrying one is migrated forward on first read.
+# Never written -- .trinity/ belongs to the memory standard, not to this module.
+_LEGACY_LOCAL_JSON = _BRANCH_ROOT / ".trinity" / "local.json"
 
 USER_FIELDS = ["name", "os", "shell", "preferred_cli", "install_method", "first_seen"]
 
 
-def _read_local_json() -> dict:
-    if not _LOCAL_JSON.exists():
+def _read_json_file(path: Path) -> dict:
+    """Load a JSON object from path; {} when absent, unreadable or not a dict."""
+    if not path.exists():
         return {}
-    result = json_handler.load_path(_LOCAL_JSON)
-    if result is None:
+    result = json_handler.load_path(path)
+    if not isinstance(result, dict):
         return {}
     return result
 
@@ -56,36 +76,52 @@ def _fire_file_deleted(path: str) -> None:
         logger.warning("[profile] trigger unavailable for file_deleted event: %s", exc)
 
 
-def _write_local_json(data: dict) -> None:
-    dir_ = _LOCAL_JSON.parent
+def _write_profile_json(data: dict) -> None:
+    dir_ = _PROFILE_JSON.parent
     dir_.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(dir_), prefix=".local_", suffix=".json.tmp")
+    fd, tmp_path = tempfile.mkstemp(dir=str(dir_), prefix=".profile_", suffix=".json.tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        os.replace(tmp_path, _LOCAL_JSON)
+        os.replace(tmp_path, _PROFILE_JSON)
     except OSError as exc:
         logger.warning("[profile] write failed, cleaning up temp file: %s", tmp_path)
         _fire_file_deleted(tmp_path)
         os.unlink(tmp_path)
-        logger.warning("[profile] local.json write error: %s", exc)
+        logger.warning("[profile] user_profile.json write error: %s", exc)
         raise
 
 
+def _legacy_profile() -> dict:
+    """Return a pre-1.1.0 profile from local.json's "user" section, or {}."""
+    legacy = _read_json_file(_LEGACY_LOCAL_JSON).get("user")
+    if not isinstance(legacy, dict) or not legacy:
+        return {}
+    logger.info("[profile] adopting legacy user section from %s", _LEGACY_LOCAL_JSON)
+    return legacy
+
+
 def get_user_profile() -> dict:
-    """Return user section from local.json, creating defaults if absent."""
-    data = _read_local_json()
-    if "user" not in data:
-        data["user"] = {f: None for f in USER_FIELDS}
-        _write_local_json(data)
-    return data.get("user", {})
+    """Return the stored profile, creating defaults if absent.
+
+    Order: this module's own store, then a legacy local.json "user" section,
+    then None-filled defaults. Whatever is found is written to the store, so
+    the legacy read happens at most once and local.json is never written.
+    """
+    data = _read_json_file(_PROFILE_JSON)
+    profile = data.get("profile")
+    if not isinstance(profile, dict):
+        profile = {f: None for f in USER_FIELDS}
+        profile.update(_legacy_profile())
+        _write_profile_json({"profile": profile})
+        return profile
+    # A field added to USER_FIELDS after this file was written must still show.
+    return {f: profile.get(f) for f in USER_FIELDS} | {k: v for k, v in profile.items() if k not in USER_FIELDS}
 
 
 def save_profile(profile: dict) -> None:
-    """Write user section to local.json, preserving all other sections."""
-    data = _read_local_json()
-    data["user"] = profile
-    _write_local_json(data)
+    """Write the profile to this module's own store."""
+    _write_profile_json({"profile": profile})
     json_handler.log_operation("profile_save", {"fields": list(profile.keys())})
 
 
