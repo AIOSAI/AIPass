@@ -11,6 +11,36 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**CI round 2, four fixes in one evening (PR #743 merge prep)** — the full
+matrix run surfaced 5 failures across 3 jobs; every one root-caused, none
+patched over. **memory**: the 3.10-only red was a MagicMock with no
+`__path__` (3.12 short-circuits imports on sys.modules; 3.10 walks the
+parents, and the optional-bus ImportError swallow turned that into an empty
+event list) — real ModuleType stand-ins now, plus a reachability assertion
+so bus-unreachable can never masquerade as bus-not-fired; and the resident
+guard gained a second discriminator, `live_residents`, which reads the four
+registry files with pathlib rather than asking the resolver about its own
+inputs — a guard that consults the code under test deletes the failure it
+exists to expose (proven: `if False` mutation gives FAILED, not skipped).
+**api**: the Windows mock wasn't wrong, it was unreachable — is_supported()
+returns before subprocess is touched; one red was five, plus six vacuous
+greens asserting exactly what the untouched gate returns. New
+SupervisorUnreachable: a probe that FAILS on a capable machine refuses
+instead of answering no-unit — on this host the old path printed "No server
+is running" about a server serving requests. **aipass**: the mkdir flag hid
+a json.dump behind it (checker reports first hit only); the writer moved to
+json_handler and came out stronger (fsync + Windows retry the hand-rolled
+version never had), with the write_json returns-False-never-raises trap
+re-raised, and all five forbidden tokens source-scan pinned. **seedgo**:
+trinity_check.py split 1557 → 429 engine + 1231 groups at the I/O seam,
+proven by running pre-split and post-split over all 18 live branches in one
+process — full result dicts byte-identical; `all_groups(ctx)` pins the
+roster because a dropped group scores HIGHER (the weighted mean divides by
+less); save_cache's real hole was BaseException, not a hard kill; the
+orphan-tmp flake now claims only what it can support (this session left no
+new orphan, pre-existing ones warned by name). Fleet 22/22 trinity 100
+held through all four.
+
 **fix(aipass)** — the last drifted citizen reaches trinity 100, and the
 stray `user` section turns out to be aipass's own profile.py writing on
 read since June (PR #743 merge prep): the fleet push pruned the section,
