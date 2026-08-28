@@ -53,6 +53,9 @@ def _mock_detector_infrastructure(monkeypatch):
     mock_config_loader.section.side_effect = lambda name: mock_config_loader.load.return_value.get(name, {})
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)

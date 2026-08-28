@@ -20,6 +20,7 @@ import json
 import pytest
 import shutil
 from pathlib import Path
+from types import ModuleType
 from typing import Generator
 from unittest.mock import MagicMock
 
@@ -41,11 +42,28 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", prax_modules_mod)
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_modules_mod.logger)
 
-    # Mock json handler
+    # Mock json handler.
+    #
+    # The PACKAGE name is impersonated by a real module object carrying the
+    # real package's __path__ -- deliberately not a MagicMock. A MagicMock has
+    # no __path__, so any lazy `from ...handlers.json.<sub> import x` executed
+    # while this fixture is active dies with ModuleNotFoundError("...handlers
+    # .json is not a package") instead of reaching the submodule.
+    #
+    # That was invisible for as long as the submodule happened to be cached in
+    # sys.modules from an earlier import, and RED the moment some earlier test
+    # in the same process evicted it -- which is why it surfaced as two receipt
+    # tests failing on ONE interpreter, in ONE xdist worker, on ONE run, with
+    # no code change behind it. Order was the trigger; this was the hole.
+    #
+    # Carrying __path__ lets submodules resolve honestly against the real
+    # directory while `json_handler` stays mocked -- the mock still shadows,
+    # because a set attribute wins over a submodule import in `from X import y`.
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
+    json_pkg = ModuleType("aipass.memory.apps.handlers.json")
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
+    json_pkg.json_handler = mock_json_handler  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 

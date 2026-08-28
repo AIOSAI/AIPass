@@ -119,6 +119,9 @@ def _mock_symbolic_infrastructure(monkeypatch):
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     mock_memory_files = MagicMock()
     json_pkg.memory_files = mock_memory_files

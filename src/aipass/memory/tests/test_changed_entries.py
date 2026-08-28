@@ -34,12 +34,20 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_modules(monkeypatch):
-    """Drop cached modules so each test gets fresh imports."""
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.entry_limits", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.lint_handler", None)
+    """Drop cached modules so each test gets fresh imports.
+
+    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
+    bare pop is one-way and the eviction outlives the test, which is how two
+    receipt tests went red on a single xdist worker on a single run.
+    """
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.entry_limits",
+        "aipass.memory.apps.handlers.json.memory_files",
+        "aipass.memory.apps.handlers.json.lint_handler",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 

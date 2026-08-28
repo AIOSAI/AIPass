@@ -87,6 +87,9 @@ def _import_extractor(monkeypatch):
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
 
@@ -188,6 +191,9 @@ def _import_normalize(monkeypatch):
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -213,6 +219,9 @@ def _import_line_counter(monkeypatch):
     mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)

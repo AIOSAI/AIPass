@@ -34,10 +34,23 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_json_handler(monkeypatch):
-    """Ensure json_handler module is freshly imported each test."""
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
+    """Ensure json_handler module is freshly imported each test.
+
+    A bare ``sys.modules.pop`` here is one-way: the eviction outlives the
+    test and every later test in the same process inherits it. That is how
+    two receipt tests in test_trinity_standard.py went red on one worker,
+    on one interpreter, on one run, on a commit that changed version
+    strings only -- this file evicted the real handlers.json package, and
+    the next lazy submodule import landed on conftest's stand-in instead.
+    ``monkeypatch.delitem`` gives the same fresh import and puts the real
+    module back at teardown, so the eviction cannot escape the test.
+    """
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.memory_files",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 

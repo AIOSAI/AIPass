@@ -20,6 +20,7 @@ unmeasurable field is a VIOLATION, and keep-N keeps N.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -366,20 +367,26 @@ class TestNoHealthStamping:
         exports = (_MEMORY_ROOT / "apps" / "handlers" / "json" / "__init__.py").read_text(encoding="utf-8")
         assert "update_metadata" not in exports
 
-    def test_the_real_module_has_no_status_writer_after_a_clean_reimport(self):
+    def test_the_real_module_has_no_status_writer_after_a_clean_reimport(self, monkeypatch):
         """The same claim against the LOADED module, not just the file on disk.
 
-        Sibling tests in this suite swap `handlers.json` for a MagicMock, and a
+        Sibling tests in this suite swap `handlers.json` for a stand-in, and a
         MagicMock answers `hasattr` True for a function that no longer exists —
         so the import has to be forced fresh before the question means anything.
         This is the assertion the retired TestUpdateMetadata class used to carry.
+
+        The eviction is `monkeypatch.delitem`, not a bare `del`. As a bare del
+        it was one-way, and it warmed the cache for the receipt tests LOWER IN
+        THIS FILE by re-importing memory_files on its way out — which is why
+        this file passed standalone and why the receipt tests could still go
+        red when xdist packed them into a worker without this test. A test that
+        silently supplies another test's precondition is worse than no test.
         """
         import importlib
         import sys
 
-        for name in list(sys.modules):
-            if name.startswith("aipass.memory.apps.handlers.json"):
-                del sys.modules[name]
+        for name in [n for n in sys.modules if n.startswith("aipass.memory.apps.handlers.json")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
 
         memory_files = importlib.import_module("aipass.memory.apps.handlers.json.memory_files")
         importlib.reload(memory_files)
@@ -586,6 +593,27 @@ class TestTemplateVersionReceipt:
 # =============================================================================
 
 
+def _assert_the_lazy_import_path_is_a_package() -> None:
+    """Name sys.modules poisoning instead of letting it read as a wrong count.
+
+    ``tab_renderer._refresh_one_file`` reaches ``memory_files`` through a LAZY
+    import, and it reports an import failure the same way it reports a bad
+    file: as a per-file error. So a poisoned process surfaces here as
+    ``(0, [...]) == (1, [])`` — a COUNT that points at the receipt renderer,
+    which is not where the defect is. This says so out loud.
+
+    Checked WITHOUT importing anything. An ``import_module`` probe would repair
+    the very state it was measuring, and a pin that fixes its own precondition
+    proves nothing.
+    """
+    package = sys.modules.get("aipass.memory.apps.handlers.json")
+    assert package is None or hasattr(package, "__path__"), (
+        f"a {type(package).__name__} with no __path__ is standing at "
+        "aipass.memory.apps.handlers.json — an earlier test poisoned this process and the "
+        "renderer's lazy import cannot resolve. This is an isolation defect, not a receipt defect."
+    )
+
+
 class TestReceiptWiring:
     """Callable is not enough — it has to be called, and only where honest."""
 
@@ -602,6 +630,7 @@ class TestReceiptWiring:
         receipt.write_receipt(trinity, receipt.STAMPED_BY_BIRTH)
         monkeypatch.setattr(receipt, "_now", lambda: "2026-08-26T07:00:00")
 
+        _assert_the_lazy_import_path_is_a_package()
         updated, _skipped, errors = tab_renderer._refresh_one_file(
             {"name": "memory"}, "memory", "local", {"defaults": {}}, {"entry_types": {}}, lambda b, m: local
         )
@@ -618,6 +647,7 @@ class TestReceiptWiring:
         local = trinity / "local.json"
         local.write_text(json.dumps({"document_metadata": {}, "sessions": []}), encoding="utf-8")
 
+        _assert_the_lazy_import_path_is_a_package()
         updated, _skipped, errors = tab_renderer._refresh_one_file(
             {"name": "memory"}, "memory", "local", {"defaults": {}}, {"entry_types": {}}, lambda b, m: local
         )
