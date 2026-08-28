@@ -11,6 +11,35 @@ PyPI version — not the changelog header.
 
 ## [2026-08-24] — post-v2.7.19 train (in progress)
 
+**fix(aipass)** — the last drifted citizen reaches trinity 100, and the
+stray `user` section turns out to be aipass's own profile.py writing on
+read since June (PR #743 merge prep): the fleet push pruned the section,
+get_user_profile() recreated it minutes later, and init_flow's
+`existing.get("first_seen") or now()` silently reset a 2026-06-10 date to
+today — so a 2.5-month-old artifact presented as same-day drift by an
+unknown author. Fix relocates the profile to aipass_json/user_profile.json
+(profile.py never writes .trinity again; legacy section read once as
+fallback, never written back; true June first_seen restored). Two live
+defects caught while verifying: the test suite was mutating the REAL user
+profile (a sys.modules MagicMock silently bypassed by from-import binding —
+only two test files TOGETHER corrupt it), and the first filename chosen
+collided with json_handler's managed triplet, which regenerated — erased —
+the store through the very call that logged the save. 1041 passed (+7),
+trinity 100 all nine groups. **FLEET: 22 of 22 at trinity 100.**
+
+**fix(memory)** — CI guard for live-fleet tests, 8 guarded not 5 because
+three greens were vacuous (PR #743 merge prep): a `live_fleet` fixture in
+tests/conftest.py skips with @seedgo's exact wording when no
+AIPASS_REGISTRY.json exists — a fixture not a helper import, because dotted
+sibling imports break on CI's repo-root rootdir (a trap this branch was
+caught by once already). Checks BOTH repo roots (registry_scope +
+trinity_push resolve independently). Red reproduced first by masking both
+_REPO_ROOTs at an empty dir — exact CI failure list remade locally. The
+deviation on the record: 3 tests that PASS on clean CI were guarded anyway,
+because an empty fleet satisfies every subset assertion — a green reporting
+a measurement that never happened. Whole suite swept under the mask from
+both rootdirs: zero other live-state dependents. 1227 passed / 5 skipped.
+
 **feat(spawn)** — newborns arrive with a receipt, retirees leave a named
 archive (DPLAN-0318 marker 7, spawn's leg): measured first — a minted
 citizen scored trinity 77, and only half of that was the missing receipt;
