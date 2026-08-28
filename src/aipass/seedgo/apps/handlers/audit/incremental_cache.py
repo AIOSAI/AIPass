@@ -221,12 +221,16 @@ def save_cache(doc: Dict[str, Any]) -> None:
             json.dump(doc, f, indent=2, default=str)
             f.write("\n")
         os.replace(tmp, CACHE_FILE)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError as cleanup_err:
-            logger.warning("[incremental_cache] Failed to clean up temp file %s: %s", tmp, cleanup_err)
-        raise
+    finally:
+        # finally, not `except Exception`: KeyboardInterrupt and SystemExit are
+        # BaseExceptions and walked straight past the old clause, leaving the
+        # staging file on disk. os.replace consumes tmp on the success path, so
+        # absence is the normal case and must not raise.
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError as cleanup_err:
+                logger.warning("[incremental_cache] Failed to clean up temp file %s: %s", tmp, cleanup_err)
     json_handler.log_operation("audit_cache_saved", {"branches": len(doc.get("branches", {}))})
 
 

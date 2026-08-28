@@ -22,6 +22,7 @@ import json
 import os
 import re
 import threading
+import warnings
 import time
 from pathlib import Path
 
@@ -322,25 +323,36 @@ class TestLiveDocumentsStillParse:
             with open(document, "r", encoding="utf-8") as handle:
                 json.load(handle)
 
-    def test_no_orphaned_temp_files_from_this_handler_in_the_live_dir(self):
-        """Scoped to THIS handler's staging prefix, and here is why.
+    def test_no_orphaned_temp_files_from_this_handler_in_the_live_dir(self, preexisting_live_tmp_files):
+        """Scoped to THIS handler's staging prefix, and to THIS session.
 
-        The helper stages as "<document-stem><random>.tmp"; incremental_cache
-        writes its own atomic temps into the same directory with the stdlib
-        default "tmp<random>.tmp" prefix. A blanket *.tmp assertion convicts
-        that unrelated writer — and it currently does: a 4.3MB truncated
-        tmp2ay2d070.tmp dated 2026-08-14 06:35 is sitting there, ending
-        mid-token, from a save_cache killed between write and os.replace (its
-        cleanup lives in `except Exception`, which a hard kill never runs).
-        Left in place and reported rather than swept, per the never-delete
-        rule. Author unknown — no session of mine records it.
+        Two narrowings, each for its own reason.
+
+        SCOPE BY PREFIX: the helper stages as "<document-stem><random>.tmp";
+        incremental_cache writes its own atomic temps into the same directory
+        with the stdlib default "tmp<random>.tmp" prefix. A blanket *.tmp
+        assertion convicts that unrelated writer — and it does: a 4.3MB
+        truncated tmp2ay2d070.tmp dated 2026-08-14 06:35 sits there ending
+        mid-token, from a save_cache killed between write and os.replace.
+
+        SCOPE BY SESSION: this assertion reads LIVE state, so an orphan created
+        by anything else on the machine failed a run that changed nothing —
+        which is exactly how it flaked on 2026-08-27, when killing an audit at
+        16:30 left help_text_check_logml8z1bf8.tmp and reddened the next full
+        suite. Diffing against a session-start snapshot makes the claim the one
+        this test can actually support: this session left no NEW orphan.
+
+        Pre-existing orphans are warned about, never silently accepted — a
+        baseline nobody is told about is how a leak becomes permanent.
         """
         live_dir = json_handler.JSON_DIR
         if not live_dir.exists():
             pytest.skip("no live json dir on this checkout")
         document_stems = {p.stem for p in live_dir.glob("*.json")}
-        ours = [p.name for p in live_dir.glob("*.tmp") if any(p.name.startswith(s) for s in document_stems)]
-        assert ours == []
+        ours = {p.name for p in live_dir.glob("*.tmp") if any(p.name.startswith(s) for s in document_stems)}
+        for stale in sorted(ours & preexisting_live_tmp_files):
+            warnings.warn(f"pre-existing orphan staging file in {live_dir}: {stale}", stacklevel=2)
+        assert sorted(ours - preexisting_live_tmp_files) == []
 
 
 class TestHelperUsesTheAtomicPrimitives:

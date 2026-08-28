@@ -38,3 +38,26 @@ def sample_test_data() -> dict:
     Customize this fixture for your module's needs
     """
     return {"test_key": "test_value", "sample_data": "example"}
+
+
+@pytest.fixture(scope="session")
+def preexisting_live_tmp_files() -> set:
+    """Names of *.tmp files already in the live json dir when the session began.
+
+    The orphan-tmp test reads LIVE state, so anything that dies mid-write
+    anywhere on the machine -- another audit, a killed CI step, a previous
+    session's SIGKILL -- lands in its assertion and fails a run that changed
+    nothing. Snapshotting at session start turns that assertion into
+    "this session left no NEW orphan", which is the claim it can actually
+    make.
+
+    Pre-existing orphans are NOT swept under the rug: the test warns on each
+    one by name so a real accumulation stays visible instead of becoming the
+    permanent baseline nobody reads.
+    """
+    from aipass.seedgo.apps.handlers.json import json_handler
+
+    live_dir = json_handler.JSON_DIR
+    if not live_dir.exists():
+        return set()
+    return {p.name for p in live_dir.glob("*.tmp")}

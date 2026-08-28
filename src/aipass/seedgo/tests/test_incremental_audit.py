@@ -987,7 +987,7 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
 
         assert "random/file.json" not in self._watch_rels(branch_path, checkers)
 
-    def test_directories_matched_by_a_glob_ARE_watched(self, tmp_path, monkeypatch):
+    def test_directories_matched_by_a_glob_are_watched(self, tmp_path, monkeypatch):
         """REVERSED 2026-08-27. This test previously asserted the opposite --
         that directories are skipped -- and that was the defect @daemon found
         hours later: the File set group scores stray DIRECTORIES, so excluding
@@ -1357,3 +1357,68 @@ class TestTheCacheSeesStrayDirectories:
         }
 
         assert seen_by_checker <= watched, f"checker sees {seen_by_checker - watched} that the cache cannot"
+
+
+# ===========================================================================
+# A FAILED CACHE SAVE MUST NOT LEAVE ITS STAGING FILE BEHIND
+# ===========================================================================
+
+
+class TestAFailedSaveLeavesNoStagingFile:
+    """save_cache stages through tempfile.mkstemp then os.replace. The cleanup
+    lived in `except Exception`, which has a real hole: BaseException --
+    KeyboardInterrupt, SystemExit, GeneratorExit -- passes straight through it
+    and the staging file survives on disk. That is not theoretical; a 4.3MB
+    truncated tmp2ay2d070.tmp has been sitting in seedgo_json/ since
+    2026-08-14, ending mid-token, exactly the shape of a save interrupted
+    between write and replace.
+
+    try/finally closes the interpreter-level hole. Stated honestly and NOT
+    claimed by these tests: it does not survive SIGKILL, nor default-disposition
+    SIGTERM, because neither unwinds the stack. Those still orphan, and no
+    finally clause can change that.
+    """
+
+    def test_a_keyboard_interrupt_mid_write_leaves_no_tmp(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        monkeypatch.setattr(incremental_cache, "CACHE_FILE", tmp_path / "audit_cache.json")
+
+        def interrupted(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(incremental_cache.json, "dump", interrupted)
+
+        with pytest.raises(KeyboardInterrupt):
+            incremental_cache.save_cache({"branches": {}})
+
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_an_ordinary_failure_mid_write_leaves_no_tmp(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        monkeypatch.setattr(incremental_cache, "CACHE_FILE", tmp_path / "audit_cache.json")
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(incremental_cache.json, "dump", boom)
+
+        with pytest.raises(OSError):
+            incremental_cache.save_cache({"branches": {}})
+
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_the_success_path_leaves_no_tmp_and_does_not_double_unlink(self, tmp_path, monkeypatch):
+        """os.replace consumes the staging file, so the finally clause must
+        tolerate its absence rather than raise over it.
+        """
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        cache_file = tmp_path / "audit_cache.json"
+        monkeypatch.setattr(incremental_cache, "CACHE_FILE", cache_file)
+
+        incremental_cache.save_cache({"branches": {"x": {"stamp": "abc"}}})
+
+        assert cache_file.is_file()
+        assert list(tmp_path.glob("*.tmp")) == []
