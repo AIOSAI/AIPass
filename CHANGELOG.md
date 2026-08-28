@@ -9,7 +9,23 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319)
+## [2026-08-28] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319) · v2.7.21
+
+**Telegram stripped from the concierge (2026-08-28)** — Patrick's ruling from
+the docker live test: BAUD is the phone face now, so @aipass's Telegram-bot-host
+identity (passport purpose/what_i_do/principle/tag), `telegram_readiness.py`
+(retired as a tracked `.disabled` rename — `.archive` is the disposal zone, so
+moving tracked source there would be a delete), the doctor telethon row, and all
+README/help mentions are gone; the @skills telegram skill and @api stay — the
+capability retired from the concierge's identity, not from the system. Riding
+with it: doctor's drone row root-caused and reconciled (`18 citizens + 1 routed
+service (@git)` — the mystery 19th was @git, routed but passportless; fixing it
+exposed and killed a substring-count bug in the same line), a split-brain
+AIPASS_HOME doctor check (terminal vs Claude Code trees compared, silent on
+agreement), the wizard now prints which branch it clones, and @aipass's seed
+re-exported clean. Merge-train CI fix: spawn's R3 archive pin asserted
+`templates/.archive/` on clean checkouts that can never carry it (gitignored) —
+the archive half now skips loudly as an environment fact.
 
 **Docker dev-container round (2026-08-28)** — the dev image (`aipass-test`)
 proved the whole cold-clone story and caught what CI structurally cannot:
