@@ -61,10 +61,17 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
       `AIPASS_HOME` exported — the `./aipass` launcher post-install forwards to
       the Python wizard, which without a tty and without `$AIPASS_HOME` prompts
       for a home and cancels on EOF (environment fact: setup.sh exports it to
-      ~/.bashrc, which a non-login audit shell never sources). Known wart, @aipass
-      lane: `aipass install --non-interactive` resolves to DEFAULT_HOME (~/AIPass)
-      and ignores the clone you are standing in; `--here` is the flag that does
-      the expected thing.
+      ~/.bashrc, which a non-login audit shell never sources). Multi-location
+      installs (any/path/AIPass) are SAFE — measured 2026-08-28: a second install
+      to a different home leaves the first byte-untouched and the #660 symlink
+      guard refuses to repoint ~/.local/bin. The surviving wart is
+      ~/.claude/settings.json: setup.sh:758 overwrites AIPASS_HOME + hook roots
+      UNCONDITIONALLY, so after a second install the terminal talks to tree #1
+      and Claude Code to tree #2, and doctor prints both facts without comparing
+      them (@aipass lane: one-line AIPASS_HOME vs global mismatch check).
+- [ ] Wizard reinstall clones the DEFAULT branch (main), not the branch you
+      stand on — from a dev tree you get a main tree back, silently. Until seeds
+      merge to main, that second tree has template passports, no seed mints.
 
 ### Phase 8 — memory files (.trinity)
 - [ ] `local.json` + `observations.json` exist for every seeded branch, valid JSON.
