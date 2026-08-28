@@ -624,6 +624,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
         A second listener started blind is how one port gets two servers and a
         log that cannot say which of them wrote a line.
         """
+
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
 
@@ -635,13 +636,12 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
 
         popen.assert_not_called()
 
-    def test_no_signal_is_sent_into_the_dark(
-        self, runtime: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_signal_is_sent_into_the_dark(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         If a unit IS holding the server, a bare SIGTERM is a stop its restart
         policy may undo — so an unanswered probe must refuse, not guess.
         """
+
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
 
