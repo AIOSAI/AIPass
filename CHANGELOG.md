@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-24] — post-v2.7.19 train (in progress)
+## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 
 **CI round 2, four fixes in one evening (PR #743 merge prep)** — the full
 matrix run surfaced 5 failures across 3 jobs; every one root-caused, none
