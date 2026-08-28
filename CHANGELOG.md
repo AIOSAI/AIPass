@@ -42,6 +42,32 @@ identity-first with top-level fallback — both layouts render byte-identical,
 proven against real passports. 1709 passed / 2 skipped, re-run exactly by
 devpulse; 4/4 mutations bite.
 
+**seedgo — the auditor refuses to import the audited**: architecture_check
+stopped raw-joining citizen_class onto the templates path (broken for
+manager branches for months per seedgo's own stored audits). The brief's
+suggested spawn-import failed seedgo's own checklist twice, so the fix is a
+drift-pinned mirror of spawn's class registry (the RESIDENT_REGISTRIES
+precedent) with three refusal doors kept apart: legacy (migrate), forbidden
+(admin, never a class), unknown (never existed). Un-migrated passports now
+score a truthful named violation quoting the cure. 1954 passed / 1 skipped,
+exact re-run; 5/5 mutations bite. Side finding banked: the audit cache was
+serving 12/18 branches pre-archive results (99 shown, 97 true).
+
+**aipass — `aipass new` revived on the new mint path**: it was dead at the
+door since the spawn commit (named refusal of the retired class — the
+planned seam, captured live before any edit). Now: no class passed (spawn's
+first-agent rule mints manager), `git init` cuts dev AFTER the birth commit
+with HEAD left on dev (ordering pinned — dev from an empty repo would never
+merge back), and git_auth's passport-owner fallback retired with a refusal
+that names the rule change. Live CLI receipt in a throwaway host: main+dev,
+HEAD dev, 2.0.0 manager passport, no owner key, live registry md5-identical.
+1061 passed / 0 skipped, exact re-run.
+
+**Still gated on Patrick**: the fleet migration run (`migrate-passports
+--confirm` — dry-run says 22/22, 0 errors), the registry_path truth ruling
+(the canonical value names a file that doesn't exist), and wave 3 (residency
+consumers converge; resident repos get dev branches).
+
 ## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 
 **CI round 2, four fixes in one evening (PR #743 merge prep)** — the full
