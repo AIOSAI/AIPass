@@ -553,7 +553,7 @@ bootstrap_branch() {
     BRANCH_COUNT=$((BRANCH_COUNT + 1))
 
     # .trinity/passport.json + local.json + observations.json
-    # DPLAN-0263 P2: rendered from spawn's own aipass_framework/manager templates
+    # DPLAN-0263 P2: rendered from spawn's own specialist/manager templates
     # (single source of truth) instead of hand-rolled heredocs — the heredocs had
     # drifted to a pre-numbered-entry schema (key_learnings as dict, observations
     # nested session/entries) that the cap/rollover system doesn't expect. By this
@@ -636,24 +636,24 @@ PYEOF
 }
 
 # Branches inside src/aipass/
-bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "aipass_framework" "Command routing and module discovery"
-bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo" "aipass_framework" "Standards enforcement and code auditing"
-bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "aipass_framework" "Logging and monitoring system"
-bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "aipass_framework" "Display formatting service"
-bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "aipass_framework" "Workflow and plan management"
-bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail" "aipass_framework" "Inter-agent messaging and dispatch"
-bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api" "aipass_framework" "LLM access and model routing"
-bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "aipass_framework" "Event-driven automation"
-bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "aipass_framework" "Branch lifecycle management"
+bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "specialist" "Command routing and module discovery"
+bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo" "specialist" "Standards enforcement and code auditing"
+bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "specialist" "Logging and monitoring system"
+bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "specialist" "Display formatting service"
+bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "specialist" "Workflow and plan management"
+bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail" "specialist" "Inter-agent messaging and dispatch"
+bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api" "specialist" "LLM access and model routing"
+bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "specialist" "Event-driven automation"
+bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "specialist" "Branch lifecycle management"
 bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
-bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "aipass_framework" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "aipass_framework" "Concierge — init, doctor, profile, onboarding"
-bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "aipass_framework" "Hook engine — cross-platform hook dispatch and per-project config"
-bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "aipass_framework" "Local-first backups, snapshots and restore"
-bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "aipass_framework" "Community social space — posts, comments, votes"
-bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "aipass_framework" "Task scheduler — per-branch schedule discovery"
-bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "Capability framework — discoverable skill units"
-bootstrap_branch "canary"   "$SCRIPT_DIR/src/aipass/canary" "aipass_framework" "Permanent test citizen — dispatch and gate verification"
+bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "specialist" "Vector memory bank"
+bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Concierge — init, doctor, profile, onboarding"
+bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "specialist" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "specialist" "Local-first backups, snapshots and restore"
+bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "specialist" "Community social space — posts, comments, votes"
+bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "specialist" "Task scheduler — per-branch schedule discovery"
+bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "specialist" "Capability framework — discoverable skill units"
+bootstrap_branch "canary"   "$SCRIPT_DIR/src/aipass/canary" "specialist" "Permanent test citizen — dispatch and gate verification"
 
 # All 18 core branches in src/aipass/ are bootstrapped above. (A stale note here
 # once claimed backup/commons/daemon/skills were external — they returned to core
