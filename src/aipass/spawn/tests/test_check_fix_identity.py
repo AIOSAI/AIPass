@@ -573,9 +573,12 @@ class TestAdoptCallsEnsureOwner:
 
         reg = _write_registry(tmp_path, branches=[])
 
-        with patch("aipass.spawn.apps.modules.core.find_registry", return_value=reg):
-            with patch("aipass.spawn.apps.modules.core.ensure_project_has_owner") as mock_owner:
-                with patch("aipass.spawn.apps.modules.core.fix_passport_registry_id"):
+        # The adoption lane lives in handlers/adoption_ops (split out of core when
+        # core crossed the 600-line standard); core re-exports it, but patches
+        # must target the module where the names are actually looked up.
+        with patch("aipass.spawn.apps.handlers.adoption_ops.find_registry", return_value=reg):
+            with patch("aipass.spawn.apps.handlers.adoption_ops.ensure_project_has_owner") as mock_owner:
+                with patch("aipass.spawn.apps.handlers.adoption_ops.fix_passport_registry_id"):
                     _adopt_existing(branch_dir, "", None, None)
                     mock_owner.assert_called_once_with(reg)
 

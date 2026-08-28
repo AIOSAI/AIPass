@@ -201,6 +201,7 @@ spawn/
 │   │   ├── sync_registry.py             # Registry repair CLI
 │   │   ├── regenerate_registry.py       # Template registry regeneration CLI
 │   │   ├── migrate_passports.py         # One-shot fleet passport 2.0 migration CLI
+│   │   ├── export_seeds.py              # Tracked passport seeds CLI — live → .aipass/passport.seed.json, dry-run default
 │   │   ├── repair.py                    # Structural repair CLI — scan, relocate, clean pollution
 │   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   ├── handlers/
@@ -209,6 +210,7 @@ spawn/
 │   │   ├── metadata.py                  # Branch name extraction, profile detection
 │   │   ├── placeholders.py              # {{PLACEHOLDER}} replacement engine
 │   │   ├── passport_migration.py        # Passport 1.x → 2.0 structure migration
+│   │   ├── seed_ops.py                  # Passport seeds — build/validate/mint-from-seed, machine-local strip, stamp
 │   │   ├── registry.py                  # Registry CRUD, find_registry(), project credential mint
 │   │   ├── meta_ops.py                  # Branch metadata generation, hash computation
 │   │   ├── mint_verify.py               # Read-only completeness check of a mint vs the template manifest

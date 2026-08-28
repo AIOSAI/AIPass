@@ -115,6 +115,21 @@ class TestDriftDetectorHermetic:
         assert "path" in contract["branch_info"]
         assert "cwd" not in contract["branch_info"]
 
+    def test_the_seed_stamp_is_not_drift(self):
+        """TDPLAN-0017: citizenship.seed is an ADDITIVE optional field.
+
+        This canary asks one question — "are the template's guaranteed keys
+        PRESENT" — so an extra key cannot make it fire. That tolerance is by
+        design (see test_ignores_extra_live_keys_not_in_contract), but a passport
+        minted from a seed is the first thing the fleet carries that relies on
+        it, so the property gets a pin of its own rather than an assumption.
+        """
+        contract = _template_contract_keys("specialist")
+        passport = json.loads((get_template_dir("specialist") / ".trinity" / "passport.json").read_text())
+        passport["citizenship"]["seed"] = {"version": "2.0.0", "sha256": "a" * 64}
+
+        assert _passport_drift(passport, contract) == {}
+
     def test_schema_version_reader_defaults_to_pre_2_0(self):
         assert _is_schema_2({"document_metadata": {"schema_version": SCHEMA_2}}) is True
         assert _is_schema_2({"document_metadata": {"schema_version": "1.0.0"}}) is False

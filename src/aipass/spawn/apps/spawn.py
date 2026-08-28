@@ -36,6 +36,7 @@ def print_help():
         "  [dim]drone @spawn repair <project_path> [--clean-pollution | --relocate @branch <path>] [--apply][/dim]"
     )
     console.print("  [dim]drone @spawn migrate-passports [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
+    console.print("  [dim]drone @spawn export-seeds [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
     console.print("  [dim]drone @spawn --help[/dim]")
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
@@ -51,6 +52,10 @@ def print_help():
     console.print("  [green]regenerate-registry[/green]           Regenerate template registry hashes")
     console.print(
         "  [green]migrate-passports[/green]             Migrate every fleet passport to schema 2.0 "
+        "(preview; add --confirm)"
+    )
+    console.print(
+        "  [green]export-seeds[/green]                  Regenerate each branch's tracked passport seed "
         "(preview; add --confirm)"
     )
     console.print(
@@ -345,6 +350,7 @@ def print_introspection():
     console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
     console.print("    [dim]- migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]")
+    console.print("    [dim]- export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
     console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
@@ -400,6 +406,11 @@ def main():
         from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
         return handle_migrate_passports(remaining)
+
+    if command == "export-seeds":
+        from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
+
+        return handle_export_seeds(remaining)
 
     if command == "repair":
         from aipass.spawn.apps.modules.repair import handle_repair

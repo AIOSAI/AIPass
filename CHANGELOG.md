@@ -93,11 +93,40 @@ end-state, and on dark/partial the row names the doc, never a ceremony
 command. 1080 tests / 0 skipped (+19 pins), 2/2 mutations bite, seedgo 100%
 overall — re-verified independently by devpulse from both rootdirs.
 
-**Still gated on Patrick**: the registry_path truth ruling (superseded if the
-passport-as-tracked-config ruling lands — the field dies), passports-tracked
-ruling (passport = public profile in git; machine ids move to the untracked
-layer — birth certificate / registry), `sync-registry --fix` stays hot?, and
-wave 3 (residency consumers converge; resident repos get dev branches).
+**PASSPORT SEEDS (TDPLAN-0017, Patrick's GO)** — the tracking ruling landed as
+**tracked soul, untracked live**: each core branch now ships
+`.aipass/passport.seed.json` (its live passport minus the four machine-local
+facts: registered, registry_id, citizen_id, and the stamp), so identities ship
+with the repo while `.trinity/` stays permanently out of git's reach — the
+ignore IS the pull protection, and seeds are new paths so existing installs
+can't collide on pull. Ruled from a 12-pattern prior-art survey (dpkg
+conffiles, RPM %config(noreplace), ucf, .env.example drift, chezmoi, Copier,
+kubectl last-applied; git-native tricks disqualified by git's own docs — four
+independent systems prove you need a record of what-was-last-shipped beside
+the live copy). Built as three parallel lanes: **spawn** grew `export-seeds`
+(dry-run default, idempotent, generated-never-hand-edited) plus a seed door in
+the create path — target-exists-without-passport (the fresh-clone shape) now
+births from the seed through closed-schema validation, minting fresh local
+ids plus a `citizenship.seed = {version, sha256}` stamp (dpkg's three-way
+fingerprint, making future update machinery retrofit-free; that machinery is
+deliberately deferred until real users exist). The validator REFUSES unknown
+keys at the two publish gates (a retired field must not ride into every
+clone) while the transform preserve-and-reports. **seedgo** measured that
+trinity judges passport EXISTENCE only, so the stamp was structurally free —
+proved with pins instead of edits, plus a new seed suite whose leak-guard
+walks whole documents for machine-local fields (live-proved red on a real
+passport planted as a seed). The 18 seeds exported and verified: idempotent
+re-run 0 changed, round-trip identity byte-equal, zero leaks. core.py crossed
+the 600-line standard in the build; the target-exists lane (adopt +
+birth-from-seed) split honestly into `handlers/adoption_ops.py`, spawn audit
+100 overall after. Bars: spawn 666→728/1 (20/20 mutations), seedgo
+1954→2040/1 (9/9 mutations, 54 seed-pin instances live), both re-run
+independently by devpulse.
+
+**Still gated on Patrick**: `sync-registry --fix` stays hot?, and wave 3
+(residency consumers converge; resident repos get dev branches; registry_path
+field retirement — zero code consumers, canonical value names a file that
+doesn't exist).
 
 ## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 

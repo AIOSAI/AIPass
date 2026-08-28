@@ -43,15 +43,16 @@ from aipass.spawn.apps.handlers.file_ops import (
 )
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
 from aipass.spawn.apps.handlers.mint_verify import verify_mint
-from aipass.spawn.apps.handlers.receipt_ops import RECEIPT_NAME, write_birth_receipt
+from aipass.spawn.apps.handlers.receipt_ops import write_birth_receipt
 from aipass.spawn.apps.handlers.registry import (
     load_registry,
     find_registry,
     add_to_registry,
     get_next_citizen_number,
-    fix_passport_registry_id,
     ensure_project_has_owner,
 )
+from aipass.spawn.apps.handlers.seed_ops import find_seed
+from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
     get_template_dir as _get_template_dir,
     validate_class as validate_class,
@@ -134,6 +135,9 @@ def print_introspection():
     console.print(
         "    [dim]- class_registry.py (validate_class, get_default_class,"
         " get_available_classes, get_template_dir — citizen class lookup)[/dim]"
+    )
+    console.print(
+        "    [dim]- seed_ops.py (find_seed, load_seed, mint_from_seed — mint a citizen from its tracked seed)[/dim]"
     )
     console.print()
 
@@ -279,6 +283,21 @@ def _spawn_agent(
         passport_path = target / ".trinity" / "passport.json"
         if passport_path.exists():
             return _adopt_existing(target, purpose, profile, registry_path)
+
+        # A directory with no live passport but WITH a tracked seed is the
+        # fresh-clone shape (TDPLAN-0017): the branch's code came down with the
+        # repo, its passport did not — .trinity/ is gitignored. That citizen is
+        # not "already existing", it is waiting to be born, and its identity is
+        # sitting right there in .aipass/passport.seed.json.
+        #
+        # This is also the ONLY door a seed can ever be found at. A seed lives
+        # inside the branch directory it describes, so a mint into a target that
+        # does not exist yet has no seed to prefer — the template path below is
+        # correct there by construction, not by omission.
+        seed_file = find_seed(target)
+        if seed_file:
+            return _birth_from_seed(target, seed_file, purpose, profile, registry_path)
+
         return _error(f"Target already exists: {target}")
     if not template.exists():
         return _error(f"Template not found: {template}")
@@ -470,117 +489,10 @@ def _spawn_agent(
     }
 
 
-def _adopt_existing(target, purpose, profile, registry_path):
-    """Register an existing directory that already has a passport.
-
-    Enhanced to also:
-    - Fix registry_id mismatch in passport (caused by registry recreation)
-    - Run template update to sync scaffolding files
-
-    Used when 'spawn create @existing' targets a directory the user already
-    moved code into. Instead of failing with "Target already exists",
-    we register it and sync its template files.
-
-    Args:
-        target: Path to the existing directory with .trinity/passport.json
-        purpose: Optional purpose description
-        profile: AIPass profile override
-        registry_path: Path to registry (or None for auto-discover)
-
-    Returns:
-        Result dict matching _spawn_agent return format.
-    """
-    folder_name = get_branch_name(target)
-    branch_upper = normalize_branch_name(folder_name, "upper")
-    branch_lower = normalize_branch_name(folder_name, "lower")
-    detected_profile = profile or detect_profile(target)
-
-    reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
-
-    # Read purpose from passport if not provided
-    if not purpose:
-        passport_path = target / ".trinity" / "passport.json"
-        # read_json returns None on failure (and logs) — same pattern as line ~250.
-        passport = json_handler.read_json(passport_path)
-        purpose = (passport or {}).get("identity", {}).get("purpose", "Adopted agent")
-
-    # Fix registry_id in passport if it doesn't match the current registry
-    fix_passport_registry_id(target, reg_path)
-
-    # Store path relative to registry location
-    try:
-        registry_branch_path = target.relative_to(reg_path.parent).as_posix()
-    except ValueError as e:
-        logger.warning("Cannot relativize path %s to registry %s: %s", target, reg_path.parent, e)
-        registry_branch_path = target.as_posix()
-
-    registry_updated = add_to_registry(
-        reg_path,
-        branch_upper,
-        registry_branch_path,
-        detected_profile,
-        f"@{branch_lower}",
-        purpose,
-    )
-
-    ensure_project_has_owner(reg_path)
-
-    # An adopted directory becomes a citizen here, so it needs a receipt too —
-    # but ONLY if it has none. A branch @memory's push already stamped carries
-    # "memory push"; restamping it "spawn birth" would overwrite a true record
-    # of which lane last touched those files with a false one. Adoption fills a
-    # hole; it does not rewrite history.
-    if not (target / ".trinity" / RECEIPT_NAME).exists():
-        adopt_receipt = write_birth_receipt(target / ".trinity")
-        if not adopt_receipt["success"]:
-            logger.warning("[spawn] Adopted %s without a trinity receipt: %s", branch_upper, adopt_receipt["error"])
-
-    json_handler.log_operation("branch_adopted", data={"branch": branch_upper})
-    logger.info("[spawn] Adopted existing branch: %s (registered in %s)", branch_upper, reg_path.name)
-
-    # Run template update to sync scaffolding files.
-    # Preserves: .trinity/, .ai_mail.local/, memories, all .py files.
-    # Only adds missing template files and merges JSON configs.
-    update_additions = 0
-    try:
-        from aipass.spawn.apps.handlers.update_ops import update_branch
-
-        update_result = update_branch(branch_lower)
-        update_additions = update_result.get("additions", 0)
-        if update_result.get("errors"):
-            logger.warning("[spawn] Template update had errors for %s: %s", branch_upper, update_result["errors"])
-    except Exception as exc:
-        logger.warning("[spawn] Template update failed for %s (adoption succeeded): %s", branch_upper, exc)
-
-    return {
-        "success": True,
-        "branch_name": branch_upper,
-        "path": str(target),
-        "files_copied": update_additions,
-        "dirs_created": 0,
-        "files_skipped": 0,
-        "renamed": [],
-        "registry_updated": registry_updated,
-        "registry_path": str(reg_path),
-        "citizen_number": 0,
-        "validation_issues": [],
-        "adopted": True,
-    }
-
-
-def _error(message):
-    """Return error result dict."""
-    return {
-        "success": False,
-        "error": message,
-        "branch_name": "",
-        "path": "",
-        "files_copied": 0,
-        "dirs_created": 0,
-        "files_skipped": 0,
-        "renamed": [],
-        "registry_updated": False,
-        "registry_path": "",
-        "citizen_number": 0,
-        "validation_issues": [],
-    }
+# The target-exists lane (adopt / birth-from-seed / the shared error dict) lives
+# in handlers/adoption_ops.py — split out when this module crossed the 600-line
+# standard. Re-exported under the old private names so the module seam the tests
+# and callers know stays put.
+_birth_from_seed = birth_from_seed
+_adopt_existing = adopt_existing
+_error = error_result
