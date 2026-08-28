@@ -245,7 +245,15 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
 
 
 def _git_init(target: Path, name: str, template: str) -> None:
-    """Initialize git repo with birth commit. Guards against re-init."""
+    """Initialize git repo with a birth commit on main, then cut dev. Guards re-init.
+
+    R6 (DPLAN-0319): a new project is born with BOTH branches and is LEFT on
+    dev — agents default to ``git_branch: dev``, main trails until merge day.
+
+    dev is cut AFTER the birth commit on purpose: branching an empty repo would
+    give dev no history in common with main, so the first merge back would be
+    an unrelated-histories refusal.
+    """
     if (target / ".git").exists():
         raise RuntimeError(f"'{target}' already has a .git directory")
     _git(["init", "-b", "main"], target)
@@ -254,6 +262,7 @@ def _git_init(target: Path, name: str, template: str) -> None:
         ["commit", "-m", f"birth: {name} ({template} template) via aipass new"],
         target,
     )
+    _git(["checkout", "-b", "dev"], target)
 
 
 # ── agent (via @spawn) ──────────────────────────────────────────────────
@@ -271,13 +280,26 @@ def _spawn_project_agent(project_root: Path, name: str) -> dict:
     Agent lives at src/<pkg>/<pkg>/ inside the project. Spawn discovers
     the project-local registry (minted earlier by _write_registry) by
     walking up from the agent home to the project root.
+
+    NO citizen_class is passed, deliberately (DPLAN-0319 R3). The class is
+    decided at mint from the citizen number, and this agent is always citizen
+    #1 of a registry minted moments earlier by ``_write_registry`` — so spawn's
+    first-agent rule mints ``manager`` on its own. Naming a class here would
+    replace a derived fact with a guess; the value this used to pass
+    ("project_agent") is a retired name spawn now refuses by name rather than
+    translate, so passing it broke agent minting outright.
+
+    ``role`` is free text (nothing branches on it — the ``role == "project_agent"``
+    tiebreaker died with the template fork), but it is rendered verbatim into
+    the agent's own injected identity. Leaving the retired class name there
+    would have every project agent introduce itself with a class name that no
+    longer exists, one field away from a passport correctly saying "manager".
     """
     home = _agent_home(project_root, name)
     result = spawn_agent(
         target_path=str(home),
-        role="project_agent",
+        role="project_manager",
         purpose=f"Resident agent of the {name} project.",
-        citizen_class="project_agent",
     )
     if not result.get("success"):
         raise RuntimeError(f"spawn_agent failed: {result.get('error', 'unknown')}")

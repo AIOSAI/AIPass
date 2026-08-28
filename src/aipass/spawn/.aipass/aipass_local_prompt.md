@@ -9,23 +9,24 @@ SPAWN — agent factory + branch lifecycle manager AIPass.
 
 ## What I Do
 
-- Create new branches class-scoped templates (aipass_framework, project_agent)
+- Create new branches from the one citizen template — class decided at mint (manager / specialist)
 - Update branches templates (single/batch class, --dry-run)
 - Delete branches (archive + deregister)
 - Sync registry against filesystem
 - Regenerate template registries fresh file hashes
-- Own both class templates — the blueprint every new branch is created from
+- Own templates/citizen/ — the one blueprint every new branch is created from
 
 ## Key Commands
 
 ```
-drone @spawn create [class] <path> [--role --purpose]   # Create branch (default: aipass_framework)
+drone @spawn create [class] <path> [--role --purpose]   # Create branch (class decided at mint if omitted)
 drone @spawn create <path> --dry-run                     # Preview without creating
 drone @spawn update @branch                              # Update single branch from template
-drone @spawn update aipass_framework --all [--dry-run]   # Update all branches of a class
+drone @spawn update specialist --all [--dry-run]         # Update all branches of a class
 drone @spawn delete @branch                              # Archive and deregister
 drone @spawn sync-registry [--fix]                       # Check/repair registry vs filesystem
 drone @spawn regenerate-registry [class | --all]         # Rebuild template registry hashes
+drone @spawn migrate-passports [--confirm]               # One-shot passport 2.0 fleet migration (dry-run default)
 ```
 
 ## Architecture
@@ -48,7 +49,8 @@ apps/
     ├── update_ops.py     # Update workflow (Phase 0)
     ├── change_detection.py  # ID-based file diff
     ├── reconcile.py      # Registry/filesystem reconciliation
-    ├── class_registry.py # Citizen class → template mapping
+    ├── class_registry.py # Citizen classes + the one template; retired names refuse loudly
+    ├── passport_migration.py # Passport 1.x → 2.0 structure migration
     └── json/json_handler.py  # JSON I/O + operation logging
 ```
 
@@ -59,11 +61,11 @@ apps/
 
 ## Working Habits
 
-- Template source truth — changes go in templates/<class>/, then regenerate-registry
+- Template source truth — changes go in templates/citizen/, then regenerate-registry
 - Py files NEVER auto-overwritten during updates (design)
 - JSON files deep-merged (preserve existing values, add new template keys)
 - Update uses Phase 0 workflow: snapshot old tracking → detect changes → execute → refresh metadata
-- Two citizen classes: aipass_framework (full 3-layer scaffold, 50 files), project_agent (17 files)
+- Two citizen classes, ONE template: manager (citizen #1) and specialist (default) both mint templates/citizen/ (50 files)
 - Birth stamps TWO ids: citizenship.citizen_id (this citizen's own UID, == its branches[] registry_id)
   and citizenship.registry_id (the REGISTRY's id, shared project-wide). Minted once in core, used twice
 - Mint verifies completeness: a template that ships fewer files than its manifest declares REFUSES, never half-registers

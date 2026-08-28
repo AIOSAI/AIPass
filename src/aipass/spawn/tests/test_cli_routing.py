@@ -10,6 +10,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 
 class TestCliRouting:
     """Tests for spawn.py main() CLI routing."""
@@ -102,7 +104,17 @@ class TestCreateHelp:
         mock_help.assert_called_once()
 
     def test_create_help_with_class(self):
-        """create aipass_framework --help shows help."""
+        """create specialist --help shows help."""
+        from aipass.spawn.apps.spawn import handle_create
+
+        with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
+            result = handle_create(["specialist", "--help"])
+        assert result == 0
+        mock_help.assert_called_once()
+
+    def test_create_help_beats_a_retired_class(self):
+        """--help is answered before the retired-name refusal — asking for help
+        is never the thing that gets refused."""
         from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
@@ -182,7 +194,11 @@ class TestCreateUnknownClassRefusal:
         mock_error.assert_called_once()
         message = str(mock_error.call_args).lower()
         assert "wizard" in message
-        assert "aipass_framework" in message
+        # The refusal names the classes that DO exist. Both, since DPLAN-0319 R4
+        # collapsed the roster to manager|specialist — a caller who mistyped needs
+        # the live names, not the retired ones.
+        assert "manager" in message
+        assert "specialist" in message
         assert not (tmp_path / "wizard").exists()
         assert not registry.exists()
 
@@ -200,17 +216,51 @@ class TestCreateUnknownClassRefusal:
         assert target.exists()
         assert (target / ".trinity" / "passport.json").exists()
 
-    def test_explicit_class_and_path_still_works(self, tmp_path):
-        """`create <class> <path>` — the two-positional form — is untouched."""
+    @pytest.mark.parametrize("citizen_class", ["manager", "specialist"])
+    def test_explicit_class_and_path_still_works(self, tmp_path, citizen_class):
+        """`create <class> <path>` — the two-positional form — is untouched.
+
+        Rewritten for DPLAN-0319 R4: this used to drive "aipass_framework", a
+        name that is now retired and refused (see the sibling test below). Both
+        LIVE classes must still create, and the class the caller typed must be
+        the class the passport ends up claiming — a create that accepted the
+        word and wrote something else would be the exact drift the rework ends.
+        """
+        import json
+
         from aipass.spawn.apps.spawn import handle_create
 
-        target = tmp_path / "legit_agent2"
+        target = tmp_path / f"legit_{citizen_class}"
         registry = tmp_path / "AIPASS_REGISTRY.json"
         with patch("aipass.spawn.apps.spawn.console"):
-            result = handle_create(["aipass_framework", str(target), "--registry", str(registry)])
+            result = handle_create([citizen_class, str(target), "--registry", str(registry)])
 
         assert result == 0
         assert target.exists()
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["identity"]["citizen_class"] == citizen_class
+
+    def test_retired_class_and_path_refuses_by_name(self, tmp_path):
+        """`create aipass_framework <path>` is REFUSED, not silently remapped.
+
+        Was green as a create; the contract inverted with DPLAN-0319 R4. It also
+        must not die as a bare argparse SystemExit(2) — the caller has to be told
+        the name retired and what replaced it.
+        """
+        from aipass.spawn.apps.spawn import handle_create
+
+        target = tmp_path / "legacy_agent"
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        with patch("aipass.spawn.apps.spawn.error") as mock_error:
+            result = handle_create(["aipass_framework", str(target), "--registry", str(registry)])
+
+        assert result == 1
+        mock_error.assert_called_once()
+        message = str(mock_error.call_args)
+        assert "aipass_framework" in message
+        assert "specialist" in message
+        assert not target.exists()
+        assert not registry.exists()
 
     def test_relative_dot_prefixed_token_still_creates(self, tmp_path, monkeypatch):
         """An explicit relative-path marker ('./name') disambiguates and still creates."""

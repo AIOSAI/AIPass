@@ -9,7 +9,9 @@
 """Verify a freshly minted citizen against the template that minted it.
 
 Why this exists: on 2026-08-17 the repo-root ``.gitignore`` was found to swallow
-six of ``templates/project_agent``'s eighteen files — blanket ignores for
+six of the then-``templates/project_agent``'s eighteen files (that template was
+retired by DPLAN-0319; every citizen mints from ``templates/citizen`` now, and
+the same hole would swallow the same files there) — blanket ignores for
 ``.ai_mail.local/``, ``DASHBOARD.local.json``, ``logs/`` and ``artifacts/`` with
 no negation for that template. Every fresh clone therefore held an INCOMPLETE
 template, and the mint copied whatever it found: exit 0, "Agent created",

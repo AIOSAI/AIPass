@@ -12,7 +12,6 @@ import json
 import shutil
 import sys
 import pytest
-from pathlib import Path
 
 from aipass.spawn import spawn_agent
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
@@ -55,17 +54,33 @@ class TestMetadata:
     def test_normalize_lower(self):
         assert normalize_branch_name("My-Agent", "lower") == "my_agent"
 
-    def test_detect_profile_default(self):
-        assert detect_profile("/tmp/test") == "AIPass Workshop"
+    def test_detect_profile_default(self, tmp_path):
+        assert detect_profile(tmp_path / "test") == "AIPass Workshop"
 
 
 class TestPlaceholders:
-    def test_build_replacements(self):
-        r = build_replacements_dict(Path("/tmp/x"), "my_agent", role="Tester")
+    def test_build_replacements(self, tmp_path):
+        r = build_replacements_dict(tmp_path / "x", "my_agent", role="Tester")
         assert r["BRANCHNAME"] == "MY_AGENT"
         assert r["branchname"] == "my_agent"
         assert r["ROLE"] == "Tester"
-        assert r["CWD"] == "/tmp/x"
+
+    def test_cwd_placeholder_is_gone(self, tmp_path):
+        """{{CWD}} rendered an ABSOLUTE path into a tracked public file.
+
+        It was replaced by {{PATH}} (DPLAN-0319), which renders RELATIVE. The
+        engine must not still answer to the old name — a template that kept
+        {{CWD}} would silently keep leaking /home/<user>/... into passports.
+        """
+        r = build_replacements_dict(tmp_path / "x", "my_agent")
+        assert "CWD" not in r
+        assert "PATH" in r
+
+    def test_dead_placeholders_are_gone(self, tmp_path):
+        """KEY_CAPABILITIES / DEPENDS_ON / PROVIDES_TO had zero live consumers."""
+        r = build_replacements_dict(tmp_path / "x", "my_agent")
+        for dead in ("KEY_CAPABILITIES", "DEPENDS_ON", "PROVIDES_TO", "TRAITS"):
+            assert dead not in r, f"{dead} is back in the engine with nothing rendering it"
 
     def test_validate_clean_dir(self, tmp_path):
         (tmp_path / "clean.txt").write_text("no placeholders here")
@@ -121,9 +136,11 @@ class TestSpawnAgent:
         assert (tmp_agent / "DASHBOARD.local.json").exists()
         assert (tmp_agent / "apps" / "test_agent.py").exists()
 
-        # Verify passport content
+        # Verify passport content. branch_name renders LOWERCASE in schema 2.0
+        # (DPLAN-0319 R1 casing) — the UPPER form survives only as the registry
+        # key and this result dict's branch_name, asserted above.
         passport = json.loads((tmp_agent / ".trinity" / "passport.json").read_text())
-        assert passport["branch_info"]["branch_name"] == "TEST_AGENT"
+        assert passport["branch_info"]["branch_name"] == "test_agent"
         assert passport["identity"]["role"] == "Test Role"
 
         # Verify registry

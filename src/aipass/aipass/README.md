@@ -43,6 +43,7 @@ aipass/
 │   │   ├── trust.py                       # Trust registry — aipass trust / aipass revoke
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
 │   ├── handlers/
+│   │   ├── admin_lane.py                  # Admin-lane state for doctor — presence only, never a verdict
 │   │   ├── cross_os/                      # Cross-OS pre-flight: gap_registry, preflight, run_record
 │   │   ├── handoff_platform/              # OS-dispatched CLI session launch — tmux, wt.exe, inline
 │   │   ├── init/                          # bootstrap.py, git_auth.py (re-exports shared/scaffold_content.py)
@@ -57,13 +58,12 @@ aipass/
 │   │   ├── sandbox_check/                 # Sandbox / containment detection
 │   │   ├── structure_scan/                # Agent placement + pollution detection
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
-│   │   ├── telegram_readiness.py          # Telegram bot-host readiness checks (doctor)
 │   │   └── ui/                            # Rich progress bars, spinners, check glyphs, step headers
 │   ├── integrations/                      # Placeholder — no code yet
 │   └── plugins/                           # Placeholder — no code yet
 ├── shared/                                # Cross-handler code — json_handler, json_ops,
 │                                          #   project_home, registry_discovery, scaffold_content
-├── tests/                                 # 1034 passing
+├── tests/                                 # 1078 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -105,7 +105,7 @@ aipass/
 | `aipass handoff --info` | Show stored CLI + platform status |
 | `aipass handoff launch [--cli claude\|codex] [--cwd PATH] [--flag VARIANT]` | Launch chosen CLI in a new session (tmux / wt.exe) |
 | `aipass <free text>` | Multi-word unknown input falls through to `aipass help` |
-| `aipass new <name>` | Create a project in projects/ — own repo, AIPass scaffold, resident agent |
+| `aipass new <name>` | Create a project in projects/ — own repo (`main` + `dev`, left on `dev`), AIPass scaffold, resident manager-class agent |
 | `aipass new <name> --template python` | Create with Python template (pyproject + src/) |
 | `aipass new <name> --no-agent` | Create without resident agent |
 | `aipass adopt <name>` | Turn an existing `projects/<name>` directory into a full project — additive scaffold only |
@@ -116,6 +116,39 @@ aipass/
 | `aipass trust prune` | Drop registry entries whose project path no longer exists |
 | `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks) |
 | `aipass --version` | Version |
+
+## Admin setup
+
+Admin is one privilege held by exactly one citizen — `@devpulse` — letting it
+dispatch any agent, manager-class citizens included. It is **per-machine**,
+**optional**, and **single-seat** (bolted to `devpulse`; there is no transfer
+ceremony). A fresh install starts with the lane **dark**, which is a correct,
+fail-closed state: admin actions simply refuse.
+
+**Full walkthrough: [`docs/admin_setup.md`](docs/admin_setup.md)** — the five
+legs, the threat model, and where each piece of the code lives.
+
+Security model in short: passports are public profiles and grant nothing; the
+security layer is the gitignored, machine-unique birth certificate, whose
+`privileges` block is signed with a key at `~/.aipass/admin_grant.key` that
+never enters a repo — so a clone never carries a grant.
+
+The ceremony, in order — `keygen` → `mint` → registry flag → `verify`:
+
+```bash
+drone @devpulse admin_grant status    # lane state
+drone @devpulse admin_grant keygen    # machine signing key (owner)
+drone @devpulse admin_grant mint      # sign the privilege block (owner)
+drone @spawn grant-admin              # admin: true on the registry entry
+drone @devpulse admin_grant verify    # full 5-leg contract check
+```
+
+`keygen --force` regenerates the key and invalidates every existing signature —
+that is the revocation story; there is no `revoke` verb.
+
+`aipass doctor` reports an `admin lane` row (`lit` / `dark` / `partial`). It
+observes presence only and never errors; `drone @devpulse admin_grant verify` is
+the authoritative check.
 
 ## Integration Points
 
@@ -137,7 +170,7 @@ Humans only. No `.py` source elsewhere in AIPass imports this branch.
 
 ## Tests
 
-1034 passing — `pytest src/aipass/aipass/tests/`
+1078 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 

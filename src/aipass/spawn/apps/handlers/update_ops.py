@@ -308,9 +308,12 @@ def _read_citizen_class(branch_dir: Path) -> str:
 
     No fallback (DPLAN-0262, Patrick ruling): a missing passport, corrupt JSON, or
     unknown citizen_class is a loud hard error naming the passport path and the
-    registered classes — never a silent 'aipass_framework' guess. Silent defaulting
+    registered classes — never a silent guess at a default class. Silent defaulting
     here is exactly what let real passports drift from their template contract
-    undetected for months.
+    undetected for months. A passport still carrying a RETIRED class name
+    ("aipass_framework", "project_agent", "builder") is refused the same way, so
+    it reads as "migrate this passport" rather than updating against a class it
+    no longer claims (DPLAN-0319).
     """
     from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 

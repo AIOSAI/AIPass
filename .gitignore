@@ -25,7 +25,6 @@ build/
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json
 .trinity/
-!src/aipass/spawn/templates/*/.trinity/
 .watchdog/
 .ai_mail.local/
 ai_mail.local/
@@ -92,17 +91,36 @@ src/aipass/seedgo/apps/standards/aipass/pack.json
 src/aipass/*/apps/integrations/**
 !src/aipass/*/apps/integrations/README.md
 
-# Spawn template exceptions (template files must be tracked for public repo)
-!src/aipass/spawn/templates/aipass_framework/.trinity/
-!src/aipass/spawn/templates/aipass_framework/.trinity/**
-!src/aipass/spawn/templates/aipass_framework/.ai_mail.local/
-!src/aipass/spawn/templates/aipass_framework/.ai_mail.local/**
-!src/aipass/spawn/templates/aipass_framework/.archive/
-!src/aipass/spawn/templates/aipass_framework/.archive/**
-!src/aipass/spawn/templates/aipass_framework/.spawn/
-!src/aipass/spawn/templates/aipass_framework/.spawn/**
-!src/aipass/spawn/templates/aipass_framework/.claude/
-!src/aipass/spawn/templates/aipass_framework/.claude/**
+# Spawn template exceptions — a template must ship WHOLE (the 2026-08-17 CI red
+# proved it: swallowed payload dirs mean fresh clones mint citizens with no
+# birth certificate and no inbox). WILDCARDED across templates/*/ since the 2.0
+# rename (aipass_framework + project_agent -> citizen, DPLAN-0319): the old
+# name-specific negations stopped matching anything after the rename and 17
+# payload files silently left the public repo. Name-specific lines are how a
+# template ships incomplete — never add one.
+!src/aipass/spawn/templates/*/.trinity/
+!src/aipass/spawn/templates/*/.trinity/**
+!src/aipass/spawn/templates/*/.ai_mail.local/
+!src/aipass/spawn/templates/*/.ai_mail.local/**
+!src/aipass/spawn/templates/*/.archive/
+!src/aipass/spawn/templates/*/.archive/**
+!src/aipass/spawn/templates/*/.spawn/
+!src/aipass/spawn/templates/*/.spawn/**
+!src/aipass/spawn/templates/*/.claude/
+!src/aipass/spawn/templates/*/.claude/**
+!src/aipass/spawn/templates/*/*_json/
+!src/aipass/spawn/templates/*/*_json/**
+!src/aipass/spawn/templates/*/logs/
+!src/aipass/spawn/templates/*/logs/**
+!src/aipass/spawn/templates/*/artifacts/
+!src/aipass/spawn/templates/*/artifacts/**
+!src/aipass/spawn/templates/*/dropbox/
+!src/aipass/spawn/templates/*/dropbox/**
+!src/aipass/spawn/templates/*/tools/
+!src/aipass/spawn/templates/*/tools/**
+!src/aipass/spawn/templates/*/docs.local/
+!src/aipass/spawn/templates/*/docs.local/**
+!src/aipass/spawn/templates/*/DASHBOARD.local.json
 
 # .archive/ exceptions: NONE, ever (Patrick ruling 2026-08-18: .archive is the
 # disposal zone, cleaned without warning — nothing that must survive or ship may
@@ -121,38 +139,6 @@ src/aipass/*/apps/integrations/**
 !src/aipass/memory/artifacts/
 src/aipass/memory/artifacts/*
 !src/aipass/memory/artifacts/dplan_0297_governance_sample_20260814.json
-!src/aipass/spawn/templates/aipass_framework/*_json/
-!src/aipass/spawn/templates/aipass_framework/*_json/**
-!src/aipass/spawn/templates/aipass_framework/logs/
-!src/aipass/spawn/templates/aipass_framework/logs/**
-!src/aipass/spawn/templates/aipass_framework/artifacts/
-!src/aipass/spawn/templates/aipass_framework/artifacts/**
-!src/aipass/spawn/templates/aipass_framework/dropbox/
-!src/aipass/spawn/templates/aipass_framework/dropbox/**
-!src/aipass/spawn/templates/aipass_framework/tools/
-!src/aipass/spawn/templates/aipass_framework/tools/**
-!src/aipass/spawn/templates/aipass_framework/docs.local/
-!src/aipass/spawn/templates/aipass_framework/docs.local/**
-!src/aipass/spawn/templates/aipass_framework/DASHBOARD.local.json
-!src/aipass/spawn/templates/project_agent/.spawn/
-!src/aipass/spawn/templates/project_agent/.spawn/**
-
-# project_agent template completeness (2026-08-17, found by a CI red). Same
-# species as the aipass_framework negations above: the blanket .ai_mail.local/
-# (line 29), DASHBOARD.local.json (line 32), logs/ (line 48) and artifacts/
-# (line 49) rules swallowed 6 of this template's 18 files, so a fresh clone got
-# the template INCOMPLETE — and the mint copies what it finds, so every citizen
-# born from a fresh clone came out with no birth certificate and no inbox.json
-# (unable to receive mail at all). A template must ship whole or the hospital
-# only works on the machine that authored it. Scoped to what project_agent
-# actually contains — it has no dropbox/, tools/, docs.local/ or *_json/.
-!src/aipass/spawn/templates/project_agent/.ai_mail.local/
-!src/aipass/spawn/templates/project_agent/.ai_mail.local/**
-!src/aipass/spawn/templates/project_agent/artifacts/
-!src/aipass/spawn/templates/project_agent/artifacts/**
-!src/aipass/spawn/templates/project_agent/logs/
-!src/aipass/spawn/templates/project_agent/logs/**
-!src/aipass/spawn/templates/project_agent/DASHBOARD.local.json
 
 # Commons artifacts subsystem — real source code (craft/trade/capsule), NOT a
 # runtime dir. Collides with the blanket `artifacts/` ignore (line 49); *.py-only

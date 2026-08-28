@@ -32,9 +32,15 @@ repo root or a dot path. Path-binding is at-or-under, so a root path degrades
 authority to repo-wide — any directory in the repo could then host a forged
 passport and hold git. That case refuses instead of repairing.
 
-Owner selection never guesses. The citizen already marked owner (registry entry
-``owner: true``, or passport ``citizenship.owner: true``) IS the owner. With
-none marked, or more than one, the run refuses and says what to add.
+Owner selection never guesses. The citizen the REGISTRY marks with
+``owner: true`` IS the owner — the single source. With none marked, or more
+than one, the run refuses and says what to add.
+
+The passport-side ``citizenship.owner`` fallback retired with passport 2.0
+(DPLAN-0319), which drops that field at migration; the refusal names the
+retirement so a project that used to be seated by a passport claim is told why,
+not just that nobody is marked. Registry-entry ``owner: true`` in
+``*_REGISTRY.json`` is a DIFFERENT field and is unaffected.
 
 RULES:
   - No CLI output — returns dicts, raises GitAuthRefusal; the module prints
@@ -45,7 +51,7 @@ RULES:
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 
@@ -199,16 +205,23 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
 # =============================================================================
 
 
-def _select_owner(entries: List[Dict[str, Any]], repo_root: Path) -> Tuple[Dict[str, Any], bool]:
-    """Return (owner_entry, needs_owner_flag). Refuses rather than guessing.
+def _select_owner(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Return the owner entry. Refuses rather than guessing.
 
-    First source is the registry's own ``owner: true``. Only when no entry
-    carries it do passports get consulted, and a passport claim is then written
-    back to the registry (drone reads the registry, not the passport).
+    The registry's own ``owner: true`` is the ONLY source. The passport-side
+    ``citizenship.owner`` fallback that used to run here retired with passport
+    2.0 (DPLAN-0319): the migration DROPS that field, so consulting it would be
+    reading a key no current passport carries — a branch that can only ever go
+    dead-silent, turning "the rule changed" into "nobody is marked".
+
+    Which is why the no-owner refusal below NAMES the retirement. A project
+    that used to be seated off a passport claim otherwise gets a message that
+    is true but unhelpful, and no way to learn why yesterday's setup stopped
+    working. Loud beats silent even when the silence is technically correct.
     """
     flagged = [entry for entry in entries if entry.get("owner") is True]
     if len(flagged) == 1:
-        return flagged[0], False
+        return flagged[0]
     if len(flagged) > 1:
         names = ", ".join(sorted(str(entry.get("name", "?")) for entry in flagged))
         raise GitAuthRefusal(
@@ -216,30 +229,12 @@ def _select_owner(entries: List[Dict[str, Any]], repo_root: Path) -> Tuple[Dict[
             "citizen, so remove owner: true from every entry except the project owner, then re-run"
         )
 
-    claimed = []
-    for entry in entries:
-        branch_dir = _resolved_path(entry, repo_root)
-        if branch_dir is None:
-            continue
-        passport = _read_passport(branch_dir / ".trinity" / "passport.json")
-        if passport is None:
-            continue
-        if passport.get("citizenship", {}).get("owner") is True:
-            claimed.append(entry)
-
-    if len(claimed) == 1:
-        return claimed[0], True
-    if len(claimed) > 1:
-        names = ", ".join(sorted(str(entry.get("name", "?")) for entry in claimed))
-        raise GitAuthRefusal(
-            f"more than one passport claims citizenship.owner: true ({names}) — mark the one project "
-            "owner with owner: true in the registry, then re-run"
-        )
-
     listed = ", ".join(sorted(str(entry.get("name", "?")) for entry in entries)) or "(no citizens listed)"
     raise GitAuthRefusal(
         'no citizen is marked as the project owner, and this never guesses — add "owner": true to the '
-        f"owning citizen's entry in the registry, then re-run. Citizens listed: {listed}"
+        f"owning citizen's entry in the registry, then re-run. Citizens listed: {listed}. "
+        "(A passport's citizenship.owner is no longer consulted: passport 2.0 dropped that field, "
+        "so the registry entry is now the only source of truth for ownership.)"
     )
 
 
@@ -344,7 +339,7 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     registry_data = _read_json(registry_path)
     entries = _entries(registry_data)
 
-    owner_entry, needs_owner_flag = _select_owner(entries, repo_root)
+    owner_entry = _select_owner(entries)
     owner_name = str(owner_entry.get("name", "?"))
 
     repairs: List[str] = []
@@ -352,12 +347,9 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     registry_dirty = False
 
     # --- check 3: owner: true on the registry entry ---
-    if needs_owner_flag:
-        owner_entry["owner"] = True
-        registry_dirty = True
-        repairs.append(f"registry: marked '{owner_name}' owner: true (its passport already claimed ownership)")
-    else:
-        already_ok.append(f"registry: '{owner_name}' already marked owner: true")
+    # Never a repair any more: the registry flag is the only way to reach here,
+    # so the alternative is the named refusal in _select_owner, not a backfill.
+    already_ok.append(f"registry: '{owner_name}' already marked owner: true")
 
     # --- check 2 (registry half): metadata.id ---
     registry_id = registry_data.get("metadata", {}).get("id")

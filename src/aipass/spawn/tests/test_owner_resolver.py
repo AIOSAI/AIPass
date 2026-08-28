@@ -231,7 +231,7 @@ class TestEnsureProjectHasOwner:
         (alpha_dir / "passport.json").write_text(
             json.dumps(
                 {
-                    "identity": {"citizen_class": "aipass_framework"},
+                    "identity": {"citizen_class": "specialist"},
                     "citizenship": {"registry_id": "abc"},
                 }
             ),

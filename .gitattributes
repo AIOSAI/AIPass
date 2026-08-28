@@ -10,6 +10,9 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.toml text eol=lf
+# .ini without eol=lf checks out CRLF on Windows, so template content hashes
+# (spawn .template_registry.json) no longer match the committed registry
+*.ini text eol=lf
 
 # Documentation - always use LF
 *.md text eol=lf

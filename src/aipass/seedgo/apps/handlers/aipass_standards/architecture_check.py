@@ -3,7 +3,7 @@
 # Description: Architecture Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-08-28
 # =============================================
 
 """
@@ -32,10 +32,41 @@ APPLIES_TO = "production"
 
 PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> seedgo/
 
-# Spawn templates directory — live-scanned, class-aware
+# Spawn templates root — live-scanned. The SUBDIRECTORY under it is never
+# guessed from citizen_class: passport 2.0 (DPLAN-0319) made the class a
+# behavioural label that does NOT name a directory, so the mapping below is
+# the only thing allowed to answer it. Keeping the root here (rather than
+# reading spawn's own constant) leaves one seam a test can point at a fixture
+# tree — tests/test_citizen_class_resolution.py pins it against spawn.
 # PACK_ROOT = seedgo/apps/, so .parent.parent = src/aipass/
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> seedgo/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
+
+# --- spawn's class registry, MIRRORED (not imported) ----------------------
+# spawn owns these facts in spawn/apps/handlers/class_registry.py. seedgo may
+# not import them: a cross-branch handler import fails seedgo's own
+# encapsulation and handlers standards, and spawn's modules layer re-exports
+# neither the template resolver (aliased private) nor the legacy refusal — so
+# the sanctioned gateway cannot serve this today. The mirror is also the safer
+# coupling for an AUDITOR: a runtime import would let one branch's broken
+# import graph blind the architecture check for all 18 branches, where a stale
+# mirror turns exactly one test red and names the drifted value.
+# EVERY entry is drift-pinned against spawn's live registry by
+# tests/test_citizen_class_resolution.py::TestMirrorMatchesSpawn — change spawn,
+# and that test names what moved. Do not edit these by hand without it green.
+CITIZEN_CLASS_TEMPLATES = {
+    "manager": "citizen",
+    "specialist": "citizen",
+}
+# Retired names → the class that replaced them. Present so an un-migrated
+# passport is told what to write, never so the old value gets translated.
+LEGACY_CITIZEN_CLASSES = {
+    "aipass_framework": "specialist",
+    "builder": "specialist",
+    "project_agent": "manager",
+}
+# Never a class, never a template — a devpulse-only registry privilege.
+FORBIDDEN_CITIZEN_CLASSES = frozenset({"admin"})
 
 # Template subtrees that are local-only and therefore never scored — see _is_local_only()
 LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
@@ -385,6 +416,45 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
         return None
 
 
+def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
+    """Resolve a citizen_class to its template directory name, or say why not.
+
+    The class stopped naming a directory at passport 2.0, so this is a lookup
+    against the mirrored registry rather than a path join. Three refusals are
+    kept apart because they mean different things to whoever reads the score: a
+    RETIRED name is a passport waiting on the one-shot migration (expected,
+    temporary, cured by a fleet run), a FORBIDDEN name is a privilege that was
+    never a class, and anything else is a typo or an invention. Collapsing them
+    would tell a branch to migrate when the real answer is "that value has never
+    existed".
+
+    Args:
+        citizen_class: The value read from identity.citizen_class.
+
+    Returns:
+        (template_dir_name, "") when the class is registered, else
+        (None, refusal) — the refusal is a complete sentence naming the value.
+    """
+    key = (citizen_class or "").strip()
+    if key in CITIZEN_CLASS_TEMPLATES:
+        return CITIZEN_CLASS_TEMPLATES[key], ""
+
+    lowered = key.lower()
+    if lowered in FORBIDDEN_CITIZEN_CLASSES:
+        return None, (
+            f'Forbidden citizen_class "{citizen_class}" — a devpulse-only registry '
+            f"privilege (DPLAN-0288), never a citizen class and never a template."
+        )
+    if lowered in LEGACY_CITIZEN_CLASSES:
+        return None, (
+            f'Legacy citizen_class "{citizen_class}" — passport not yet migrated to 2.0; '
+            f'this class is now "{LEGACY_CITIZEN_CLASSES[lowered]}". '
+            f"Run spawn's migrate-passports; the old name is never translated silently."
+        )
+    available = ", ".join(sorted(CITIZEN_CLASS_TEMPLATES))
+    return None, f'Unknown citizen_class "{citizen_class}" — registered classes: {available}.'
+
+
 def _scan_template(template_path: Path) -> Dict:
     """Scan spawn template directory and return expected structure.
 
@@ -452,7 +522,8 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
     """
     Verify branch structure against spawn template (live scan, class-aware).
 
-    Reads .trinity/passport.json → citizen_class → picks spawn/templates/{class}/
+    Reads .trinity/passport.json → citizen_class → asks spawn's class_registry
+    which template directory that class mints from (both classes: templates/citizen/).
     Scans the template directory live (no static registry needed).
     Transforms {{BRANCH}} placeholders and compares against actual branch.
 
@@ -508,13 +579,29 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
             }
         ]
 
-    template_path = SPAWN_TEMPLATES_DIR / citizen_class
+    # Resolve class -> template directory through the mirrored registry, never
+    # by joining the class name onto the path. A refused class is a SCORED
+    # violation naming the value, so an un-migrated passport reads as "migrate
+    # this" and never as a silent pass.
+    template_dir_name, refusal = _resolve_template_dir(citizen_class)
+    if not template_dir_name:
+        logger.info("Template baseline: unusable citizen_class %r for %s", citizen_class, branch_name)
+        return [
+            {
+                "name": "Template baseline",
+                "passed": False,
+                "message": f"{refusal} Read from {branch_name}/.trinity/passport.json",
+            }
+        ]
+
+    template_path = SPAWN_TEMPLATES_DIR / template_dir_name
     if not template_path.exists():
         return [
             {
                 "name": "Template baseline",
                 "passed": False,
-                "message": f'No template for citizen_class "{citizen_class}" at {template_path}',
+                "message": f'No template directory "{template_dir_name}" for citizen_class '
+                f'"{citizen_class}" at {template_path}',
             }
         ]
 
@@ -540,7 +627,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                     {
                         "name": f"Dir: {expected}/",
                         "passed": False,
-                        "message": f"Missing dir: {expected}/ (template: {citizen_class})",
+                        "message": f"Missing dir: {expected}/ (template: {template_dir_name})",
                     }
                 )
 
@@ -564,7 +651,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                     {
                         "name": f"File: {expected}",
                         "passed": False,
-                        "message": f"Missing file: {expected} (template: {citizen_class})",
+                        "message": f"Missing file: {expected} (template: {template_dir_name})",
                     }
                 )
 
@@ -576,7 +663,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
         {
             "name": f"Template baseline ({citizen_class})",
             "passed": missing_count == 0,
-            "message": f"{total_count} items checked from spawn/templates/{citizen_class}/, {missing_count} missing",
+            "message": f"{total_count} items checked from spawn/templates/{template_dir_name}/, {missing_count} missing",
         },
     )
 

@@ -204,12 +204,32 @@ class TestGetTemplateDir:
     """Tests for get_template_dir()."""
 
     def test_returns_path(self):
-        """Should return a Path object pointing to aipass_framework template."""
+        """Should return a Path object pointing to the one citizen template.
+
+        There is exactly ONE template dir now (DPLAN-0319 R3) and it is named for
+        what it is, not for a class — both "manager" and "specialist" land here.
+        """
         from aipass.spawn.apps.handlers.meta_ops import get_template_dir
 
         result = get_template_dir()
         assert isinstance(result, Path)
-        assert result.name == "aipass_framework"
+        assert result.name == "citizen"
+        assert result.is_dir()
+
+    def test_both_classes_resolve_the_same_dir(self):
+        """The class is validated, it does not pick a scaffold."""
+        from aipass.spawn.apps.handlers.meta_ops import get_template_dir
+
+        assert get_template_dir("manager") == get_template_dir("specialist")
+
+    def test_retired_class_refuses_by_name(self):
+        """A retired class never resolves a template — it is refused, not mapped."""
+        import pytest
+
+        from aipass.spawn.apps.handlers.meta_ops import get_template_dir
+
+        with pytest.raises(ValueError, match="retired citizen class"):
+            get_template_dir("aipass_framework")
 
 
 # =============================================================================

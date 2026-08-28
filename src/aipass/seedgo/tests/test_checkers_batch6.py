@@ -378,7 +378,7 @@ class TestCheckTemplateBaseline:
         from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
         templates = tmp_path / "templates"
-        template = templates / "aipass_framework"
+        template = templates / "citizen"
         (template / ".trinity").mkdir(parents=True)
         (template / ".trinity" / "README.md").write_text("memory guide\n", encoding="utf-8")
         (template / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
@@ -394,7 +394,7 @@ class TestCheckTemplateBaseline:
         trinity = branch / ".trinity"
         trinity.mkdir()
         # Branch deliberately has NO .trinity/README.md — it must not be penalised.
-        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "aipass_framework"}}', encoding="utf-8")
+        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "specialist"}}', encoding="utf-8")
 
         result = architecture_check.check_template_baseline(str(entry))
         names = [c["name"] for c in result]
@@ -423,7 +423,7 @@ class TestCheckTemplateBaseline:
         (branch / "apps").mkdir(parents=True)
         trinity = branch / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "aipass_framework"}}', encoding="utf-8")
+        (trinity / "passport.json").write_text('{"identity": {"citizen_class": "specialist"}}', encoding="utf-8")
 
         assert architecture_check.check_branch_info(str(branch)) == []
 

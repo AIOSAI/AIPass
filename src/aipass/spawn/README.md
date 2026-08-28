@@ -10,7 +10,7 @@
 
 ## What I Do
 
-- Create new branches from class-scoped templates (`aipass_framework`, `project_agent`)
+- Create new branches from the one citizen template — class (`manager` / `specialist`) is decided at mint
 - Update branches from templates (single or batch by class, with --dry-run)
 - Delete branches (archive + deregister)
 - Sync registry against filesystem
@@ -43,10 +43,22 @@ drone @spawn sync-registry
 
 Every branch belongs to a **citizen class**, which determines its template:
 
-| Class | Template | What It Creates |
-|-------|----------|-----------------|
-| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/ incl. json shim), tests/, docs/, logs/ — 50 files, 24 dirs |
-| `project_agent` | `templates/project_agent/` | Minimal citizen for an external project: .trinity/, .aipass/, apps/ (modules/ + handlers/), artifacts/, logs/ — 17 files, 9 dirs |
+| Class | What It Means |
+|-------|---------------|
+| `manager` | A project's first citizen (citizen #1) — manages the project. ai_mail's wake-block keys on it: managers are emailed, never dispatched |
+| `specialist` (default) | Every citizen minted after the first |
+
+Both classes mint from the **one** template, `templates/citizen/` — full 3-layer scaffold:
+.trinity/, .aipass/, apps/ (modules/ + handlers/ incl. json shim), tests/, docs/, logs/ —
+50 files, 24 dirs. The class is a *behavioral* label in `identity.citizen_class`, not a
+choice of scaffold shape (DPLAN-0319), which is why the template directory is named for
+what it is rather than for a class.
+
+**The class is decided at mint, not typed.** Citizen #1 of a project is born `manager`,
+everyone after is `specialist`. An explicit class still wins if you pass one. The retired
+names `aipass_framework`, `project_agent` and `builder` **refuse loudly** at every entry
+point — they are never silently remapped, because a passport that quietly disagrees with
+the value a caller typed is the exact drift the rename ends.
 
 `admin` is permanently refused as a class or `--template` value — see Grant Admin below.
 
@@ -65,7 +77,7 @@ All commands run through `drone @spawn <command>`.
 ### Create
 
 ```bash
-drone @spawn create <path>                                    # Create aipass_framework branch
+drone @spawn create <path>                                    # Class decided at mint (manager if first, else specialist)
 drone @spawn create <path> --role "Analyst" --purpose "Reports"  # With identity
 drone @spawn create <path> --dry-run                           # Preview without touching disk
 drone @spawn create @existing                                  # Adopt pre-existing agent
@@ -79,7 +91,7 @@ Update is **preview-only by default** — `--apply` required to execute changes.
 ```bash
 drone @spawn update @branch_name                               # Preview changes (dry-run default)
 drone @spawn update @branch_name --apply                       # Execute changes
-drone @spawn update aipass_framework --all --apply              # All aipass_framework-class branches
+drone @spawn update specialist --all --apply                   # All specialist-class branches
 drone @spawn update @branch_name --dry-run                     # Explicit preview (same as default)
 ```
 
@@ -111,9 +123,14 @@ drone @spawn sync-registry <project_path>                      # Same report aga
 drone @spawn sync-registry --fix                               # Rebuild .spawn/ tracking, register strays, fix passport registry_ids
 drone @spawn sync-registry --fix --dry-run                     # Preview what --fix would change
 drone @spawn sync-registry --check [--json]                    # Owner/identity health check only — never writes
-drone @spawn regenerate-registry                               # Regenerate aipass_framework template hashes
-drone @spawn regenerate-registry project_agent                 # Named class
-drone @spawn regenerate-registry --all                         # All template classes
+drone @spawn regenerate-registry                               # Regenerate the citizen template hashes
+drone @spawn regenerate-registry specialist                    # Named class (both classes share one template)
+drone @spawn regenerate-registry --all                         # Every template directory
+
+# Passport 2.0 migration — one-shot, dry-run by default (DPLAN-0319)
+drone @spawn migrate-passports                                 # Measure every fleet passport, write nothing
+drone @spawn migrate-passports --only @canary                  # Restrict to one branch
+drone @spawn migrate-passports --confirm                       # Execute: backup to passport.json.pre_v2_backup, then write
 
 # Repair — the bare scan is read-only ALWAYS; only --relocate and --clean-pollution execute, and both need --apply
 drone @spawn repair <project_path>                             # Scan: pollution + registry path mismatches (read-only)
@@ -183,6 +200,8 @@ spawn/
 │   │   ├── delete.py                    # Delete CLI — archive + deregister
 │   │   ├── sync_registry.py             # Registry repair CLI
 │   │   ├── regenerate_registry.py       # Template registry regeneration CLI
+│   │   ├── migrate_passports.py         # One-shot fleet passport 2.0 migration CLI
+│   │   ├── export_seeds.py              # Tracked passport seeds CLI — live → .aipass/passport.seed.json, dry-run default
 │   │   ├── repair.py                    # Structural repair CLI — scan, relocate, clean pollution
 │   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   ├── handlers/
@@ -190,6 +209,8 @@ spawn/
 │   │   ├── file_ops.py                  # Template copy, path renaming, registry regeneration
 │   │   ├── metadata.py                  # Branch name extraction, profile detection
 │   │   ├── placeholders.py              # {{PLACEHOLDER}} replacement engine
+│   │   ├── passport_migration.py        # Passport 1.x → 2.0 structure migration
+│   │   ├── seed_ops.py                  # Passport seeds — build/validate/mint-from-seed, machine-local strip, stamp
 │   │   ├── registry.py                  # Registry CRUD, find_registry(), project credential mint
 │   │   ├── meta_ops.py                  # Branch metadata generation, hash computation
 │   │   ├── mint_verify.py               # Read-only completeness check of a mint vs the template manifest
@@ -206,9 +227,9 @@ spawn/
 │   ├── json_templates/                  # Package marker for JSON template assets
 │   └── plugins/                         # Package marker — no plugins shipped
 ├── templates/
-│   ├── aipass_framework/                # Full scaffold template (50 files, 24 dirs)
-│   └── project_agent/                   # Minimal external-project template (17 files, 9 dirs)
-├── tests/                               # 23 test files, 532 tests
+│   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
+│   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
+├── tests/                               # 25 test files, 620 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -269,8 +290,8 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**531 passed | 1 skipped | 0 failed** across 23 test files (532 collected — parametrized cases expand),
-measured 2026-08-27 from the repo root. The one skip is `test_scaffold.py`: the shipped
+**668 passed | 1 skipped | 0 failed** across 25 test files (669 collected — parametrized cases expand),
+measured 2026-08-28 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
 scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
 
 | File | Focus |
@@ -278,6 +299,8 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
 | `test_json_handler.py` | JSON I/O, operation logging, standard API |
 | `test_handlers.py` | Handler function behavior and integration |
+| `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
+| `test_passport_birth_schema.py` | 2.0 block and key order on a newly minted passport |
 | `test_regenerate_registry_ops.py` | Template registry regeneration |
 | `test_update.py` | Branch update mechanics |
 | `test_citizen_classes.py` | Citizen class validation and template discovery |
@@ -323,7 +346,7 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 
 ## Newborn Compliance
 
-A citizen minted from `aipass_framework` audits **100%** against the CI gate on
+A citizen minted from `templates/citizen/` audits **100%** against the CI gate on
 its first day — verified 2026-08-22 by minting one and running
 `.venv/bin/python .github/scripts/seedgo_audit.py`, the real gate, floor 100.
 Before this the same mint scored 79% and failed the gate, having earned none of
@@ -362,9 +385,9 @@ mandate.
 ## Metrics
 
 - **Seedgo:** 100% with bypasses, 98% without — both re-measured 2026-08-25 (17 live bypass rules; the two newest, `atomic_write.py` and `mint_verify.py`, date from 2026-08-16/17)
-- **Tests:** 531 passed, 1 skipped, 0 failed
-- **Module coverage:** 23/23 files (100%)
-- **Template registry:** 50 files, 24 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
+- **Tests:** 668 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
+- **Module coverage:** 25/25 files (100%)
+- **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
 ---

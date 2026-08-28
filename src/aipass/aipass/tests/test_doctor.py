@@ -10,7 +10,6 @@
 
 import json
 import os
-import shutil
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -1429,146 +1428,153 @@ class TestRunDoctorPreflight:
 
 
 # =============================================================================
-# TestTelegramReadiness
+# TestDroneCitizenCount — the row must explain its own number
 # =============================================================================
 
 
-class TestTelegramReadiness:
-    """Tests for BotFather automation readiness reporting."""
+class TestDroneCitizenCount:
+    """`drone systems` lists addressable SYSTEMS; the registry lists CITIZENS.
+
+    Those are different sets — `@git` is routed by drone but has no branch
+    directory and no passport — so the two counts legitimately differ. Two
+    numbers disagreeing on a health screen with no explanation is a false
+    alarm generator; two independent readers tripped on it the same day.
+    """
 
     @staticmethod
-    def _make_host(tmp_path):
-        """Give tmp_path a registered bot so the check does not skip."""
-        bots = tmp_path / ".aipass" / "telegram_bots"
-        bots.mkdir(parents=True)
-        (bots / "base.json").write_text("{}", encoding="utf-8")
-        return bots
+    def _systems_stdout(names) -> str:
+        return "\n".join(f"  @{n}    Some description here" for n in names)
 
     @staticmethod
-    def _make_secrets(tmp_path, config=True, session=True):
-        """Create the telethon prerequisite files under tmp_path."""
-        secrets = tmp_path / ".secrets" / "aipass" / "telegram"
-        secrets.mkdir(parents=True)
-        if config:
-            (secrets / "telethon_config.json").write_text("{}", encoding="utf-8")
-        if session:
-            (secrets / ".telethon.session").write_text("", encoding="utf-8")
-        return secrets
+    def _run(stdout, registry_names):
+        """Drive only the drone row, with a stubbed `drone systems` + registry."""
+        import subprocess as _sp
 
-    def test_no_bots_returns_empty(self, tmp_path) -> None:
-        """A machine hosting no bots emits nothing at all."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
-
-        with patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path):
-            results = check_telegram_readiness()
-        assert results == []
-
-    def test_bot_dir_without_json_returns_empty(self, tmp_path) -> None:
-        """An empty telegram_bots dir does not count as hosting bots."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
-
-        (tmp_path / ".aipass" / "telegram_bots").mkdir(parents=True)
-        with patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path):
-            results = check_telegram_readiness()
-        assert results == []
-
-    def test_missing_telethon_warns(self, tmp_path) -> None:
-        """Host with no telethon installed gets a WARN plus the install hint."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
-
-        self._make_host(tmp_path)
-        self._make_secrets(tmp_path)
+        proc = _sp.CompletedProcess(args=["drone", "systems"], returncode=0, stdout=stdout, stderr="")
         with (
-            patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.telegram_readiness.importlib.util.find_spec", return_value=None),
+            patch("subprocess.run", return_value=proc),
+            patch(
+                "aipass.aipass.apps.modules.doctor._registry_citizen_names",
+                return_value=set(registry_names),
+            ),
         ):
-            results = check_telegram_readiness()
-        assert len(results) == 1
-        assert results[0][1] == GLYPH_WARN
-        assert "not installed" in results[0][2]
-        assert "pip install" in results[0][3]
-        # Rich eats an unescaped [telegram] as markup — the hint must keep the backslash
-        # or doctor prints "pip install -e '.'", which installs WITHOUT the extra.
-        assert "\\[telegram]" in results[0][3]
+            from aipass.aipass.apps.modules.doctor import _check_drone_systems
 
-    def test_missing_credentials_warns(self, tmp_path) -> None:
-        """Telethon present but no credentials secret reports the creds gap."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
+            return _check_drone_systems()[0]
 
-        self._make_host(tmp_path)
-        self._make_secrets(tmp_path, config=False)
-        with (
-            patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.telegram_readiness._telethon_version", return_value="1.36.0"),
-        ):
-            results = check_telegram_readiness()
-        assert len(results) == 1
-        assert results[0][1] == GLYPH_WARN
-        assert "credentials" in results[0][2]
-        assert "set-secret" in results[0][3]
+    def test_extra_system_is_named_not_silently_counted(self) -> None:
+        """The unregistered name appears, so nobody has to guess what the +1 is."""
+        row = self._run(self._systems_stdout(["drone", "aipass", "git"]), ["drone", "aipass"])
 
-    def test_missing_session_warns(self, tmp_path) -> None:
-        """Credentials present but no session reports the auth gap, not a pass."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
+        assert "git" in row.detail
+        assert "2 citizens" in row.detail
 
-        self._make_host(tmp_path)
-        self._make_secrets(tmp_path, session=False)
-        with (
-            patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.telegram_readiness._telethon_version", return_value="1.36.0"),
-        ):
-            results = check_telegram_readiness()
-        assert len(results) == 1
-        assert results[0][1] == GLYPH_WARN
-        assert "not authenticated" in results[0][2]
+    def test_counts_agree_reads_as_plain_citizens(self) -> None:
+        """No discrepancy → no extra noise; the row stays the short old form."""
+        row = self._run(self._systems_stdout(["drone", "aipass"]), ["drone", "aipass"])
 
-    def test_all_prerequisites_pass(self, tmp_path) -> None:
-        """Every prerequisite present reports PASS with no remediation."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
+        assert row.detail == "2 citizens"
+        assert "service" not in row.detail
 
-        self._make_host(tmp_path)
-        self._make_secrets(tmp_path)
-        with (
-            patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.telegram_readiness._telethon_version", return_value="1.36.0"),
-        ):
-            results = check_telegram_readiness()
-        assert len(results) == 1
-        assert results[0][1] == GLYPH_PASS
-        assert "1.36.0" in results[0][2]
-        assert results[0][3] == ""
+    def test_registry_only_citizen_is_not_reported_as_extra(self) -> None:
+        """A citizen drone does not route is not an 'extra system'."""
+        row = self._run(self._systems_stdout(["drone"]), ["drone", "ghost"])
 
-    def test_never_emits_fail_glyph(self, tmp_path) -> None:
-        """An optional extra must never set the error exit code."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
+        assert "ghost" not in row.detail
 
-        self._make_host(tmp_path)
-        for config in (True, False):
-            for session in (True, False):
-                secrets = tmp_path / ".secrets"
-                if secrets.exists():
-                    shutil.rmtree(secrets)
-                self._make_secrets(tmp_path, config=config, session=session)
-                for spec in (None, object()):
-                    with (
-                        patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-                        patch(
-                            "aipass.aipass.apps.handlers.telegram_readiness.importlib.util.find_spec",
-                            return_value=spec,
-                        ),
-                    ):
-                        results = check_telegram_readiness()
-                    assert all(r[1] != GLYPH_FAIL for r in results)
+    def test_row_still_passes_when_counts_differ(self) -> None:
+        """A legitimate difference is not a health failure."""
+        row = self._run(self._systems_stdout(["drone", "git"]), ["drone"])
 
-    def test_label_is_stable(self, tmp_path) -> None:
-        """Doctor splices rows by exact label — it must not drift."""
-        from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
+        assert row.glyph == GLYPH_PASS
 
-        self._make_host(tmp_path)
-        self._make_secrets(tmp_path)
-        with (
-            patch("aipass.aipass.apps.handlers.telegram_readiness.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.telegram_readiness._telethon_version", return_value="1.36.0"),
-        ):
-            results = check_telegram_readiness()
-        assert results[0][0] == "telegram automation"
+    def test_many_extras_are_summarized_not_dumped(self) -> None:
+        """The detail stays a one-liner even if the sets diverge badly."""
+        extras = [f"svc{n}" for n in range(9)]
+        row = self._run(self._systems_stdout(["drone", *extras]), ["drone"])
+
+        assert len(row.detail) < 120
+        assert "more" in row.detail
+
+    def test_description_text_containing_an_at_sign_is_not_counted(self) -> None:
+        """Counting lines-with-@ counted prose; count NAMES at line start.
+
+        The original row counted any line containing '@', so a description
+        mentioning '@drone' would inflate the citizen count.
+        """
+        stdout = "  @aipass    Concierge — talks to @drone and @spawn for routing\n"
+        row = self._run(stdout, ["aipass"])
+
+        assert row.detail == "1 citizens"
+
+
+# =============================================================================
+# TestHomeAgreement — the two AIPASS_HOME rows must be compared, not just printed
+# =============================================================================
+
+
+class TestHomeAgreement:
+    """Doctor prints the active tree and Claude Code's tree on adjacent lines.
+
+    Until now it never compared them. A second install to a different home
+    leaves terminal tooling pointed at tree 1 while Claude Code's env and every
+    hook command point at tree 2 — two registries, two citizen_id sets — and
+    doctor showed both facts side by side without ever saying they disagreed.
+    """
+
+    @staticmethod
+    def _run(active, configured):
+        from aipass.aipass.apps.modules.doctor import _check_home_agreement
+
+        return _check_home_agreement(active, configured)
+
+    def test_split_brain_is_an_error(self, tmp_path) -> None:
+        """Two different trees is a real fault, not an advisory."""
+        a, b = tmp_path / "tree1", tmp_path / "tree2"
+        a.mkdir()
+        b.mkdir()
+
+        rows = self._run(str(a), str(b))
+
+        assert len(rows) == 1
+        assert rows[0].glyph == GLYPH_FAIL
+
+    def test_split_brain_names_both_trees(self, tmp_path) -> None:
+        """The human needs to see WHICH two trees, not just that they differ."""
+        a, b = tmp_path / "tree1", tmp_path / "tree2"
+        a.mkdir()
+        b.mkdir()
+
+        rows = self._run(str(a), str(b))
+
+        assert "tree1" in rows[0].detail and "tree2" in rows[0].detail
+        assert rows[0].remediation
+
+    def test_agreement_emits_nothing(self, tmp_path) -> None:
+        """Silent when correct — doctor already prints both values."""
+        tmp_path.joinpath("tree").mkdir()
+        same = str(tmp_path / "tree")
+
+        assert self._run(same, same) == []
+
+    def test_trailing_slash_is_not_a_split(self, tmp_path) -> None:
+        """Cosmetic path differences must not raise a false alarm."""
+        tree = tmp_path / "tree"
+        tree.mkdir()
+
+        assert self._run(str(tree), str(tree) + "/") == []
+
+    def test_symlinked_same_tree_is_not_a_split(self, tmp_path) -> None:
+        """Same real directory reached two ways is one tree."""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+
+        assert self._run(str(real), str(link)) == []
+
+    def test_missing_either_value_emits_nothing(self, tmp_path) -> None:
+        """Nothing to compare is not a disagreement — the other rows own that."""
+        assert self._run("", str(tmp_path)) == []
+        assert self._run(str(tmp_path), "") == []
+        assert self._run("", "") == []

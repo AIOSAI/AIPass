@@ -96,6 +96,36 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def _announce_cloned_branch(home: Path) -> None:
+    """Print which branch actually landed. Never raises — naming is a courtesy.
+
+    The clone takes the repo's DEFAULT branch, which is NOT necessarily the one
+    the user is standing in: running this from a ``dev`` checkout hands back a
+    ``main`` tree, silently. Changing the target would be wrong (install is the
+    fresh-machine bootstrap and usually runs where no checkout exists), so the
+    fix is to stop being silent about it.
+
+    The name is READ BACK from the new clone rather than assumed, so this line
+    cannot drift from reality if the repo's default branch ever changes.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(home),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[install] could not read cloned branch: %s", exc)
+        return
+    branch = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not branch:
+        logger.info("[install] cloned branch unreadable (exit %s)", proc.returncode)
+        return
+    console.print(f"  [dim]branch:[/dim] [cyan]{branch}[/cyan] [dim](the repo default)[/dim]")
+
+
 def _clone_repo(home: Path, dry_run: bool) -> bool:
     """git clone the public AIPass repo into `home`. Returns True on success."""
     if dry_run:
@@ -112,6 +142,7 @@ def _clone_repo(home: Path, dry_run: bool) -> bool:
     try:
         proc = subprocess.run(["git", "clone", "--depth", "1", REPO_URL, str(home)], timeout=_CLONE_TIMEOUT)
         if proc.returncode == 0:
+            _announce_cloned_branch(home)
             return True
         logger.warning("[install] git clone exited %s", proc.returncode)
     except subprocess.TimeoutExpired as exc:

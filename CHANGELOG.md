@@ -9,6 +9,166 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-28] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319) · v2.7.21
+
+**Telegram stripped from the concierge (2026-08-28)** — Patrick's ruling from
+the docker live test: BAUD is the phone face now, so @aipass's Telegram-bot-host
+identity (passport purpose/what_i_do/principle/tag), `telegram_readiness.py`
+(retired as a tracked `.disabled` rename — `.archive` is the disposal zone, so
+moving tracked source there would be a delete), the doctor telethon row, and all
+README/help mentions are gone; the @skills telegram skill and @api stay — the
+capability retired from the concierge's identity, not from the system. Riding
+with it: doctor's drone row root-caused and reconciled (`18 citizens + 1 routed
+service (@git)` — the mystery 19th was @git, routed but passportless; fixing it
+exposed and killed a substring-count bug in the same line), a split-brain
+AIPASS_HOME doctor check (terminal vs Claude Code trees compared, silent on
+agreement), the wizard now prints which branch it clones, and @aipass's seed
+re-exported clean. Merge-train CI fix: spawn's R3 archive pin asserted
+`templates/.archive/` on clean checkouts that can never carry it (gitignored) —
+the archive half now skips loudly as an environment fact.
+
+**Docker dev-container round (2026-08-28)** — the dev image (`aipass-test`)
+proved the whole cold-clone story and caught what CI structurally cannot:
+`./aipass install` was DEAD on dev — setup.sh still passed the retired
+`aipass_framework` class and spawn's refusal (correct, by design) killed the
+installer before settings.json existed; one root cause, eight cascading FAILs,
+zero suites red. Fixed to `specialist` as the refusal instructs. Then the
+banked mint-all-core follow-up landed: the installer bootstrap now asks
+`find_seed()` first — every branch shipping a tracked seed births its live
+passport through spawn's own `mint_and_write` (fresh uuid4 citizen_id,
+registry_id from the fresh registry's metadata.id); template render fills only
+local/observations (seeds carry identity, never memories); a bad seed kills
+the install loudly. `tests/docker_checklist.md` (new) is the contract;
+docker_dev_verify.sh grew phases 7–9 (seed-minted passports incl. stamp
+sha256 vs seed bytes and verbatim identity diff, memory-file hygiene, doctor
+read in full). Final run 30/30; an INDEPENDENT sub-agent audit then confirmed
+7/8 claims with stronger checks (full-document diff on all 18, double-install
+byte-identity, two clean containers = 36 unique citizen_ids), split the 8th
+honestly (`./aipass install` re-run exits 1 only when `$AIPASS_HOME` is absent
+from a non-login shell — the wizard prompts and cancels on EOF; file state
+untouched), and banked the warts: `aipass install --non-interactive` targets
+~/AIPass ignoring the clone you stand in (@aipass lane), drone counts 19
+citizens vs registry 18, concurrent installs on one host can die silently.
+Cold-machine doctor: 35 pass / 2 warnings (both container-env, inert) /
+0 errors, admin lane dark-and-valid per the fail-closed design.
+
+**The rulings (Patrick live, 2026-08-27 night)** — devpulse's passport becomes
+the 2.0 schema: machine facts on top (document_metadata → branch_info →
+citizenship), agent-written soul below (identity, with principles moved
+inside); classes become `manager | specialist` (aipass_framework renames —
+"every branch is an expert in its domain"); new `citizenship.residency`
+(core / resident / external) splits the job from the posting; ONE template
+replaces the aipass_framework/project_agent fork — the first agent minted in
+a project gets manager, every later one specialist; new projects get main +
+dev at creation and every agent defaults to `git_branch: dev`.
+
+**spawn — the epicenter build**: new `templates/citizen/` (both classes mint
+from it; old template dirs archived, never deleted); class_registry reworked
+with loud refusal of legacy names; the first-agent rule wired from the
+already-computed `citizen_number == 1` signal — and a CLI default that was
+silently defeating it fixed and pinned both directions; a dedicated one-shot
+migration tool (`migrate-passports`, dry-run default, per-file
+`.pre_v2_backup`, idempotent across a date roll, 20/20 mutations bite) built
+but NOT run — the fleet flip is its own GO. Dry-run receipt over the live
+fleet: 22/22 would change, 0 errors, 0 unrecognised fields. Beyond the brief:
+resident passports' hardcoded absolute paths cured by a general relative-path
+rule, and `sync-registry --fix` (a second fleet-write path) now takes the
+same backups first. 668 tests passed / 1 skipped, re-run identically from
+branch dir and repo root by devpulse.
+
+**hooks — the silent-vanish fix, landed first**: identity injection read
+top-level `principles` only; post-migration the Principles line would have
+silently vanished from every agent's injected prompt. Now reads
+identity-first with top-level fallback — both layouts render byte-identical,
+proven against real passports. 1709 passed / 2 skipped, re-run exactly by
+devpulse; 4/4 mutations bite.
+
+**seedgo — the auditor refuses to import the audited**: architecture_check
+stopped raw-joining citizen_class onto the templates path (broken for
+manager branches for months per seedgo's own stored audits). The brief's
+suggested spawn-import failed seedgo's own checklist twice, so the fix is a
+drift-pinned mirror of spawn's class registry (the RESIDENT_REGISTRIES
+precedent) with three refusal doors kept apart: legacy (migrate), forbidden
+(admin, never a class), unknown (never existed). Un-migrated passports now
+score a truthful named violation quoting the cure. 1954 passed / 1 skipped,
+exact re-run; 5/5 mutations bite. Side finding banked: the audit cache was
+serving 12/18 branches pre-archive results (99 shown, 97 true).
+
+**aipass — `aipass new` revived on the new mint path**: it was dead at the
+door since the spawn commit (named refusal of the retired class — the
+planned seam, captured live before any edit). Now: no class passed (spawn's
+first-agent rule mints manager), `git init` cuts dev AFTER the birth commit
+with HEAD left on dev (ordering pinned — dev from an empty repo would never
+merge back), and git_auth's passport-owner fallback retired with a refusal
+that names the rule change. Live CLI receipt in a throwaway host: main+dev,
+HEAD dev, 2.0.0 manager passport, no owner key, live registry md5-identical.
+1061 passed / 0 skipped, exact re-run.
+
+**THE MIGRATION RAN (2026-08-28, Patrick's GO)**: 22/22 migrated, 0 errors,
+per-file `.pre_v2_backup`, idempotent re-run changed 0; drift canary flipped
+to 2.0-only (schema-1 lane removed). Full fleet audit: Architecture 100
+fleet-wide — the 15 legacy passport violations cured.
+
+**gitignore — the rename had silently untracked the template's payload**: the
+spawn-template negations still named the retired `aipass_framework` /
+`project_agent` dirs, so after the `citizen` rename 17 payload files
+(birth-certificate template, inbox scaffold, `{{BRANCH}}_json/`, logs/,
+DASHBOARD, dropbox/, tools/, docs.local/, `.archive/`, `.spawn/`) left the
+public repo — the exact ship-incomplete bug the 2026-08-17 CI red documented,
+reintroduced by rename. All template negations consolidated into one
+wildcarded `templates/*/` block (name-specific lines are how this breaks) and
+the payload restored. Verified: template files are pure placeholders — no real
+mail, signatures, names, or machine paths; live-branch ignores unaffected.
+
+**aipass — the admin ceremony becomes findable (Patrick's ruling: admin stays
+bolted to devpulse, single-seat, no transfer)**: new `docs/admin_setup.md`
+(the ceremony as the live surfaces state it: keygen → mint → @spawn registry
+flag → verify; keygen --force = revocation), README "Admin setup" section
+placed above the help-lane truncation threshold so `aipass help` actually
+surfaces it, and a doctor row that reports lane state (lit / dark / partial —
+partial never rounds up) as PASS-glyph info, never a nag: it observes four
+presence facts and refuses to reimplement the HMAC verdict (pinned — no
+hmac/hashlib, no devpulse import, key file content never read; the
+authoritative check stays `admin_grant verify`). A dark lane is a valid
+end-state, and on dark/partial the row names the doc, never a ceremony
+command. 1080 tests / 0 skipped (+19 pins), 2/2 mutations bite, seedgo 100%
+overall — re-verified independently by devpulse from both rootdirs.
+
+**PASSPORT SEEDS (TDPLAN-0017, Patrick's GO)** — the tracking ruling landed as
+**tracked soul, untracked live**: each core branch now ships
+`.aipass/passport.seed.json` (its live passport minus the four machine-local
+facts: registered, registry_id, citizen_id, and the stamp), so identities ship
+with the repo while `.trinity/` stays permanently out of git's reach — the
+ignore IS the pull protection, and seeds are new paths so existing installs
+can't collide on pull. Ruled from a 12-pattern prior-art survey (dpkg
+conffiles, RPM %config(noreplace), ucf, .env.example drift, chezmoi, Copier,
+kubectl last-applied; git-native tricks disqualified by git's own docs — four
+independent systems prove you need a record of what-was-last-shipped beside
+the live copy). Built as three parallel lanes: **spawn** grew `export-seeds`
+(dry-run default, idempotent, generated-never-hand-edited) plus a seed door in
+the create path — target-exists-without-passport (the fresh-clone shape) now
+births from the seed through closed-schema validation, minting fresh local
+ids plus a `citizenship.seed = {version, sha256}` stamp (dpkg's three-way
+fingerprint, making future update machinery retrofit-free; that machinery is
+deliberately deferred until real users exist). The validator REFUSES unknown
+keys at the two publish gates (a retired field must not ride into every
+clone) while the transform preserve-and-reports. **seedgo** measured that
+trinity judges passport EXISTENCE only, so the stamp was structurally free —
+proved with pins instead of edits, plus a new seed suite whose leak-guard
+walks whole documents for machine-local fields (live-proved red on a real
+passport planted as a seed). The 18 seeds exported and verified: idempotent
+re-run 0 changed, round-trip identity byte-equal, zero leaks. core.py crossed
+the 600-line standard in the build; the target-exists lane (adopt +
+birth-from-seed) split honestly into `handlers/adoption_ops.py`, spawn audit
+100 overall after. Bars: spawn 666→728/1 (20/20 mutations), seedgo
+1954→2040/1 (9/9 mutations, 54 seed-pin instances live), both re-run
+independently by devpulse.
+
+**Still gated on Patrick**: `sync-registry --fix` stays hot?, and wave 3
+(residency consumers converge; resident repos get dev branches; registry_path
+field retirement — zero code consumers, canonical value names a file that
+doesn't exist).
+
 ## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 
 **CI round 2, four fixes in one evening (PR #743 merge prep)** — the full

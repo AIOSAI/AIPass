@@ -168,7 +168,11 @@ def _format_identity(data: dict) -> str:
     if what_i_dont_do:
         lines.append("Don't: " + " | ".join(what_i_dont_do[:3]))
 
-    principles = data.get("principles", [])
+    # Passport 1.0 keeps principles at the top level, 2.0 moves them inside
+    # identity (DPLAN-0319). Read the new home first, fall back to the old one —
+    # same dual-location shape as the traits read above. Without the fallback the
+    # line vanishes silently on whichever layout is not being read.
+    principles = identity.get("principles") or data.get("principles") or []
     if principles:
         lines.append("Principles: " + " * ".join(principles))
 

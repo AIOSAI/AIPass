@@ -79,7 +79,8 @@ def handle_update(args: list[str]) -> int:
 
     Args patterns:
         ["@branch"]                -> update single branch (uses passport's class)
-        ["aipass_framework", "--all"] -> update all aipass_framework-class branches
+        ["specialist", "--all"]    -> update all specialist-class branches
+        ["manager", "--all"]       -> update all manager-class branches
         ["--all"]                  -> BLOCKED (must specify class)
         ["--dry-run", "@branch"]   -> preview mode
         ["--dry-run", "--all"]     -> BLOCKED
@@ -94,7 +95,7 @@ def handle_update(args: list[str]) -> int:
         )
         console.print()
         console.print("  [green]@branch[/green]           Update a single branch (uses its own class)")
-        console.print("  [green]aipass_framework --all[/green]  Update all aipass_framework-class branches")
+        console.print("  [green]<class> --all[/green]     Update every branch of one class (manager | specialist)")
         console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
         console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
         console.print("  [green]--trace[/green]           Enable verbose logging")
@@ -104,18 +105,25 @@ def handle_update(args: list[str]) -> int:
         warning("Usage: drone @spawn update <@branch|class --all> [--apply] [--dry-run] [--trace]")
         console.print()
         console.print("  [green]@branch[/green]           Update a single branch (uses its own class)")
-        console.print("  [green]aipass_framework --all[/green]  Update all aipass_framework-class branches")
+        console.print("  [green]<class> --all[/green]     Update every branch of one class (manager | specialist)")
         console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
         console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
         console.print("  [green]--trace[/green]           Enable verbose logging")
         return 1
 
-    from aipass.spawn.apps.modules.core import validate_class, get_available_classes, refuse_forbidden_class
+    from aipass.spawn.apps.modules.core import (
+        validate_class,
+        get_available_classes,
+        refuse_retired_or_forbidden,
+    )
 
     # A forbidden class refuses by name before it can be read as a branch
-    # target or reach the update engine (DPLAN-0288).
+    # target or reach the update engine (DPLAN-0288). A RETIRED class name
+    # refuses the same way (DPLAN-0319) — otherwise `update aipass_framework
+    # --all` would fall through to "specify a branch name", naming the wrong
+    # problem to someone whose only mistake is an out-of-date habit.
     for arg in args:
-        refusal = refuse_forbidden_class(arg.lstrip("@"))
+        refusal = refuse_retired_or_forbidden(arg.lstrip("@"))
         if refusal:
             error(refusal)
             return 1

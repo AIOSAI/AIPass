@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.class_registry import DEFAULT_CLASS
 from aipass.spawn.apps.handlers.json import json_handler
 
 # =============================================================================
@@ -37,14 +38,26 @@ _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 # =============================================================================
 
 
-def get_template_dir(citizen_class: str = "aipass_framework") -> Path:
-    """Return path to template directory for a citizen class.
+def get_template_dir(citizen_class: str = DEFAULT_CLASS) -> Path:
+    """Return path to the template directory for a citizen class.
+
+    A thin re-export of class_registry.get_template_dir so callers already
+    holding meta_ops do not need a second import. Both registered classes
+    ("manager", "specialist") resolve to the SAME directory — the class is
+    validated here, it does not pick a scaffold (DPLAN-0319 R3).
+
+    The default is imported from class_registry rather than spelled out, so this
+    signature cannot drift from the real default the way "aipass_framework" did.
 
     Args:
-        citizen_class: Name of the citizen class. Defaults to "aipass_framework".
+        citizen_class: Name of the citizen class. Defaults to class_registry's
+            DEFAULT_CLASS ("specialist").
 
     Returns:
         Path to the template directory.
+
+    Raises:
+        ValueError: The class is forbidden, retired, or not registered.
     """
     from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_get_template_dir
 
@@ -89,7 +102,7 @@ def load_template_registry(template_dir: Path) -> Optional[dict]:
     """Load .spawn/.template_registry.json from a template directory.
 
     Args:
-        template_dir: Path to the template directory (e.g. aipass_framework/).
+        template_dir: Path to the template directory (e.g. templates/citizen/).
 
     Returns:
         Parsed dict of the template registry, or None if missing/unreadable.

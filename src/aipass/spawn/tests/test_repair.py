@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,7 +40,7 @@ def _make_project(tmp_path, project_name="testproj", branches=None):
                 "path": rel_path,
                 "module": f"{project_name}.{name.lower()}",
             },
-            "identity": {"citizen_class": "aipass_framework"},
+            "identity": {"citizen_class": "specialist"},
             "citizenship": {"registered": True},
         }
         (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
@@ -583,7 +585,7 @@ class TestDetectPollutionProtection:
             json.dumps(
                 {
                     "branch_info": {"branch_name": "mypkg"},
-                    "identity": {"citizen_class": "aipass_framework"},
+                    "identity": {"citizen_class": "specialist"},
                     "citizenship": {"registered": True},
                 }
             )
@@ -720,17 +722,51 @@ class TestArchiveExclude:
 
 
 class TestTemplateFiles:
-    """Tests for template file additions — .gitignore and requirements.project.txt."""
+    """Tests for template file additions — .gitignore and requirements.project.txt.
 
-    def test_builder_gitignore_has_venv(self):
-        """Builder template .gitignore includes .venv/ entry."""
-        gitignore = Path(__file__).resolve().parent.parent / "templates" / "aipass_framework" / ".gitignore"
-        content = gitignore.read_text()
+    The class-named template dirs are gone (DPLAN-0319 R3): manager and specialist
+    mint from the ONE ``templates/citizen/`` dir, so these read the live template
+    through ``get_template_dir()`` rather than hardcoding a directory name that a
+    future rename can silently point at nothing.
+    """
+
+    def _template(self):
+        from aipass.spawn.apps.handlers.class_registry import get_template_dir
+
+        return get_template_dir()
+
+    def test_citizen_gitignore_has_venv(self):
+        """The citizen template .gitignore includes the .venv/ entry."""
+        content = (self._template() / ".gitignore").read_text()
         assert ".venv/" in content
 
     def test_requirements_project_exists(self):
-        """Builder template includes requirements.project.txt."""
-        req = Path(__file__).resolve().parent.parent / "templates" / "aipass_framework" / "requirements.project.txt"
+        """The citizen template includes requirements.project.txt."""
+        req = self._template() / "requirements.project.txt"
         assert req.exists()
         content = req.read_text()
         assert "Project-specific" in content
+
+    def test_retired_class_named_template_dirs_are_archived_not_live(self):
+        """R3: the class-named template dirs were ARCHIVED, never straight-deleted.
+
+        Two halves with different reach: nothing-mints-from-a-class-named-dir is
+        the shipped contract and holds everywhere; the archived-trees-still-on-disk
+        half is a LIVE-MACHINE fact — .archive/ is gitignored by design, so a
+        clean checkout legitimately has none. Absent archive = environment fact,
+        skipped loudly, never scored as a deletion (the clean-checkout
+        discriminator; this exact test was CI-red on a tree that never carried
+        the archive).
+        """
+        templates = Path(__file__).resolve().parent.parent / "templates"
+
+        for retired in ("aipass_framework", "project_agent"):
+            assert not (templates / retired).exists(), f"templates/{retired}/ is live again"
+
+        assert (templates / "citizen").is_dir()
+
+        archive = templates / ".archive"
+        if not archive.is_dir():
+            pytest.skip("templates/.archive/ absent — clean checkout; the archive half is a live-machine fact")
+        for retired in ("aipass_framework", "project_agent"):
+            assert (archive / retired).is_dir(), f"templates/{retired}/ was deleted, not archived"

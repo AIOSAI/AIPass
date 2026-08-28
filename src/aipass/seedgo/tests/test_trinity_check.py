@@ -993,7 +993,7 @@ class TestACleanCheckoutIsNotAViolatingFleet:
         un-ignored in .gitignore. It sits two levels down, not at
         <fleet>/<branch>/.trinity, so it must not make a clone look live.
         """
-        template = tmp_path / "spawn" / "templates" / "aipass_framework" / ".trinity"
+        template = tmp_path / "spawn" / "templates" / "citizen" / ".trinity"
         template.mkdir(parents=True)
         (template / "local.json").write_text("{}\n", encoding="utf-8")
 
@@ -2187,3 +2187,121 @@ class TestTheGroupSplitKeepsTheNine:
 
         assert "all_groups(ctx)" in source
         assert "_group_entry_shapes" not in source, "engine reaches past all_groups again"
+
+
+# ===========================================================================
+# TDPLAN-0017. citizenship.seed -- the mint stamp is not a violation here
+# ===========================================================================
+
+
+class TestTheMintStampIsNotAViolation:
+    """Passport seeds (TDPLAN-0017) add one optional field to LIVE passports:
+    ``citizenship.seed = {"version", "sha256"}``, written by spawn's mint so a
+    later update can tell "changed by the agent" from "changed by the shipped
+    seed" -- dpkg's MD5 pattern. Schema stays 2.0.0; the field is additive and
+    canonical.
+
+    MEASURED BEFORE WRITING, the marker-7 way: nothing here flags it, and not
+    because citizenship happens to be spelled outside a closed set -- there is
+    no rule over passport CONTENT at all. The closed set ruling 4 executes over
+    ``document_metadata`` in local.json and observations.json; the passport is
+    reached only as a NAME in ``_CANONICAL_FILES``, counted present or missing
+    by the File set group, never opened. So nothing was changed for this lane.
+
+    These three pin the tolerance and its cause separately, because they can be
+    lost separately: someone adding a real passport-content rule later would
+    keep the docstring true and still break the stamp, and someone deleting the
+    contract sentence would leave the behaviour undefended.
+    """
+
+    _SEED_STAMP = {"version": "1.0.0", "sha256": "0" * 64}
+
+    @staticmethod
+    def _write_passport(branch: Path, *, stamp: bool) -> None:
+        """Replace the fixture's placeholder passport with a real 2.0 one.
+
+        ``_write_branch`` writes ``{}`` because existence is all trinity has
+        ever asked of this file -- these tests need the live shape to make the
+        comparison mean something.
+        """
+        citizenship = {
+            "registered": True,
+            "residency": "core",
+            "registry_id": "7087bb93-570f-4b9a-b035-4fd7f570200e",
+            "citizen_id": "a41235f5-1ca9-489f-8191-b106d398c0fa",
+            "registry_path": ".aipass/registry.json",
+            "communications": True,
+            "memory": True,
+        }
+        if stamp:
+            citizenship["seed"] = dict(TestTheMintStampIsNotAViolation._SEED_STAMP)
+        payload = {
+            "document_metadata": {
+                "document_type": "branch_identity",
+                "document_name": f"{_BRANCH}.PASSPORT",
+                "version": "2.0.0",
+                "schema_version": "2.0.0",
+                "created": "2026-01-01",
+                "last_updated": "2026-08-28",
+                "managed_by": _BRANCH,
+                "tags": ["identity", "passport", "branch_profile"],
+            },
+            "branch_info": {
+                "branch_name": _BRANCH,
+                "alias": "",
+                "path": f"src/aipass/{_BRANCH}",
+                "module": f"aipass.{_BRANCH}",
+                "email": f"@{_BRANCH}",
+                "created": "2026-01-01",
+                "git_branch": "dev",
+            },
+            "citizenship": citizenship,
+            "identity": {
+                "citizen_class": "specialist",
+                "role": "fixture",
+                "purpose": "Stand in for a live passport.",
+                "what_i_do": [],
+                "what_i_dont_do": [],
+                "traits": [],
+                "principles": [],
+            },
+        }
+        _write_doc(branch / ".trinity" / "passport.json", payload)
+
+    def test_a_stamped_passport_scores_exactly_what_an_unstamped_one_scores(self, trinity, tmp_path):
+        """Not just "still 100" -- the whole result, group by group, identical.
+        A future rule that scored the stamp anywhere would move one subscore and
+        this comparison would see it even if the weighted mean rounded back.
+        """
+        plain_branch = _write_branch(tmp_path / "plain")
+        self._write_passport(plain_branch, stamp=False)
+        stamped_branch = _write_branch(tmp_path / "stamped")
+        self._write_passport(stamped_branch, stamp=True)
+
+        plain = trinity.check_branch(str(plain_branch))
+        stamped = trinity.check_branch(str(stamped_branch))
+
+        assert stamped == plain
+        assert stamped["score"] == 100, stamped["checks"]
+
+    def test_the_tolerance_is_structural_the_passport_is_never_opened(self, trinity, tmp_path):
+        """WHY the stamp is free: not JSON this checker parses. A passport that
+        is not even valid JSON still scores 100, because the File set group asks
+        the directory for the name and stops there. Pinning the cause means a
+        future reader can tell an intended tolerance from a lucky one.
+        """
+        branch = _write_branch(tmp_path)
+        _write_doc(branch / ".trinity" / "passport.json", "not json at all {{")
+
+        result = trinity.check_branch(str(branch))
+
+        assert result["score"] == 100
+        assert _group(result, "File set")["passed"] is True
+
+    def test_the_contract_still_says_passports_are_existence_only(self, trinity):
+        """The sentence that makes the tolerance deliberate. If a passport rule
+        is ever added here, this fails first and whoever adds it has to decide
+        about the stamp on purpose.
+        """
+        assert "EXISTENCE only" in trinity.__doc__
+        assert "nothing inside a passport is read or judged" in trinity.__doc__

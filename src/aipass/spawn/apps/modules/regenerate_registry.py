@@ -16,7 +16,13 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
-from aipass.spawn.apps.handlers.class_registry import get_template_dir, get_available_classes
+from aipass.spawn.apps.handlers.class_registry import (
+    get_available_classes,
+    get_default_class,
+    get_template_dir,
+    get_template_dirs,
+    refuse_retired_or_forbidden,
+)
 from aipass.spawn.apps.handlers.json import json_handler
 
 
@@ -74,9 +80,9 @@ def handle_regenerate_registry(args: list[str]) -> int:
     """Parse args and execute template registry regeneration.
 
     Args patterns:
-        []                        -> regenerate aipass_framework (default)
-        ["aipass_framework"]      -> regenerate aipass_framework template
-        ["--all"]       -> regenerate all template registries
+        []              -> regenerate the default class's template (specialist)
+        ["specialist"]  -> regenerate that class's template
+        ["--all"]       -> regenerate every distinct template registry
         ["--help"]      -> show help
 
     Returns exit code (0=success, 1=failure).
@@ -88,35 +94,45 @@ def handle_regenerate_registry(args: list[str]) -> int:
     regen_all = "--all" in args
 
     if regen_all:
-        # Regenerate all known template classes
-        classes = get_available_classes()
+        # Iterate TEMPLATE DIRECTORIES, not classes. Both classes share one
+        # template dir now (DPLAN-0319), so walking classes would hash the same
+        # template twice and report it as two templates.
+        template_dirs = get_template_dirs()
         all_results: list[dict] = []
         had_error = False
 
-        for class_name in classes:
+        for template_dir in template_dirs:
             try:
-                template_dir = get_template_dir(class_name)
                 result = regenerate_template_registry(template_dir)
                 if "error" in result:
-                    error(f"[{class_name}] {result['error']}")
+                    error(f"[{template_dir.name}] {result['error']}")
                     had_error = True
                 else:
                     all_results.append(result)
             except Exception as exc:
-                logger.error(f"[regenerate-registry] Error for {class_name}: {exc}")
-                error(f"[{class_name}] {exc}")
+                logger.error(f"[regenerate-registry] Error for {template_dir.name}: {exc}")
+                error(f"[{template_dir.name}] {exc}")
                 had_error = True
 
         for result in all_results:
             _print_summary(result)
 
         if not had_error:
-            json_handler.log_operation("regenerate_registry_all", data={"classes": list(classes)})
+            json_handler.log_operation(
+                "regenerate_registry_all",
+                data={"templates": [d.name for d in template_dirs]},
+            )
         return 1 if had_error else 0
 
-    # Single class — default to aipass_framework
+    # Single class — default to the registered default class
     clean_args = [a for a in args if not a.startswith("--")]
-    class_name = clean_args[0] if clean_args else "aipass_framework"
+    class_name = clean_args[0] if clean_args else get_default_class()
+
+    # A retired or forbidden name is named as such, not reported as merely unknown.
+    refusal = refuse_retired_or_forbidden(class_name)
+    if refusal:
+        error(refusal)
+        return 1
 
     available = get_available_classes()
     if class_name not in available:
@@ -152,9 +168,9 @@ def _print_help() -> None:
     """Print usage help for regenerate-registry command."""
     console.print("[bold cyan]Usage:[/bold cyan] drone @spawn regenerate-registry \\[class_name | --all]")
     console.print()
-    console.print("  [green](no args)[/green]       Regenerate aipass_framework template registry (default)")
+    console.print(f"  [green](no args)[/green]       Regenerate the {get_default_class()} template registry (default)")
     console.print("  [green]<class>[/green]          Regenerate registry for a specific template class")
-    console.print("  [green]--all[/green]            Regenerate registries for all template classes")
+    console.print("  [green]--all[/green]            Regenerate every distinct template registry")
     console.print()
     console.print("[dim]Available classes:[/dim]")
     for cls in get_available_classes():

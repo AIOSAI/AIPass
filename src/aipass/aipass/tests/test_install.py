@@ -8,6 +8,7 @@
 
 """Tests for the aipass install module (DPLAN-0233)."""
 
+import subprocess as _sp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -110,13 +111,19 @@ class TestCloneRepo:
             run.assert_not_called()
 
     def test_success(self, tmp_path: Path) -> None:
-        """A zero-exit git clone returns success."""
+        """A zero-exit git clone returns success, and clones exactly once.
+
+        A branch read-back follows the clone, so this pins the CLONE call
+        rather than the total call count — the old assert_called_once() was
+        asserting an implementation detail, not the behaviour it named.
+        """
         with (
             patch(f"{_MOD}.shutil.which", return_value="/usr/bin/git"),
             patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
         ):
             assert _clone_repo(tmp_path / "home", dry_run=False) is True
-            run.assert_called_once()
+            clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
+            assert len(clone_calls) == 1
 
     def test_nonzero_exit(self, tmp_path: Path) -> None:
         """A non-zero git clone exit reports failure."""
@@ -685,3 +692,84 @@ class TestCheckAndFixOwner:
             side_effect=_sp.TimeoutExpired("drone", 30),
         ):
             _check_and_fix_owner(tmp_path)
+
+
+# =============================================================================
+# TestClonedBranchIsNamed — say which branch the user actually got
+# =============================================================================
+
+
+class TestClonedBranchIsNamed:
+    """A reinstall clones the repo DEFAULT branch, not the one you stand on.
+
+    From a `dev` tree you silently get a `main` tree back. The clone target is
+    deliberately unchanged (install is the fresh-machine bootstrap and usually
+    runs where no checkout exists) — but it must no longer be silent about
+    which branch landed.
+    """
+
+    @staticmethod
+    def _clone(tmp_path, branch_stdout="main\n", rc=0):
+        from aipass.aipass.apps.modules import install as _install
+
+        home = tmp_path / "home"
+        calls = []
+
+        def fake_run(cmd, *a, **kw):
+            calls.append(cmd)
+            if "clone" in cmd:
+                home.mkdir(parents=True, exist_ok=True)
+                return _sp.CompletedProcess(cmd, rc)
+            return _sp.CompletedProcess(cmd, 0, stdout=branch_stdout, stderr="")
+
+        printed = []
+        with (
+            patch("subprocess.run", side_effect=fake_run),
+            patch("shutil.which", return_value="/usr/bin/git"),
+            patch.object(
+                _install.console,
+                "print",
+                side_effect=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
+            ),
+        ):
+            ok = _install._clone_repo(home, dry_run=False)
+        return ok, " ".join(printed), calls
+
+    def test_prints_the_branch_that_landed(self, tmp_path) -> None:
+        """The name is MEASURED after the clone, so the message cannot be wrong."""
+        ok, printed, _calls = self._clone(tmp_path, branch_stdout="main\n")
+
+        assert ok is True
+        assert "main" in printed
+
+    def test_reports_the_real_branch_not_a_guess(self, tmp_path) -> None:
+        """A repo whose default is not 'main' reports its actual name."""
+        _ok, printed, _calls = self._clone(tmp_path, branch_stdout="trunk\n")
+
+        assert "trunk" in printed
+        assert "main" not in printed
+
+    def test_unreadable_branch_does_not_fail_the_install(self, tmp_path) -> None:
+        """Naming is a courtesy — it must never turn a good clone into a failure."""
+        from aipass.aipass.apps.modules import install as _install
+
+        home = tmp_path / "home"
+
+        def fake_run(cmd, *a, **kw):
+            if "clone" in cmd:
+                home.mkdir(parents=True, exist_ok=True)
+                return _sp.CompletedProcess(cmd, 0)
+            raise OSError("git gone")
+
+        with (
+            patch("subprocess.run", side_effect=fake_run),
+            patch("shutil.which", return_value="/usr/bin/git"),
+            patch.object(_install.console, "print"),
+        ):
+            assert _install._clone_repo(home, dry_run=False) is True
+
+    def test_failed_clone_still_returns_false(self, tmp_path) -> None:
+        """The added step must not mask a real clone failure."""
+        ok, _printed, _calls = self._clone(tmp_path, rc=1)
+
+        assert ok is False

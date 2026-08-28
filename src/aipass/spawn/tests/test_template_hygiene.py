@@ -83,10 +83,12 @@ def test_spawn_package_ships_no_artifact_dirs():
 # Mint completeness — a truncated template must refuse, never mint quietly
 # ---------------------------------------------------------------------------
 
-# The exact files the repo-root .gitignore swallowed out of templates/project_agent
-# until 2026-08-17: blanket rules for .ai_mail.local/, DASHBOARD.local.json, logs/
-# and artifacts/ with no negation for this template. A fresh clone got 12 of 18
-# files, and the mint copied what it found without a word of complaint.
+# The exact files the repo-root .gitignore swallowed out of the (then) project_agent
+# template until 2026-08-17: blanket rules for .ai_mail.local/, DASHBOARD.local.json,
+# logs/ and artifacts/ with no negation for that template. A fresh clone got 12 of 18
+# files, and the mint copied what it found without a word of complaint. That template
+# retired to templates/.archive/ with DPLAN-0319 R3; the casualty LIST did not, because
+# the gitignore rules that caused it still apply to the one template that replaced it.
 FRESH_CLONE_CASUALTIES = (
     ".ai_mail.local/inbox.json",
     ".ai_mail.local/README.md",
@@ -97,7 +99,7 @@ FRESH_CLONE_CASUALTIES = (
 )
 
 
-def _truncated_template(tmp_path, class_name="project_agent", casualties=FRESH_CLONE_CASUALTIES):
+def _truncated_template(tmp_path, class_name=None, casualties=FRESH_CLONE_CASUALTIES):
     """Copy a real template, then remove files the way a fresh clone would.
 
     The manifest (.spawn/.template_registry.json) is deliberately KEPT — it is
@@ -108,7 +110,8 @@ def _truncated_template(tmp_path, class_name="project_agent", casualties=FRESH_C
     import shutil
 
     stripped = tmp_path / "stripped_template"
-    shutil.copytree(get_template_dir(class_name), stripped)
+    template = get_template_dir(class_name) if class_name else get_template_dir()
+    shutil.copytree(template, stripped)
     for rel in casualties:
         (stripped / rel).unlink()
     return stripped
@@ -117,9 +120,10 @@ def _truncated_template(tmp_path, class_name="project_agent", casualties=FRESH_C
 class TestMintCompleteness:
     """A mint that cannot deliver the template's own contract must fail out loud.
 
-    Found the hard way: with those six files gitignored, `create project_agent`
-    exited 0, printed "Agent created", registered the citizen — and produced an
-    empty artifacts/ (no birth certificate) and an empty .ai_mail.local/ (no
+    Found the hard way: with those six files gitignored, `create` against the
+    truncated template exited 0, printed "Agent created", registered the citizen
+    — and produced an empty artifacts/ (no birth certificate) and an empty
+    .ai_mail.local/ (no
     inbox.json, so the citizen could not receive mail at all). Silent success on
     a broken citizen is the opposite of "code is truth — fail honestly".
     """
@@ -236,12 +240,12 @@ class TestExpectedMintPaths:
     Get that wrong and the guard either never fires or fires on every mint.
     """
 
-    def test_branch_placeholder_is_rendered_not_literal(self):
+    def test_branch_placeholder_is_rendered_not_literal(self, tmp_path):
         from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths
         from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
 
-        replacements = build_replacements_dict(Path("/tmp/my_agent"), "my_agent")
-        expected = expected_mint_paths(get_template_dir("aipass_framework"), replacements, "my_agent")
+        replacements = build_replacements_dict(tmp_path / "my_agent", "my_agent")
+        expected = expected_mint_paths(get_template_dir(), replacements, "my_agent")
 
         assert "apps/my_agent.py" in expected
         assert not [rel for rel in expected if "{{" in rel], "unrendered placeholder left in a claim"

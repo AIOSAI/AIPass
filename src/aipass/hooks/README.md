@@ -144,7 +144,7 @@ src/aipass/hooks/
 │       └── json_handler.py      #   Auto-creating JSON handler for hooks data files
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1680 tests across 50 test files (1678 pass, 2 env-skipped)
+└── tests/                       # 1711 tests across 50 test files (1709 pass, 2 env-skipped)
 ```
 
 ## How It Works

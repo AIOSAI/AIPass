@@ -412,8 +412,14 @@ def pick_owner_branch(branches, project_root):
 
     Canonical heuristic (first match wins):
       1. citizen_class == "manager" (cosmetic preference, not the gate)
-      2. passport citizenship.owner == true
-      3. First agent by ``created`` date (ultimate fallback)
+      2. First agent by ``created`` date (ultimate fallback)
+
+    The passport ``citizenship.owner`` step that used to sit between these two
+    is GONE: R8 (DPLAN-0319) dropped that field from the 2.0 schema, because a
+    passport is self-declared and ownership is not. The registry ENTRY's
+    ``owner: true`` flag — a different field, written by
+    ``ensure_project_has_owner`` — remains the sealed authority. Step 1 still
+    reads the passport, but only for the cosmetic class preference.
 
     Args:
         branches: List of branch entry dicts.
@@ -433,14 +439,6 @@ def pick_owner_branch(branches, project_root):
         if passport_path.exists():
             passport = json_handler.read_json(passport_path)
             if passport and passport.get("identity", {}).get("citizen_class") == "manager":
-                return branch
-
-    for branch in branches:
-        branch_path = project_root / branch.get("path", "")
-        passport_path = branch_path / ".trinity" / "passport.json"
-        if passport_path.exists():
-            passport = json_handler.read_json(passport_path)
-            if passport and passport.get("citizenship", {}).get("owner") is True:
                 return branch
 
     return min(branches, key=lambda b: b.get("created", "9999-99-99"))

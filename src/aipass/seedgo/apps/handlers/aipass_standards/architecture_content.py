@@ -3,7 +3,7 @@
 # Description: Architecture Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-08-28
 # =============================================
 
 """
@@ -36,9 +36,11 @@ def get_architecture_standards() -> str:
         "[bold cyan]TEMPLATE BASELINE COMPLIANCE (class-aware, live scan):[/bold cyan]",
         "  All branches must match their spawn template structure",
         "",
-        "  [yellow]Source of Truth:[/yellow] [dim]spawn/templates/{citizen_class}/[/dim] (scanned live)",
+        "  [yellow]Source of Truth:[/yellow] [dim]spawn/templates/citizen/[/dim] (scanned live)",
         "  [yellow]Class Detection:[/yellow] Reads [dim].trinity/passport.json[/dim]",
-        "     [dim]→ citizen_class[/dim] (builder, birthright, etc.)",
+        "     [dim]→ citizen_class[/dim] (manager, specialist) resolved via spawn's class_registry",
+        "     [dim]The class is a behavioural label, NOT a directory name — both mint from one template[/dim]",
+        "     [dim]Retired names (aipass_framework, project_agent, builder) score a named violation[/dim]",
         "  [yellow]Transformations:[/yellow] [dim]{{BRANCH}}[/dim] → branch name, template placeholders resolved",
         "  [yellow]Why:[/yellow] Template is the contract - branches that drift break during updates",
         "",

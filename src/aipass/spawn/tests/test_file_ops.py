@@ -36,7 +36,9 @@ REPLACEMENTS = {
     "BRANCH": "testagent",
     "DATE": "2026-01-01",
     "MODULE": "testagent",
-    "CWD": "/tmp/test",
+    # {{PATH}} replaced {{CWD}} in DPLAN-0319 and renders RELATIVE, never an
+    # absolute /home/... path — the value here mirrors that.
+    "PATH": "src/aipass/testagent",
 }
 
 

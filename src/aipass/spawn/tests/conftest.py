@@ -67,7 +67,7 @@ def mock_infrastructure(tmp_path):
         (branch / d).mkdir(parents=True)
     passport = {
         "branch_info": {"branch_name": "test_branch"},
-        "identity": {"citizen_class": "aipass_framework"},
+        "identity": {"citizen_class": "specialist"},
     }
     (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
     return branch

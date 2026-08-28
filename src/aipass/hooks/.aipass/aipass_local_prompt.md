@@ -82,7 +82,7 @@ apps/
       diagnostics.py       #   JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 46 test files, 1407 tests
+tests/                     # 50 test files, 1711 tests
 ```
 
 ## Handler Categories

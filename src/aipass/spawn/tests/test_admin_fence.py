@@ -258,8 +258,12 @@ class TestAdminClassRefusal:
         assert "admin" in refusal.lower()
         assert "devpulse" in refusal.lower()
         assert refuse_forbidden_class("ADMIN")
-        assert refuse_forbidden_class("aipass_framework") == ""
+        assert refuse_forbidden_class("specialist") == ""
+        assert refuse_forbidden_class("manager") == ""
         assert refuse_forbidden_class("") == ""
+        # A RETIRED name is not a FORBIDDEN one — this helper stays silent for it
+        # so admin's permanent refusal never gets diluted into a rename notice.
+        assert refuse_forbidden_class("aipass_framework") == ""
 
     def test_get_template_dir_refuses_admin(self):
         """No template lookup ever resolves admin."""
@@ -351,10 +355,43 @@ class TestAdminClassRefusal:
         assert "devpulse" in str(exc.value).lower()
         assert "SOMEBRANCH" in str(exc.value)
 
-    def test_sync_template_class_still_falls_back_for_unknown(self):
-        """Pin existing behavior: a merely-unknown class still falls back."""
+    def test_sync_template_class_refuses_unknown_instead_of_falling_back(self):
+        """CONTRACT INVERTED (DPLAN-0319): the unknown-class fallback was REMOVED.
+
+        This used to pin ``resolve_sync_template_class("legacy_builder", ...)``
+        guessing the ``aipass_framework`` template. Two things were wrong with the
+        guess: it wrote .branch_meta.json against a template the passport never
+        claimed (the branch then reads as "repaired" while tracking the wrong
+        contract), and the value it guessed is now itself a dead name. House law
+        is fail-loud, so the guess is gone and the refusal must name the branch
+        and the class it could not resolve — that is what the caller skips on.
+        """
         from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 
-        resolved = resolve_sync_template_class("legacy_builder", "SOMEBRANCH")
+        with pytest.raises(ValueError) as exc:
+            resolve_sync_template_class("legacy_builder", "SOMEBRANCH")
 
-        assert resolved.name == "aipass_framework"
+        message = str(exc.value)
+        assert "SOMEBRANCH" in message
+        assert "legacy_builder" in message
+        assert "aipass_framework" not in message, f"the removed fallback is being named as a target: {message}"
+
+    def test_sync_template_class_refuses_retired_names_by_name(self):
+        """A retired class is refused with the rename notice, never remapped."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
+
+        for retired, replacement in (("aipass_framework", "specialist"), ("project_agent", "manager")):
+            with pytest.raises(ValueError) as exc:
+                resolve_sync_template_class(retired, "SOMEBRANCH")
+
+            message = str(exc.value)
+            assert "SOMEBRANCH" in message
+            assert "retired" in message.lower()
+            assert replacement in message
+
+    def test_sync_template_class_resolves_both_live_classes(self):
+        """The fence must not have taken the real classes down with the fallback."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
+
+        for live in ("manager", "specialist"):
+            assert resolve_sync_template_class(live, "SOMEBRANCH").name == "citizen"

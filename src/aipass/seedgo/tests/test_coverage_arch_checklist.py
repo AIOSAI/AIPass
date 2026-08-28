@@ -843,15 +843,20 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "builder"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         result = architecture_check.check_template_baseline(str(entry))
         assert len(result) >= 1
         assert result[0]["passed"] is False
         assert "not found" in result[0]["message"]
 
-    def test_template_class_not_found(self, tmp_path, monkeypatch):
-        """When citizen_class template directory does not exist, returns failure."""
+    def test_template_dir_absent_for_registered_class(self, tmp_path, monkeypatch):
+        """A registered class whose template directory is not on disk fails by name.
+
+        This is the environment failure (templates root present, the one template
+        dir missing) — distinct from an unrecognised class, which never reaches
+        the filesystem at all. Both are scored; only this one is about the disk.
+        """
         import sys
 
         monkeypatch.delitem(
@@ -860,7 +865,7 @@ class TestCheckTemplateBaselineFull:
         from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
         templates_dir = tmp_path / "templates"
-        templates_dir.mkdir()
+        templates_dir.mkdir()  # root exists, templates/citizen/ deliberately does not
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
 
         branch = tmp_path / "mybranch"
@@ -872,10 +877,13 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "nonexistent_class"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         result = architecture_check.check_template_baseline(str(entry))
-        assert any("No template" in c["message"] for c in result)
+        assert len(result) == 1
+        assert result[0]["passed"] is False
+        assert "No template directory" in result[0]["message"]
+        assert "citizen" in result[0]["message"]
 
     def test_template_baseline_full_match(self, tmp_path, monkeypatch):
         """All template items present in branch: full pass."""
@@ -888,11 +896,11 @@ class TestCheckTemplateBaselineFull:
 
         # Create template dir
         templates_dir = tmp_path / "templates"
-        builder_template = templates_dir / "builder"
-        builder_template.mkdir(parents=True)
-        (builder_template / "apps").mkdir()
-        (builder_template / "apps" / "modules").mkdir()
-        (builder_template / "apps" / "entry.py").write_text("# entry\n", encoding="utf-8")
+        citizen_template = templates_dir / "citizen"
+        citizen_template.mkdir(parents=True)
+        (citizen_template / "apps").mkdir()
+        (citizen_template / "apps" / "modules").mkdir()
+        (citizen_template / "apps" / "entry.py").write_text("# entry\n", encoding="utf-8")
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
 
         # Create branch that matches template
@@ -906,7 +914,7 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "builder"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         result = architecture_check.check_template_baseline(str(entry))
         # First check is the summary
@@ -923,10 +931,10 @@ class TestCheckTemplateBaselineFull:
         from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
         templates_dir = tmp_path / "templates"
-        builder_template = templates_dir / "builder"
-        builder_template.mkdir(parents=True)
-        (builder_template / "apps").mkdir()
-        (builder_template / "apps" / "modules").mkdir()
+        citizen_template = templates_dir / "citizen"
+        citizen_template.mkdir(parents=True)
+        (citizen_template / "apps").mkdir()
+        (citizen_template / "apps" / "modules").mkdir()
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
 
         branch = tmp_path / "mybranch"
@@ -939,7 +947,7 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "builder"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         result = architecture_check.check_template_baseline(str(entry))
         failed = [c for c in result if not c["passed"]]
@@ -955,10 +963,10 @@ class TestCheckTemplateBaselineFull:
         from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
         templates_dir = tmp_path / "templates"
-        builder_template = templates_dir / "builder"
-        builder_template.mkdir(parents=True)
-        (builder_template / "apps").mkdir()
-        (builder_template / "apps" / "something.py").write_text("# x\n", encoding="utf-8")
+        citizen_template = templates_dir / "citizen"
+        citizen_template.mkdir(parents=True)
+        (citizen_template / "apps").mkdir()
+        (citizen_template / "apps" / "something.py").write_text("# x\n", encoding="utf-8")
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
 
         branch = tmp_path / "mybranch"
@@ -971,7 +979,7 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "builder"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         bypass = [{"standard": "architecture", "file": "something.py"}]
         result = architecture_check.check_template_baseline(str(entry), bypass_rules=bypass)
@@ -992,10 +1000,10 @@ class TestCheckTemplateBaselineFull:
         from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
         templates_dir = tmp_path / "templates"
-        builder_template = templates_dir / "builder"
-        builder_template.mkdir(parents=True)
-        (builder_template / "apps").mkdir()
-        (builder_template / "apps" / "handlers").mkdir()
+        citizen_template = templates_dir / "citizen"
+        citizen_template.mkdir(parents=True)
+        (citizen_template / "apps").mkdir()
+        (citizen_template / "apps" / "handlers").mkdir()
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
 
         branch = tmp_path / "mybranch"
@@ -1008,7 +1016,7 @@ class TestCheckTemplateBaselineFull:
         trinity = branch / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({"identity": {"citizen_class": "builder"}}), encoding="utf-8")
+        passport.write_text(json.dumps({"identity": {"citizen_class": "specialist"}}), encoding="utf-8")
 
         bypass = [{"standard": "architecture", "file": "apps/handlers"}]
         result = architecture_check.check_template_baseline(str(entry), bypass_rules=bypass)
