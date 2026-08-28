@@ -63,10 +63,27 @@ that names the rule change. Live CLI receipt in a throwaway host: main+dev,
 HEAD dev, 2.0.0 manager passport, no owner key, live registry md5-identical.
 1061 passed / 0 skipped, exact re-run.
 
-**Still gated on Patrick**: the fleet migration run (`migrate-passports
---confirm` — dry-run says 22/22, 0 errors), the registry_path truth ruling
-(the canonical value names a file that doesn't exist), and wave 3 (residency
-consumers converge; resident repos get dev branches).
+**THE MIGRATION RAN (2026-08-28, Patrick's GO)**: 22/22 migrated, 0 errors,
+per-file `.pre_v2_backup`, idempotent re-run changed 0; drift canary flipped
+to 2.0-only (schema-1 lane removed). Full fleet audit: Architecture 100
+fleet-wide — the 15 legacy passport violations cured.
+
+**gitignore — the rename had silently untracked the template's payload**: the
+spawn-template negations still named the retired `aipass_framework` /
+`project_agent` dirs, so after the `citizen` rename 17 payload files
+(birth-certificate template, inbox scaffold, `{{BRANCH}}_json/`, logs/,
+DASHBOARD, dropbox/, tools/, docs.local/, `.archive/`, `.spawn/`) left the
+public repo — the exact ship-incomplete bug the 2026-08-17 CI red documented,
+reintroduced by rename. All template negations consolidated into one
+wildcarded `templates/*/` block (name-specific lines are how this breaks) and
+the payload restored. Verified: template files are pure placeholders — no real
+mail, signatures, names, or machine paths; live-branch ignores unaffected.
+
+**Still gated on Patrick**: the registry_path truth ruling (superseded if the
+passport-as-tracked-config ruling lands — the field dies), passports-tracked
+ruling (passport = public profile in git; machine ids move to the untracked
+layer — birth certificate / registry), `sync-registry --fix` stays hot?, and
+wave 3 (residency consumers converge; resident repos get dev branches).
 
 ## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 

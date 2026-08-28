@@ -1,0 +1,35 @@
+{
+  "_warning": "AUTO-GENERATED FILE - DO NOT MANUALLY EDIT. This file is 100% automated and will be overwritten. Services update their own sections.",
+  "branch": "{{BRANCHNAME}}",
+  "last_updated": "{{DATE}}",
+  "quick_status": {
+    "new_mail": 0,
+    "opened_mail": 0,
+    "active_plans": 0,
+    "action_required": false,
+    "summary": "All clear"
+  },
+  "sections": {
+    "ai_mail": {
+      "managed_by": "ai_mail",
+      "new": 0,
+      "opened": 0,
+      "total": 0,
+      "oldest_unread_age": null,
+      "last_dispatch_received": null,
+      "last_updated": "{{DATE}}"
+    },
+    "flow": {
+      "managed_by": "flow",
+      "active_plans": 0,
+      "recently_closed": [],
+      "last_updated": "{{DATE}}"
+    },
+    "memory": {
+      "managed_by": "memory",
+      "vectors_stored": 0,
+      "notes": {},
+      "last_updated": "{{DATE}}"
+    }
+  }
+}
