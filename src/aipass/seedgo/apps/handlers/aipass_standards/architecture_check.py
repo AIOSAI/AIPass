@@ -23,6 +23,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# Spawn's modules gateway — the public door, and the ONLY source for the
+# class->template question. Imported at module scope with no fallback on
+# purpose: if this door moves, the architecture checker must die at import
+# with spawn's name in the traceback, not quietly score the fleet against a
+# guess. The mirror this replaces is retired (DPLAN-0319 wave 3, FPLAN-0454).
+from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: this checks the apps/handlers/modules layering
@@ -34,39 +41,13 @@ PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -
 
 # Spawn templates root — live-scanned. The SUBDIRECTORY under it is never
 # guessed from citizen_class: passport 2.0 (DPLAN-0319) made the class a
-# behavioural label that does NOT name a directory, so the mapping below is
-# the only thing allowed to answer it. Keeping the root here (rather than
-# reading spawn's own constant) leaves one seam a test can point at a fixture
-# tree — tests/test_citizen_class_resolution.py pins it against spawn.
+# behavioural label that does NOT name a directory, so only spawn's gateway
+# may answer it. Keeping the ROOT here (rather than reading spawn's own
+# constant) leaves one seam a test can point at a fixture tree —
+# tests/test_citizen_class_resolution.py pins it against spawn.
 # PACK_ROOT = seedgo/apps/, so .parent.parent = src/aipass/
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> seedgo/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
-
-# --- spawn's class registry, MIRRORED (not imported) ----------------------
-# spawn owns these facts in spawn/apps/handlers/class_registry.py. seedgo may
-# not import them: a cross-branch handler import fails seedgo's own
-# encapsulation and handlers standards, and spawn's modules layer re-exports
-# neither the template resolver (aliased private) nor the legacy refusal — so
-# the sanctioned gateway cannot serve this today. The mirror is also the safer
-# coupling for an AUDITOR: a runtime import would let one branch's broken
-# import graph blind the architecture check for all 18 branches, where a stale
-# mirror turns exactly one test red and names the drifted value.
-# EVERY entry is drift-pinned against spawn's live registry by
-# tests/test_citizen_class_resolution.py::TestMirrorMatchesSpawn — change spawn,
-# and that test names what moved. Do not edit these by hand without it green.
-CITIZEN_CLASS_TEMPLATES = {
-    "manager": "citizen",
-    "specialist": "citizen",
-}
-# Retired names → the class that replaced them. Present so an un-migrated
-# passport is told what to write, never so the old value gets translated.
-LEGACY_CITIZEN_CLASSES = {
-    "aipass_framework": "specialist",
-    "builder": "specialist",
-    "project_agent": "manager",
-}
-# Never a class, never a template — a devpulse-only registry privilege.
-FORBIDDEN_CITIZEN_CLASSES = frozenset({"admin"})
 
 # Template subtrees that are local-only and therefore never scored — see _is_local_only()
 LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
@@ -417,42 +398,41 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
 
 
 def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
-    """Resolve a citizen_class to its template directory name, or say why not.
+    """Ask spawn's gateway which template directory a citizen_class mints from.
 
-    The class stopped naming a directory at passport 2.0, so this is a lookup
-    against the mirrored registry rather than a path join. Three refusals are
-    kept apart because they mean different things to whoever reads the score: a
-    RETIRED name is a passport waiting on the one-shot migration (expected,
-    temporary, cured by a fleet run), a FORBIDDEN name is a privilege that was
-    never a class, and anything else is a typo or an invention. Collapsing them
-    would tell a branch to migrate when the real answer is "that value has never
-    existed".
+    Two questions, because spawn publishes two and they answer different things.
+    ``refuse_legacy_class`` is asked FIRST and alone: a retired name is a
+    passport waiting on the migration — expected, temporary, cured by a fleet
+    run — and telling that branch "unknown class" would send it hunting for a
+    typo it does not have. Everything else goes to ``get_template_dir``, whose
+    own refusal already separates the permanent privilege ("admin" is not a
+    class and never will be, DPLAN-0288) from a name nobody registered. Spawn's
+    sentence is carried through verbatim rather than paraphrased, so the three
+    lanes stay apart in the words the branch actually reads.
+
+    Nothing is mirrored here any more and nothing may be: the previous version
+    of this function kept a local copy of spawn's class table, which made the
+    auditor's copy a second source of truth for facts it does not own.
 
     Args:
         citizen_class: The value read from identity.citizen_class.
 
     Returns:
-        (template_dir_name, "") when the class is registered, else
-        (None, refusal) — the refusal is a complete sentence naming the value.
+        (template_dir_name, "") when the class resolves, else (None, refusal) —
+        the refusal is a complete sentence naming the value.
     """
-    key = (citizen_class or "").strip()
-    if key in CITIZEN_CLASS_TEMPLATES:
-        return CITIZEN_CLASS_TEMPLATES[key], ""
+    legacy = refuse_legacy_class(citizen_class)
+    if legacy:
+        return None, f'Legacy citizen_class "{citizen_class}" — passport not yet migrated to 2.0. {legacy}'
 
-    lowered = key.lower()
-    if lowered in FORBIDDEN_CITIZEN_CLASSES:
-        return None, (
-            f'Forbidden citizen_class "{citizen_class}" — a devpulse-only registry '
-            f"privilege (DPLAN-0288), never a citizen class and never a template."
-        )
-    if lowered in LEGACY_CITIZEN_CLASSES:
-        return None, (
-            f'Legacy citizen_class "{citizen_class}" — passport not yet migrated to 2.0; '
-            f'this class is now "{LEGACY_CITIZEN_CLASSES[lowered]}". '
-            f"Run spawn's migrate-passports; the old name is never translated silently."
-        )
-    available = ", ".join(sorted(CITIZEN_CLASS_TEMPLATES))
-    return None, f'Unknown citizen_class "{citizen_class}" — registered classes: {available}.'
+    try:
+        return get_template_dir(citizen_class).name, ""
+    except ValueError as exc:
+        # Not swallowed: exc IS the refusal returned above and scored by the
+        # caller. Logged as well so a bad passport leaves a prax trail even
+        # when the reader only sees the branch score.
+        logger.info("Template baseline: spawn refused citizen_class %r", citizen_class)
+        return None, f'Unresolved citizen_class "{citizen_class}" — {exc}'
 
 
 def _scan_template(template_path: Path) -> Dict:

@@ -203,8 +203,13 @@ def do_stuff():
         assert "line 2" in independence["message"]
 
     def test_handlers_reports_all_orchestration_imports(self, tmp_path: Path) -> None:
-        """A file with two module (orchestration) imports must report both, not just the first."""
-        handler_dir = tmp_path / "apps" / "handlers" / "mypack"
+        """A file with two module (orchestration) imports must report both, not just the first.
+
+        The fixture sits under a directory NAMED seedgo on purpose: orchestration
+        is now an own-branch rule, and a tmp_path-named branch would make these
+        two imports cross-branch -- the sanctioned gateway shape, not a violation.
+        """
+        handler_dir = tmp_path / "seedgo" / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
         code = """\
 from aipass.seedgo.apps.modules.scanner import scan_all

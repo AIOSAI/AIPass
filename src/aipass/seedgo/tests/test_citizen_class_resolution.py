@@ -1,24 +1,28 @@
-"""Pins for architecture_check resolving citizen_class to a template dir, mirror kept honest."""
+"""Pins for architecture_check resolving citizen_class through spawn's modules gateway."""
 
 # =================== META ====================
 # Name: test_citizen_class_resolution.py
-# Description: Template baseline resolves class via the mirrored registry, never a raw path join
+# Description: Template baseline resolves class via spawn's modules gateway, never a mirror or a path join
 # Version: 1.0.0
 # Created: 2026-08-28
 # Modified: 2026-08-28
 # =============================================
 
+import ast
 import json
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
 
-# Tests may reach into spawn's real registry — that is the whole point of a
-# drift pin. Production code may not (seedgo's own encapsulation/handlers
-# standards refuse a cross-branch handler import), which is why the mirror
-# exists and why this file is the thing that keeps it true.
+# The gateway is what production imports; the handler behind it is what these
+# tests read to enumerate cases (the retired-name list is spawn's to own, and a
+# test that hardcoded it would be the mirror coming back in through the door).
+from aipass.spawn.apps import modules as spawn_gateway
 from aipass.spawn.apps.handlers import class_registry
 
 
@@ -105,9 +109,9 @@ class TestRegisteredClassesResolveToTheOneTemplate:
 class TestRefusedClassesScoreAViolation:
     """A class the registry refuses is a named scored violation -- never a crash, never a pass."""
 
-    @pytest.mark.parametrize("legacy", sorted(architecture_check.LEGACY_CITIZEN_CLASSES))
+    @pytest.mark.parametrize("legacy", sorted(class_registry.LEGACY_CLASSES))
     def test_every_retired_class_scores_by_name(self, tmp_path, monkeypatch, legacy):
-        """Parametrised off the mirror, which the drift pin holds equal to spawn's."""
+        """Parametrised off spawn's own retired-name map, so a name added there is covered here."""
         _template(tmp_path, monkeypatch)
         entry = _branch(tmp_path, legacy)
 
@@ -126,8 +130,10 @@ class TestRefusedClassesScoreAViolation:
 
         message = architecture_check.check_template_baseline(str(entry))[0]["message"]
 
-        assert '"specialist"' in message
-        assert "migrate" in message.lower()
+        assert "specialist" in message, "the replacement class must be named"
+        assert "migrat" in message.lower(), "the reader must be told this is a migration, not a typo"
+        # Spawn's own refusal is carried verbatim, never paraphrased.
+        assert class_registry.refuse_legacy_class("aipass_framework") in message
 
     def test_forbidden_class_is_not_labelled_legacy(self, tmp_path, monkeypatch):
         """'admin' was never a class, so 'migrate this passport' would be the wrong advice."""
@@ -136,9 +142,13 @@ class TestRefusedClassesScoreAViolation:
 
         result = architecture_check.check_template_baseline(str(entry))
 
+        message = result[0]["message"]
         assert result[0]["passed"] is False
-        assert result[0]["message"].startswith("Forbidden citizen_class")
-        assert "DPLAN-0288" in result[0]["message"]
+        assert not message.startswith("Legacy citizen_class"), "admin must never be told to migrate"
+        assert "migrat" not in message.lower()
+        # The privilege refusal is what marks this lane apart, in spawn's words.
+        assert "DPLAN-0288" in message
+        assert "privilege" in message
 
     def test_unknown_class_still_fails_loudly(self, tmp_path, monkeypatch):
         """Invented values are neither retired nor forbidden -- they are just wrong."""
@@ -147,10 +157,13 @@ class TestRefusedClassesScoreAViolation:
 
         result = architecture_check.check_template_baseline(str(entry))
 
+        message = result[0]["message"]
         assert result[0]["passed"] is False
-        assert result[0]["message"].startswith("Unknown citizen_class")
-        assert '"wizard"' in result[0]["message"]
-        assert "manager" in result[0]["message"] and "specialist" in result[0]["message"]
+        assert not message.startswith("Legacy citizen_class"), "an invented name is not a migration"
+        assert "migrat" not in message.lower()
+        assert "DPLAN-0288" not in message, "a typo is not the admin privilege refusal"
+        assert '"wizard"' in message
+        assert "manager" in message and "specialist" in message
 
     def test_refusal_never_reaches_the_filesystem(self, tmp_path, monkeypatch):
         """A refused class must fail on the value, not on a directory that happens to exist.
@@ -171,38 +184,108 @@ class TestRefusedClassesScoreAViolation:
         assert result[0]["passed"] is False
 
 
-class TestMirrorMatchesSpawn:
-    """The mirror is only honest while it equals spawn's live registry."""
+class TestGatewayIsTheOnlySource:
+    """The mirror is retired. Nothing here may answer the class question locally."""
 
-    def test_class_to_template_mapping_matches(self):
-        """Every registered class maps to the directory spawn actually mints from.
+    def test_import_path_is_the_declared_gateway(self):
+        """Production imports the two names from spawn's modules gateway.
 
-        Compared as whole dicts, not key-by-key: a class ADDED in spawn and
-        missing here would leave a live branch scored as 'Unknown citizen_class'
-        while every mirrored key still agreed.
+        Pinned on the source text, not just on behaviour: reaching around to
+        spawn.apps.handlers would still work at runtime while failing seedgo's
+        own encapsulation and handlers standards, and a checker that breaks the
+        rule it enforces on 17 branches is worse than a wrong answer.
         """
-        spawn_map = {name: spec["template_dir"] for name, spec in class_registry.CITIZEN_CLASSES.items()}
-        assert architecture_check.CITIZEN_CLASS_TEMPLATES == spawn_map
+        source = Path(architecture_check.__file__).read_text(encoding="utf-8")
+        assert "from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class" in source
+        assert "spawn.apps.handlers" not in source
 
-    def test_legacy_map_matches(self):
-        """A retired name added in spawn must not read as 'Unknown' here.
+    def test_imported_names_are_spawns_own_callables(self):
+        """Identity, not equivalence.
 
-        The values matter too, not just the keys: the violation quotes the
-        replacement class, so a wrong value tells a branch to write the wrong thing.
+        A local reimplementation that merely agreed today would satisfy any
+        behavioural pin and drift the moment spawn changed. This fails the
+        instant the checker stops calling spawn's actual function.
         """
-        assert architecture_check.LEGACY_CITIZEN_CLASSES == class_registry.LEGACY_CLASSES
+        assert architecture_check.get_template_dir is spawn_gateway.get_template_dir
+        assert architecture_check.refuse_legacy_class is spawn_gateway.refuse_legacy_class
+        assert architecture_check.get_template_dir is class_registry.get_template_dir
+        assert architecture_check.refuse_legacy_class is class_registry.refuse_legacy_class
 
-    def test_forbidden_set_matches(self):
-        """A privilege refusal must not degrade into 'Unknown citizen_class'."""
-        assert architecture_check.FORBIDDEN_CITIZEN_CLASSES == class_registry.FORBIDDEN_CLASSES
+    def test_no_local_class_table_survives(self):
+        """The mirrored constants are gone, by name.
 
-    def test_mirror_and_spawn_agree_on_every_value_they_know(self):
-        """End-to-end agreement: spawn's resolver and the mirror answer the same.
-
-        The three dict pins above can all hold while the CODE reading them
-        diverges from spawn's behaviour, so this asks the two implementations
-        the same questions and compares the answers.
+        They were module-level and importable, so anything that still reads them
+        would break loudly — but a NEW table under a new name is the failure this
+        guards, which is why the source is checked for the shape as well.
         """
+        for retired in ("CITIZEN_CLASS_TEMPLATES", "LEGACY_CITIZEN_CLASSES", "FORBIDDEN_CITIZEN_CLASSES"):
+            assert not hasattr(architecture_check, retired), f"{retired} came back"
+
+        # Read as CODE, not as text: the docstrings name "admin" and
+        # "aipass_framework" as examples on purpose, and a substring search
+        # would either fail on the prose or be weakened until it saw nothing.
+        # Only a string LITERAL carrying one of these values is a second source.
+        tree = ast.parse(Path(architecture_check.__file__).read_text(encoding="utf-8"))
+        docstrings = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        }
+        spawns_facts = set(class_registry.LEGACY_CLASSES) | set(class_registry.FORBIDDEN_CLASSES)
+        baked = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings
+        } & spawns_facts
+        assert not baked, f"{sorted(baked)} baked into seedgo code -- spawn's facts to hold, not mine"
+
+    def test_the_import_has_no_silent_fallback(self):
+        """A missing gateway must kill the import, not degrade to a guess.
+
+        The whole point of retiring the mirror is that spawn is the one source;
+        a try/except ImportError around it would quietly restore two sources,
+        with the fallback answering only on the days spawn is broken.
+        """
+        source = Path(architecture_check.__file__).read_text(encoding="utf-8")
+        assert "except ImportError" not in source
+        assert "ModuleNotFoundError" not in source
+
+    def test_a_missing_gateway_fails_loudly_at_import(self):
+        """Behaviour, not just source: block the gateway and the checker must die.
+
+        The source pin above says no `except ImportError` is written; this proves
+        the consequence in a fresh interpreter, which also covers a fallback
+        arriving by some other spelling. Run as a subprocess because the import
+        must fail from cold — this module is already in sys.modules here.
+        """
+        script = textwrap.dedent(
+            """
+            import sys
+
+            class Blocker:
+                def find_spec(self, fullname, path=None, target=None):
+                    if fullname == "aipass.spawn.apps.modules":
+                        raise ImportError("gateway removed")
+                    return None
+
+            sys.meta_path.insert(0, Blocker())
+            try:
+                from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+            except ImportError:
+                print("LOUD")
+            else:
+                print("SILENT")
+            """
+        )
+        proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        assert proc.stdout.strip() == "LOUD", f"stdout={proc.stdout!r} stderr={proc.stderr[-400:]!r}"
+
+    def test_resolution_matches_spawn_on_every_value_spawn_knows(self):
+        """End to end: the checker's answer IS spawn's answer, for every known value."""
         known = (
             sorted(class_registry.CITIZEN_CLASSES)
             + sorted(class_registry.LEGACY_CLASSES)
@@ -210,13 +293,28 @@ class TestMirrorMatchesSpawn:
             + ["wizard", ""]
         )
         for value in known:
-            mirrored, refusal = architecture_check._resolve_template_dir(value)
-            # Asked through validate_class rather than by catching the raise:
-            # a swallowed ValueError would also swallow a spawn bug that raises
-            # for a class it says is valid, and this crosschecks the two.
-            spawn_answer = class_registry.get_template_dir(value).name if class_registry.validate_class(value) else None
-            assert mirrored == spawn_answer, f"{value!r}: mirror said {mirrored!r}, spawn said {spawn_answer!r}"
-            assert bool(refusal) is (spawn_answer is None), f"{value!r}: refusal text and verdict disagree"
+            resolved, refusal = architecture_check._resolve_template_dir(value)
+            expected = spawn_gateway.get_template_dir(value).name if class_registry.validate_class(value) else None
+            assert resolved == expected, f"{value!r}: checker said {resolved!r}, spawn said {expected!r}"
+            assert bool(refusal) is (expected is None), f"{value!r}: refusal text and verdict disagree"
+
+    def test_the_three_lanes_stay_apart(self):
+        """Retired, forbidden and unregistered each get their own answer.
+
+        Compared as a set of three distinct messages rather than three separate
+        assertions: the failure being guarded is two lanes collapsing into one
+        sentence, which no single-lane assertion can see.
+        """
+        messages = {
+            lane: architecture_check._resolve_template_dir(value)[1]
+            for lane, value in (("legacy", "aipass_framework"), ("forbidden", "admin"), ("unknown", "wizard"))
+        }
+        assert len(set(messages.values())) == 3
+        assert "migrat" in messages["legacy"].lower()
+        assert "migrat" not in messages["forbidden"].lower()
+        assert "migrat" not in messages["unknown"].lower()
+        assert "DPLAN-0288" in messages["forbidden"]
+        assert "DPLAN-0288" not in messages["unknown"]
 
 
 class TestResolutionSeamMatchesSpawn:
@@ -231,7 +329,7 @@ class TestResolutionSeamMatchesSpawn:
         a directory that no longer exists.
         """
         for citizen_class in class_registry.get_available_classes():
-            spawn_dir = class_registry.get_template_dir(citizen_class).resolve()
+            spawn_dir = spawn_gateway.get_template_dir(citizen_class).resolve()
             assert spawn_dir.parent == architecture_check.SPAWN_TEMPLATES_DIR.resolve()
 
     def test_checker_does_not_join_the_class_name(self):
@@ -242,9 +340,10 @@ class TestResolutionSeamMatchesSpawn:
     def test_live_template_dir_is_on_disk(self):
         """The template the fleet is actually scored against exists.
 
-        Live-state, deliberately: the mirror can be perfectly in sync with spawn
-        and still name a directory nobody shipped.
+        Live-state, deliberately: the gateway can resolve perfectly and still
+        name a directory nobody shipped.
         """
-        for dir_name in set(architecture_check.CITIZEN_CLASS_TEMPLATES.values()):
+        for citizen_class in class_registry.get_available_classes():
+            dir_name = spawn_gateway.get_template_dir(citizen_class).name
             live = architecture_check.SPAWN_TEMPLATES_DIR / dir_name
-            assert live.is_dir(), f"mirrored template dir is missing on disk: {live}"
+            assert live.is_dir(), f"resolved template dir is missing on disk: {live}"

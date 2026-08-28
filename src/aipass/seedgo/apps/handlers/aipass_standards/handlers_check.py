@@ -114,7 +114,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(auto_detect_check)
 
     # Check 3: No orchestration logic (handlers shouldn't import modules)
-    orchestration_check = check_no_orchestration(content, lines)
+    orchestration_check = check_no_orchestration(content, lines, module_path)
     if orchestration_check:
         checks.append(orchestration_check)
 
@@ -176,15 +176,43 @@ def _branch_of_path(module_path: str) -> Optional[str]:
     return None
 
 
+def _branch_before(module: str, marker: str) -> Optional[str]:
+    """Return the branch segment sitting immediately before marker, or None.
+
+    The None on a missing marker matters: splitting a string that does not
+    contain the separator returns the WHOLE string, so the old handlers-only
+    version answered 'modules' for 'aipass.spawn.apps.modules' -- a confident
+    wrong branch name rather than "I cannot tell".
+
+    Args:
+        module: Dotted import path.
+        marker: The layer separator to look for, e.g. ".apps.handlers".
+
+    Returns:
+        The branch name, or None when marker is absent or nothing precedes it.
+    """
+    if marker not in module:
+        return None
+    prefix = module.split(marker, 1)[0]
+    parts = prefix.split(".")
+    return parts[-1] if parts and parts[-1] else None
+
+
 def _branch_of_import(module: str) -> Optional[str]:
     """Return the branch an 'apps.handlers' import targets.
 
     aipass.trigger.apps.handlers.events.error_detected -> 'trigger'
     Also handles the bare form: aipass.trigger.apps.handlers -> 'trigger'
     """
-    prefix = module.split(".apps.handlers", 1)[0]
-    parts = prefix.split(".")
-    return parts[-1] if parts and parts[-1] else None
+    return _branch_before(module, ".apps.handlers")
+
+
+def _branch_of_modules_import(module: str) -> Optional[str]:
+    """Return the branch an 'apps.modules' import targets.
+
+    aipass.spawn.apps.modules -> 'spawn'
+    """
+    return _branch_before(module, ".apps.modules")
 
 
 def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
@@ -269,14 +297,37 @@ def check_auto_detection(content: str) -> Optional[Dict]:
     }
 
 
-def check_no_orchestration(content: str, lines: List[str]) -> Optional[Dict]:
-    """
-    Check that handler doesn't import/call modules (orchestration)
+def check_no_orchestration(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
+    """Check that a handler does not reach up into its OWN branch's modules layer.
 
-    Handlers should be pure implementation, not orchestration.
-    FORBIDDEN: from aipass.seedgo.apps.modules import some_module
+    Handlers are pure implementation; orchestration lives in modules/. A handler
+    importing its own branch's modules inverts that and is the shape that can
+    actually close a cycle.
+
+    - FORBIDDEN: from aipass.seedgo.apps.modules import x, inside seedgo's handlers
+    - ALLOWED: from aipass.spawn.apps.modules import x -- another branch's modules
+      package is its PUBLIC GATEWAY, and check_handler_independence explicitly
+      sends cross-branch callers there ("use that branch's modules/ instead").
+      Refusing it here closed the only door that check leaves open, which made
+      every cross-branch consumer non-compliant whichever import it wrote.
+
+    Unknown branch stays STRICT, deliberately the opposite default to
+    check_handler_independence: that check cannot evaluate its rule without a
+    branch, while this one still has a real question to answer, and widening it
+    would let every own-branch orchestration import pass whenever a caller
+    omitted the path.
+
+    Args:
+        content: Source of the file being checked.
+        lines: The same source split into lines, for quoting the offending line.
+        module_path: Path of the file, used to tell own-branch from cross-branch.
+
+    Returns:
+        Check dict, or None when the check does not apply.
     """
     module_imports = []
+
+    own_branch = _branch_of_path(module_path) if module_path else None
 
     for lineno, module, _names in _iter_import_modules(content):
         if "apps.modules" not in module:
@@ -286,7 +337,12 @@ def check_no_orchestration(content: str, lines: List[str]) -> Optional[Dict]:
         if "prax.apps.modules.logger" in module or "cli.apps.modules" in module:
             continue
 
-        # Forbidden: Module imports (orchestration)
+        # Allowed: another branch's modules gateway -- its public door
+        imported_branch = _branch_of_modules_import(module)
+        if own_branch and imported_branch and imported_branch != own_branch:
+            continue
+
+        # Forbidden: this branch's own modules (orchestration)
         module_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
 
     if module_imports:
