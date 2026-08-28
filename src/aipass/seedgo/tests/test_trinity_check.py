@@ -993,7 +993,7 @@ class TestACleanCheckoutIsNotAViolatingFleet:
         un-ignored in .gitignore. It sits two levels down, not at
         <fleet>/<branch>/.trinity, so it must not make a clone look live.
         """
-        template = tmp_path / "spawn" / "templates" / "aipass_framework" / ".trinity"
+        template = tmp_path / "spawn" / "templates" / "citizen" / ".trinity"
         template.mkdir(parents=True)
         (template / "local.json").write_text("{}\n", encoding="utf-8")
 
