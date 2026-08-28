@@ -9,6 +9,7 @@
 """Tests for aipass profile command — Phase 3 (FPLAN-0188)."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -89,6 +90,94 @@ class TestLiveStoreIsolation:
 # =============================================================================
 # TestGetUserProfile
 # =============================================================================
+
+
+class TestWriteDurability:
+    """The two behaviours the hand-rolled writer carried, kept after the refactor.
+
+    Both tests force a REAL failure inside json_handler.write_json (its retried
+    replace raises) rather than stubbing save_path to False -- stubbing the
+    handler would measure only this module's signalling and would pass even if
+    the underlying save stopped being atomic.
+    """
+
+    @staticmethod
+    def _fail_the_replace():
+        """Patch the handler's replace step to raise, as a full disk would."""
+        return patch(
+            "aipass.aipass.shared.json_handler._replace_with_retry",
+            side_effect=OSError("no space left on device"),
+        )
+
+    def test_oserror_mid_write_leaves_the_store_byte_intact(self, tmp_store) -> None:
+        """A failed save must not half-write or truncate the previous profile."""
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "Original", "os": "Linux"})
+        before = tmp_store.read_bytes()
+
+        with self._fail_the_replace():
+            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+                with pytest.raises(OSError):
+                    save_profile({"name": "Replacement", "os": "Windows"})
+
+        assert tmp_store.read_bytes() == before
+        assert get_user_profile()["name"] == "Original"
+
+    def test_failed_write_leaves_no_temp_file_behind(self, tmp_store) -> None:
+        """The handler unlinks its own temp file on the failure path."""
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "Original"})
+
+        with self._fail_the_replace():
+            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+                with pytest.raises(OSError):
+                    save_profile({"name": "Replacement"})
+
+        leftovers = [p.name for p in tmp_store.parent.iterdir() if p.name != tmp_store.name]
+        assert leftovers == []
+
+    def test_write_failure_raises_instead_of_answering_false(self, tmp_store) -> None:
+        """json_handler answers False; save_profile must not pass that off as success."""
+        with self._fail_the_replace():
+            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+                with pytest.raises(OSError):
+                    save_profile({"name": "Doomed"})
+
+    def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
+        """The file_deleted / write_failure_cleanup event survives the refactor."""
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            with self._fail_the_replace():
+                with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+                    with pytest.raises(OSError):
+                        save_profile({"name": "Doomed"})
+
+        mock_trigger.fire.assert_called_once()
+        event, kwargs = mock_trigger.fire.call_args[0][0], mock_trigger.fire.call_args[1]
+        assert event == "file_deleted"
+        assert kwargs["reason"] == "write_failure_cleanup"
+
+    def test_successful_save_fires_nothing(self, tmp_store) -> None:
+        """The counterfactual: without it the fire-test could pass on any call."""
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+                save_profile({"name": "Fine"})
+
+        mock_trigger.fire.assert_not_called()
+
+    def test_module_does_no_direct_file_operations(self) -> None:
+        """The seedgo modules rule, pinned here so it cannot regress silently.
+
+        Line 81's mkdir was the CI blocker on PR 743; json.dump sat behind it in
+        the same writer and would have surfaced as the next failure once the
+        mkdir went, because the audit reports only the first violation it finds.
+        """
+        from aipass.aipass.apps.modules import profile as profile_mod
+
+        source = Path(profile_mod.__file__).read_text(encoding="utf-8")
+        body = [line for line in source.splitlines() if line.strip() and not line.strip().startswith("#")]
+        for forbidden in (".mkdir(", ".write_text(", ".read_text(", "json.dump(", "json.load("):
+            offenders = [line.strip() for line in body if forbidden in line]
+            assert offenders == [], f"{forbidden} -> {offenders}"
 
 
 class TestRoundTrip:
@@ -182,7 +271,7 @@ class TestGetUserProfile:
 class TestSaveProfile:
     def test_saves_profile_to_disk(self, tmp_store) -> None:
         """Profile dict is written to user section of local.json."""
-        with patch("aipass.aipass.apps.modules.profile.json_handler"):
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "user", "os": "Linux"})
         stored = json.loads(tmp_store.read_text())
         assert stored["profile"]["name"] == "user"
@@ -206,7 +295,7 @@ class TestSaveProfile:
         """Missing aipass_json/ directory is created on write."""
         deep_path = tmp_path / "a" / "b" / "aipass_json" / "user_profile.json"
         with patch("aipass.aipass.apps.modules.profile._PROFILE_JSON", deep_path):
-            with patch("aipass.aipass.apps.modules.profile.json_handler"):
+            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
                 save_profile({"name": "Test"})
         assert deep_path.exists()
 
@@ -308,7 +397,7 @@ class TestHandleCommand:
 
     def test_clear_confirmed(self, tmp_store) -> None:
         """'clear' with 'aipass' confirmation resets profile."""
-        with patch("aipass.aipass.apps.modules.profile.json_handler"):
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             with patch("builtins.input", return_value="aipass"):
                 with patch("aipass.aipass.apps.modules.profile.console"):
                     result = handle_command("profile", ["clear"])

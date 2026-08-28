@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: profile.py
 # Description: User profile read/write — aipass profile command
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-16
 # Modified: 2026-08-27
 # =============================================
@@ -27,9 +27,6 @@ Commands:
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success, warning
@@ -67,29 +64,49 @@ def _read_json_file(path: Path) -> dict:
 
 
 def _fire_file_deleted(path: str) -> None:
-    """Fire trigger event for temp file deletion, ignoring ImportError."""
+    """Fire the write-failure trigger event, ignoring an absent trigger branch.
+
+    Same event name and reason as before the handler refactor, so any consumer
+    of this signal sees exactly what it saw when the writer was hand-rolled.
+    Only ``path`` changed meaning, and it had to: json_handler owns its temp
+    file and unlinks it internally, so this module never learns that name. The
+    path is therefore the STORE the failed write targeted, and ``detail`` says
+    plainly that the store itself was not the thing deleted -- an event that
+    named the store under a bare "file_deleted" with no qualifier would read as
+    "the profile was deleted", which is not what happened.
+    """
     try:
         from aipass.trigger.apps.modules.core import trigger
 
-        trigger.fire("file_deleted", path=path, reason="write_failure_cleanup")
+        trigger.fire(
+            "file_deleted",
+            path=path,
+            reason="write_failure_cleanup",
+            detail="json_handler removed its own temp file; the store was left untouched",
+        )
     except ImportError as exc:
         logger.warning("[profile] trigger unavailable for file_deleted event: %s", exc)
 
 
 def _write_profile_json(data: dict) -> None:
-    dir_ = _PROFILE_JSON.parent
-    dir_.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(dir_), prefix=".profile_", suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, _PROFILE_JSON)
-    except OSError as exc:
-        logger.warning("[profile] write failed, cleaning up temp file: %s", tmp_path)
-        _fire_file_deleted(tmp_path)
-        os.unlink(tmp_path)
-        logger.warning("[profile] user_profile.json write error: %s", exc)
-        raise
+    """Write the store through json_handler, raising when it cannot be written.
+
+    The handler's save is atomic -- temp file, fsync, then a retried replace --
+    so an OSError mid-write leaves the previous store byte-intact rather than
+    half-written, and the temp file is unlinked on any exception. That is the
+    durability the hand-rolled writer provided, kept.
+
+    What the handler does NOT do is raise: it answers False and logs. Answering
+    False up to save_profile would make a failed save look identical to a
+    successful one at every call site, so the False is turned back into the
+    OSError the callers were already written against. A profile that quietly
+    failed to save is worse than one that says so.
+    """
+    if json_handler.save_path(_PROFILE_JSON, data):
+        return
+    logger.warning("[profile] user_profile.json write failed: %s", _PROFILE_JSON)
+    _fire_file_deleted(str(_PROFILE_JSON))
+    raise OSError(f"[profile] could not write {_PROFILE_JSON}")
 
 
 def _legacy_profile() -> dict:
