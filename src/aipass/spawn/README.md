@@ -168,6 +168,30 @@ drone @spawn --help                                            # Full help text
 drone @spawn --version                                         # Version string
 ```
 
+### Class registry — the gateway other branches import through
+
+`apps/handlers/` is internal to this branch; its `__init__` refuses cross-branch
+imports and points callers here. Other branches that need to resolve a
+`citizen_class` read spawn's registry through the modules gateway rather than
+mirroring the class table — a mirror makes the reader a fleet-wide single point
+of failure the moment spawn renames a class.
+
+```python
+from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+
+get_template_dir("specialist")        # -> Path(.../templates/citizen)
+get_template_dir("aipass_framework")  # -> ValueError naming the retired name AND 'specialist'
+get_template_dir("admin")             # -> ValueError, permanent refusal
+get_template_dir("wizard")            # -> ValueError listing the registered classes
+refuse_legacy_class("aipass_framework")  # -> the rename message
+refuse_legacy_class("specialist")        # -> "" (not a retired name)
+```
+
+`get_template_dir` already refuses forbidden, retired and unknown values by
+name, so "resolve, or tell me why not" is one call plus `try/except ValueError`.
+`refuse_legacy_class` is the separate lane for callers that must distinguish
+"this passport has not been migrated yet" from a hard error.
+
 ### Python API
 
 ```python
@@ -229,7 +253,7 @@ spawn/
 ├── templates/
 │   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 25 test files, 620 tests
+├── tests/                               # 27 test files, 696 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -290,7 +314,7 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**668 passed | 1 skipped | 0 failed** across 25 test files (669 collected — parametrized cases expand),
+**753 passed | 1 skipped | 0 failed** across 27 test files (754 collected — parametrized cases expand),
 measured 2026-08-28 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
 scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
 
@@ -299,6 +323,7 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
 | `test_json_handler.py` | JSON I/O, operation logging, standard API |
 | `test_handlers.py` | Handler function behavior and integration |
+| `test_modules_gateway.py` | The modules-package gateway other branches import through |
 | `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
 | `test_passport_birth_schema.py` | 2.0 block and key order on a newly minted passport |
 | `test_regenerate_registry_ops.py` | Template registry regeneration |
@@ -385,8 +410,8 @@ mandate.
 ## Metrics
 
 - **Seedgo:** 100% with bypasses, 98% without — both re-measured 2026-08-25 (17 live bypass rules; the two newest, `atomic_write.py` and `mint_verify.py`, date from 2026-08-16/17)
-- **Tests:** 668 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
-- **Module coverage:** 25/25 files (100%)
+- **Tests:** 753 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
+- **Module coverage:** 27/27 files (100%)
 - **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
