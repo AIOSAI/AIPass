@@ -77,7 +77,7 @@ UPS=$(jq -r '.hooks.UserPromptSubmit | length' "$SETTINGS" 2>/dev/null || echo 0
 if [ "$UPS" -ge 6 ]; then ok "UserPromptSubmit: $UPS entries"; else bad "UserPromptSubmit: $UPS entries (want >=6)"; fi
 
 PC=$(jq -r '.hooks.PreCompact | length' "$SETTINGS" 2>/dev/null || echo 0)
-if [ "$PC" -eq 6 ]; then ok "PreCompact: 6 entries"; else bad "PreCompact: $PC entries (want 6)"; fi
+if [ "$PC" -eq 8 ]; then ok "PreCompact: 8 entries"; else bad "PreCompact: $PC entries (want 8)"; fi
 
 # --- Phase 4: project hook config ---
 echo "--- Phase 4: project hook config ---"
