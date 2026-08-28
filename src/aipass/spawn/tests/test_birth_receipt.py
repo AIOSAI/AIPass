@@ -137,28 +137,41 @@ def test_spawn_does_not_import_memorys_receipt_handler():
 # =============================================================================
 
 
-@pytest.mark.parametrize("citizen_class", ["aipass_framework", "project_agent"])
+# There is ONE template on disk now (DPLAN-0319 R3) — the class-named dirs
+# retired to templates/.archive/ — so the seed checks below stop parametrizing
+# over classes and read the one citizen template. The "aipass new" divergence
+# the old project_agent seed carried retired with that template: a single seed
+# has nothing left to diverge from, so the normalisation for it is gone too.
+CITIZEN_TRINITY = SPAWN_TEMPLATES / "citizen" / ".trinity"
+
+
 @pytest.mark.parametrize(
     "seed_name,gold_name",
     [("local.json", "LOCAL.template.json"), ("observations.json", "OBSERVATIONS.template.json")],
 )
-def test_trinity_seed_matches_gold_template(citizen_class, seed_name, gold_name):
+def test_trinity_seed_matches_gold_template(seed_name, gold_name):
     """A seed that drifts from gold mints a citizen that fails the meta-line group."""
-    seed = (SPAWN_TEMPLATES / citizen_class / ".trinity" / seed_name).read_text(encoding="utf-8")
+    seed = (CITIZEN_TRINITY / seed_name).read_text(encoding="utf-8")
     gold = (GOLD_DIR / gold_name).read_text(encoding="utf-8")
     # spawn's engine maps BRANCHNAME->UPPER and BRANCH->lower; gold renders lowercase
     normalized = seed.replace("{{BRANCH}}", "{{BRANCHNAME}}")
-    # project_agent is born by `aipass new`, not `aipass init` — the only sanctioned divergence
-    normalized = normalized.replace("created by aipass new.", "created by aipass init.")
     assert normalized == gold
 
 
-@pytest.mark.parametrize("citizen_class", ["aipass_framework", "project_agent"])
 @pytest.mark.parametrize("seed_name", ["local.json", "observations.json"])
-def test_trinity_seed_carries_no_status_block(citizen_class, seed_name):
+def test_trinity_seed_carries_no_status_block(seed_name):
     """document_metadata.status is deleted by the standard — health is computed."""
-    seed = json.loads((SPAWN_TEMPLATES / citizen_class / ".trinity" / seed_name).read_text(encoding="utf-8"))
+    seed = json.loads((CITIZEN_TRINITY / seed_name).read_text(encoding="utf-8"))
     assert "status" not in seed["document_metadata"]
+
+
+def test_the_one_template_is_what_every_class_mints_from():
+    """Guard the collapse above: if a class ever gets its own dir again, the two
+    seed checks would be silently testing only one of them."""
+    from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+
+    for citizen_class in get_available_classes():
+        assert get_template_dir(citizen_class) / ".trinity" == CITIZEN_TRINITY
 
 
 # =============================================================================

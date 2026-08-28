@@ -475,7 +475,27 @@ class TestFailedWriteKeepsOldContent:
         assert _stray_temps(tmp_path) == []
 
     def test_failed_passport_write_keeps_old_passport(self, passport_world, monkeypatch):
-        """RED before the fix: the citizen's identity file was left empty."""
+        """RED before the fix: the citizen's identity file was left empty.
+
+        The durability property is unchanged and still the whole point: the write
+        that FAILS must leave the previous file intact, never a truncated husk.
+
+        What changed is the snapshot this used to compare against. ``fix_owner_identity``
+        makes TWO independent writes to this passport, and only the first one carries
+        SENTINEL:
+
+          1. align citizenship.registry_id to the registry's metadata.id — the
+             registry id IS the sentinel here, so this write is the one that dies;
+          2. migrate a retired identity.citizen_class to its live replacement
+             (DPLAN-0319 extended this from builder→aipass_framework to
+             aipass_framework→specialist). The fixture passport says
+             "aipass_framework", so this write legitimately fires and legitimately
+             SUCCEEDS — it carries no sentinel and nothing is failing it.
+
+        A flat ``== before`` therefore asserted the second write never happened,
+        which is a claim about the migration, not about durability. The fields are
+        pinned separately instead, so a regression in either one is named.
+        """
         from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         passport = passport_world["passport"]
@@ -484,12 +504,23 @@ class TestFailedWriteKeepsOldContent:
         data["metadata"]["id"] = SENTINEL
         reg.write_text(json.dumps(data), encoding="utf-8")
         before = json.loads(passport.read_text(encoding="utf-8"))
+        assert before["identity"]["citizen_class"] == "aipass_framework", "fixture no longer exercises the migration"
 
         with write_fails_midway(monkeypatch):
             fix_owner_identity(registry_path=reg, dry_run=False)
 
+        after = json.loads(passport.read_text(encoding="utf-8"))
+
+        # DURABILITY — the failed write neither truncated the file nor landed.
         assert passport.read_text(encoding="utf-8") != ""
-        assert json.loads(passport.read_text(encoding="utf-8")) == before
+        assert after["citizenship"] == before["citizenship"]
+        assert after["citizenship"]["registry_id"] != SENTINEL
+        # The bulky payload the truncation used to destroy survives byte for byte.
+        assert after["identity"]["traits"] == before["identity"]["traits"]
+
+        # The one legitimate difference: the separate, successful class migration.
+        assert after["identity"]["citizen_class"] == "specialist"
+        assert after == {**before, "identity": {**before["identity"], "citizen_class": "specialist"}}
 
     def test_failed_json_merge_keeps_old_file(self, merge_world, monkeypatch):
         """RED before the fix: the branch's live JSON was left empty."""

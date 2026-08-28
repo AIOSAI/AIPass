@@ -30,13 +30,15 @@ WHEN YOU'RE DONE:
 
 ## Identity
 
-*One line. Who you are and what your role is. This is the first thing the agent reads every turn — make it count.*
+*One line. Who you are and what your role is. This is the first thing the agent reads every turn — make it count.
+Your class — manager or specialist — is in `.trinity/passport.json` under `identity.citizen_class`.*
 
 You are {{BRANCHNAME}} — {one-line role description}.
 
 ## What I Do
 
-*3-5 bullets covering what happens in this branch. Not a mission statement — concrete actions. Think "if someone asked what this branch does day-to-day, what would you say?"*
+*3-5 bullets covering what happens in this branch. Not a mission statement — concrete actions. Think "if someone asked what this branch does day-to-day, what would you say?"
+If you are this project's manager, coordinating the work and holding the project's context belong in this list; a specialist lists its own domain instead. Either way, routing commands to your discovered modules is one of them.*
 
 - {Primary responsibility}
 - {Secondary responsibility}
@@ -70,7 +72,7 @@ apps/
 
 *Which branches you depend on or serve. Every branch connects to others — document those relationships so the agent knows who to ask and who's asking.*
 
-- **Depends on:** @{branch} for {what}, @{branch} for {what}
+- **Depends on:** @prax for logging, @cli for console output, @{branch} for {what}
 - **Serves:** @{branch} uses my {feature}, @{branch} calls my {command}
 
 ## Working Habits
@@ -84,7 +86,8 @@ apps/
 
 *Non-obvious quirks, hard-won lessons, things that will waste 20 minutes if you don't know them. These are the breadcrumbs that save time — the stuff you'd tell a new agent on day one.*
 
-- You do not arm watchdogs — that is the project owner's seat (the citizen marked `owner: true`
-  in the project registry). After dispatching, expect the reply as mail: `drone @ai_mail inbox`
+- Arming watchdogs is the project owner's seat — the citizen marked `owner: true` in the project
+  registry, normally the manager. If that is not you, dispatch instead and expect the reply as
+  mail: `drone @ai_mail inbox`
 - {Gotcha or non-obvious behavior}
 - {Hard-won lesson from a past session}

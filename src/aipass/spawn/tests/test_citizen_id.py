@@ -115,13 +115,17 @@ def test_supplied_citizen_id_is_not_overwritten_by_a_fresh_mint(tmp_path):
 # =============================================================================
 
 
-def test_both_templates_declare_citizen_id():
-    """Every class must stamp the field, or that class's births render no number."""
-    from pathlib import Path
+def test_every_class_declares_citizen_id():
+    """Every class must stamp the field, or that class's births render no number.
 
-    templates = Path(__file__).resolve().parents[1] / "templates"
-    for citizen_class in ("aipass_framework", "project_agent"):
-        passport = templates / citizen_class / ".trinity" / "passport.json"
+    There is one template dir now (DPLAN-0319 R3), but the loop stays over the
+    CLASSES rather than the directory: the day a class stops resolving to it,
+    this fails instead of quietly checking the same file twice.
+    """
+    from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+
+    for citizen_class in get_available_classes():
+        passport = get_template_dir(citizen_class) / ".trinity" / "passport.json"
         citizenship = json.loads(passport.read_text(encoding="utf-8"))["citizenship"]
 
         assert citizenship["citizen_id"] == "{{CITIZEN_ID}}", f"{citizen_class} does not stamp citizen_id"

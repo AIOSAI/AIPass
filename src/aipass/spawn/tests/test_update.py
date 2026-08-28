@@ -145,9 +145,9 @@ def branch_dir(tmp_path):
                 "branch_info": {
                     "branch_name": "test_branch",
                     "email": "@test_branch",
-                    "git_branch": "work/test_branch",
+                    "git_branch": "dev",
                 },
-                "identity": {"citizen_class": "aipass_framework", "role": "test", "traits": ""},
+                "identity": {"citizen_class": "specialist", "role": "test", "traits": []},
             },
             indent=2,
         )
@@ -711,6 +711,6 @@ class TestHandleUpdate:
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
         ):
-            result = handle_update(["aipass_framework", "--all"])
+            result = handle_update(["specialist", "--all"])
 
         assert result == 0

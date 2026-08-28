@@ -51,7 +51,7 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     on content hash first, then path, before assigning new IDs.
 
     Args:
-        template_dir: Absolute path to the template directory (e.g. aipass_framework/).
+        template_dir: Absolute path to the template directory (e.g. templates/citizen/).
 
     Returns:
         dict with keys: metadata, files, directories, stats.

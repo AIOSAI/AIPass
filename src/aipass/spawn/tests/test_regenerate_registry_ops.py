@@ -561,10 +561,15 @@ class TestScanTemplateDirectoryOrdering:
 
 
 def _shipped_registry_path() -> Path:
-    """Path to the real aipass_framework template registry that spawn ships."""
-    import aipass.spawn
+    """Path to the real citizen template registry that spawn ships.
 
-    return Path(aipass.spawn.__file__).parent / "templates" / "aipass_framework" / ".spawn" / ".template_registry.json"
+    One template dir for both classes since DPLAN-0319 R3 — the class-named dirs
+    are archived, so this reads the live one through the class registry rather
+    than hardcoding a name that a rename would point at nothing.
+    """
+    from aipass.spawn.apps.handlers.class_registry import get_template_dir
+
+    return get_template_dir() / ".spawn" / ".template_registry.json"
 
 
 class TestHandleRegenerateRegistry:
@@ -612,13 +617,22 @@ class TestHandleRegenerateRegistry:
 
         assert shipped.read_bytes() == before
 
-    def test_default_regenerates_aipass_framework(self):
+    def test_default_regenerates_the_default_class(self):
         result = handle_regenerate_registry([])
         assert result == 0
 
-    def test_explicit_aipass_framework(self):
-        result = handle_regenerate_registry(["aipass_framework"])
+    def test_explicit_specialist(self):
+        result = handle_regenerate_registry(["specialist"])
         assert result == 0
+
+    def test_explicit_manager(self):
+        result = handle_regenerate_registry(["manager"])
+        assert result == 0
+
+    def test_retired_class_returns_error(self):
+        """A retired name is refused like any other unknown class — never mapped."""
+        result = handle_regenerate_registry(["aipass_framework"])
+        assert result == 1
 
     def test_all_flag(self):
         result = handle_regenerate_registry(["--all"])

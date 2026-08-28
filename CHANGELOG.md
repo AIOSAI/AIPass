@@ -9,6 +9,39 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319)
+
+**The rulings (Patrick live, 2026-08-27 night)** — devpulse's passport becomes
+the 2.0 schema: machine facts on top (document_metadata → branch_info →
+citizenship), agent-written soul below (identity, with principles moved
+inside); classes become `manager | specialist` (aipass_framework renames —
+"every branch is an expert in its domain"); new `citizenship.residency`
+(core / resident / external) splits the job from the posting; ONE template
+replaces the aipass_framework/project_agent fork — the first agent minted in
+a project gets manager, every later one specialist; new projects get main +
+dev at creation and every agent defaults to `git_branch: dev`.
+
+**spawn — the epicenter build**: new `templates/citizen/` (both classes mint
+from it; old template dirs archived, never deleted); class_registry reworked
+with loud refusal of legacy names; the first-agent rule wired from the
+already-computed `citizen_number == 1` signal — and a CLI default that was
+silently defeating it fixed and pinned both directions; a dedicated one-shot
+migration tool (`migrate-passports`, dry-run default, per-file
+`.pre_v2_backup`, idempotent across a date roll, 20/20 mutations bite) built
+but NOT run — the fleet flip is its own GO. Dry-run receipt over the live
+fleet: 22/22 would change, 0 errors, 0 unrecognised fields. Beyond the brief:
+resident passports' hardcoded absolute paths cured by a general relative-path
+rule, and `sync-registry --fix` (a second fleet-write path) now takes the
+same backups first. 668 tests passed / 1 skipped, re-run identically from
+branch dir and repo root by devpulse.
+
+**hooks — the silent-vanish fix, landed first**: identity injection read
+top-level `principles` only; post-migration the Principles line would have
+silently vanished from every agent's injected prompt. Now reads
+identity-first with top-level fallback — both layouts render byte-identical,
+proven against real passports. 1709 passed / 2 skipped, re-run exactly by
+devpulse; 4/4 mutations bite.
+
 ## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
 
 **CI round 2, four fixes in one evening (PR #743 merge prep)** — the full

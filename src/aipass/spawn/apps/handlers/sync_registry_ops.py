@@ -38,17 +38,25 @@ from aipass.spawn.apps.handlers.meta_ops import (
 )
 from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
-from aipass.spawn.apps.handlers.class_registry import get_template_dir, refuse_forbidden_class
+from aipass.spawn.apps.handlers.passport_migration import backup_passport
+from aipass.spawn.apps.handlers.class_registry import (
+    LEGACY_CLASSES,
+    get_template_dir,
+    refuse_retired_or_forbidden,
+)
 from aipass.spawn.apps.handlers.json import json_handler
 
 
 def resolve_sync_template_class(citizen_class: str, branch_name: str) -> Path:
     """Resolve a passport's citizen_class to a template dir for a sync rebuild.
 
-    A merely-unknown class still falls back to aipass_framework (sync repairs
-    drifted branches; a stale class name shouldn't block the repair). A
-    FORBIDDEN class does not: "admin" is a devpulse-only registry privilege,
-    so sync refuses to scaffold anything claiming it (DPLAN-0288).
+    NO FALLBACK (DPLAN-0319). This used to guess ``aipass_framework`` for any
+    unrecognised class on the reasoning that a stale name should not block a
+    repair — but a guess writes .branch_meta.json against a template the
+    passport never claimed, so the branch reads as "repaired" while tracking the
+    wrong contract. It also guessed a value that is now a DEAD name. House law
+    is fail-loud: an unknown, retired or forbidden class raises, and the caller
+    skips that branch with the reason on the record.
 
     Args:
         citizen_class: The value read from the branch's passport.
@@ -58,19 +66,21 @@ def resolve_sync_template_class(citizen_class: str, branch_name: str) -> Path:
         Path to the template directory to rebuild against.
 
     Raises:
-        ValueError: The class is forbidden — caller must skip this branch.
+        ValueError: The class is forbidden, retired, or unknown — caller must
+            skip this branch and say why.
     """
-    refusal = refuse_forbidden_class(citizen_class)
+    refusal = refuse_retired_or_forbidden(citizen_class)
     if refusal:
         raise ValueError(f"{branch_name}: {refusal}")
 
     try:
         return get_template_dir(citizen_class)
-    except ValueError:
-        logger.warning(
-            f"[sync-registry] Unknown class '{citizen_class}' for {branch_name}, falling back to aipass_framework"
-        )
-        return get_template_dir("aipass_framework")
+    except ValueError as exc:
+        raise ValueError(
+            f"{branch_name}: cannot resolve a template — {exc} "
+            f"Spawn will not guess a class for a passport that does not declare a known one; "
+            f"fix {branch_name}'s passport identity.citizen_class, then re-run sync."
+        ) from exc
 
 
 def _derive_description(branch_path: Path) -> str:
@@ -310,18 +320,35 @@ def sync_registry(fix: bool = False) -> dict:
             # Check/rebuild .spawn/.branch_meta.json
             branch_meta_path = spawn_dir / ".branch_meta.json"
             if not branch_meta_path.exists():
-                # Determine citizen class from passport
+                # Determine citizen class from the passport — no default. A
+                # branch whose passport is missing, unreadable, or silent about
+                # its class gets SKIPPED with the reason named, never scaffolded
+                # against a guessed class (DPLAN-0319, house law: fail loud).
                 passport_path = branch_path / ".trinity" / "passport.json"
-                citizen_class = "aipass_framework"  # default
-                if passport_path.exists():
-                    try:
-                        passport = json.loads(passport_path.read_text(encoding="utf-8"))
-                        citizen_class = passport.get("identity", {}).get("citizen_class", "aipass_framework")
-                    except (json.JSONDecodeError, IOError) as e:
-                        logger.warning(f"Failed to read passport for citizen class detection ({name}): {e}")
+                if not passport_path.exists():
+                    logger.error(
+                        f"[sync-registry] {name}: no .trinity/passport.json — cannot resolve a citizen class, "
+                        f".spawn/.branch_meta.json not rebuilt."
+                    )
+                    continue
+                try:
+                    passport = json.loads(passport_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.error(
+                        f"[sync-registry] {name}: passport unreadable ({e}) — cannot resolve a citizen class, "
+                        f".spawn/.branch_meta.json not rebuilt."
+                    )
+                    continue
+                citizen_class = passport.get("identity", {}).get("citizen_class", "")
+                if not citizen_class:
+                    logger.error(
+                        f"[sync-registry] {name}: passport declares no identity.citizen_class — "
+                        f".spawn/.branch_meta.json not rebuilt."
+                    )
+                    continue
 
-                # Resolve the template for that class — forbidden classes refuse
-                # loudly and skip the branch rather than being scaffolded.
+                # Resolve the template for that class — forbidden, retired and
+                # unknown classes refuse loudly and skip the branch.
                 try:
                     template_dir = resolve_sync_template_class(citizen_class, name)
                 except ValueError as e:
@@ -639,7 +666,14 @@ def fix_owner_identity(registry_path=None, dry_run=False):
 
     actions.extend(passport_actions)
 
-    # --- migrate legacy citizen_class "builder" → "aipass_framework" ---
+    # --- migrate retired citizen_class values → the live class names ---
+    #
+    # This block used to rewrite "builder" → "aipass_framework". That target is
+    # now itself a DEAD name (DPLAN-0319 R4), so the migration was writing one
+    # retired value over another. Both retired values now land on "specialist";
+    # "manager" is a live class and is left alone. LEGACY_CLASSES is the single
+    # source of the old→new map — the same table refuse_legacy_class() quotes,
+    # so a rename can never be applied here and refused there.
     for branch in branches:
         branch_dir = project_root / branch.get("path", "")
         passport_path = branch_dir / ".trinity" / "passport.json"
@@ -651,16 +685,25 @@ def fix_owner_identity(registry_path=None, dry_run=False):
             logger.warning("[fix-identity] Cannot read passport for migration: %s", e)
             continue
         current_class = passport.get("identity", {}).get("citizen_class", "")
-        if current_class != "builder":
+        new_class = LEGACY_CLASSES.get(current_class)
+        if not new_class:
             continue
-        passport.setdefault("identity", {})["citizen_class"] = "aipass_framework"
+        passport.setdefault("identity", {})["citizen_class"] = new_class
         if not dry_run:
             try:
+                # `sync-registry --fix` is a SECOND fleet-write path onto live
+                # passports (sync_registry.py:174 calls this with dry_run=False),
+                # and it lands the same rename the 2.0 migration does. Back the
+                # file up first, through the migration's own helper: same
+                # .pre_v2_backup name, and it never overwrites an existing one,
+                # so whichever path touches a passport first owns the true
+                # pre-migration original and the other cannot destroy it.
+                backup_passport(passport_path)
                 atomic_write_text(passport_path, json.dumps(passport, indent=2, ensure_ascii=False))
-            except IOError as e:
+            except (IOError, OSError) as e:
                 logger.warning("[fix-identity] Failed to migrate citizen_class for %s: %s", branch.get("name", "?"), e)
                 continue
-        actions.append(f"Migrate citizen_class for {branch.get('name', '?')}: builder → aipass_framework")
+        actions.append(f"Migrate citizen_class for {branch.get('name', '?')}: {current_class} → {new_class}")
 
     applied = False
     if registry_changed and not dry_run:

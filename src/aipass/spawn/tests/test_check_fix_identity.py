@@ -24,7 +24,7 @@ def _write_registry(tmp_path, metadata=None, branches=None):
     return reg
 
 
-def _make_branch(tmp_path, name, rel_path, citizen_class="aipass_framework", passport_rid=""):
+def _make_branch(tmp_path, name, rel_path, citizen_class="specialist", passport_rid=""):
     """Helper: create a branch directory with passport on disk."""
     branch_dir = tmp_path / rel_path
     trinity = branch_dir / ".trinity"
@@ -455,34 +455,74 @@ class TestFixOwnerIdentity:
 
 
 class TestLegacyCitizenClassMigration:
-    """Tests for builder → aipass_framework passport migration."""
+    """Tests for retired-citizen_class passport migration.
 
-    def test_migrates_builder_to_aipass_framework(self, tmp_path):
+    CONTRACT MOVED (DPLAN-0319 R4). This block used to pin builder →
+    aipass_framework. That target is itself a retired name now, so the migration
+    was rewriting one dead value over another: both land on "specialist", while
+    "project_agent" lands on "manager" and the live classes are left alone.
+    """
+
+    def test_migrates_every_retired_name_to_its_live_replacement(self, tmp_path):
         from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         _make_branch(tmp_path, "vera", "src/vera", citizen_class="builder", passport_rid="proj-id")
-        _make_branch(tmp_path, "writer", "src/writer", citizen_class="builder", passport_rid="proj-id")
-        _make_branch(tmp_path, "modern", "src/modern", citizen_class="aipass_framework", passport_rid="proj-id")
+        _make_branch(tmp_path, "writer", "src/writer", citizen_class="aipass_framework", passport_rid="proj-id")
+        _make_branch(tmp_path, "pilot", "src/pilot", citizen_class="project_agent", passport_rid="proj-id")
+        _make_branch(tmp_path, "modern", "src/modern", citizen_class="specialist", passport_rid="proj-id")
+        _make_branch(tmp_path, "boss", "src/boss", citizen_class="manager", passport_rid="proj-id")
         reg = _write_registry(
             tmp_path,
             metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
             branches=[
                 _entry("vera", "src/vera", owner=True, registry_id="uid-v"),
                 _entry("writer", "src/writer", registry_id="uid-w"),
+                _entry("pilot", "src/pilot", registry_id="uid-p"),
                 _entry("modern", "src/modern", registry_id="uid-m"),
+                _entry("boss", "src/boss", registry_id="uid-b"),
             ],
         )
 
         result = fix_owner_identity(registry_path=reg)
         assert any("Migrate" in a and "vera" in a for a in result["actions"])
         assert any("Migrate" in a and "writer" in a for a in result["actions"])
+        assert any("Migrate" in a and "pilot" in a for a in result["actions"])
+        # Live classes are never "migrated" — that would be a rewrite, not a rename.
         assert not any("modern" in a and "Migrate" in a for a in result["actions"])
+        assert not any("boss" in a and "Migrate" in a for a in result["actions"])
 
-        vera_passport = json.loads((tmp_path / "src/vera/.trinity/passport.json").read_text(encoding="utf-8"))
-        assert vera_passport["identity"]["citizen_class"] == "aipass_framework"
+        def _class_of(rel):
+            return json.loads((tmp_path / rel / ".trinity/passport.json").read_text(encoding="utf-8"))["identity"][
+                "citizen_class"
+            ]
 
-        modern_passport = json.loads((tmp_path / "src/modern/.trinity/passport.json").read_text(encoding="utf-8"))
-        assert modern_passport["identity"]["citizen_class"] == "aipass_framework"
+        assert _class_of("src/vera") == "specialist"
+        assert _class_of("src/writer") == "specialist"
+        assert _class_of("src/pilot") == "manager"
+        assert _class_of("src/modern") == "specialist"
+        assert _class_of("src/boss") == "manager"
+
+    def test_migration_backs_the_passport_up_before_rewriting_it(self, tmp_path):
+        """A second fleet-write path onto live passports must leave a pre-v2 original.
+
+        `sync-registry --fix` lands the same rename the 2.0 migration tool does, so
+        it takes the same backup under the same trinity-legal suffix — whichever
+        path touches a passport first owns the true original.
+        """
+        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+
+        _make_branch(tmp_path, "alpha", "src/alpha", citizen_class="aipass_framework", passport_rid="proj-id")
+        reg = _write_registry(
+            tmp_path,
+            metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
+            branches=[_entry("alpha", "src/alpha", owner=True, registry_id="uid-a")],
+        )
+
+        fix_owner_identity(registry_path=reg)
+
+        backup = tmp_path / "src/alpha/.trinity/passport.json.pre_v2_backup"
+        assert backup.exists(), "the rewrite left no pre-migration original"
+        assert json.loads(backup.read_text(encoding="utf-8"))["identity"]["citizen_class"] == "aipass_framework"
 
     def test_migration_idempotent(self, tmp_path):
         from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
@@ -577,7 +617,7 @@ class TestUnifiedOwnerHeuristic:
         from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
         from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
-        _make_branch(tmp_path, "older", "src/older", citizen_class="aipass_framework")
+        _make_branch(tmp_path, "older", "src/older", citizen_class="specialist")
         _make_branch(tmp_path, "newer", "src/newer", citizen_class="manager")
 
         branches = [

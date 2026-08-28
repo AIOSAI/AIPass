@@ -58,11 +58,14 @@ from aipass.spawn.apps.handlers.class_registry import (
     get_default_class as get_default_class,
     get_available_classes as get_available_classes,
     refuse_forbidden_class as refuse_forbidden_class,
+    refuse_retired_or_forbidden as refuse_retired_or_forbidden,
+    class_for_citizen_number as class_for_citizen_number,
 )
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Default template location (relative to spawn package root)
-DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "aipass_framework"
+# Default template location (relative to spawn package root). One template for
+# every citizen — the class no longer picks a scaffold (DPLAN-0319 R3).
+DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "citizen"
 
 _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
@@ -174,6 +177,13 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 2
             elif args[i] == "--template" and i + 1 < len(args):
                 template_val = args[i + 1]
+                # A retired class name reaching here would otherwise be read as a
+                # DIRECTORY path and fail with "Template not found: aipass_framework",
+                # naming the wrong problem. Refuse by name instead (DPLAN-0319).
+                refusal = refuse_retired_or_forbidden(template_val)
+                if refusal:
+                    logger.error(refusal)
+                    return False
                 if validate_class(template_val):
                     kwargs["citizen_class"] = template_val
                 else:
@@ -194,12 +204,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 def _spawn_agent(
     target_path,
     role="",
-    traits="",
+    traits: str | list[str] | tuple[str, ...] = "",
     purpose="",
     profile=None,
     template_dir=None,
     registry_path=None,
-    citizen_class="aipass_framework",
+    citizen_class=None,
 ):
     """
     Create a new AIPass agent from template.
@@ -207,12 +217,21 @@ def _spawn_agent(
     Args:
         target_path: Where to create the agent (must not exist)
         role: Agent's role description
-        traits: Agent's personality traits
+        traits: Agent's personality traits. A bare string becomes a one-element
+            list; a list/tuple is stored as given. identity.traits is a LIST in
+            the 2.0 schema (DPLAN-0319 R7), and the annotation says so — the
+            list branch below has always been reachable from the Python API, it
+            was just invisible to a type checker reading the ``""`` default.
         purpose: Agent's purpose (brief description)
         profile: AIPass profile override (default: auto-detect)
-        template_dir: Custom template directory (default: class-based lookup)
+        template_dir: Custom template directory (default: the citizen template)
         registry_path: Path to AIPASS_REGISTRY.json (default: auto-discover)
-        citizen_class: Citizen class name (default: "aipass_framework")
+        citizen_class: Explicit citizen class ("manager" or "specialist").
+            Default None means DECIDE AT MINT from the citizen number — the
+            project's first citizen is its manager, everyone after is a
+            specialist (DPLAN-0319 R3). An explicit value still wins; a retired
+            name ("aipass_framework", "project_agent", "builder") is refused by
+            name, never quietly translated.
 
     Returns:
         Dict with creation results:
@@ -224,11 +243,15 @@ def _spawn_agent(
             - validation_issues: list
             - error: str (only if success=False)
     """
-    # Forbidden values refuse before any filesystem work — "admin" is a
-    # devpulse-only registry privilege, never a class and never a template
-    # directory (DPLAN-0288). Both doors are checked, including the API.
+    # Forbidden and RETIRED values refuse before any filesystem work — "admin" is
+    # a devpulse-only registry privilege, never a class and never a template
+    # directory (DPLAN-0288); "aipass_framework"/"project_agent"/"builder" are
+    # renamed classes that spawn refuses to translate silently (DPLAN-0319 R4).
+    # Both doors are checked, including the API — @aipass's new_project still
+    # passes citizen_class="project_agent" today, and a loud refusal is the
+    # correct answer until its parallel fix lands.
     for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
-        refusal = refuse_forbidden_class(candidate)
+        refusal = refuse_retired_or_forbidden(candidate)
         if refusal:
             return _error(refusal)
 
@@ -236,7 +259,9 @@ def _spawn_agent(
     if template_dir:
         template = Path(template_dir)
     else:
-        template = _get_template_dir(citizen_class)
+        # Both classes share one template dir, so this lookup is class-independent
+        # — the real class decision happens at mint, once citizen_number is known.
+        template = _get_template_dir(citizen_class or get_default_class())
 
     # Guard: block creating agent inside another agent's directory
     for parent in target.parents:
@@ -290,20 +315,27 @@ def _spawn_agent(
     # facts would be two different UUIDs for one citizen.
     citizen_id = str(uuid.uuid4())
 
+    # The class is decided HERE, at mint, from the citizen number: a project's
+    # first citizen manages it, everyone after is a specialist (DPLAN-0319 R3).
+    # citizen_number is only known now — after the registry was resolved — which
+    # is why the decision cannot live in the signature default. An explicit
+    # caller-supplied class still wins; retired names already refused above.
+    resolved_class = citizen_class or class_for_citizen_number(citizen_number)
+
     # Build placeholder replacements
     meta_tabs = _load_meta_tabs()
     replacements = build_replacements_dict(
         target,
         folder_name,
         role=role,
-        traits=traits,
         purpose=purpose or "New agent - purpose TBD",
         profile=detected_profile,
         citizen_number=citizen_number,
-        citizen_class=citizen_class,
+        citizen_class=resolved_class,
         meta_tabs=meta_tabs,
         registry_id=resolved_registry_id,
         citizen_id=citizen_id,
+        registry_path=reg_path,
     )
 
     # Step 1: Copy template with placeholder replacement in content
@@ -313,13 +345,30 @@ def _spawn_agent(
     # Step 2: Rename any {{BRANCH}} dirs/files that weren't caught by path replacement
     renamed = rename_placeholder_paths(target, folder_name)
 
-    # Step 2b: Set owner field — first agent in the project is the owner
-    passport_path = target / ".trinity" / "passport.json"
-    if passport_path.exists():
-        passport_data = json_handler.read_json(passport_path)
+    # Step 2b: Write caller-supplied traits into the passport.
+    #
+    # citizenship.owner used to be written here. R8 DROPPED that field from the
+    # schema — the registry entry's owner:true flag (ensure_project_has_owner,
+    # step 5) is the sealed authority and a second copy in the passport was a
+    # self-declared duplicate of it.
+    #
+    # traits is a post-render write because the 2.0 template makes identity.traits
+    # an empty LIST and no longer carries a {{TRAITS}} placeholder. Without this,
+    # `spawn create --traits ...` would accept the value and silently drop it.
+    traits_issues = []
+    if traits:
+        passport_path = target / ".trinity" / "passport.json"
+        passport_data = json_handler.read_json(passport_path) if passport_path.exists() else None
         if passport_data:
-            passport_data.setdefault("citizenship", {})["owner"] = citizen_number == 1
-            json_handler.write_json(passport_path, passport_data)
+            passport_data.setdefault("identity", {})["traits"] = (
+                list(traits) if isinstance(traits, (list, tuple)) else [traits]
+            )
+            if not json_handler.write_json(passport_path, passport_data):
+                traits_issues.append(f"Traits not written to passport: {passport_path} could not be saved")
+        else:
+            traits_issues.append(f"Traits not written to passport: no readable passport at {passport_path}")
+        for issue in traits_issues:
+            logger.warning("[spawn] %s", issue)
 
     # Step 3: Regenerate .template_registry.json with fresh hashes
     regenerate_template_registry(target)
@@ -384,7 +433,7 @@ def _spawn_agent(
     ensure_project_has_owner(reg_path)
 
     # Step 6: Validate no unreplaced placeholders
-    issues = validate_no_placeholders(target) + receipt_issues
+    issues = validate_no_placeholders(target) + receipt_issues + traits_issues
 
     # Birth is observable: the log names who was born, where, and which trinity
     # template version they carry. @trigger's bus has no subscriber for a birth
@@ -393,7 +442,7 @@ def _spawn_agent(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
         branch_upper,
         target,
-        citizen_class,
+        resolved_class,
         citizen_number,
         receipt_result.get("receipt", {}).get("template_versions") if receipt_result["success"] else "NOT STAMPED",
     )
@@ -401,7 +450,7 @@ def _spawn_agent(
         "branch_created",
         data={
             "branch": branch_upper,
-            "citizen_class": citizen_class,
+            "citizen_class": resolved_class,
             "receipt": receipt_result.get("receipt", {}).get("template_versions", {}),
         },
     )

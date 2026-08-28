@@ -35,6 +35,7 @@ def print_help():
     console.print(
         "  [dim]drone @spawn repair <project_path> [--clean-pollution | --relocate @branch <path>] [--apply][/dim]"
     )
+    console.print("  [dim]drone @spawn migrate-passports [--dry-run|--confirm] [--root <path>] [--only <branch>][/dim]")
     console.print("  [dim]drone @spawn --help[/dim]")
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
@@ -49,6 +50,10 @@ def print_help():
     console.print("  [green]sync-registry[/green]                 Repair registry against filesystem")
     console.print("  [green]regenerate-registry[/green]           Regenerate template registry hashes")
     console.print(
+        "  [green]migrate-passports[/green]             Migrate every fleet passport to schema 2.0 "
+        "(preview; add --confirm)"
+    )
+    console.print(
         "  [green]repair[/green] <project_path>           Scan project structure — paths/registry/pollution (read-only)"
     )
     console.print(
@@ -61,8 +66,12 @@ def print_help():
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
+    console.print("  [green]manager[/green]     A project's first citizen — manages the project")
+    console.print("  [green]specialist[/green]  Domain specialist — every citizen after the first [dim][default][/dim]")
+    console.print()
     console.print(
-        "  [green]aipass_framework[/green]  Full 3-layer scaffold (apps/, modules/, handlers/) [dim][default][/dim]"
+        "  [dim]Both classes mint from the one template (templates/citizen/). Omit the class and "
+        "spawn decides at mint from the citizen number.[/dim]"
     )
     console.print()
     console.print("[bold cyan]OPTIONS:[/bold cyan]")
@@ -71,7 +80,7 @@ def print_help():
     console.print("  [green]--role[/green]      Agent role description")
     console.print("  [green]--traits[/green]    Agent personality traits")
     console.print("  [green]--purpose[/green]   Agent purpose (brief)")
-    console.print("  [green]--template[/green]  Template class name (aipass_framework) or custom directory path")
+    console.print("  [green]--template[/green]  Template class name (manager, specialist) or custom directory path")
     console.print("  [green]--registry[/green]  Path to AIPASS_REGISTRY.json")
     console.print("  [green]--apply[/green]     Execute changes (update/repair are preview-only by default)")
     console.print("  [green]--dry-run[/green]   Preview changes without modifying files (default for update/repair)")
@@ -156,9 +165,8 @@ def handle_create(args):
     from aipass.spawn.apps.modules.core import _spawn_agent as spawn_agent
     from aipass.spawn.apps.modules.core import (
         validate_class,
-        get_default_class,
         get_available_classes,
-        refuse_forbidden_class,
+        refuse_retired_or_forbidden,
     )
 
     if not args:
@@ -170,16 +178,27 @@ def handle_create(args):
         print_help()
         return 0
 
-    # Forbidden class/template values refuse here — before argparse turns
-    # "admin" into a target path or a raw template directory (DPLAN-0288).
+    # Forbidden AND retired class/template values refuse here — before argparse
+    # turns "admin" into a target path or a raw template directory (DPLAN-0288),
+    # and before a retired name like "aipass_framework" falls through to the
+    # parser and dies as a bare SystemExit(2) instead of saying what happened
+    # to it (DPLAN-0319 R4).
     for value in _class_candidates(args):
-        refusal = refuse_forbidden_class(value)
+        refusal = refuse_retired_or_forbidden(value)
         if refusal:
             error(refusal)
             return 1
 
-    # Check if first arg is a citizen class
-    citizen_class = get_default_class()
+    # Check if first arg is a citizen class.
+    #
+    # None means "no class was typed — decide at mint from the citizen number"
+    # (DPLAN-0319 R3: a project's first citizen is its manager, everyone after is
+    # a specialist). This used to seed get_default_class() here, which handed
+    # _spawn_agent an EXPLICIT "specialist" on every CLI create — and an explicit
+    # class always wins, so the mint-time decision could never fire through the
+    # CLI. `drone @spawn create ./firstborn` in a fresh project minted a
+    # specialist with no manager anywhere in it.
+    citizen_class = None
     remaining_args = args
     if validate_class(args[0]):
         citizen_class = args[0]
@@ -219,7 +238,7 @@ def handle_create(args):
 
     parsed = parser.parse_args(remaining_args)
 
-    # --template can be a class name (e.g. "aipass_framework") or a raw path
+    # --template can be a class name (e.g. "specialist") or a raw path
     template_dir = parsed.template
     if parsed.template and validate_class(parsed.template):
         citizen_class = parsed.template
@@ -255,12 +274,24 @@ def handle_create(args):
 
 
 def _dry_run_create(target_path, citizen_class, parsed):
-    """Preview what create would do without making changes."""
+    """Preview what create would do without making changes.
+
+    ``citizen_class`` is None when the caller typed no class — the real class is
+    then decided at mint from the citizen number, which needs a registry read the
+    preview deliberately does not do. The preview says so instead of guessing.
+    Both classes share one template dir, so the template shown is right either way.
+    """
     from pathlib import Path
-    from aipass.spawn.apps.modules.core import _get_template_dir, get_branch_name, normalize_branch_name
+    from aipass.spawn.apps.modules.core import (
+        _get_template_dir,
+        get_branch_name,
+        get_default_class,
+        normalize_branch_name,
+    )
 
     target = Path(target_path).resolve()
-    template = _get_template_dir(citizen_class)
+    template = _get_template_dir(citizen_class or get_default_class())
+    class_display = citizen_class or "decided at mint (manager if first citizen in the project, else specialist)"
     branch_name = get_branch_name(target)
     branch_upper = normalize_branch_name(branch_name, "upper")
 
@@ -268,7 +299,7 @@ def _dry_run_create(target_path, citizen_class, parsed):
     header("DRY RUN — Create Preview")
     console.print()
     console.print(f"  [bold]Branch:[/bold]  {branch_upper}")
-    console.print(f"  [bold]Class:[/bold]   {citizen_class}")
+    console.print(f"  [bold]Class:[/bold]   {class_display}")
     console.print(f"  [bold]Path:[/bold]    {target}")
     console.print(f"  [bold]Template:[/bold] {template}")
     if parsed.role:
@@ -313,6 +344,7 @@ def print_introspection():
     console.print("    [dim]- sync_registry.py (handle_sync_registry — registry repair)[/dim]")
     console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
+    console.print("    [dim]- migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]")
     console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
@@ -363,6 +395,11 @@ def main():
         from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 
         return handle_regenerate_registry(remaining)
+
+    if command == "migrate-passports":
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        return handle_migrate_passports(remaining)
 
     if command == "repair":
         from aipass.spawn.apps.modules.repair import handle_repair
