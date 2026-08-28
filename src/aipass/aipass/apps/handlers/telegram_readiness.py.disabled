@@ -1,3 +1,40 @@
+# =============================================================================
+# RETIRED 2026-08-28 — DISABLED, NOT DELETED
+#
+# Patrick ruled that AIPass moved off Telegram entirely; BAUD is the phone face
+# now. This branch's Telegram awareness stopped being true, so it was stripped
+# rather than left standing as a claim about a capability that no longer exists.
+#
+# The .py extension is removed so nothing can import it. The file stays HERE, in
+# its tracked home, rather than in .archive/ — .gitignore:125 records Patrick's
+# 2026-08-18 ruling that .archive is the disposal zone, cleaned without warning,
+# and the dispatch that retired this said "never delete". Those two facts only
+# reconcile as an in-place disabled rename.
+#
+# Removed in the same pass:
+#   .trinity/passport.json   telegram_host tag, the bot-host paragraph in
+#                            purpose, the "Host the AIPass Telegram bot"
+#                            what_i_do entry, the "Single bot-spawn point"
+#                            principle
+#   apps/modules/doctor.py   the import and the Services-group wiring
+#   tests/test_doctor.py     the TestTelegramReadiness class (8 tests)
+#   README.md                the architecture-tree line
+#   aipass_json/             telegram_readiness_{config,data,log}.json — runtime
+#                            state, gitignored, parked in .archive/telegram_20260828/
+#
+# KNOWN INCONSISTENCY THIS RESOLVED (not root-caused, per the dispatch): the
+# doctor row reported differently by machine. This host printed
+# "! telegram automation — telethon not installed"; a cold container printed NO
+# row at all, because the handler returned early when no bot configs existed. A
+# machine that had never hosted bots was silent while one that had was warned.
+#
+# IF TELEGRAM EVER COMES BACK, do not restore this shape. Its doctor row was
+# wrong in a way worth not repeating: an optional, unconfigured capability
+# reported as WARN, which reads as a nag. See apps/handlers/admin_lane.py for
+# the pattern that replaced that thinking — an informational row that never
+# errors and never pushes.
+# =============================================================================
+
 # =================== AIPass ====================
 # Name: telegram_readiness.py
 # Description: Report BotFather automation readiness on Telegram host machines

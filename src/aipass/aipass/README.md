@@ -43,6 +43,7 @@ aipass/
 │   │   ├── trust.py                       # Trust registry — aipass trust / aipass revoke
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
 │   ├── handlers/
+│   │   ├── admin_lane.py                  # Admin-lane state for doctor — presence only, never a verdict
 │   │   ├── cross_os/                      # Cross-OS pre-flight: gap_registry, preflight, run_record
 │   │   ├── handoff_platform/              # OS-dispatched CLI session launch — tmux, wt.exe, inline
 │   │   ├── init/                          # bootstrap.py, git_auth.py (re-exports shared/scaffold_content.py)
@@ -57,13 +58,12 @@ aipass/
 │   │   ├── sandbox_check/                 # Sandbox / containment detection
 │   │   ├── structure_scan/                # Agent placement + pollution detection
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
-│   │   ├── telegram_readiness.py          # Telegram bot-host readiness checks (doctor)
 │   │   └── ui/                            # Rich progress bars, spinners, check glyphs, step headers
 │   ├── integrations/                      # Placeholder — no code yet
 │   └── plugins/                           # Placeholder — no code yet
 ├── shared/                                # Cross-handler code — json_handler, json_ops,
 │                                          #   project_home, registry_discovery, scaffold_content
-├── tests/                                 # 1061 passing
+├── tests/                                 # 1078 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -170,7 +170,7 @@ Humans only. No `.py` source elsewhere in AIPass imports this branch.
 
 ## Tests
 
-1061 passing — `pytest src/aipass/aipass/tests/`
+1078 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 

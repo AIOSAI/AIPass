@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,7 +50,6 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     is_linux,
 )
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
-from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
     check_pyproject,
@@ -159,6 +159,19 @@ def _check_system() -> List[CheckResult]:
     return results
 
 
+def _configured_aipass_home() -> str:
+    """``env.AIPASS_HOME`` from ~/.claude/settings.json, or "" when absent."""
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return ""
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.info("[doctor] global settings.json unreadable: %s", exc)
+        return ""
+    return str(data.get("env", {}).get("AIPASS_HOME", "") or "")
+
+
 def _check_global_aipass_home() -> List[CheckResult]:
     """Check ~/.claude/settings.json env.AIPASS_HOME for stale or temp paths."""
     from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
@@ -197,6 +210,50 @@ def _check_global_aipass_home() -> List[CheckResult]:
     else:
         results.append(CheckResult("global AIPASS_HOME", GLYPH_PASS, home_val, ""))
     return results
+
+
+def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
+    """Compare the tree doctor is standing in against the one Claude Code uses.
+
+    Doctor has always printed both on adjacent lines and never compared them.
+    That gap hides a SPLIT-BRAIN install: a second install to a different home
+    takes an unconditional overwrite of ``~/.claude/settings.json``, so terminal
+    tooling (bashrc, symlinks) keeps pointing at tree 1 while Claude Code's env
+    and every hook command point at tree 2 — two registries, two citizen_id
+    sets, and every individual doctor row still green.
+
+    Silent when they agree: both values are already on screen, so a third row
+    saying so would be noise. Loud when they do not, because unlike an optional
+    capability this is never a valid state.
+
+    Args:
+        active: The tree this doctor run resolved (registry parent / env).
+        configured: ``env.AIPASS_HOME`` from ``~/.claude/settings.json``.
+
+    Returns:
+        One CheckResult when the trees disagree, otherwise an empty list.
+    """
+    if not active or not configured:
+        return []
+    try:
+        # resolve() collapses trailing slashes and symlinks — the same tree
+        # reached two ways is one tree, not a split.
+        same = Path(active).resolve() == Path(configured).resolve()
+    except OSError as exc:
+        logger.warning("[doctor] could not resolve AIPASS_HOME pair: %s", exc)
+        return []
+    if same:
+        return []
+
+    logger.warning("[doctor] split-brain install: active=%s configured=%s", active, configured)
+    return [
+        CheckResult(
+            "AIPASS_HOME split",
+            GLYPH_FAIL,
+            f"terminal uses {active}, Claude Code uses {configured}",
+            "Two installs are live — point ~/.claude/settings.json env.AIPASS_HOME at the tree you work in",
+        )
+    ]
 
 
 def _check_owner_seating() -> List[CheckResult]:
@@ -278,11 +335,12 @@ def _check_identity() -> List[CheckResult]:
     # Project root + registry — single lookup
     reg_path = _find_registry()
     if reg_path:
-        results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, str(reg_path.parent), ""))
+        active_home = str(reg_path.parent)
+        results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, active_home, ""))
     else:
-        home = os.environ.get("AIPASS_HOME", "")
-        if home:
-            results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, home, ""))
+        active_home = os.environ.get("AIPASS_HOME", "")
+        if active_home:
+            results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, active_home, ""))
         else:
             results.append(
                 CheckResult(
@@ -294,6 +352,8 @@ def _check_identity() -> List[CheckResult]:
             )
 
     results.extend(_check_global_aipass_home())
+    # Both values are now on screen — say so when they disagree (silent when they agree)
+    results.extend(_check_home_agreement(active_home, _configured_aipass_home()))
 
     if reg_path is None:
         results.append(CheckResult("registry", GLYPH_FAIL, "not found", "Run 'aipass init' to create registry"))
@@ -521,45 +581,107 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
     return results
 
 
-def _check_services(verbose: bool = False) -> List[CheckResult]:
-    """Run Services group checks."""
-    results: List[CheckResult] = []
+_MAX_NAMED_EXTRAS = 3
 
-    # drone systems
+
+def _registry_citizen_names() -> set[str]:
+    """Lowercased names of every citizen the root registry lists. Empty on failure."""
+    reg_path = _find_registry()
+    if reg_path is None:
+        return set()
     try:
-        proc = subprocess.run(
-            ["drone", "systems"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if proc.returncode == 0:
-            # Count citizen lines (lines with @)
-            citizens = [ln for ln in proc.stdout.splitlines() if "@" in ln]
-            detail = f"{len(citizens)} citizens" if citizens else "ok"
-            results.append(CheckResult("drone", GLYPH_PASS, detail, ""))
-        else:
-            results.append(
-                CheckResult(
-                    "drone",
-                    GLYPH_FAIL,
-                    "exit non-zero",
-                    "Ensure aipass is installed: clone the repo and run setup.sh",
-                )
-            )
+        data = json.loads(reg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("[doctor] could not read registry for citizen names: %s", exc)
+        return set()
+    branches = data.get("branches")
+    if not isinstance(branches, list):
+        return set()
+    return {str(b.get("name", "")).lower() for b in branches if isinstance(b, dict) and b.get("name")}
+
+
+def _drone_system_names(stdout: str) -> list[str]:
+    """Names drone routes, read from the START of each line.
+
+    Deliberately anchored: the old row counted every line CONTAINING "@", so a
+    description mentioning another branch inflated the count. A routed name is
+    the first token on its line, never one quoted inside prose.
+    """
+    names: list[str] = []
+    for line in stdout.splitlines():
+        match = re.match(r"\s*@([A-Za-z0-9_-]+)", line)
+        if match:
+            names.append(match.group(1).lower())
+    return names
+
+
+def _check_drone_systems() -> List[CheckResult]:
+    """The `drone` row — routed systems, reconciled against the registry.
+
+    ``drone systems`` lists everything ADDRESSABLE; the registry lists
+    CITIZENS. They are different sets: ``@git`` is routed by drone but owns no
+    branch directory and no passport, so a healthy install shows 19 routed
+    against 18 registered. Printing the bare routed count next to the
+    registry's count elsewhere on the same screen made two correct numbers look
+    like a discrepancy — two independent readers tripped on it the same day.
+
+    So the row now reconciles and NAMES the difference. It stays a PASS either
+    way: a routed service without a passport is normal, not a fault.
+    """
+    results: List[CheckResult] = []
+    try:
+        proc = subprocess.run(["drone", "systems"], capture_output=True, text=True, timeout=10)
     except FileNotFoundError as exc:
         logger.warning("[doctor] drone not found: %s", exc)
-        results.append(
+        return [
             CheckResult(
                 "drone",
                 GLYPH_FAIL,
                 "not found",
                 "Ensure aipass is installed: clone the repo and run setup.sh",
             )
-        )
+        ]
     except subprocess.TimeoutExpired as exc:
         logger.warning("[doctor] drone systems timed out: %s", exc)
-        results.append(CheckResult("drone", GLYPH_WARN, "timed out", ""))
+        return [CheckResult("drone", GLYPH_WARN, "timed out", "")]
+
+    if proc.returncode != 0:
+        return [
+            CheckResult(
+                "drone",
+                GLYPH_FAIL,
+                "exit non-zero",
+                "Ensure aipass is installed: clone the repo and run setup.sh",
+            )
+        ]
+
+    routed = _drone_system_names(proc.stdout)
+    if not routed:
+        return [CheckResult("drone", GLYPH_PASS, "ok", "")]
+
+    registered = _registry_citizen_names()
+    # Only drone-side extras matter here. A citizen the registry lists but drone
+    # does not route is a different question, and the registry row already owns it.
+    extras = sorted({name for name in routed if name not in registered}) if registered else []
+
+    if not extras:
+        detail = f"{len(routed)} citizens"
+    else:
+        shown = ", ".join(f"@{n}" for n in extras[:_MAX_NAMED_EXTRAS])
+        if len(extras) > _MAX_NAMED_EXTRAS:
+            shown += f" +{len(extras) - _MAX_NAMED_EXTRAS} more"
+        detail = f"{len(routed) - len(extras)} citizens + {len(extras)} routed service ({shown})"
+
+    logger.info("[doctor] drone routed=%d registered=%d extras=%s", len(routed), len(registered), extras)
+    results.append(CheckResult("drone", GLYPH_PASS, detail, ""))
+    return results
+
+
+def _check_services(verbose: bool = False) -> List[CheckResult]:
+    """Run Services group checks."""
+    results: List[CheckResult] = []
+
+    results.extend(_check_drone_systems())
 
     # pytest --collect-only
     try:
@@ -609,10 +731,6 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
 
     # stale rm deny rules — detect only (fix runs in run_doctor when --fix)
     for tup in reconcile_stale_deny(fix=False):
-        results.append(CheckResult(*tup))
-
-    # BotFather automation prerequisites — silent unless this machine hosts bots
-    for tup in check_telegram_readiness():
         results.append(CheckResult(*tup))
 
     # admin lane — informational only; a dark lane is a valid install, so this
