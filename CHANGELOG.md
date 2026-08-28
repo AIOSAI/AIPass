@@ -79,6 +79,20 @@ wildcarded `templates/*/` block (name-specific lines are how this breaks) and
 the payload restored. Verified: template files are pure placeholders — no real
 mail, signatures, names, or machine paths; live-branch ignores unaffected.
 
+**aipass — the admin ceremony becomes findable (Patrick's ruling: admin stays
+bolted to devpulse, single-seat, no transfer)**: new `docs/admin_setup.md`
+(the ceremony as the live surfaces state it: keygen → mint → @spawn registry
+flag → verify; keygen --force = revocation), README "Admin setup" section
+placed above the help-lane truncation threshold so `aipass help` actually
+surfaces it, and a doctor row that reports lane state (lit / dark / partial —
+partial never rounds up) as PASS-glyph info, never a nag: it observes four
+presence facts and refuses to reimplement the HMAC verdict (pinned — no
+hmac/hashlib, no devpulse import, key file content never read; the
+authoritative check stays `admin_grant verify`). A dark lane is a valid
+end-state, and on dark/partial the row names the doc, never a ceremony
+command. 1080 tests / 0 skipped (+19 pins), 2/2 mutations bite, seedgo 100%
+overall — re-verified independently by devpulse from both rootdirs.
+
 **Still gated on Patrick**: the registry_path truth ruling (superseded if the
 passport-as-tracked-config ruling lands — the field dies), passports-tracked
 ruling (passport = public profile in git; machine ids move to the untracked

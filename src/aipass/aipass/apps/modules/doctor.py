@@ -48,6 +48,7 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_srt_resolvable,
     is_linux,
 )
+from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
@@ -612,6 +613,11 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
 
     # BotFather automation prerequisites — silent unless this machine hosts bots
     for tup in check_telegram_readiness():
+        results.append(CheckResult(*tup))
+
+    # admin lane — informational only; a dark lane is a valid install, so this
+    # never errors and never names a ceremony command, only the doc
+    for tup in check_admin_lane():
         results.append(CheckResult(*tup))
 
     return results

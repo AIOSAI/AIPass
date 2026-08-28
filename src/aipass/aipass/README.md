@@ -117,6 +117,39 @@ aipass/
 | `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks) |
 | `aipass --version` | Version |
 
+## Admin setup
+
+Admin is one privilege held by exactly one citizen — `@devpulse` — letting it
+dispatch any agent, manager-class citizens included. It is **per-machine**,
+**optional**, and **single-seat** (bolted to `devpulse`; there is no transfer
+ceremony). A fresh install starts with the lane **dark**, which is a correct,
+fail-closed state: admin actions simply refuse.
+
+**Full walkthrough: [`docs/admin_setup.md`](docs/admin_setup.md)** — the five
+legs, the threat model, and where each piece of the code lives.
+
+Security model in short: passports are public profiles and grant nothing; the
+security layer is the gitignored, machine-unique birth certificate, whose
+`privileges` block is signed with a key at `~/.aipass/admin_grant.key` that
+never enters a repo — so a clone never carries a grant.
+
+The ceremony, in order — `keygen` → `mint` → registry flag → `verify`:
+
+```bash
+drone @devpulse admin_grant status    # lane state
+drone @devpulse admin_grant keygen    # machine signing key (owner)
+drone @devpulse admin_grant mint      # sign the privilege block (owner)
+drone @spawn grant-admin              # admin: true on the registry entry
+drone @devpulse admin_grant verify    # full 5-leg contract check
+```
+
+`keygen --force` regenerates the key and invalidates every existing signature —
+that is the revocation story; there is no `revoke` verb.
+
+`aipass doctor` reports an `admin lane` row (`lit` / `dark` / `partial`). It
+observes presence only and never errors; `drone @devpulse admin_grant verify` is
+the authoritative check.
+
 ## Integration Points
 
 ### Depends On
