@@ -132,6 +132,67 @@ OUT=$("$AIPASS_BIN" @drone 2>&1 || true)
 if echo "$OUT" | grep -qi "traceback"; then bad "'aipass @drone' crashed"; else ok "'aipass @drone' no crash"; fi
 if echo "$OUT" | grep -qi "drone"; then ok "'aipass @drone' mentions drone guidance"; else bad "'aipass @drone' output unhelpful"; fi
 
+# --- Phase 7: passports built from seeds (TDPLAN-0017) ---
+echo "--- Phase 7: passports from seeds ---"
+REG_ID=$(jq -r '.metadata.id' "$AH/AIPASS_REGISTRY.json" 2>/dev/null)
+SEEDED=0; MISSING=0; BADSTAMP=0; BADRID=0; BADIDENT=0
+for seed in "$AH"/src/aipass/*/.aipass/passport.seed.json; do
+    [ -f "$seed" ] || continue
+    bdir=$(dirname "$(dirname "$seed")")
+    bname=$(basename "$bdir")
+    pp="$bdir/.trinity/passport.json"
+    if [ ! -f "$pp" ]; then MISSING=$((MISSING+1)); echo "    missing passport: $bname"; continue; fi
+    SEEDED=$((SEEDED+1))
+    want=$(sha256sum "$seed" | cut -d' ' -f1)
+    got=$(jq -r '.citizenship.seed.sha256 // ""' "$pp")
+    [ "$want" = "$got" ] || { BADSTAMP=$((BADSTAMP+1)); echo "    stamp mismatch: $bname"; }
+    [ "$(jq -r '.citizenship.registry_id' "$pp")" = "$REG_ID" ] || { BADRID=$((BADRID+1)); echo "    registry_id mismatch: $bname"; }
+    if ! diff <(jq -S '.identity' "$seed") <(jq -S '.identity' "$pp") > /dev/null 2>&1; then
+        BADIDENT=$((BADIDENT+1)); echo "    identity drift vs seed: $bname"
+    fi
+done
+if [ "$SEEDED" -eq 18 ] && [ "$MISSING" -eq 0 ]; then ok "18/18 seeded passports minted"; else bad "passports: $SEEDED minted, $MISSING missing"; fi
+if [ "$BADSTAMP" -eq 0 ]; then ok "every stamp sha256 matches its seed bytes"; else bad "$BADSTAMP stamp mismatches"; fi
+if [ "$BADRID" -eq 0 ]; then ok "every registry_id = registry metadata.id"; else bad "$BADRID registry_id mismatches"; fi
+if [ "$BADIDENT" -eq 0 ]; then ok "identity blocks match seeds verbatim"; else bad "$BADIDENT identity drifts"; fi
+
+DP="$AH/src/aipass/devpulse/.trinity/passport.json"
+DCLS=$(jq -r '.identity.citizen_class // ""' "$DP" 2>/dev/null)
+DEXT=$(jq -r '.identity.class_extension // ""' "$DP" 2>/dev/null)
+if [ "$DCLS" = "manager" ]; then ok "devpulse class = manager"; else bad "devpulse class: $DCLS"; fi
+case "$DEXT" in admin*) ok "devpulse admin class_extension survived" ;; *) bad "devpulse class_extension lost" ;; esac
+
+DUPES=$(jq -r '.citizenship.citizen_id' "$AH"/src/aipass/*/.trinity/passport.json 2>/dev/null | sort | uniq -d | wc -l)
+if [ "$DUPES" -eq 0 ]; then ok "citizen_ids unique across fleet"; else bad "$DUPES duplicate citizen_ids"; fi
+
+# --- Phase 8: memory files ---
+echo "--- Phase 8: memory files ---"
+MEMBAD=0
+for seed in "$AH"/src/aipass/*/.aipass/passport.seed.json; do
+    [ -f "$seed" ] || continue
+    bdir=$(dirname "$(dirname "$seed")")
+    bname=$(basename "$bdir")
+    for f in local.json observations.json; do
+        ff="$bdir/.trinity/$f"
+        if [ ! -f "$ff" ]; then MEMBAD=$((MEMBAD+1)); echo "    missing: $bname/$f"; continue; fi
+        jq empty "$ff" 2>/dev/null || { MEMBAD=$((MEMBAD+1)); echo "    invalid JSON: $bname/$f"; }
+        if grep -qE '\{[A-Z_]+\}' "$ff"; then MEMBAD=$((MEMBAD+1)); echo "    unreplaced placeholder: $bname/$f"; fi
+    done
+done
+if [ "$MEMBAD" -eq 0 ]; then ok "memory files valid JSON, no placeholder residue"; else bad "$MEMBAD memory file problems"; fi
+if grep -q "⟦" "$AH/src/aipass/drone/.trinity/local.json" 2>/dev/null; then
+    ok "meta cap lines rendered (drone local.json)"
+else
+    bad "meta cap lines missing — memory tab renderer did not run at bootstrap"
+fi
+
+# --- Phase 9: aipass doctor (read the output, don't just count it) ---
+echo "--- Phase 9: aipass doctor ---"
+DOC=$("$AIPASS_BIN" doctor 2>&1)
+echo "$DOC" | sed 's/^/    | /'
+if echo "$DOC" | grep -qi "traceback"; then bad "doctor crashed"; else ok "doctor ran without crash"; fi
+if echo "$DOC" | grep -qi "entry_rid_stale\|no_owner"; then bad "stale-bookkeeping errors (reconcile regressed)"; else ok "no stale-bookkeeping errors"; fi
+
 # --- Summary ---
 echo "========================================="
 echo "  Results: $PASS passed, $FAIL failed"

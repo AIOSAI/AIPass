@@ -576,6 +576,29 @@ from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, rep
 branch_name, target_path, citizen_class, role = sys.argv[1:5]
 target = Path(target_path)
 
+# PASSPORT SEEDS (TDPLAN-0017): a branch shipping a tracked seed births its real
+# identity from it — machine-local ids minted fresh, same as spawn's seed door.
+# The template loop below only fills what this lane didn't write. A seed that
+# fails validation kills the install loudly — never a silent template fallback.
+import json
+import uuid
+
+from aipass.spawn.apps.handlers.seed_ops import find_seed, mint_and_write
+
+minted = []
+seed_file = find_seed(target)
+passport_dest = target / ".trinity" / "passport.json"
+if seed_file is not None and not passport_dest.exists():
+    registry = json.loads(Path("AIPASS_REGISTRY.json").read_text(encoding="utf-8"))
+    mint_and_write(
+        seed_file,
+        passport_dest,
+        branch_name=branch_name,
+        registry_id=registry.get("metadata", {}).get("id", ""),
+        citizen_id=str(uuid.uuid4()),
+    )
+    minted.append("passport.json(seed)")
+
 # "manager" (devpulse) isn't template-selectable — resolve_template_class picks
 # its real shape via identity.role, same logic `spawn update` heals against.
 template_class = resolve_template_class({"citizen_class": citizen_class, "role": role})
@@ -595,7 +618,7 @@ replacements = build_replacements_dict(
 # carries the aipass. package prefix.
 replacements["MODULE"] = f"aipass.{replacements['branchname']}"
 
-created = []
+created = list(minted)
 for filename in ("passport.json", "local.json", "observations.json"):
     dest = target / ".trinity" / filename
     if dest.exists():
