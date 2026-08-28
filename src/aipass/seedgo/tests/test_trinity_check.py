@@ -2134,3 +2134,56 @@ class TestARelativeBranchPathStillNamesTheBranch:
         result = trinity.check_branch(f"{branch}/.")
 
         assert result["score"] == 100
+
+
+# ===========================================================================
+# THE SPLIT: trinity_groups holds the nine, trinity_check holds the engine
+# ===========================================================================
+
+
+class TestTheGroupSplitKeepsTheNine:
+    """trinity_check.py crossed the 1500-line architecture cap during the
+    marker-7 work, so the group checkers moved to trinity_groups.py on
+    2026-08-27. A relocation, not a redesign -- but the one regression a split
+    invites is a group quietly going missing, and a missing group does not
+    fail loudly: the weighted mean simply divides by less and the branch scores
+    HIGHER. That is the exact shape of a silent pass this standard exists to
+    end, so it gets pinned rather than assumed.
+    """
+
+    def test_all_groups_returns_every_weighted_group_in_reporting_order(self, trinity, tmp_path):
+        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
+
+        branch = _write_branch(tmp_path)
+        ctx = trinity._build_context(branch)
+
+        names = [check["name"] for check in trinity_groups.all_groups(ctx)]
+
+        assert names == [
+            "Entry shapes",
+            "Top-level keys",
+            "Ordering & numbering",
+            "Char caps",
+            "File set",
+            "Meta lines & _usage",
+            "Receipt",
+            "Todos hygiene",
+            "Freshness",
+        ]
+        assert set(names) == set(trinity.GROUP_WEIGHTS), "a group is weighted but never run, or run but never weighted"
+
+    def test_check_branch_reports_the_same_nine(self, trinity, tmp_path):
+        branch = _write_branch(tmp_path)
+
+        result = trinity.check_branch(str(branch))
+
+        assert [c["name"] for c in result["checks"]] == list(trinity.GROUP_WEIGHTS)
+
+    def test_the_engine_does_not_reach_past_the_public_entry_point(self, trinity):
+        """The nine used to be imported by name into the engine, which is how a
+        forgotten group becomes possible. Pin that the engine holds one handle.
+        """
+        source = Path(trinity.__file__).read_text(encoding="utf-8")
+
+        assert "all_groups(ctx)" in source
+        assert "_group_entry_shapes" not in source, "engine reaches past all_groups again"
