@@ -202,3 +202,38 @@ def live_fleet():
         if not (root / registry_scope.CORE_REGISTRY).is_file():
             pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
     return registry_scope.REPO_ROOT
+
+
+@pytest.fixture
+def live_residents(live_fleet):
+    """A repo root that ALSO carries the four resident projects, or SKIP.
+
+    `live_fleet` answers "is aipass installed here". It is not enough for the
+    resident assertions, and the Windows e2e lane proved it: that job installs
+    aipass from the wheel, so it has a REAL `AIPASS_REGISTRY.json` and the core
+    citizens — the guard correctly saw a live installation and let the tests
+    run — and then `{earmark, finch, aipass_site, baud} <= names` failed,
+    because those four live in `projects/` on ONE machine. "The residents are
+    reachable" is a claim about an installation, not about the software.
+
+    So the second discriminator is narrower: are the resident registry FILES
+    on disk. Present and unreachable stays RED, which is the whole point.
+
+    MEASURED WITH pathlib, NOT with `resident_registry_paths()`. Asking the
+    code under test whether its own inputs exist would turn every regression
+    in the resolver into a SKIP — the guard would delete the failure it exists
+    to expose. The ground truth has to be read independently of the thing
+    being judged.
+
+    Returns:
+        The repo root holding the core registry and all four residents.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    missing = [relative for relative in registry_scope.RESIDENT_REGISTRIES if not (live_fleet / relative).is_file()]
+    if missing:
+        pytest.skip(
+            f"{len(missing)} of {len(registry_scope.RESIDENT_REGISTRIES)} resident registries "
+            f"not installed at {live_fleet} ({', '.join(missing)}) -- live-state guard skipped"
+        )
+    return live_fleet

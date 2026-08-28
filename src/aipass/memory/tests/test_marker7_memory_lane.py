@@ -30,6 +30,8 @@ The five behaviours under test, and the wrong implementation each pin kills:
 """
 
 import json
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -85,7 +87,16 @@ class TestOneFleetOneDefinition:
         assert "marketstand" not in names
         assert not any("hold" in name for name in names)
 
-    def test_the_shared_scope_reaches_every_resident(self, live_fleet):
+    def test_the_shared_scope_reaches_every_resident(self, live_residents):
+        """Guarded on the RESIDENT FILES, not just on "aipass is installed".
+
+        The Windows e2e lane installs aipass from the wheel: a real registry,
+        the core citizens, and none of the four residents — which live in
+        `projects/` on one machine. `live_fleet` correctly called that a live
+        installation and let this run, and it failed on a claim that was never
+        about the software. `live_residents` reads the four registry files off
+        disk with pathlib; present-but-unreachable is still a failure.
+        """
         names = {item["name"] for item in registry_scope.fleet_branches()}
         assert {"earmark", "finch", "aipass_site", "baud"} <= names
 
@@ -519,13 +530,30 @@ class TestTemplateBumpFiresThePush:
         assert template_bump.BUMP_EVENT == "trinity_template_bumped"
         assert "aipass.trigger" not in source
 
-    def test_the_bump_announces_itself_on_the_bus(self):
+    def test_the_bump_announces_itself_on_the_bus(self, monkeypatch):
         """Trigger-driven, never a poller: the bump ANNOUNCES what it did.
 
         Fires through the REAL call path with a real outcome dict — the payload
         is built inside the try, so a broken payload expression is swallowed by
         the best-effort catch and the announcement silently never happens. That
         shipped once (`json` unimported); only an end-to-end pin bites it.
+
+        REAL MODULE OBJECTS, NOT MagicMocks, and not a string-target `patch`.
+        `_announce_bump` imports the bus INSIDE the function, so what it gets
+        depends on import machinery. conftest's autouse fixture puts MagicMocks
+        in `sys.modules` for the `aipass.trigger` chain, and a MagicMock has no
+        `__path__` — so `from aipass.trigger.apps.modules.core import trigger`
+        resolves only while the interpreter serves the leaf straight out of
+        `sys.modules`. 3.12 does; 3.10 entered the parent traversal, raised
+        ModuleNotFoundError, and `_announce_bump` swallowed it by design —
+        green on three interpreters and red on the fourth, for a reason that
+        had nothing to do with the behaviour under test.
+
+        Packages carry `__path__` here, so the import resolves the same way on
+        every version. And the reachability check below runs FIRST: without it
+        this test has two causes for one symptom — "the bus was never reached"
+        and "the code chose not to fire" both arrive as an empty list, which is
+        the exact ambiguity this branch keeps refusing to ship in product code.
         """
         fired = []
 
@@ -534,8 +562,20 @@ class TestTemplateBumpFiresThePush:
             def fire(event, **data):
                 fired.append((event, data))
 
-        with patch("aipass.trigger.apps.modules.core.trigger", _Bus):
-            templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})
+        for name in ("aipass.trigger", "aipass.trigger.apps", "aipass.trigger.apps.modules"):
+            package = types.ModuleType(name)
+            package.__path__ = []  # type: ignore[attr-defined]
+            monkeypatch.setitem(sys.modules, name, package)
+        bus_module = types.ModuleType("aipass.trigger.apps.modules.core")
+        bus_module.trigger = _Bus  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", bus_module)
+
+        # Exactly the bytecode `from X import trigger` compiles to, so the
+        # check cannot pass by a route the code under test does not take.
+        reached = __import__("aipass.trigger.apps.modules.core", fromlist=["trigger"])
+        assert reached.trigger is _Bus, "the bus stand-in is not reachable by the import _announce_bump uses"
+
+        templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})
 
         assert [event for event, _ in fired] == [template_bump.BUMP_EVENT]
         payload = fired[0][1]

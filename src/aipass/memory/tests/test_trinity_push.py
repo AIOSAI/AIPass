@@ -510,9 +510,19 @@ class TestTheNote:
 class TestScope:
     """Fleet mode covers a named list, and an unknown branch is an error."""
 
-    def test_the_fleet_scope_holds_the_core_citizens_and_the_named_residents(self, live_fleet):
+    def test_the_fleet_scope_holds_the_core_citizens(self, live_fleet):
+        """Split from the resident half on 2026-08-27, and the split is the point.
+
+        The core citizens ship with any installation, so this runs on every
+        lane that has a registry at all — including the Windows e2e job, where
+        it is the only half that was ever a claim about the software.
+        """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert {"memory", "canary", "hooks"} <= names
+
+    def test_the_fleet_scope_holds_the_named_residents(self, live_residents):
+        """The other half — true only where the residents are actually installed."""
+        names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert {"baud", "earmark", "finch", "aipass_site"} <= names
 
     def test_on_hold_projects_are_not_swept_in(self, live_fleet):
