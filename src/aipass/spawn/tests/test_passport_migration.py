@@ -580,10 +580,17 @@ def _expected_traits(original: object) -> object:
 
 
 def _assert_identity_content_preserved(name: str, old: dict, new: dict) -> None:
-    """Every identity-content field survives; traits keeps its text, list-wrapped."""
+    """Every identity-content field survives; traits keeps its text, list-wrapped.
+
+    Reads the OLD principles from wherever that passport kept them — top level
+    (1.x) or inside identity (2.0) — so this holds against a live fleet copy on
+    either side of the 2026-08-28 migration (post-flip, the run is a no-op and
+    before == after, which is the idempotency contract restated as content).
+    """
     for key in IDENTITY_CONTENT_KEYS:
         if key == "principles":
-            assert new["identity"]["principles"] == old["principles"], name
+            old_principles = old.get("principles", old.get("identity", {}).get("principles"))
+            assert new["identity"]["principles"] == old_principles, name
         elif key == "traits":
             assert new["identity"]["traits"] == _expected_traits(old["identity"]["traits"]), name
         elif key in old["identity"]:

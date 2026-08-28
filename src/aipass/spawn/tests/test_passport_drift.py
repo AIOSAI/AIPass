@@ -6,7 +6,7 @@
 # Modified: 2026-08-28
 # =============================================
 
-"""Passport drift detection — DPLAN-0262, schema-tolerant for DPLAN-0319.
+"""Passport drift detection — DPLAN-0262, 2.0-only since the DPLAN-0319 fleet run.
 
 Templates guarantee certain branch_info/identity fields via placeholder
 substitution. `spawn update` auto-heals .trinity/passport.json against a narrow
@@ -14,32 +14,13 @@ allowlist (branch_info.email, branch_info.git_branch, identity.traits — see
 update_ops._heal_passport); the live scan below is the permanent canary that
 says when a real passport has fallen behind what its template promises.
 
-WHY THIS FILE ACCEPTS TWO SCHEMAS RIGHT NOW
--------------------------------------------
-Passport 2.0 (DPLAN-0319) landed the new template and the new class names, but
-the FLEET MIGRATION HAS NOT BEEN RUN — that live run is Patrick's own GO and
-devpulse fires it (``drone @spawn migrate-passports --confirm``). Measured
-2026-08-28: all 18 registered core passports still report
-``document_metadata.schema_version == "1.0.0"``, 17 of them still claim the
-retired class ``aipass_framework``, and every one of them still keeps
-``principles`` at the TOP LEVEL instead of inside ``identity``.
-
-So for exactly this window the template on disk is 2.0 and every live passport
-is 1.x. A canary that pinned only 2.0 would be red for a reason that is not
-drift — it would be red because the migration it is waiting for has not been
-authorised yet. It therefore checks each passport against the contract for the
-schema THAT PASSPORT DECLARES, and keeps full coverage on both.
-
-.. _flip-to-2-0:
-
-TO MAKE THIS FILE 2.0-ONLY AFTER THE FLEET RUN, do exactly this and nothing else
-    1. set ``REQUIRE_SCHEMA_2 = True`` (the constant right below)
-    2. delete ``_SCHEMA_1_CONTRACT``, ``_SCHEMA_1_CLASSES`` and ``_schema_1_drift``
-    3. delete ``TestSchemaMigrationMarker``
-
-The 2.0 lane already reads its contract off the live template, so nothing else
-in here is schema-1 specific. ``test_fleet_schema_marker`` fails the moment the
-whole fleet reports 2.0.0, which is the reminder to come back and do the above.
+This file was schema-tolerant during the DPLAN-0319 window (2.0 template on
+disk, 1.x fleet awaiting the migration GO). The fleet migration ran 2026-08-28
+(22/22, Patrick's GO), the marker test went red on cue, and the schema-1 lane
+(frozen contract, class allowlist, drift helper, marker class and the 1.x-lane
+hermetic test) was removed in the same working set — the canary now judges
+every live passport against the live template's contract, and any passport
+declaring a pre-2.0 schema is reported as drift.
 """
 
 import json
@@ -57,28 +38,11 @@ from aipass.spawn.apps.handlers.registry import branches_as_list, find_registry,
 
 _CONTRACT_SECTIONS = ("branch_info", "identity")
 
-# --- SCHEMA 2.0 FLIP SWITCH -- see "TO MAKE THIS FILE 2.0-ONLY" in the docstring.
-# False = accept schema 1.x passports as well (the pre-migration fleet).
-REQUIRE_SCHEMA_2 = False
+# --- SCHEMA 2.0 FLIP SWITCH — flipped 2026-08-28 with the fleet migration.
+# True = every live passport must declare schema 2.0.0; anything else is drift.
+REQUIRE_SCHEMA_2 = True
 
 SCHEMA_2 = "2.0.0"
-
-# The schema-1 contract, FROZEN as a literal. It is history: no template on disk
-# describes it any more (the class-named template dirs retired to
-# templates/.archive/), and reading it back out of an archived tree would make a
-# retired directory load-bearing. Measured against all 18 live core passports on
-# 2026-08-28 — every one satisfies it.
-_SCHEMA_1_CONTRACT = {
-    "branch_info": {"branch_name", "alias", "path", "module", "email", "created", "git_branch"},
-    "identity": {"citizen_class", "role", "purpose", "what_i_do", "what_i_dont_do", "traits"},
-}
-
-# Class values a schema-1 passport is allowed to claim. These are the names the
-# 2.0 rework RETIRED, so class_registry refuses them by design — a 1.x passport
-# carrying one is correct-for-its-schema, not drift. "manager" appears in both
-# eras (devpulse), "specialist" is accepted so a passport migrated ahead of the
-# fleet run is not punished for it.
-_SCHEMA_1_CLASSES = frozenset({"aipass_framework", "builder", "project_agent", "manager", "specialist"})
 
 
 def _schema_version(passport: dict) -> str:
@@ -103,20 +67,6 @@ def _passport_drift(passport: dict, contract: dict) -> dict:
         missing = required_keys - set(passport.get(section, {}).keys())
         if missing:
             drift[section] = sorted(missing)
-    return drift
-
-
-def _schema_1_drift(passport: dict) -> dict:
-    """Drift for a passport still on the pre-2.0 schema.
-
-    Same section check against the frozen 1.x key set, plus the one structural
-    fact 1.x owns: ``principles`` lives at the TOP LEVEL there (R1 moves it into
-    identity). Checking it keeps the field covered on both sides of the migration
-    instead of going blind to it for the duration of the window.
-    """
-    drift = _passport_drift(passport, _SCHEMA_1_CONTRACT)
-    if "principles" not in passport:
-        drift["<top-level>"] = ["principles"]
     return drift
 
 
@@ -170,12 +120,6 @@ class TestDriftDetectorHermetic:
         assert _is_schema_2({"document_metadata": {"schema_version": "1.0.0"}}) is False
         assert _is_schema_2({"document_metadata": {}}) is False
         assert _is_schema_2({}) is False
-
-    def test_schema_1_lane_still_requires_top_level_principles(self):
-        """The 1.x lane is real coverage, not a hole to wait in."""
-        complete = {section: dict.fromkeys(keys, "x") for section, keys in _SCHEMA_1_CONTRACT.items()}
-        assert _schema_1_drift({**complete, "principles": ["p"]}) == {}
-        assert _schema_1_drift(complete) == {"<top-level>": ["principles"]}
 
 
 # =============================================================================
@@ -247,16 +191,11 @@ class TestLivePassportDrift:
                     report[name] = {"error": str(exc)}
                     continue
                 drift = _passport_drift(passport, _template_contract_keys(citizen_class))
-            elif REQUIRE_SCHEMA_2:
+            else:
+                # REQUIRE_SCHEMA_2: the fleet migrated 2026-08-28 — a passport
+                # declaring anything older is drift, reported not excused.
                 report[name] = {"error": f"schema_version {_schema_version(passport)} — expected {SCHEMA_2}"}
                 continue
-            else:
-                # Pre-migration lane: judge the passport by the schema it declares.
-                declared = passport.get("identity", {}).get("citizen_class")
-                if declared not in _SCHEMA_1_CLASSES:
-                    report[name] = {"error": f"unknown citizen_class {declared!r} on a schema-1 passport"}
-                    continue
-                drift = _schema_1_drift(passport)
 
             if drift:
                 report[name] = drift
@@ -285,38 +224,17 @@ class TestLivePassportDrift:
         assert offenders == {}, f"absolute paths in tracked passports: {offenders}"
 
 
-class TestSchemaMigrationMarker:
-    """The flip reminder. DELETE THIS CLASS when you set REQUIRE_SCHEMA_2 = True.
+class TestSchema2Only:
+    """The fleet is 2.0-only as of the 2026-08-28 migration run.
 
-    See "TO MAKE THIS FILE 2.0-ONLY" in the module docstring.
+    Any passport declaring an older schema is reported as drift by the live
+    scan above — there is no accepted pre-2.0 lane any more.
     """
 
-    def test_fleet_schema_marker(self):
-        """Fails once the whole fleet reports 2.0.0 — that is the cue to flip.
-
-        Not an xfail and not a skip: both of those are quiet, and a silent
-        reminder is a reminder nobody gets. This asserts the CURRENT, measured
-        state of the world, so it goes red exactly when the world changes.
-        """
+    def test_every_live_passport_declares_schema_2(self):
         passports = _live_passports()
         if not passports:
             pytest.skip("No live registry/passports on this machine (gitignored — expected in CI)")
 
         laggards = sorted(name for name, passport in passports if not _is_schema_2(passport))
-
-        assert laggards, (
-            "Every live passport now reports schema_version 2.0.0 — the fleet migration has run. "
-            "Make this canary 2.0-only: set REQUIRE_SCHEMA_2 = True, delete _SCHEMA_1_CONTRACT, "
-            "_SCHEMA_1_CLASSES and _schema_1_drift, and delete this class. "
-            "(Full instructions in the module docstring.)"
-        )
-
-    def test_the_flip_switch_matches_the_lane_actually_in_use(self):
-        """REQUIRE_SCHEMA_2 and the schema-1 helpers flip together, or not at all."""
-        if REQUIRE_SCHEMA_2:
-            pytest.fail(
-                "REQUIRE_SCHEMA_2 is True but the schema-1 lane is still here — "
-                "finish the flip: delete _SCHEMA_1_CONTRACT, _SCHEMA_1_CLASSES, "
-                "_schema_1_drift and TestSchemaMigrationMarker."
-            )
-        assert _SCHEMA_1_CONTRACT and _SCHEMA_1_CLASSES
+        assert laggards == [], f"passports still declaring pre-2.0 schema: {laggards}"
