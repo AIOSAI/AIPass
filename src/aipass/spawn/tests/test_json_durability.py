@@ -68,6 +68,12 @@ class _Racer:
         n = 0
         effective = 0
         while not self._stop:
+            # Same 1ms yield as the reader, same reason: a zero-delay write loop
+            # keeps an os.replace nearly always in flight, and Windows share-mode
+            # semantics then refuse every reader open — a slow CI runner can end
+            # the whole race with reads == 0 (Windows CI, 2026-08-28). No fleet
+            # workload rewrites a config file in a hot loop either.
+            time.sleep(0.001)
             # write_once returns True only when it actually rewrote the target.
             # Counting loop turns instead would let a race pass vacuously when
             # the call under test decided there was nothing to write.

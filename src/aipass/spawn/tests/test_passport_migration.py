@@ -365,6 +365,11 @@ class TestDiscovery:
         assert baud.relative_path == "src/baud/baud"
 
     def test_live_fleet_matches_the_measured_baseline(self):
+        if os.environ.get("GITHUB_ACTIONS"):
+            # Windows CI runs setup.sh, which mints a fresh core-only fleet
+            # (18, 18, 0) — a real fleet, but not the machine this baseline
+            # measured. The pin guards the live fleet, not any installed one.
+            pytest.skip("CI-installed fleet is not the measured live machine")
         targets = discover_passports(repo_root())
         if not targets:
             pytest.skip("No live fleet on this machine (gitignored — expected in CI)")
