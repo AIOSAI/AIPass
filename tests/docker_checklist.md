@@ -72,6 +72,12 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
 - [ ] Wizard reinstall clones the DEFAULT branch (main), not the branch you
       stand on — from a dev tree you get a main tree back, silently. Until seeds
       merge to main, that second tree has template passports, no seed mints.
+- [x] Registry-loss recovery SELF-HEALS (measured 2026-08-28, drift_probe):
+      delete AIPASS_REGISTRY.json, re-run install → new metadata.id minted and
+      all 18 passports re-aligned to it by setup's reconcile step
+      (fix_owner_identity → "Align passports to metadata.id"); doctor clean
+      after. Do NOT re-flag "passports keep the old registry_id forever" — that
+      concern was source-read only and is refuted by this measurement.
 
 ### Phase 8 — memory files (.trinity)
 - [ ] `local.json` + `observations.json` exist for every seeded branch, valid JSON.
