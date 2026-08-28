@@ -54,9 +54,24 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
 - [ ] devpulse: `citizen_class` = manager, admin `class_extension` intact.
 - [ ] `citizen_id` unique across the fleet (fresh uuid4 per branch, per machine).
 
+### Phase 7b — idempotency (verified by independent audit 2026-08-28)
+- [ ] A SECOND install in the same container changes zero `.trinity` json bytes,
+      prints "exists (skipped)" for all 18, leaves AIPASS_REGISTRY.json
+      byte-identical. Run the second pass as `bash setup.sh --no-chat` or with
+      `AIPASS_HOME` exported — the `./aipass` launcher post-install forwards to
+      the Python wizard, which without a tty and without `$AIPASS_HOME` prompts
+      for a home and cancels on EOF (environment fact: setup.sh exports it to
+      ~/.bashrc, which a non-login audit shell never sources). Known wart, @aipass
+      lane: `aipass install --non-interactive` resolves to DEFAULT_HOME (~/AIPass)
+      and ignores the clone you are standing in; `--here` is the flag that does
+      the expected thing.
+
 ### Phase 8 — memory files (.trinity)
 - [ ] `local.json` + `observations.json` exist for every seeded branch, valid JSON.
-- [ ] No unreplaced `{PLACEHOLDER}` residue anywhere in them.
+- [ ] No unreplaced `{PLACEHOLDER}` residue anywhere in them. (Keep this grep
+      scoped to memory files: spawn's PASSPORT legitimately contains the prose
+      "Replace all {{PLACEHOLDER}} patterns" in what_i_do — it comes verbatim
+      from the seed and trips a naive `\{[A-Z_]+\}` scan if widened.)
 - [ ] `*_meta` cap lines rendered (the `⟦ … ⟧` text from @memory's tab renderer —
       if missing, the memory extra failed to import during bootstrap and the
       ImportError fallback silently rendered nothing).

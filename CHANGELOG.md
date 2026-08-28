@@ -11,6 +11,31 @@ PyPI version — not the changelog header.
 
 ## [Unreleased] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319)
 
+**Docker dev-container round (2026-08-28)** — the dev image (`aipass-test`)
+proved the whole cold-clone story and caught what CI structurally cannot:
+`./aipass install` was DEAD on dev — setup.sh still passed the retired
+`aipass_framework` class and spawn's refusal (correct, by design) killed the
+installer before settings.json existed; one root cause, eight cascading FAILs,
+zero suites red. Fixed to `specialist` as the refusal instructs. Then the
+banked mint-all-core follow-up landed: the installer bootstrap now asks
+`find_seed()` first — every branch shipping a tracked seed births its live
+passport through spawn's own `mint_and_write` (fresh uuid4 citizen_id,
+registry_id from the fresh registry's metadata.id); template render fills only
+local/observations (seeds carry identity, never memories); a bad seed kills
+the install loudly. `tests/docker_checklist.md` (new) is the contract;
+docker_dev_verify.sh grew phases 7–9 (seed-minted passports incl. stamp
+sha256 vs seed bytes and verbatim identity diff, memory-file hygiene, doctor
+read in full). Final run 30/30; an INDEPENDENT sub-agent audit then confirmed
+7/8 claims with stronger checks (full-document diff on all 18, double-install
+byte-identity, two clean containers = 36 unique citizen_ids), split the 8th
+honestly (`./aipass install` re-run exits 1 only when `$AIPASS_HOME` is absent
+from a non-login shell — the wizard prompts and cancels on EOF; file state
+untouched), and banked the warts: `aipass install --non-interactive` targets
+~/AIPass ignoring the clone you stand in (@aipass lane), drone counts 19
+citizens vs registry 18, concurrent installs on one host can die silently.
+Cold-machine doctor: 35 pass / 2 warnings (both container-env, inert) /
+0 errors, admin lane dark-and-valid per the fail-closed design.
+
 **The rulings (Patrick live, 2026-08-27 night)** — devpulse's passport becomes
 the 2.0 schema: machine facts on top (document_metadata → branch_info →
 citizenship), agent-written soul below (identity, with principles moved
