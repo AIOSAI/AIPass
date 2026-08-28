@@ -7,7 +7,7 @@
 **Version:** 2.1.0
 **Seedgo:** 100%
 **Tests:** 192 tests across 10 files — 201 passing, 0 skipped (parametrized cases expand at runtime)
-**Last Updated:** 2026-08-19
+**Last Updated:** 2026-08-25
 
 ## Quick Start
 
@@ -113,6 +113,8 @@ cli/
 │   │   ├── display.py          # header, success, error, warning, fatal, section, exit-code API
 │   │   └── templates.py        # operation_start, operation_complete
 │   ├── handlers/               # PRIVATE — internal implementation
+│   │   ├── cli/
+│   │   │   └── help_flags.py   # wants_help() — whole-sequence help detection
 │   │   ├── json/
 │   │   │   └── json_handler.py # JSON lifecycle (CRUD, validation, rotation)
 │   │   └── templates/          # Scaffold placeholder
@@ -133,8 +135,14 @@ cli/
 │   └── parked/                 # TRACKED, not run — collect_ignore_glob barrier (archive doctrine, 2026-08-18)
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
-└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__, test_scaffold)
+└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__, init_project leftovers)
 ```
+
+Branch-standard scaffold dirs are omitted from the tree above: `artifacts/`, `docs/`,
+`docs.local/`, `dropbox/`, `templates/`, `tools/`, and the dot-dirs (`.trinity/`,
+`.aipass/`, `.ai_mail.local/`, `.seedgo/`, `.spawn/`, `.daemon/`, `.backup/`).
+The scaffold `test_scaffold` moved out of `.archive/` to `tests/parked/scaffold(disabled).py`
+on 2026-08-19 — tracked, not collected.
 
 **Testing display output:** never assert on raw captured bytes. Build the console with
 `make_capture_console()` from `tests/conftest.py` and assert through its `get_output()`,
@@ -169,9 +177,9 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 ## Integration Points
 
 ### Depends On
-- `rich` — Terminal formatting (Table, Panel, Text, Console)
-- `aipass.prax` — Logging (imported in cli.py only, not in modules/)
-- Python stdlib (`sys`, `importlib`, `pathlib`, `json`)
+- `rich` — Terminal formatting (Console, Panel, Table, Text, Columns, box)
+- `aipass.prax` — Logging (one import, in `apps/cli.py` only — never in modules/ or handlers/)
+- Python stdlib (`sys`, `os`, `json`, `time`, `tempfile`, `inspect`, `importlib`, `pathlib`, `datetime`, `typing`)
 
 ### Cannot Import (in modules/)
 - `aipass.prax` — Circular dependency (prax depends on cli). Bypassed in `.seedgo/bypass.json`.
@@ -186,13 +194,13 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 | Entry | Command | How |
 |-------|---------|-----|
 | drone | `drone @cli [command]` | Routes to `apps/cli.py:main()` |
-| Import | `from aipass.cli import ...` | The real entry point — 252 call sites fleet-wide |
+| Import | `from aipass.cli import ...` | The real entry point — 356 import statements in 264 files across 17 branches (measured 2026-08-25; 33 of them in test files) |
 
 `python -m aipass.cli` is **not** an entry point — `__main__.py` was archived 2026-05-02 (no branch in the fleet ships one). `cli_entry()` still exists in `__init__.py` but is no longer wired: `pyproject.toml` maps the `aipass` script to `aipass.aipass.apps.aipass:main`. See APLAN-0002 for the keep-or-retire decision.
 
 ---
 
-*Last Updated: 2026-08-19*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

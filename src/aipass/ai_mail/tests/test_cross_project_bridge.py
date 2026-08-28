@@ -478,3 +478,97 @@ class TestReplyProofMailboxResolution:
             email_data={"in_reply_to": "abc123", "from": "@baud"},
         )
         assert refused is False
+
+
+# --- Verified-admin @all reaches the residents (DPLAN-0318 circle close) ----
+#
+# Ruled after this morning's fleet-push announcement had to be hand-sent to the
+# four resident projects in four separate admin sends, because @all could not
+# carry it. The widening applies ONLY behind the five-leg admin verification;
+# an ordinary citizen's @all stays fleet-only, unchanged.
+
+import ast
+
+import aipass.ai_mail.apps.handlers.registry.read as reg
+
+
+class TestResidentScopeIsANamedConstant:
+    """The four residents are named one by one, never globbed."""
+
+    def test_resident_registries_match_memorys_fleet_definition(self):
+        """@memory's registry_scope.py is the single definition of the fleet.
+
+        We do NOT import it -- reaching into another branch's handlers is an
+        encapsulation violation and this must not become a runtime dependency.
+        We read its constant and compare, so a drift between the two lanes
+        fails HERE, loudly, instead of one lane quietly reaching a project the
+        other does not maintain.
+        """
+        scope = (
+            reg.find_repo_root() / "src" / "aipass" / "memory" / "apps" / "handlers" / "memory" / "registry_scope.py"
+        )
+        if not scope.is_file():
+            matches = list((reg.find_repo_root() / "src" / "aipass" / "memory").rglob("registry_scope.py"))
+            assert matches, "cannot locate @memory's registry_scope.py -- drift is now unmeasurable, go look"
+            scope = matches[0]
+
+        tree = ast.parse(scope.read_text(encoding="utf-8"))
+        theirs = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", "") == "RESIDENT_REGISTRIES" for t in node.targets
+            ):
+                theirs = tuple(ast.literal_eval(node.value))
+        assert theirs is not None, "RESIDENT_REGISTRIES not found in @memory's registry_scope.py"
+        assert tuple(reg.RESIDENT_REGISTRIES) == theirs, (
+            f"resident scope drifted from @memory's definition\n  ai_mail: {reg.RESIDENT_REGISTRIES}\n  memory : {theirs}"
+        )
+
+    def test_held_projects_are_not_in_scope(self):
+        """`projects/` also holds two on-hold projects. A glob would sweep them in."""
+        joined = " ".join(reg.RESIDENT_REGISTRIES).lower()
+        assert "marketstand" not in joined
+        assert "speakeasy" not in joined
+        assert len(reg.RESIDENT_REGISTRIES) == 4
+
+
+class TestBroadcastScope:
+    """@all widens for a verified admin and for nobody else."""
+
+    def test_non_admin_broadcast_stays_fleet_only(self, monkeypatch):
+        monkeypatch.setattr(reg, "get_resident_branches", lambda: {"@baud": "/x"})
+        import aipass.ai_mail.apps.modules.email_send as es
+
+        monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: False)
+        assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
+
+    def test_verified_admin_broadcast_includes_residents(self, monkeypatch):
+        import aipass.ai_mail.apps.modules.email_send as es
+
+        monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
+        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        emails = [b["email"] for b in es.resolve_broadcast_targets()]
+        assert emails == ["@flow", "@baud"], emails
+
+    def test_a_resident_already_in_the_core_registry_is_not_duplicated(self, monkeypatch):
+        """One inbox, one copy -- a duplicate would deliver the announcement twice."""
+        import aipass.ai_mail.apps.modules.email_send as es
+
+        monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@baud", "name": "BAUD"}])
+        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@baud"]
+
+    def test_a_refusing_verifier_never_widens(self, monkeypatch):
+        """A privilege path that raises is a refusal, never an opening."""
+        import aipass.ai_mail.apps.modules.email_send as es
+
+        def boom():
+            raise RuntimeError("grant unreadable")
+
+        monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
+        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", boom)
+        assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]

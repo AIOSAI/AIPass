@@ -44,6 +44,11 @@ BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 # how a dispatch from the repo root sent as @aipass (@devpulse, 0bb77ec2).
 _CREDENTIAL_SOURCES = frozenset({"assigned", "passport"})
 
+# Strategies where AIPASS_CALLER_BRANCH did not merely exist but actually RESOLVED
+# against a catalog. `caller_branch:synthesized` is deliberately absent: it invents
+# a citizen from env vars alone, so nothing vouched for the name.
+_ENV_VAR_RESOLVED_STRATEGIES = frozenset({"caller_branch:registry", "caller_branch:contact"})
+
 
 def _get_contact_info(branch_name: str) -> Optional[Dict]:
     """Look up branch info from the contacts address book.
@@ -235,10 +240,34 @@ def _record_resolution(branch_info: Optional[Dict], strategy: str, confidence: s
     # pick AIPASS_CALLER_BRANCH. Legitimate when the caller stood outside any branch
     # (drone falls back to the env var), so this warns rather than raises — but it is
     # the one disagreement visible from inside this process, so it gets recorded.
+    #
+    # UNLESS THE ENV VAR CARRIES A CREDENTIAL, in which case there is no disagreement
+    # to name. A credential travels and a location does not: an agent that cds into
+    # another branch is still itself (S102), so `assigned`/`passport` naming one
+    # branch while the cwd sits in another is the DESIGNED precedence working, not a
+    # conflict. 104 lifetime warnings said AMBIGUOUS about correctly-resolved sweeps
+    # — every one CALLER_BRANCH='ai_mail' with the cwd walking the whole fleet — and
+    # a warning that fires on the known-good case buries the one it exists for.
+    #
+    # Two things deliberately keep warning, because neither is proven good:
+    #   • provenance `project` — a registry-derived DIRECTORY name, which answers
+    #     "which project am I in", never "who am I". @aipass the directory and
+    #     @aipass the citizen spell the same; that is the $1.41 wake, and it must
+    #     stay loud forever.
+    #   • provenance missing or `unknown` (an older drone, or no drone) — unprovable
+    #     is not proven, and this lane fails toward noise rather than toward silence.
+    # A credential naming a citizen the registry has never heard of also still warns:
+    # resolution falls through to synthesis, and the provenance only says who STAMPED
+    # the name, never that anything vouched for it.
     if caller_branch and caller_cwd:
         cwd_root = find_branch_root(Path(caller_cwd))
         if cwd_root and cwd_root.name.lower() != caller_branch.lstrip("@").lower():
-            logger.warning(
+            vouched = (
+                os.environ.get("AIPASS_CALLER_IDENTITY_SOURCE") in _CREDENTIAL_SOURCES
+                and strategy in _ENV_VAR_RESOLVED_STRATEGIES
+            )
+            log_disagreement = logger.debug if vouched else logger.warning
+            log_disagreement(
                 "[identity] AMBIGUOUS: AIPASS_CALLER_BRANCH=%r but AIPASS_CALLER_CWD sits in branch %r "
                 "— resolved as %s from the env var. If this message is misattributed, the caller's cwd is why.",
                 caller_branch,
@@ -346,6 +375,39 @@ def detect_branch_from_pwd() -> Optional[Dict]:
         return None
 
 
+def _rooted(branch: Dict, registry_path: Path) -> Dict:
+    """Return *branch* with its ``path`` made absolute against its OWN registry.
+
+    A registry row's ``path`` is relative to THE REGISTRY THAT HOLDS IT, and a
+    row handed back raw carries no memory of which registry answered. Every
+    consumer then joins it to the AIPass repo root — right for AIPass citizens
+    by coincidence, wrong for every project citizen.
+
+    Found live 2026-08-24 (@devpulse 10400b9b, measured by @baud): a projects/*
+    citizen read "Inbox is empty" with four unread messages in the file under
+    his feet, and `reply <id>` answered "Message not found" for an id read out
+    of that same file. ``projects/baud`` + ``src/baud/baud`` had been resolved
+    as ``<aipass>/src/baud/baud``.
+
+    IT FABRICATED RATHER THAN FAILING. The wrong path sits inside the AIPass
+    tree, so the mail lane CREATED it — a phantom .ai_mail.local/sent/ holding
+    the reply he believed he had sent, in a directory belonging to no citizen.
+    A refusal would have been loud; a confident wrong address was not.
+
+    Absolutising HERE, at the one place a registry is read, rather than at the
+    nine call sites that join a registry path: a consumer cannot re-derive a
+    root it was never given, and nine copies of that join is how they drift.
+    Rows that are already absolute are returned untouched.
+    """
+    path = str(branch.get("path", ""))
+    if not path or Path(path).is_absolute():
+        return branch
+
+    rooted = dict(branch)
+    rooted["path"] = str((registry_path.parent / path).resolve())
+    return rooted
+
+
 def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
     """
     Look up branch in the registry by name (case-insensitive).
@@ -368,7 +430,7 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
-                    return branch
+                    return _rooted(branch, BRANCH_REGISTRY_PATH)
         except Exception as e:
             logger.warning("[identity] _lookup_branch_by_name(%s) failed: %s", branch_name, e)
 
@@ -380,7 +442,7 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
-                    return branch
+                    return _rooted(branch, caller_registry)
         except Exception as e:
             logger.warning(
                 "[identity] _lookup_branch_by_name(%s) caller registry %s failed: %s", branch_name, caller_registry, e
@@ -443,7 +505,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
                 else:
                     reg_path = reg_path.resolve()
                 if reg_path == branch_path_resolved:
-                    return branch
+                    return _rooted(branch, BRANCH_REGISTRY_PATH)
         except Exception as e:
             logger.warning("[identity] get_branch_info_from_registry(%s) failed: %s", branch_path, e)
 
@@ -461,7 +523,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
                 else:
                     reg_path = reg_path.resolve()
                 if reg_path == branch_path_resolved:
-                    return branch
+                    return _rooted(branch, caller_registry)
         except Exception as e:
             logger.warning("[identity] get_branch_info_from_registry(%s) caller registry failed: %s", branch_path, e)
 

@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-18
+**Last Updated:** 2026-08-27
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1319 pass (1315 + 4 live-hygiene skips on a fresh checkout) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1340 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -36,12 +36,18 @@ drone @ai_mail dispatch @target "Subject" "Body"
 # Dispatch (send + wake in one step)
 drone @ai_mail dispatch @target "Subject" "Body"          # Send dispatch email + wake
 drone @ai_mail dispatch @target "Subject" "Body" --fresh  # Send + fresh wake (new session)
+drone @ai_mail dispatch @t "Subj" "Body" --model sonnet   # Wake on a named model
 drone @ai_mail dispatch wake @target                      # Wake only (no email)
+drone @ai_mail dispatch register                          # What is outstanding, what is overdue
+drone @ai_mail dispatch status                            # Last 5 spawns (see Known Issues)
+drone @ai_mail dispatch daemon                            # Start the polling dispatch daemon
 
 # Send mail (no wake)
 drone @ai_mail email @target "Subject" "Body"             # Send to one branch
 drone @ai_mail email @all "Subject" "Body"                # Broadcast to all branches
 drone @ai_mail email @target "Subj" "Body" --from @spawn  # Explicit sender override
+drone @ai_mail email @t "Subj" "Body" --reply-to @x       # Route replies elsewhere
+drone @ai_mail email @t "Subj" "Body" --upsert-key KEY    # Repeat signal, one slot (below)
 
 # Read mail
 drone @ai_mail inbox                                      # List all emails (new + opened)
@@ -78,6 +84,46 @@ the worst failure shape mail has, because the sender believes it was delivered.
   raises `MarkupError` that aborts the whole listing.
 - **Fail honest** — a row that still cannot render is reprinted raw behind a marker, and
   an unreadable `sent/` file lists as a placeholder. Never a silent skip.
+
+## Broadcast Costs What It Delivers, Not More
+
+`email @all` fans out sequentially to every fleet citizen. The per-recipient work
+is real and it is allowed to take the time it takes. What is **not** allowed is
+paying a global cost per recipient.
+
+- **One central aggregation per broadcast, not one per recipient.**
+  `update_central()` takes no arguments — it rescans every branch inbox from the
+  repo root and derives the whole answer itself. Running it per delivery
+  recomputes one global result N times, and only the last run is ever read.
+  `send_to_broadcast` therefore passes **no** `on_delivered` callback and calls
+  `update_central_fn()` once after the loop. The central file is byte-identical
+  either way; the 18 discarded recomputations are not.
+- **The inbox scan prunes, it does not filter.** `find_all_inbox_files()` walks
+  with `os.walk` and drops excluded directories from `dirnames` in place, which
+  is what stops the descent. It used to `rglob` the entire tree and then discard
+  results whose path *contained* an excluded word — but discarding a result does
+  not save the walk. Measured on the live repo: **2.9s → 0.34s** for the same 26
+  inboxes, because 57GB of `.backup` and 68GB of `projects/` are no longer
+  traversed to be thrown away.
+- **Exclusions are path components, not substrings** (`EXCLUDED_DIR_NAMES`). The
+  substring form hid any branch whose directory merely contained the word —
+  `my.backup.tools/` read as an archive and vanished from central stats with no
+  error anywhere. It was also the only reason `/backups/` behaved differently on
+  Windows: that check was a literal forward-slash match, so the same tree counted
+  on POSIX and not on Windows. Component names have no separator to disagree on.
+
+**What this cost, stated plainly.** On 2026-08-27 a fleet announcement to 18
+inboxes spent ~55 of its ~60 seconds doing 19 full-repo scans, and the router
+killed it at its 60s default *after every message had already been delivered*.
+The caller saw a timeout for a send that worked — worse than either a clean
+success or a clean failure, because the work was done and only the report died.
+
+**The timeout is still the router's to fix.** Speed here removes today's
+symptom, not the failure shape: `resolve_timeout(branch, command, explicit)`
+never sees the command's arguments, so no per-verb integer can distinguish
+`email @seedgo` from `email @all`, and there is no mechanism for a target to
+declare what a call actually needs. Raised with @drone separately; a bigger
+constant is not the fix.
 
 ## Repeat Signals (`upsert_key`)
 
@@ -363,7 +409,10 @@ in the body, as evidence, not as a route.
 ## Help Flags — Explain, Never Execute
 
 A help flag anywhere in the argument list means *describe this command*, and all three
-modules check for it as the first statement in `handle_command`, before anything routes.
+modules check for it as the first thing after the command-ownership guard in
+`handle_command` — before any argument is read and before anything routes. It is not
+literally statement one, and cannot be: a module has to establish the command is *its*
+before it may answer for it (`email.py`, `dispatch.py`, `email_send.py`).
 
 They used to gate help at `args[0]` only, so a flag one position later was discarded and
 the command ran instead. On a messaging branch that is not a cosmetic bug:
@@ -565,6 +614,39 @@ FPLAN-0401 puts one door in each — openable only with the grant:
   is out of scope — this reads the projects the repo already hosts, and is not a
   multi-root discovery layer.
 
+### `@all` Scope: Fleet, Plus Residents for a Verified Admin
+
+`@all` resolves the 18 core citizens. A **verified-admin** `@all` also reaches the
+four resident projects — baud, earmark, finch, aipass_site (ruled 2026-08-27,
+DPLAN-0318 circle close). Ordinary citizens' `@all` is byte-identical to what it
+was: the widening rides the same five-leg verification that already permits
+admin-initiated direct mail into projects, and grants no new authority — every
+recipient still passes the per-delivery boundary check.
+
+The case that decided it: the fleet-push announcement had to be hand-sent to the
+four residents in four separate admin sends, because `@all` could not carry it.
+An announcement every citizen should hear is exactly what the asymmetry was
+built for.
+
+- **The resident list is a NAMED CONSTANT, never a glob** (`RESIDENT_REGISTRIES`
+  in `registry/read.py`, read by `get_resident_branches()`). `projects/` also
+  holds `marketstand(on _hold)` and `speakeasy(on_hold)`, and marketstand's
+  registry still marks its branch `active` while its directory name says parked —
+  a glob would broadcast into a held project on the strength of a stale field.
+- **Broadcast scope and resolution scope are different questions.**
+  `get_project_tree_branches()` still globs, and should: a held project's citizen
+  legitimately has an *address*. Being reachable is not the same as being on the
+  announcement list.
+- **It mirrors @memory's `registry_scope.RESIDENT_REGISTRIES`**, the single fleet
+  definition, and is deliberately a copy rather than an import — reaching into
+  another branch's handlers is an encapsulation violation, and `@all` must not
+  acquire a runtime dependency on @memory to know who it is talking to. A test
+  parses their constant and fails on drift, so the copy cannot rot quietly.
+- **Fails closed in both directions.** An unverified caller widens nothing, and a
+  verifier that *raises* is a refusal, not an opening.
+- **One inbox, one copy** — a resident already in the core registry is not added
+  twice.
+
 ### Out-of-Scope Addresses Are Explained, Not Denied
 
 An address can fail to resolve for two different reasons, and reporting both as
@@ -579,6 +661,10 @@ Out of scope: @baud is a citizen of hosted project 'baud', not the AIPass fleet
 (DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an
 existing message from @baud, or use the feedback channel.
 ```
+
+The branch count is **computed, not written** — `len(branches)` for the caller's own
+scope, handed to `_describe_unresolved_address()`. It reads 18 today and drifts with the
+fleet; the number above is an example of the shape, never a constant.
 
 - **The refusal is unchanged — only the reason is now true.** Fleet→project initiation
   stays walled for every non-admin caller, exit `2`, sent record stamped `refused`.
@@ -630,17 +716,72 @@ The polling daemon (`daemon.py`) watches inboxes for `auto_execute` dispatch ema
 
 ## Sender Identity
 
-Branch identity detection follows a priority chain in `detect_branch_from_pwd()`:
+Branch identity detection runs in `detect_branch_from_pwd()`. It is **not** a flat
+waterfall — a fence runs first, and the env-var lane and the walk-up lane are
+alternatives, not neighbours.
 
-1. `AIPASS_CALLER_BRANCH` env var (set by drone router from passport or `AIPASS_BRANCH_NAME`)
-2. Contacts address book lookup (fastest path for registered branches)
-3. Registry lookup by name
-4. `AIPASS_CALLER_CWD` / `Path.cwd()` walk-up to find `.trinity/passport.json`
-5. Registry lookup by path
+**0. The identity fence.** `AIPASS_CALLER_CWD` set but standing outside any branch →
+refused outright, *unless* `AIPASS_CALLER_IDENTITY_SOURCE` is `assigned` or `passport`.
+@drone stamps which kind of evidence named the caller, and a credential travels where a
+location does not. `project` — a registry-derived *project* name — answers "which project
+am I in", never "who am I", and stays refused: that is the $1.41 wake, where drone
+standing at the repo root stamped `aipass` the directory, which spells the same as
+`@aipass` the citizen. An **absent** `AIPASS_CALLER_CWD` is not contradicting evidence and
+leaves everything below untouched — in-process callers depend on that.
 
-If all fail, detection returns `None` and the operation fails loudly. Wrong identity is worse than no identity.
+**1. `AIPASS_CALLER_BRANCH` is set** → registry lookup by name, **then** contacts, then an
+identity synthesized from the env vars alone (recorded `unverified` — no passport, no
+registry row).
+
+> **The registry is asked before contacts, and the order is the whole fix.**
+> `AIPASS_REGISTRY.json` is the authoritative catalog; `contacts.json` is a learned,
+> writable cache. Asking the cache first let one poisoned row outrank the catalog for a
+> citizen the catalog knew perfectly well — found live 2026-08-23, when
+> `drone @ai_mail inbox` served @flow's mailbox from inside @ai_mail's own directory,
+> logged as name AI_MAIL / email @ai_mail / path `.../flow`, confidence **verified**.
+> The `is_dir()` staleness guard could never have caught it: the wrong root was a live
+> branch with a real mailbox in it. Contacts keep their real job — resolving external
+> callers the registry has never heard of.
+
+**2. No `AIPASS_CALLER_BRANCH` at all** → walk up `AIPASS_CALLER_CWD` (or, with no caller
+env, this process's `Path.cwd()`) for `.trinity/passport.json`, then registry lookup by
+path. The `Path.cwd()` leg is recorded `unverified` deliberately: it is correct for a
+dispatched agent standing in its own tree and silently wrong anywhere else.
+
+Every exit is stamped by `_record_resolution()` with the winning strategy and a
+confidence, so a wrong sender can be traced to the path that produced it. If all fail,
+detection returns `None` and the operation fails loudly. Wrong identity is worse than no
+identity.
 
 The `--from @branch` flag on send/email commands provides an explicit sender override for callers outside branch directories.
+
+### Registry Rows Leave the Reader Absolute
+
+**A registry row's `path` is relative to THE REGISTRY THAT HOLDS IT.** Returned raw it
+carries no memory of which registry answered, and every consumer then joins it to the
+AIPass repo root — right for AIPass citizens by coincidence, wrong for every project
+citizen.
+
+`_rooted()` absolutises a row against its own registry at the point of read, in both lanes
+of `_lookup_branch_by_name()` and both of `get_branch_info_from_registry()`. Rows already
+absolute pass through untouched. It lives at the reader rather than at the nine call sites
+that join a registry path, because a consumer cannot re-derive a root it was never given —
+and nine copies of that join is how they drift.
+
+**It fabricated rather than failing, which is why this is a rule and not a footnote.**
+Found live 2026-08-24: a `projects/*` citizen read *"Inbox is empty"* against a file
+holding four unread messages, and `reply <id>` answered *"Message not found"* for an id
+read out of that same file. `projects/baud` + row `src/baud/baud` had resolved to
+`<aipass>/src/baud/baud`. That path sits **inside** the AIPass tree, so the mail lane
+created it — a phantom `.ai_mail.local/` holding a reply its author believed he had sent,
+in a directory belonging to no citizen. A refusal would have been loud; a confident wrong
+address was not.
+
+The caller-registry fallback in `_lookup_branch_by_name()` is **not** admin-gated, and is
+a different question from the admin-only cross-project sweep above: it resolves a citizen
+of the caller's *own* project. It cannot reach @baud from a fleet seat — walking up from a
+fleet citizen's `AIPASS_CALLER_CWD` finds `AIPASS_REGISTRY.json` first, which does not
+list him.
 
 ### Verified-Caller Rail
 
@@ -675,6 +816,28 @@ could run `dispatch @manager --from @daemon` and wake a manager (found by a
   `wake_branch` cannot: its in-process callers (@daemon's `run.py`) have no
   caller env and are trusted by import instead. A test scans `wake.py` for
   `sender == "@x"` gates and fails if one is missing from the set.
+
+### A Credential Is Not an Ambiguity
+
+`_record_resolution()` warns when `AIPASS_CALLER_BRANCH` and `AIPASS_CALLER_CWD`
+name different branches — the one disagreement visible from inside this process.
+It logs that at **debug** when the env var carries a credential provenance
+(`assigned` / `passport`) *and* actually resolved against a catalog.
+
+A credential travels and a location does not: an agent that cds into another
+branch is still itself. So `assigned` naming one branch while the cwd sits in
+another is the designed precedence working, not a conflict. 104 lifetime
+warnings said AMBIGUOUS about correctly-resolved sweeps — every one
+`CALLER_BRANCH='ai_mail'` with the cwd walking the whole fleet — and a warning
+that fires on the known-good case buries the one it exists for.
+
+Three cases deliberately keep the warning, because none is proven good:
+
+| Case | Why it stays loud |
+|---|---|
+| provenance `project` | a registry-derived **directory** name — @aipass the directory and @aipass the citizen spell the same. This is the $1.41 wake |
+| provenance missing / `unknown` | unprovable is not proven; this lane fails toward noise, not silence |
+| resolved via `caller_branch:synthesized` | the name resolved against nothing — provenance says who *stamped* it, never that anything vouched for it |
 
 ### Address Derivation Hazard
 
@@ -736,6 +899,9 @@ ai_mail/
 │       │   ├── daemon.py       # Polls inboxes, spawns agents for dispatch emails
 │       │   ├── wake.py         # Wakes branches via claude subprocess
 │       │   ├── dispatch_monitor.py # Wraps claude process (bounce, lock cleanup, sandbox, broker fd)
+│       │   ├── register.py     # Append-only dispatch register — open/close/outstanding
+│       │   ├── report.py       # Completion report — build/write, emails_sent, memories_edited
+│       │   ├── session_pointer.py # Durable resume-session pointer (replaces `claude -c`'s mtime guess)
 │       │   ├── status.py       # Dispatch log I/O
 │       │   └── test_token.py   # AIPASS-TEST ping protocol (auto-ack)
 │       ├── cli/
@@ -754,7 +920,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1319 tests across 46 test files
+└── tests/                      # 1326 tests across 46 test files (selection below)
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -762,8 +928,9 @@ ai_mail/
     ├── test_wake.py            # Branch resolution, PID checks, lock files
     ├── test_wake_blocklist.py  # Wake protection for @devpulse
     ├── test_delivery.py        # Inbox migration, private branches, pipeline
-    ├── test_send_identity.py   # Sender identity chain (36 tests)
-    ├── test_user_paths.py      # Mailbox path resolution (13 tests)
+    ├── test_send_identity.py   # Sender identity chain (62 tests)
+    ├── test_identity_fence.py  # Every verb refuses outside a branch
+    ├── test_user_paths.py      # Mailbox path resolution (22 tests)
     ├── test_contacts.py        # Address book operations
     ├── test_inbox_ops.py       # Inbox loading + migration
     ├── test_registry_read.py   # Registry parsing + branch lookup
@@ -778,6 +945,12 @@ ai_mail/
     ├── test_public_surface.py  # Package doors: feed_path, register_path, outstanding (22 tests)
     ├── test_message_correlation.py # sent_id back-reference + shared id resolver (12 tests)
     ├── test_live_mailbox_hygiene.py # Guard: no test fixtures in real mailboxes (4 tests)
+    ├── test_live_contacts_hygiene.py # Guard: no tmp paths in live contacts.json (3 tests)
+    ├── test_dispatch_register.py # Append-only register, later-record-wins reconstruction
+    ├── test_dispatch_report.py  # Completion report contents + durability
+    ├── test_session_pointer.py  # Resume pointer (47 tests)
+    ├── test_admin_lane.py      # 5-leg admin verdict on the wake path
+    ├── test_cross_project_bridge.py # Admin-only resolution + reply return path
     └── test_paths.py           # find_repo_root() utility
 ```
 
@@ -786,9 +959,14 @@ ai_mail/
 ### Depends On
 - `aipass.prax` — Logging via `system_logger`
 - `aipass.cli` — Console output and display formatting
-- `aipass.drone` — Command routing and `@branch` resolution
-- `aipass.trigger` — `trigger.fire()` for `email_dispatched` events
-- Python stdlib (`pathlib`, `json`, `argparse`, `importlib`, `subprocess`, `fcntl`)
+- `aipass.drone` — broker-socket IPC for a sandboxed dispatch child
+  (`create_identified_connection`). This is the **only** `aipass.drone` import in the
+  package: `@branch` resolution is internal (`registry/read.py`, `users/branch_detection.py`),
+  and "drone routes commands to us" describes how `drone @ai_mail …` invokes this branch
+  from outside, not a dependency
+- `aipass.trigger` — `trigger.fire()` for `email_dispatched` / `dispatch_completed` events
+- Python stdlib (`pathlib`, `json`, `importlib`, `subprocess`, `fcntl`) — argument parsing
+  is hand-rolled in `send_args.py`, not `argparse`
 
 ### Provides To
 - **All branches** — inter-branch messaging (send/receive/reply/close)
@@ -799,9 +977,13 @@ ai_mail/
 
 ## Bypass Registry
 
-`.seedgo/bypass.json` holds **18** rules — 17 survivors of the prune below, plus one added
-the same day *with* `cli/help_flags.py` and measured live (99% with it off, 100% on), which
-is the opposite of a prune candidate.
+`.seedgo/bypass.json` holds **20** rules — 17 survivors of the prune below, one added the
+same day *with* `cli/help_flags.py` and measured live (99% with it off, 100% on, the
+opposite of a prune candidate), plus two added since: `handlers` on
+`dispatch/report.py` (FPLAN-0452 P1) and `unused_function` on the package `__init__.py`
+(S154, re-checked against the built wire). The 99%-with-everything-off figure was measured
+on 2026-08-13 against the 18-rule registry and has **not** been re-run since — the 100%
+audit score below is current, that one is dated.
 
 It held 51 until the 2026-08-13 audit measured
 every one of them in **both** lanes — the audit lane (`audit aipass @ai_mail --full`, walks
@@ -834,6 +1016,12 @@ re-measure per lane.
 - **`--from` is undocumented in `email --help`** — it is in this README and in the code, but
   not in the module's own FLAGS block. Open in APLAN-0006.
 - **`--model` help names retired models** ("Claude Opus 4.6", "Sonnet 4.6"). Open in APLAN-0006.
+- **`dispatch status` reports "No dispatches recorded yet." while dispatches are running.**
+  Reproduced 2026-08-25 with two live entries visible in `dispatch register` at the same
+  moment. The register is the trustworthy view; `status` reads a different log and its
+  empty answer is a false negative, not an empty state. Open in APLAN-0006.
+- **`dispatch wake` prints "see step status above"** when the step status prints below it
+  (`dispatch.py`). Named under *Output ordering*; open in APLAN-0006.
 
 ---
 

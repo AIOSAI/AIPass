@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-16
 # Modified: 2026-03-06
 # =============================================
@@ -173,17 +173,36 @@ def _read_single_registry(registry_path: Path, root: Path) -> List[Dict[str, Any
 
 def _read_registry() -> List[Dict[str, Any]]:
     """
-    Read all project registries (AIPass + external projects from caller CWD).
+    Read every registry this fleet covers: core, residents, then callers.
+
+    THE RESIDENTS ARE NOT DISCOVERED, THEY ARE NAMED. Until 2026-08-27 this
+    function reached 19 of the fleet's 22 branches: the core citizens plus
+    whatever external registry a caller's cwd had once persisted into
+    known_registries.json. `baud` was in there by accident of where somebody
+    happened to stand; `earmark`, `finch` and `aipass_site` were not, so their
+    memory files could overflow with no rollover ever running on them while
+    the trinity push — which resolved its own scope from a named constant —
+    saw all 22. A gap that depends on a caller's working directory is not a
+    policy, and a citizen whose memories can overflow unattended is
+    slow-motion data loss.
+
+    Both lanes now read `registry_scope.RESIDENT_REGISTRIES`, so the fleet has
+    exactly one definition. Caller discovery is unchanged and still runs after
+    the residents — an external project calling in from its own tree is a
+    different mechanism with a different purpose.
 
     Registry paths are relative — resolved against their respective project root.
 
     Returns:
         List of branch dictionaries with absolute paths
     """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
     branches = _read_single_registry(_REPO_ROOT / "AIPASS_REGISTRY.json", _REPO_ROOT)
 
     seen_paths = {b.get("path") for b in branches}
-    for reg_path in _find_caller_registries():
+    resident_paths = registry_scope.resident_registry_paths(_REPO_ROOT)
+    for reg_path in resident_paths + _find_caller_registries():
         for branch in _read_single_registry(reg_path, reg_path.parent):
             if branch.get("path") not in seen_paths:
                 branches.append(branch)
@@ -308,6 +327,13 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
     All branches use v2 entry-count limits from config (per_branch with
     defaults fallback). No line-count fallbacks — errors over silent fallbacks.
 
+    Fires only ABOVE the limit, never at it: keep-15 means the file is allowed
+    to hold 15. This threshold and rollover/extractor.py's `_extract_tail_excess`
+    are one decision in two places — the extractor drains `len - limit`, so a
+    detector firing at `>=` would flag a file the extractor correctly refuses to
+    touch, and the pair would spin on it forever (NOTHING DRAINED). Pinned by
+    `test_detector_and_extractor_never_disagree`, swept across the boundary.
+
     Args:
         file_path: Path to memory JSON file
 
@@ -362,21 +388,21 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
         if isinstance(sessions, list):
             auto_count = sum(1 for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact")
             regular_count = len(sessions) - auto_count
-            if auto_compact_cap is not None and auto_count >= auto_compact_cap:
+            if auto_compact_cap is not None and auto_count > auto_compact_cap:
                 reasons.append(f"{auto_count}/{auto_compact_cap} auto-compact snapshots")
-            if max_sessions is not None and regular_count >= max_sessions:
+            if max_sessions is not None and regular_count > max_sessions:
                 reasons.append(f"{regular_count}/{max_sessions} sessions")
 
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None:
         key_learnings = data.get("key_learnings", [])
-        if isinstance(key_learnings, (list, dict)) and len(key_learnings) >= max_key_learnings:
+        if isinstance(key_learnings, (list, dict)) and len(key_learnings) > max_key_learnings:
             reasons.append(f"{len(key_learnings)}/{max_key_learnings} key_learnings")
 
     max_observations = file_limits.get("observations", {}).get("count")
     if max_observations is not None:
         observations = data.get("observations", [])
-        if isinstance(observations, list) and len(observations) >= max_observations:
+        if isinstance(observations, list) and len(observations) > max_observations:
             reasons.append(f"{len(observations)}/{max_observations} observations")
 
     if reasons:

@@ -226,7 +226,6 @@ class TestSendToBroadcastRefusedBookkeeping:
             create_email_file_fn=_create,
             load_email_file_fn=load_email_file,
             deliver_email_to_branch_fn=_deliver,
-            on_delivered_callback=MagicMock(),
             log_operation_fn=MagicMock(),
             update_central_fn=MagicMock(),
         )

@@ -6,6 +6,7 @@
 """Tests for feedback compose — send, reply, ai_mail delivery."""
 
 import json
+from datetime import datetime
 from unittest.mock import patch
 
 import pytest
@@ -213,6 +214,34 @@ class TestAiMailDelivery:
         assert "body" not in mail_msg
         assert mail_msg["metadata"]["source"] == "feedback"
         assert mail_msg["metadata"]["thread_id"] == "aaa11111"
+
+    def test_delivered_timestamp_matches_ai_mail_store_format(self, inbox_with_message, mock_aipass_root):
+        """Delivered timestamp must use ai_mail's canonical store format.
+
+        ai_mail stamps its store with local '%Y-%m-%d %H:%M:%S' (create.py,
+        reply.py). This module wrote UTC ISO-T into that same store, leaving
+        two timestamp shapes in one file (BAUD report e8c235f8, 2026-08-24).
+        One store, one format — and local wall-clock, not UTC wearing it.
+        """
+        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
+        ai_mail_dir.mkdir(parents=True)
+        ai_mail_inbox = ai_mail_dir / "inbox.json"
+        with open(ai_mail_inbox, "w", encoding="utf-8") as f:
+            json.dump(
+                {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []},
+                f,
+            )
+
+        compose.reply_to("aaa11111", "format check")
+
+        with open(ai_mail_inbox, encoding="utf-8") as f:
+            ts = json.load(f)["messages"][0]["timestamp"]
+
+        # Parses in ai_mail's canonical shape (raises on ISO-T)...
+        parsed = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        # ...and reads as local wall-clock — a UTC stamp in local clothes
+        # would sit a whole UTC-offset away from now.
+        assert abs((parsed - datetime.now()).total_seconds()) < 60
 
     def test_skips_delivery_when_no_ai_mail(self, inbox_with_message, mock_aipass_root):
         """Should log warning and skip when sender has no ai_mail inbox."""

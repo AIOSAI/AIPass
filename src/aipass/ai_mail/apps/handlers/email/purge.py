@@ -226,6 +226,19 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
             )
 
         # Call @memory vectorization via subprocess (handler independence)
+        # THE GAP IS CLOSED — this operation is real now. It was NOT, for about
+        # four months: @memory's handler had no `vectorize_and_store`, answered
+        # this call with success:false at exit 0, and purge read that refusal as
+        # a store and deleted the originals. @memory shipped the operation in
+        # chroma_subprocess 1.4.0 (2026-08-24) and the seam is verified live from
+        # this side: a probe returns {'success': True} and both
+        # ai_mail_email_sent and ai_mail_email_deleted now exist.
+        #
+        # Kept as a TEXT-IN call deliberately. `store_vectors` wants `embeddings`
+        # plus `documents`; sending raw `texts` and letting @memory encode them
+        # means the branch that OWNS the store picks the embedding model. If each
+        # caller encoded its own, two callers could put vectors from two models
+        # in one collection, which is silently unsearchable rather than an error.
         input_data = {
             "operation": "vectorize_and_store",
             "branch": "AI_MAIL",
@@ -244,6 +257,28 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
 
         if result.returncode != 0:
             return {"success": False, "error": result.stderr or "Storage failed"}
+
+        # EXIT 0 MEANS THE PROCESS RAN, NOT THAT THE REQUEST SUCCEEDED. @memory's
+        # handler answers a bad request on stdout — {"success": false, "error":
+        # ...} — and exits 0, correctly: the subprocess did its job, it was the
+        # ASK that was wrong. Testing only returncode read that refusal as a
+        # store, and _purge_files then unlinked the originals under the comment
+        # "data is safely in @memory". It was not. Found by @memory (9da1ba52,
+        # 2026-08-23) from their side of the wire; the database agrees — not one
+        # email collection exists among 37.
+        try:
+            reply = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            # Unreadable output is not evidence of success. Guessing "probably
+            # fine" here is the original defect wearing a different hat, and the
+            # cost of guessing wrong is deleted mail.
+            logger.warning("[purge] Unreadable vectorization reply for %s: %s", folder_type, e)
+            return {"success": False, "error": f"Unreadable reply from @memory: {result.stdout[:200]!r}"}
+
+        if not isinstance(reply, dict) or not reply.get("success"):
+            error = (reply or {}).get("error") if isinstance(reply, dict) else None
+            logger.warning("[purge] @memory refused vectorization for %s: %s", folder_type, error)
+            return {"success": False, "error": str(error or "Vectorization refused without a reason")}
 
         return {"success": True, "count": len(texts)}
 

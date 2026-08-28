@@ -19,6 +19,7 @@ name the file had, and must have again, on revival.
 |---|---|---|
 | `symbolic_20260814/` | Patrick, 2026-08-14 — park the symbolic fragments tier, revivable; the active piece is Compass | 9 implementation files. Pinned by `tests/test_symbolic_parked.py`, which fails if any of them goes missing. |
 | `unwired_handlers_20260813/` | Owner call, 2026-08-13 — three handlers with no caller anywhere; wire-it-or-archive-it, all three archived | 5 implementation files + the 105 tests that covered them. |
+| `dead_template_lane_20260827/` | DPLAN-0318 marker 7, item 3 — `push-templates` / `diff-templates` scanned a pre-`.trinity` layout where zero real matches were possible | `pusher`, `differ`, the 67 tests that pinned them, and the fleet-side ledger the lane wrote. Retired, not revivable as-is. |
 
 Each park's own `README.md` carries its evidence and its revival steps.
 

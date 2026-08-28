@@ -17,7 +17,7 @@
 - Manage git workflows: tier-based access (global read-only, owner write), commit, diff, log, sync, merge
 - Discover and scan available commands across the system
 - Provide `drone systems` introspection of all registered components
-- Support external AIPass projects via dual registry lookup and module fallback
+- Support external AIPass projects via dual registry lookup and module routing
 
 ---
 
@@ -95,7 +95,7 @@ drone remove <name>              # Remove a custom command shortcut
 
 # Utilities
 drone rm <path> [<path>...]      # Contained safe-delete (project + tmp only)
-drone @flow list --drone-timeout 90   # Override subprocess timeout (default 60s)
+drone @flow list --drone-timeout 90   # Override subprocess timeout (default 600s)
                                       # Must come AFTER @target — anywhere after it works
 drone --version                  # Show version (v1.1.0)
 drone --help                     # Show usage information
@@ -109,27 +109,32 @@ from aipass.drone import resolve_branch, list_branches, route_command
 # Resolve @name to absolute path
 path = resolve_branch("@seedgo")
 
-# List all registered branches
-branches = list_branches()               # All branches
-active = list_branches(status="active")  # Filter by status
+# List registered branches — status defaults to "active", it is not "all"
+active = list_branches()                      # 18 today; the default IS a filter
+by_type = list_branches(branch_type="core")   # 0 today — see note below
 
 # Route a command to a branch
-result = route_command("@seedgo", "verify")
+result = route_command("@seedgo", "audit", args=["aipass", "@drone"])
 print(result.stdout)      # Command output
 print(result.exit_code)   # 0 on success
 ```
 
+`list_branches(branch_type=...)` is a live parameter with nothing to match: no entry in `AIPASS_REGISTRY.json` carries a `branch_type` field, and all 18 carry `status: "active"`, so today the type filter always returns `[]` and any status but `active` returns `[]` too. Documented as it behaves, not as it reads — verified 2026-08-25.
+
 ### Registry Management
 
 ```python
-from aipass.drone import set_registry_path, get_registry_path
+from aipass.drone import set_registry_path, get_registry_path, reset_registry_path
 
 # Use a custom registry location
 set_registry_path("/path/to/AIPASS_REGISTRY.json")
+reset_registry_path()                     # back to normal resolution
 
 # Or set via environment variable
-# export AIPASS_REGISTRY_PATH=/path/to/registry.json
+# export AIPASS_REGISTRY=/path/to/registry.json
 ```
+
+Path resolution order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path()` → **`AIPASS_REGISTRY`** env var → walk up from cwd, skipping any registry whose `metadata.id` conflicts with the nearest passport's `citizenship.registry_id` → `AIPASS_HOME` → walk up from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`, not `AIPASS_REGISTRY_PATH` — the latter name appeared here until 2026-08-25 and was never read by any code.
 
 ### Error Handling
 
@@ -167,7 +172,7 @@ drone/
 │   │   ├── module_registry.py     # Internal module routing
 │   │   ├── registry.py            # Registry query operations
 │   │   ├── commands.py            # Custom command shortcut orchestrator
-│   │   ├── git_module.py          # Git workflow (tier-based access, 22 commands)
+│   │   ├── git_module.py          # Git workflow (tier-based access, 24 commands)
 │   │   ├── scan.py                # Branch command scanning
 │   │   ├── rm.py                  # Contained safe-delete orchestrator
 │   │   └── broker.py             # Broker daemon orchestrator (sandbox delete)
@@ -180,7 +185,9 @@ drone/
 │   │   ├── module_registry_handler.py  # Module loading (internal + external)
 │   │   ├── generic_adapter.py     # StringIO capture for external modules
 │   │   ├── help_flags.py          # wants_help() — whole-sequence help detection (rule E)
+│   │   ├── json_flags.py          # wants_json() / strip_json_flag() — --json in any slot
 │   │   ├── rm_handler.py          # Path containment checks + deletion
+│   │   ├── deletion_log.py        # Deletion record — JSONL store + prax line (both lanes)
 │   │   ├── routing_config.json    # External module declarations
 │   │   ├── broker/
 │   │   │   ├── daemon.py          # Broker daemon (unix socket, openat2, audit)
@@ -202,6 +209,7 @@ drone/
 │   │       ├── diff_handler.py              # Scoped git diff (--staged support)
 │   │       ├── log_handler.py               # Scoped git log (configurable count)
 │   │       ├── show_handler.py              # Read history at a commit (repo-wide, NOT branch-scoped)
+│   │       ├── remote_handler.py            # List remotes (credentials redacted)
 │   │       ├── commit_handler.py            # Commit changes (--all, selective files, or pre-staged)
 │   │       ├── checkout_handler.py          # Branch switching (main/dev guard)
 │   │       ├── dev_pr_handler.py            # Push dev and create PR to main
@@ -224,7 +232,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1019 tests across 25 test files
+└── tests/                         # 1243 tests across 32 test files
 ```
 
 ### Routing Flow
@@ -236,7 +244,9 @@ drone/
 5. **Bare module names** → auto-discovered from `apps/modules/*.py`, routed via `importlib`
 6. **Custom commands** → greedy multi-word matching against `drone_command_registry.json`
 
-There is **no module fallback on the error path.** A `BranchNotFoundError` from a branch that the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a registry path that escapes the project root, and the old fallback answered that security refusal by quietly running the module instead.
+The `@target` lane has **no module fallback on the error path.** A `BranchNotFoundError` from a branch that the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a registry path that escapes the project root, and the old fallback answered that security refusal by quietly running the module instead.
+
+One fallback deliberately survives, and only in the **custom-command** lane (`_handle_custom_command()`, `apps/drone.py:376`): a registered shortcut whose target is a module but not a branch here falls back to module routing, logged at INFO. That lane resolves its target from `drone_command_registry.json` rather than the argv, so the look-before-route check the `@target` lane uses does not apply to it. Unverified whether it should — it has never been measured for happy-path firing the way `@git status` was.
 
 ### Module System
 
@@ -294,8 +304,26 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 | **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | `pr`, `commit`, `checkout`, `dev-pr`, `delete-branch`, `prune-temp`, `close-pr`, `sync`, `unlock`, `merge`, `smart-sync`, `fix`, `tag` |
 
 - Auth is checked once at the top of `git_module.handle_command()` before any handler is called
-- Unauthorized commands are refused with a message naming the caller, its `citizen_class`, and the tier required
+- A refusal names the caller and why it was refused — see the two refusal species below; only the authority species names `citizen_class` and the tier required
 - **A command in neither tier is unreachable, not merely ungated** — `verify_git_access()` refuses anything it cannot find in a tier as `Unknown git command`, so registering a verb in `_COMMANDS` and wiring it to a handler does not make it callable. `prune-temp` shipped that way and no caller could reach it (found in the APLAN-0003 audit, tier ruled by @devpulse). `test_every_registered_command_holds_a_tier` now asserts the rule rather than the instance
+
+### Two refusal species — authority vs capability
+
+Owner tier refuses for two reasons that are not interchangeable, and conflating them cost a false page *and* a real hole (commit `2b7e6bcc`).
+
+| | **Authority** | **Capability** |
+|---|---|---|
+| What happened | the caller is not, or cannot be shown to be, this repo's owner | the caller **is** the proven owner, but the verb is not translated for this repo |
+| Where it is decided | any of the four owner checks — `citizen_class: manager`, registry readable, registry tenancy, listed with `owner: true` + passport path-binding | only **after** all four pass |
+| Log level | `ERROR` — fault-shaped, someone should look | `WARNING` — by design, nothing is broken |
+| Message | `Branch 'x' is not authorized for 'pr': <reason>` | `Branch 'x' cannot run 'pr' in this repo: <reason>` |
+| `AIPASS_GIT_AUTH_MODE=warn` | **lifts it** — rolling back the authority migration is exactly that switch's job (F59 6.1) | **does not lift it**, and cannot: the capability branch raises before `warn_only` is ever read |
+
+Why the wording differs: a proven owner sent to audit their passport is a false trail — they never had an authority problem. Why the rollback is scoped: one flag tested against every refusal species also lifted this wall, and `pr` ran to completion inside an external repo. A rollback named for one migration has no business re-arming a half-run of our merge flow in someone else's repository.
+
+**Which verbs refuse outside AIPass:** `dev-pr`, `pr`, `close-pr`, `merge`, `smart-sync`, `fix`, `delete-branch` — they assume a `dev` branch, our PR conventions, or `pyproject` versioning, so against an arbitrary repo they would half-run and leave a mess. `commit` and `sync` were translated in DPLAN-0281 P2, `tag` in DPLAN-0290 item 1; the refusal names those three so a manager who hits the wall learns what they *can* use.
+
+**WARNING is not silence.** @trigger's `watch_branch_log_warnings` feeds branch-log WARNINGs into the escalation digest — ten occurrences of one signature in 60 minutes mails @devpulse. A capability wall walked into repeatedly still reaches an operator, as a digest rather than a page here.
 
 ### Subprocess timeouts
 
@@ -303,11 +331,31 @@ Routed commands run with a timeout resolved in this order — **explicit flag > 
 
 | Layer | Value | Where |
 |-------|-------|-------|
-| Default | **60s** | `DEFAULT_TIMEOUT` in `apps/handlers/executor.py` |
-| Per-command policy | e.g. `memory process-plans` 120s, `memory rollover` 100s, `flow close` 90s | `TIMEOUT_OVERRIDES` in the same file |
+| Default | **600s** | `DEFAULT_TIMEOUT` in `apps/handlers/executor.py` |
+| Per-command policy | **none — the table ships empty** | `TIMEOUT_OVERRIDES` in the same file |
 | Explicit | whatever you pass | `--drone-timeout <n>` |
+| Extension quantum | **120s** | `IDLE_GRACE` in the same file |
+| Hard ceiling | **1800s** | `MAX_TIMEOUT` in the same file |
 
-The default was raised 30 → 60 on 2026-08-13 (Patrick's ruling): two known runners finish around 31s and were tripping the old default. A per-command policy is a decision, not a floor — it wins even if it is *lower* than the default.
+The default was raised 30 → 60 on 2026-08-13 (Patrick's ruling): two known runners finish around 31s and were tripping the old default. It was raised again 60 → 600 on 2026-08-27, after two live kills in one morning — the fleet-wide trinity push died at 60s mid-alphabet (it needs about five minutes; the re-fire used `--drone-timeout 900`), and an `@all` mail broadcast was killed at 60s *after* all 18 messages had been delivered. Patrick's ruling: *"it is configured wrong — it should not be timing out before it completes; processing time is fine, increase the allowed timeout so things can actually complete."*
+
+**The timeout is a hang guard, not a performance budget.** It is sized for the worst *legitimate* case. Per-verb budgets were considered and rejected: an integer per command cannot tell `email @seedgo` from `email @all`, which is one verb with two very different worst cases.
+
+**`TIMEOUT_OVERRIDES` is empty on purpose.** It held three entries — `memory process-plans` 120s, `memory rollover` 100s, `flow close` 90s — and every one of them was written to *raise* above the old 60s default. Against a 600s base the same numbers invert into *caps*: the three commands we know are slow would get the least time in the fleet. The mechanism stays, because a per-command policy is a decision, not a floor — it still wins even if it is *lower* than the default (`resolve_timeout` has no `max()`, and a test pins that). Only the now-harmful data is gone.
+
+**Output extends life.** Nothing is killed before the base timeout, however silent it is. If the child has produced output within the last `IDLE_GRACE` (120s) when the deadline arrives, the deadline moves out by another `IDLE_GRACE` instead of killing — repeatedly, while it keeps talking, up to `MAX_TIMEOUT` (1800s), which nothing can pass. A child that has said *nothing at all* never extends: silence is not output.
+
+**The ceiling caps extension, never the base.** If a number above `MAX_TIMEOUT` is asked for — an operator's `--drone-timeout 3600`, or a future `TIMEOUT_OVERRIDES` entry — that number is honoured in full; the ceiling only bounds how far *extension* can push a deadline past it. A ceiling that quietly became a maximum would kill work earlier than the number that was actually requested, which is the failure this whole change exists to end.
+
+**A killed child is chased down and reported.** The kill path is a ladder — `terminate()`, wait, then `kill()`, then wait again to reap — and the one rung that can leave something behind says so: a child still unreaped after `SIGKILL` logs a **WARNING** naming its pid, because a zombie held for the lifetime of this process is otherwise invisible. Every other rung logs at debug; none of them is silent.
+
+*The honest edge:* a long **silent** computation gets only the base 600s. Extension is earned by talking, so a quiet 15-minute job still needs `--drone-timeout`. This adds no new false-kill mode — silence never *shortens* anything, it just does not lengthen it.
+
+**Two lanes take no timeout, and now say so.** Module routing runs in-process and interactive commands (`monitor`, `audit`, `watchdog`, `status`, and the `cli`/`backup` branches) inherit the terminal — neither is captured, so neither can be timed. The flag still *parses* there, so before this an operator's number vanished in silence: `drone @seedgo audit aipass --drone-timeout 5` ran unbounded and said nothing. Both lanes now emit a WARNING to the log and to stderr naming the number and the reason. A silently discarded cap is the same species of defect as a silent kill.
+
+**An explicit `--drone-timeout N` means exactly N.** `route_command()` passes `extend_on_output=False` whenever the operator named a number, because a deliberate tight cap that silently stretches is worse than no cap. The routing log line states the extension state next to the timeout.
+
+**A killed command still reports what it did.** The timeout error replays the child's partial stdout and stderr under `--- partial stdout (N bytes) ---` banners, truncated to the last 4000 characters *and told so when truncated*, and the chained `subprocess.TimeoutExpired` carries the same bytes on `.output` / `.stderr`. This is the other half of the `@all` broadcast defect: every message was delivered, and the old error said only *"Command timed out after 60s"* because the child's captured output was discarded with the exception.
 
 The signature defaults of `execute_command()` and `execute_branch_command()` reference `DEFAULT_TIMEOUT` rather than restating the number, so the layers cannot silently disagree. `tests/test_executor.py::TestDefaultTimeoutValue` pins the number itself and asserts all three layers agree.
 
@@ -384,6 +432,8 @@ Four things worth knowing:
  - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
  - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
 
+**Known gap in the `caller` field — read it with this in mind.** The resolver's last resort before `unknown` is the *project*, not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no `.trinity/passport.json` anywhere up the tree, it derives a name from the registry that answered (for AIPass, the `AIPASS_REGISTRY.json` filename → `aipass`). A delete run from the repo root therefore records `caller: "aipass"` — a directory, not the citizen who typed it. The live store carries 8 such records, one of them a deletion inside @devpulse's own tree. Nothing is fabricated: `aipass` is a true statement about *where* the process stood, and the same `CallerIdentity.source` distinction documented under Caller Identity applies (`project`, not `passport` or `assigned`). But a reader auditing a deletion months later wants the citizen, and for those records the ledger cannot supply one. Not fixed here — writing it down beats a reader inferring a person from a project name.
+
 Both of drone's delete lanes feed it: `rm` (`handlers/rm_handler.py`) and `broker` (`handlers/broker/daemon.py`, which deletes on behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading its own cwd). The broker's protocol audit log is unchanged — that records requests and error codes; this records deletions.
 
 `AIPASS_DELETION_LOG` relocates the store (tests, containers). It cannot silence the prax line.
@@ -441,7 +491,7 @@ Enforcement layers:
 
 ## Interactive Commands
 
-By default, drone captures subprocess output (`capture_output=True`) with a 30s timeout. This is safe for AI-to-AI routing but strips Rich colors, buffers progress bars, and kills long-running commands.
+By default, drone captures subprocess output (both pipes, drained concurrently) with the resolved timeout — 600s unless `--drone-timeout` says otherwise, extended while the child keeps producing output up to a 1800s ceiling (see Subprocess timeouts). This is safe for AI-to-AI routing but strips Rich colors, buffers progress bars, and kills long-running commands.
 
 Commands in the interactive tuple bypass capture and inherit the terminal directly — enabling live Rich output, colors, and no timeout.
 
@@ -501,7 +551,7 @@ Infrastructure modules (seedgo, cli, git, spawn) work from external AIPass proje
 
 **Dual registry lookup:** `registry_handler.py` merges local project registry with `AIPASS_HOME` registry. Local entries win on name collision.
 
-**Module fallback:** When subprocess routing fails (branch not in local registry), drone falls back to module routing for registered modules. Graceful degradation: Rich output from AIPass, functional output from external projects.
+**Module routing, not a fallback:** an external seat reaches `seedgo`, `cli`, `spawn` and `git` because `is_module()` is checked *before* any branch call (see Routing Flow) — the module lane is chosen, not discovered by failing the branch lane. Rich output from AIPass, functional output from external projects. The one surviving error-path fallback lives in the custom-command lane only.
 
 **AIPASS_HOME hints:** When `AIPASS_HOME` is not set and the local registry lacks core branches, drone shows setup hints:
 ```
@@ -529,22 +579,24 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1199 tests collected across 30 test files (1194 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-21:
+1243 tests collected across 32 test files (1238 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-27 — every file on disk appears in exactly one row, so the rows sum to the total:
 
 | Area | Files | Tests |
 |------|-------|-------|
-| Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 183 |
-| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 335 |
-| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 125 |
+| Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 188 |
+| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 341 |
+| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 151 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
 | Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 185 |
 | Deletion record | `test_deletion_log.py` | 26 |
 | Broker | `test_broker.py` | 60 |
-| Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 93 |
+| Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 100 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 | Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
 | Caller identity provenance | `test_caller_identity_provenance.py` | 10 |
+| Machine output (`--json` doors, `remote`) | `test_git_json_and_remote.py` | 50 |
+| JSON log durability | `test_json_durability.py` | 10 |
 
 Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
@@ -556,12 +608,13 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 - `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
 - Piping drone output into a truncating reader (`| head`) yields inconsistent exit codes (0, 1, or 243) — no BrokenPipe handling anywhere in the tree. Cosmetic, but blocks `drone ... | head` inside `set -e` scripts
 - Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
-- Pyright warns about `json` package name shadowing stdlib — works at runtime
+- `apps/drone.py`'s file header says `Version: 1.1.1` while the runtime constant two lines down is `VERSION = "1.1.0"` — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. Found 2026-08-25; a code fix, out of scope for a README-only pass
+- Pyright's `json` package-shadowing warning could **not** be reproduced on 2026-08-25 (`pyright apps/handlers/json/json_handler.py` → 0 errors/0 warnings; a full run under the root `pyrightconfig.json` → 0 errors, 3 unrelated `reportUnusedExpression` warnings in tests). It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced — no evidence it was never real
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1194 pass, 5 skip | **Last Updated:** 2026-08-21
+**Seedgo:** 100% | **Tests:** 1238 pass, 5 skip | **Last Updated:** 2026-08-27
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -21,6 +21,7 @@ Covers the 2 missing CLI routing items:
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -1065,3 +1066,97 @@ class TestExtractTimeout:
         cleaned, timeout = _extract_timeout(args)
         assert cleaned == args
         assert timeout is None
+
+
+# ---------------------------------------------------------------------------
+# An accepted --drone-timeout that cannot be applied says so
+# ---------------------------------------------------------------------------
+
+
+class TestInertTimeoutIsReported:
+    """Two lanes take no timeout: module routing and interactive commands.
+
+    The flag parses in both, so before this the operator's number vanished in
+    silence — `drone @seedgo audit ... --drone-timeout 5` ran unbounded and
+    said nothing. A silently discarded cap is the same species of defect as a
+    silent kill, which is what the rest of this change removes.
+    """
+
+    def test_a_dropped_timeout_is_logged(self, caplog) -> None:
+        from aipass.drone.apps.drone import _report_inert_timeout
+
+        with caplog.at_level("WARNING"):
+            _report_inert_timeout(5, "interactive commands inherit the terminal and are not timed")
+        assert any("--drone-timeout 5" in record.getMessage() for record in caplog.records)
+
+    def test_the_reason_travels_with_the_warning(self, caplog) -> None:
+        """'Ignored' without 'why' sends the operator hunting."""
+        from aipass.drone.apps.drone import _report_inert_timeout
+
+        with caplog.at_level("WARNING"):
+            _report_inert_timeout(5, "module routing runs in-process and is not timed")
+        assert any("in-process" in record.getMessage() for record in caplog.records)
+
+    def test_no_flag_means_no_noise(self, caplog) -> None:
+        from aipass.drone.apps.drone import _report_inert_timeout
+
+        with caplog.at_level("WARNING"):
+            _report_inert_timeout(None, "interactive commands inherit the terminal and are not timed")
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    def test_the_operator_is_told_not_just_the_log(self, capsys) -> None:
+        """A log line the operator never reads is not a report."""
+        from aipass.drone.apps.drone import _report_inert_timeout
+
+        _report_inert_timeout(5, "module routing runs in-process and is not timed")
+        assert "--drone-timeout 5" in capsys.readouterr().err
+
+    def test_an_interactive_route_reports_before_running(self, capsys) -> None:
+        """End to end through _handle_target — the lane that was silent."""
+        from aipass.drone.apps import drone as drone_cli
+
+        with (
+            patch.object(drone_cli, "is_module", return_value=False),
+            patch.object(drone_cli, "branch_exists", return_value=True),
+            patch.object(drone_cli, "route_command") as mock_route,
+        ):
+            mock_route.return_value = SimpleNamespace(stdout="", stderr="", exit_code=0)
+            drone_cli._handle_target(["@seedgo", "audit", "aipass", "--drone-timeout", "5"])
+
+        assert "--drone-timeout 5 not applied" in capsys.readouterr().err
+        assert mock_route.call_args.kwargs["interactive"] is True
+
+    def test_a_captured_route_stays_quiet_and_keeps_the_number(self, capsys) -> None:
+        """The flag still WORKS where it applies — no warning, number forwarded."""
+        from aipass.drone.apps import drone as drone_cli
+
+        with (
+            patch.object(drone_cli, "is_module", return_value=False),
+            patch.object(drone_cli, "branch_exists", return_value=True),
+            patch.object(drone_cli, "route_command") as mock_route,
+        ):
+            mock_route.return_value = SimpleNamespace(stdout="", stderr="", exit_code=0)
+            drone_cli._handle_target(["@memory", "search", "x", "--drone-timeout", "5"])
+
+        assert "not applied" not in capsys.readouterr().err
+        assert mock_route.call_args.kwargs["timeout"] == 5
+
+    def test_a_module_route_reports_before_running(self, capsys) -> None:
+        """End to end through the OTHER silent lane — module routing.
+
+        Separate from the interactive case on purpose: the two lanes are
+        different branches of _handle_target, and a mutation proved one test
+        cannot pin both. `drone @git status --drone-timeout 5` is a real
+        invocation an operator would type.
+        """
+        from aipass.drone.apps import drone as drone_cli
+
+        with (
+            patch.object(drone_cli, "is_module", return_value=True),
+            patch.object(drone_cli, "branch_exists", return_value=False),
+            patch.object(drone_cli, "_handle_module", return_value=0) as mock_module,
+        ):
+            assert drone_cli._handle_target(["@git", "status", "--drone-timeout", "5"]) == 0
+
+        assert "--drone-timeout 5 not applied" in capsys.readouterr().err
+        assert mock_module.call_args.args[1] == ["status"], "the flag itself must not reach the module"

@@ -40,6 +40,9 @@ def _import_extractor(monkeypatch):
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
 
@@ -70,6 +73,9 @@ def _import_line_counter(monkeypatch):
     mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -95,6 +101,9 @@ def _import_normalize(monkeypatch):
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -293,21 +302,10 @@ class TestExtractItemsV2:
         assert extracted_keys == ["learning_4", "learning_5"]
 
 
-class TestUpdateMetadata:
-    """Test _update_metadata_after_extraction."""
-
-    def test_adds_health_check_date(self, monkeypatch):
-        ext, _ = _import_extractor(monkeypatch)
-        data = {"document_metadata": {}}
-        ext._update_metadata_after_extraction(data)
-        assert "last_health_check" in data["document_metadata"]["status"]
-
-    def test_creates_metadata_if_missing(self, monkeypatch):
-        ext, _ = _import_extractor(monkeypatch)
-        data = {}
-        ext._update_metadata_after_extraction(data)
-        assert "document_metadata" in data
-        assert "status" in data["document_metadata"]
+# _update_metadata_after_extraction was deleted on 2026-08-25 along with the
+# status.health field it stamped; rollover moves entries and no longer edits
+# metadata it does not own. Its pins live on as the sweep in
+# tests/test_trinity_standard.py::TestNoHealthStamping.
 
 
 class TestCreateRolloverBackup:
@@ -381,24 +379,35 @@ class TestUpdateLineCount:
         assert result["success"] is False
 
     def test_updates_line_count_successfully(self, monkeypatch, tmp_path):
-        lc, mocks = _import_line_counter(monkeypatch)
+        lc, _mocks = _import_line_counter(monkeypatch)
         f = tmp_path / "test.local.json"
         f.write_text('{\n  "a": 1\n}\n', encoding="utf-8")
 
         result = lc.update_line_count(f)
         assert result["success"] is True
         assert result["lines"] == 3
-        mocks["memory_files"].update_metadata.assert_called_once()
 
-    def test_reports_failure_when_metadata_update_fails(self, monkeypatch, tmp_path):
-        lc, mocks = _import_line_counter(monkeypatch)
-        mocks["memory_files"].update_metadata.return_value = {"success": False, "error": "write error"}
+    def test_counting_lines_writes_nothing(self, monkeypatch, tmp_path):
+        """The health stamp was this function's only write (removed 2026-08-25).
+
+        The file must come back byte-identical: a counter that edits the thing
+        it is counting is how `sync-lines` came to be the fleet's most frequent
+        writer of a field nobody read.
+        """
+        lc, _mocks = _import_line_counter(monkeypatch)
         f = tmp_path / "test.local.json"
-        f.write_text("{}\n", encoding="utf-8")
+        original = '{\n  "a": 1\n}\n'
+        f.write_text(original, encoding="utf-8")
 
-        result = lc.update_line_count(f)
+        assert lc.update_line_count(f)["success"] is True
+        assert f.read_text(encoding="utf-8") == original
+
+    def test_reports_failure_for_a_missing_file(self, monkeypatch, tmp_path):
+        lc, _mocks = _import_line_counter(monkeypatch)
+
+        result = lc.update_line_count(tmp_path / "absent.local.json")
         assert result["success"] is False
-        assert "write error" in result["error"]
+        assert "not found" in result["error"].lower()
 
 
 # ===========================================================================
@@ -476,7 +485,15 @@ class TestNormalizeMemoryFile:
         # root status removed
         assert "status" not in {k for k in data if k != "document_metadata"}
 
-    def test_removes_auto_compress_at(self, monkeypatch, tmp_path):
+    def test_removes_the_whole_status_block(self, monkeypatch, tmp_path):
+        """The status block is not pruned field-by-field any more — it goes.
+
+        The gold-source templates stopped declaring `status` on 2026-08-25
+        (Patrick's ruling: health is computed by the checker, never stored), so
+        the template-conformance pass strips it whole. This test used to assert
+        that one stale field inside the block was dropped while the block
+        itself survived.
+        """
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.local.json"
         self._write_json(
@@ -492,7 +509,7 @@ class TestNormalizeMemoryFile:
         assert result["success"] is True
 
         data = json.loads(f.read_text(encoding="utf-8"))
-        assert "auto_compress_at" not in data["document_metadata"]["status"]
+        assert "status" not in data["document_metadata"]
 
     def test_dry_run_does_not_write(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
@@ -518,9 +535,10 @@ class TestNormalizeMemoryFile:
         self._write_json(
             f,
             {
+                # No status block: a file carrying one is no longer normalized,
+                # it is drifted, and the normalizer strips it.
                 "document_metadata": {
                     "_usage": "Automated file.",
-                    "status": {"last_health_check": "2026-03-31"},
                 },
                 "sessions": [],
             },

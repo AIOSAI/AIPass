@@ -1039,7 +1039,11 @@ class TestDetachStatusAndStop:
         why it went, and the answer is in a file they should not have to find
         by reading this source.
         """
-        detachable.running.return_value = None
+        # server_state(), not running(): status gained a THIRD answer on
+        # 2026-08-27 ("cannot tell"), so it asks the handler for a state rather
+        # than deciding from a record. This test found the move by failing
+        # loudly, which is the good version of that.
+        detachable.server_state.return_value = {"state": "none", "record": None, "reason": ""}
         detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
 
         handle_command("host-api", ["status"])
@@ -1051,12 +1055,16 @@ class TestDetachStatusAndStop:
 
     def test_status_reports_a_running_server(self, store: Path, quiet_module: dict, detachable) -> None:
         """pid, bind and log — the three things an operator asks for next."""
-        detachable.running.return_value = {
-            "pid": 4242,
-            "host": "127.0.0.1",
-            "port": 8790,
-            "log": "/tmp/host_api_serve.log",
-            "started": "2026-08-19 18:00:00",
+        detachable.server_state.return_value = {
+            "state": "running",
+            "reason": "",
+            "record": {
+                "pid": 4242,
+                "host": "127.0.0.1",
+                "port": 8790,
+                "log": "/tmp/host_api_serve.log",
+                "started": "2026-08-19 18:00:00",
+            },
         }
 
         handle_command("host-api", ["status"])
@@ -1066,6 +1074,33 @@ class TestDetachStatusAndStop:
 
         assert "4242" in printed
         assert "8790" in printed
+
+    def test_status_says_it_cannot_tell_rather_than_inventing_an_absence(
+        self, store: Path, quiet_module: dict, detachable
+    ) -> None:
+        """
+        The 2026-08-27 ruling, at the surface an operator reads.
+
+        This host runs the server under a unit that writes NO record file, so
+        reporting an unanswered probe as "no server is running" would be a
+        confident lie about a server answering requests. It must reach `error`,
+        not the not-running branch.
+        """
+        detachable.server_state.return_value = {
+            "state": "unknown",
+            "record": None,
+            "reason": "systemctl is here but did not answer",
+        }
+        detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
+
+        handle_command("host-api", ["status"])
+
+        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed += " ".join(str(call) for call in quiet_module["error"].call_args_list)
+
+        quiet_module["error"].assert_called()
+        assert "did not answer" in printed
+        assert "No server is running" not in printed
 
     def test_stopping_nothing_is_not_an_error(self, store: Path, quiet_module: dict, detachable) -> None:
         """Running `stop` twice must be safe — the second has nothing to do."""

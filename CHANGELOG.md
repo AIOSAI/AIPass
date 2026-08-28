@@ -9,6 +9,416 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-27] — v2.7.20: the trinity pattern lands — fleet 22/22 at trinity 100
+
+**CI round 2, four fixes in one evening (PR #743 merge prep)** — the full
+matrix run surfaced 5 failures across 3 jobs; every one root-caused, none
+patched over. **memory**: the 3.10-only red was a MagicMock with no
+`__path__` (3.12 short-circuits imports on sys.modules; 3.10 walks the
+parents, and the optional-bus ImportError swallow turned that into an empty
+event list) — real ModuleType stand-ins now, plus a reachability assertion
+so bus-unreachable can never masquerade as bus-not-fired; and the resident
+guard gained a second discriminator, `live_residents`, which reads the four
+registry files with pathlib rather than asking the resolver about its own
+inputs — a guard that consults the code under test deletes the failure it
+exists to expose (proven: `if False` mutation gives FAILED, not skipped).
+**api**: the Windows mock wasn't wrong, it was unreachable — is_supported()
+returns before subprocess is touched; one red was five, plus six vacuous
+greens asserting exactly what the untouched gate returns. New
+SupervisorUnreachable: a probe that FAILS on a capable machine refuses
+instead of answering no-unit — on this host the old path printed "No server
+is running" about a server serving requests. **aipass**: the mkdir flag hid
+a json.dump behind it (checker reports first hit only); the writer moved to
+json_handler and came out stronger (fsync + Windows retry the hand-rolled
+version never had), with the write_json returns-False-never-raises trap
+re-raised, and all five forbidden tokens source-scan pinned. **seedgo**:
+trinity_check.py split 1557 → 429 engine + 1231 groups at the I/O seam,
+proven by running pre-split and post-split over all 18 live branches in one
+process — full result dicts byte-identical; `all_groups(ctx)` pins the
+roster because a dropped group scores HIGHER (the weighted mean divides by
+less); save_cache's real hole was BaseException, not a hard kill; the
+orphan-tmp flake now claims only what it can support (this session left no
+new orphan, pre-existing ones warned by name). Fleet 22/22 trinity 100
+held through all four.
+
+**fix(aipass)** — the last drifted citizen reaches trinity 100, and the
+stray `user` section turns out to be aipass's own profile.py writing on
+read since June (PR #743 merge prep): the fleet push pruned the section,
+get_user_profile() recreated it minutes later, and init_flow's
+`existing.get("first_seen") or now()` silently reset a 2026-06-10 date to
+today — so a 2.5-month-old artifact presented as same-day drift by an
+unknown author. Fix relocates the profile to aipass_json/user_profile.json
+(profile.py never writes .trinity again; legacy section read once as
+fallback, never written back; true June first_seen restored). Two live
+defects caught while verifying: the test suite was mutating the REAL user
+profile (a sys.modules MagicMock silently bypassed by from-import binding —
+only two test files TOGETHER corrupt it), and the first filename chosen
+collided with json_handler's managed triplet, which regenerated — erased —
+the store through the very call that logged the save. 1041 passed (+7),
+trinity 100 all nine groups. **FLEET: 22 of 22 at trinity 100.**
+
+**fix(memory)** — CI guard for live-fleet tests, 8 guarded not 5 because
+three greens were vacuous (PR #743 merge prep): a `live_fleet` fixture in
+tests/conftest.py skips with @seedgo's exact wording when no
+AIPASS_REGISTRY.json exists — a fixture not a helper import, because dotted
+sibling imports break on CI's repo-root rootdir (a trap this branch was
+caught by once already). Checks BOTH repo roots (registry_scope +
+trinity_push resolve independently). Red reproduced first by masking both
+_REPO_ROOTs at an empty dir — exact CI failure list remade locally. The
+deviation on the record: 3 tests that PASS on clean CI were guarded anyway,
+because an empty fleet satisfies every subset assertion — a green reporting
+a measurement that never happened. Whole suite swept under the mask from
+both rootdirs: zero other live-state dependents. 1227 passed / 5 skipped.
+
+**feat(spawn)** — newborns arrive with a receipt, retirees leave a named
+archive (DPLAN-0318 marker 7, spawn's leg): measured first — a minted
+citizen scored trinity 77, and only half of that was the missing receipt;
+spawn's own seeds carried a status block the standard deletes, wrong-case
+managed_by, and _usage/meta drift nobody had ever measured. receipt_ops
+stamps at birth AFTER mint-verify and BEFORE registration (ordering pinned),
+reading versions from @memory's GOLD templates, not its own seeds — a
+drifted seed must not mint a receipt claiming a version the fleet never
+issued. Shape copied not imported (ast test pins the constant; another
+asserts no aipass.memory import). Seeds rebuilt from gold with
+byte-identical pins that go red on the next template bump. Adoption stamps
+only-if-absent — restamping a push-stamped branch would replace a true
+record with a false one. Retire now SAYS what it carried (archive path +
+trinity files in the operation log — the fact a later reader can't
+re-derive). Newborn trinity 100 both classes, live-minted and scored with
+seedgo's real checker. 531 spawn tests, full repo 17589 passed, 12/12
+mutations bite.
+
+**fix(seedgo)** — the audit learns what a clean checkout is, and the cache
+learns to see directories (CI unblock for PR #743): trinity on a tree with no
+AIPASS_REGISTRY.json AND no citizen `.trinity/` anywhere now returns
+not_applicable with score None — left OUT of scores entirely, because a 0
+blames the branch for an environment fact and a 100 claims a measurement that
+never happened (the old path actually CRASHED on None; red-first surfaced
+it). Both signals must be absent — a live installation missing one branch's
+.trinity still scores 0, pinned. The one `.trinity` that DOES ship (spawn's
+un-ignored template, two levels down) is a named test, not a lucky accident.
+The skip announces itself in the report. Defect 2, @daemon's find: the
+incremental cache excluded directories (`is_file()`), blinding it to the
+exact stray shape the File set rule scores — directories now watched by
+presence, the morning's opposite-asserting test reversed with a banner.
+1931 passed, 7/7 mutations bite. Flagged honestly: trinity_check.py now
+1550 lines vs its own 1500 limit (seedgo 99 architecture — split queued,
+not smuggled into a CI fix), and 2 branches drifted to 99 since the push.
+
+**feat(hooks)** — edit_gate grandfather narrowed to todos only (1.6.0,
+DPLAN-0318 circle close): the migration-era blanket exemption is retired —
+exempt containers are now read off @memory's RESHAPE_ONLY_SECTIONS at call
+time from the module the gate already imports (one list, no drift; a
+hardcoded-copy mutation bites), with a loud-warning fallback for an old
+entry_limits because exempting nothing would brick every branch carrying one
+drifted todo. Pinned both directions: a drifted todo on disk blocks nothing
+elsewhere, a NEW drifted todo is refused, editing a drifted todo forfeits
+its exemption. Four migration-era tests REVERSED with banners saying what
+expired ("the critical no-false-reject test" was right while the fleet was
+mid-migration; that state ended). Verified its half was dead weight on the
+blanket path before — not riding @memory's measurement now. Rider:
+auto_fix's open_no_encoding matched the open( inside Popen( as a substring
+— word-boundary fix after @drone hit 6 false demands on a file with no
+open() at all. Hooks' own trinity 68→100; its restore mistake (top-down
+numbering) was caught by the live checker, not the builder — the gate
+gating its own consumer.
+
+**feat(drone)** — timeouts stop killing legitimate work (Patrick's ruling,
+DPLAN-0318 circle close): the seam is a HANG GUARD, not a per-verb budget —
+default 60s→600s, and a child still producing output at its deadline buys
+repeated 120s extensions up to an absolute 1800s ceiling, so a chattering
+hang can't live forever while a long silent job never gets *shortened*.
+Explicit `--drone-timeout N` means exactly N (extension off). On timeout the
+error now replays both streams tail-first ("partial stdout (N bytes)"
+banners) instead of discarding the evidence. TIMEOUT_OVERRIDES emptied: its
+three raise-entries (memory 120/100, flow 90) would have inverted into CAPS
+under the new base — the known-slow commands getting the least time.
+Beyond the brief: `--drone-timeout` was silently INERT on interactive and
+in-process lanes (found by live-proving, not tests) — both now warn; and a
+checklist catch turned a restructured KeyboardInterrupt handler from
+compliant to silent — seven silent catches now log. 1238 passed, 22/22
+mutations bite (two equivalent mutants removed rather than tested around).
+Honest edge on record: output-extension is test-proven with scaled
+constants, not yet end-to-end past 600s live.
+
+**feat(ai_mail)** — verified-admin `@all` reaches the residents + the
+ambiguity warning goes quiet on proven-good cases (DPLAN-0318 circle close):
+behind the DPLAN-0288 five-leg admin verification only, `@all` now adds the
+four resident projects — via a named RESIDENT_REGISTRIES constant mirroring
+@memory's registry_scope (copy not import; an ast-parsing test fails on
+drift), NOT the existing projects glob, which would have silently broadcast
+into two on-hold projects on the strength of a stale ACTIVE flag. Ordinary
+citizens' @all unchanged; a verifier that raises fails toward fleet-only.
+The 104× captured_branch_detection warning was a fleet sweep from ai_mail's
+own process (premise corrected by reading all 104), and the quiet-gate is
+PROVENANCE not success — identity source in {assigned, passport} resolved
+against a catalog; a directory-name identity that resolves "successfully"
+keeps warning, because that is the misattribution the warning exists for.
+1340 passed, 6/6 mutations bite. New ruling banked: should resolution (not
+broadcast) also stop at held projects.
+
+**feat(memory)** — marker 7 memory lane (DPLAN-0318 circle close): the
+self-healing triggers, trigger-driven never a daemon. `templates bump` fires
+the trinity push (dry-run default, only a push that actually succeeded stamps
+the fleet ledger); rollover normalizes the rolled branch's machine frame on
+touch (entries byte-identical, sibling branches untouched); the dead
+pre-trinity pusher/differ lane retired to the archive with its 67 tests;
+ruling 5 confirmed (schema_version IS the receipt field, both sides already
+agree); sync-lines renamed report-lines and made genuinely read-only; the
+grandfather clauses narrowed to todos only (one RESHAPE_ONLY list shared by
+gate and push); the fleet defined once in registry_scope.py — residents now
+visible to monitor/report (44 files seen, was 38). The wifi outage's one red
+test led to the find of the build: `_announce_bump` hit a NameError (json
+never imported) that a broad catch logged as "Event bus unavailable" — the
+bump had never announced anything; catch split so environment facts and bugs
+stop wearing the same clothes. Push reports now always state todos ("N seen,
+M to reshape") so silence can't hide open work again. 1225 passed from repo
+root, seedgo --full 100% including trinity, mutations bite ×4.
+
+**feat(seedgo)** — marker 7 seedgo lane (DPLAN-0318 circle close): trinity was
+measured to ALREADY be a gate (non-ADVISORY, passes only at 100, failures land
+in failed_checks) — so instead of performing a flip, 6 regression pins now
+hold each gate property individually, including "ADVISORY still means
+non-gating" and "the gate is satisfiable." The ruling-6 audit-cache defect is
+dead declaratively: branch_level checkers declare their inputs as globs
+(trinity: `.trinity/*`), split into content-matters vs presence-only channels
+after the live tree caught the first cut always-dirty (json_handler's own
+`*_log.json` outputs are written during the audit — the audit disturbed what
+it measured). document_metadata extras now flagged by name (closed set,
+ruling 4), guidelines content byte-compared against the gold template —
+both calibrated against the pre-push `.pre_v3_backup` corpus since the push
+cured the live population first (preventive, not curative — said plainly).
+Fleet re-measured: 17/18 at 100, only daemon 98 (.recovery queued). 1911
+passed, trinity suite 166→189, 12/12 mutations bite, first all-standards-100
+audit of seedgo itself.
+
+**feat(api)** — host-api survives reboots (Patrick's ruling after the morning
+baud outage): a systemd user unit, deliberately NOT a home-grown supervisor —
+the 14 death-and-restart cycles of 08-19 came from one. `autostart.py`
+supervises nothing: renders the unit, reports whether systemd holds the
+server, asks it to stop. `status` stops lying by construction (asks the
+supervisor first — a unit-managed server previously reported "no server
+running"); `stop` routes supervised stops through systemctl (a SIGTERM is a
+stop the restart policy may undo) and re-checks the pid rather than trusting
+the accept. Unit details each an avoided trap: `append:` logs (file:
+truncates the outage evidence), `Restart=on-failure` never always,
+StartLimit* under [Unit] (systemd silently ignores the [Service] spelling),
+a 10-min retry window wide enough for tailscaled to assign the bind address
+at boot. Installed live: pid 227641 under `aipass-host-api.service`, tailnet
+200, enabled at boot with linger. 1611 tests green (re-run independently),
+46/46 standards, 10/10 mutations bite.
+
+**fix(devpulse)** — the watchdog pair moves out of `.trinity/` (File set
+ruling, DPLAN-0318 circle close): `watchdog_active.json` + lock and
+`watchdog_timers.json` now resolve to a dedicated `.watchdog/` dot-dir
+(gitignored) — `.trinity/` holds identity and memory only. registry.py +
+timer.py resolvers changed, statusline reader repointed, live wire re-armed on
+the new path, 99 watchdog tests green, devpulse trinity 100 on a fresh --full
+audit. 21 of 22 branches now at trinity 100; the last stray (`daemon/.recovery`)
+is queued with its owner.
+
+**fix(memory)** — todos are never archived (memory 1.1.0): spawn caught the
+push's one real defect — non-canonical todos were pruned to vectors like any
+entry, but a todo in a vector is silently forgotten open work ("never rolls"
+must outrank the shape rule). Mechanical reshape was considered and refused on
+the module's own law: a machine that invents someone's `priority` has
+rewritten their open work, not rescued it. Non-canonical todos now stay
+byte-identical in the file and are REPORTED per entry (uncapped — the report
+is the only place left-behind work is named); `carried[]` deliberately doesn't
+count them, because calling a debt clean is how it goes unseen. Blast-radius
+sweep measured from the vector stamps, not the reports (catching the 46
+entries the first timeout-killed fire had already cured): 388 total archived,
+67 todos across 8 branches (baud 41), every affected branch mailed its own
+todos verbatim with the recovery command — three via devpulse's admin lane,
+since fleet-to-project mail is replies-only by ruling. The best mutation
+survived the unit pins and only an end-to-end test caught it: without the cap,
+the note enumeration busts 300 chars, the canonical-note guard refuses it, and
+the branch is told nothing — that test now exists and bites.
+
+**feat(fleet)** — THE FLEET PUSH EXECUTED: five months of memory-file drift
+cured in one gated run. 22/22 branches pushed, ~366 non-canonical entries
+vectorized-verified-pruned (every one recallable via `drone @memory search`),
+563 carried, 0 refusals, receipts stamped everywhere, a canonical session note
+written into every pruned branch's own chronicle. The first fire hit drone's
+60s default timeout mid-run; the fleet parsed clean and the re-run pruned 0 on
+already-cured branches — the idempotency canary proved, proven again in anger.
+Seedgo's live acceptance guard now skips itself with the best sentence of the
+night: "no drifted citizens on disk". Full fresh audit: trinity 100 on 20/22,
+the two below are the deliberately-flagged operational strays (daemon
+.recovery/, devpulse watchdog pair) whose relocation is owned work; every
+other standard 100 fleet-wide. The README species closed the same hour — all
+22 .trinity/README.md files byte-identical (spawn's md5-before-writing caught
+that a template edit reaches newborns only; living branches took an explicit
+copy). _CANONICAL_OBSERVATION_BRANCHES flipped from the six to all eighteen.
+
+**feat(seedgo)+feat(spawn)** — the File set ruling executed on both sides.
+Seedgo: versioned old files are legal residents of .trinity/ — the rule
+matches the shape `<canonical>.pre<sep><token>` (dotless token, canonical base
+required) rather than a suffix list, so the next migration needs no code
+change; deliberately narrow because an allow-rule fails toward blindness — a
+rule loose enough to admit `local.json.tmp` would hide torn writes in the one
+directory whose job is durable memory. Fleet strays 38→4 with zero collateral
+(the 4 = the deliberately-flagged operational files); seedgo relocated its own
+stale STATUS.local.md while it was there. 10 red-first tests + 23 over-refusal
+guards written first, 6/6 mutations bite, trinity suite 125→166. Spawn: one
+generic .trinity/README.md (no numbers, no branch names — points at meta lines
+and the standard instead of restating them), added to BOTH scaffold classes and
+backfilled to the 6 missing branches, 8 files byte-identical; passports
+surveyed first so the new template file red-boards nobody (the August lesson,
+applied). The 4 outlier core READMEs (one literally says "README.md
+placeholder", one hardcodes a cap) get the same file in a follow-up copy.
+
+**feat(memory)** — the trinity PUSH is built and live-proven on canary
+(@memory's build): one lane per branch — re-render the machine frame, prune
+every non-canonical entry (vectorize verbatim → read back BY ID and compare
+byte-for-byte → only then prune; verification failure means nothing is pruned),
+and write one canonical session entry telling the agent where its memories
+went. Canary live: 15 pruned, 25 carried, trinity 77→100, idempotent on
+re-run, and the note's promise was tested not assumed — search returns a
+pruned entry verbatim. Fleet dry-run: 366 to archive / 560 carry over across
+22 branches (the push resolves residents from a named constant — the registry
+lane reaches only 19), measured post-push projection 70.1→97.2 with only
+stray-file/README rulings blocking 100. Over-cap entries prune like any other
+(size and shape are different scan groups — the grandfathered 315-char summary
+would otherwise hold branches at 96). refresh_all_tabs now scopes to the
+rolled branch, closing the any-PreCompact-rewrites-the-fleet hazard; the bare
+`push` alias that once fired a fleet-wide config reset is gone, and the fleet
+lane refuses without --confirm. 69 new tests, 10/10 mutations bite, the
+strongest pin runs seedgo's real checker over pushed output and requires all
+nine groups at 100.
+
+**fix(memory)+fix(hooks)+docs(seedgo)** — the morning-after round, all three
+verified independently before commit. @memory entry_limits 1.4.0 closes the
+half of B1 that @hooks proved still open: a MISSING canonical field now
+returns None like any other unreadable payload (present-and-empty still
+answers "") with its own reason=missing_field naming the field — 42 previously
+invisible violations surfaced fleet-wide (hooks/ai_mail/api, 14 each, all
+learning-shape key_learnings; grandfathered until the fleet push, like B1).
+This retires 8d31a646's "memory_files.py:116 still dodges" note — true when
+written, closed within the hour. @memory also fixed tab_renderer's per_branch
+override blindness (one resolver shared with the write gate), so @seedgo's
+known xfail flipped to a plain passing test and the marker is removed.
+@hooks edit_gate 1.5.1 dedupes the double-report that appeared once both
+missing-field checks ran (union of checks kept deliberately — a gate that
+outsources all measurement inherits its supplier's blind spots). And Patrick's
+session-shape ruling landed in the contract + graduated trinity.md verbatim:
+the shape stays closed — summary is the headline, lessons go to
+key_learnings, depth lives in @memory vectors (rollover + search), tags are
+the findability hook. Suites re-run together pre-commit: memory + hooks +
+trinity checker all green.
+
+**feat(seedgo)** — the trinity standard is LIVE: trinity_check.py joins the
+standards family (no bypass by design) and the fleet has its first honest
+memory-file scores — red-first bar hit exactly (clean set = the MASTER_LIST
+six, all 12 deviants flagged, pinned as a live test), fleet avg 72% with
+memory the only 100. The checker's own first draft broke the one law it
+enforces (zero denominator read as clean → silent pass of an unmeasurable) —
+caught by its test agent as strict xfail, fixed in the engine, kept as a named
+regression guard. Five contract ambiguities and two possibly-wrong rules
+flagged for Patrick rather than silently resolved; audit-cache engine defect
+(hashes only apps/*.py — stale scores for checkers reading outside) queued.
+1836 green + 1 known xfail, 25 rule-matched mutations.
+
+**fix(hooks)** — B3, the last of the four measurement bugs: edit_gate refuses
+a NEW/EDITED entry whose canonical field is missing — by name, with the rename
+instruction, never measured as zero. Exemption keys on raw-entry identity so
+one legacy entry cannot license ten more (mutation-pinned). Live-proven on
+hooks' own drifted file. Second defect fixed en route: @memory's unmeasurable
+refusals were rendering as "0/300 chars" through the over-cap formatter.
+Flagged honestly: the dodge originates in @memory's _extract_text (missing
+field still returns ""), so their own write path still dodges — repro
+dispatched to them. 7 red-first tests, 1688 green.
+
+**fix(memory)+feat(memory)** — the measurement bugs that let memory-file drift
+pass silently are dead, and the standard's text machinery is live (@memory's
+build). The law: a field the gate cannot measure is REFUSED loudly, never
+measured as zero. B1: non-string entries refused (new/edited only — legacy
+shapes grandfathered until the reset, deliberately); B2: lint's len-on-a-list
+path gone; B4 was TWO files — detector fired at >= while the extractor floored
+at 1, both moved together or the fix would have traded settle-at-14 for a
+drain-nothing loop. Renderer reads the gold-source templates (hardcoded text
+constants retired, refresh preserves the semantics prose); every health writer
+deleted per the ruling; new per-branch .template_version.json receipt writer
+(three sanctioned lanes, push lane awaits the pusher rebuild — flagged). 42
+red-first tests, 1115 green re-run independently.
+
+**feat(memory)** — trinity gold-source templates carry the agreed standard
+(DPLAN-0318, Patrick's line-by-line review): unique `_usage` per file (working
+draft vs memory-of-the-USER), meta lines become `{{PLACEHOLDER}} + one-sentence
+semantics` so every section shows its live caps AND its meaning where the agent
+writes, and the dead `status.health` block is deleted rather than revived — it
+had no consumer, stored a derivable fact, and always read healthy; health is
+now computed by the checker at run time, never stamped into the file. The
+standard itself (trinity_pattern.md, seedgo-format) governs; @memory machinery
+fixes and the @seedgo checker build ride separate dispatches.
+
+**docs(fleet)** — README truth campaign, the 08-25 night shift (Patrick's GO):
+every citizen verified its OWN README against the code as it exists, waves of
+two, each pass re-audited to 100% after editing — 18 branch READMEs corrected
+in this repo (~120 claim families), plus the four resident projects in their
+own repos. The rule was measured-or-marked: every number rewritten tonight was
+counted tonight, and what couldn't be verified is now labeled unverified in the
+README itself instead of standing green. Headlines: commons documented a
+Reward-Drops feature that never existed in any code; baud's command-registry
+safety claim was false (26 listed, 29 registered — three write-capable commands
+invisible to an audit); aipass's own Quick Start pointed new users at bare
+`init`, which prints help; two project front doors misrepresented finished
+products as empty templates. Fleet pattern, both directions: dead features
+documented live AND real features/fixed debt undocumented — either would
+poison a post-reset agent, which is why this campaign was the precondition for
+the DPLAN-0318 fleet memory reset. Code defects found were flagged to owners,
+never smuggled into docs-only edits; the queue rides in devpulse's campaign
+log (dropbox/readme_night_shift.md) for the morning read.
+
+**fix(ai_mail)** — registry rows leave the reader ABSOLUTE, rooted against the
+registry that answered (`_rooted()` in both lanes of `_lookup_branch_by_name`
+and `get_branch_info_from_registry`). The defect: a projects/* citizen's
+relative registry row was joined to the AIPass repo root, so BAUD's mailbox
+resolved to a phantom dir inside our tree — inbox read empty against a full
+store, reply refused an id sitting in the file under his feet, and the lane
+FABRICATED the phantom on write: his answer to Patrick's continuity probe was
+silently swallowed into `src/baud/` (recovered, then removed via drone rm once
+re-sent on the live lane). Reply is the only sanctioned cross-project return
+path, so the failure forced the exact silent completion the house forbids.
+Three red-first tests including a guard for the six relative AIPass rows;
+verified live from BAUD's seat — inbox lists all messages, the id resolves,
+and his reply arrived through ai_mail itself. 1326 green. Rider: purge.py's
+gap comment updated — @memory shipped `vectorize_and_store` (1.4.0), the seam
+is verified live, and the four-month mail-loss loop is closed in practice.
+
+**feat(spawn)** — a brand-new external project's registry is born WITH its
+credential: `load_registry` mints `metadata.id` for a missing file (a registry
+that does not exist is a new project) and deliberately does NOT mint for an
+unreadable one (a live project whose credential failed to read must never be
+re-credentialled — four tests hold the asymmetry). Mint-once ordering moved
+into `_spawn_agent`: the passport writes at step 1, the registry at step 4, so
+the credential resolves at step 1 and `add_to_registry` adopts it only for a
+registry it is CREATING, keyed off file-existed-before-load rather than
+id-already-set. Live probe: fresh project mints its own credential, passport
+and registry agree, zero AIPass leak. 11 red-first tests, 506 green. Known and
+flagged, not fixed here: `add_to_registry` against an unreadable registry
+would write the empty schema over the real file — guard awaits its own GO.
+
+**fix(drone)** — owner-tier git refusals carry their species: authority (not
+this repo's owner) stays ERROR and warn-mode lifts it; capability (proven
+owner, verb untranslated for external repos) logs WARNING and warn-mode does
+NOT lift it — `AIPASS_GIT_AUTH_MODE=warn`, the AUTHORITY-migration rollback,
+was proven live re-arming `pr` inside BAUD's repo, a half-run of our flow in
+someone else's tree. Message honesty: a proven owner reads "cannot run pr in
+this repo", not "is not authorized". 6 tests, 1200 green, auth.py 1.1.0.
+
+**fix(devpulse)** — feedback's cross-store writes speak the host's dialect:
+`compose.py` 1.3.1 stamps ai_mail's canonical local format into recipients'
+inbox.json instead of UTC ISO-T (two timestamp shapes in one store, BAUD's
+report — measured NOT the cause of his dead inbox, but real pollution).
+Red-first test pins format and wall-clock, 70 feedback tests green.
+
+**docs(changelog)** — the v2.7.17 section header is restored at its splice
+point (VERA's find: the v2.7.18 merge glued the header's title onto a README
+paragraph mid-line, leaving tag v2.7.17 with no matching section). Kept the
+deliberate retitle over the 08-19 original; all released tags have sections
+again.
+
 ## [2026-08-23] — v2.7.19: the merge playbook grows teeth
 
 **docs(flow)** — README truth check and site parity become hard checkboxes in
@@ -258,7 +668,9 @@ to Linux/macOS/Windows (Git Bash or WSL) — both extra platforms run the full
 suite in CI on every PR. Verified clean and left alone: every badge and link
 (zero dead, LICENSE genuinely MIT, codecov live at 78%), and the whole
 Subscriptions & Compliance section — the subprocess claim is backed by code,
-zero credential handling in the tree.: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
+zero credential handling in the tree.
+
+## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
 **fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own
 board from red to 21/21. Main was never red — the merge gate forbids it; these

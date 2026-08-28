@@ -7,7 +7,11 @@
     "created": "{{DATE}}",
     "last_updated": "{{DATE}}",
     "managed_by": "{{BRANCHNAME}}",
-    "tags": ["identity", "passport", "branch_profile"]
+    "tags": [
+      "identity",
+      "passport",
+      "branch_profile"
+    ]
   },
   "branch_info": {
     "branch_name": "{{BRANCHNAME}}",
@@ -34,6 +38,7 @@
   "citizenship": {
     "registered": true,
     "registry_id": "{{REGISTRY_ID}}",
+    "citizen_id": "{{CITIZEN_ID}}",
     "communications": true,
     "memory": true
   }

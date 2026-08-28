@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1579 pass | **Functions:** 225 public (205 tested)
-**Last Updated:** 2026-08-21
+**Seedgo:** 100% (46/46) | **Tests:** 1625 pass | **Functions:** 240 public (218 tested)
+**Last Updated:** 2026-08-27
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -237,8 +237,9 @@ drone @api stats
 | `integrations list` | List registered contracts |
 | `integrations call <contract> [args...]` | Call a registered contract |
 | `host-api serve [--host IP] [--port N] [--detach]` | Run the host API (binds the configured address or refuses); `--detach` gives it its own session and a log file |
-| `host-api status` | Is a detached server running, its pid, bind and log |
-| `host-api stop` | Ask a detached server to exit (SIGTERM, never SIGKILL) |
+| `host-api autostart [--host IP] [--port N]` | Render the systemd user unit into `logs/` and print the host-side install steps — never installs anything itself |
+| `host-api status` | Is a server running, **who holds it** (systemd or a hand-started detach), its pid, bind and log |
+| `host-api stop` | Stop it through its owner — `systemctl --user stop` when supervised, SIGTERM when not, never SIGKILL |
 | `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
@@ -252,7 +253,7 @@ drone @api stats
 api/
 ├── apps/
 │   ├── api.py                         # Entry point — module discovery, command routing
-│   ├── modules/                       # Orchestration layer (9 modules)
+│   ├── modules/                       # Orchestration layer (10 modules)
 │   │   ├── api_key.py                 # Key retrieval, validation, provider listing
 │   │   ├── secrets.py                 # Cross-branch secrets door (in-process API)
 │   │   ├── openrouter_client.py       # OpenRouter client — calls, models, status
@@ -263,20 +264,21 @@ api/
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   ├── registry.py               # Driver auto-discovery (load_drivers)
 │   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
-│   ├── handlers/                      # Business logic (9 packages, 35 files)
+│   ├── handlers/                      # Business logic (8 packages, 34 files)
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
 │   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory)
 │   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
+│   │   ├── host/pump.py (the attach socket's two directions), settings.py (the desktop's two gears), memory_config.py (@memory's limits, served)
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py
 │   │   ├── openrouter/caller.py, client.py, models.py, provision.py
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1359 test functions across 46 files
+└── tests/                             # 1483 test functions across 49 files (1579 collected, parametrised)
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
@@ -333,7 +335,8 @@ after the Phase 5 security review — the first network-listening service in AIP
 drone @api host-api issue-token pixel-8 --scope read   # receipt -> ~/.secrets/aipass/host_api/
 drone @api host-api serve              # binds the configured address
 drone @api host-api serve --detach     # survives drone's exec timeout; log in logs/
-drone @api host-api status             # pid, bind, and where to read it
+drone @api host-api autostart          # renders the boot unit + prints the install steps
+drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api revoke-token <id>  # effective next request, no restart
 ```
@@ -515,6 +518,117 @@ before the tests that now catch them.
 A genuinely unreachable project still refuses honestly: a non-git one answers
 `503` with git's own sentence, *not a git repository*. An empty change list
 would paint it clean when nothing was measured.
+
+### Autostart — the server comes back on its own (2026-08-27)
+
+@baud's phone face went dark this morning. `host_api_serve.log` showed normal
+traffic and then silence — no traceback, no shutdown line, which is exactly what
+a reboot looks like from inside a log. A detached server dies with the machine
+and nothing brought it back; Patrick ruled that a face which waits for a human
+after every reboot is wrong.
+
+**It is a systemd user unit, not a loop in this tree, and the reason is the scar
+already written into `lifetime.py`.** That module refuses on principle to
+restart anything — because the fourteen death-and-restart cycles @baud read out
+of a pane on 2026-08-19 came FROM a supervisor, a shell loop somebody typed.
+Answering a missing supervisor with a second home-grown one repeats the mistake
+with better manners. The alternative on the table was a `@daemon` check-and-start
+entry, which keeps everything inside AIPass conventions and is exactly that
+second supervisor: it can only notice a crash at poll granularity, it has no
+concept of boot ordering, and it would have to reimplement "do not restart what
+an operator deliberately stopped" — the one rule this lane cannot get wrong.
+systemd is already running here, already owns boot, and already knows that rule.
+
+So `autostart.py` supervises nothing. It **renders** a unit, **answers** whether
+the supervisor is holding the server, and **asks** it to stop. Every decision
+about starting, restarting and boot ordering belongs to systemd.
+
+**`autostart` writes into the tree and installs nothing.** The unit lands in
+`logs/` — gitignored, deliberately: it necessarily carries this machine's
+absolute paths and this machine's bind address, and a file like that committed to
+a public repo is either a hardcoded path or somebody else's broken install. The
+command then prints the five host-side steps. Installing means writing under a
+home directory and enabling something that outlives every session; that is
+outside this tree and stays the operator's to run.
+
+**Two things make this safe rather than merely automatic, and both used to fail
+silently.**
+
+`status` was lying by construction. A unit-managed server writes no record file,
+and `running()` only ever read that record — so a perfectly healthy server was
+reported as *"No detached server is running"*, at exactly the moment an operator
+needs the opposite. It asks the supervisor FIRST now, and a reboot's stale record
+can no longer outrank the live process. Every record carries an `owner`, because
+the two cases need different commands from whoever reads it.
+
+`stop` would have been a trap. Signalling a supervised pid directly leaves the
+restart policy free to start it again, so the command prints success and the
+server is back before anyone finishes reading. A supervised stop goes through
+`systemctl --user stop`, which outranks `Restart=` by definition. The pid is then
+re-checked rather than trusted — the supervisor *accepting* a stop and the
+process *being gone* are two facts, and this branch has already been caught once
+believing the first implies the second.
+
+**The unit's own details are each a silent failure avoided.** `StandardOutput=`
+and `StandardError=` are `append:`, not `file:` — `file:` truncates on every
+start, so the first restart after an outage would destroy the evidence of the
+outage, and appending to the same `host_api_serve.log` is what made this morning
+diagnosable at all. `Restart=on-failure`, never `always`, so a cleanly refused
+bind stays refused instead of spinning. `StartLimitIntervalSec`/`Burst` sit under
+`[Unit]`: systemd moved them there in v230 and **ignores** the old `[Service]`
+spelling rather than erroring, so a rate limit in the wrong section is an absence
+wearing a config's clothes. The window is deliberately generous — 60 attempts,
+5s apart, inside 10 minutes — because at boot this server can come up before
+tailscaled has assigned the address it binds, and that failure is indistinguishable
+from a fatal misconfiguration: it exits non-zero immediately. Generous enough to
+outlast a slow network, still finite, so an impossible bind ends as a unit in
+`failed` that says so rather than retrying forever into a growing log.
+
+The unit and `serve --detach` build their argv from one function, `serve_argv()`.
+Two ways to start one server is how a fix lands in one of them and the other
+keeps the bug — and the unit's copy is the one nobody re-reads, because it lives
+in a file under somebody's home directory that this tree cannot see.
+
+Lingering is reported, not assumed: without it a user unit waits for a login,
+which on a headless reboot never comes — the exact failure this build exists to
+end. It is set outside this tree and can be turned off by someone who never reads
+this file.
+
+---
+
+**A probe that cannot answer is not a probe that answered "nothing" (2026-08-27).**
+The Windows CI lane went red on this lane the day it shipped, and the failure was
+worth more than the fix. `_systemctl` asks `is_supported()` before it runs
+anything, so on a runner with no systemd the platform gate returned first and
+every test that scripted `subprocess.run` never reached its mock. Five failed —
+and **six more passed for the wrong reason**, because they assert `0` or
+`(None, None)`, which is exactly what the untouched gate returns. Those six were
+the real finding: a red test tells you it is broken, while a test that passes
+without running its subject tells you nothing forever and looks like coverage
+doing it.
+
+Under it sat a live defect. `_systemctl` returned `None` for two different facts:
+*this platform has no systemd*, and *this machine has one and it did not answer*.
+Both became `supervised_pid() == 0`, "no unit is holding the server". **The
+ruling, split in two because the question has two answers.** No systemd on the
+platform still answers zero — a machine that cannot have a unit has no
+uncertainty to report, so zero is the strongest available answer and `running()`
+correctly falls through to the detached record, the only kind of server that can
+exist there. But a probe that FAILED on a capable machine now raises
+`SupervisorUnreachable`, because the tailnet host runs under a unit that writes
+**no record file**: a swallowed probe sends `running()` down the record path and
+prints "No server is running" about a server answering requests. Proven live
+rather than argued — with the unit genuinely holding pid 227641, forcing the
+probe to fail made the old path return `None`.
+
+Each of the three callers wants that refusal: `status` says it cannot tell rather
+than inventing an absence, `stop` will not signal into the dark where a restart
+policy may undo it, and `serve` will not start a second listener on a port it
+cannot see. Only `supervised_bind` swallows it, and only because the pid probe
+has already established the verdict — losing the bind costs a status line its
+address, not its truth.
+
+---
 
 ### The git surface (DPLAN-0303)
 
@@ -809,9 +923,13 @@ argument to the shared half.
 **`ended` is a fact, not a success flag.** `ended: true` means a live session was
 ended; `ended: false` with `ok: true` means there was nothing to end, which is the
 goal state rather than a failure. Both travel, because the phone shows different
-sentences and flattening them here would make that impossible. An unknown branch
-is a *refusal*, never nothing-to-end — both show `room: null` and they are
-opposite facts, so `ok` is what tells them apart.
+sentences and flattening them here would make that impossible. A refusal is never
+nothing-to-end, and the two never share a shape: an unknown branch is refused
+before the exec by `citizen_address`, so it leaves as a **400 `verb_refused`**
+carrying no `room` and no `ok` at all, while a refusal spoken by @baud's own
+envelope comes back 200 with `ok: false` and their sentence in `detail`. Only
+the second one can be mistaken for nothing-to-end, and there `ok` is what tells
+them apart.
 
 The exec lives in `fleet.py`, which already owns @baud's binary — one resolution,
 one cwd rule, one parser for their envelope. That is what lets the verb lane keep
@@ -1073,10 +1191,10 @@ Private drivers in `apps/integrations/{project}/driver.py` (gitignored) register
 - Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`; legacy dir still present)
 - No rate limiting on OpenRouter calls (S117 finding)
 
-**Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-13.
+**Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-25 (`openai` 2.49.0, `google.auth` + `googleapiclient`), verified by import alone — no call goes out.
 
 ---
 
-*Last Updated: 2026-08-14*
+*Last Updated: 2026-08-25*
 
 [← Back to AIPass](../../../README.md)

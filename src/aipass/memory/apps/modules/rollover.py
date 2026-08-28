@@ -62,9 +62,25 @@ _SUBCOMMANDS = {
     "run": "Execute rollover for files exceeding limits",
     "status": "Show rollover statistics for all branches",
     "check": "Check which files need rollover (dry run)",
-    "sync-lines": "Update line count metadata for all branches",
+    "report-lines": "Report physical line counts per memory file (read-only)",
     "push": "Overwrite all per_branch limits to defaults (system-wide reset)",
 }
+
+# Public alias — the introspection surface and the tests read this name.
+SUBCOMMANDS = _SUBCOMMANDS
+
+# `sync-lines` stopped writing anything when the health stamp was deleted from
+# the standard on 2026-08-25: its one write was a `status.last_health_check`
+# date, and the line count it "synced" was computed, returned and dropped. The
+# name outlived the behaviour, which is the exact species of lie DPLAN-0318
+# exists to kill — so the verb is renamed, not quietly left alone.
+#
+# The old name still ROUTES rather than 404-ing. A removed verb tells a caller
+# nothing about what replaced it; this one answers, does the same read-only
+# work, and says what changed. It also no longer triggers the unscoped
+# fleet-wide `refresh_all_tabs()` it used to run on the tail — a reporter that
+# rewrites 22 branches' files is the same lie in the other direction.
+RENAMED_VERBS = {"sync-lines": "report-lines"}
 
 # `config` is the verb surface over rollover limits — the rollover module owns
 # rollover config, so nothing has to hand-edit memory.config.json (DPLAN-0302).
@@ -91,6 +107,67 @@ _VERB_ROLLOVER = "rollover"
 _VERB_ROLLOVER_PUSH = "rollover push"
 
 
+def _handle_rollover_verb(args: List[str]) -> bool:
+    """Route the `rollover` subcommands. Always returns True — the verb is ours.
+
+    Split out of `handle_command` so each router stays one level deep: the
+    combined version nested subcommand dispatch inside command dispatch, and
+    a reader had to hold both to answer "what does `rollover push` do?".
+    """
+    # No args → introspection (seedgo standard)
+    if not args:
+        print_introspection()
+        return True
+
+    # A help flag ANYWHERE wins — asking about `push` must never push.
+    # No rollover subcommand takes free text, so a bare `help` counts too.
+    if wants_help(args, allow_bare_word=True):
+        print_help()
+        return True
+
+    # Machine output is read and REMOVED before positional parsing, so a
+    # flag in any slot leaves the subcommand where the parser expects it.
+    json_mode = wants_json(args)
+    args = strip_json_flag(args)
+    if not args:
+        print_introspection()
+        return True
+
+    sub = args[0]
+
+    if sub == "run":
+        run_rollover()
+        return True
+
+    if sub == "status":
+        show_status()
+        return True
+
+    if sub == "check":
+        check_triggers()
+        return True
+
+    if sub in RENAMED_VERBS:
+        _announce_rename(sub)
+        report_line_counts()
+        return True
+
+    if sub == "report-lines":
+        report_line_counts()
+        return True
+
+    if sub == "push":
+        push_defaults(json_mode)
+        return True
+
+    _refuse(
+        _Json(_VERB_ROLLOVER, json_mode),
+        f"Unknown subcommand: '{sub}'",
+        suggestion="Available: " + ", ".join(_SUBCOMMANDS.keys()),
+    )
+    return True
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle rollover commands with seedgo-compliant introspection.
@@ -101,7 +178,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         rollover run              -> execute rollover
         rollover status           -> show rollover status
         rollover check            -> dry-run check
-        rollover sync-lines       -> sync line counts
+        rollover report-lines     -> report line counts (read-only)
         rollover push [--json]    -> reset every per_branch entry
 
     Rollover-limit config verbs (top-level command, routed from entry point):
@@ -117,7 +194,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     neither the config nor a payload.
 
     Backward-compatible top-level commands (routed from entry point):
-        status, check, sync-lines -> forwarded directly
+        status, check, report-lines -> forwarded directly
 
     Args:
         command: Command name
@@ -135,70 +212,38 @@ def handle_command(command: str, args: List[str]) -> bool:
         return _handle_config(args)
 
     if command == "rollover":
-        # No args → introspection (seedgo standard)
+        # The no-args gate stays HERE, at the entry seam, even though the verb
+        # handler gates again after the flags are stripped. They answer two
+        # different questions — "no subcommand was typed" versus "the only
+        # arguments were flags" — and a reader (or a checker) looking at the
+        # entry point should not have to follow a delegation to learn that a
+        # bare `rollover` introspects.
         if not args:
             print_introspection()
             return True
+        return _handle_rollover_verb(args)
 
-        # A help flag ANYWHERE wins — asking about `push` must never push.
-        # No rollover subcommand takes free text, so a bare `help` counts too.
-        if wants_help(args, allow_bare_word=True):
-            print_help()
-            return True
-
-        # Machine output is read and REMOVED before positional parsing, so a
-        # flag in any slot leaves the subcommand where the parser expects it.
-        json_mode = wants_json(args)
-        args = strip_json_flag(args)
-        if not args:
-            print_introspection()
-            return True
-
-        # Subcommand routing
-        sub = args[0]
-
-        if sub == "run":
-            run_rollover()
-            return True
-
-        if sub == "status":
-            show_status()
-            return True
-
-        if sub == "check":
-            check_triggers()
-            return True
-
-        if sub == "sync-lines":
-            sync_line_counts()
-            return True
-
-        if sub == "push":
-            push_defaults(json_mode)
-            return True
-
-        # Unknown subcommand
-        _refuse(
-            _Json(_VERB_ROLLOVER, json_mode),
-            f"Unknown subcommand: '{sub}'",
-            suggestion="Available: " + ", ".join(_SUBCOMMANDS.keys()),
-        )
-        return True
-
-    # Backward-compatible top-level commands (entry point still routes these)
+    # Backward-compatible top-level commands (entry point still routes these).
+    # Flat `if`/return, never an elif chain: each arm is independent, and a
+    # chain of six nests six deep for a reader and for the nesting checker.
     if command == "status":
         show_status()
         return True
 
-    elif command == "check":
+    if command == "check":
         check_triggers()
         return True
 
-    elif command == "sync-lines":
-        sync_line_counts()
+    if command in RENAMED_VERBS:
+        _announce_rename(command)
+        report_line_counts()
         return True
 
-    elif command == "process-plans":
+    if command == "report-lines":
+        report_line_counts()
+        return True
+
+    if command == "process-plans":
         process_plans_command()
         return True
 
@@ -223,7 +268,7 @@ def print_help() -> None:
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits")
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run)")
-    console.print("  [cyan]sync-lines[/cyan]  Update line count metadata for all branches")
+    console.print("  [cyan]report-lines[/cyan] Report line counts per memory file (read-only)")
     console.print("  [cyan]push[/cyan]        Reset ALL per_branch limits to defaults (system-wide, use with caution)")
     console.print("  [cyan]help[/cyan]        Show this help message")
     console.print()
@@ -898,15 +943,63 @@ def run_rollover() -> bool:
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
-    # Refresh state-tabs after rollover (counts may have changed)
-    try:
-        from aipass.memory.apps.handlers.tracking.tab_renderer import refresh_all_tabs
+    # Refresh state-tabs for the branches THIS run actually rolled (counts may
+    # have changed). Scoped deliberately: unscoped, one citizen's overdue file
+    # rewrote all 38 memory files fleet-wide on 2026-08-25, shipping a renderer
+    # change to every branch from a PreCompact hook nobody was watching.
+    rolled = sorted({item["branch"] for item in result.get("results", []) if item.get("branch")})
+    if rolled:
+        try:
+            from aipass.memory.apps.handlers.tracking.tab_renderer import refresh_all_tabs
 
-        refresh_all_tabs()
-    except Exception as e:
-        logger.warning(f"[rollover] Tab refresh failed: {e}")
+            refresh_all_tabs(branches=rolled)
+        except Exception as e:
+            logger.warning(f"[rollover] Tab refresh failed: {e}")
+
+        _normalize_rolled(rolled)
 
     return success_count > 0
+
+
+def _normalize_rolled(rolled: List[str]) -> None:
+    """Re-render the machine frame of each branch THIS run actually rolled.
+
+    Self-healing on touch, the marker-7 shape: a branch that rolls heals its
+    own frame in the same breath — nothing watches, nothing polls, and a
+    branch that never rolls is never touched.
+
+    Scoped to `rolled` for the reason the tab refresh above is: an unscoped
+    version of this rewrote all 38 memory files in the fleet on 2026-08-25.
+    Failures are logged, never raised — the rollover already succeeded and
+    reported, and a cosmetic re-render must not retract that.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+    from aipass.memory.apps.handlers.rollover import normalizer
+    from aipass.memory.apps.handlers.json import config_loader
+
+    wanted = {name.lower() for name in rolled}
+    try:
+        config = config_loader.load()
+        targets = [item for item in registry_scope.fleet_branches() if item["name"].lower() in wanted]
+    except Exception as e:
+        logger.warning(f"[rollover] Frame normalize skipped — cannot resolve scope: {e}")
+        return
+
+    healed = 0
+    for item in targets:
+        try:
+            if normalizer.normalize_branch(item["name"], item["path"], config)["success"]:
+                healed += 1
+        except Exception as e:
+            logger.warning(f"[rollover] Frame normalize failed for {item['name']}: {e}")
+
+    missing = wanted - {item["name"].lower() for item in targets}
+    if missing:
+        # Named, never silent: a rolled branch the fleet scope cannot see is
+        # exactly the invisibility item 7 closed, and it would come back here.
+        logger.warning(f"[rollover] Rolled but not in fleet scope, frame NOT normalized: {sorted(missing)}")
+    if healed:
+        logger.info(f"[rollover] Machine frame re-rendered for {healed} rolled branch(es)")
 
 
 # =============================================================================
@@ -970,38 +1063,44 @@ def process_plans_command() -> None:
 # =============================================================================
 
 
-def sync_line_counts() -> None:
-    """
-    Update line count metadata for all branch memory files.
+def _announce_rename(old_verb: str) -> None:
+    """Tell a caller of a renamed verb what it is running and why."""
+    new_verb = RENAMED_VERBS[old_verb]
+    console.print()
+    warning(
+        f"'{old_verb}' is now '{new_verb}' — it never synced anything: its only write was a "
+        f"health stamp deleted from the standard on 2026-08-25. Running the reporter."
+    )
 
-    Delegates to handler and renders results with Rich.
+
+def report_line_counts() -> None:
+    """Report physical line counts for every branch memory file. Read-only.
+
+    Writes nothing — not the files, not the tabs. The rename exists because
+    the old name promised a sync; re-rendering the fleet's meta lines from a
+    reporter would have kept the promise in the worst possible way.
+
+    Meta lines are re-rendered by the lanes that have a reason to: the trinity
+    push (per branch, gated), and a rollover's own scoped normalize.
     """
     console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Sync Line Counts[/bold cyan]", border_style="cyan", box=box.ROUNDED))
+    console.print(Panel.fit("[bold cyan]Memory - Line Count Report[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
-    console.print("[cyan]Updating line counts for all memory files...[/cyan]")
+    console.print("[cyan]Measuring every branch memory file (read-only)...[/cyan]")
     console.print()
 
     result = _handler_sync_line_counts()
 
     if result["success"]:
-        console.print(f"[green]>[/green] Updated {result['updated']} files")
+        console.print(f"[green]>[/green] Measured {result['updated']} files")
         if result["failed"] > 0:
-            warning(f"{result['failed']} files failed")
+            warning(f"{result['failed']} files could not be read")
             for branch, mem_type, err_msg in result.get("failures", []):
                 error(f"{branch}.{mem_type}: {err_msg}")
-        json_handler.log_operation("rollover_sync_lines", {"updated": result["updated"], "failed": result["failed"]})
+        json_handler.log_operation("rollover_report_lines", {"measured": result["updated"], "failed": result["failed"]})
     else:
-        error("Failed to sync line counts")
-
-    # Refresh state-tabs after line count sync
-    try:
-        from aipass.memory.apps.handlers.tracking.tab_renderer import refresh_all_tabs
-
-        refresh_all_tabs()
-    except Exception as e:
-        logger.warning(f"[rollover] Tab refresh failed: {e}")
+        error("Failed to measure line counts")
 
     console.print()
 

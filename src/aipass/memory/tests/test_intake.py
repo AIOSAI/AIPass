@@ -35,14 +35,20 @@ from unittest.mock import MagicMock
 def _import_pool_processor(monkeypatch):
     """Import pool_processor with mocked dependencies.
 
-    Pops the json handler package and its sub-modules from sys.modules so
-    that the real modules (json_handler, config_loader) can be re-imported
-    fresh, bypassing the conftest MagicMock replacement.
+    Evicts the json handler package and its sub-modules from sys.modules so
+    that the real modules (json_handler, config_loader) are re-imported fresh.
+
+    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
+    bare pop is one-way and the eviction outlives the test, which is how two
+    receipt tests went red on a single xdist worker on a single run.
     """
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.config_loader", None)
-    sys.modules.pop("aipass.memory.apps.handlers.intake.pool_processor", None)
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.config_loader",
+        "aipass.memory.apps.handlers.intake.pool_processor",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.intake")
     if parent is not None and hasattr(parent, "pool_processor"):
         delattr(parent, "pool_processor")

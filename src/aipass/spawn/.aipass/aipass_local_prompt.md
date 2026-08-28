@@ -63,7 +63,9 @@ apps/
 - Py files NEVER auto-overwritten during updates (design)
 - JSON files deep-merged (preserve existing values, add new template keys)
 - Update uses Phase 0 workflow: snapshot old tracking → detect changes → execute → refresh metadata
-- Two citizen classes: aipass_framework (full 3-layer scaffold, 46 files), project_agent (18 files)
+- Two citizen classes: aipass_framework (full 3-layer scaffold, 50 files), project_agent (17 files)
+- Birth stamps TWO ids: citizenship.citizen_id (this citizen's own UID, == its branches[] registry_id)
+  and citizenship.registry_id (the REGISTRY's id, shared project-wide). Minted once in core, used twice
 - Mint verifies completeness: a template that ships fewer files than its manifest declares REFUSES, never half-registers
 
 ## Known Gotchas

@@ -318,6 +318,7 @@ def execute_branch_command(
     args: Optional[List[str]] = None,
     timeout: int = DEFAULT_TIMEOUT,
     interactive: bool = False,
+    extend_on_output: bool = True,
 ) -> CommandResult:
     """Execute a command against a branch's entry point via subprocess.
 
@@ -325,6 +326,10 @@ def execute_branch_command(
     to the subprocess executor.
 
     When command is None, runs the branch with no args (introspection).
+
+    ``extend_on_output`` is carried, not decided, here: the router knows whether
+    the operator named an explicit timeout, and this layer never second-guesses
+    that. The default matches the executor's own — extension on.
 
     Returns:
         CommandResult with stdout, stderr, exit_code, branch, and command
@@ -359,6 +364,7 @@ def execute_branch_command(
         timeout=timeout,
         env=caller_env,
         interactive=interactive,
+        extend_on_output=extend_on_output,
     )
 
     caller_tag = f" [CALLER:{caller_branch.upper()}]" if caller_branch else ""

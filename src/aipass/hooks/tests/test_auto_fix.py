@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-08-27
 # =============================================
 
 """Tests for handlers/lifecycle/auto_fix.py.
@@ -423,3 +423,85 @@ class TestAutoFixPatterns:
         result = _check_emoji_list(["a"], "emojis")
         assert result is not None
         assert "EMOJI CORRUPTION" in result
+
+
+class TestOpenPatternWordBoundary:
+    """`open(` is a substring of `Popen(` — reported by @drone, 2026-08-27.
+
+    Every Edit to drone/apps/handlers/executor.py returned "open() without
+    encoding='utf-8'". That file contains no open() call at all; the only match
+    was `subprocess.Popen(`. It fired six times across six unrelated edits.
+
+    Why this is worth fixing rather than tolerating: the advisory says "Fix
+    these errors now. Do not skip or defer." Popen takes no encoding argument
+    in byte mode, so the only two moves available to the agent were to ignore a
+    hook that claims an error, or to damage working code to satisfy it. A check
+    that cries wolf on correct code trains agents to ignore it, and it will be
+    ignored on the day it is right.
+    """
+
+    def test_popen_alone_does_not_fire(self, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = tmp_path / "executor_like.py"
+        target.write_text(
+            "import subprocess\n"
+            "def run(cmd):\n"
+            "    proc = subprocess.Popen(cmd, bufsize=0)\n"
+            "    return proc.communicate()\n",
+            encoding="utf-8",
+        )
+        assert _check_patterns(str(target)) == []
+
+    def test_other_open_suffixed_calls_do_not_fire(self, tmp_path):
+        """fdopen, os.popen and reopen are all longer names, not open()."""
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = tmp_path / "suffixed.py"
+        target.write_text(
+            "import os\ndef f(fd):\n    a = os.fdopen(fd)\n    b = os.popen('ls')\n    return a, b\n",
+            encoding="utf-8",
+        )
+        assert _check_patterns(str(target)) == []
+
+    def test_real_open_without_encoding_still_fires(self, tmp_path):
+        """The rule must keep working — this is the case it exists for."""
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = tmp_path / "bare_open.py"
+        target.write_text("def f(p):\n    return open(p).read()\n", encoding="utf-8")
+        errors = _check_patterns(str(target))
+        assert any("encoding" in e for e in errors)
+
+    def test_attribute_open_without_encoding_still_fires(self, tmp_path):
+        """io.open( / os.open( are real open calls — the dot is a boundary."""
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = tmp_path / "attr_open.py"
+        target.write_text("import io\ndef f(p):\n    return io.open(p).read()\n", encoding="utf-8")
+        errors = _check_patterns(str(target))
+        assert any("encoding" in e for e in errors)
+
+    def test_open_with_encoding_does_not_fire(self, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        target = tmp_path / "good_open.py"
+        target.write_text("def f(p):\n    return open(p, encoding='utf-8').read()\n", encoding="utf-8")
+        assert _check_patterns(str(target)) == []
+
+    def test_against_the_reporters_real_file(self, tmp_path):
+        """@drone offered executor.py as the fixture; it is a good one.
+
+        Skips rather than fails if the file moves — a cross-branch path is
+        evidence, not a dependency this suite may hold hostage.
+        """
+        import pytest
+
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
+
+        executor = Path(__file__).resolve().parents[2] / "drone" / "apps" / "handlers" / "executor.py"
+        if not executor.is_file():
+            pytest.skip("drone/apps/handlers/executor.py not present")
+
+        errors = _check_patterns(str(executor))
+        assert not any("encoding" in e for e in errors), f"false positive still fires: {errors}"

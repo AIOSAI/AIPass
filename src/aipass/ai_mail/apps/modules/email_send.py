@@ -28,7 +28,12 @@ from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
 from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.registry.read import get_all_branches, get_branch_by_email
+from aipass.ai_mail.apps.handlers.registry.read import (
+    get_all_branches,
+    get_branch_by_email,
+    get_resident_branches,
+)
+from aipass.ai_mail.apps.handlers.users import verified_caller
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
 from aipass.ai_mail.apps.handlers.email.send import (
     resolve_sender_info,
@@ -278,9 +283,46 @@ def _fire_dispatch_trigger(to_branch: str, subject: str) -> None:
         logger.warning("[email_send] trigger fire for email_dispatched failed: %s", e)
 
 
+def resolve_broadcast_targets() -> list:
+    """Who @all reaches: the fleet, plus the residents for a verified admin.
+
+    Ruled 2026-08-27 (DPLAN-0318 circle close). The fleet-push announcement had
+    to be hand-sent to baud, earmark, finch and aipass_site in four separate
+    admin sends because @all could not carry it -- an announcement every citizen
+    should hear, and the exact case the fleet/project asymmetry was built for.
+
+    The widening rides the SAME five-leg verification (DPLAN-0288) that already
+    permits admin-initiated direct mail into projects. It grants no new
+    authority: an ordinary citizen's @all resolves exactly the branches it did
+    before, and every recipient still passes the per-delivery boundary check.
+
+    Fails closed in both directions. An unverified caller widens nothing, and a
+    verifier that RAISES is a refusal, not an opening -- a privilege path must
+    never take mail down or, worse, fall open when it cannot answer.
+
+    Residents already present in the core registry are not added twice: one
+    inbox must receive one copy, or the announcement arrives double.
+    """
+    branches = get_all_branches()
+    try:
+        if not verified_caller.is_verified_admin_caller():
+            return branches
+    except Exception as e:
+        logger.warning("[email_send] admin verification failed, broadcast stays fleet-only: %s", e)
+        return branches
+
+    known = {b.get("email", "").lower() for b in branches}
+    for email, path in get_resident_branches().items():
+        if email.lower() in known:
+            continue
+        known.add(email.lower())
+        branches.append({"email": email, "path": path, "name": email.lstrip("@").upper()})
+    return branches
+
+
 def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to) -> bool:
     """Broadcast send to all branches - display wrapper."""
-    branches = get_all_branches()
+    branches = resolve_broadcast_targets()
     console.print(f"\nBroadcasting to {len(branches)} branches...")
     ok, success_count, total, results = send_to_broadcast(
         subject,
@@ -294,7 +336,6 @@ def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, r
         create_email_file,
         load_email_file,
         deliver_email_to_branch,
-        _delivery_callback,
         json_handler.log_operation,
         update_central,
     )

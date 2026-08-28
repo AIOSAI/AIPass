@@ -227,9 +227,12 @@ class TestSubcommands:
         rollover, _ = _import_rollover(monkeypatch)
         assert "check" in rollover._SUBCOMMANDS
 
-    def test_subcommands_has_sync_lines(self, monkeypatch):
+    def test_subcommands_has_report_lines(self, monkeypatch):
+        """Renamed 2026-08-27 — `sync-lines` synced nothing after the health stamp went."""
         rollover, _ = _import_rollover(monkeypatch)
-        assert "sync-lines" in rollover._SUBCOMMANDS
+        assert "report-lines" in rollover._SUBCOMMANDS
+        assert "sync-lines" not in rollover._SUBCOMMANDS
+        assert rollover.RENAMED_VERBS["sync-lines"] == "report-lines"
 
     def test_subcommands_values_are_strings(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
@@ -354,11 +357,18 @@ class TestSubcommandHelpFlag:
             assert rollover.handle_command("rollover", ["run", "--help"]) is True
         ran.assert_not_called()
 
-    def test_sync_lines_help_does_not_sync(self, monkeypatch):
+    def test_report_lines_help_does_not_report(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
-        with patch.object(rollover, "sync_line_counts") as synced:
+        with patch.object(rollover, "report_line_counts") as reported:
+            assert rollover.handle_command("rollover", ["report-lines", "-h"]) is True
+        reported.assert_not_called()
+
+    def test_the_retired_name_help_does_not_report_either(self, monkeypatch):
+        """The rename must not smuggle a run past the help gate."""
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "report_line_counts") as reported:
             assert rollover.handle_command("rollover", ["sync-lines", "-h"]) is True
-        synced.assert_not_called()
+        reported.assert_not_called()
 
     def test_check_help_prints_help_not_check(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)

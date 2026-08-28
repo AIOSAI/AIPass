@@ -36,6 +36,9 @@ def _import_normalize(monkeypatch):
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -65,6 +68,9 @@ def _import_extractor(monkeypatch):
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
 
@@ -89,11 +95,19 @@ def _import_extractor(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_entry_limits_modules(monkeypatch):
-    """Drop cached entry_limits modules so each test gets fresh imports."""
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.config_loader", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.entry_limits", None)
+    """Drop cached entry_limits modules so each test gets fresh imports.
+
+    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
+    bare pop is one-way and the eviction outlives the test, which is how two
+    receipt tests went red on a single xdist worker on a single run.
+    """
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.config_loader",
+        "aipass.memory.apps.handlers.json.entry_limits",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 
@@ -183,7 +197,9 @@ class TestNormalizerNumberSort:
             f,
             {
                 "document_metadata": {
-                    "status": {"last_health_check": "2026-06-13"},
+                    # No status block: the gold-source templates stopped declaring one on
+                    # 2026-08-25, so a file carrying one is drifted and gets it
+                    # stripped — which is a change, and these tests assert none.
                 },
                 "sessions": [
                     {"number": 5, "date": "2026-01-05", "summary": "Fifth"},
@@ -214,7 +230,9 @@ class TestNormalizerUnsortableEntries:
         _write_json(
             f,
             {
-                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
+                # No status block — stripped by the template-conformance pass
+                # since 2026-08-25; see test_trinity_standard.py.
+                "document_metadata": {},
                 "sessions": sessions,
             },
         )

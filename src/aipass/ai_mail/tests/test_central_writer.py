@@ -182,9 +182,13 @@ def test_find_all_inbox_files_skips_backup(tmp_path, monkeypatch):
 
 
 def test_find_all_inbox_files_skips_backups_dir(tmp_path, monkeypatch):
-    """Skips .ai_mail.local dirs inside /backups/ paths."""
-    import sys
+    """Skips .ai_mail.local dirs inside a `backups/` tree, on every platform.
 
+    This used to assert 2 on Windows and 1 everywhere else: the old check was a
+    literal `"/backups/" in str(path)`, and Windows renders that separator as a
+    backslash, so the same tree counted on one OS and not the other. Exclusions
+    are path COMPONENTS now, which have no separator to disagree about.
+    """
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
     valid = tmp_path / "branch" / ".ai_mail.local"
@@ -196,12 +200,7 @@ def test_find_all_inbox_files_skips_backups_dir(tmp_path, monkeypatch):
     (backup / "inbox.json").write_text("{}", encoding="utf-8")
 
     result = mod.find_all_inbox_files()
-    # On Windows, str(path) uses backslashes so the runtime's "/backups/" check
-    # does not match; the backup inbox is not filtered out on that platform.
-    if sys.platform == "win32":
-        assert len(result) == 2
-    else:
-        assert len(result) == 1
+    assert len(result) == 1
 
 
 def test_find_all_inbox_files_ignores_dir_without_inbox(tmp_path, monkeypatch):
@@ -370,3 +369,66 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     written = json.loads(central_file.read_text(encoding="utf-8"))
     assert written == new_data
     assert "old" not in written
+
+
+# --- Walk pruning: the exclusion must PRUNE, not filter after descending ----
+#
+# find_all_inbox_files() used rglob(".ai_mail.local") and then discarded hits
+# whose path contained .backup/.archive/backups. Discarding a RESULT does not
+# save the WALK: rglob still descended every excluded tree first. On the live
+# repo that meant walking 57GB of .backup and 68GB of projects/ to return 26
+# inboxes -- 2.9s per call, and update_central() calls this on every delivery.
+
+
+def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monkeypatch):
+    """The excluded trees must never be WALKED, not merely filtered from results.
+
+    Red-first against the rglob implementation: rglob visits everything and the
+    skip only drops results, so the decoy tree below was fully traversed.
+    """
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+
+    valid = tmp_path / "branch" / ".ai_mail.local"
+    valid.mkdir(parents=True)
+    (valid / "inbox.json").write_text("{}", encoding="utf-8")
+
+    # A deep decoy under each excluded name. Nothing here may be visited.
+    for excluded in (".backup", ".archive", "backups"):
+        deep = tmp_path / excluded / "a" / "b" / "c" / ".ai_mail.local"
+        deep.mkdir(parents=True)
+        (deep / "inbox.json").write_text("{}", encoding="utf-8")
+
+    visited = []
+    real_walk = mod.os.walk
+
+    def spy_walk(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            visited.append(dirpath)
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(mod.os, "walk", spy_walk)
+
+    result = mod.find_all_inbox_files()
+
+    assert len(result) == 1, "only the non-excluded inbox may be returned"
+    # Without this the test is BLIND: an implementation that never calls
+    # os.walk leaves `visited` empty, and an empty list trespasses nowhere.
+    assert visited, "find_all_inbox_files must walk via os.walk so descent can be pruned"
+    trespassed = [d for d in visited if any(part in Path(d).parts for part in (".backup", ".archive", "backups"))]
+    assert not trespassed, f"walk descended into excluded trees: {trespassed}"
+
+
+def test_find_all_inbox_files_excludes_are_named_not_substrings(tmp_path, monkeypatch):
+    """A directory merely CONTAINING an excluded name is a real branch, not a backup.
+
+    The old check was `".backup" in str(path)`, so a legitimate branch living in
+    e.g. `my.backup.tools/` was silently invisible to central stats.
+    """
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+
+    legit = tmp_path / "my.backup.tools" / ".ai_mail.local"
+    legit.mkdir(parents=True)
+    (legit / "inbox.json").write_text("{}", encoding="utf-8")
+
+    result = mod.find_all_inbox_files()
+    assert len(result) == 1, "a path containing 'backup' as a substring is not an excluded tree"

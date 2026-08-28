@@ -11,10 +11,11 @@
 ## Quick Start
 
 ```bash
+drone @memory push --dry-run            # THE TRINITY PUSH — report what would change, write nothing
 drone @memory search "query"            # Search archived memories across all branches
 drone @memory rollover status           # Show what needs archiving per branch
 drone @memory rollover check            # Dry run — preview pending rollovers
-drone @memory lint                      # Audit .trinity entries for limit violations
+drone @memory lint run                  # Audit .trinity entries for limit violations
 drone @memory watch                     # Auto-rollover watcher (Ctrl+C to stop)
 ```
 
@@ -26,8 +27,16 @@ drone @memory watch                     # Auto-rollover watcher (Ctrl+C to stop)
 drone @memory rollover run                 # Execute rollover for files over limits
 drone @memory rollover status              # Show per-branch rollover statistics
 drone @memory rollover check               # Dry run — what needs rollover
-drone @memory rollover sync-lines          # Update line count metadata
-drone @memory rollover push                # ⚠ Reset ALL per_branch limits to defaults
+drone @memory rollover report-lines        # Report line counts per memory file — READ-ONLY, writes
+                                           #   nothing (see Line counts are reported, not stored)
+drone @memory rollover sync-lines          # The old name — still routes: prints a notice naming
+                                           #   report-lines, then runs the reporter
+drone @memory rollover push                # ⚠ Reset ALL per_branch limits to defaults (config only)
+
+drone @memory push --dry-run               # Trinity push, FLEET dry-run — the report Patrick reads
+drone @memory push --branch @canary        # Trinity push, one branch
+drone @memory push --branch @canary --dry-run
+drone @memory push --confirm               # FLEET push — refused without the flag
 
 drone @memory config                       # Introspection — the three config verbs
 drone @memory config --help                # Full contract: types, bounds, semantics
@@ -42,20 +51,27 @@ drone @memory rollover push --json         # …and on push. `--help` still outr
 
 drone @memory search "query"               # Semantic search across all branch memories
 drone @memory search "query" --branch X    # Filter by branch
-drone @memory search "query" --n 10        # Limit results
+drone @memory search "query" --type local  # Filter by memory type (local, observations)
+drone @memory search "query" --n 10        # Limit results shown
 
-drone @memory symbolic                     # PARKED 2026-08-14 — explains the ruling, then exits 1
+drone @memory symbolic                     # PARKED 2026-08-14 — bare prints the ruling, exits 0
+drone @memory symbolic <subcommand>        # …a named subcommand is refused, exits 1
                                            # Curated truth lives in Compass: drone @devpulse compass
 
-drone @memory templates push-templates     # Push template updates to all branches
-drone @memory templates diff-templates     # Show template differences per branch
-drone @memory templates template-status    # Show template version and push status
+drone @memory templates spawn-templates    # Propagate the gold templates into @spawn's scaffold sets
+drone @memory templates spawn-templates --dry-run   # …preview it
+drone @memory templates template-status    # Who carries which version — reads each branch's own
+                                           #   .trinity/.template_version.json receipt
+drone @memory templates bump               # The template bump site — DRY RUN; --confirm executes
+drone @memory templates push-templates     # RETIRED 2026-08-27 — refuses, names the live lane
+drone @memory templates diff-templates     # RETIRED 2026-08-27 — refuses, points at push --dry-run
 
 drone @memory pool status                  # Pool file count, config, vector stats
 drone @memory pool process                 # Vectorize pool files + check rollover
 
-drone @memory lint                         # Audit .trinity entries for over-limit violations (read-only)
+drone @memory lint run                     # Audit .trinity entries for over-limit violations (read-only)
 drone @memory lint @devpulse               # Lint a specific branch
+drone @memory lint                         # Bare = introspection banner, NOT a scan
 
 drone @memory verify FPLAN-XXXX            # Check if plan is vectorized in ChromaDB
 drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+C to stop)
@@ -69,15 +85,16 @@ drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+
 memory/
 ├── apps/
 │   ├── memory.py                # Entry point — auto-discovers modules
-│   ├── modules/                 # 10 modules
+│   ├── modules/                 # 11 modules
 │   │   ├── governance.py        # Surfacing governance — re-exports from handlers
 │   │   ├── health.py            # Branch health wrapper (entry-count + entry-size, read-only)
 │   │   ├── lint.py              # Entry limit violation scanner (read-only)
 │   │   ├── pool.py              # Pool vectorization + auto-process
-│   │   ├── rollover.py          # Rollover orchestration, status, sync-lines
+│   │   ├── push.py              # The trinity push lane (dry-run + gated execute)
+│   │   ├── rollover.py          # Rollover orchestration, status, report-lines
 │   │   ├── search.py            # Semantic query routing
 │   │   ├── symbolic.py          # PARKED 2026-08-14 — refusal stub (impl in tests/parked/)
-│   │   ├── templates.py         # Template push, diff, status
+│   │   ├── templates.py         # Gold templates — spawn scaffolds, receipt status, bump
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
 │   └── handlers/                # 14 handler groups
@@ -86,18 +103,19 @@ memory/
 │       ├── governance/          # engine.py — surfacing decision logic
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py, memory_files.py, entry_limits.py, lint_handler.py, config_loader.py
-│       ├── monitor/             # detector.py, memory_watcher.py, watch_runner.py
-│       ├── rollover/            # extractor.py, orchestrator.py
+│       ├── monitor/             # detector.py, memory_watcher.py, watch_runner.py, registry_scope.py
+│       ├── rollover/            # extractor.py, orchestrator.py, normalizer.py
 │       ├── schema/              # normalize.py
 │       ├── search/              # query_executor.py
 │       ├── storage/             # chroma_subprocess.py
 │       ├── symbolic/            # PARKED 2026-08-14 — __init__ raises; impl in tests/parked/
-│       ├── templates/           # pusher.py, differ.py, spawn_pusher.py
+│       ├── templates/           # trinity_push.py, push_store.py, push_report.py,
+│       │                        #   receipt.py, template_bump.py, spawn_pusher.py
 │       ├── tracking/            # line_counter.py, tab_renderer.py
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1171 test functions — 1061 pass, 5 skip (parked symbolic tier)
+├── tests/                       # 1323 test functions on disk — 1222 collected, 1222 pass, 5 skip
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -106,17 +124,55 @@ memory/
 
 ```
 detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external registries
-→ _should_rollover(file)             # v1: line_count >= max_lines (600)
-                                     # v2: len(sessions) >= max_sessions (20)
+→ _should_rollover(file)             # ENTRY COUNTS ONLY — no line-count trigger, no 600 fallback
+                                     # len(sessions) >= count (default 15), auto-compact lane
+                                     # against auto_compact_cap (3), key_learnings, observations
+                                     # per_branch[branch][file_type] → defaults[file_type]
+                                     # no limit either place = CONFIG GAP, logged, skipped
+                                     # unparseable file = logged, skipped — never a fallback
 → orchestrator.execute_rollover()
   → create_rollover_backup()         # safety copy to branch/.backup/
   → extract_items()                  # v2: max(excess, 1) oldest entries
-  → embed via subprocess             # fastembed (ONNX) in memory .venv
+  → embed via subprocess             # fastembed (ONNX) — see Subprocess Isolation re: venv
   → upsert in ChromaDB               # content-hash IDs (sha256[:16]), no duplicates
   → trim source file                 # write back with oldest removed
 ```
 
 Rollover writes safety copies (`rollover_backup_*.json`) into `<branch>/.backup/` — a shared runtime namespace (see `@backup`'s README for all writers).
+
+### A rollover normalizes the branch it touched (2026-08-27)
+
+After `rollover run` rolls a branch, it re-renders **that branch's** machine frame —
+`handlers/rollover/normalizer.py`, called from `rollover._normalize_rolled()`. The frame is built by
+`trinity_push.build_frame`, the same function the push's step 1 uses, so there is one renderer rather
+than two free to drift: closed `document_metadata`, `managed_by` in exact branch-directory casing,
+`_usage` and `guidelines` verbatim from the gold templates, all four `*_meta` lines re-composed from
+config.
+
+It **never prunes.** Every entry carries over exactly as found, canonical or not — pruning is the
+push's mandate and the push earns it with a report, a verified vector round-trip, a receipt and an
+in-file note.
+
+It is **scoped to the branches this run actually rolled**, like the tab refresh beside it:
+`normalize_branch()` takes one branch and touches one branch, and there is no fleet entry point in
+that handler on purpose. A rolled branch the fleet scope cannot see is logged by name, never silently
+skipped.
+
+### One definition of the fleet (2026-08-27)
+
+`handlers/monitor/registry_scope.py` answers "which branches are ours" once: `CORE_REGISTRY` plus
+four named `RESIDENT_REGISTRIES` (`baud`, `earmark`, `finch`, `aipass-site`).
+`detector._read_registry()` reads the residents from that constant, so rollover, lint and health now
+reach the same **22** branches the trinity push always did. Measured live: `_read_registry()` returns
+22 branches, and `rollover report-lines` measures **44** files (22 × 2).
+
+Before it, a resident arrived only if some caller's cwd had once persisted its registry into
+`known_registries.json` — `baud` was in there by accident of where somebody happened to stand;
+`earmark`, `finch` and `aipass_site` were not, so three citizens' memory files could overflow with no
+rollover ever running on them. The list is a **named constant, never a glob** over `projects/`, which
+also holds `marketstand(on _hold)` — a project whose registry says `active` inside a directory whose
+name says otherwise. Caller discovery (`detector._find_caller_registries`) is a separate mechanism and
+is unchanged.
 
 ### Safety valve and the two session lanes
 
@@ -184,6 +240,103 @@ All six are absolute now, and a contract test scans the whole directory.
 
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these libraries. Python interpreter resolved via `_get_memory_python()` (env var `AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`).
 
+### `vectorize_and_store` — text in, this branch owns the model (1.4.0, 2026-08-23)
+
+`chroma_subprocess.py` gained a **text-in** operation so another branch can archive its own content
+without ever choosing an embedding model:
+
+```
+vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None)
+    → embeds via embed_subprocess.py, stores through the existing _store_vectors path
+    → content-hash IDs, upsert, dedup — same guarantees as rollover
+    → validates: branch and memory_type required, len(metadatas) == len(texts)
+    → timeout max(30, len(texts) * 3)s; always returns an explicit success flag
+```
+
+Caller today: `@ai_mail`'s `handlers/email/purge.py` — it sends sent/deleted mail as text before
+deleting the originals (`ai_mail_email_sent`, `ai_mail_email_deleted`). The model choice stays here
+because consistency across a collection is this branch's job, not the caller's.
+
+**Why it exists.** For four months `purge.py` called an operation that did not exist. The handler
+answered `success: false` on stdout and **exited 0**; the caller checked only the return code, so
+purge reported mail vectorized and deleted it. 55 purges across 11 branches into a collection that
+had never been created. An unknown operation that exits 0 is a lie — the operation now exists, and
+the caller reads the payload.
+
+### Anchored plan-ID matching (1.3.0)
+
+`_source_matches()` backs `drone @memory verify`. A plain `label in source_file` had no boundary
+check, so `DPLAN-0012` matched inside `TDPLAN-0012` — `verify DPLAN-0012` reported 27 chunks live
+that all belonged to a different plan. A hit now counts only at the string start or after a
+non-alphanumeric boundary, and scanning continues past a rejected hit so a real match later in the
+same string (`TDPLAN-0012_supersedes_DPLAN-0012`) is still found. The same predicate is shared by
+`_delete_by_source`, which **deletes** — that call site was the reason to fix it at the source.
+
+### The templates lane was retired (2026-08-27)
+
+`push-templates` and `diff-templates` scanned the **branch root** for files ending `.local.json` /
+`.observations.json` — a naming convention that predates `.trinity/`. The live layout is
+`<branch>/.trinity/local.json`, which does not end with `.local.json` and is not in the directory
+being scanned: **zero real matches were possible.** Measured before retirement, `diff-templates`
+reported "16 branches have template differences" and not one was a `.trinity/` file — the only thing
+it ever matched was `CLOSED_PLANS.local.json`, an unrelated archive file with the right suffix by
+coincidence.
+
+Both verbs still **route and refuse**, naming the live lane (`modules/templates.RETIRED_VERBS`); a
+removed verb tells a caller nothing about its replacement. `pusher.py`, `differ.py` and the two test
+files that pinned them are in `tests/parked/dead_template_lane_20260827/`, with the measurement written
+down there.
+
+- `push-templates` → `drone @memory push` (branch memory files, gated) and
+  `drone @memory templates spawn-templates` (@spawn's scaffold sets)
+- `diff-templates` → `drone @memory push --dry-run`
+
+**The half that always worked survives under its own name.** `spawn_pusher.py` propagates the gold
+templates into @spawn's template sets at `spawn/templates/*/.trinity/{local,observations}.json` — the
+real layout. It used to run as a side effect of the dead verb, which is why it went unnoticed; it is
+`templates spawn-templates` now.
+
+`template-status` survives too, **repointed**: it read a fleet-side push log whose `last_push` only
+the retired lane could ever move, and now reads each branch's own `.trinity/.template_version.json`
+receipt through `template_bump.receipt_status()` — written by lanes that are alive.
+
+### The template bump site (2026-08-27)
+
+`drone @memory templates bump` is where a gold-template version bump gets acted on.
+`handlers/templates/template_bump.py` compares the gold templates against a **fleet-side ledger**
+(`memory/templates/.template_version.json` — not to be confused with a branch's own receipt of the
+same name), announces `trinity_template_bumped` on @trigger's bus, and heals the fleet by running the
+trinity push with every gate intact.
+
+- **Trigger-driven, never polled.** Nothing watches the templates: `bump_pending()` compares two files
+  already on disk and runs only when the lane is invoked. No timer, no poller, idle costs nothing.
+- **DRY RUN by default; `--confirm` executes.** A version bump that rewrote 22 branches' memory files
+  on its own is exactly the unattended fleet-wide write `--confirm` exists to prevent.
+- **The ledger is stamped only by a push that actually ran and actually succeeded** — a dry run that
+  stamped it would tell the next bump the work was done, and a stamped failure would do the same while
+  leaving the fleet stale. No ledger at all reads as *bump pending*: absent and up-to-date are opposite
+  answers.
+- The event's **name** lives in the handler (`BUMP_EVENT`); the **firing** lives in
+  `modules/templates._announce_bump()`, because reaching the bus means importing @trigger's module
+  layer, and a handler that does that is orchestration in a handler's clothes.
+
+**There is no ledger yet, and that is the honest state.** `templates/.template_version.json` did
+exist — written by the retired `pusher.py` and by nothing else, holding `last_push: 2026-06-25` and
+sixteen uppercase branch names, no version field anywhere. A file with no `template_versions` is not
+a record of a push, so `bump_pending()` already read it as PENDING; but a fossil sitting in
+`templates/` reads to a human as a live ledger with a stale date, so it moved to
+`tests/parked/dead_template_lane_20260827/fleet_ledger.pre_trinity.json` with the lane that wrote it.
+`template-status` therefore reports **BUMP PENDING** while every branch reads *current* — both are
+true: 22/22 carry `3.0.0` by their own receipts, and no push has yet run through the bump lane to
+stamp a fleet ledger. The first `templates bump --confirm` writes the first real one. The old shape
+is pinned by `test_the_retired_lanes_own_ledger_shape_reads_as_pending_not_as_current`, so a ledger
+that cannot name a version can never be mistaken for one that can.
+
+**Nothing listens for `trinity_template_bumped` yet** — grepped across @trigger's tree, no handler is
+registered. The announcement is fired and lands on an empty subscriber list, which is the intended
+shape (the bump acts through the push, never through a listener) but is stated here so the event is
+not read as wiring that already does something.
+
 ---
 
 ## State-Tabs (`*_meta` keys)
@@ -220,7 +373,7 @@ fallback is ever reintroduced into this file.
 
 | Scenario | How tabs arrive |
 |---|---|
-| **Live branches** | `refresh_all_tabs()` walks the registry, renders tabs from config with per-branch overrides, writes them into `.trinity/` files. Wired after rollover, sync-lines, and push-templates. |
+| **Live branches** | `refresh_all_tabs(branches=…)` renders tabs from config with per-branch overrides and writes them into `.trinity/` files. Wired after `rollover run` only, **scoped to the branches that run actually rolled** — the same rollover then re-renders those branches' whole frame through `rollover/normalizer.py`. Grep for `refresh_all_tabs` under `apps/` finds exactly that one caller: `report-lines` writes nothing, and the retired template verbs never called it. |
 | **New branches** | Templates carry `{{TODOS_META}}`, `{{KEY_LEARNINGS_META}}`, `{{SESSIONS_META}}`, `{{OBSERVATIONS_META}}` placeholders. `spawn_pusher` propagates these (unresolved) from memory templates → spawn template sets. At branch creation, @spawn calls `render_all_meta_tabs()` to get rendered defaults and resolves the placeholders. |
 
 ### Public API
@@ -233,6 +386,299 @@ tabs = render_all_meta_tabs()
 ```
 
 Returns defaults (not per-branch overrides) — appropriate for template resolution at branch creation.
+
+---
+
+## The trinity standard (DPLAN-0318, built 2026-08-25)
+
+The standard has one rule: **numbers come from `memory.config.json`, prose comes from
+`memory/templates/*.template.json`, entry content comes from the agent** — and nothing holds a fact
+it can derive. The contract lives in `@devpulse dropbox/trinity_pattern.md`; this section is what
+the code now does.
+
+### An unmeasurable field is a violation, not a zero
+
+`entry_limits._extract_text()` returned `""` for anything that was not a string. A `note` holding a
+list of dicts therefore measured **0 chars** and cleared a 300-char cap — and `lint_handler` ran
+`len()` on that same list, counting **elements**. Two independent gates agreeing is exactly what made
+the drift look verified. Both now refuse what they cannot measure:
+
+```
+observations[0]: UNMEASURABLE — list, expected str (cap 300 chars cannot be applied)
+```
+
+The refusal payload keeps `length`/`cap`/`over_by` as ints (the @hooks `edit_gate` formats them with
+`%d`) and adds `reason: "unmeasurable"` and `found_type`. When this shipped, **unchanged legacy
+entries still passed** — `enforce: true` was live and 9 branches carried list-shaped notes, so only a
+*new or edited* unmeasurable entry was refused and the fix could not brick the fleet it was meant to
+protect. That exemption has since been narrowed to `todos` alone — see
+[The grandfather clause, narrowed to todos](#the-grandfather-clause-narrowed-to-todos-2026-08-27).
+
+#### …and a field it cannot FIND is the same species (fixed 2026-08-26)
+
+The first pass fixed the wrong-type case and left the **missing-field** case still answering `""`.
+A `key_learning` carrying its text under `learning` where the config says `value` therefore measured
+as zero characters and cleared a 200-char cap — @hooks proved it live against their own `local.json`
+the night 1.3.0 shipped: a 500-char entry, cap 200, **zero violations**. A renamed field is not an
+absent text; it is a text the reader cannot find. `_extract_text` now returns `None` for it, and the
+violation carries its own reason because the repair differs:
+
+| `reason` | Means | What the agent does |
+|---|---|---|
+| `missing_field` | the canonical key is absent (`field` names it) | rename the key |
+| `unmeasurable` | the key is there holding a non-string (`found_type` names it) | fix the shape |
+
+`""` stays a legitimate answer for a field that is present and empty. Measured across the live fleet
+the day of the fix: **42 missing-field entries on 3 branches** (@hooks, @ai_mail, @api — all
+`key_learnings`, all the `learning` shape), previously reported as compliant by both gates.
+
+**Lint's boundary moved with it.** `lint` used to skip an entry whose canonical field was absent, on
+the reading that shape belongs to the trinity checker rather than to a char-cap scanner. That cost
+more than it bought: the write gate refuses those entries, so a branch could be told it was compliant
+and then be blocked on its next write for a shape lint had already seen. `run_lint` now names them.
+
+#### The grandfather clause, narrowed to todos (2026-08-27)
+
+"Unchanged and over cap passes untouched" was written for a fleet full of legacy drift: without it a
+maintenance write — a rollover, a frame re-render — would be refused whole over an entry it was not
+touching, and the branch's memories would stop rolling. The push has since cured that drift, so for
+the three archivable containers the clause protected nothing real and hid everything new: a fresh
+over-cap `sessions` entry written straight to disk read as "already there" on the next write and never
+surfaced. In `sessions`, `key_learnings` and `observations` an over-cap entry is now a violation
+whether or not the current write created it.
+
+`todos` keep the exemption, and only todos — `entry_limits.RESHAPE_ONLY_SECTIONS`, the single list the
+write gate and the push's prune lane share (`trinity_push` re-exports it) rather than each restating
+it. A non-canonical todo can sit in a branch indefinitely BY DESIGN, because the push is forbidden to
+archive open work and only that branch's own agent can cure it; refusing every write to such a file
+would brick its rollover, preserving the debt by destroying the lane that preserves everything else.
+The exemption covers what is **already on disk** — a newly written over-cap todo is refused like
+anything else.
+
+### keep 15 now keeps 15
+
+`extractor._extract_tail_excess` floored the drain at `max(len - limit, 1)`, so a file sitting at
+exactly the limit lost one entry every run and every branch settled permanently at **14**. Fixing the
+extractor alone would have stranded `detector._should_rollover`, which fired at `>=` — a fleet-wide
+`NOTHING DRAINED` skip loop. Both thresholds moved together, and
+`test_detector_and_extractor_never_disagree` sweeps the boundary so they cannot drift apart again.
+
+### One resolver for char caps, too
+
+`render_tab` read `entry_types` straight off the config and never consulted
+`entry_limits.per_branch`, while the write gate (`load_entry_limits`) always did.
+The first branch to take a per-branch char-cap override would have been *told* one number in its
+`*_meta` line and *measured* against another — and would have failed @seedgo's Meta-lines rule
+permanently, because the renderer keeps rewriting the line the checker keeps rejecting. Found by
+@seedgo's trinity checker from the other side of the same contract, latent only because that map is
+empty today. `entry_limits.resolve_entry_types()` is now the single implementation both call, and
+`rollover.per_branch` (which `render_tab` already honoured) is no longer the odd one out.
+
+### The renderer reads the template
+
+`tab_renderer` used to carry the `_usage` text as `_CORRECTED_USAGE_*` string constants — a second
+copy of prose the templates own. The constants are retired: `template_usage()` and
+`template_semantics()` read the gold-source templates, and a missing or malformed template **raises**
+rather than falling back to a stale string. `refresh_all_tabs()` now replaces only the `⟦ … ⟧` tab
+portion of a `*_meta` value and preserves the template-owned sentence beside it.
+
+### `status.health` is deleted, not computed
+
+Patrick's ruling: the field had no consumer, read `healthy` hardcoded since 2025-11, and stored a
+fact that is derivable — a second source of truth waiting to go stale. Every writer is gone
+(`memory_files.update_metadata()` removed, the extractor's post-drain stamper removed,
+`normalize.py` no longer relocates a root `status` or adds `last_health_check`), and the
+template-conformance pass strips the orphan block from files that still carry it. Health is a
+checker-computed report value now, never a stamp in the file. Source-scan tests pin that the writers
+stay gone.
+
+### Line counts are reported, not stored
+
+`line_counter.update_line_count()` is **read-only**: its only write was the health stamp, and the
+line count itself was never persisted — it was computed, returned and dropped. The verb was therefore
+renamed to **`rollover report-lines`** (`modules/rollover.RENAMED_VERBS`), and it now writes **nothing
+at all**: the unscoped fleet-wide `refresh_all_tabs()` it used to run on the tail is gone from
+`report_line_counts()`, because a reporter that rewrites 22 branches' files is the same lie in the
+other direction. `sync-lines` still routes — it prints a notice naming `report-lines` and runs the
+reporter, since a removed verb tells a caller nothing about what replaced it. Meta lines are
+re-rendered by the lanes that have a reason to: the trinity push, and a rollover's own scoped
+normalize.
+
+### `.template_version.json` — the per-branch receipt
+
+```json
+{
+  "template_versions": {"local": "3.0.0", "observations": "3.0.0"},
+  "stamped": "2026-08-25T23:37:05",
+  "stamped_by": "memory push",
+  "config_rendered": "2026-08-25T23:37:05"
+}
+```
+
+`template_versions` reports each template's **`document_metadata.schema_version`**, not its
+`version` — the two templates disagree on `version` (LOCAL 2.0.0, OBSERVATIONS 1.0.0) and agree on
+`schema_version` (3.0.0), and the receipt reports the *structure* a branch was stamped with. Pinned
+by a test, and confirmed to @seedgo whose checker compares against the same field.
+
+Written by `handlers/templates/receipt.py`. Only three lanes may stamp it — `memory push`,
+`spawn birth`, `reset` — and any other value is refused. The push lane stamps **only branches it
+actually changed**; a tab refresh calls `bump_config_rendered()`, which **refuses to create** a
+receipt that does not exist, because the renderer has no authority to claim a template version it
+never wrote. @spawn's birth lane adopts the writer separately — this build ships the callable and
+does not touch spawn.
+
+---
+
+## The trinity push (DPLAN-0318, built 2026-08-27)
+
+`drone @memory push` is the one lane that brings a branch's `.trinity/` files to the trinity
+standard. Per branch it does exactly three things:
+
+1. **Re-renders the machine frame.** `document_metadata` is rebuilt as a **CLOSED set** — any key
+   the standard does not name is pruned, `status` with it; `managed_by` takes the exact branch
+   **directory** name (what @seedgo's checker compares against — the registry's own `name` field
+   disagrees in casing for six citizens); `_usage` and the `guidelines` block come **verbatim** from
+   the gold-source templates; all four `*_meta` lines are re-composed from config + template prose.
+2. **Prunes every non-canonical entry — except a todo.** See the law below, and *Todos are never
+   archived* under it.
+3. **Writes one canonical session note** in the pruned branch's own `sessions[]` saying where its
+   entries went, how to get them back, and which todos were left behind for it to reshape. Skipped
+   entirely when nothing was pruned.
+
+Then it stamps `.template_version.json` via `receipt.py` with `stamped_by: "memory push"` — the
+push-lane wiring the receipt build left pending.
+
+### The law: vectorize → VERIFY → prune
+
+Pruning is a safety feature, not a deletion. Each entry is serialized **verbatim** (the stored
+document *is* the entry as JSON, never a summary), embedded into both the branch's local `.chroma`
+and the global store, and then **read back by ID and compared byte-for-byte** to what was sent. Only
+then is it removed from the live file.
+
+**If verification fails for any entry, NOTHING is pruned from that branch** and the file is left
+exactly as found. A store call's own `success` flag is the writer's opinion; the read-back is the
+evidence. This is the same law `vectorize_and_store` was built for after @ai_mail deleted four
+months of mail on the strength of an unread success flag — `get_by_ids` (chroma_subprocess 1.5.0)
+exists to make the second half of it possible, because `get_by_source` matches a metadata substring
+and caps at `n_results`, so a partial hit reads like a full one.
+
+`tests/test_trinity_push.py::TestNothingIsPrunedWithoutProof` pins all six failure shapes: the store
+refuses, the vector never lands, it lands corrupted, one of several goes missing, the read-back call
+itself fails, and a second destination fails after the first succeeded. Absent and corrupted get
+**different** refusal sentences, because the repair differs — the lesson from `missing_field` vs
+`unmeasurable`.
+
+### What counts as non-canonical
+
+Shape **and** size, because they are two different scan groups in the standard and an entry can pass
+one while failing the other. A perfectly-shaped 315-char session summary under a 300 cap is
+canonical to look at and still leaves its branch short of 100 — and until 2026-08-27 it was exactly
+the entry @hooks' `edit_gate` grandfathered, that clause now covering `todos` only. Caps come from
+`entry_limits.resolve_entry_types`, the same resolver the write gate and the tab renderer use, so the
+push cannot prune on a number the gate does not enforce.
+
+The note the push writes is itself measured against that same gate before it is written. A push that
+left behind a note the standard would refuse would have re-introduced, in its own hand, the exact
+violation it came to remove.
+
+### Todos are never archived (1.1.0, 2026-08-27)
+
+`todos` are **exempt from the prune lane**, and the exemption is not a softening of the standard — it
+*is* the standard, which says in its own words that todos never roll.
+
+Sessions, key_learnings and observations are **records**, and a record in a vector is still a record:
+`drone @memory search` returns it the moment anyone wants it. A todo is a **debt**, and a debt only
+works if it resurfaces **unbidden** on the next load. Vectorized, it never does — the agent opens a
+clean file, sees nothing owed, and silently forgets what it promised. For this one container,
+archiving *is* losing.
+
+Found by @spawn after the fleet push: its three open todos were `{task, added}` shaped, so the shape
+rule archived them like everything else. The archive half worked perfectly — @spawn verified verbatim
+recall before restoring them by hand — which is exactly what made it dangerous: an agent that had not
+gone looking would never have known.
+
+So a non-canonical todo is **REPORTED for reshape-in-place**:
+
+- kept in the file **byte-identical**, never vectorized, never removed;
+- named **per entry, uncapped** in the push report (`~ todos[0] #? : missing 'priority'; …`) — unlike
+  prune samples, which are capped at 6 because the vector store holds the full entry; this is the only
+  place the left-behind work is named;
+- **counted on every branch, every run.** Each branch line carries `todos N seen, M to reshape in
+  place` (`push_report._todo_clause`) even when nothing needs reshaping. Silence used to be the
+  report's answer for a clean branch, which made "this agent owes nothing" and "this agent's open work
+  is gone" render identically — the exact blindness the morning of 2026-08-27 ran into;
+- **counted in the in-file note**, with the entry numbers enumerated when they fit the note's own cap
+  and stepped down to a bare count when they do not;
+- rolled up in the report totals as `TODOS LEFT TO RESHAPE: N across M branch(es)`.
+
+**Reshaping it mechanically was considered and refused.** The canonical shape needs `priority` and
+`status`, and a machine that invents someone else's priority has not preserved their open work — it has
+rewritten it. That is the same rule this module already applies to everything it archives.
+
+**The note is minted only when something was actually archived.** A branch whose only finding is a
+drifted todo lost nothing and had nothing moved — and since that todo stays non-canonical until its
+agent reshapes it, noting it on every run would stack a fresh session entry on every push and break the
+idempotency the canary proved. The report says it every time; the file says it once, alongside the
+entries that did move.
+
+**The cost is stated, not hidden:** a branch carrying a drifted todo does not reach trinity 100 until
+its own agent reshapes it. That is the correct trade — a debt visible and non-canonical beats a debt
+canonical and gone.
+
+### Scope
+
+`--branch` pushes one branch. Fleet mode covers the DPLAN scope: the **18** active citizens in
+`AIPASS_REGISTRY.json` plus the **4** named resident projects (`baud`, `earmark`, `finch`,
+`aipass_site`) — **22** branches.
+
+The resident list is a **named constant, never a glob** over `projects/`. A glob would sweep in
+`marketstand`, which is marked `active` inside a directory literally named `(on _hold)`. That constant
+moved to `handlers/monitor/registry_scope.py` on 2026-08-27 and `trinity_push` re-exports it, so the
+lane that always saw 22 and the lanes that saw 19 now read one list — see
+[One definition of the fleet](#one-definition-of-the-fleet-2026-08-27).
+
+A branch whose files cannot be read is **refused by name**, never skipped — and refused *whole*, so
+a branch never ends up with one canonical file and one drifted one.
+
+### The two gates
+
+- **`--dry-run` writes nothing anywhere** — not the memory files, not the vector store, not the
+  receipts. Its report is the artifact, written to `artifacts/push_reports/` and echoed to the
+  terminal.
+- **A fleet write requires `--confirm`.** Encoding the gate as a flag rather than as an operator's
+  memory is the difference between a rule and a hope; this branch has already demonstrated the
+  alternative (see the `push` alias note under Known Issues, now cleared).
+
+### Measured, 2026-08-27
+
+Live end-to-end on @canary, the sanctioned guinea pig: **15 entries archived and pruned, 25 carried
+over, trinity 77 → 100**, receipt stamped, note written. The promise in that note was then tested
+rather than assumed — `drone @memory search "…" --branch canary` returns pruned key_learning **#30
+verbatim**. Re-running the push prunes 0 and holds 100: the lane is idempotent.
+
+Fleet dry-run: **366 entries to archive, 560 carry over, 22 branches, 0 refused, 0 errors.**
+Projected by applying the push into a temp copy of each branch's real `.trinity/` and scoring it with
+@seedgo's own checker: **fleet average 70.1 → 97.2**.
+
+### Measured again, 2026-08-27 (the todo exemption)
+
+The exemption was proven by replaying @spawn's real incident: its three archived todos recovered
+**verbatim from the vectors they were pruned into**, re-inserted into a temp copy of @spawn's live
+`.trinity/`, plus one drifted session so the archive lane fired in the same run. Through the real
+handler and the real `push_store` against a throwaway `.chroma`: **1 session pruned, 3 todos left in
+place byte-identical, note written at 266/300 chars naming all three, report roll-call correct.**
+Nothing under `src/aipass/spawn/` was touched.
+
+Fleet dry-run after the change: **0 entries to archive, 582 carry over, 22 branches, 0 todos to
+reshape** — the fleet is already canonical, so the fix protects future pushes; the sweep is what
+healed today's.
+
+The one remaining blocker is the **File set** group, and it is **not push scope**: 16 branches carry
+stray files in `.trinity/` (mostly `*.pre_v3_backup` migration leftovers, plus `daemon/.recovery`,
+`seedgo/STATUS.local.md` and devpulse's `watchdog_active.json` pair) and 6 have no
+`.trinity/README.md`. Deleting another citizen's files and authoring README prose are both outside
+the three-part mandate, so the push **reports** them and leaves them alone. They need a ruling; with
+it executed the fleet reaches 100 across the board.
 
 ---
 
@@ -271,9 +717,15 @@ stops being rollover. Unknown branches are refused against the registry — regi
 would report a limit the engine does not enforce; `test_matches_the_detector_on_a_real_file` pins
 the two together with the engine as the oracle.
 
-**`[OVERRIDE]` is decided by VALUE**, not by provenance: all 17 branches carry a materialized
-`per_branch` entry, so marking every one an override would be pure noise. A value is an override
-when it differs from the corresponding default.
+**`[OVERRIDE]` is decided by VALUE**, not by provenance. `rollover push` materializes a
+`per_branch` entry for every active branch in the registry, so once it has run, provenance marks
+every branch an override — pure noise. A value is an override when it differs from the
+corresponding default.
+
+*Live state, measured 2026-08-25:* `per_branch` is **empty** in both `rollover` and `entry_limits`,
+so every branch resolves from `defaults` and `config get @branch` reports
+`source: "defaults"`. The registry carries **18** active branches, which is the number
+`rollover push` materializes and reports.
 
 **`set-default` does not touch `per_branch`.** It changes `defaults` only — which means already
 materialized branches keep their old numbers and start reporting as `[OVERRIDE]`. `rollover push`
@@ -283,9 +735,10 @@ semantics are unchanged. Writes go through `config_loader._write_config_file` (a
 refused, never rewritten.
 
 **Apply timing:** limits take effect on the next rollover run (daemon tick) — there is no
-immediate-kick verb in v1. The `*_meta` tab strings in `.trinity/` files are likewise refreshed by
-the next rollover / sync-lines / push-templates run, so a freshly changed limit is live in the
-engine before it is visible in the tab text.
+immediate-kick verb in v1. The `*_meta` tab strings in `.trinity/` files are likewise re-rendered by
+the next `rollover run` that touches the branch (scoped to what it rolled) or by the next
+`drone @memory push`, so a freshly changed limit is live in the engine before it is visible in the tab
+text. `rollover report-lines` does not re-render them — it writes nothing.
 
 ### `--json` — the machine surface
 
@@ -336,7 +789,7 @@ the pipe.
 {"ok": true, "verb": "config set-default", "entry_type": "sessions", "count": 25, "pushed": false}
 
 // rollover push --json
-{"ok": true, "verb": "rollover push", "branches": 17}
+{"ok": true, "verb": "rollover push", "branches": 18}   // = active branches in AIPASS_REGISTRY.json
 
 // any refusal
 {"ok": false, "verb": "config set", "error": "Unknown branch: @wizard",
@@ -359,7 +812,9 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 **Depends on:**
 - `prax` — logging via `get_system_logger()`
-- `api` — API key for symbolic extraction (`get_api_key()`) — dormant while the symbolic tier is parked
+- ~~`api`~~ — **no longer a dependency.** `get_api_key()` was the symbolic tier's, and it left the
+  tree with it on 2026-08-14. Verified 2026-08-25: zero references anywhere under `apps/`; the only
+  survivors are in `tests/parked/` and in the skipped `test_symbolic_extras.py`
 - `AIPASS_REGISTRY.json` — branch discovery for rollover scanning
 - External `*_REGISTRY.json` — scanned via `AIPASS_CALLER_CWD`
 
@@ -369,7 +824,7 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 - All branches — `.trinity/` template distribution and sync
 - `@daemon` — branch health check (entry-count rollover status + entry-size cap violations) via `apps/modules/health.py`'s `get_branch_health(branch_name)`, since seedgo blocks handler-to-other-branch-handler imports and daemon's own handlers cannot reach `handlers/monitor/detector.py` / `handlers/json/lint_handler.py` directly
 
-**ML dependencies (memory `.venv/` only):**
+**ML dependencies (in whichever venv `_get_memory_python()` resolves to — repo root today):**
 - `fastembed` — ONNX embeddings (model: `sentence-transformers/all-MiniLM-L6-v2`)
 - `chromadb` — vector storage and semantic search
 - `numpy`
@@ -378,9 +833,10 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** 1086 passed, 0 failures, 5 skipped (2026-08-18). The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/`. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (see below).
-- **Seedgo:** 100%. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
-- **Bypass registry:** 113 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+- **Tests:** 1222 passed, 0 failures, 5 skipped, 21.8s (re-measured 2026-08-27 from the branch dir after the marker-7 build, which archived two test files with the retired lane and added `tests/test_marker7_memory_lane.py` and `tests/test_templates_lane.py`; the repo-root invocation behind the earlier 1201 reading was not repeated here). The push added 69 of those in `tests/test_trinity_push.py`, and 10 mutations were run against the lane — all 10 bite, each on its own tests. The first pass had one survivor (`_verify_ingestion` ignoring absent vectors, caught anyway by the content comparison that follows); rather than accept a provably-equivalent survivor, two tests were added pinning that an ABSENT vector and a CORRUPTED one produce different refusal sentences, and the mutation now bites. The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout").
+  *Two different numbers, deliberately:* `grep def test_` over `tests/*.py` finds **1323 test functions** on disk. 237 of those live in 5 modules that call `pytest.skip(allow_module_level=True)` at import, so pytest never collects them individually (they surface as the 5 skips). The rest expand through `@pytest.mark.parametrize` into **1222** collected cases, and all 1222 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1323 on disk, a green board counts the 1222 that execute.
+- **Seedgo:** 100% across every rule including the `trinity` standard, 0 type errors — re-run `--full` 2026-08-27 after the marker 7 build. Two findings that build itself introduced were fixed, not bypassed: extracting `_handle_rollover_verb()` out of `rollover.handle_command()` moved the no-args gate behind a delegation (`introspection` 85%, and the checker was right — the entry seam should say for itself that a bare `rollover` introspects), and adding the renamed verb to the top-level `elif` chain pushed it to depth 5 (`deep_nesting`); the chain is now flat `if`/`return`, one arm per command. The four findings the first audit raised on the new files were fixed rather than bypassed: report rendering moved out of the module into `handlers/templates/push_report.py` (modules do no direct file I/O), `json_handler` logging added to both new handlers, and the `unused_function` hit on `is_canonical()` was cleared by giving it a real caller — the guard that measures the push's own session note against the same gate everything else was pruned against. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
+- **Bypass registry:** **114** rules in `.seedgo/bypass.json` (`last_updated: 2026-08-16`). The old claim here — "113 rules, all pointing at files that exist", verified 2026-08-13 — is **stale on both counts**: re-measured 2026-08-25, **37 of the 114 point at 10 files that are no longer in the tree**, all of them parked on 08-14 / 08-18 (`symbolic/*.py`, `vector/embedder.py`, `storage/chroma.py`, `search/vector_search.py`, `learnings/manager.py`). One duplicate `(file, standard)` pair as well. The rules are inert — a bypass for an absent file suppresses nothing — but the registry is now a record of a tree that stopped existing. Cleanup is an open item, not fixed tonight.
 
 ### A park in the disposal zone is not a park (2026-08-18)
 
@@ -493,16 +949,23 @@ unreferenced". See that directory's README for the full method.
 
 ## Known Issues
 
-- `search` requires fastembed in memory `.venv/` — fails without it
-- `drone @memory push` (and `rollover push`) overwrites every branch's `per_branch` limits with defaults, fleet-wide, with **no confirmation prompt**. Now that BAUD writes this config, an accidental `push` silently discards operator tuning. Open item — see APLAN-0010.
-- Entry point imports two `monitor/` handlers directly for the built-in `watch` command, which the `encapsulation` standard flags (66% on `apps/memory.py`). Deliberately unshielded — the fix is to move `watch` into a module. Open item — see APLAN-0010.
-- `pool.py` and `lint.py` score 85% on `introspection`: the checker only recognises a help guard whose `if` test contains a literal `"--help"`, so the shared `wants_help()` predicate is invisible to it. Both intercept help correctly (live-verified). Reported to @seedgo; not bypassed.
+- `search` requires `fastembed` in the venv `_get_memory_python()` resolves to — fails without it
+- **`.seedgo/bypass.json` holds 37 rules for 10 files that no longer exist** (parked 08-14 / 08-18) plus one duplicate `(file, standard)` pair. Inert, but the registry no longer describes the tree.
+- **The receipt writer's `spawn birth` lane is still unwired.** `handlers/templates/receipt.py` now stamps for real from the trinity push (`stamped_by: "memory push"`, verified live on @canary), and a tab refresh bumps `config_rendered`. `spawn birth` adopts the writer separately — not built here.
+- **16 branches carry stray files in `.trinity/`** — File set group, and outside the push's mandate: it reports them per branch in the dry-run and never touches them. Needs a ruling. Re-measured 2026-08-27 by walking `registry_scope.fleet_branches()`: still 16, all of them `*.pre_v3_backup` migration leftovers, plus devpulse's older `*.pre-aipl` pair and `daemon/.recovery`. The README half of this item is closed — all 22 branches now carry a `.trinity/README.md`.
+- Bare `drone @memory lint` prints the introspection banner rather than scanning — `lint run` or `lint @branch` is the scan. Consistent with every other module's no-args convention; noted because the Quick Start used to read as if bare `lint` audited.
 
-**Cleared 2026-08-13:** `rollover status` showing 0 branches did not reproduce (17 branches from two working directories). `memory_threshold_exceeded` appears nowhere in this branch's code — the previous note described @trigger's registry, not memory's.
+**Cleared 2026-08-27 (marker 7 — the template lane and the fleet definition):** (1) `rollover sync-lines` is renamed **`rollover report-lines`** and is genuinely read-only — the fleet-wide `refresh_all_tabs()` it ran on the tail is gone from `report_line_counts()`; the old name still routes, names the new verb, and runs the reporter. (2) `push-templates` and `diff-templates` are **retired**: both refuse and name the live lane, and `pusher.py` / `differ.py` plus their two test files are archived at `tests/parked/dead_template_lane_20260827/`. `template-status` survives, repointed at the per-branch `.trinity/.template_version.json` receipts. (3) The registry gap is closed — `detector._read_registry()` reads the resident registries from `registry_scope.RESIDENT_REGISTRIES`, so rollover, lint and health reach all 22 branches (measured: `_read_registry()` → 22 branches, `report-lines` → 44 files).
+
+**Cleared 2026-08-27 (the trinity push build):** (1) `drone @memory push` no longer aliases `rollover push` — the bare word that fired an unprompted fleet-wide `per_branch` CONFIG reset on 18 branches now runs the trinity push, whose fleet lane refuses without `--confirm`; the config reset keeps its explicit `rollover push` verb, and a source-scan test fails if the alias returns. (2) A rollover's tab refresh is scoped to the branches it actually rolled (`refresh_all_tabs(branches=…)`), so no citizen's PreCompact hook can propagate renderer changes fleet-wide again — the 23:37 write of 38 files that opened this arc.
+
+**Cleared 2026-08-25:** the entry-point `encapsulation` finding (66% on `apps/memory.py` for importing two `monitor/` handlers) — `watch` is a module now and a contract test fails the suite if any handler import returns to the entry point. Also cleared: `pool.py` / `lint.py` at 85% on `introspection`. Seedgo re-run 2026-08-25 reports **100% on all 45 rules**, both findings gone.
+
+**Cleared 2026-08-13:** `rollover status` showing 0 branches did not reproduce (19 branches across two working directories at the 08-25 re-run). `memory_threshold_exceeded` appears nowhere in this branch's code — the previous note described @trigger's registry, not memory's.
 
 ---
 
-*Last Updated: 2026-08-13 (full branch audit, APLAN-0010)*
+*Last Updated: 2026-08-27 (marker 7 — the template lane retired, `sync-lines` renamed to `report-lines` and made read-only, the fleet defined once in `registry_scope.py`; the trinity-push figures in this document are from that build's dry-run and checker-scored simulation, not re-measured here)*
 
 ---
 [← Back to AIPass](../../../README.md)

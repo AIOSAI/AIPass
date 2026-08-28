@@ -53,6 +53,9 @@ def _mock_detector_infrastructure(monkeypatch):
     mock_config_loader.section.side_effect = lambda name: mock_config_loader.load.return_value.get(name, {})
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -248,11 +251,17 @@ class TestCheckSingleFile:
         assert result["should_rollover"] is False
 
     def test_v2_list_key_learnings_triggers_rollover(self, tmp_path: Path, monkeypatch):
-        """List-shaped key_learnings at/over count triggers v2 rollover."""
+        """List-shaped key_learnings ABOVE count triggers v2 rollover.
+
+        Above, not "at/over": keep-3 means the file may hold 3. Firing at the
+        limit while the extractor drains `len - limit` (nothing) is the
+        NOTHING DRAINED skip loop — see test_trinity_standard.py::TestKeepNKeepsN.
+        """
         mem_file = tmp_path / "DEVPULSE.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
             "key_learnings": [
+                {"number": 4, "date": "2026-06-14", "key": "d", "value": "vd"},
                 {"number": 3, "date": "2026-06-13", "key": "c", "value": "vc"},
                 {"number": 2, "date": "2026-06-12", "key": "b", "value": "vb"},
                 {"number": 1, "date": "2026-06-11", "key": "a", "value": "va"},
@@ -271,7 +280,7 @@ class TestCheckSingleFile:
 
         assert result["success"] is True
         assert result["should_rollover"] is True
-        assert "3/3 key_learnings" in result["trigger"].v2_reason
+        assert "4/3 key_learnings" in result["trigger"].v2_reason
 
     def test_v2_list_key_learnings_under_limit_no_trigger(self, tmp_path: Path, monkeypatch):
         """List-shaped key_learnings under count does not trigger."""
@@ -375,12 +384,13 @@ class TestSessionAutoCompactBudget:
     """auto-compact snapshots get their own cap and don't inflate the regular session count."""
 
     def test_auto_compact_cap_triggers_independently_of_session_count(self, tmp_path: Path, monkeypatch):
-        """3 auto-compact entries hitting cap=3 trigger even with regular sessions well under count."""
+        """4 auto-compact entries over cap=3 trigger even with regular sessions well under count."""
         mem_file = tmp_path / "MEMORY.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
             "sessions": [
                 {"id": "regular-1", "status": "completed"},
+                {"id": "auto-0", "status": "auto-compact"},
                 {"id": "auto-1", "status": "auto-compact"},
                 {"id": "auto-2", "status": "auto-compact"},
                 {"id": "auto-3", "status": "auto-compact"},
@@ -403,7 +413,7 @@ class TestSessionAutoCompactBudget:
 
         assert result["success"] is True
         assert result["should_rollover"] is True
-        assert result["trigger"].v2_reason == "3/3 auto-compact snapshots"
+        assert result["trigger"].v2_reason == "4/3 auto-compact snapshots"
 
     def test_auto_compact_entries_excluded_from_regular_session_count(self, tmp_path: Path, monkeypatch):
         """Auto-compact entries must not count toward the regular sessions/count trigger."""

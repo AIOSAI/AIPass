@@ -39,15 +39,25 @@ import pytest
 def _fresh_config_loader(monkeypatch):
     """Drop cached module so each test gets a fresh import.
 
-    The conftest _mock_infrastructure replaces
-    aipass.memory.apps.handlers.json with a MagicMock, which prevents
-    sub-module discovery.  We pop the json package and its children so
-    importlib can re-import the real modules with the prax mock still in
-    place.
+    Historically this popped the json package because conftest replaced it
+    with a MagicMock, which has no __path__ and so blocked sub-module
+    discovery.  Conftest now impersonates the package with a real module
+    object carrying the real __path__, so discovery works either way -- the
+    eviction here is now only about getting a FRESH config_loader per test.
+
+    It is a ``monkeypatch.delitem`` rather than a bare ``sys.modules.pop``
+    because a bare pop is one-way: the eviction outlives the test and every
+    later test in the same process inherits it.  Three test files invented
+    that same workaround independently and all three leaked; one of them is
+    what turned two receipt tests red on a single xdist worker on a single
+    run.  delitem gives the same fresh import and puts the real module back.
     """
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.config_loader", None)
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.config_loader",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 

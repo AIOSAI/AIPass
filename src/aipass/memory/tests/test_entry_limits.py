@@ -36,19 +36,22 @@ import pytest
 def _fresh_entry_limits(monkeypatch):
     """Drop cached module so each test gets a fresh import.
 
-    The conftest _mock_infrastructure replaces
-    aipass.memory.apps.handlers.json with a MagicMock, which prevents
-    sub-module discovery.  We pop the json package and its children so
-    importlib can re-import the real modules with the prax mock still in
-    place.
+    Conftest's stand-in for aipass.memory.apps.handlers.json now carries the
+    real package's __path__, so sub-module discovery works with it in place --
+    the eviction here is only about getting FRESH modules per test, and
+    config_loader in particular so its _CONFIG_PATH can be re-patched.
 
-    config_loader must also be popped so its _CONFIG_PATH can be
-    re-patched per test.
+    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
+    bare pop is one-way and the eviction outlives the test, which is how two
+    receipt tests went red on a single xdist worker on a single run.
     """
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.config_loader", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.entry_limits", None)
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.config_loader",
+        "aipass.memory.apps.handlers.json.entry_limits",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 

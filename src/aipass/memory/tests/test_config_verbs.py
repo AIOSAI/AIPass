@@ -1247,7 +1247,7 @@ class TestJsonFlagPosition:
 
     def test_bare_json_flag_on_rollover_introspects(self, verbs, capsys) -> None:
         assert _run_rollover(verbs, "--json") is True
-        assert "sync-lines" in _streams(capsys)
+        assert "report-lines" in _streams(capsys)
 
 
 class TestHelpOutranksJson:

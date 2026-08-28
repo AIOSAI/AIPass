@@ -371,3 +371,116 @@ class TestThePoisonedContactRowCannotOutvoteTheRegistry:
 
         assert resolved is not None
         assert Path(resolved["path"]).name == "vera"
+
+
+class TestAProjectCitizenResolvesAgainstItsOwnRegistry:
+    """Found live 2026-08-24 (@devpulse 10400b9b, measured first by @baud).
+
+    A projects/* citizen could not read or reply to his own mail: `inbox` printed
+    "Inbox is empty" while four unread messages sat in the file under his feet,
+    and `reply <id>` answered "Message not found" for an id read straight out of
+    that file. Both symptoms are one cause, and the identity log named it in a
+    single row - the contrast with the row logged seconds later is the defect:
+
+        BAUD      strategy caller_branch:registry  resolved_path src/baud/baud
+        DEVPULSE  strategy caller_branch:registry  resolved_path /home/.../devpulse
+
+    One relative, one absolute. A registry row's ``path`` is relative to THE
+    REGISTRY IT CAME FROM. ``_lookup_branch_by_name`` falls back to the caller's
+    own project registry for citizens absent from the AIPass one - correctly -
+    but returns the raw row, which carries no memory of which registry answered.
+    Every consumer then joins it to the AIPass repo root, so
+    ``projects/baud`` + ``src/baud/baud`` was read as ``<aipass>/src/baud/baud``.
+
+    IT DID NOT FAIL LOUDLY, IT FABRICATED. The wrong path is inside the AIPass
+    tree, so the mail lane CREATED it: src/baud/baud/.ai_mail.local/sent/ exists,
+    timestamped inside his session, holding the reply he believed he had sent.
+    Reading found nothing there (hence "empty"), and writing made a phantom
+    mailbox belonging to no citizen. Same species as the contacts-cache leak of
+    08-23 and the register-in-the-wrong-place risk of 08-22: not a refusal, a
+    confident wrong address.
+
+    Fixed at the SOURCE rather than at the nine call sites that join a registry
+    path - the row is absolutised by the function that reads the registry, so no
+    consumer can ever be handed a relative path without the root that explains it.
+    """
+
+    @staticmethod
+    def _project(tmp_path):
+        """A project citizen laid out exactly like projects/baud."""
+        project_root = tmp_path / "projects" / "baud"
+        citizen = project_root / "src" / "baud" / "baud"
+        (citizen / ".ai_mail.local").mkdir(parents=True)
+        # A real seat: the fence refuses a caller_cwd that stands in no branch.
+        (citizen / ".trinity").mkdir()
+        (citizen / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "baud", "email": "@baud"}}), encoding="utf-8"
+        )
+        (project_root / "BAUD_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "BAUD", "email": "@baud", "path": "src/baud/baud"}]}),
+            encoding="utf-8",
+        )
+        return project_root, citizen
+
+    def test_the_relative_path_is_rooted_at_its_own_registry(self, monkeypatch, tmp_path):
+        """The regression test: a project row must not be joined to the AIPass root."""
+        project_root, citizen = self._project(tmp_path)
+
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", aipass_registry)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(citizen))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "baud")
+
+        resolved = bd.detect_branch_from_pwd()
+
+        assert resolved is not None, "premise: the project citizen must still resolve"
+        assert Path(resolved["path"]).is_absolute(), (
+            f"a row leaving the registry reader must carry its root. Got: {resolved['path']}"
+        )
+        assert Path(resolved["path"]).resolve() == citizen.resolve(), (
+            f"resolved to the wrong tree: {resolved['path']} (his mailbox is at {citizen})"
+        )
+
+    def test_an_aipass_citizen_with_a_relative_row_is_unaffected(self, monkeypatch, tmp_path):
+        """Six of the eighteen AIPass rows are relative — this must not move them.
+
+        Fixing the project lane by breaking the main one would trade a rare
+        failure for the common one.
+        """
+        repo = tmp_path / "aipass"
+        citizen = repo / "src" / "aipass" / "ai_mail"
+        (citizen / ".trinity").mkdir(parents=True)
+        (citizen / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "ai_mail", "email": "@ai_mail"}}), encoding="utf-8"
+        )
+        registry = repo / "AIPASS_REGISTRY.json"
+        registry.write_text(
+            json.dumps({"branches": [{"name": "AI_MAIL", "email": "@ai_mail", "path": "src/aipass/ai_mail"}]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", registry)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
+
+        resolved = bd.detect_branch_from_pwd()
+
+        assert resolved is not None
+        assert Path(resolved["path"]).resolve() == citizen.resolve()
+
+    def test_the_mailbox_follows_the_corrected_root(self, monkeypatch, tmp_path):
+        """The consequence the citizen actually feels: inbox and reply find his mail."""
+        from aipass.ai_mail.apps.handlers.users.user import get_current_user
+
+        project_root, citizen = self._project(tmp_path)
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", aipass_registry)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(citizen))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "baud")
+
+        user = get_current_user()
+
+        assert Path(user["mailbox_path"]).resolve() == (citizen / ".ai_mail.local").resolve(), (
+            f"his commands would read {user['mailbox_path']} instead of his own mailbox"
+        )

@@ -91,7 +91,41 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     ]
 
 
-def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
+def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, attribute: str) -> List[Path]:
+    """Existing files matching one declaration channel's globs.
+
+    Globs are relative to the branch root with ``{branch}`` standing in for
+    the branch directory name, so the cache hardcodes no path: a new
+    branch_level checker declares its inputs and invalidation follows.
+
+    Only the declaration is watched -- nothing widens incidentally.
+
+    Directories ARE included, because trinity's File set group scores stray
+    DIRECTORIES as well as files; leaving them out made the one stray shape
+    the ruling is about invisible to the cache, so a branch growing a stray
+    directory read 100 on cached audits until someone ran --full. The caller
+    watches them by PRESENCE -- a directory's mtime moves whenever any child
+    changes, and those children are already tracked as their own entries.
+
+    Args:
+        branch_path: Branch root.
+        checkers: Discovered checker modules, or None.
+        attribute: Declaration attribute to read off each module.
+
+    Returns:
+        Matching paths, files and directories, deduplicated and sorted.
+    """
+    if not checkers:
+        return []
+    found: set[Path] = set()
+    for module in checkers.values():
+        for pattern in getattr(module, attribute, ()) or ():
+            resolved = pattern.replace("{branch}", branch_path.name)
+            found.update(branch_path.glob(resolved))
+    return sorted(found)
+
+
+def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = None) -> List[Dict[str, str]]:
     """Union of every file whose content can change audit output.
 
     Superset of _collect_py_files(include_init=True): also includes
@@ -102,6 +136,20 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     result gets served forever. .seedgo/bypass.json and .seedgoignore
     files are deliberately NOT included here — they're already covered
     by compute_bypass_stamp()'s separate whole-branch stamp-bust.
+
+    Branch_level checkers declare their own inputs, which live outside apps/
+    and so were invisible here (ruling 6). Two channels, because the two
+    checkers need different things:
+
+      * ``BRANCH_INPUTS`` -- CONTENT matters. trinity reads and scores the
+        bytes of ``.trinity/*``, so an edit must bust the cache. Directories
+        matched by such a glob are watched by presence instead, because the
+        File set group scores a stray DIRECTORY's existence, not its bytes.
+      * ``BRANCH_INPUT_NAMES`` -- PRESENCE only. json_handler scores triplet
+        completeness, i.e. which filenames exist, and never reads them. Those
+        files include the checkers' own ``*_log.json``, written DURING the
+        audit -- fingerprinting their content would mark every branch dirty on
+        every run and quietly disable the cache. Add and delete still bust it.
 
     Also fingerprints {branch}_json/custom_config/ entries: the audit's
     custom_config info line names those files, so an operator adding or
@@ -122,6 +170,22 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
         files.extend(
             {"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in custom_config.iterdir() if f.is_file()
         )
+    seen = {entry["rel"] for entry in files}
+    for f in _declared_input_files(branch_path, checkers, "BRANCH_INPUTS"):
+        rel = _rel_path(f, root)
+        if rel not in seen:
+            seen.add(rel)
+            entry = {"file": str(f), "name": f.name, "rel": rel}
+            if f.is_dir():
+                # Presence only: existence is what the File set group scores,
+                # and a directory mtime would re-report every child edit.
+                entry["presence_only"] = "1"
+            files.append(entry)
+    for f in _declared_input_files(branch_path, checkers, "BRANCH_INPUT_NAMES"):
+        rel = _rel_path(f, root)
+        if rel not in seen:
+            seen.add(rel)
+            files.append({"file": str(f), "name": f.name, "rel": rel, "presence_only": "1"})
     return files
 
 
@@ -365,7 +429,16 @@ def audit_branch(
         if scope == "branch_level" or (not hasattr(checker, "check_module") and hasattr(checker, "check_branch")):
             try:
                 r = checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
-                results[name], scores[name] = r, r.get("score", 0)
+                results[name] = r
+                # A standard that reports not_applicable measured NOTHING, so it
+                # never enters scores[]: a 0 would blame the branch for an
+                # environment fact and a 100 would claim a measurement that did
+                # not happen. It stays in results[] so the display and the
+                # info channel can still say why it stood down.
+                if r.get("not_applicable") is True:
+                    logger.info("Branch-level checker %s is not applicable for %s", name, branch_path)
+                else:
+                    scores[name] = r.get("score", 0)
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
                 # A crashed checker scores 0, which is indistinguishable from an honest
@@ -576,7 +649,7 @@ def audit_branch_incremental(
     branch_entry = incremental_cache.get_branch_entry(cache, cache_key)
     stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
 
-    watch_files = _collect_watch_files(branch_path)
+    watch_files = _collect_watch_files(branch_path, discover_checkers(pack_path))
     current_fp = incremental_cache.collect_fingerprints(watch_files)
 
     if not force_full and branch_entry and branch_entry.get("stamp") == stamp:

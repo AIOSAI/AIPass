@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-08-11
+# Modified: 2026-08-24
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -98,6 +98,19 @@ _AIPASS_FLOW_VERBS = frozenset({"dev-pr", "pr", "close-pr", "merge", "smart-sync
 # hits one of the above learns what they can use instead of guessing.
 _TRANSLATED_VERBS = "'commit', 'sync' and 'tag'"
 
+# Owner-tier refuses for two reasons that are NOT interchangeable, and conflating
+# them cost us both a false page and a real hole:
+#   authority  — the caller is not, or cannot be shown to be, this repo's owner.
+#                Fault-shaped, so it logs ERROR, and warn-mode DOES lift it —
+#                rolling back the authority migration is exactly that switch's job.
+#   capability — the caller IS the proven owner; the verb simply is not translated
+#                for this repo yet (_AIPASS_FLOW_VERBS). Not a fault, so it logs
+#                WARNING for the same reason _resolve_caller does, and warn-mode
+#                must NOT lift it: this refusal predates that migration and exists
+#                to stop a half-run in someone else's repo, which no rollback wants.
+_AUTHORITY = "authority"
+_CAPABILITY = "capability"
+
 
 # Real git verbs drone deliberately does not expose — staging and remote work are
 # folded into higher-level commands. Without a pointer the refusal is a dead end.
@@ -126,6 +139,18 @@ class Caller(NamedTuple):
     name: str
     home: Path
     passport: dict
+
+
+class Refusal(NamedTuple):
+    """Why owner-tier was refused, and which species of refusal it is.
+
+    ``kind`` is load-bearing, not decoration: it selects the log severity and
+    decides whether the warn-mode rollback may lift the refusal. See _AUTHORITY
+    and _CAPABILITY above.
+    """
+
+    reason: str
+    kind: str
 
 
 def _resolve_caller() -> Caller:
@@ -228,18 +253,25 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
         return None
 
 
-def _owner_tier_refusal(command: str, caller: Caller) -> str | None:
+def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     """Return why owner-tier is refused for this caller, or None if authorized.
 
     Every branch names the check that refused, so a passport/registry drift is
     diagnosable from a single log line instead of a bisect. Fails CLOSED: any
     check that cannot be completed is a refusal, never a silent pass.
+
+    Each refusal also carries its species (_AUTHORITY vs _CAPABILITY), because
+    the caller has to know whether it is looking at a fault or at an untranslated
+    verb — they differ in severity and in whether warn-mode may lift them.
     """
     citizen_class = _citizen_class(caller.passport)
     if citizen_class != _MANAGER_CLASS:
-        return (
-            f"caller '{caller.name}' is citizen_class '{citizen_class or 'unset'}' — "
-            f"owner-tier requires '{_MANAGER_CLASS}'"
+        return Refusal(
+            (
+                f"caller '{caller.name}' is citizen_class '{citizen_class or 'unset'}' — "
+                f"owner-tier requires '{_MANAGER_CLASS}'"
+            ),
+            _AUTHORITY,
         )
 
     try:
@@ -251,48 +283,64 @@ def _owner_tier_refusal(command: str, caller: Caller) -> str | None:
         # Same verdict, named the same way — a refusal must not depend on which
         # layer happened to notice first.
         logger.warning("owner-tier refused for '%s': registry credential mismatch: %s", caller.name, exc)
-        return f"caller '{caller.name}' does not hold citizenship in this project's registry ({exc})"
+        return Refusal(
+            f"caller '{caller.name}' does not hold citizenship in this project's registry ({exc})", _AUTHORITY
+        )
     except Exception as exc:
         logger.warning("owner-tier refused for '%s': registry unreadable: %s", caller.name, exc)
-        return f"the project registry could not be read ({exc}) — cannot verify ownership"
+        return Refusal(f"the project registry could not be read ({exc}) — cannot verify ownership", _AUTHORITY)
 
     registry_id = registry_data.get("metadata", {}).get("id")
     passport_id = caller.passport.get("citizenship", {}).get("registry_id")
     if not registry_id:
-        return f"registry {registry_path.name} declares no metadata.id — cannot verify tenancy"
+        return Refusal(f"registry {registry_path.name} declares no metadata.id — cannot verify tenancy", _AUTHORITY)
     if not passport_id:
-        return (
-            f"caller '{caller.name}' passport has no citizenship.registry_id — "
-            "needs a registry backfill before it can hold owner-tier"
+        return Refusal(
+            (
+                f"caller '{caller.name}' passport has no citizenship.registry_id — "
+                "needs a registry backfill before it can hold owner-tier"
+            ),
+            _AUTHORITY,
         )
     if passport_id != registry_id:
-        return (
-            f"caller '{caller.name}' belongs to registry {passport_id}, but this repo is "
-            f"{registry_id} — a manager of one project holds nothing in another"
+        return Refusal(
+            (
+                f"caller '{caller.name}' belongs to registry {passport_id}, but this repo is "
+                f"{registry_id} — a manager of one project holds nothing in another"
+            ),
+            _AUTHORITY,
         )
 
     entry = _registry_entry(registry_data, caller.name)
     if entry is None:
-        return f"caller '{caller.name}' is not listed in {registry_path.name}"
+        return Refusal(f"caller '{caller.name}' is not listed in {registry_path.name}", _AUTHORITY)
     if entry.get("owner") is not True:
-        return f"caller '{caller.name}' is listed in {registry_path.name} without owner: true"
+        return Refusal(f"caller '{caller.name}' is listed in {registry_path.name} without owner: true", _AUTHORITY)
 
     # The registry file's own directory is the repo root by construction, which
     # keeps path-binding anchored to the SAME registry the checks above used.
     repo_root = registry_path.parent.resolve()
     recorded = _recorded_home(entry, repo_root)
     if recorded is None:
-        return f"registry entry for '{caller.name}' records no path — cannot bind authority to a location"
+        return Refusal(
+            f"registry entry for '{caller.name}' records no path — cannot bind authority to a location", _AUTHORITY
+        )
     if caller.home != recorded and recorded not in caller.home.parents:
-        return (
-            f"caller '{caller.name}' presented a passport from {caller.home}, but the registry "
-            f"binds that name to {recorded} — a passport outside its recorded home proves nothing"
+        return Refusal(
+            (
+                f"caller '{caller.name}' presented a passport from {caller.home}, but the registry "
+                f"binds that name to {recorded} — a passport outside its recorded home proves nothing"
+            ),
+            _AUTHORITY,
         )
 
+    # Reached only once all four authority checks have PASSED, so the caller is a
+    # proven owner and this is purely a missing translation — hence _CAPABILITY.
     if registry_path.name != AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
-        return (
+        return Refusal(
             f"'{command}' encodes AIPass's own dev→PR→main flow and is not translated for "
-            f"external repos yet — {_TRANSLATED_VERBS} work here today (DPLAN-0281 P2, DPLAN-0290)"
+            f"external repos yet — {_TRANSLATED_VERBS} work here today (DPLAN-0281 P2, DPLAN-0290)",
+            _CAPABILITY,
         )
 
     return None
@@ -329,8 +377,18 @@ def verify_git_access(command: str) -> str:
         caller_info = _resolve_caller()
         refusal = _owner_tier_refusal(command, caller_info)
         warn_only = os.environ.get(_AUTH_MODE_ENV, "").strip().lower() == "warn"
+        if refusal and refusal.kind == _CAPABILITY:
+            # A proven owner meeting an untranslated verb. Not a fault, so it warns
+            # rather than pages — and warn_only is deliberately not consulted: the
+            # authority rollback has no business re-arming a half-run in someone
+            # else's repo. Says "cannot run", not "not authorized", because this
+            # caller IS authorized and sending them to audit their passport would
+            # be a false trail.
+            msg = f"Branch '{caller_info.name}' cannot run '{command}' in this repo: {refusal.reason}."
+            logger.warning(msg)
+            raise PermissionError(msg)
         if refusal and not warn_only:
-            msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal}."
+            msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal.reason}."
             logger.error(msg)
             raise PermissionError(msg)
         if refusal:
@@ -340,7 +398,7 @@ def verify_git_access(command: str) -> str:
                 "git auth warn-mode: '%s' for '%s' would be denied under enforcement: %s",
                 command,
                 caller_info.name,
-                refusal,
+                refusal.reason,
             )
         json_handler.log_operation(
             "git_access_verify",
@@ -349,7 +407,7 @@ def verify_git_access(command: str) -> str:
                 "command": command,
                 "tier": "owner",
                 "mode": "warn" if warn_only else "enforce",
-                "would_refuse": refusal,
+                "would_refuse": refusal.reason if refusal else None,
             },
         )
         return caller_info.name

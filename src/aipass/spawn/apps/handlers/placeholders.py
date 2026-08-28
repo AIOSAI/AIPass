@@ -33,7 +33,7 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
         target_dir: Path to target directory
         branch_name: Raw folder name
         **overrides: Optional overrides for ROLE, TRAITS, PURPOSE_BRIEF, PROFILE,
-                     CITIZEN_NUMBER, MODULE, etc.
+                     CITIZEN_NUMBER, CITIZEN_ID, MODULE, etc.
 
     Returns:
         Dict mapping placeholder names to replacement values
@@ -41,6 +41,13 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
     upper = branch_name.upper().replace("-", "_")
     lower = branch_name.lower().replace("-", "_")
     now = datetime.now()
+
+    # CITIZEN_ID is the citizen's OWN unique id, stamped into the passport as
+    # citizenship.citizen_id and rendered by faces as the passport number.
+    # REGISTRY_ID below is a different fact: the id of the REGISTRY that holds
+    # the citizen (shared by every citizen in a project). One name apart, two
+    # meanings — see the citizenship block in the template passports.
+    citizen_id = overrides.get("citizen_id", "")
 
     registry_id = overrides.get("registry_id", "")
     if not registry_id:
@@ -69,6 +76,7 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
         "CITIZEN_NUMBER": str(overrides.get("citizen_number", 0)),
         "CITIZEN_CLASS": overrides.get("citizen_class", "aipass_framework"),
         "REGISTRY_ID": registry_id,
+        "CITIZEN_ID": citizen_id,
         "KEY_CAPABILITIES": "",
         "DEPENDS_ON": "",
         "PROVIDES_TO": "",

@@ -87,6 +87,9 @@ def _import_extractor(monkeypatch):
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
     json_pkg.config_loader = mock_config_loader
 
@@ -188,6 +191,9 @@ def _import_normalize(monkeypatch):
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -213,6 +219,9 @@ def _import_line_counter(monkeypatch):
     mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
 
     json_pkg = MagicMock()
+    # Impersonating a package means answering __path__ — a bare MagicMock does not,
+    # and every lazy submodule import under it then dies. See test_import_isolation.py.
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
     json_pkg.json_handler = mock_json_handler
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
@@ -827,10 +836,13 @@ class TestAutoCompactSnapshotBudget:
         ext, mocks = _import_extractor(monkeypatch)
         branch_key = tmp_path.name.lower()
 
-        # 2 regular sessions (count limit 2 -- triggers) + 3 auto-compact (well under cap 5)
+        # 3 regular sessions OVER count limit 2 -- triggers, archives one --
+        # plus 3 auto-compact well under cap 5. Keep-2 keeps 2, so the budget
+        # has to be exceeded for anything to move (B4, 2026-08-25).
         sessions = [
+            {"number": 6, "date": "2026-01-06", "summary": "regular newest", "status": "completed"},
             {"number": 5, "date": "2026-01-05", "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
-            {"number": 4, "date": "2026-01-04", "summary": "regular newest", "status": "completed"},
+            {"number": 4, "date": "2026-01-04", "summary": "regular middle", "status": "completed"},
             {"number": 3, "date": "2026-01-03", "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
             {"number": 2, "date": "2026-01-02", "summary": "regular oldest", "status": "completed"},
             {"number": 1, "date": "2026-01-01", "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
@@ -855,13 +867,14 @@ class TestAutoCompactSnapshotBudget:
 
         assert result["success"] is True
         archived_summaries = {e["summary"] for e in result["extracted"]}
-        # Regular budget (count=2) triggers on 2 regular entries >= 2 -> archives the oldest regular one only
+        # Regular budget (count=2) triggers on 3 regular entries > 2 -> archives the oldest regular one only
         assert archived_summaries == {"regular oldest"}
         remaining_summaries = {e["summary"] for e in data["sessions"]}
         assert "AUTO-COMPACT SNAPSHOT: a" in remaining_summaries
         assert "AUTO-COMPACT SNAPSHOT: b" in remaining_summaries
         assert "AUTO-COMPACT SNAPSHOT: c" in remaining_summaries
         assert "regular newest" in remaining_summaries
+        assert "regular middle" in remaining_summaries
 
 
 class TestAutoCompactSameDaySnapshots:
@@ -890,13 +903,19 @@ class TestAutoCompactSameDaySnapshots:
         mocks["memory_files"].read_memory_file_data.return_value = data
         return file_path, data
 
-    def test_same_day_snapshots_drain_at_cap(self, monkeypatch, tmp_path):
-        """3 snapshots, all written today, cap 3 -> the oldest one archives."""
+    def test_same_day_snapshots_drain_over_cap(self, monkeypatch, tmp_path):
+        """4 snapshots, all written today, cap 3 -> the oldest one archives.
+
+        The point of this test is the DATE, not the count: every candidate is
+        dated today, and the valve must still let the snapshot lane drain. The
+        lane is now driven one entry OVER the cap because keep-3 keeps 3 (B4).
+        """
         ext, mocks = _import_extractor(monkeypatch)
         today = datetime.now().strftime("%Y-%m-%d")
         sessions = [
             {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
-            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: d", "status": "auto-compact"},
+            {"number": 27, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
             {"number": 25, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
             {"number": 22, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
         ]
@@ -910,7 +929,18 @@ class TestAutoCompactSameDaySnapshots:
         assert "regular newest" in {e["summary"] for e in data["sessions"]}
 
     def test_skip_loop_terminates(self, monkeypatch, tmp_path):
-        """Repeated runs must reach a steady state below the cap, not re-trigger forever."""
+        """Repeated runs must reach a steady state AT the cap, not re-trigger forever.
+
+        The steady state moved with B4 (2026-08-25): the lane now settles at
+        the cap rather than one below it, because keep-3 keeps 3. That is the
+        whole point of the fix — the old floor archived an entry the standard
+        said to keep, so every capped lane in the fleet rested one short.
+
+        What this test is actually guarding is unchanged: repeated runs must
+        CONVERGE. A lane that keeps draining past its cap and a lane that never
+        drains are both failures; only "reaches the cap and then stops" is
+        correct, and the last two iterations below prove the stop.
+        """
         ext, mocks = _import_extractor(monkeypatch)
         today = datetime.now().strftime("%Y-%m-%d")
         sessions = [{"number": 40, "date": today, "summary": "regular newest", "status": "completed"}]
@@ -922,17 +952,18 @@ class TestAutoCompactSameDaySnapshots:
         # The write path is mocked here, so `data` (mutated in place by each run)
         # is what the next run would read on a live system.
         archived_total = 0
-        snapshots = [e for e in sessions if e.get("status") == "auto-compact"]
+        per_run = []
         for _ in range(5):
             result = ext.extract_items(file_path)
             assert result["success"] is True
-            archived_total += len(result.get("extracted", []))
-            snapshots = [e for e in data["sessions"] if e.get("status") == "auto-compact"]
-            if len(snapshots) < 3:
-                break
+            archived = len(result.get("extracted", []))
+            archived_total += archived
+            per_run.append(archived)
 
+        snapshots = [e for e in data["sessions"] if e.get("status") == "auto-compact"]
         assert archived_total > 0, "nothing ever archived — the skip loop is live"
-        assert len(snapshots) == 2, f"snapshot lane never drained below cap: {len(snapshots)} left"
+        assert len(snapshots) == 3, f"snapshot lane did not settle at the cap: {len(snapshots)} left"
+        assert per_run[-1] == 0 and per_run[-2] == 0, f"lane never stopped draining: {per_run}"
 
     def test_snapshot_numbered_above_head_is_still_refused(self, monkeypatch, tmp_path):
         """Relaxing the date rule must not relax the ordering rule."""
@@ -1468,12 +1499,13 @@ class TestUpdateAllMemoryFiles:
         assert result["updated"] >= 1
 
     def test_tracks_failures(self, monkeypatch, tmp_path):
-        lc, mocks = _import_line_counter(monkeypatch)
+        lc, _mocks = _import_line_counter(monkeypatch)
 
-        mocks["memory_files"].update_metadata.return_value = {"success": False, "error": "write error"}
-
+        # The old failure injection was a mocked update_metadata write error.
+        # That write is gone (health stamping removed 2026-08-25), so the only
+        # way update_line_count can fail now is a file that is not there —
+        # which is the honest remaining failure mode to track.
         file_path = tmp_path / "local.json"
-        file_path.write_text("{}\n", encoding="utf-8")
 
         branch = {"name": "TEST", "path": str(tmp_path)}
 

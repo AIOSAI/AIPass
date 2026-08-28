@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.2.0
+# Version: 1.5.0
 # Created: 2025-11-27
-# Modified: 2026-03-12
+# Modified: 2026-08-23
 # =============================================
 
 """
@@ -20,6 +20,7 @@ Output: JSON on stdout with result
 
 import sys
 import json
+import subprocess
 import logging
 import hashlib
 from pathlib import Path
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 # Default global chroma path: memory/.chroma
 _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
+
+# Sibling embedder script -- same venv, invoked by path. Encoding lives behind
+# this handler on purpose: a caller that picks its own embedding model can put
+# vectors from two models in one collection, which fails silently rather than
+# loudly (no error, just wrong neighbours). The store owns the model choice.
+_EMBED_SCRIPT = Path(__file__).resolve().parent.parent / "vector" / "embed_subprocess.py"
 
 # Singleton clients per path
 _clients = {}
@@ -105,12 +112,116 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
     }
 
 
+def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
+    """Encode raw texts and store them -- the text-in entry point.
+
+    Callers send text and get a verdict; they never pick an embedding model.
+    Every failure returns success=False with a reason: a caller that deletes its
+    originals on the strength of this answer must be able to trust it.
+
+    Args:
+        branch: Owning branch name (e.g. "AI_MAIL")
+        memory_type: Collection suffix (e.g. "email_sent")
+        texts: Raw strings to encode and store
+        metadatas: One metadata dict per text, same order
+        db_path: Optional path to Chroma database
+
+    Returns:
+        Dict with success, collection, count -- or success=False and an error
+    """
+    if not branch or not memory_type:
+        return {"success": False, "error": "branch and memory_type are required"}
+
+    texts = texts or []
+    metadatas = metadatas or []
+
+    if not texts:
+        return {"success": True, "count": 0, "message": "No texts to store"}
+
+    # zip() in the store path would truncate a mismatch silently and hand a row
+    # someone else's provenance. Refuse instead.
+    if len(metadatas) != len(texts):
+        return {"success": False, "error": f"metadatas ({len(metadatas)}) does not match texts ({len(texts)})"}
+
+    timeout = max(30, len(texts) * 3)
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(_EMBED_SCRIPT)],
+            input=json.dumps({"texts": texts}),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[chroma_subprocess] Embedding timed out after {timeout}s for {len(texts)} texts")
+        return {"success": False, "error": f"Embedding timed out after {timeout}s"}
+    except Exception as e:
+        logger.warning(f"[chroma_subprocess] Embed subprocess failed: {e}")
+        return {"success": False, "error": f"Embedding subprocess failed: {e}"}
+
+    if completed.returncode != 0:
+        return {"success": False, "error": completed.stderr or "Embedding failed"}
+
+    try:
+        embed_reply = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        # Unreadable output is not evidence of success.
+        logger.warning(f"[chroma_subprocess] Unreadable embedder reply: {e}")
+        return {"success": False, "error": f"Unreadable embedder reply: {e}"}
+
+    if not isinstance(embed_reply, dict) or not embed_reply.get("success"):
+        error = embed_reply.get("error") if isinstance(embed_reply, dict) else None
+        return {"success": False, "error": str(error or "Embedding refused without a reason")}
+
+    embeddings = embed_reply.get("embeddings") or []
+    if len(embeddings) != len(texts):
+        return {"success": False, "error": f"embeddings ({len(embeddings)}) does not match texts ({len(texts)})"}
+
+    return _store_vectors(
+        branch=branch,
+        memory_type=memory_type,
+        embeddings=embeddings,
+        documents=texts,
+        metadatas=metadatas,
+        db_path=db_path,
+    )
+
+
 def _list_collections(db_path=None):
     """List all collections."""
     client = _get_client(db_path)
     collections = client.list_collections()
     names = [col.name for col in collections]
     return {"success": True, "collections": names, "count": len(names)}
+
+
+def _source_matches(source, pattern):
+    """Whether pattern occurs in source at a non-alphanumeric boundary.
+
+    A plain `pattern in source` test lets a label match inside a longer one --
+    DPLAN-0012 answers to a TDPLAN-0012 filename, so verification miscounts and
+    the search pin promotes the wrong plan. A hit only counts when the label
+    starts the string or follows a non-alphanumeric character.
+
+    Args:
+        source: The source_file value from a chunk's metadata
+        pattern: The label to look for (e.g. "DPLAN-0012")
+
+    Returns:
+        True if pattern occurs at a boundary in source
+    """
+    if not source or not pattern:
+        return False
+
+    idx = source.find(pattern)
+    while idx != -1:
+        # Keep scanning past a rejected hit: the same source may carry the
+        # label again at a real boundary ("TDPLAN-0012_supersedes_DPLAN-0012").
+        if idx == 0 or not source[idx - 1].isalnum():
+            return True
+        idx = source.find(pattern, idx + 1)
+
+    return False
 
 
 def _check_plan(plan_label, db_path=None):
@@ -145,7 +256,7 @@ def _check_plan(plan_label, db_path=None):
     match_count = 0
     for metadata in metadatas:
         source_file = metadata.get("source_file", "")
-        if plan_label in source_file:
+        if _source_matches(source_file, plan_label):
             match_count += 1
             matching_files.add(source_file)
 
@@ -157,7 +268,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
 
     Args:
         collection_name: Name of the ChromaDB collection
-        source_pattern: Substring to match in source_file metadata
+        source_pattern: Label to match at a boundary in source_file metadata
         n_results: Maximum number of results to return
         db_path: Optional path to Chroma database
 
@@ -176,7 +287,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
     matches = []
     for i, meta in enumerate(result.get("metadatas", [])):
         source = meta.get("source_file", "")
-        if source_pattern in source:
+        if _source_matches(source, source_pattern):
             matches.append(
                 {
                     "collection": collection_name,
@@ -197,7 +308,7 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
 
     Args:
         collection_name: Name of the ChromaDB collection
-        source_pattern: Substring to match in source_file metadata
+        source_pattern: Label to match at a boundary in source_file metadata
         db_path: Optional path to Chroma database
 
     Returns:
@@ -215,7 +326,7 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
     ids_to_delete = []
     for i, meta in enumerate(result.get("metadatas", [])):
         source = meta.get("source_file", "")
-        if source_pattern in source:
+        if _source_matches(source, source_pattern):
             ids_to_delete.append(result["ids"][i])
 
     if not ids_to_delete:
@@ -223,6 +334,43 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
 
     collection.delete(ids=ids_to_delete)
     return {"success": True, "deleted": len(ids_to_delete), "ids": ids_to_delete}
+
+
+def _get_by_ids(collection_name, ids, db_path=None):
+    """Fetch documents by their exact IDs -- the read-back behind verification.
+
+    Exists so a caller that is about to DELETE its originals can prove the copy
+    landed instead of trusting the writer's own success flag. ``get_by_source``
+    could not serve that role: it matches on a metadata substring and caps at
+    n_results, so a partial hit reads like a full one.
+
+    Args:
+        collection_name: Name of the ChromaDB collection
+        ids: Exact vector IDs to fetch
+        db_path: Optional path to Chroma database
+
+    Returns:
+        Dict with success and a documents map {id: document}. Missing IDs are
+        simply absent from the map -- the caller decides what that means.
+    """
+    client = _get_client(db_path)
+
+    try:
+        collection = client.get_collection(collection_name, embedding_function=None)
+    except Exception as e:
+        logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found in get_by_ids: {e}")
+        return {"success": False, "error": f"Collection '{collection_name}' not found: {e}"}
+
+    ids = list(ids or [])
+    if not ids:
+        return {"success": True, "documents": {}, "count": 0}
+
+    result = collection.get(ids=ids, include=["documents"])
+    documents = {}
+    for i, found_id in enumerate(result.get("ids", [])):
+        documents[found_id] = result["documents"][i]
+
+    return {"success": True, "documents": documents, "count": len(documents)}
 
 
 def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None):
@@ -293,6 +441,14 @@ def main():
                 metadatas=input_data.get("metadatas"),
                 db_path=input_data.get("db_path"),
             )
+        elif operation == "vectorize_and_store":
+            result = _vectorize_and_store(
+                branch=input_data.get("branch"),
+                memory_type=input_data.get("memory_type"),
+                texts=input_data.get("texts"),
+                metadatas=input_data.get("metadatas"),
+                db_path=input_data.get("db_path"),
+            )
         elif operation == "list_collections":
             result = _list_collections(db_path=input_data.get("db_path"))
         elif operation == "search_vectors":
@@ -310,6 +466,12 @@ def main():
                 collection_name=input_data.get("collection_name"),
                 source_pattern=input_data.get("source_pattern"),
                 n_results=input_data.get("n_results", 5),
+                db_path=input_data.get("db_path"),
+            )
+        elif operation == "get_by_ids":
+            result = _get_by_ids(
+                collection_name=input_data.get("collection_name"),
+                ids=input_data.get("ids"),
                 db_path=input_data.get("db_path"),
             )
         elif operation == "delete_by_source":

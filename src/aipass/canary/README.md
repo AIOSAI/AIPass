@@ -3,7 +3,7 @@
 **Purpose:** Permanent test citizen. Exists to be spawned, dispatched, resumed, broken and re-scaffolded so the working fleet never is. All mail, logs and memories here are TEST DATA by definition — never production work. Sibling of @finch (projects tier) and @wren (external tier): three homes covering three different fence contexts.
 **Module:** `aipass.canary`
 **Created:** 2026-08-20
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -23,6 +23,11 @@ Run the branch's own suite from the repo root, which is how CI runs it:
 ```bash
 pytest src/aipass/canary/tests -v
 ```
+
+Three of those functions are parametrized, so pytest collects and passes more
+cases than there are `def test_` lines. Both counts are true of different
+things; the tree below states the function count, which is what the standards
+audit measures.
 
 ---
 
@@ -50,15 +55,23 @@ fleet, and saying so is part of every report.
 CANARY/
 ├── apps/
 │   ├── canary.py           # Entry point
-│   ├── modules/            # Business logic (empty by design — added per test)
+│   ├── modules/            # Business logic — no .py here by design, added per test
 │   ├── handlers/
 │   │   └── json/           # JSON handler shim over aipass.aipass.shared
-│   └── plugins/            # Extensions
+│   ├── integrations/       # Scaffold, empty
+│   └── plugins/            # Scaffold, empty
 ├── artifacts/              # Test artifacts written during dispatches
+├── canary_json/            # Where the json shim writes — test data, nothing depends on it
+├── tests/                  # 38 test functions, all passing as of 2026-08-25
 ├── docs/
-├── tests/
 └── README.md
 ```
+
+The branch also carries the standard spawn scaffold — `.trinity/`,
+`.aipass/`, `.ai_mail.local/`, `.archive/`, `.seedgo/`, `.spawn/`,
+`docs.local/`, `dropbox/`, `logs/`, `templates/`, `tools/` — README-only
+placeholders except where a service writes into them. `logs/` holds dispatch
+transcripts written by @ai_mail, not output from canary's own code.
 
 ---
 
@@ -71,12 +84,18 @@ now rather than a fixed catalogue.
 | Flag | What it does |
 |------|--------------|
 | *(none)* | Print the self-map: identity, purpose, discovered modules |
-| `--help`, `-h` | Usage, flags and examples |
-| `--version`, `-V` | Branch name and version |
+| `--help`, `-h`, `help` | Usage, flags and examples |
+| `--version`, `-V` | Branch name and version (`CANARY v2.0.0`) |
 
-`drone @canary <cmd> --help` shows that subcommand's help without executing it.
 An unknown command is refused and exits non-zero — a refusal that exits 0 is a
-lie to every non-human caller, and that one is pinned by test here.
+lie to every non-human caller, and that one is pinned by test here
+(`test_unknown_command_exits_nonzero`).
+
+`main()` also routes `<cmd> --help` to that subcommand's own help without
+executing it, and a test pins it against a stub module. It cannot be reached
+from a live `drone @canary` today: with no modules registered, every subcommand
+is unknown, so `drone @canary <anything> --help` prints `❌ Unknown command` and
+exits 1. Documented as code that exists, not as behaviour you can observe here.
 
 ---
 
@@ -85,7 +104,13 @@ lie to every non-human caller, and that one is pinned by test here.
 ### Depends On
 
 - **@cli** — `console`, `error` for all terminal output.
-- **@prax** — the logger; every fallback and failure path writes a line.
+- **@prax** — the logger. Wired on the module-discovery paths: import fallback,
+  module load failure, a module raising mid-route, and an unhandled error in
+  `main()`. All four are dead while `modules/` is empty, so canary has written
+  no prax log of its own — there is no `canary_canary.log` in `system_logs/`.
+  The one failure path that *does* fire today, the unknown-command refusal,
+  goes through @cli's `error()`, which marks the command failed but writes no
+  prax line.
 - **@ai_mail** — how work arrives; canary is dispatched, it does not self-start.
 - **@spawn** — owns the framework template this branch was scaffolded from.
 

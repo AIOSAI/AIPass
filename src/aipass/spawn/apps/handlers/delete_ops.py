@@ -186,7 +186,22 @@ def delete_branch(
         logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg, str(archive_dir), registry_updated)
 
-    json_handler.log_operation("delete_executed", data={"branch": branch_name})
+    # Retirement is observable, and specifically SAYS whether the citizen's
+    # memory left with it. The archive is the only copy after the rmtree above,
+    # so "trinity carried" is the one fact a later reader cannot re-derive.
+    archived_trinity = (
+        sorted(p.name for p in (archive_dir / ".trinity").glob("*")) if (archive_dir / ".trinity").is_dir() else []
+    )
+    logger.info(
+        "[spawn] RETIRED %s — archived to %s (trinity carried: %s)",
+        branch_name,
+        archive_dir,
+        ", ".join(archived_trinity) if archived_trinity else "NONE",
+    )
+    json_handler.log_operation(
+        "delete_executed",
+        data={"branch": branch_name, "archive": str(archive_dir), "trinity_carried": archived_trinity},
+    )
 
     return {
         "branch": branch_name,

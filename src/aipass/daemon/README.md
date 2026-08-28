@@ -2,11 +2,11 @@
 
 # DAEMON
 
-**Purpose:** Cron-triggered task scheduler with plugin system. Routes commands to modules for scheduled tasks, activity reports, action management, and status digests.
+**Purpose:** Decentralized task scheduler fired by a systemd user timer. Discovers every citizen's `.daemon/schedule.json`, wakes due owners, and reports fleet activity. The plugin system it was born with is retired — see **Plugins** below.
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-08-16
+**Last Updated:** 2026-08-25
 
 ---
 
@@ -80,13 +80,15 @@ daemon/
 │   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
-│   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor
+│   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor,
+│   │   │                              # telegram_notifier (superseded copy)
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
 │   │   │   └── .archive/             # assistant_chat (archived)
 │   │   └── update/
 │   │       └── data_loader.py         # Data loading for status digests
 │   ├── extensions/             # Extension point for additional capabilities
-│   ├── json_templates/         # JSON template definitions
+│   ├── integrations/           # Private branch-local wrappers — gitignored except its README
+│   ├── json_templates/         # JSON template definitions (default/: config, data, log)
 │   └── plugins/
 │       ├── __init__.py                # discover_plugins() — ORPHANED, no live caller
 │       └── .archive/                  # ALL plugins archived: heartbeat, daily_audit,
@@ -109,16 +111,12 @@ drone @daemon --help                # Rich-formatted help with all commands
 drone @daemon --version             # Print version
 
 drone @daemon update                # Status digest — inbox, session info, escalations (partial — reads stale data paths)
-drone @daemon schedule list         # List pending scheduled tasks
-drone @daemon schedule create "task" --due 7d --to @branch
-drone @daemon schedule run-due      # Fire all due tasks (sends emails)
 drone @daemon activity              # Quick 24h activity summary
 drone @daemon activity-report       # Full detailed report (--json for raw)
 drone @daemon branch-health BRANCH  # Single branch deep dive
-drone @daemon actions list          # Action registry
-drone @daemon actions <id> on/off   # Toggle action
-drone @daemon actions set reminder 7d "msg" --to @branch
-drone @daemon actions set schedule @branch "prompt" daily 04:00
+
+drone @daemon queue                   # Unified job queue view (--json for frozen schema)
+drone @daemon run                     # One scheduler tick — fire every due job now
 drone @daemon install-timer           # Install + enable systemd user timer
 drone @daemon uninstall-timer         # Stop + remove systemd user timer
 
@@ -130,6 +128,12 @@ drone @daemon inbox-sweep --limit 3   # Cap wakes for this pass
 drone @daemon rotation                # Roster, whose turn is next, recent turns
 drone @daemon rotation --json         # Same state, machine-readable
 ```
+
+`schedule` and `actions` are still routable, but only as retirement notices — they ignore every
+argument and print the same migration text pointing at `.daemon/schedule.json`. There is no
+`schedule list`, `schedule create`, `schedule run-due`, `actions list`, `actions set` or
+`actions <id> on/off`; those subcommands were documented here long after the modules were retired.
+Use `run`, `queue` and per-branch `.daemon/schedule.json` instead.
 
 Each module accepts `--help` for module-specific usage:
 ```bash
@@ -160,7 +164,18 @@ drone @daemon <command> --help
 
 Each citizen owns its schedule at `<branch>/.daemon/schedule.json`. The daemon discovers and fires — citizens define their own jobs.
 
-Two trees are swept: framework citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) and project citizens under `projects/<name>/*` (listed in that project's own sealed `<NAME>_REGISTRY.json`). A project registry's paths resolve against its own project root, never the repo root — `src/baud/baud` exists in both trees, and resolving repo-first picks the wrong directory. Vera-Studio is a separate repo and is out of scope until multi-root discovery exists.
+**Nothing here is resident.** `install-timer` writes a systemd *user* timer, `daemon-tick.timer`
+(`OnActiveSec=30s`, `OnUnitActiveSec=2min`, `Persistent=true`), which fires `daemon-tick.service` —
+`Type=oneshot`, running `python3 -m aipass.daemon.apps.daemon run` once and exiting. Between ticks
+there is no daemon process at all.
+
+The 2 min is nominal, not exact: `OnUnitActiveSec` measures from the *last activation*, and systemd's
+default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min**. A tick costs about
+**0.6s of CPU** (`systemctl --user show daemon-tick.service -p CPUUsageNSec`, measured 2026-08-25:
+`626320000` ns) and roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's
+own output appends to `~/.aipass/daemon-tick.log`.
+
+Two trees are swept: framework citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) and project citizens under `projects/<name>/*` (listed in that project's own sealed `<NAME>_REGISTRY.json`). A project registry's paths resolve against its own project root, never the repo root — BAUD's registry row reads `src/baud/baud`, which is a path that also *could* resolve under this repo, and resolving repo-first picks the wrong directory. That collision was live until the phantom `<aipass>/src/baud/` was removed (2026-08-24); the guard and its test stay, because the row is still relative and a repo-first join would recreate the phantom rather than fail. Vera-Studio is a separate repo and is out of scope until multi-root discovery exists.
 
 ### Job file schema
 
@@ -197,7 +212,7 @@ Two trees are swept: framework citizens under `src/aipass/*` (listed in `AIPASS_
 
 ### Staggering
 
-No native offset field. To stagger jobs, seed different `last_run` values in `daemon_json/daemon_runstate.json`.
+No native offset field. To stagger jobs, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
 
 ---
 
@@ -266,12 +281,18 @@ surfaces here rather than blanking this report.
 ## Integration Points
 
 ### Depends On
-- `rich` -- Console output and formatted display
-- Python stdlib (`sys`, `typing`, `logging`)
+- `rich` — console output and formatted display (via `@cli`'s shared console)
+- `@prax` — the logger every module writes through
+- `@ai_mail` — `wake_branch()`, the only way a job or a sweep actually wakes a citizen; also its
+  `WAKE_BLOCKLIST`, read by the sweep's wake policy
+- `@memory` — `get_branch_health()`, rendered by `branch-health` (module layer only, see below)
+- `@skills` — fail-soft Telegram lifecycle pings; imported lazily, absence is not an error
+- Python stdlib, and a systemd *user* instance for the tick timer
 
 ### Provides To
-- All modules — background task scheduling, activity monitoring, action tracking
-- Plugins — extensible plugin system for recurring tasks (community_rotation, daily_audit, heartbeat)
+- The fleet — job discovery and firing for any citizen that writes a `.daemon/schedule.json`
+- The fleet — the unread-mail backstop (`inbox-sweep`) and the steward rotation
+- `@skills` bot — `queue --json`, a frozen schema
 - Note: Telegram handlers archived — moving to skills system. See `apps/handlers/telegram/.archive/`
 
 ---
@@ -345,7 +366,7 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 - 10/10 modules covered, 46/50 public functions tested
 - Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-16*
+*Last Updated: 2026-08-25*
 
 ---
 [← Back to AIPass](../../../README.md)

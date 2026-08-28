@@ -244,9 +244,16 @@ def _extract_tail_excess(
 
     Returns the list of entries safe to archive; may be empty.
     """
-    if limit is None or not isinstance(entries, list) or len(entries) < limit:
+    if limit is None or not isinstance(entries, list) or len(entries) <= limit:
         return []
-    excess = max(len(entries) - limit, 1)
+    # keep-N keeps N. The old floor — max(len - limit, 1) behind a `< limit`
+    # guard — archived ONE entry when the array sat at exactly the limit, so
+    # every branch that reached keep-15 settled permanently at 14 and rolled
+    # again on the very next write. The detector's threshold moves with this
+    # line (monitor/detector.py `_should_rollover`): if it still fired at the
+    # limit while nothing here drained, the file would re-trigger forever —
+    # the NOTHING DRAINED skip loop, which this branch has already met twice.
+    excess = len(entries) - limit
     candidate_tail = entries[-excess:]  # oldest from end
 
     reason = "numbered above head" if not date_guard else "dated today or numbered above head"
@@ -417,8 +424,10 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 return {"success": False, "error": f"Failed to write file: {e}"}
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
-    # Update metadata
-    _update_metadata_after_extraction(data)
+    # No metadata stamping here. Rollover used to write a
+    # status.last_health_check date on its way past; that field is deleted from
+    # the standard (2026-08-25) and rollover has no business editing metadata
+    # it does not own. It moves entries — that is the whole job.
 
     # Write back
     try:
@@ -510,34 +519,6 @@ def extract_items(file_path: Path, percentage: int | None = None) -> Dict[str, A
 
 # =============================================================================
 # METADATA OPERATIONS
-# =============================================================================
-
-
-def _update_metadata_after_extraction(data: Dict[str, Any]) -> None:
-    """
-    Update document_metadata after extraction.
-
-    Updates:
-    - status.last_health_check
-
-    Args:
-        data: JSON data dict (modified in place)
-    """
-    # Ensure metadata structure
-    if "document_metadata" not in data:
-        data["document_metadata"] = {}
-
-    metadata = data["document_metadata"]
-
-    # Update status
-    if "status" not in metadata:
-        metadata["status"] = {}
-
-    metadata["status"]["last_health_check"] = datetime.now().strftime("%Y-%m-%d")
-
-
-# =============================================================================
-# VECTORIZATION PREPARATION
 # =============================================================================
 
 

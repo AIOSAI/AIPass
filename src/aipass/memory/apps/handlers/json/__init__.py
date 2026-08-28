@@ -22,7 +22,6 @@ from .json_handler import (
 from .memory_files import (
     read_memory_file,
     write_memory_file,
-    update_metadata,
     read_memory_file_data,
     write_memory_file_simple,
     validate_memory_file_structure,
@@ -44,7 +43,6 @@ __all__ = [
     # memory_files (memory file I/O)
     "read_memory_file",
     "write_memory_file",
-    "update_metadata",
     "read_memory_file_data",
     "write_memory_file_simple",
     "validate_memory_file_structure",

@@ -6,7 +6,9 @@
 # Modified: 2026-04-14
 # =============================================
 
-# Storage choice: .trinity/watchdog_timers.json with atomic write (tmp + rename).
+# Storage choice: .watchdog/watchdog_timers.json with atomic write (tmp + rename).
+# Relocated out of .trinity/ (2026-08-27, File set ruling): .trinity/ holds
+# identity and memory only — operational state lives in its own dot-dir.
 # Devpulse root is resolved by walking upward looking for AIPASS_REGISTRY.json
 # (same pattern the agent handler uses to find the repo). Tests override via
 # explicit storage_path to avoid touching the real trinity directory.
@@ -18,7 +20,7 @@ Public surface:
   parse_duration(duration)       Parse "5m", "30s", "2h", "1h30m", "45"
   format_human(seconds)          Render "5h 3m 12s" / "12m 07s" / "45s"
   wake_in(duration)              Blocking sleep, returns on wake
-  timer_start(name, path=None)   Record a named start in .trinity/watchdog_timers.json
+  timer_start(name, path=None)   Record a named start in .watchdog/watchdog_timers.json
   timer_stop(name, path=None)    Stop + persist history entry + return elapsed
   timer_list(path=None)          Active + history snapshot
   timer_report(path=None)        Formatted multi-line session summary
@@ -67,13 +69,13 @@ def _find_devpulse_root(start: Path | None = None) -> Path | None:
 
 
 def _default_storage_path() -> Path:
-    """Resolve `.trinity/watchdog_timers.json` relative to the devpulse root."""
+    """Resolve `.watchdog/watchdog_timers.json` relative to the devpulse root."""
     root = _find_devpulse_root()
     if root is None:
         # Fall back to cwd so callers still get a deterministic path — tests
         # always pass an explicit storage_path so this branch is production-only.
         root = Path.cwd()
-    return root / ".trinity" / _STORAGE_FILENAME
+    return root / ".watchdog" / _STORAGE_FILENAME
 
 
 def _empty_store() -> dict:

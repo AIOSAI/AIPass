@@ -20,6 +20,7 @@ import json
 import pytest
 import shutil
 from pathlib import Path
+from types import ModuleType
 from typing import Generator
 from unittest.mock import MagicMock
 
@@ -41,11 +42,28 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", prax_modules_mod)
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_modules_mod.logger)
 
-    # Mock json handler
+    # Mock json handler.
+    #
+    # The PACKAGE name is impersonated by a real module object carrying the
+    # real package's __path__ -- deliberately not a MagicMock. A MagicMock has
+    # no __path__, so any lazy `from ...handlers.json.<sub> import x` executed
+    # while this fixture is active dies with ModuleNotFoundError("...handlers
+    # .json is not a package") instead of reaching the submodule.
+    #
+    # That was invisible for as long as the submodule happened to be cached in
+    # sys.modules from an earlier import, and RED the moment some earlier test
+    # in the same process evicted it -- which is why it surfaced as two receipt
+    # tests failing on ONE interpreter, in ONE xdist worker, on ONE run, with
+    # no code change behind it. Order was the trigger; this was the hole.
+    #
+    # Carrying __path__ lets submodules resolve honestly against the real
+    # directory while `json_handler` stays mocked -- the mock still shadows,
+    # because a set attribute wins over a submodule import in `from X import y`.
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
+    json_pkg = ModuleType("aipass.memory.apps.handlers.json")
+    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
+    json_pkg.json_handler = mock_json_handler  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
@@ -161,3 +179,79 @@ def temp_registry(tmp_path, sample_registry_data):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(sample_registry_data, indent=2), encoding="utf-8")
     return registry_path
+
+
+@pytest.fixture
+def live_fleet():
+    """The real installation's repo root, or SKIP if this machine has no fleet.
+
+    A handful of tests are valuable precisely because they measure the fleet
+    that exists — that the resident projects really are reachable, that
+    `backup` resolves to its directory name and not the registry's `BACKUP`.
+    Rebuilding those against a synthetic registry would test the parser and
+    stop testing the fleet, so they are guarded rather than converted.
+
+    The ground truth is `AIPASS_REGISTRY.json`, which is gitignored: a clean
+    CI checkout has no registry and no citizen `.trinity/`, so every fleet
+    lane resolves EMPTY there. Empty is not a measurement — it is the absence
+    of one, and a test that reports green over it is claiming to have checked
+    something it never saw.
+
+    ONE discriminator, one place. Two copies of "is there a fleet here" would
+    disagree within a release, and this is a fixture rather than an importable
+    helper because a test module importing a sibling by dotted path resolves
+    only on a branch-dir rootdir — red on CI's repo-root run, a trap this
+    branch has already been caught by once.
+
+    BOTH roots are checked, not one. `registry_scope` and `trinity_push` each
+    resolve their own repo root, and the guarded tests are split across the
+    two: on a real installation the walk-up finds the same registry for both,
+    but a guard that checked only one would report "fleet present" while the
+    other lane was blind — the same one-lane-sees-22-the-other-19 asymmetry
+    this whole marker was built to close.
+
+    Returns:
+        The repo root holding the core registry.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+    from aipass.memory.apps.handlers.templates import trinity_push
+
+    for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
+        if not (root / registry_scope.CORE_REGISTRY).is_file():
+            pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+    return registry_scope.REPO_ROOT
+
+
+@pytest.fixture
+def live_residents(live_fleet):
+    """A repo root that ALSO carries the four resident projects, or SKIP.
+
+    `live_fleet` answers "is aipass installed here". It is not enough for the
+    resident assertions, and the Windows e2e lane proved it: that job installs
+    aipass from the wheel, so it has a REAL `AIPASS_REGISTRY.json` and the core
+    citizens — the guard correctly saw a live installation and let the tests
+    run — and then `{earmark, finch, aipass_site, baud} <= names` failed,
+    because those four live in `projects/` on ONE machine. "The residents are
+    reachable" is a claim about an installation, not about the software.
+
+    So the second discriminator is narrower: are the resident registry FILES
+    on disk. Present and unreachable stays RED, which is the whole point.
+
+    MEASURED WITH pathlib, NOT with `resident_registry_paths()`. Asking the
+    code under test whether its own inputs exist would turn every regression
+    in the resolver into a SKIP — the guard would delete the failure it exists
+    to expose. The ground truth has to be read independently of the thing
+    being judged.
+
+    Returns:
+        The repo root holding the core registry and all four residents.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    missing = [relative for relative in registry_scope.RESIDENT_REGISTRIES if not (live_fleet / relative).is_file()]
+    if missing:
+        pytest.skip(
+            f"{len(missing)} of {len(registry_scope.RESIDENT_REGISTRIES)} resident registries "
+            f"not installed at {live_fleet} ({', '.join(missing)}) -- live-state guard skipped"
+        )
+    return live_fleet

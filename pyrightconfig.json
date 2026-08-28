@@ -1,9 +1,9 @@
 {
   "extraPaths": [
-    "src",
-    ".venv/lib/python3.12/site-packages",
-    "src/aipass/memory/.venv/lib/python3.12/site-packages"
+    "src"
   ],
+  "venvPath": ".",
+  "venv": ".venv",
   "pythonVersion": "3.10",
   "reportMissingImports": "error",
   "reportAttributeAccessIssue": "error",

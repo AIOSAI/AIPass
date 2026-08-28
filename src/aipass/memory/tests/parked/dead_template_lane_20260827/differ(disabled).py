@@ -121,8 +121,6 @@ def _diff_structural_section(current: dict, template: dict, path_prefix: str) ->
             # Skip dynamic values that are expected to differ
             if key in (
                 "current_lines",
-                "health",
-                "last_health_check",
                 "current_key_learnings",
                 "current_recently_completed",
                 "created",

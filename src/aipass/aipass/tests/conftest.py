@@ -31,6 +31,34 @@ def temp_test_dir() -> Generator[Path, None, None]:
         shutil.rmtree(test_dir)
 
 
+@pytest.fixture(autouse=True)
+def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
+    """Point the user profile at a temp dir for EVERY test in this branch.
+
+    Not belt-and-braces — it closes a live-state leak found 2026-08-27:
+    test_init_flow injects a MagicMock at
+    sys.modules["aipass.aipass.apps.modules.profile"], but
+    ``from ...modules import profile`` resolves the attribute already set on
+    the parent package whenever another test file imported the real module
+    first. The mock is then silently bypassed and the profile stage writes the
+    REAL store. test_help_flag + test_init_flow together rewrote the live
+    profile to null defaults; either file alone was clean, which is why no
+    single-file run ever caught it.
+
+    Autouse and unconditional because the leak is an ORDERING effect: any test
+    that reaches profile code through an unmocked path is a candidate, and
+    naming them one by one only holds until the next import order changes.
+    """
+    from aipass.aipass.apps.modules import profile as profile_mod
+
+    store_dir = tmp_path_factory.mktemp("profile_store")
+    with (
+        patch.object(profile_mod, "_PROFILE_JSON", store_dir / profile_mod._PROFILE_FILENAME),
+        patch.object(profile_mod, "_LEGACY_LOCAL_JSON", store_dir / "local.json"),
+    ):
+        yield store_dir
+
+
 @pytest.fixture
 def sample_test_data() -> dict:
     """Provides sample test data."""

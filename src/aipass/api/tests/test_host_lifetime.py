@@ -34,18 +34,39 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import autostart as host_autostart
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 
 
 @pytest.fixture
 def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """A throwaway runtime directory, so no test touches the real logs/."""
+    """
+    A throwaway runtime directory, so no test touches the real logs/.
+
+    THE SUPERVISOR IS ANSWERED "no" BY DEFAULT, added 2026-08-27 with the
+    autostart lane. running() now asks systemd before it reads the record file,
+    so without this every test in this file would shell out to the real
+    systemctl and — on a host where the unit IS installed and running — would
+    get a live pid back and fail for a reason that has nothing to do with it.
+    A test whose result depends on whether the machine it runs on happens to be
+    serving is not a test.
+    """
     monkeypatch.setattr(host_lifetime, "_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(host_lifetime, "json_handler", MagicMock())
     monkeypatch.setattr(host_lifetime, "logger", MagicMock())
     monkeypatch.setattr(host_lifetime, "SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
     return tmp_path
+
+
+@pytest.fixture
+def supervised(monkeypatch: pytest.MonkeyPatch) -> int:
+    """A systemd unit that is holding the server, on pid 5150."""
+    monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 5150)
+    monkeypatch.setattr(host_autostart, "supervised_bind", lambda: ("10.0.0.9", 8787))
+    monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 5150)
+    return 5150
 
 
 @pytest.fixture
@@ -390,3 +411,351 @@ class TestStopping:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestStatusTellsTheTruthAboutAServerItDidNotStart:
+    """
+    Requirement four of the autostart ruling, and the reason it is a
+    requirement: a unit-managed server writes no record file, so the lane that
+    only ever read that file called a perfectly healthy server absent.
+
+    This is the failure mode that costs an operator an hour at 3am — the command
+    you run to find out whether it is up, telling you the opposite of the truth.
+    """
+
+    def test_a_supervised_server_is_reported_running(self, runtime: Path, supervised: int) -> None:
+        record = host_lifetime.running()
+
+        assert record is not None
+        assert record["pid"] == supervised
+        assert record["owner"] == host_lifetime.OWNER_SUPERVISOR
+        assert record["unit"] == host_autostart.unit_name()
+
+    def test_the_supervisor_outranks_a_stale_record_from_before_the_reboot(
+        self, runtime: Path, supervised: int
+    ) -> None:
+        """
+        A reboot leaves a record naming a pid that is gone, and the unit then
+        starts the real server. Reading the file first would answer with the
+        dead pid while a healthy server listened on the same port.
+        """
+        host_lifetime.record_path().write_text(json.dumps({"pid": 999, "host": "127.0.0.1", "port": 1}))
+
+        record = host_lifetime.running()
+
+        assert record["pid"] == supervised
+        assert record["owner"] == host_lifetime.OWNER_SUPERVISOR
+
+    def test_a_hand_started_server_is_still_named_as_such(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The detached path keeps working and now says what it is."""
+        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+
+        record = host_lifetime.running()
+
+        assert record["owner"] == host_lifetime.OWNER_DETACHED
+
+    def test_no_supervisor_and_no_record_is_still_none(self, runtime: Path) -> None:
+        assert host_lifetime.running() is None
+
+
+class TestStoppingASupervisedServerIsNotATrap:
+    """
+    Requirement five. Signalling a supervised pid directly leaves the restart
+    policy free to start it again — the command prints success and the server is
+    back before the operator finishes reading it.
+
+    A stop that undoes itself is worse than a stop that refuses, because the
+    operator walks away.
+    """
+
+    def test_the_supervisor_is_asked_and_the_pid_is_never_signalled(
+        self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gone = {"yet": False}
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: not gone["yet"])
+
+        def accept() -> bool:
+            gone["yet"] = True
+            return True
+
+        monkeypatch.setattr(host_autostart, "stop_unit", accept)
+
+        with patch.object(host_lifetime.os, "kill") as kill:
+            record = host_lifetime.stop()
+
+        assert record["owner"] == host_lifetime.OWNER_SUPERVISOR
+        kill.assert_not_called()
+
+    def test_a_refused_stop_is_reported_rather_than_forced(
+        self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(host_autostart, "stop_unit", lambda: False)
+
+        with pytest.raises(host_lifetime.LifetimeError, match="would not stop"):
+            host_lifetime.stop()
+
+    def test_an_accepted_stop_whose_process_stays_is_not_reported_as_success(
+        self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The supervisor ACCEPTING a stop and the process being gone are two
+        facts. This branch has already been caught once believing the first
+        implies the second — os.kill(pid, 0) answering yes to an unreaped
+        corpse, found by running the thing for real rather than by a mock.
+        """
+        monkeypatch.setattr(host_autostart, "stop_unit", lambda: True)
+        monkeypatch.setattr(host_autostart, "STOP_TIMEOUT_SECONDS", 0.0)
+
+        with pytest.raises(host_lifetime.LifetimeError, match="still running"):
+            host_lifetime.stop()
+
+    def test_a_detached_server_is_still_stopped_by_signal(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No regression: the hand-started path did not change."""
+        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        alive = {"still": True}
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: alive["still"])
+
+        def signalled(pid: int, sig: int) -> None:
+            alive["still"] = False
+
+        with patch.object(host_lifetime.os, "kill", side_effect=signalled) as kill:
+            record = host_lifetime.stop()
+
+        assert record["owner"] == host_lifetime.OWNER_DETACHED
+        kill.assert_called_once_with(321, signal.SIGTERM)
+
+
+class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
+    """
+    D1 reaches the unit too, and this is the one place it matters most: a unit
+    is a spawn that repeats at every boot with nobody watching. An address
+    refused at the CLI and then baked into one is D1 holding everywhere except
+    forever.
+    """
+
+    def test_a_refused_bind_writes_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(host_config, "load_config", lambda: {"host": "0.0.0.0", "port": 8787})
+        monkeypatch.setattr(host_config, "validate_bind", MagicMock(side_effect=host_config.BindRefused("wildcard")))
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+
+        with pytest.raises(host_config.BindRefused):
+            host_lifetime.write_unit()
+
+        assert not host_lifetime.unit_path().exists()
+
+    def test_a_platform_without_systemd_writes_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: False)
+
+        with pytest.raises(host_autostart.AutostartUnsupported):
+            host_lifetime.write_unit()
+
+        assert not host_lifetime.unit_path().exists()
+
+    def test_the_written_unit_carries_the_cleared_address(
+        self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+
+        written = host_lifetime.write_unit()
+
+        assert "--host 127.0.0.1 --port 8790" in written.read_text()
+
+
+class TestTwoServersAreNeverStartedByAccident:
+    """A supervised server and a detached one would fight over one port."""
+
+    def test_a_detach_is_refused_while_the_supervisor_holds_it(
+        self, runtime: Path, bind_ok: None, supervised: int
+    ) -> None:
+        """
+        And the refusal NAMES the supervisor, because the two cases need
+        different commands from the operator: a supervised server signalled by
+        hand comes straight back, so "already running" alone sends them to the
+        wrong one.
+        """
+        with pytest.raises(host_lifetime.LifetimeError, match="supervisor"):
+            host_lifetime.serve_detached()
+
+
+class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
+    """
+    The 2026-08-27 ruling, at the three places that act on it.
+
+    A probe that failed on a machine that HAS systemd leaves the question
+    unanswered. Flattening that to None would be the original defect one layer
+    down: the tailnet unit writes no record file, so every caller would take the
+    record path and conclude that nothing is running.
+    """
+
+    def test_running_refuses_rather_than_reporting_no_server(
+        self, runtime: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        with pytest.raises(host_autostart.SupervisorUnreachable):
+            host_lifetime.running()
+
+    def test_a_stale_record_cannot_stand_in_for_an_unanswered_probe(
+        self, runtime: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The trap this closes: a record left over from before the unit was
+        installed is still on disk. Swallowing the refusal would report THAT
+        pid — a hand-started server that has not existed since this morning.
+        """
+        host_lifetime.record_path().write_text(json.dumps({"pid": 177102, "host": "10.0.0.1", "port": 8787}))
+
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        with pytest.raises(host_autostart.SupervisorUnreachable):
+            host_lifetime.running()
+
+    def test_nothing_is_spawned_while_the_supervisor_is_unreadable(
+        self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        A second listener started blind is how one port gets two servers and a
+        log that cannot say which of them wrote a line.
+        """
+
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        with patch.object(host_lifetime.subprocess, "Popen") as popen:
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_lifetime.serve_detached()
+
+        popen.assert_not_called()
+
+    def test_no_signal_is_sent_into_the_dark(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        If a unit IS holding the server, a bare SIGTERM is a stop its restart
+        policy may undo — so an unanswered probe must refuse, not guess.
+        """
+
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        with patch.object(host_lifetime.os, "kill") as kill:
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_lifetime.stop()
+
+        kill.assert_not_called()
+
+    def test_a_platform_without_systemd_still_reads_its_detached_record(
+        self, runtime: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The ruling's other half, at the caller: zero is not a refusal, so a
+        machine with no systemd still finds a hand-started server exactly as it
+        did before any of this existed.
+        """
+        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+
+        record = host_lifetime.running()
+
+        assert record["owner"] == host_lifetime.OWNER_DETACHED
+
+
+class TestTheStatusLaneGetsAThirdAnswer:
+    """
+    running() raises when the supervisor cannot be asked, which is right for
+    stop and serve — both must refuse rather than act blind. Status is the one
+    caller whose whole job is to report a state, and "I cannot tell" IS a state.
+    """
+
+    def test_an_unreachable_supervisor_is_unknown_not_none(
+        self, runtime: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        answer = host_lifetime.server_state()
+
+        assert answer["state"] == "unknown"
+        assert answer["record"] is None
+        assert "did not answer" in answer["reason"]
+
+    def test_unknown_is_not_the_same_as_nothing_running(self, runtime: Path) -> None:
+        """
+        The distinction the whole fix rests on. Both print differently and one
+        of them is a lie when the unit is live.
+        """
+        assert host_lifetime.server_state()["state"] == "none"
+
+    def test_a_live_server_still_reports_running(self, runtime: Path, supervised: int) -> None:
+        answer = host_lifetime.server_state()
+
+        assert answer["state"] == "running"
+        assert answer["record"]["pid"] == supervised
+
+
+class TestTheInstallReportNamesAConflictItCanSee:
+    """
+    A hand-started server holding the port turns `enable --now` into a unit that
+    cannot bind, burns its retry window and lands in `failed` — which reads as
+    "autostart is broken" rather than as the real cause.
+    """
+
+    def test_a_detached_server_on_the_port_is_reported(
+        self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
+        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+        host_lifetime.record_path().write_text(json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 8790}))
+
+        report = host_lifetime.autostart_report()
+
+        assert report["conflict"]["pid"] == 4242
+
+    def test_a_supervised_server_is_not_a_conflict(
+        self, runtime: Path, bind_ok: None, supervised: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Reinstalling over a unit that is already running is normal — the
+        supervisor restarts it. Only a HAND-started server is in the way.
+        """
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
+
+        report = host_lifetime.autostart_report()
+
+        assert report["conflict"] is None
+
+    def test_an_unreachable_supervisor_never_retracts_a_written_unit(
+        self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        The conflict check is a courtesy and runs AFTER the write. Letting it
+        raise would hand the operator a rendered unit plus an error saying it
+        did not happen.
+        """
+        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
+
+        def unreachable() -> int:
+            raise host_autostart.SupervisorUnreachable("systemctl did not answer")
+
+        monkeypatch.setattr(host_autostart, "supervised_pid", unreachable)
+
+        report = host_lifetime.autostart_report()
+
+        assert report["conflict"] is None
+        assert host_lifetime.unit_path().exists()

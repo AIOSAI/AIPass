@@ -55,7 +55,7 @@ drone @hooks --help              # Full help reference
 
 Hooks operate on two tiers:
 
-**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists because merging handler output into a single blob buries prompt injection past Claude Code's inline preview — see S167 below. Provider settings cannot be changed by branches — only setup tooling manages them.
+**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry concatenates every handler's stdout into one blob, which buries prompt injection past Claude Code's inline preview; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
 
 **Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. Edit `enabled` flags to turn hooks on/off per project. Use `drone @hooks status` to view current config.
 
@@ -121,7 +121,7 @@ src/aipass/hooks/
 │   │   ├── lifecycle/           # Session management hooks
 │   │   │   ├── auto_fix.py      #   Post-edit diagnostics (ruff, pyright, py_compile)
 │   │   │   ├── auto_process.py  #   Scheduled inbox/task processing (UserPromptSubmit + PreCompact)
-│   │   │   ├── auto_watchdog.py #   Watchdog arming after dispatch
+│   │   │   ├── auto_watchdog.py #   Watchdog arming after dispatch (live; retirement pending — see below)
 │   │   │   ├── compact.py       #   Pre-compact memory archival
 │   │   │   ├── session_boot.py  #   Boot wrapper (main() CLI, not a hook — no handle())
 │   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction (PostToolUse, DPLAN-0276)
@@ -134,13 +134,17 @@ src/aipass/hooks/
 │   │       ├── stop_sound.py    #   Bell on session stop
 │   │       ├── telegram_response.py # Telegram reply delivery on Stop
 │   │       └── tool_sound.py    #   Announces tool name via TTS
-│   └── handlers/config/         # Config utilities
-│       ├── loader.py            # hooks.json discovery + validation
-│       ├── trust_registry.py    # Trusted-project registry (enroll/revoke/hash checks)
-│       └── diagnostics.py       # JSONL logging for hook execution
+│   ├── handlers/config/         # Config utilities (not hooks — no handle())
+│   │   ├── loader.py            #   hooks.json discovery + validation
+│   │   ├── trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
+│   │   └── diagnostics.py       #   JSONL logging for hook execution
+│   ├── handlers/cli/            # CLI utilities (not hooks — no handle())
+│   │   └── help_flags.py        #   Help-flag detection — did the caller ask, or instruct?
+│   └── handlers/json/           # JSON utilities (not hooks — no handle())
+│       └── json_handler.py      #   Auto-creating JSON handler for hooks data files
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1660 tests across 50 test files
+└── tests/                       # 1680 tests across 50 test files (1678 pass, 2 env-skipped)
 ```
 
 ## How It Works
@@ -172,7 +176,9 @@ prax's `SystemLogger` exposes only `info`/`warning`/`error`, so there is no DEBU
 
 ## Dynamic Dispatch
 
-Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — unshielded, `dead_code` scores 40% on this branch and reports 29 of 49 files unreferenced, which is this indirection and not rot. Every handler is verified wired in `hooks.json`; all fire in `engine.jsonl` except `feedback_pulse`, which is wired `enabled: false` here and therefore cannot be confirmed firing.
+Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 53 non-`__init__` files, and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
+
+Every handler is verified wired in `hooks.json` (31 entries, 30 distinct names). Firing evidence is a *narrow* window — `logs/engine.jsonl` keeps 2 generations at ~500 KB, which is minutes to tens of minutes of live traffic, so absence from it is not evidence of a dead wire. In a sampled ~24-minute window, 26 of the 30 names appear. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `notification_sound` — none of those events fired in the window. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
 
 ## Event Types
 
@@ -187,10 +193,29 @@ Handlers are called **dynamically at runtime** — the engine uses `importlib.im
 | SessionStart | cadence_reset | Cadence reset on new chat / clear |
 | PreCompact | compact, rollover, pre_compact_prep, auto_process | Memory archival + rollover + mechanical snapshot stamp + inbox/task processing |
 
-Two names in that table are not handler files in this branch: `user_message_relay` belongs to @skills
-(`skills/lib/telegram/apps/handlers/user_message_relay.py`) and rides the engine as a guest, and
+That table mixes handler filenames with `hooks.json` entry names, because three of the names are not
+handler files in this branch. `user_message_relay` belongs to @skills
+(`skills/lib/telegram/apps/handlers/user_message_relay.py`) and rides the engine as a guest.
 `presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
+`cadence_reset` is likewise an entry name — the handler file is `lifecycle/session_start.py`.
 `feedback_pulse` is wired but `enabled: false` in this repo, so it is listed and does not fire.
+
+Entry name and filename diverge for others too (`pre_edit_gate` → `security/edit_gate.py`,
+`tool_use_sound` → `notification/tool_sound.py`, `branch_prompt` → `prompt/branch_loader.py`,
+`identity_injector` → `prompt/identity.py`, `email_notification` → `notification/email.py`,
+`auto_fix_diagnostics` → `lifecycle/auto_fix.py`, `subagent_stop_gate` → `security/subagent_gate.py`,
+`notification_sound` → `notification/announce.py`, `pre_compact` → `lifecycle/compact.py`,
+`pre_compact_rollover` → `lifecycle/rollover.py`). **`.claude/provider_manifest.json` keys by the
+entry name, not the filename** — `claude.py UserPromptSubmit:branch_prompt`, never `:branch_loader`.
+Wire a new per-handler entry with the name as it appears in `hooks.json`.
+
+### auto_watchdog — retirement decided, not yet executed
+
+`auto_watchdog` is **live and enabled** in this repo and fires on every PostToolUse. Its retirement
+has been decided (its arming path is owner-only, which makes it a refusal for 17 of 18 citizens), but
+it is gated on a Patrick-present ceremony: both `hooks.json` entries set `enabled: false`, then
+`aipass trust` re-enrol, then the file rename. Until that runs, the handler stays as documented above.
+Do not disable or rename it out-of-band — an un-re-enrolled config edit takes *every* hook dark.
 
 ## Git Gate
 
@@ -287,7 +312,7 @@ The sandbox module (`apps/modules/sandbox.py`) provides the kernel-level filesys
 
 ### Policy Rules
 
-- **Every agent**: own branch tree + /tmp + shared channels (system_logs, .ai_central, memory_pool, AIPASS_REGISTRY.json, flow_json) + sibling mail/dashboard carve-ins + ~/.claude/projects/
+- **Every agent**: own branch tree + the system temp dir (`tempfile.gettempdir()`, plus `$TMPDIR` when it differs) + shared channels (system_logs, .ai_central, memory_pool, AIPASS_REGISTRY.json, flow_json) + sibling `.ai_mail.local/` and `DASHBOARD.local.json` carve-ins + its **own** `~/.claude/projects/<encoded-cwd>/` (added only if that directory already exists — not the whole `projects/` tree)
 - **devpulse only**: .git writable (the only committer)
 - **All other agents**: .git read-only, sibling source trees read-only
 - **Deny**: broker_secret (deny_read + deny_write for all roles)
@@ -300,8 +325,8 @@ The Node helper (`_srt_resolve.mjs`) resolves the globally-installed srt library
 
 @ai_mail's `dispatch_monitor` wires the launch seam with `build_policy` + `build_srt_config` +
 `resolve_bwrap_command` — **not** `sandbox_launch`, which this section previously claimed. Corrected
-2026-08-13 against `ai_mail/apps/handlers/dispatch/dispatch_monitor.py:66`, whose call order is pinned
-by `ai_mail/tests/test_dispatch_monitor.py:1755`. An earlier claim here that the @drone broker
+2026-08-13 against `ai_mail/apps/handlers/dispatch/dispatch_monitor.py:69`, whose call order is pinned
+by `ai_mail/tests/test_dispatch_monitor.py:1759`. An earlier claim here that the @drone broker
 validates sandbox policy before agent launch could not be substantiated — the broker is a privileged
 delete daemon and no policy validation was found in its tree — so it has been removed rather than
 restated.
@@ -312,15 +337,15 @@ restated.
 
 | Branch | What for |
 |---|---|
-| prax | Logging (system_logger for prax monitor visibility) — 49 imports across `apps/` |
-| cli | Rich console rendering for every command surface — 16 imports across `apps/` |
+| prax | Logging (system_logger for prax monitor visibility) — 50 imports across `apps/` |
+| cli | Rich console rendering for every command surface — 17 imports across `apps/` |
 
 ### Provides To
 
 - All branches via hook dispatch — every Claude Code session routes through the engine
 - @ai_mail dispatch_monitor — `build_policy` + `build_srt_config` + `resolve_bwrap_command` at the agent launch boundary
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-25*
 
 ---
 

@@ -34,13 +34,21 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_tab_renderer(monkeypatch):
-    """Drop cached module so each test gets a fresh import."""
-    for mod_name in list(sys.modules):
-        if "tab_renderer" in mod_name:
-            sys.modules.pop(mod_name, None)
-    # Also clear json sub-modules that conftest replaces with MagicMock
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
+    """Drop cached module so each test gets a fresh import.
+
+    A bare ``sys.modules.pop`` here is one-way: the eviction outlives the
+    test and every later test in the same process inherits it. That is how
+    two receipt tests in test_trinity_standard.py went red on one worker,
+    on one interpreter, on one run, on a commit that changed version
+    strings only -- this file evicted the real handlers.json package, and
+    the next lazy submodule import landed on conftest's stand-in instead.
+    ``monkeypatch.delitem`` gives the same fresh import and puts the real
+    module back at teardown, so the eviction cannot escape the test.
+    """
+    stale = [name for name in sys.modules if "tab_renderer" in name]
+    stale += ["aipass.memory.apps.handlers.json", "aipass.memory.apps.handlers.json.json_handler"]
+    for name in stale:
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 
@@ -195,8 +203,11 @@ class TestRenderTabTodos:
         assert "rollover OFF" in tab
         assert "cap ~10 entries" in tab
         assert "task ≤15" in tab  # ≤150
-        assert "RULE: DELETE" in tab
-        assert "BAU" in tab
+        # The RULE sentence moved to LOCAL.template.json on 2026-08-25: the tab
+        # carries numbers, the template carries prose, and compose_meta joins
+        # them. Pinned there by test_trinity_standard.py.
+        assert "RULE: DELETE" not in tab
+        assert tab.endswith("⟧")
 
     def test_todos_ignores_per_branch_rollover(self):
         """Todos are always rollover OFF regardless of per_branch config."""

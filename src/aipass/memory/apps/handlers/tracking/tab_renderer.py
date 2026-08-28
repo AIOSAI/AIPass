@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-08-26
 # =============================================
 
 """
@@ -23,25 +23,94 @@ Independence:
     and memory_files for safe I/O.  No service or module dependencies.
 """
 
+import json
+from pathlib import Path
 from typing import Any, Dict
 
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.json import entry_limits
 
 logger = get_system_logger()
 
-_CORRECTED_USAGE_LOCAL = (
-    "Automated file — add entries within your sections, newest on top. "
-    "Rollover auto-archives sessions/key_learnings (+ observations.json) to @memory; "
-    "todos[] are OPERATIONAL and NEVER rolled — prune done ones by hand at /prep. "
-    "Limits live in @memory’s memory.config.json."
-)
-_CORRECTED_USAGE_OBS = (
-    "Automated file — add entries within your sections, newest on top. "
-    "Rollover auto-archives the oldest observations to @memory. "
-    "Limits live in @memory’s memory.config.json."
-)
+# =============================================================================
+# TEMPLATE TEXT — the gold source, read never copied
+# =============================================================================
+
+# The templates own every word of prose in a memory file; this module owns the
+# numbers. It used to own both: two `_CORRECTED_USAGE_*` constants held their
+# own copy of the `_usage` sentence and overwrote every live file from them, so
+# editing the gold source changed what new branches were born with and nothing
+# else. A second copy of a text is a second source of truth, which is the exact
+# disease the one-source rule exists to cure — the constants are retired and
+# the text is read from the template at render time.
+
+_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+
+_TEMPLATE_FILES = {
+    "local": "LOCAL.template.json",
+    "observations": "OBSERVATIONS.template.json",
+}
+
+# Which template carries the semantics sentence for each section, and under
+# which key it lives there.
+_SECTION_TEMPLATE = {
+    "todos": ("local", "todos_meta", "{{TODOS_META}}"),
+    "key_learnings": ("local", "key_learnings_meta", "{{KEY_LEARNINGS_META}}"),
+    "sessions": ("local", "sessions_meta", "{{SESSIONS_META}}"),
+    "observations": ("observations", "observations_meta", "{{OBSERVATIONS_META}}"),
+}
+
+
+def _load_template(file_key: str) -> dict:
+    """Read a gold-source template. Raises rather than inventing text.
+
+    There is deliberately no fallback string here. A fallback IS the constant
+    this build retired — it would let a missing or unreadable template pass
+    silently and stamp prose nobody agreed to across the fleet. Refusing to
+    write is the safe failure; writing a guess is not.
+    """
+    name = _TEMPLATE_FILES.get(file_key)
+    if name is None:
+        raise ValueError(f"Unknown template key: {file_key}")
+    path = _TEMPLATES_DIR / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def template_usage(file_key: str) -> str:
+    """Return ``document_metadata._usage`` from the gold-source template."""
+    usage = _load_template(file_key).get("document_metadata", {}).get("_usage")
+    if not isinstance(usage, str):
+        raise ValueError(f"{_TEMPLATE_FILES[file_key]}: document_metadata._usage is missing or not a string")
+    return usage
+
+
+def template_semantics(section_name: str) -> str:
+    """Return the one-sentence meaning that rides after a section's tab.
+
+    The template stores the line as ``{{SECTION_META}} <sentence>``; the
+    placeholder is the slot the rendered caps tab fills, so the sentence is
+    what remains once it is removed.
+    """
+    entry = _SECTION_TEMPLATE.get(section_name)
+    if entry is None:
+        raise ValueError(f"Unknown section: {section_name}")
+    file_key, meta_key, placeholder = entry
+    line = _load_template(file_key).get(meta_key)
+    if not isinstance(line, str):
+        raise ValueError(f"{_TEMPLATE_FILES[file_key]}: {meta_key} is missing or not a string")
+    return line.replace(placeholder, "").strip()
+
+
+def compose_meta(section_name: str, rollover_cfg: dict, entry_limits_cfg: dict, branch_name: str) -> str:
+    """Render a full ``*_meta`` value: machine tab, then template semantics.
+
+    Numbers from config, prose from the template, joined here and nowhere
+    else — so a refresh can never strip the meaning off a line it re-renders.
+    """
+    tab = render_tab(section_name, rollover_cfg, entry_limits_cfg, branch_name)
+    return f"{tab} {template_semantics(section_name)}"
 
 
 # =============================================================================
@@ -101,23 +170,28 @@ def render_tab(
         branch_name: Branch name (lowercase) for per-branch overrides.
 
     Returns:
-        The rendered tab string (e.g. ``⟦ rollover ON ... ⟧``).
+        The rendered tab string (e.g. ``⟦ rollover ON ... ⟧``) — the ⟦⟧ tab
+        alone, carrying live numbers and no prose. Use :func:`compose_meta`
+        for the full ``*_meta`` value.
     """
     # --- Resolve entry-limits for this section --------------------------------
-    entry_types = entry_limits_cfg.get("entry_types", {})
+    # Through the SAME resolver the write gate uses. Reading `entry_types` off
+    # the config directly ignored `entry_limits.per_branch`, so an overridden
+    # cap would have been enforced but never printed — the tab instructing an
+    # agent to break the rule measured against it (@seedgo, 2026-08-26). Note
+    # `rollover.per_branch` was honoured below all along; the asymmetry is what
+    # marked this an oversight rather than a decision.
+    entry_types = entry_limits.resolve_entry_types(entry_limits_cfg, branch_name)
     section_limits = entry_types.get(section_name, {})
     max_chars = section_limits.get("max_chars", 300)
     field = section_limits.get("field", "value")
 
     # --- Todos are special: rollover OFF, static shape ------------------------
+    # Numbers only. The RULE sentence that used to be appended here is prose,
+    # and prose is the template's — it now rides after the placeholder in
+    # LOCAL.template.json where every other section's semantics live.
     if section_name == "todos":
-        return (
-            f"⟦ rollover OFF — operational, never trimmed · "
-            f"cap ~10 entries · task ≤{max_chars} chars ⟧ "
-            f"RULE: DELETE each todo when done (never leave status:done) "
-            f"+ reconcile on load; proof goes in the session entry, "
-            f"not the todo. Add freely — BAU."
-        )
+        return f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars ⟧"
 
     # --- Rollover sections: ask the ONE resolver, never re-derive --------------
     # This banner is written INTO the agent's own memory file, where it reads as
@@ -155,27 +229,10 @@ def _refresh_local(branch_name, local_path, rollover_cfg, entry_limits_cfg):
         return False, None  # file unreadable, skip silently
 
     meta = data.get("document_metadata", {})
-    if meta.get("_usage") != _CORRECTED_USAGE_LOCAL:
-        meta["_usage"] = _CORRECTED_USAGE_LOCAL
+    meta["_usage"] = template_usage("local")
 
-    data["todos_meta"] = render_tab(
-        "todos",
-        rollover_cfg,
-        entry_limits_cfg,
-        branch_name,
-    )
-    data["key_learnings_meta"] = render_tab(
-        "key_learnings",
-        rollover_cfg,
-        entry_limits_cfg,
-        branch_name,
-    )
-    data["sessions_meta"] = render_tab(
-        "sessions",
-        rollover_cfg,
-        entry_limits_cfg,
-        branch_name,
-    )
+    for section in ("todos", "key_learnings", "sessions"):
+        data[f"{section}_meta"] = compose_meta(section, rollover_cfg, entry_limits_cfg, branch_name)
     data = _reorder_keys(data, _LOCAL_KEY_ORDER)
 
     if write_memory_file_simple(local_path, data):
@@ -195,15 +252,9 @@ def _refresh_observations(branch_name, obs_path, rollover_cfg, entry_limits_cfg)
         return False, None  # file unreadable, skip silently
 
     meta = data.get("document_metadata", {})
-    if meta.get("_usage") != _CORRECTED_USAGE_OBS:
-        meta["_usage"] = _CORRECTED_USAGE_OBS
+    meta["_usage"] = template_usage("observations")
 
-    data["observations_meta"] = render_tab(
-        "observations",
-        rollover_cfg,
-        entry_limits_cfg,
-        branch_name,
-    )
+    data["observations_meta"] = compose_meta("observations", rollover_cfg, entry_limits_cfg, branch_name)
     data = _reorder_keys(data, _OBSERVATIONS_KEY_ORDER)
 
     if write_memory_file_simple(obs_path, data):
@@ -216,12 +267,24 @@ def _refresh_observations(branch_name, obs_path, rollover_cfg, entry_limits_cfg)
 # =============================================================================
 
 
-def refresh_all_tabs() -> dict:
-    """Render and write state-tabs to all branch .trinity files.
+def refresh_all_tabs(branches: list[str] | None = None) -> dict:
+    """Render and write state-tabs to branch .trinity files.
 
-    Walks the registry, reads each branch's memory files, computes tab
-    strings from config, injects them as ``*_meta`` keys, and writes back
-    with correct key ordering.
+    Reads each branch's memory files, computes tab strings from config,
+    injects them as ``*_meta`` keys, and writes back with correct key
+    ordering.
+
+    SCOPE IS AN ARGUMENT, and callers should pass one. Unscoped, this walks
+    the whole registry — which is how one citizen's PreCompact hook rolling
+    ONE overdue file rewrote all 38 memory files fleet-wide at 23:37 on
+    2026-08-25, delivering a just-shipped renderer change to every branch
+    ahead of any gated review. Rollover now names the branch it rolled, so a
+    per-branch maintenance verb has a per-branch tail.
+
+    Args:
+        branches: Branch names to refresh (case-insensitive). None means the
+            whole registry — reserve that for lanes that genuinely are
+            fleet-wide, like the trinity push.
 
     Returns:
         Dict with success status and counts.
@@ -238,8 +301,8 @@ def refresh_all_tabs() -> dict:
     rollover_cfg = config.get("rollover", {})
     entry_limits_cfg = config.get("entry_limits", {})
 
-    branches = _read_registry()
-    if not branches:
+    registry = _read_registry()
+    if not registry:
         return {
             "success": True,
             "updated": 0,
@@ -247,11 +310,22 @@ def refresh_all_tabs() -> dict:
             "message": "No branches in registry",
         }
 
+    if branches is not None:
+        wanted = {name.lstrip("@").lower() for name in branches}
+        registry = [item for item in registry if item.get("name", "").lower() in wanted]
+        if not registry:
+            return {
+                "success": True,
+                "updated": 0,
+                "skipped": 0,
+                "message": f"No registry match for {', '.join(sorted(wanted))}",
+            }
+
     updated = 0
     skipped = 0
     errors: list[str] = []
 
-    for branch in branches:
+    for branch in registry:
         branch_name = branch.get("name", "UNKNOWN").lower()
         for mem_type in ("local", "observations"):
             u, s, e = _refresh_one_file(
@@ -268,7 +342,7 @@ def refresh_all_tabs() -> dict:
 
     json_handler.log_operation(
         "refresh_all_tabs",
-        {"updated": updated, "skipped": skipped, "errors": len(errors)},
+        {"updated": updated, "skipped": skipped, "errors": len(errors), "scoped": branches is not None},
         module_name="tab_renderer",
     )
     logger.info(
@@ -329,7 +403,26 @@ def _refresh_one_file(branch, branch_name, mem_type, rollover_cfg, entry_limits_
         return 0, 0, [f"{branch_name}/{mem_type}.json: {e}"]
 
     if ok:
+        _bump_receipt(file_path)
         return 1, 0, []
     if err:
         return 0, 0, [err]
     return 0, 1, []
+
+
+def _bump_receipt(file_path) -> None:
+    """Record the re-render on the branch's receipt, if it has one.
+
+    A missing receipt is not an error here and is deliberately not created:
+    this pass knows the NUMBERS it just rendered, not which template version
+    the files were built from. Only a push, a birth, or a reset knows that,
+    and writing a guess into the receipt would defeat its one job.
+    """
+    from aipass.memory.apps.handlers.templates import receipt
+
+    trinity_dir = file_path.parent
+    if trinity_dir.name != ".trinity":
+        return
+    result = receipt.bump_config_rendered(trinity_dir)
+    if not result["success"]:
+        logger.debug(f"[tab_renderer] receipt not bumped for {trinity_dir}: {result['error']}")

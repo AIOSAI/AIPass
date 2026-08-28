@@ -21,7 +21,6 @@ and left at its index while the rows beside it are still ordered.
 import json
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
@@ -176,20 +175,20 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
                 metadata["limits"][key] = val
         changes.append("Merged root 'limits' into document_metadata.limits")
 
-    # Legacy fix: move root 'status' into document_metadata.status
+    # Legacy fix: drop a root-level 'status' block.
+    #
+    # It is not relocated into document_metadata any more. Patrick's ruling of
+    # 2026-08-25 deleted status.health from the standard outright: it stored a
+    # DERIVABLE fact — a second source of truth waiting to go stale, the exact
+    # disease this standard cures — and it read "healthy" hardcoded from 2025-11
+    # onwards without a single consumer noticing. Health is computed by the
+    # checker at run time and never stamped into a memory file.
+    #
+    # The template-conformance pass below strips whatever `status` remains in
+    # document_metadata, because the gold-source templates no longer declare one.
     if "status" in data:
         data.pop("status")
-        if "status" not in metadata:
-            metadata["status"] = {}
         changes.append("Removed redundant root 'status'")
-
-    # Ensure status has required fields
-    if "status" not in metadata:
-        metadata["status"] = {}
-
-    if "last_health_check" not in metadata["status"]:
-        metadata["status"]["last_health_check"] = datetime.now().strftime("%Y-%m-%d")
-        changes.append("Added last_health_check")
 
     # Template-conformance: strip orphan keys at every level
     template = _load_template(file_path)

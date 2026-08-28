@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.4.0
+# Version: 1.6.0
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-19
+# Modified: 2026-08-27
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -163,15 +163,190 @@ def _resolve_after_text(tool_name: str, tool_input: dict, current_text: str) -> 
     return None
 
 
+def _entries_of(container: Any, kind: str) -> list[tuple[str, Any]]:
+    """Normalise a list- or dict-shaped container to (key, entry) pairs."""
+    if kind == "list" and isinstance(container, list):
+        return [(str(i), item) for i, item in enumerate(container)]
+    if kind == "dict" and isinstance(container, dict):
+        return [(str(k), v) for k, v in container.items()]
+    return []
+
+
+_RESHAPE_ONLY_FALLBACK: tuple[str, ...] = ("todos",)
+
+
+def _reshape_only_sections(el: Any) -> tuple[str, ...]:
+    """The containers where on-disk drift may legitimately persist.
+
+    Read off @memory's already-imported ``entry_limits`` at call time rather
+    than restated here. Two lists of "containers we may not prune" would
+    disagree within a release, and this gate and @memory's push must exempt the
+    same set or one of them is wrong about the other.
+
+    This is not a new dependency — ``_check_trinity_change`` already imports the
+    module for ``load_entry_limits`` and ``changed_entries``; this reads an
+    attribute off the object it already holds.
+
+    On an @memory too old to publish the constant, fall back to todos and SAY
+    SO. The alternative default — exempting nothing — would refuse every write
+    to a file carrying one drifted todo, bricking the branch the exemption
+    exists to protect.
+    """
+    sections = getattr(el, "RESHAPE_ONLY_SECTIONS", None)
+    if isinstance(sections, (tuple, list)):
+        return tuple(sections)
+    logger.warning(
+        "[HOOKS] edit_gate: entry_limits publishes no RESHAPE_ONLY_SECTIONS — falling back to %s",
+        _RESHAPE_ONLY_FALLBACK,
+    )
+    return _RESHAPE_ONLY_FALLBACK
+
+
+def _missing_field_violations(before: dict, after: dict, limits: dict, el: Any) -> list[dict]:
+    """Refuse entries whose CANONICAL field is absent (DPLAN-0318 bug B3).
+
+    The cap check reads one field name per entry type, taken from @memory's
+    memory.config.json ``entry_limits`` (file/container/field). A renamed field
+    — ``learning`` where the config says ``value``, the shape ai_mail, api and
+    this branch carried — leaves the extractor with no such key. It answered
+    ``""``, the entry measured as zero characters, and three branches ran 2.7x
+    over cap for the two months AFTER the gate landed while it reported
+    compliance. ``""`` and "cannot read this" are different answers; a field the
+    gate cannot find is named, not measured.
+
+    The on-disk exemption is now TODOS ONLY, matching @memory's narrowing. It
+    existed so a drifted fleet would not be bricked mid-migration; the fleet
+    converged, so everywhere else it protects nothing real and hides everything
+    new — a drifted entry written straight to disk would read as "already
+    there" on the next write and never surface again.
+
+    todos keep it because no machine may prune them: the push is forbidden to
+    archive open work, so only the branch's own agent can cure a drifted todo,
+    and refusing every write until it does would brick the rollover that
+    preserves everything else. Even there the exemption covers only what is
+    ALREADY ON DISK, by raw-entry identity — carrying one drifted todo must not
+    license adding ten more in the same shape.
+    """
+    exempt_sections = _reshape_only_sections(el)
+    hits: list[dict] = []
+    for type_name, type_def in limits.get("entry_types", {}).items():
+        if not isinstance(type_def, dict):
+            continue
+        container_key = type_def.get("container", "")
+        kind = type_def.get("kind", "dict")
+        field = type_def.get("field", "value")
+
+        after_container = after.get(container_key)
+        if after_container is None:
+            continue
+
+        exempt = container_key in exempt_sections
+        legacy = [entry for _, entry in _entries_of(before.get(container_key), kind)] if exempt else []
+
+        for key, entry in _entries_of(after_container, kind):
+            # Plain-string entries carry their own text — measurable, and
+            # @memory's extractor already handles them.
+            if not isinstance(entry, dict) or field in entry:
+                continue
+            if exempt and entry in legacy:
+                continue  # Already on disk in a container nothing may prune
+            hits.append(
+                {
+                    "entry_type": type_name,
+                    "container": container_key,
+                    "key": key,
+                    "length": 0,
+                    "cap": type_def.get("max_chars", 0),
+                    "over_by": 0,
+                    "reason": "missing_field",
+                    "found_type": "missing",
+                    "field": field,
+                }
+            )
+    return hits
+
+
+def _format_violation(v: dict) -> str:
+    """Render one violation line.
+
+    A refusal that cannot be measured must not print as a measurement. The
+    unmeasurable and missing-field species carry zeros in length/cap/over_by to
+    keep @memory's published six-key contract, so rendering them through the
+    over-cap format produces "0/300 chars (+0)" — which reads as a bug in the
+    gate rather than as the named refusal it is.
+    """
+    reason = v.get("reason")
+    if reason == "missing_field":
+        return (
+            f"  {v['entry_type']} [{v['key']}]: no '{v.get('field', '?')}' field — "
+            f"cannot be measured against its {v['cap']}-char cap. "
+            f"Rename the field to '{v.get('field', '?')}' (the canonical name)."
+        )
+    if reason:
+        return (
+            f"  {v['entry_type']} [{v['key']}]: unmeasurable — expected a string, "
+            f"found {v.get('found_type', 'unknown')}. Cap is {v['cap']} chars."
+        )
+    return f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})"
+
+
+def _log_violation(v: dict) -> None:
+    """Warn-mode log line — carries the same cause the block would have named."""
+    if v.get("reason"):
+        logger.warning(
+            "[HOOKS] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
+            v["entry_type"],
+            v["key"],
+            v["reason"],
+            v.get("field", v.get("found_type", "?")),
+            v["cap"],
+        )
+        return
+    logger.warning(
+        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d) — warn only",
+        v["entry_type"],
+        v["key"],
+        v["length"],
+        v["cap"],
+        v["over_by"],
+    )
+
+
+def _dedupe_violations(violations: list[dict]) -> list[dict]:
+    """Collapse violations naming the same entry, first record wins.
+
+    Two checkers now find the missing-field species: @memory's extractor (1.4.0,
+    which stopped answering ``""`` for an absent key) and this gate's own
+    ``_missing_field_violations``. The overlap is deliberate — a gate that
+    outsources ALL of its measurement inherits its supplier's blind spots
+    silently, which is how the renamed-field dodge survived two months — but one
+    defect must still read as one defect. Two identical lines in a refusal send
+    the agent hunting for a second problem that does not exist.
+
+    Keyed on (entry_type, container, key): the container matters because two
+    entry types both index their first entry as ``"0"``.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[dict] = []
+    for v in violations:
+        ident = (v.get("entry_type", ""), v.get("container", ""), v.get("key", ""))
+        if ident in seen:
+            continue
+        seen.add(ident)
+        unique.append(v)
+    return unique
+
+
 def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict | None:
     """Diff changed entries and return block dict or None (allow)."""
     over = el.changed_entries(before, after, limits)
+    over = _dedupe_violations(over + _missing_field_violations(before, after, limits, el))
     if not over:
         return None
     if limits.get("enforce"):
-        lines = ["Over-limit .trinity entries (shorten before saving):"]
+        lines = ["Unwritable .trinity entries (fix before saving):"]
         for v in over:
-            lines.append(f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})")
+            lines.append(_format_violation(v))
         # Say what this gate can actually see. It is a PreToolUse hook on Edit/Write,
         # so a write made through Bash (python -c, heredoc, sed) never reaches it and
         # is not checked. Three branches have drifted over cap through that lane —
@@ -184,14 +359,7 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
             "sound": "edit gate",
         }
     for v in over:
-        logger.warning(
-            "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d) — warn only",
-            v["entry_type"],
-            v["key"],
-            v["length"],
-            v["cap"],
-            v["over_by"],
-        )
+        _log_violation(v)
     return None
 
 

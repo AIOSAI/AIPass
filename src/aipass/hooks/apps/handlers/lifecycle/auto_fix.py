@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-06-09
+# Modified: 2026-08-27
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -32,7 +33,17 @@ PYTHON_PATTERNS = {
         "message": "Return None for error states, not error_msg string",
     },
     "open_no_encoding": {
+        # Word-boundary matched: a bare substring test reads the `open(` inside
+        # `subprocess.Popen(` as an open() call. @drone reported it firing on
+        # every edit to a file that has a Popen and no open() at all — six
+        # times across six unrelated edits, with no fix available on their side
+        # (Popen takes no encoding in byte mode) and an advisory that says "do
+        # not skip or defer". A check that cries wolf on correct code gets
+        # ignored on the day it is right.
+        # \b before `open` also excludes fdopen/popen/reopen, while `.` is a
+        # non-word char so io.open( and os.open( still match.
         "pattern": "open(",
+        "word_boundary": True,
         "requires_missing": "encoding=",
         "message": "open() without encoding='utf-8'",
     },
@@ -122,8 +133,14 @@ def _check_patterns(file_path: str) -> list[str]:
             message = check["message"]
             requires_missing = check.get("requires_missing")
 
+            present = (
+                re.search(rf"\b{re.escape(pattern)}", content) is not None
+                if check.get("word_boundary")
+                else pattern in content
+            )
+
             if requires_missing:
-                if pattern in content and requires_missing not in content:
+                if present and requires_missing not in content:
                     errors.append(f"PATTERN: {message}")
                 continue
 

@@ -34,12 +34,20 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_modules(monkeypatch):
-    """Drop cached modules so each test gets fresh imports."""
-    sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.entry_limits", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
-    sys.modules.pop("aipass.memory.apps.handlers.json.lint_handler", None)
+    """Drop cached modules so each test gets fresh imports.
+
+    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
+    bare pop is one-way and the eviction outlives the test, which is how two
+    receipt tests went red on a single xdist worker on a single run.
+    """
+    for name in (
+        "aipass.memory.apps.handlers.json",
+        "aipass.memory.apps.handlers.json.json_handler",
+        "aipass.memory.apps.handlers.json.entry_limits",
+        "aipass.memory.apps.handlers.json.memory_files",
+        "aipass.memory.apps.handlers.json.lint_handler",
+    ):
+        monkeypatch.delitem(sys.modules, name, raising=False)
     yield
 
 
@@ -176,15 +184,105 @@ class TestChangedEntryOverCap:
 
 
 class TestUnchangedLegacyFatEntry:
-    """THE KEY TEST: unchanged fat entries must NOT be flagged (rollover-safe)."""
+    """THE KEY TEST, rewritten 2026-08-27 when the clause was narrowed.
 
-    def test_unchanged_500char_key_learning_not_flagged(self) -> None:
+    "Unchanged and over cap passes" was written for a fleet full of legacy
+    drift. The trinity push cured that fleet-wide, so for an ARCHIVABLE
+    container the clause now hides new drift rather than protecting old:
+    an over-cap entry written straight to disk would read as "already there"
+    on every subsequent write and never surface. Only `todos` keep the
+    exemption — see TestReshapeOnlyKeepsTheExemption.
+    """
+
+    def test_unchanged_500char_key_learning_is_now_flagged(self) -> None:
         mod = _get_entry_limits()
         fat_text = "z" * 500
         before = {"key_learnings": {"legacy": fat_text}}
         after = {"key_learnings": {"legacy": fat_text}}
 
         result = mod.changed_entries(before, after, _KEY_LEARNINGS_ONLY)
+
+        assert len(result) == 1
+        assert result[0]["entry_type"] == "key_learnings"
+
+
+class TestReshapeOnlyKeepsTheExemption:
+    """`todos` is the one container where legacy drift legitimately persists.
+
+    The trinity push is forbidden to archive open work (1.1.0), so nothing but
+    the branch's own agent can ever cure a drifted todo. Refusing every write
+    to that file would brick its rollover — the debt preserved by destroying
+    the lane that preserves everything else.
+    """
+
+    _TODOS_ONLY = {
+        "enabled": True,
+        "enforce": True,
+        "entry_types": {"todos": {"container": "todos", "field": "task", "max_chars": 150, "kind": "list"}},
+    }
+
+    def test_an_unchanged_over_cap_todo_is_not_flagged(self) -> None:
+        mod = _get_entry_limits()
+        fat = {"number": 1, "date": "2026-08-27", "task": "z" * 500, "priority": "high", "status": "open"}
+
+        result = mod.changed_entries({"todos": [fat]}, {"todos": [dict(fat)]}, self._TODOS_ONLY)
+
+        assert result == []
+
+    def test_a_new_over_cap_todo_is_still_flagged(self) -> None:
+        mod = _get_entry_limits()
+        fresh = {"number": 2, "date": "2026-08-27", "task": "y" * 500, "priority": "high", "status": "open"}
+
+        result = mod.changed_entries({"todos": []}, {"todos": [fresh]}, self._TODOS_ONLY)
+
+        assert len(result) == 1
+        assert result[0]["entry_type"] == "todos"
+
+    _TODOS_AS_DICT = {
+        "enabled": True,
+        "enforce": True,
+        "entry_types": {"todos": {"container": "todos", "field": "task", "max_chars": 150, "kind": "dict"}},
+    }
+
+    def test_editing_a_drifted_todo_into_another_drifted_shape_is_caught(self) -> None:
+        """@hooks' M5, and it SURVIVED my set until they named it (2026-08-27).
+
+        The exemption is for the entry that is ALREADY ON DISK — not for "the
+        canonical field is missing on both sides". Both values here are
+        unmeasurable (a list where a string belongs) and they are DIFFERENT
+        values under the same key, so this write really did change the entry
+        and must be reported. Keying identity on the field name instead of the
+        raw value reads the second as untouched and exempts a drift this write
+        introduced: one drifted todo would license every future edit of it.
+
+        A NEW key never reaches this comparison at all (`key_known` is False
+        and the entry is checked outright), which is why the obvious two-key
+        version of this test does NOT bite the mutant — the surviving line is
+        only reachable when the key exists and the value moved.
+
+        HONEST ABOUT THE COVERAGE: this exercises the DICT container path,
+        which no shipped entry type reaches — all four are `kind: list` since
+        the grandfather clause narrowed to todos, so `_is_unchanged`'s exempt
+        branch is currently unreachable in production. That is the other half
+        of why the mutation survived. Pinned at the contract rather than end
+        to end, because the branch is one config edit from live and a dead
+        branch that is also unpinned comes back wrong.
+        """
+        mod = _get_entry_limits()
+        on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+        written = {"todos": {"a": {"task": ["a completely different malformed todo"]}}}
+
+        result = mod.changed_entries(on_disk, written, self._TODOS_AS_DICT)
+
+        assert [hit["key"] for hit in result] == ["a"], "a drifted todo exempted a different value under its own key"
+
+    def test_the_same_drifted_todo_is_still_exempt_in_the_dict_path(self) -> None:
+        """The other half of the contract: identical raw value, still skipped."""
+        mod = _get_entry_limits()
+        on_disk = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+        rewritten = {"todos": {"a": {"task": ["chunk one", "chunk two"]}}}
+
+        result = mod.changed_entries(on_disk, rewritten, self._TODOS_AS_DICT)
 
         assert result == []
 
@@ -257,7 +355,8 @@ class TestListContainer:
         assert result[0]["key"] == "1"
         assert result[0]["over_by"] == 100
 
-    def test_existing_unchanged_items_not_flagged(self) -> None:
+    def test_existing_unchanged_items_are_now_flagged(self) -> None:
+        """Post-push, "unchanged" means "written and not yet caught"."""
         mod = _get_entry_limits()
         fat_item = {"session_number": 1, "summary": "s" * 400}
         before = {"sessions": [fat_item]}
@@ -265,7 +364,7 @@ class TestListContainer:
 
         result = mod.changed_entries(before, after, _SESSIONS_ONLY)
 
-        assert result == []
+        assert len(result) == 1
 
 
 # ===========================================================================
@@ -276,8 +375,13 @@ class TestListContainer:
 class TestListPrependIdentityMatch:
     """Prepending a new entry must NOT re-flag shifted legacy over-cap entries."""
 
-    def test_prepend_with_legacy_overcap_entries_allowed(self) -> None:
-        """Full container of over-cap legacy entries + one new in-cap prepend → no violations."""
+    def test_prepend_reports_the_legacy_entries_it_shifted_past(self) -> None:
+        """The prepend itself is clean; the five over-cap entries beneath are not.
+
+        Before the 2026-08-27 narrowing this returned nothing, and that silence
+        was the point of the clause. Now the write is told exactly which five
+        entries are over cap — the new one is not among them.
+        """
         mod = _get_entry_limits()
         legacy = [{"session_number": i, "summary": "s" * 400} for i in range(5, 0, -1)]
         before = {"sessions": legacy}
@@ -286,7 +390,9 @@ class TestListPrependIdentityMatch:
 
         result = mod.changed_entries(before, after, _SESSIONS_ONLY)
 
-        assert result == []
+        assert len(result) == 5
+        assert all(hit["entry_type"] == "sessions" for hit in result)
+        assert "0" not in {hit["key"] for hit in result}
 
     def test_edited_existing_entry_text_still_caught(self) -> None:
         """Changing an existing entry's text to over-cap is still flagged."""
@@ -418,7 +524,7 @@ class TestEnforceModeRejects:
 class TestEnforceAllowsUnchangedLegacy:
     """THE CRITICAL ROLLOVER-SAFE TEST: enforce mode allows writing back same fat data."""
 
-    def test_enforce_allows_same_data_with_fat_entries(
+    def test_enforce_now_refuses_same_data_with_fat_entries(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -437,7 +543,9 @@ class TestEnforceAllowsUnchangedLegacy:
 
         result = mem_mod.write_memory_file(local_path, fat_data)
 
-        assert result["success"] is True
+        # Narrowed 2026-08-27: key_learnings is archivable, so an over-cap
+        # entry is refused even when the write did not create it.
+        assert result["success"] is False
         on_disk = json.loads(local_path.read_text(encoding="utf-8"))
         assert on_disk["key_learnings"]["legacy"] == "z" * 500
 
