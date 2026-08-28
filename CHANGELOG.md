@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-08-28] — residency convergence: the fleet definition becomes a rule (DPLAN-0319 wave 3) · v2.7.22
 
 **Residency convergence — the fleet definition becomes a rule, not a list
 (DPLAN-0319 wave 3, FPLAN-0454)** — four consumer lanes and one gateway, each
