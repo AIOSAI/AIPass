@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1340 pass across 46 files (1322 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1350 pass across 46 files (1332 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -628,20 +628,36 @@ four residents in four separate admin sends, because `@all` could not carry it.
 An announcement every citizen should hear is exactly what the asymmetry was
 built for.
 
-- **The resident list is a NAMED CONSTANT, never a glob** (`RESIDENT_REGISTRIES`
-  in `registry/read.py`, read by `get_resident_branches()`). `projects/` also
-  holds `marketstand(on _hold)` and `speakeasy(on_hold)`, and marketstand's
-  registry still marks its branch `active` while its directory name says parked —
-  a glob would broadcast into a held project on the strength of a stale field.
+- **Residency is DECLARED, not listed** (2026-08-28, DPLAN-0319 wave 3).
+  `get_resident_branches()` no longer carries a hardcoded four-name tuple. It
+  discovers `projects/<name>/*_REGISTRY.json` one level down, then reads
+  `citizenship.residency` from each listed branch's own passport. Both keys are
+  required: the registry must say `active` **and** the passport must say
+  `resident`. That asymmetry is the point — a passport can never *add* scope (a
+  self-declared resident that no registry lists is unreachable by construction),
+  and a stale registry field can never *carry* one (marketstand's registry still
+  says `active`; its passport does not say `resident`, so it is refused and named
+  at error level).
+- **Two exclusion layers, each load-bearing alone.** `pathlib` globs match hidden
+  directories — unlike a shell — so `.archive` needs an *explicit* dot filter, and
+  the one-level depth rule is separate from it. On the live tree they overlap
+  (`projects/.archive/marketstand(on _hold)/` is caught by both), which is exactly
+  how a single-layer regression hides. Each layer therefore has a fixture that
+  only *it* refuses.
 - **Broadcast scope and resolution scope are different questions.**
   `get_project_tree_branches()` still globs, and should: a held project's citizen
   legitimately has an *address*. Being reachable is not the same as being on the
-  announcement list.
-- **It mirrors @memory's `registry_scope.RESIDENT_REGISTRIES`**, the single fleet
-  definition, and is deliberately a copy rather than an import — reaching into
-  another branch's handlers is an encapsulation violation, and `@all` must not
-  acquire a runtime dependency on @memory to know who it is talking to. A test
-  parses their constant and fails on drift, so the copy cannot rot quietly.
+  announcement list. It does, however, lack the dot filter — a registry planted
+  directly at `projects/.archive/X_REGISTRY.json` resolves. Masked today only
+  because the real held projects sit a level deeper. Reported to @devpulse
+  2026-08-28, deliberately not refactored under this dispatch.
+- **The semantics are mirrored, the code is mine.** @memory's
+  `registry_scope.accepted_resident_paths()` is the fleet definition; this reads
+  the same passport field with its own code. No runtime import — `@all` must not
+  need @memory to know who it is talking to. The old drift pin AST-parsed
+  @memory's constant; when the constant went, the pin went with it, replaced by
+  behavioural pins of this branch's own resolution. Pinning another branch's
+  source text was never the check it looked like.
 - **Fails closed in both directions.** An unverified caller widens nothing, and a
   verifier that *raises* is a refusal, not an opening.
 - **One inbox, one copy** — a resident already in the core registry is not added

@@ -194,50 +194,186 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
     return result
 
 
-# The DPLAN-0318 resident projects, named one by one on purpose. This MIRRORS
-# @memory's registry_scope.RESIDENT_REGISTRIES -- the single fleet definition --
-# and is deliberately a copy rather than an import: reaching into another
-# branch's handlers is an encapsulation violation, and @all must not acquire a
-# runtime dependency on @memory to know who it is talking to. A test compares
-# the two and fails on drift, so the copy cannot rot quietly.
-#
-# NAMED, NEVER GLOBBED. projects/ also holds `marketstand(on _hold)` and
-# `speakeasy(on_hold)`. marketstand's registry still marks its branch active
-# while the directory name says the project is parked, so a glob would broadcast
-# into a held project on the strength of a stale status field. Adding a resident
-# is a deliberate edit here -- the correct amount of friction for "this project
-# now receives fleet announcements".
-RESIDENT_REGISTRIES = (
-    "projects/baud/BAUD_REGISTRY.json",
-    "projects/earmark/EARMARK_REGISTRY.json",
-    "projects/finch/FINCH_REGISTRY.json",
-    "projects/aipass-site/AIPASS-SITE_REGISTRY.json",
-)
+# Discovery: exactly one level under this directory, dot-prefixed components
+# refused. The rule is named so it can be read, not buried in a glob string.
+RESIDENT_PROJECTS_DIR = "projects"
+RESIDENT_REGISTRY_GLOB = "*/*_REGISTRY.json"
+PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
+
+# The two values passport 2.0 defines for citizenship.residency.
+RESIDENCY_CORE = "core"
+RESIDENCY_RESIDENT = "resident"
 
 
-def get_resident_branches() -> Dict[str, str]:
-    """Load email->path for the named resident projects only.
+def declared_residency(branch_path: Path) -> Optional[str]:
+    """What the passport at *branch_path* declares itself to be.
 
-    Distinct from get_project_tree_branches(), which globs every registry under
-    projects/ and therefore also answers for held projects. Resolution may
-    legitimately be that wide -- a held project's citizen still has an address --
-    but BROADCAST may not: reaching a parked project is a delivery nobody asked
-    for. Same tree, two different questions.
+    The single reader for ``citizenship.residency`` on this branch. An absent or
+    unreadable passport declares NOTHING and does not raise: the caller decides
+    what silence means, and here it always means refusal.
+
+    Args:
+        branch_path: Branch directory holding ``.trinity/passport.json``.
 
     Returns:
-        Dict mapping email address to absolute path string. A resident whose
-        registry is missing or unreadable contributes nothing and is logged by
-        _branches_from_registry; it never becomes an empty-but-present entry.
+        The declared residency string, or None when nothing is declared.
     """
-    repo_root = find_repo_root()
-    result: Dict[str, str] = {}
-    for rel in RESIDENT_REGISTRIES:
-        reg_file = repo_root / rel
-        if reg_file.is_file():
-            result.update(_branches_from_registry(reg_file))
-        else:
-            logger.warning("[registry] resident registry absent: %s", rel)
-    return result
+    passport = Path(branch_path) / PASSPORT_RELATIVE
+    try:
+        data = json.loads(passport.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.debug("[registry] no passport at %s — declares nothing", passport)
+        return None
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        logger.error("[registry] unreadable passport %s: %s", passport, exc)
+        return None
+    residency = data.get("citizenship", {}).get("residency")
+    return residency if isinstance(residency, str) else None
+
+
+def resident_registry_paths(repo_root: Path) -> List[Path]:
+    """Candidate resident-project registries. DISCOVERY ONLY — decides nothing.
+
+    Registry-led and shallow, and both halves are load-bearing:
+
+    - REGISTRY-LED, NEVER A PASSPORT WALK. On this machine a passport walk under
+      projects/ returns EIGHT passports for FOUR residents — baud carries real
+      resident-declaring passports under .backup/versioned/ and
+      .backup/snapshots/, and a backup copy of a declaration is still a
+      declaration. Passport-led discovery counts baud three times. Reading a
+      passport only at a path some registry declared is what makes the count
+      right.
+    - ONE LEVEL, DOT COMPONENTS REFUSED BY AN EXPLICIT LINE. pathlib globs DO
+      match hidden directories, unlike a shell, so without the filter below
+      projects/.archive/ walks straight back in. The filter is separate from the
+      depth rule on purpose: on the live tree the parked projects are excluded
+      by both, so either one alone looks unnecessary until the other is removed.
+
+    A checkout with no projects/ returns empty and does not raise — CI runs on
+    exactly that tree.
+
+    Args:
+        repo_root: Repository root to resolve against.
+
+    Returns:
+        Absolute registry paths, sorted, one per candidate project.
+    """
+    projects = Path(repo_root) / RESIDENT_PROJECTS_DIR
+    if not projects.is_dir():
+        return []
+
+    found: List[Path] = []
+    for path in sorted(projects.glob(RESIDENT_REGISTRY_GLOB)):
+        if any(part.startswith(".") for part in path.relative_to(projects).parts):
+            continue
+        found.append(path)
+    return found
+
+
+def _refuse_resident(name: str, path: str, registry_path: Path, reason: str) -> None:
+    """Log a refused resident candidate by name, path and reason.
+
+    Every rejection goes through here so none can be silent. A candidate refused
+    without a line in the log is indistinguishable from one that was never
+    discovered, and those two need very different fixes.
+    """
+    logger.error(
+        "[registry] REFUSED resident '%s' at %s (listed active in %s): %s",
+        name,
+        path,
+        registry_path.name,
+        reason,
+    )
+
+
+def _classify_resident(name: str, path: Path, registry_path: Path) -> bool:
+    """Decide one candidate on its own passport, naming the refusal if it is one.
+
+    Split out from the discovery loop so the decision can be read — and changed —
+    without the two levels of iteration that surround it in the caller.
+    """
+    residency = declared_residency(path)
+    if residency == RESIDENCY_RESIDENT:
+        return True
+    if residency is None:
+        reason = "passport declares no residency (missing, unreadable, or no field)"
+    elif residency == RESIDENCY_CORE:
+        reason = f"passport declares '{RESIDENCY_CORE}' from inside {RESIDENT_PROJECTS_DIR}/"
+    else:
+        reason = f"passport declares unknown residency '{residency}'"
+    _refuse_resident(name, str(path), registry_path, reason)
+    return False
+
+
+def _residents_from_registry(registry_path: Path) -> Dict[str, str]:
+    """Email->path for the residents one registry lists and their passports confirm.
+
+    Rows are resolved against the registry that holds them, never against the
+    caller's cwd: a registry is the only thing that knows what its own relative
+    paths mean.
+    """
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logger.error("[registry] unreadable resident registry %s: %s", registry_path, exc)
+        return {}
+
+    raw = data.get("branches", [])
+    entries = [{**info, "name": n} for n, info in raw.items()] if isinstance(raw, dict) else raw
+    if not isinstance(entries, list):
+        return {}
+
+    accepted: Dict[str, str] = {}
+    for branch in entries:
+        if not isinstance(branch, dict) or branch.get("status") != "active":
+            continue
+        rel = branch.get("path", "")
+        if not rel:
+            continue
+        path = Path(rel)
+        if not path.is_absolute():
+            path = (registry_path.parent / rel).resolve()
+        name = str(branch.get("name", path.name))
+        email = branch.get("email") or f"@{name.lower()}"
+        if _classify_resident(name, path, registry_path):
+            accepted[email] = str(path)
+    return accepted
+
+
+def get_resident_branches(repo_root: Optional[Path] = None) -> Dict[str, str]:
+    """Email->path for every project branch whose passport declares it a resident.
+
+    THE TWO-KEY RULE, restated here rather than imported. The registry says the
+    branch is active — the anchor a passport cannot forge. The passport says
+    ``resident`` — the declaration a registry does not carry. Both are required
+    inside projects/, and every other outcome is refused and NAMED.
+
+    This mirrors the SEMANTICS of @memory's registry_scope.accepted_resident_paths()
+    as this branch's own code reading the same files. Deliberately not a runtime
+    import: reaching into another branch's handlers is an encapsulation
+    violation, and @all must not depend on @memory being importable to know who
+    it is addressing. It replaces a hardcoded 4-tuple that mirrored theirs and an
+    AST pin that compared the two constants — agreement between two literals was
+    never evidence that either produced the right answer.
+
+    THE TRUST MODEL. A passport can never ADD scope: nothing walks passports, so
+    a declared resident that no discovered registry lists is unreachable by
+    construction rather than filtered out later. A stale ``active`` can never
+    add one either — status alone is never trusted, which is what answers the
+    parked-project concern that the old named list carried by hand.
+
+    Args:
+        repo_root: Repository root to resolve against; defaults to this checkout.
+
+    Returns:
+        Dict mapping email address to absolute path string.
+    """
+    root = Path(repo_root) if repo_root is not None else find_repo_root()
+    accepted: Dict[str, str] = {}
+    for registry_path in resident_registry_paths(root):
+        accepted.update(_residents_from_registry(registry_path))
+    return accepted
 
 
 def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
