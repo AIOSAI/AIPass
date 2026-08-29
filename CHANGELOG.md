@@ -9,6 +9,32 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **devpulse watchdog: cancel no longer reports KILLED for a process that survived
+  SIGTERM** — `registry.kill_watch` returned `"killed": killed or True` (always
+  True), so a runaway pid that ignored the signal was announced as killed while
+  still running; the log line beside it already told the truth. Now returns the
+  measured value; the presenter's existing `FAILED` path renders it. Red-first
+  pin: a child that installs `SIG_IGN` before the kill, asserts `killed: False`
+  + the handle still deregistered (FPLAN-0455, todo 172 — found by the dead-code
+  map on 2026-08-22, all prior tests only covered pids that die).
+
+### Added
+
+- **devpulse: owner-guard refusal-exit pins** (`test_owner_guard_refusals.py`) —
+  the 2026-08-22 exit-0 refusal fixes (feedback + admin_grant guards rendered
+  with `warning()`, which skips `mark_command_failed()`) had scar docstrings but
+  no tests defending them. Five pins now assert the failure MARK, not wording;
+  both mutations (error→warning) bite with exactly one failing test each. The
+  one remaining `warning()` in devpulse (feedback compose, anonymous-sender
+  advisory) judged legitimate — the command succeeds, degraded — and the verdict
+  pinned in a comment so future sweeps don't re-flag it.
+
+---
+
 ## [2026-08-28] — residency convergence: the fleet definition becomes a rule (DPLAN-0319 wave 3) · v2.7.22
 
 **Residency convergence — the fleet definition becomes a rule, not a list
