@@ -9,6 +9,50 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-28] — residency convergence: the fleet definition becomes a rule (DPLAN-0319 wave 3) · v2.7.22
+
+**Residency convergence — the fleet definition becomes a rule, not a list
+(DPLAN-0319 wave 3, FPLAN-0454)** — four consumer lanes and one gateway, each
+built by its own branch, each independently re-verified before commit:
+
+- **@memory `registry_scope` 2.0.0** — discovery is registry-led and shallow
+  (`projects/<name>/*_REGISTRY.json`, one level, explicit dot filter);
+  classification reads the passport's `citizenship.residency`; trust asymmetry
+  pinned: a passport can never ADD scope (no passport walk exists — baud's
+  `.backup/` copies carry real resident-declaring passports, so a walk counts it
+  three times) and never REMOVE a core citizen. `trinity_push` and `detector`
+  converged in the same pass. Then the micro-pass deleted `RESIDENT_REGISTRIES`
+  outright: no list of residents exists anywhere in @memory now — a rule the
+  passports answer. One legacy test was found green while defending the exact
+  design wave 3 overturned, and was inverted with the reason written in.
+- **@ai_mail** — the deliberate mirror and its AST drift pin died together,
+  replaced by 12 behavioural pins of ai_mail's own resolution; live answer
+  unchanged (same four residents). Banked: the verified-admin bridge
+  (`get_project_tree_branches`) lacks the dot filter — ghost registries in
+  `projects/.archive` leak in, masked today only by depth.
+- **@daemon discovery 2.0.0** — the blind projects/* walk is gone; two-key rule
+  (registry active AND passport resident) replaces the de-facto on_hold
+  inclusion (all three consumer lanes checked before flipping — load-bearing for
+  nothing). Real hole proven: `SKIP_DIRS` never covered `.archive`; a planted
+  ghost registry WAS discoverable. A sixth named refusal added: a registry row
+  whose directory is missing no longer vanishes silently.
+- **@spawn modules gateway** — `get_template_dir` + `refuse_legacy_class`
+  re-exported with an identity pin (the export IS the handler's callable), so
+  **@seedgo retired its drift-pinned class-registry mirror** for the import.
+  Fixing the door meant fixing the rule that barred it: `check_no_orchestration`
+  contradicted `check_handler_independence`; orchestration is now an own-branch
+  rule, and the widening admitted zero hidden violations fleet-wide.
+
+Fleet receipt unchanged throughout: 18 core + 4 resident = 22. Adding a resident
+is now a deliberate write in a tracked passport plus a registry entry — no
+central file edit (stated trade, Patrick can overturn). Banked for later:
+spawn's cross-branch handler guard is pre-empted at import time by an eager
+package import (pinned both directions, not fixed); resident repos still need
+their retro dev branches (no git door into nested project repos — refusal
+recorded, no workaround taken).
+
+---
+
 ## [2026-08-28] — passport 2.0: the identity file gets the trinity treatment (DPLAN-0319) · v2.7.21
 
 **Telegram stripped from the concierge (2026-08-28)** — Patrick's ruling from

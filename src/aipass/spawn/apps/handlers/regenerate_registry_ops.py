@@ -69,12 +69,32 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     # Scan and build new registry entries
     files, directories = _scan_template_directory(template_dir, existing_registry)
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    # last_updated tracks the TEMPLATE, not the calendar. A no-change
+    # regenerate keeps the existing date, so re-running the command on a new day
+    # is a byte-identical no-op instead of a one-line diff that describes
+    # nothing. That churn is not merely cosmetic: it is what hid a real defect
+    # for months — metadata.last_updated was the ONLY field that moved on a
+    # no-change run, so tests/test_regenerate_registry_ops.py's shipped-tree
+    # canary compared bytes that were identical whenever the run happened on the
+    # same UTC day as the committed date, and went red the first time CI crossed
+    # midnight (PR #745). Preserving the date is not a way to keep the canary
+    # quiet — the canary now also watches mtime — it removes the daily diff that
+    # made a real rewrite indistinguishable from noise.
+    existing_metadata = (existing_registry or {}).get("metadata", {})
+    unchanged = (
+        bool(existing_registry)
+        and files == (existing_registry.get("files") or {})
+        and directories == (existing_registry.get("directories") or {})
+    )
+    if unchanged and existing_metadata.get("last_updated"):
+        last_updated = existing_metadata["last_updated"]
+    else:
+        last_updated = datetime.now().strftime("%Y-%m-%d")
 
     registry = {
         "metadata": {
             "version": "1.0.0",
-            "last_updated": today,
+            "last_updated": last_updated,
             "description": "Template file tracking registry for ID-based updates",
         },
         "files": files,

@@ -186,10 +186,19 @@ def _read_registry() -> List[Dict[str, Any]]:
     policy, and a citizen whose memories can overflow unattended is
     slow-motion data loss.
 
-    Both lanes now read `registry_scope.RESIDENT_REGISTRIES`, so the fleet has
-    exactly one definition. Caller discovery is unchanged and still runs after
-    the residents — an external project calling in from its own tree is a
-    different mechanism with a different purpose.
+    Every lane now resolves residents through `registry_scope`, so the fleet
+    has exactly one definition. As of 2026-08-28 that definition is the
+    passport's `citizenship.residency` field rather than a named tuple:
+    discovery globs `projects/` for candidate registries and classification
+    reads the declaration, so this function filters what it reads against
+    `registry_scope.accepted_resident_paths()`. Without that filter the glob
+    would widen this lane to any directory under `projects/` carrying a
+    registry — discovery is deliberately generous and classification is what
+    makes it safe.
+
+    Caller discovery is unchanged and still runs after the residents — an
+    external project calling in from its own tree is a different mechanism
+    with a different purpose, and is NOT residency-classified.
 
     Registry paths are relative — resolved against their respective project root.
 
@@ -201,8 +210,15 @@ def _read_registry() -> List[Dict[str, Any]]:
     branches = _read_single_registry(_REPO_ROOT / "AIPASS_REGISTRY.json", _REPO_ROOT)
 
     seen_paths = {b.get("path") for b in branches}
-    resident_paths = registry_scope.resident_registry_paths(_REPO_ROOT)
-    for reg_path in resident_paths + _find_caller_registries():
+    accepted = registry_scope.accepted_resident_paths(_REPO_ROOT)
+    for reg_path in registry_scope.resident_registry_paths(_REPO_ROOT):
+        for branch in _read_single_registry(reg_path, reg_path.parent):
+            if branch.get("path") not in accepted or branch.get("path") in seen_paths:
+                continue
+            branches.append(branch)
+            seen_paths.add(branch.get("path"))
+
+    for reg_path in _find_caller_registries():
         for branch in _read_single_registry(reg_path, reg_path.parent):
             if branch.get("path") not in seen_paths:
                 branches.append(branch)

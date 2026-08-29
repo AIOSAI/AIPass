@@ -377,6 +377,76 @@ def test_no_orchestration_module_import():
     assert "orchestration" in result["message"]
 
 
+def test_branch_before_says_none_rather_than_guessing():
+    """A missing marker returns None, never the whole string.
+
+    str.split on an absent separator returns [whole], so the un-guarded version
+    answered 'modules' for 'aipass.spawn.apps.modules' when asked about
+    .apps.handlers -- a confident wrong branch name. Pinned directly because
+    both callers pre-filter on the marker, so no behavioural test reaches it.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import _branch_before
+
+    assert _branch_before("aipass.spawn.apps.modules", ".apps.handlers") is None
+    assert _branch_before("aipass.spawn.apps.modules", ".apps.modules") == "spawn"
+    assert _branch_before("aipass.seedgo.apps.handlers.json", ".apps.handlers") == "seedgo"
+    assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
+
+
+def test_no_orchestration_allows_another_branchs_modules_gateway():
+    """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration.
+
+    The two handler rules used to contradict each other: check_handler_independence
+    refuses a cross-branch HANDLER import and tells the caller to "use that branch's
+    modules/ instead", while this check refused every apps.modules import outright --
+    so the door it pointed at was closed. The layering rule is about a handler
+    reaching back up to ITS OWN branch's orchestration, which is the shape that can
+    actually make a cycle; another branch's gateway cannot.
+    """
+    content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_no_orchestration,
+    )
+
+    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    assert result is not None
+    assert result["passed"] is True, result["message"]
+
+
+def test_no_orchestration_still_flags_own_branch_modules():
+    """The real layering violation survives: a handler reaching up its OWN branch."""
+    content = '"""Handler."""\nfrom aipass.seedgo.apps.modules import audit_module\n'
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_no_orchestration,
+    )
+
+    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    assert result is not None
+    assert result["passed"] is False
+    assert "orchestration" in result["message"]
+
+
+def test_no_orchestration_unknown_path_stays_strict():
+    """No path means the branch is unknown -- flag, never assume cross-branch.
+
+    Deliberately the OPPOSITE default to check_handler_independence, which says
+    "not evaluated" when it cannot find a branch. Widening here would fail toward
+    blindness: every own-branch orchestration import would pass whenever a caller
+    forgot the path.
+    """
+    content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_no_orchestration,
+    )
+
+    result = check_no_orchestration(content, _lines(content))
+    assert result is not None
+    assert result["passed"] is False
+
+
 def test_no_orchestration_in_docstring():
     """Module import inside docstring is not flagged."""
     content = (

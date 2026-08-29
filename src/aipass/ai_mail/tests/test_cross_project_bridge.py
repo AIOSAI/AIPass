@@ -20,6 +20,7 @@ reply is always deliverable to the mail it answers.
 """
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -487,49 +488,136 @@ class TestReplyProofMailboxResolution:
 # carry it. The widening applies ONLY behind the five-leg admin verification;
 # an ordinary citizen's @all stays fleet-only, unchanged.
 
-import ast
-
 import aipass.ai_mail.apps.handlers.registry.read as reg
 
 
-class TestResidentScopeIsANamedConstant:
-    """The four residents are named one by one, never globbed."""
+class TestResidentDiscovery:
+    """Discovery is registry-led, shallow, and refuses dot-prefixed components.
 
-    def test_resident_registries_match_memorys_fleet_definition(self):
-        """@memory's registry_scope.py is the single definition of the fleet.
+    Replaces an AST pin that parsed @memory's RESIDENT_REGISTRIES assignment to
+    prove this branch's hardcoded mirror matched theirs. Both are gone: the
+    mirror because residency is now DECLARED in a passport, and the pin because
+    it asserted agreement between two constants rather than the behaviour either
+    produced. Nothing here reads @memory's file.
+    """
 
-        We do NOT import it -- reaching into another branch's handlers is an
-        encapsulation violation and this must not become a runtime dependency.
-        We read its constant and compare, so a drift between the two lanes
-        fails HERE, loudly, instead of one lane quietly reaching a project the
-        other does not maintain.
+    @staticmethod
+    def _project(root, project, branch, *, residency="resident", status="active", nested=""):
+        """Plant one project: a registry naming a branch, and that branch's passport."""
+        proj = root / "projects" / project
+        rel = f"src/{branch}"
+        bdir = proj / rel
+        (bdir / ".trinity").mkdir(parents=True, exist_ok=True)
+        if residency is not None:
+            (bdir / ".trinity" / "passport.json").write_text(
+                json.dumps({"citizenship": {"residency": residency}}), encoding="utf-8"
+            )
+        regdir = proj / nested if nested else proj
+        regdir.mkdir(parents=True, exist_ok=True)
+        (regdir / f"{project.upper()}_REGISTRY.json").write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {
+                            "name": branch.upper(),
+                            "email": f"@{branch}",
+                            "path": ("../" * len(Path(nested).parts)) + rel if nested else rel,
+                            "status": status,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return bdir
+
+    def test_a_declared_resident_is_discovered(self, tmp_path):
+        self._project(tmp_path, "baud", "baud")
+        assert reg.get_resident_branches(tmp_path) == {"@baud": str((tmp_path / "projects/baud/src/baud").resolve())}
+
+    def test_no_projects_tree_is_empty_not_an_error(self, tmp_path):
+        """CI checks out exactly this tree. Empty is an answer, not a fault."""
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    # --- The exclusion layers, each asserted ALONE ----------------------
+    #
+    # @memory's mutation pass proved the dot filter and the depth rule MASK each
+    # other: on the real tree marketstand is excluded by both, so deleting
+    # either one changes nothing and a passing suite says nothing. Each fixture
+    # below is refused by exactly ONE layer.
+
+    def test_dot_prefixed_project_is_refused_by_the_dot_filter_alone(self, tmp_path):
+        """Depth-legal (one level) but hidden: only the dot filter can refuse it.
+
+        pathlib globs DO match hidden directories, unlike a shell — so without
+        an explicit filter `projects/.archive/` walks straight back in.
         """
-        scope = (
-            reg.find_repo_root() / "src" / "aipass" / "memory" / "apps" / "handlers" / "memory" / "registry_scope.py"
-        )
-        if not scope.is_file():
-            matches = list((reg.find_repo_root() / "src" / "aipass" / "memory").rglob("registry_scope.py"))
-            assert matches, "cannot locate @memory's registry_scope.py -- drift is now unmeasurable, go look"
-            scope = matches[0]
+        self._project(tmp_path, ".archive", "marketstand")
+        assert reg.get_resident_branches(tmp_path) == {}
 
-        tree = ast.parse(scope.read_text(encoding="utf-8"))
-        theirs = None
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and any(
-                getattr(t, "id", "") == "RESIDENT_REGISTRIES" for t in node.targets
-            ):
-                theirs = tuple(ast.literal_eval(node.value))
-        assert theirs is not None, "RESIDENT_REGISTRIES not found in @memory's registry_scope.py"
-        assert tuple(reg.RESIDENT_REGISTRIES) == theirs, (
-            f"resident scope drifted from @memory's definition\n  ai_mail: {reg.RESIDENT_REGISTRIES}\n  memory : {theirs}"
-        )
+    def test_nested_registry_is_refused_by_the_depth_rule_alone(self, tmp_path):
+        """No dot anywhere: only the one-level depth rule can refuse it."""
+        self._project(tmp_path, "deepproj", "deepbranch", nested="held/inner")
+        assert reg.get_resident_branches(tmp_path) == {}
 
-    def test_held_projects_are_not_in_scope(self):
-        """`projects/` also holds two on-hold projects. A glob would sweep them in."""
-        joined = " ".join(reg.RESIDENT_REGISTRIES).lower()
-        assert "marketstand" not in joined
-        assert "speakeasy" not in joined
-        assert len(reg.RESIDENT_REGISTRIES) == 4
+    # --- Classification: both keys required, every refusal NAMED --------
+
+    def test_registry_active_but_passport_silent_is_refused(self, tmp_path):
+        self._project(tmp_path, "quiet", "quiet", residency=None)
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_passport_resident_but_registry_inactive_is_refused(self, tmp_path):
+        """A stale `active` can never be trusted alone — nor can its absence be overridden."""
+        self._project(tmp_path, "parked", "parked", status="retired")
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_core_claimed_from_inside_projects_is_refused(self, tmp_path):
+        self._project(tmp_path, "impostor", "impostor", residency="core")
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_unknown_residency_value_is_refused(self, tmp_path):
+        self._project(tmp_path, "weird", "weird", residency="honoured-guest")
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_unreadable_passport_is_refused_not_crashed(self, tmp_path):
+        bdir = self._project(tmp_path, "torn", "torn")
+        (bdir / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_every_refusal_is_named_at_error_level(self, tmp_path, monkeypatch):
+        """A candidate refused silently is indistinguishable from one never found."""
+        errors = []
+        monkeypatch.setattr(reg.logger, "error", lambda msg, *a: errors.append(msg % a if a else msg))
+        self._project(tmp_path, "impostor", "impostor", residency="core")
+        reg.get_resident_branches(tmp_path)
+        assert any("impostor" in e.lower() and "core" in e.lower() for e in errors), errors
+
+    # --- The trust model ------------------------------------------------
+
+    def test_a_passport_cannot_add_a_branch_no_registry_lists(self, tmp_path):
+        """Unreachable BY CONSTRUCTION: nothing walks passports, so there is no
+        path for a declaration alone to widen scope."""
+        stray = tmp_path / "projects" / "ghost" / "src" / "ghost" / ".trinity"
+        stray.mkdir(parents=True)
+        (stray / "passport.json").write_text(json.dumps({"citizenship": {"residency": "resident"}}), encoding="utf-8")
+        assert reg.get_resident_branches(tmp_path) == {}
+
+    def test_the_live_fleet_still_resolves_its_four_residents(self):
+        """Behavioural, against THIS machine: the semantics change, not the answer.
+
+        projects/* is gitignored — each project is its own repo — so a fresh
+        checkout and CI have no fleet to measure. This pin guards the live
+        machine, not any installed fleet, so it skips loudly rather than
+        reporting a red for a tree that was never cloned.
+        """
+        if os.environ.get("GITHUB_ACTIONS"):
+            pytest.skip("live-fleet pin: projects/* is gitignored, CI has no fleet to measure")
+        if not (reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR).is_dir():
+            pytest.skip("live-fleet pin: no projects/ tree on this machine")
+        live = reg.get_resident_branches()
+        assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
+        joined = " ".join(live.values()).lower()
+        assert "marketstand" not in joined and "speakeasy" not in joined
 
 
 class TestBroadcastScope:
