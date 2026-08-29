@@ -424,7 +424,7 @@ def kill_watch(handle: str, storage_path: Path | None = None) -> dict:
     logger.info("[watchdog.registry] kill_watch handle=%s killed=%s", handle, killed)
     return {
         "handle": handle,
-        "killed": killed or True,
+        "killed": killed,
         "was_alive": True,
         "reason": reason,
     }

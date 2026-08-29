@@ -250,6 +250,48 @@ def test_kill_watch_happy_path(store_path):
             proc.wait(timeout=5)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only signal semantics (SIG_IGN)")
+def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
+    """A pid that ignores SIGTERM must come back killed=False, not a KILLED lie.
+
+    The handle is still deregistered (the caller reclaims it; the runaway pid
+    is theirs to deal with) — but the result must say the process survived.
+    """
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "print('armed', flush=True); time.sleep(30)",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == b"armed"  # SIG_IGN installed before we fire
+
+        handle = watch_registry.register("timer", {"duration": "30s"}, storage_path=store_path)
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        for watch in raw["watches"]:
+            if watch["handle"] == handle:
+                watch["pid"] = proc.pid
+        store_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+        result = watch_registry.kill_watch(handle, storage_path=store_path)
+        assert result["was_alive"] is True
+        assert result["killed"] is False
+        assert "still alive" in result["reason"]
+
+        # Deregistered regardless — the handle is reclaimable.
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        assert raw["watches"] == []
+        # And the process really did survive the SIGTERM.
+        assert proc.poll() is None
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_kill_all_multiple_watches(store_path):
     h1 = watch_registry.register("timer", {}, storage_path=store_path)

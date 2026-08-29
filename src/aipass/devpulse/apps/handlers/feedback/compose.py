@@ -115,6 +115,9 @@ def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str =
     # one party who can fix it — a reply to 'unknown' can never be delivered
     # (live failure 2026-08-04: 6 messages arrived anonymous, 3 replies
     # silently stranded for 5 hours).
+    # warning(), deliberately NOT error(): the feedback WAS stored and the
+    # command succeeded — this is a degraded-success advisory, not a refusal,
+    # so it must not mark_command_failed() (refusal-species audit 2026-08-28).
     if from_branch == "unknown" or not ai_mail_path:
         logger.warning(
             f"[FEEDBACK] Sender unresolved (branch={from_branch}, "
