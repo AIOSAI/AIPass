@@ -731,11 +731,7 @@ class TestHandleRegenerateRegistry:
         """
         from aipass.spawn.apps.modules import regenerate_registry as module
 
-        found = {
-            name
-            for name in dir(module)
-            if name.startswith("get_template_dir") or name.endswith("_template_dirs")
-        }
+        found = {name for name in dir(module) if name.startswith("get_template_dir") or name.endswith("_template_dirs")}
 
         assert found == _TEMPLATE_LOOKUPS, (
             f"template lookups on the module changed: {sorted(found)} != {sorted(_TEMPLATE_LOOKUPS)}. "
