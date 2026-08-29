@@ -560,6 +560,14 @@ class TestScanTemplateDirectoryOrdering:
         assert dir_paths == sorted(dir_paths)
 
 
+SPAWN_BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+# Every template-directory lookup regenerate_registry.py binds at import time.
+# The fixture below must redirect all of them; the pin that enforces it is
+# TestHandleRegenerateRegistry.test_every_template_lookup_is_redirected.
+_TEMPLATE_LOOKUPS = {"get_template_dir", "get_template_dirs"}
+
+
 def _shipped_registry_path() -> Path:
     """Path to the real citizen template registry that spawn ships.
 
@@ -570,6 +578,97 @@ def _shipped_registry_path() -> Path:
     from aipass.spawn.apps.handlers.class_registry import get_template_dir
 
     return get_template_dir() / ".spawn" / ".template_registry.json"
+
+
+class TestLastUpdatedTracksContentNotTheCalendar:
+    """metadata.last_updated moves when the TEMPLATE moves, not when the day does.
+
+    A no-change regenerate used to stamp today's date into a tracked file, so
+    running the command on a new day produced a one-line diff describing nothing.
+    That daily churn is also what masked the shipped-tree rewrite for months: the
+    only field that moved was the one that moved for free.
+    """
+
+    @staticmethod
+    def _regenerate(template: Path, date: str) -> None:
+        """Regenerate with the clock pinned to `date`."""
+        with patch("aipass.spawn.apps.handlers.regenerate_registry_ops.datetime") as fake:
+            fake.now.return_value.strftime.return_value = date
+            regenerate_template_registry(template)
+
+    @staticmethod
+    def _registry(template: Path) -> dict:
+        return json.loads((template / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
+
+    def _settled(self, tmp_path: Path, date: str = "2026-01-01") -> Path:
+        """A template whose registry is already stable.
+
+        The FIRST regenerate creates .spawn/, which the scanner then tracks as a
+        directory — so run #2 legitimately sees new content. Settling twice makes
+        the run under test a genuine no-change run rather than a disguised one.
+        """
+        template = _make_template(tmp_path, files={"README.md": "hello"})
+        self._regenerate(template, date)
+        self._regenerate(template, date)
+        return template
+
+    def test_no_change_regenerate_preserves_the_existing_date(self, tmp_path):
+        template = self._settled(tmp_path)
+
+        self._regenerate(template, "2099-12-31")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2026-01-01"
+
+    def test_no_change_regenerate_is_byte_identical(self, tmp_path):
+        template = self._settled(tmp_path)
+        registry_path = template / ".spawn" / ".template_registry.json"
+        before = registry_path.read_bytes()
+
+        self._regenerate(template, "2099-12-31")
+
+        assert registry_path.read_bytes() == before
+
+    def test_changed_content_does_bump_the_date(self, tmp_path):
+        """The other half — preserving must never become freezing."""
+        template = self._settled(tmp_path)
+
+        (template / "README.md").write_text("hello, world", encoding="utf-8")
+        self._regenerate(template, "2099-12-31")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+
+    def test_a_new_file_bumps_the_date(self, tmp_path):
+        template = self._settled(tmp_path)
+
+        (template / "NEW.md").write_text("new", encoding="utf-8")
+        self._regenerate(template, "2099-12-31")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+
+    def test_a_new_directory_bumps_the_date(self, tmp_path):
+        template = self._settled(tmp_path)
+
+        (template / "extra").mkdir()
+        (template / "extra" / "README.md").write_text("x", encoding="utf-8")
+        self._regenerate(template, "2099-12-31")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+
+    def test_a_removed_file_bumps_the_date(self, tmp_path):
+        template = self._settled(tmp_path)
+
+        (template / "README.md").unlink()
+        self._regenerate(template, "2099-12-31")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2099-12-31"
+
+    def test_first_ever_regenerate_stamps_today(self, tmp_path):
+        """No prior registry to preserve — today is the honest answer."""
+        template = _make_template(tmp_path, files={"README.md": "hello"})
+
+        self._regenerate(template, "2026-01-01")
+
+        assert self._registry(template)["metadata"]["last_updated"] == "2026-01-01"
 
 
 class TestHandleRegenerateRegistry:
@@ -584,7 +683,18 @@ class TestHandleRegenerateRegistry:
 
     @pytest.fixture(autouse=True)
     def _isolate_templates(self, tmp_path):
-        """Redirect every class lookup to throwaway copies under tmp_path."""
+        """Redirect EVERY template lookup the handler makes into tmp_path.
+
+        The handler binds its class-registry helpers at import time, so each one
+        has to be patched on THIS module by name — patching class_registry does
+        nothing here. That is also how the gap happened: get_template_dirs()
+        arrived with the DPLAN-0319 --all rework and was never added below, so
+        --all walked to the shipped tree while everything else was sandboxed.
+
+        _TEMPLATE_LOOKUPS is the closed list, and
+        test_every_template_lookup_is_redirected fails if the module grows a new
+        one — the next lookup cannot silently escape the way this one did.
+        """
         import shutil
 
         from aipass.spawn.apps.handlers.class_registry import get_available_classes as real_classes
@@ -595,17 +705,43 @@ class TestHandleRegenerateRegistry:
         for class_name in real_classes():
             shutil.copytree(real_template_dir(class_name), sandbox / class_name)
 
-        def fake_template_dir(class_name: str) -> Path:
+        def fake_template_dir(class_name: str = "specialist") -> Path:
             return sandbox / class_name
+
+        def fake_template_dirs() -> list[Path]:
+            return sorted({sandbox / class_name for class_name in real_classes()})
 
         with (
             patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dir", side_effect=fake_template_dir),
+            patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dirs", side_effect=fake_template_dirs),
             patch(
                 "aipass.spawn.apps.modules.regenerate_registry.get_available_classes",
                 side_effect=real_classes,
             ),
         ):
             yield
+
+    def test_every_template_lookup_is_redirected(self):
+        """Guard the guard: a NEW template lookup on the module must be patched.
+
+        This is the pin that would have caught the original gap the day
+        get_template_dirs() was added, instead of five weeks later at a merge
+        gate. If this fails, add the new name to the fixture above — do not
+        widen the list without redirecting it.
+        """
+        from aipass.spawn.apps.modules import regenerate_registry as module
+
+        found = {
+            name
+            for name in dir(module)
+            if name.startswith("get_template_dir") or name.endswith("_template_dirs")
+        }
+
+        assert found == _TEMPLATE_LOOKUPS, (
+            f"template lookups on the module changed: {sorted(found)} != {sorted(_TEMPLATE_LOOKUPS)}. "
+            "Every one of these must be redirected by _isolate_templates or a test run "
+            "writes into the shipped template tree."
+        )
 
     def test_shipped_template_registry_untouched(self):
         """Canary: running the CLI handler must not rewrite the registry spawn ships."""
@@ -616,6 +752,64 @@ class TestHandleRegenerateRegistry:
         assert handle_regenerate_registry(["--all"]) == 0
 
         assert shipped.read_bytes() == before
+
+    def test_shipped_registry_not_even_reopened_for_writing(self):
+        """The canary, made date-proof: bytes are the wrong instrument alone.
+
+        A byte compare only catches a rewrite whose CONTENT differs, and
+        metadata.last_updated is the only field that moves on a no-change
+        regenerate. Every run before 2026-08-29 happened on the same UTC day as
+        the committed date, so the rewrite was byte-identical and the canary
+        stayed green while the shipped file was being rewritten every run.
+        mtime sees the write itself, whatever the calendar says.
+        """
+        shipped = _shipped_registry_path()
+        before_mtime = shipped.stat().st_mtime_ns
+
+        assert handle_regenerate_registry([]) == 0
+        assert handle_regenerate_registry(["--all"]) == 0
+
+        assert shipped.stat().st_mtime_ns == before_mtime, (
+            "the CLI handler reopened the SHIPPED template registry for writing — "
+            "some template lookup escaped the _isolate_templates redirect"
+        )
+
+    def test_shipped_registry_untouched_on_a_different_calendar_day(self):
+        """Reproduce the CI red locally: force the clock past the committed date.
+
+        This is the merge-gate failure (PR #745, windows-setup + Linux coverage,
+        both jobs crossing midnight UTC) turned into a pin that does not need a
+        calendar to fire.
+        """
+        shipped = _shipped_registry_path()
+        before = shipped.read_bytes()
+
+        with patch("aipass.spawn.apps.handlers.regenerate_registry_ops.datetime") as fake:
+            fake.now.return_value.strftime.return_value = "2099-12-31"
+
+            assert handle_regenerate_registry([]) == 0
+            assert handle_regenerate_registry(["--all"]) == 0
+
+        assert shipped.read_bytes() == before
+
+    def test_all_flag_writes_only_inside_the_sandbox(self):
+        """Name the escape point directly: --all resolves dirs, not classes.
+
+        DPLAN-0319 R3 made both classes share one template dir, so the --all
+        branch switched from iterating CLASSES to iterating TEMPLATE DIRS via
+        get_template_dirs(). The fixture redirected the class lookups and was
+        never widened to the new one, so --all walked straight to the shipped
+        tree while the single-class path stayed correctly sandboxed.
+        """
+        from aipass.spawn.apps.modules import regenerate_registry as module
+
+        resolved = module.get_template_dirs()
+
+        assert resolved, "get_template_dirs() returned nothing — the --all branch would be a silent no-op"
+        for template_dir in resolved:
+            assert not template_dir.is_relative_to(SPAWN_BRANCH_ROOT / "templates"), (
+                f"--all resolved {template_dir}, which is inside the shipped tree"
+            )
 
     def test_default_regenerates_the_default_class(self):
         result = handle_regenerate_registry([])

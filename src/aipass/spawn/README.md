@@ -253,7 +253,7 @@ spawn/
 ├── templates/
 │   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 27 test files, 696 tests
+├── tests/                               # 27 test files, 707 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -314,7 +314,7 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**753 passed | 1 skipped | 0 failed** across 27 test files (754 collected — parametrized cases expand),
+**764 passed | 1 skipped | 0 failed** across 27 test files (765 collected — parametrized cases expand),
 measured 2026-08-28 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
 scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
 
@@ -410,7 +410,7 @@ mandate.
 ## Metrics
 
 - **Seedgo:** 100% with bypasses, 98% without — both re-measured 2026-08-25 (17 live bypass rules; the two newest, `atomic_write.py` and `mint_verify.py`, date from 2026-08-16/17)
-- **Tests:** 753 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
+- **Tests:** 764 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
 - **Module coverage:** 27/27 files (100%)
 - **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
