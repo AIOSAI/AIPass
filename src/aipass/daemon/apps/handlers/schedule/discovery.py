@@ -77,6 +77,11 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
+# @memory's PUBLIC gateway to the fleet definition (apps/modules/fleet.py,
+# built on our dispatch 2a70bbcd): handlers/ is private implementation, and
+# importing it cross-branch failed encapsulation + handlers on the checklist.
+from aipass.memory.apps.modules import fleet as registry_scope
+
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
 _SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
@@ -90,255 +95,161 @@ SKIP_DIRS = frozenset({"compass", "__pycache__", ".git", ".venv"})
 
 PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 
-# The two values passport 2.0 defines for citizenship.residency.
-RESIDENCY_CORE = "core"
-RESIDENCY_RESIDENT = "resident"
+# The values passport 2.0 defines for citizenship.residency. Re-exported from
+# @memory rather than re-spelled: two copies of a vocabulary drift silently.
+RESIDENCY_CORE = registry_scope.RESIDENCY_CORE
+RESIDENCY_RESIDENT = registry_scope.RESIDENCY_RESIDENT
 
 REQUIRED_JOB_KEYS = {"id", "schedule", "prompt"}
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
 
 # Source labels on a citizen record — which registry vouched for it.
 SOURCE_AIPASS = "aipass"
+SOURCE_EXTERNAL = "external"
+
+# The core registry's file name, as @memory's records spell it.
+_CORE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
 # Passport citizen_class that reads its mail live and must never be woken into
 # an interactive session by a scheduled job.
 MANAGER_CLASS = "manager"
 
 
-def _load_registry() -> dict:
-    """Load AIPASS_REGISTRY.json. Returns empty dict on failure."""
-    if not _REGISTRY_FILE.exists():
-        logger.warning("[discovery] AIPASS_REGISTRY.json not found at %s", _REGISTRY_FILE)
-        return {}
-    try:
-        with open(_REGISTRY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error("[discovery] Failed to load registry: %s", e)
-        return {}
-
-
 def declared_residency(branch_path: Path) -> Optional[str]:
     """What the passport at *branch_path* declares itself to be.
 
-    The single reader for ``citizenship.residency`` on this branch. Every lane
-    that needs to know whether a branch is core or resident goes through here,
-    so the field is spelled once.
+    Delegates to :mod:`registry_scope`, which owns the field. Kept as a name
+    here because callers and tests in this branch import it from discovery,
+    and because re-spelling the read is exactly the duplication 2.1.0 removes.
+    """
+    return registry_scope.declared_residency(branch_path)
 
-    An absent or unreadable passport declares NOTHING and does not raise. The
-    caller decides what silence means: for a core citizen it means "log it and
-    keep them", for a resident candidate it means "refuse". Returning None for
-    both is what lets one reader serve two policies.
+
+def _source_label(record: dict, repo_root: Path) -> str:
+    """A human label for WHICH registry vouched for this citizen.
+
+    Presentation only — nothing routes on it. It is printed by
+    ``drone @daemon rotation`` and carried in the rotation's JSON, so the
+    strings are a display contract rather than a policy one.
+
+    @memory's record carries the registry FILE NAME, which is enough to tell
+    core from everything else but not enough to name the project. The project
+    directory is recovered from the citizen's own path, one level under
+    ``projects/``. A citizen outside both trees is labelled by its registry
+    stem, so the federated externals land as ``external/WREN`` rather than
+    silently reading as core.
+    """
+    if record.get("registry") == _CORE_REGISTRY_NAME:
+        return SOURCE_AIPASS
+
+    path = Path(record["path"])
+    projects_dir = repo_root / _PROJECTS_DIR_NAME
+
+    # Asked rather than caught: a citizen outside projects/ is the ORDINARY
+    # federated-external case, not an exception, and catching ValueError here
+    # would read as error handling for something that is simply a third tier.
+    if not path.is_relative_to(projects_dir):
+        stem = str(record.get("registry", "")).replace("_REGISTRY.json", "")
+        return f"{SOURCE_EXTERNAL}/{stem}" if stem else SOURCE_EXTERNAL
+
+    return f"{_PROJECTS_DIR_NAME}/{path.relative_to(projects_dir).parts[0]}"
+
+
+def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
+    """Return an ordered record per active citizen, in @memory's fleet order.
+
+    Record: {name, email, dir_name, path, source}.
+
+    WHO COUNTS IS NOT DECIDED HERE ANY MORE (FPLAN-0460). The core-registry
+    read, the ``projects/*`` glob, the dot-filter and the two-key resident
+    rule all used to live in this module in a second copy. They are now one
+    call to :func:`registry_scope.fleet_branches`, because a fleet definition
+    with two implementations agrees only by coincidence — and the day the
+    federated-external anchor lands in the core registry, this lane gains
+    those citizens without a line changing here. That is the whole point of
+    consuming rather than mirroring.
+
+    WHAT IS STILL DECIDED HERE is the one thing @memory deliberately left to
+    each caller: an address. Their ruling is that a branch with no ``email``
+    is KEPT, because the path-based lanes (trinity push, rollover) still want
+    it. Daemon cannot use it — a job's owner IS an email and the wake targets
+    an email — so it is refused, and refused LOUDLY at error level. A citizen
+    dropped without a line in the log is indistinguishable from one that was
+    never discovered.
 
     Args:
-        branch_path: Branch directory holding ``.trinity/passport.json``.
+        repo_root: Root to resolve the fleet against; defaults to this
+            checkout's. Threaded through so a test can drive a temp tree
+            without patching module state.
 
     Returns:
-        The declared residency string, or None when nothing is declared.
+        One record per addressable active citizen, fleet order preserved.
     """
-    passport = Path(branch_path) / PASSPORT_RELATIVE
-    try:
-        data = json.loads(passport.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        logger.debug("[discovery] No passport at %s — declares nothing", passport)
-        return None
-    except (OSError, ValueError, UnicodeDecodeError) as e:
-        logger.error("[discovery] Unreadable passport %s: %s", passport, e)
-        return None
+    # Defaults to the module constant rather than passing None straight through,
+    # so patching _REPO_ROOT still redirects the whole lane — the seam every
+    # temp-tree test in this branch already drives.
+    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
 
-    if not isinstance(data, dict):
-        logger.error("[discovery] Non-dict passport at %s — declares nothing", passport)
-        return None
-
-    residency = data.get("citizenship", {}).get("residency")
-    return residency if isinstance(residency, str) else None
-
-
-def _refuse_resident(name: str, path: Path, registry_path: Path, reason: str) -> None:
-    """Log a refused resident candidate by name, path and reason.
-
-    Every rejection funnels through here so none can be silent. A candidate
-    refused without a line in the log looks exactly like one that was never
-    discovered, and a parked project and a broken glob need different fixes.
-    """
-    logger.error(
-        "[discovery] REFUSED resident '%s' at %s (listed active in %s): %s",
-        name,
-        path,
-        registry_path.name,
-        reason,
-    )
-
-
-def _classify_resident(name: str, path: Path, registry_path: Path) -> bool:
-    """Decide one resident candidate on its own passport, naming any refusal.
-
-    Split out from the record loop so the decision can be read — and changed —
-    without the iteration that surrounds it.
-    """
-    residency = declared_residency(path)
-    if residency == RESIDENCY_RESIDENT:
-        return True
-
-    if residency is None:
-        reason = "passport declares no residency (missing, unreadable, or no field)"
-    elif residency == RESIDENCY_CORE:
-        reason = f"passport declares '{RESIDENCY_CORE}' from inside {_PROJECTS_DIR_NAME}/"
-    else:
-        reason = f"passport declares unknown residency '{residency}'"
-    _refuse_resident(name, path, registry_path, reason)
-    return False
-
-
-def _citizen_records(registry: dict, base: Path, source: str, resident_registry: Optional[Path] = None) -> List[dict]:
-    """Build citizen records for one registry, resolving paths against `base`.
-
-    `base` is the root a relative registry path is measured from: the repo root
-    for AIPASS_REGISTRY.json, the project root for a sealed project registry.
-    Project paths must NOT fall back to the repo root — 'src/baud/baud' happens
-    to exist in both trees, and resolving it repo-first picks the wrong one.
-
-    Args:
-        registry: The parsed registry document.
-        base: Root that relative branch paths are resolved against.
-        source: Label recorded on each record — which registry vouched for it.
-        resident_registry: Set to the registry FILE when these rows are resident
-            candidates: each then also needs a passport declaring ``resident``,
-            and every refusal is named against this file. Left None for the
-            sealed core registry, whose citizens are included unconditionally.
-
-    Returns:
-        One record per accepted branch: {name, email, dir_name, path, source}.
-    """
+    # @memory deduplicates by resolved PATH — correct for their lanes, which are
+    # path-keyed. Daemon is email-keyed: a job's owner IS an address and the wake
+    # targets one, so two rows sharing an email are ambiguous here even when they
+    # name different directories. Deduplicated on daemon's own axis, and named.
     records = []
-    for branch in registry.get("branches", []):
-        if branch.get("status", "") != "active":
+    seen: dict = {}
+    for citizen in registry_scope.fleet_branches(root, name_from="registry"):
+        email = citizen.get("email")
+        if not email:
+            logger.error(
+                "[discovery] REFUSED '%s' at %s (listed active in %s): no email in the registry row — "
+                "daemon addresses jobs and wakes by email, so an addressless citizen cannot own one",
+                citizen.get("name", "?"),
+                citizen.get("path"),
+                citizen.get("registry", "?"),
+            )
             continue
-        email = branch.get("email", "")
-        path_str = branch.get("path", "")
-        if not email or not path_str:
+
+        if email in seen:
+            logger.error(
+                "[discovery] REFUSED duplicate address %s at %s (listed active in %s): "
+                "already claimed by %s — daemon keys jobs and wakes by email, so a second "
+                "row with the same address would double-fire the first citizen's schedule",
+                email,
+                citizen.get("path"),
+                citizen.get("registry", "?"),
+                seen[email],
+            )
             continue
-        path = Path(path_str)
-        if not path.is_absolute():
-            path = base / path
-        name = branch.get("name", path.name)
-        if not path.exists():
-            if resident_registry is not None:
-                _refuse_resident(name, path, resident_registry, "registry path does not exist on disk")
-            continue
-        if resident_registry is not None and not _classify_resident(name, path, resident_registry):
-            continue
+
+        path = Path(citizen["path"])
+        seen[email] = path
         records.append(
             {
-                "name": name,
+                "name": citizen.get("name", path.name),
                 "email": email,
                 "dir_name": path.name,
                 "path": path,
-                "source": source,
+                "source": _source_label(citizen, root),
             }
         )
     return records
 
 
-def _project_registry_files() -> List[Path]:
-    """Candidate resident-project registries. DISCOVERY ONLY — decides nothing.
-
-    Registry-led and shallow, and both halves are load-bearing. Exactly one
-    level under ``projects/``, so a registry nested deeper is out of reach; and
-    every dot-prefixed component refused by the explicit filter below, because
-    ``pathlib`` globs match hidden directories where a shell would not. On the
-    live tree the parked projects are excluded by BOTH, which is why each layer
-    is pinned alone — either one looks unnecessary until the other is removed.
-
-    A checkout with no ``projects/`` returns empty and does not raise: CI runs
-    on exactly that tree, since ``projects/`` is gitignored.
-
-    Returns:
-        Absolute registry paths, sorted, one per candidate project.
-    """
-    projects_dir = _REPO_ROOT / _PROJECTS_DIR_NAME
-    if not projects_dir.is_dir():
-        return []
-
-    files = []
-    for path in sorted(projects_dir.glob(RESIDENT_REGISTRY_GLOB)):
-        if any(part.startswith(".") for part in path.relative_to(projects_dir).parts):
-            continue
-        files.append(path)
-    return files
-
-
-def _load_registry_file(path: Path) -> dict:
-    """Load one registry JSON file. Returns empty dict on failure."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error("[discovery] Failed to load registry %s: %s", path, e)
-        return {}
-
-
-def active_citizens() -> List[dict]:
-    """Return an ordered record per active citizen across both trees.
-
-    Record: {name, email, dir_name, path, source}. Core citizens come first in
-    AIPASS_REGISTRY.json order, then residents in project-name order — this
-    ordering is the steward rotation's roster order.
-
-    The two halves are judged by DIFFERENT rules on purpose. Core citizens come
-    from the sealed registry and are included unconditionally; one that declares
-    something other than 'core' is logged and KEPT, because an agent-writable
-    field must never be able to remove its own branch from the scheduler.
-    Resident candidates need both keys — see :func:`_classify_resident` — since
-    there the passport is the only thing separating a live project from a
-    parked one.
-    """
-    citizens = _citizen_records(_load_registry(), _REPO_ROOT, SOURCE_AIPASS)
-    for citizen in citizens:
-        residency = declared_residency(citizen["path"])
-        if residency != RESIDENCY_CORE:
-            logger.warning(
-                "[discovery] Core citizen %s declares residency %r, not '%s' — kept, "
-                "because the sealed registry is the anchor",
-                citizen["email"],
-                residency,
-                RESIDENCY_CORE,
-            )
-
-    for registry_file in _project_registry_files():
-        project_root = registry_file.parent
-        source = f"{_PROJECTS_DIR_NAME}/{project_root.name}"
-        citizens.extend(
-            _citizen_records(_load_registry_file(registry_file), project_root, source, resident_registry=registry_file)
-        )
-
-    seen = set()
-    unique = []
-    for citizen in citizens:
-        if citizen["email"] in seen:
-            logger.info("[discovery] Duplicate citizen %s ignored (%s)", citizen["email"], citizen["source"])
-            continue
-        seen.add(citizen["email"])
-        unique.append(citizen)
-    return unique
-
-
-def active_branch_map() -> dict:
+def active_branch_map(repo_root: Optional[Path] = None) -> dict:
     """Return dir_name -> branch_email for every active, registered citizen.
 
     Public entry point so sibling handlers (inbox_scanner) can resolve branch
     directories to owners without reaching into the private helpers.
     """
-    return {c["dir_name"]: c["email"] for c in active_citizens()}
+    return {c["dir_name"]: c["email"] for c in active_citizens(repo_root)}
 
 
-def branch_path_for(dir_name: str) -> Path:
+def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
     """Return the on-disk path for a branch directory name.
 
     Resolved from the citizen records so project citizens land in their own
     tree; falls back to src/aipass/<dir_name> for anything unregistered.
     """
-    for citizen in active_citizens():
+    for citizen in active_citizens(repo_root):
         if citizen["dir_name"] == dir_name:
             return citizen["path"]
     return _SRC_AIPASS / dir_name

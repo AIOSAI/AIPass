@@ -170,8 +170,14 @@ class TestDiscoveryIsRegistryLedAndShallow:
         ``projects/live/.backup/LIVE_REGISTRY.json`` is excluded twice over, by
         depth and by dot-directory. Asserted on depth alone here so the two
         rules cannot be mistaken for one.
+
+        The non-empty guard is the whole test. A depth rule asserted inside a
+        loop is proven by the paths that ENTER it, so a discovery returning
+        nothing passes this green while checking nothing at all.
         """
-        for path in rs.resident_registry_paths(fleet):
+        found = rs.resident_registry_paths(fleet)
+        assert found, "discovery returned nothing, so the depth rule was never exercised"
+        for path in found:
             assert len(path.relative_to(fleet / "projects").parts) == 2, f"discovered below depth one: {path}"
 
     def test_a_missing_projects_directory_is_not_an_error(self, tmp_path):
@@ -366,12 +372,22 @@ class TestTheLiveFleetStillCountsTwentyTwo:
         assert (len(branches), len(residents)) == (22, 4), [item["name"] for item in branches]
 
     def test_every_live_resident_declares_itself_one(self, live_residents):
-        """The declaration is the classifier now — so it had better be there."""
+        """The declaration is the classifier now — so it had better be there.
+
+        Counted, not just iterated: two nested loops over live discovery mean
+        two chances to check nothing. The fixture already skips when the
+        registries are missing, so reaching here with a count of zero is a
+        different failure — discovery found the files and read no branches out
+        of them — and it must not read as agreement.
+        """
+        checked = 0
         for registry_path in rs.resident_registry_paths(live_residents):
             for item in rs.read_registry_branches(registry_path):
+                checked += 1
                 assert rs.declared_residency(item["path"]) == rs.RESIDENCY_RESIDENT, (
                     f"{item['name']} is in fleet scope but its passport does not declare it"
                 )
+        assert checked, "no live resident branch was read, so nothing was proven about any declaration"
 
     def test_the_archived_projects_are_still_on_disk_and_still_out(self, live_fleet):
         """The exclusion is only proven where the thing being excluded exists."""
@@ -382,3 +398,226 @@ class TestTheLiveFleetStillCountsTwentyTwo:
         assert stale, "the archive carries no registries, so it cannot prove the exclusion"
         names = {item["name"] for item in rs.fleet_branches(live_fleet)}
         assert "marketstand" not in names and "speakeasy" not in names
+
+
+class TestTheRecordCarriesTheAddress:
+    """A fleet record without an email is unusable by every email-addressed lane.
+
+    Asked for by @daemon (dispatch 16fbf1c0) and ruled in their favour: the row
+    is already read and the field already thrown away, so resolving it anywhere
+    else would mean a second reader of the same registry rows — the exact defect
+    this module exists to end.  @ai_mail is email-addressed too, so shipping the
+    record without it would strand both of the lanes 2.0.0 was meant to converge.
+
+    Pass-through, never derived.  ``name`` may come from the directory, and an
+    address guessed from a directory name is a wrong answer that looks right.
+    """
+
+    def test_every_record_carries_an_email_key(self, fleet):
+        records = rs.fleet_branches(fleet)
+        assert records, "nothing was discovered, so the record shape was never exercised"
+        addressless = [r["name"] for r in records if "email" not in r]
+        assert not addressless, f"records with no email key: {addressless}"
+
+    def test_the_email_is_the_registrys_verbatim_not_derived_from_the_name(self, tmp_path):
+        """A row whose address looks nothing like its name or its directory.
+
+        ``@daemon`` asked for the field; this pins WHERE it comes from. Both
+        plausible derivations — lowercase the name, or read the directory —
+        produce a different string here, so either one fails this outright.
+        """
+        _write(
+            tmp_path / "AIPASS_REGISTRY.json",
+            _registry({"name": "ALPHA", "path": "src/aipass/alpha", "email": "@not-the-name", "status": "active"}),
+        )
+        _write(tmp_path / "src/aipass/alpha/.trinity/passport.json", _passport("core"))
+        (record,) = rs.fleet_branches(tmp_path)
+        assert record["email"] == "@not-the-name"
+
+    def test_a_row_with_no_email_keeps_the_branch_and_reports_none(self, tmp_path):
+        """Addressless is a condition to hand on, not a reason to drop a citizen.
+
+        Path-based lanes (trinity_push, rollover) never touch the address, so
+        dropping the branch here would break them to protect a caller that has
+        not asked yet.  The record reports ``None`` and the caller refuses on
+        its own terms.  Measured on the live fleet at 22 of 22 rows carrying an
+        address, so this is the shape of a future defect, not today's.
+        """
+        _write(
+            tmp_path / "AIPASS_REGISTRY.json",
+            _registry({"name": "ALPHA", "path": "src/aipass/alpha", "status": "active"}),
+        )
+        _write(tmp_path / "src/aipass/alpha/.trinity/passport.json", _passport("core"))
+        (record,) = rs.fleet_branches(tmp_path)
+        assert record["name"] == "alpha"
+        assert record["email"] is None
+
+    def test_the_live_fleet_is_addressable_end_to_end(self, live_fleet):
+        """The guard that would have caught this before @daemon had to ask."""
+        records = rs.fleet_branches(live_fleet)
+        assert records, "live discovery returned nothing -- this proved nothing"
+        unaddressed = [r["name"] for r in records if not r.get("email")]
+        assert not unaddressed, f"live citizens with no address in their registry row: {unaddressed}"
+
+    def test_each_record_gets_its_OWN_rows_address_not_a_neighbours(self, tmp_path):
+        """Three rows, three addresses, none guessable from its own name.
+
+        Found by mutation: a version handing every record the FIRST row's email
+        survived every other test in this class, because the single-row
+        registries above cannot see a cross-row mixup and the live guard only
+        asks whether an address is present. For an email-addressed scheduler
+        that mutant is the worst available failure — every job would wake a real
+        citizen, just never the right one — so it is pinned by pairing, not by
+        presence.
+        """
+        rows = [
+            {"name": "ALPHA", "path": "src/aipass/alpha", "email": "@third", "status": "active"},
+            {"name": "BETA", "path": "src/aipass/beta", "email": "@first", "status": "active"},
+            {"name": "GAMMA", "path": "src/aipass/gamma", "email": "@second", "status": "active"},
+        ]
+        _write(tmp_path / "AIPASS_REGISTRY.json", _registry(*rows))
+        for row in rows:
+            _write(tmp_path / row["path"] / ".trinity" / "passport.json", _passport("core"))
+        found = {record["name"]: record["email"] for record in rs.fleet_branches(tmp_path)}
+        assert found == {"alpha": "@third", "beta": "@first", "gamma": "@second"}
+
+
+class TestMalformedJsonDeclaresNothingAndNeverRaises:
+    """A file that parses as JSON but is the wrong SHAPE must refuse, not crash.
+
+    Reported by @daemon (dispatch 5031a591) against declared_residency, and the
+    provenance is the point: their deleted reader had an explicit isinstance
+    guard that mine never had. Removing the duplicate removed the stricter of
+    two implementations, and nobody knew which one was stricter.
+
+    Why it is fleet-wide rather than branch-local: declared_residency is called
+    once per core citizen by fleet_branches and once per candidate by
+    _accepted_residents, and read_registry_branches is called for every registry
+    in scope. An uncaught raise in either does not refuse ONE branch -- it takes
+    out rollover, lint, health, trinity_push and @daemon's scheduler together,
+    with a traceback naming this module rather than the file that is wrong.
+
+    The module docstring is the specification being broken: an unreadable
+    passport "declares NOTHING and does not raise". A non-dict root is
+    unreadable in every sense that matters.
+
+    Every root is pinned separately. @daemon's own suite pinned only "[]", and a
+    fix tested against a list alone would have let a string root through -- so
+    the parametrisation is the test, not decoration.
+    """
+
+    @pytest.mark.parametrize(
+        "label, document",
+        [
+            ("list", "[]"),
+            ("string", '"resident"'),
+            ("number", "7"),
+            ("null", "null"),
+            ("bool", "true"),
+        ],
+    )
+    def test_a_non_dict_passport_root_declares_nothing(self, tmp_path, label, document):
+        """Five roots, not the three reported: null and bool raise too."""
+        branch = tmp_path / f"branch_{label}"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(document, encoding="utf-8")
+        assert rs.declared_residency(branch) is None
+
+    @pytest.mark.parametrize(
+        "label, document",
+        [
+            ("string", '{"citizenship": "core"}'),
+            ("list", '{"citizenship": []}'),
+            ("number", '{"citizenship": 1}'),
+        ],
+    )
+    def test_a_non_dict_citizenship_block_declares_nothing(self, tmp_path, label, document):
+        """The second `.get` on the same line had the same defect.
+
+        `data.get("citizenship", {}).get("residency")` guards an ABSENT block
+        with its default and a PRESENT-but-wrong one not at all, so fixing only
+        the root would have left the identical crash one key deeper. Not in
+        @daemon's report -- found by reading the line that was reported.
+        """
+        branch = tmp_path / f"branch_cz_{label}"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(document, encoding="utf-8")
+        assert rs.declared_residency(branch) is None
+
+    @pytest.mark.parametrize(
+        "label, document",
+        [
+            ("list root", "[]"),
+            ("string root", '"whatever"'),
+            ("number root", "7"),
+            ("null root", "null"),
+            ("branches is a mapping", '{"branches": {"alpha": 1}}'),
+            ("branches is a string", '{"branches": "alpha"}'),
+            # The three NON-ITERABLE values. Found by mutation: with only the
+            # mapping and string cases above, deleting the `branches` list guard
+            # SURVIVED, because iterating a dict or a string still yields items
+            # and the row guard below catches every one of them. A number, a
+            # bool or an explicit null raises TypeError at the `for` itself,
+            # where no row guard can ever reach. `null` is the live shape of the
+            # three: `data.get("branches", [])` returns None when the key is
+            # PRESENT and null, so the default never fires.
+            ("branches is a number", '{"branches": 7}'),
+            ("branches is a bool", '{"branches": true}'),
+            ("branches is null", '{"branches": null}'),
+            ("a branch is a string", '{"branches": ["alpha"]}'),
+            ("a branch is a list", '{"branches": [[]]}'),
+        ],
+    )
+    def test_a_malformed_registry_yields_no_branches(self, tmp_path, label, document):
+        """The registry reader has the same defect and nobody had tested it.
+
+        Worse than the passport case, because a registry is the SEALED ANCHOR:
+        the passport is agent-written and expected to be wrong sometimes, while
+        every lane trusts the registry to be the thing a passport cannot forge.
+        A registry that crashes the reader takes the anchor with it.
+        """
+        registry = tmp_path / f"{label.replace(' ', '_')}_REGISTRY.json"
+        registry.write_text(document, encoding="utf-8")
+        assert rs.read_registry_branches(registry) == []
+
+    def test_a_malformed_row_is_skipped_and_the_good_rows_survive(self, tmp_path):
+        """One bad row must cost one row, not the whole registry.
+
+        This is the difference between refusing and crashing, stated as a test:
+        a fleet where one typo hides every other citizen is not failing honestly,
+        it is failing loudly in the wrong place.
+        """
+        registry = tmp_path / "MIXED_REGISTRY.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        "not-a-dict-at-all",
+                        {"name": "GOOD", "path": "src/good", "email": "@good", "status": "active"},
+                        {"name": "BADPATH", "path": 123, "email": "@badpath", "status": "active"},
+                        {"name": "INACTIVE", "path": "src/inactive", "status": "retired"},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        found = rs.read_registry_branches(registry, name_from="name")
+        assert [record["name"] for record in found] == ["GOOD"]
+
+    def test_a_non_string_name_or_address_never_reaches_the_record(self, tmp_path):
+        """Wrong TYPE is a wrong answer, not a crash -- and it is still wrong.
+
+        Neither of these raises, so they would have survived the guard above.
+        An int name breaks any caller that formats it, and a non-string address
+        is unmailable; @daemon consumes both. Name falls back to the directory,
+        which is a real answer; an address has no honest fallback, so it is None
+        and the caller refuses on its own terms.
+        """
+        registry = tmp_path / "TYPES_REGISTRY.json"
+        registry.write_text(
+            json.dumps({"branches": [{"name": 42, "path": "src/alpha", "email": ["@a"], "status": "active"}]}),
+            encoding="utf-8",
+        )
+        (record,) = rs.read_registry_branches(registry, name_from="name")
+        assert record["name"] == "alpha"
+        assert record["email"] is None

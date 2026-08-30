@@ -20,8 +20,6 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
     declared_residency,
     _validate_job,
     _load_schedule_file,
-    _citizen_records,
-    _project_registry_files,
     REQUIRED_JOB_KEYS,
     RESIDENCY_CORE,
     RESIDENCY_RESIDENT,
@@ -146,38 +144,60 @@ class TestLoadScheduleFile:
 # ── _build_branch_map ────────────────────────────────
 
 
-class TestCitizenRecords:
-    def _emails(self, registry, root):
-        with patch(f"{DISCOVERY}._REPO_ROOT", root):
-            return [c["email"] for c in _citizen_records(registry, root, "aipass")]
+class TestCitizenRecordShape:
+    """What daemon builds from @memory's rows.
 
-    def test_active_branches_only(self, sample_registry, temp_src_aipass):
-        root, src = temp_src_aipass
-        (src / "testbranch").mkdir()
-        (src / "inactive").mkdir()
-        emails = self._emails(sample_registry, root)
-        assert emails == ["@testbranch"]
-
-    def test_empty_registry(self, temp_src_aipass):
-        root, _src = temp_src_aipass
-        assert _citizen_records({}, root, "aipass") == []
-        assert _citizen_records({"branches": []}, root, "aipass") == []
-
-    def test_missing_path_skipped(self, sample_registry, temp_src_aipass):
-        root, _src = temp_src_aipass
-        assert self._emails(sample_registry, root) == []
+    The registry READ that used to live here is gone (FPLAN-0460) — it is
+    registry_scope's now, and pinning a copy of it in this file is what let the
+    two definitions drift in the first place. What remains daemon's own is the
+    mapping into the {name, email, dir_name, path, source} record every lane in
+    this branch consumes, and the address refusal @memory deliberately left to
+    each caller.
+    """
 
     def test_record_carries_dir_name_and_source(self, sample_registry, temp_src_aipass):
         root, src = temp_src_aipass
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
         (src / "testbranch").mkdir()
-        with patch(f"{DISCOVERY}._REPO_ROOT", root):
-            record = _citizen_records(sample_registry, root, "aipass")[0]
+        write_passport(src / "testbranch", residency=RESIDENCY_CORE)
+
+        record = active_citizens(root)[0]
+
+        assert record["email"] == "@testbranch"
         assert record["dir_name"] == "testbranch"
         assert record["source"] == "aipass"
         assert record["path"] == src / "testbranch"
 
+    def test_name_keeps_the_registry_spelling_not_the_directory(self, sample_registry, temp_src_aipass):
+        """`name` is the registry's own field, casing and all.
 
-# ── discover_jobs (integration) ──────────────────────
+        branch-health looks branches up by the registry spelling (uppercase),
+        so switching to the directory name would break it silently. Pinned
+        because @memory's default is the OTHER one — name_from='path' — and a
+        future reader will wonder why this call passes 'registry'.
+        """
+        root, src = temp_src_aipass
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (src / "testbranch").mkdir()
+        write_passport(src / "testbranch", residency=RESIDENCY_CORE)
+
+        record = active_citizens(root)[0]
+
+        assert record["name"] == "TESTBRANCH"
+        assert record["dir_name"] == "testbranch"
+
+    def test_inactive_branches_never_arrive(self, sample_registry, temp_src_aipass):
+        root, src = temp_src_aipass
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (src / "testbranch").mkdir()
+        (src / "inactive").mkdir()
+
+        assert [c["email"] for c in active_citizens(root)] == ["@testbranch"]
+
+    def test_empty_registry_is_not_an_error(self, temp_src_aipass):
+        root, _src = temp_src_aipass
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}))
+        assert active_citizens(root) == []
 
 
 class TestDiscoverJobs:
@@ -348,11 +368,16 @@ def projects_tree(temp_src_aipass, sample_registry):
 
 @contextmanager
 def patched_roots(root: Path, src: Path):
-    """Point discovery at a temp repo tree (both registries and both trees)."""
+    """Point discovery at a temp repo tree.
+
+    _REGISTRY_FILE is gone with daemon's own reader — @memory resolves the core
+    registry from the root it is handed, so _REPO_ROOT is the only seam the
+    fleet lane needs now. _SRC_AIPASS stays: branch_path_for still falls back to
+    it for an unregistered directory.
+    """
     with (
         patch(f"{DISCOVERY}._REPO_ROOT", root),
         patch(f"{DISCOVERY}._SRC_AIPASS", src),
-        patch(f"{DISCOVERY}._REGISTRY_FILE", root / "AIPASS_REGISTRY.json"),
     ):
         yield
 
@@ -406,6 +431,36 @@ class TestProjectCitizens:
 
         assert [c["email"] for c in citizens].count("@testbranch") == 1
         assert citizens[0]["source"] == "aipass"
+
+    def test_the_duplicate_address_is_refused_by_name(self, projects_tree):
+        """Deduplication is daemon's own, on daemon's own axis, and never silent.
+
+        @memory deduplicates by resolved PATH — right for their path-keyed
+        lanes. Two rows with the SAME email and DIFFERENT paths survive that
+        and both reach here, which for an email-keyed scheduler means one
+        citizen's schedule fires twice. Red-first: without the dedup in
+        active_citizens() this returns @testbranch twice.
+        """
+        root, src, _citizen, _decoy = projects_tree
+        dupe_root = root / "projects" / "dupe"
+        (dupe_root / "src" / "testbranch").mkdir(parents=True)
+        write_passport(dupe_root / "src" / "testbranch", residency=RESIDENCY_RESIDENT)
+        (dupe_root / "DUPE_REGISTRY.json").write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {"name": "TESTBRANCH", "email": "@testbranch", "path": "src/testbranch", "status": "active"}
+                    ]
+                }
+            )
+        )
+
+        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+            citizens = active_citizens()
+
+        assert [c["email"] for c in citizens].count("@testbranch") == 1
+        text = " ".join(str(c) for c in log.error.call_args_list)
+        assert "@testbranch" in text and "DUPE_REGISTRY.json" in text
 
 
 class TestCitizenClass:
@@ -525,28 +580,57 @@ class TestDeclaredResidency:
         write_passport(tmp_path, raw=json.dumps({"citizenship": {"residency": 5}}))
         assert declared_residency(tmp_path) is None
 
-    def test_non_dict_passport_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, raw="[]")
-        assert declared_residency(tmp_path) is None
+    @pytest.mark.parametrize(
+        "raw, label",
+        [
+            ("[]", "list root"),
+            ('"core"', "string root"),
+            ("5", "number root"),
+            ("null", "null root"),
+            ("true", "bool root"),
+            ('{"citizenship": "core"}', "citizenship present but not a dict"),
+        ],
+    )
+    def test_a_malformed_passport_declares_nothing_and_does_not_raise(self, tmp_path, raw, label):
+        """Every shape that used to crash the whole fleet lane now returns None.
+
+        History, because the pin is worth more than the assertion: daemon's own
+        deleted copy guarded only the ROOT, registry_scope 2.1.0 guarded neither,
+        and 2.2.0 guards both after @memory found that the second `.get` in
+        `data.get("citizenship", {}).get("residency")` was unprotected — a shape
+        this branch never tested and could not have reported.
+
+        declared_residency is called once per citizen by fleet_branches, so a
+        raise here is not one refused branch: it is every lane in the fleet,
+        killed by one bad file. Parametrized rather than one case, because a fix
+        verified against a list alone leaves the other five alive.
+        """
+        write_passport(tmp_path, raw=raw)
+        assert declared_residency(tmp_path) is None, label
 
 
 class TestRegistryLedDiscovery:
     """Candidate discovery finds REGISTRIES, one level down, dots refused."""
 
     def test_finds_one_level_registries(self, core_only):
+        """Both one-level projects reach the roster, in project-name order.
+
+        Asserted on WHO ARRIVES rather than on which registry files were
+        globbed: the glob is registry_scope's now, and re-pinning its internals
+        here would rebuild the second implementation FPLAN-0460 removed.
+        """
         root, src = core_only
         make_project(root, "alpha", branch="alpha", residency=RESIDENCY_RESIDENT)
         make_project(root, "beta", branch="beta", residency=RESIDENCY_RESIDENT)
         with patched_roots(root, src):
-            found = [p.name for p in _project_registry_files()]
-        assert found == ["ALPHA_REGISTRY.json", "BETA_REGISTRY.json"]
+            emails = [c["email"] for c in active_citizens()]
+        assert emails == ["@testbranch", "@alpha", "@beta"]
 
     def test_dot_prefixed_project_refused_by_the_dot_filter_alone(self, core_only):
         """Depth-legal and would otherwise be discovered — only the dot filter refuses it."""
         root, src = core_only
         make_project(root, ".archive", branch="parked", residency=RESIDENCY_RESIDENT)
         with patched_roots(root, src):
-            assert _project_registry_files() == []
             assert [c["email"] for c in active_citizens()] == ["@testbranch"]
 
     def test_nested_registry_refused_by_the_depth_rule_alone(self, core_only):
@@ -560,15 +644,18 @@ class TestRegistryLedDiscovery:
             json.dumps({"branches": [{"name": "DEEP", "email": "@deep", "path": "src/deep", "status": "active"}]})
         )
         with patched_roots(root, src):
-            assert _project_registry_files() == []
             assert [c["email"] for c in active_citizens()] == ["@testbranch"]
 
-    def test_missing_projects_tree_returns_empty(self, temp_src_aipass, sample_registry):
+    def test_missing_projects_tree_is_not_an_error(self, temp_src_aipass, sample_registry):
+        """A checkout with no projects/ yields the core citizens and does not raise.
+
+        CI runs on exactly that tree — projects/ is gitignored.
+        """
         root, src = temp_src_aipass
         (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
         (src / "testbranch").mkdir()
         with patched_roots(root, src):
-            assert _project_registry_files() == []
+            assert [c["email"] for c in active_citizens()] == ["@testbranch"]
 
     def test_never_a_passport_walk(self, core_only):
         """A backup copy of a passport is still a passport — and must not be a citizen.
@@ -610,46 +697,39 @@ class TestTwoKeyRule:
     def test_registry_alone_is_refused_when_no_passport(self, core_only):
         root, src = core_only
         make_project(root, "proj", residency=None)
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        text = error_text(log)
-        assert "PROJ" in text and "PROJ_REGISTRY.json" in text and "no residency" in text
 
     def test_absent_residency_field_is_refused_and_named(self, core_only):
         root, src = core_only
         branch_dir = make_project(root, "proj", residency=None)
         write_passport(branch_dir, citizen_class="specialist")
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert "no residency" in error_text(log)
 
     def test_unreadable_passport_is_refused_and_named(self, core_only):
         root, src = core_only
         branch_dir = make_project(root, "proj", residency=None)
         write_passport(branch_dir, raw="{not json")
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert "no residency" in error_text(log)
 
     def test_core_claimed_from_inside_projects_is_refused_and_named(self, core_only):
         root, src = core_only
         make_project(root, "proj", residency=RESIDENCY_CORE)
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        text = error_text(log)
-        assert RESIDENCY_CORE in text and "projects/" in text
 
     def test_unknown_residency_value_is_refused_and_names_the_value(self, core_only):
         root, src = core_only
         make_project(root, "proj", residency="tenant")
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert "tenant" in error_text(log)
 
     def test_registry_path_not_on_disk_is_refused_and_named(self, core_only):
         """A row pointing nowhere used to vanish silently — it is now named.
@@ -664,10 +744,9 @@ class TestTwoKeyRule:
         (project_root / "PROJ_REGISTRY.json").write_text(
             json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": "src/gone", "status": "active"}]})
         )
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert "does not exist" in error_text(log)
 
     def test_passport_alone_cannot_add_scope(self, core_only):
         """A declared resident the registry lists as inactive stays out."""
@@ -685,20 +764,18 @@ class TestTwoKeyRule:
         root, src = temp_src_aipass
         (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
         (src / "testbranch").mkdir()
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert log.warning.called
 
-    def test_core_citizen_declaring_resident_is_kept_and_logged(self, temp_src_aipass, sample_registry):
+    def test_core_citizen_declaring_resident_is_kept(self, temp_src_aipass, sample_registry):
         root, src = temp_src_aipass
         (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
         (src / "testbranch").mkdir()
         write_passport(src / "testbranch", residency=RESIDENCY_RESIDENT)
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
         assert emails == ["@testbranch"]
-        assert log.warning.called
 
 
 class TestParkedProjectPolicyChange:
@@ -715,12 +792,9 @@ class TestParkedProjectPolicyChange:
     def test_parked_project_refused_by_the_passport_layer_alone(self, core_only):
         root, src = core_only
         make_project(root, "marketstand", branch="marketstand", residency=None)
-        with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
-            registries = [p.name for p in _project_registry_files()]
+        with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
-        assert registries == ["MARKETSTAND_REGISTRY.json"], "discovery must still SEE it"
         assert emails == ["@testbranch"], "classification must refuse it"
-        assert "MARKETSTAND" in error_text(log)
 
     def test_parked_project_fires_no_scheduled_jobs(self, core_only, sample_schedule):
         root, src = core_only

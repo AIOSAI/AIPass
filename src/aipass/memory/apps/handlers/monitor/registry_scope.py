@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
 # Description: The one definition of "the fleet" — core citizens plus passport-declared residents
-# Version: 2.0.0
+# Version: 2.2.0
 # Created: 2026-08-27
-# Modified: 2026-08-28
+# Modified: 2026-08-30
 # =============================================
 
 """Fleet Scope
@@ -140,7 +140,23 @@ def declared_residency(branch_path: Path) -> str | None:
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         logger.error(f"[registry_scope] Unreadable passport {passport}: {exc}")
         return None
-    residency = data.get("citizenship", {}).get("residency")
+    # SHAPE, not just parseability. Reported by @daemon 2026-08-30 (dispatch
+    # 5031a591): valid JSON that is not an object made `.get` raise
+    # AttributeError straight out of this function — and this function is not a
+    # leaf. `fleet_branches` calls it once per core citizen and
+    # `_accepted_residents` once per candidate, so one malformed file took out
+    # every fleet lane at once, with a traceback naming this module instead of
+    # the passport. The docstring above is the specification: unreadable
+    # declares NOTHING and does not raise. A non-dict root is unreadable.
+    if not isinstance(data, dict):
+        logger.error(f"[registry_scope] Passport root is {type(data).__name__}, not an object: {passport}")
+        return None
+    citizenship = data.get("citizenship")
+    if not isinstance(citizenship, dict):
+        if citizenship is not None:
+            logger.error(f"[registry_scope] Passport citizenship is {type(citizenship).__name__} in {passport}")
+        return None
+    residency = citizenship.get("residency")
     return residency if isinstance(residency, str) else None
 
 
@@ -201,18 +217,69 @@ def read_registry_branches(registry_path: Path, name_from: str = "path") -> list
         logger.error(f"[registry_scope] Unreadable registry {registry_path}: {exc}")
         return []
 
+    # Same shape defect as `declared_residency`, and worse here: a passport is
+    # agent-written and expected to be wrong sometimes, while every lane trusts
+    # the registry as the anchor a passport cannot forge. A registry that
+    # crashes the reader takes the anchor down with it. Found by extending
+    # @daemon's report rather than by their tests, which only reached the
+    # passport.
+    if not isinstance(data, dict):
+        logger.error(f"[registry_scope] Registry root is {type(data).__name__}, not an object: {registry_path}")
+        return []
+    branches = data.get("branches", [])
+    if not isinstance(branches, list):
+        logger.error(f"[registry_scope] Registry 'branches' is {type(branches).__name__}, not a list: {registry_path}")
+        return []
+
     found = []
-    for branch in data.get("branches", []):
+    for branch in branches:
+        # One bad row costs one row. A fleet where a single typo hides every
+        # other citizen is not failing honestly — it is failing loudly in the
+        # wrong place.
+        if not isinstance(branch, dict):
+            logger.error(f"[registry_scope] Registry row is {type(branch).__name__}, not an object: {registry_path}")
+            continue
         if branch.get("status") != "active":
             continue
         raw = branch.get("path", "")
+        if not isinstance(raw, str):
+            logger.error(
+                f"[registry_scope] Registry row '{branch.get('name')}' has a non-string path in {registry_path}"
+            )
+            continue
         if not raw:
             continue
         path = Path(raw)
         if not path.is_absolute():
             path = Path(registry_path).parent / raw
         name = path.name if name_from == "path" else branch.get("name", path.name)
-        found.append({"name": name, "path": path, "registry": Path(registry_path).name})
+        # Wrong TYPE is a wrong answer rather than a crash, so neither of these
+        # is caught by the guards above — and both are still wrong. An int name
+        # breaks any caller that formats it; a non-string address is unmailable
+        # for @daemon and @ai_mail. The name has an honest fallback (the
+        # directory); an address does not, so it becomes None and the caller
+        # refuses on its own terms.
+        if not isinstance(name, str):
+            logger.error(f"[registry_scope] Registry row at {raw} has a non-string name in {registry_path}")
+            name = path.name
+        email = branch.get("email")
+        if email is not None and not isinstance(email, str):
+            logger.error(f"[registry_scope] Registry row '{name}' has a non-string email in {registry_path}")
+            email = None
+        # Pass-through, never derived. ``name`` may come from the DIRECTORY, so
+        # deriving an address from it would hand an email-addressed caller a
+        # plausible wrong answer instead of a missing one. Absent stays None and
+        # the branch is kept: path-based lanes never read the address, and
+        # dropping a citizen here would break them to protect a caller that has
+        # not asked. Requested by @daemon, 2026-08-30, dispatch 16fbf1c0.
+        found.append(
+            {
+                "name": name,
+                "path": path,
+                "registry": Path(registry_path).name,
+                "email": email or None,
+            }
+        )
     return found
 
 
