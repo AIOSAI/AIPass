@@ -450,3 +450,29 @@ class TestEnforce:
         problems = laws.validate(document)
         assert any(p.startswith("S8") for p in problems)
         assert any(p.startswith("S2") for p in problems)
+
+
+class TestSpineIsLawfulByConstruction:
+    """Found by the refused-artifact test: a refusal is built from spine
+    documents alone, so an unlawful spine document makes every refusal itself
+    an unlawful artifact."""
+
+    def test_the_ai_tier_group_declares_nominate_only(self):
+        assert spine.spine_document("ai_advisory")["kind"] == "nominate_only"
+
+    def test_no_other_spine_group_claims_a_kind(self):
+        for name in spine.CORE_SPINE:
+            if spine.SPINE_TIERS[name] != "ai":
+                assert "kind" not in spine.spine_document(name)
+
+    def test_a_document_built_only_from_the_spine_passes_every_law(self):
+        groups = {name: spine.spine_document(name) for name in spine.CORE_SPINE}
+        document = {
+            "group_list": list(spine.CORE_SPINE),
+            "groups": groups,
+            "retired_groups": [],
+            "group_baseline": "first run for this pair",
+            "cache": {"served_from_cache": False, "not_fingerprinted": []},
+        }
+
+        assert laws.validate(document) == []

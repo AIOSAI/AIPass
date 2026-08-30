@@ -184,14 +184,23 @@ def spine_document(group: str) -> dict:
 
     Law S1: not-run is `not_applicable`, never 0. The reason is mandatory —
     a `not_applicable` without one is indistinguishable from a silent skip.
+
+    The AI tier carries `kind: nominate_only` unconditionally (Law S6). A
+    refused artifact is built entirely from these documents, so if the spine
+    did not stamp it here, every refusal would itself be an unlawful artifact —
+    found by the refused-artifact test on its first run.
     """
+    tier = SPINE_TIERS.get(group, "exec")
     document = {
-        "tier": SPINE_TIERS.get(group, "exec"),
+        "tier": tier,
         "status": "not_applicable",
         "reason": "not built",
         "universal_because": SPINE_RATIONALE.get(group, ""),
         "score": None,
     }
+    if tier == "ai":
+        document["kind"] = "nominate_only"
+
     contract = contract_for(group)
     if contract:
         document["contract"] = contract
