@@ -43,7 +43,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import resolve_caller_identity
+from aipass.drone.apps.handlers.router_handler import caller_cwd, resolve_caller_identity
 
 _LOG_DIR_NAME = ".ai_central"
 _LOG_NAME = "deletions.jsonl"
@@ -82,34 +82,6 @@ UNKNOWN_CALLER = "unknown"
 NO_CURRENT_DIRECTORY = "<none: deleted during this operation>"
 
 
-def _current_directory() -> Path | None:
-    """The process's working directory, or None if it no longer has one.
-
-    ``Path.cwd()`` raises ENOENT once the directory it names is gone, and this
-    module is called immediately after a delete that can be exactly that
-    directory. Both reads sat outside :func:`record_deletion`'s try, so the
-    "Never raises" in its docstring was true of the store write and of nothing
-    else: the successful delete's own record raised, rm's except handler caught
-    it and logged the delete as FAILED, and the failure record raised the same
-    way straight out of ``safe_delete``. One line said deleted, the next said
-    delete failed, and the caller got a traceback instead of a result.
-
-    None is the honest answer here, not an error to report: a process with no
-    cwd is the expected outcome of deleting your own directory, and the record
-    is a witness to that delete, not a second thing to fail.
-    """
-    try:
-        return Path.cwd()
-    except OSError as exc:
-        # INFO, not a warning: this is the chosen outcome of a sanctioned
-        # delete, the same severity ruling the module header cites (#273).
-        # It is said out loud anyway, because it is the only explanation for
-        # the "unknown" caller and the empty cwd the next reader will find in
-        # the record, and an unexplained "unknown" invites a hunt for a bug.
-        logger.info("deletion record: no current directory — it was deleted by this operation (%s)", exc)
-        return None
-
-
 def _find_project_root() -> Path | None:
     """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
 
@@ -118,7 +90,7 @@ def _find_project_root() -> Path | None:
     do not need a cwd, so a delete that removes its own directory keeps the
     durable half of its record instead of surviving as a prax line alone.
     """
-    cwd = _current_directory()
+    cwd = caller_cwd()
     for parent in [cwd, *cwd.parents] if cwd is not None else []:
         if list(parent.glob("*_REGISTRY.json")):
             return parent.resolve()
@@ -284,7 +256,7 @@ def record_deletion(
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
     """
-    cwd = _current_directory()
+    cwd = caller_cwd()
     caller = caller or resolve_caller_identity(cwd) or UNKNOWN_CALLER
     shape = measurement or {"kind": "unknown", "size_bytes": None, "entry_count": None, "measured": "none"}
 

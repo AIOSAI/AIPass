@@ -40,8 +40,12 @@ CONTRACT = (
     "find_repo_root",
     "declared_residency",
     "accepted_resident_paths",
+    "declared_roots",
+    "external_branches",
     "RESIDENCY_CORE",
     "RESIDENCY_RESIDENT",
+    "RESIDENCY_EXTERNAL",
+    "DECLARED_ROOTS",
 )
 
 INTERNAL = ("resident_registry_paths", "read_registry_branches", "_refuse", "_accepted_residents")

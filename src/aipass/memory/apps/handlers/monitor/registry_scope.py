@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
 # Description: The one definition of "the fleet" — core citizens plus passport-declared residents
-# Version: 2.2.0
+# Version: 3.0.0
 # Created: 2026-08-27
 # Modified: 2026-08-30
 # =============================================
@@ -91,6 +91,21 @@ PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 # The two values passport 2.0 defines for citizenship.residency.
 RESIDENCY_CORE = "core"
 RESIDENCY_RESIDENT = "resident"
+
+# The third TIER, which is deliberately not a third passport value. FPLAN-0460
+# phase 2 retired the schema migration as a precondition: external membership is
+# PRESENCE (a passport exists), not DECLARATION (a passport says a word). None of
+# the six live external citizens carries a residency field, so gating on one
+# would have shipped a feature nobody could reach. The label is ours to apply,
+# not theirs to claim.
+RESIDENCY_EXTERNAL = "external"
+
+# The machine-scope anchor: AIPass home declares which repo roots participate.
+# Beside AIPASS_REGISTRY.json because it is the same species of file -- machine
+# managed, blessed by Patrick, the anchor of trust for a whole tier.
+DECLARED_ROOTS = "AIPASS_ROOTS.json"
+EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
+SCHEDULE_RELATIVE = Path(".daemon") / "schedule.json"
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -283,15 +298,175 @@ def read_registry_branches(registry_path: Path, name_from: str = "path") -> list
     return found
 
 
-def _refuse(item: dict[str, Any], registry_path: Path, reason: str) -> None:
-    """Log a refused resident candidate by name, path and reason.
+def declared_roots(repo_root: Path | None = None) -> list[Path]:
+    """Repo roots this installation has DECLARED as participating, resolved.
+
+    The anchor for the external tier.  Reading a file, not searching a disk:
+    every root here was written down by someone, and a root nobody wrote down is
+    not a root no matter how close it sits.
+
+    The two anchors this replaces both failed in production, which is why it is
+    a declaration rather than an accumulation.  ``ai_mail``'s contacts.json
+    accretes by ``last_seen``, still carries dead April entries and does not
+    contain @wren at all.  My own ``known_registries.json`` persisted a deleted
+    /tmp scratchpad probe while never recording Vera-Studio's real registry.
+
+    Relative paths resolve against *repo_root* so ``../wren`` survives a
+    checkout move and keeps machine paths out of a public repo; absolute paths
+    are accepted for roots that live nowhere near it.
+
+    Every rejection is logged by name.  A missing file is NOT one of them: zero
+    declared roots is the ordinary state of a fresh clone, and an installation
+    that participates in nothing is not broken.
+
+    Args:
+        repo_root: AIPass home; defaults to this checkout's.
+
+    Returns:
+        Existing directories, resolved, deduplicated, sorted. Never this repo.
+    """
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+    anchor = root / DECLARED_ROOTS
+    try:
+        data = json.loads(anchor.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        logger.debug(f"[registry_scope] No {DECLARED_ROOTS} at {root} — no external roots declared")
+        return []
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.error(f"[registry_scope] Unreadable {DECLARED_ROOTS} at {anchor}: {exc}")
+        return []
+
+    if not isinstance(data, dict):
+        logger.error(f"[registry_scope] {DECLARED_ROOTS} root is {type(data).__name__}, not an object: {anchor}")
+        return []
+    rows = data.get("roots", [])
+    if not isinstance(rows, list):
+        logger.error(f"[registry_scope] {DECLARED_ROOTS} 'roots' is {type(rows).__name__}, not a list: {anchor}")
+        return []
+
+    home = root.resolve()
+    found: list[Path] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            logger.error(f"[registry_scope] {DECLARED_ROOTS} row is {type(row).__name__}, not an object: {anchor}")
+            continue
+        if row.get("status") != "active":
+            logger.info(f"[registry_scope] Declared root {row.get('path')!r} is not active — skipped")
+            continue
+        raw = row.get("path")
+        if not isinstance(raw, str) or not raw:
+            logger.error(f"[registry_scope] Declared root has no usable path ({raw!r}) in {anchor}")
+            continue
+
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            candidate = candidate.resolve()
+        except OSError as exc:
+            logger.error(f"[registry_scope] Declared root {raw!r} cannot be resolved: {exc}")
+            continue
+        if not candidate.is_dir():
+            logger.error(f"[registry_scope] Declared root {raw!r} is not a directory on this machine ({candidate})")
+            continue
+        # The double-count guard, and it is not hypothetical: declaring our own
+        # tree would return every core citizen and every resident a second time
+        # under a different tier, and @baud would appear three times. A root
+        # that CONTAINS home is refused for the same reason from the other side.
+        if candidate == home or home in candidate.parents or candidate in home.parents:
+            logger.error(
+                f"[registry_scope] REFUSED declared root {raw!r} ({candidate}): it overlaps AIPass home "
+                f"{home} — core and resident citizens would be counted twice"
+            )
+            continue
+
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(candidate)
+
+    return sorted(found)
+
+
+def external_branches(repo_root: Path | None = None, name_from: str = "path") -> list[dict[str, Any]]:
+    """Citizens living in declared roots outside this repo.
+
+    Registry-led and shallow, exactly as the resident tier is: one glob for
+    ``*_REGISTRY.json`` at the TOP LEVEL of a declared root, then that
+    registry's own active branches.  Never a passport walk, at any depth, ever
+    -- a walk of our own ``projects/`` returns eight passports for four
+    residents because @baud carries copies under ``.backup/``, and the same walk
+    across a whole machine would count every snapshot of every repo.
+
+    MEMBERSHIP IS PRESENCE.  A branch is a citizen if ``.trinity/passport.json``
+    exists; it does not have to say anything.  That is Patrick's ruling and the
+    reason phase 2 shipped without a schema migration in front of it.
+
+    ``scheduler`` reports a FILE, never a decision: whether the branch carries
+    ``.daemon/schedule.json``.  What that means is @daemon's ruling to make, and
+    encoding their policy here would be a second implementation of it.
+
+    Args:
+        repo_root: AIPass home; defaults to this checkout's.
+        name_from: See :func:`read_registry_branches`.
+
+    Returns:
+        ``[{"name", "path", "registry", "email", "residency", "scheduler"}]``.
+    """
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for root in declared_roots(repo_root):
+        registries = sorted(root.glob(EXTERNAL_REGISTRY_GLOB))
+        if not registries:
+            logger.error(
+                f"[registry_scope] Declared root {root} carries no {EXTERNAL_REGISTRY_GLOB} at its top level — "
+                "no citizens read from it, and a passport walk is never the fallback"
+            )
+            continue
+        if len(registries) > 1:
+            # Raised by @drone against their OWN code: their _first_registry_in
+            # takes sorted(glob)[0], which they called a fallback wearing a
+            # determinism costume, and recommended I not copy it. Merging would
+            # be worse than picking — it invents a union nobody declared and
+            # makes that repo's fleet a thing only this reader knows. So the
+            # root contributes nothing and says why. One ambiguous root costs
+            # one root; the others are untouched.
+            logger.error(
+                f"[registry_scope] REFUSED declared root {root}: it carries {len(registries)} registries "
+                f"({', '.join(path.name for path in registries)}) — which one is the fleet is not ours to guess"
+            )
+            continue
+        for registry_path in registries:
+            for item in read_registry_branches(registry_path, name_from=name_from):
+                if not (item["path"] / PASSPORT_RELATIVE).is_file():
+                    _refuse(
+                        item,
+                        registry_path,
+                        "no passport on disk — external membership is presence",
+                        tier=RESIDENCY_EXTERNAL,
+                    )
+                    continue
+                key = str(item["path"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                item["residency"] = RESIDENCY_EXTERNAL
+                item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
+                found.append(item)
+    return found
+
+
+def _refuse(item: dict[str, Any], registry_path: Path, reason: str, tier: str = RESIDENCY_RESIDENT) -> None:
+    """Log a refused candidate by tier, name, path and reason.
 
     Every rejection goes through here so none of them can be silent.  A
     candidate refused without a line in the log is indistinguishable from one
     that was never discovered, and those two need very different fixes.
     """
     logger.error(
-        f"[registry_scope] REFUSED resident '{item['name']}' at {item['path']} "
+        f"[registry_scope] REFUSED {tier} '{item['name']}' at {item['path']} "
         f"(listed active in {registry_path.name}): {reason}"
     )
 
@@ -345,7 +520,7 @@ def accepted_resident_paths(repo_root: Path | None = None) -> set[str]:
 
 
 def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> list[dict[str, Any]]:
-    """Every branch @memory maintains: the core citizens plus declared residents.
+    """Every branch @memory maintains: core citizens, residents, and externals.
 
     Deduplicated by resolved path, core registry first, residents in discovery
     order.
@@ -363,7 +538,7 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
         name_from: See :func:`read_registry_branches`.
 
     Returns:
-        ``[{"name", "path", "registry"}]``.
+        ``[{"name", "path", "registry", "email", "residency", "scheduler"}]``.
     """
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     branches = read_registry_branches(root / CORE_REGISTRY, name_from=name_from)
@@ -376,12 +551,29 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
                 f"{residency!r}, not '{RESIDENCY_CORE}' — kept, because the sealed registry is the anchor"
             )
 
+    # The TIER is applied here, not read from the passport. A core citizen whose
+    # passport disagrees is still core (the sealed registry is the anchor), and
+    # an external citizen has no passport field at all -- so a record labelled
+    # from the declaration would be blank for a whole tier. @daemon asked for
+    # these labels by name so 'external' never silently reads as 'core'.
+    for item in branches:
+        item["residency"] = RESIDENCY_CORE
+        item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
+
     seen = {str(item["path"]) for item in branches}
     for registry_path in resident_registry_paths(root):
         for item in _accepted_residents(registry_path, name_from):
             if str(item["path"]) not in seen:
+                item["residency"] = RESIDENCY_RESIDENT
+                item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
                 branches.append(item)
                 seen.add(str(item["path"]))
+    resident_count = len(branches) - core_count
+
+    for item in external_branches(root, name_from=name_from):
+        if str(item["path"]) not in seen:
+            branches.append(item)
+            seen.add(str(item["path"]))
 
     # Logged because the SIZE of the fleet is the whole point of this module:
     # the residents were invisible to rollover, lint and health for months and
@@ -389,7 +581,12 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
     # exact regression, and this line is where it shows up.
     json_handler.log_operation(
         "fleet_scope",
-        {"total": len(branches), "core": core_count, "resident": len(branches) - core_count},
+        {
+            "total": len(branches),
+            "core": core_count,
+            "resident": resident_count,
+            "external": len(branches) - core_count - resident_count,
+        },
         module_name="registry_scope",
     )
     return branches

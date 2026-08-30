@@ -149,7 +149,6 @@ def _bytecode_row(config_note: str) -> dict:
 def _m10_rows(m10_proof: dict) -> List[dict]:
     """Checks 1 and 12 - the real tree, fingerprinted at both ends."""
     probed = bool(m10_proof.get("probed"))
-    intact = m10_proof.get("real_tree_unchanged")
 
     if not probed:
         detail = str(m10_proof.get("note", "the fingerprint could not be taken"))

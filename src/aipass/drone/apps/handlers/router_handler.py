@@ -140,6 +140,30 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
     return derived
 
 
+def caller_cwd() -> Path | None:
+    """The caller's working directory, or None when the process has none.
+
+    ``Path.cwd()`` raises ENOENT once the directory it names is gone, and a
+    caller standing in a directory that was just deleted is now an ordinary
+    state rather than a crash — the delete lane was fixed to survive it first,
+    which is exactly what put a live process here to route a second command.
+
+    None is the absence of the location signal, not a failure to read it. Who a
+    process IS was never derived from where it stood (S102), so an assigned
+    identity still answers from here; only the inference from a passport under
+    the caller's feet has nothing left to read.
+
+    Lives in this module because it is the caller-location signal and this
+    module owns caller identity — deletion_log imports it rather than keeping a
+    second copy, which is the direction the dependency already runs.
+    """
+    try:
+        return Path.cwd()
+    except OSError as exc:
+        logger.info("No current directory — it was deleted out from under this process (%s)", exc)
+        return None
+
+
 def detect_caller_signal(cwd: Path) -> CallerSignal:
     """Walk up from cwd for a passport, then fall back to the registry project.
 
@@ -346,18 +370,21 @@ def execute_branch_command(
     if command:
         cmd_args += [command] + list(args or [])
 
-    # Pass caller's CWD so target branches can detect who invoked them
-    caller_env = {
-        "AIPASS_CALLER_CWD": str(Path.cwd()),
-        "AIPASS_BRANCH_NAME": branch_name,
-    }
+    # Pass caller's CWD so target branches can detect who invoked them.
+    # Omitted entirely when there is none, matching how the identity keys below
+    # handle their own absence: a target that reads this as a location must get
+    # no answer rather than a sentinel it might try to resolve.
+    cwd = caller_cwd()
+    caller_env = {"AIPASS_BRANCH_NAME": branch_name}
+    if cwd is not None:
+        caller_env["AIPASS_CALLER_CWD"] = str(cwd)
 
     # Who is calling: assigned identity first, cwd passport only as fallback.
     # The provenance ships WITH the name: a consumer deciding whether to trust
     # this identity cannot re-derive it — it is in another process, with a
     # different cwd and no access to our environment. Unstamped, "commons
     # standing in /tmp" and "nobody standing at a repo root" arrive identical.
-    caller_branch, identity_source = resolve_caller_identity_signal(Path.cwd())
+    caller_branch, identity_source = resolve_caller_identity_signal(cwd)
     if caller_branch:
         caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
         caller_env["AIPASS_CALLER_IDENTITY_SOURCE"] = identity_source or "unknown"

@@ -14,7 +14,6 @@ to the handler layer.
 """
 
 import sys
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
@@ -23,6 +22,7 @@ from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
+    caller_cwd,
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch
@@ -115,7 +115,7 @@ def route_command(
     # Same resolver execute_branch_command uses — logging its own precedence
     # here would let the CALLER: tag name someone other than the branch actually
     # stamped on the work.
-    caller = resolve_caller_identity(Path.cwd())
+    caller = resolve_caller_identity(caller_cwd())
     # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
     # hides the gap. detect_caller_signal already logged the cwd.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"

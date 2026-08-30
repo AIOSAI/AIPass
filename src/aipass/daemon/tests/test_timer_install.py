@@ -232,9 +232,7 @@ class TestNoRealHomeWrites:
         home_state = [
             p
             for p in recorded
-            if p.startswith(str(Path.home()))
-            and not p.startswith(str(repo_root))
-            and not p.startswith(str(tmp_path))
+            if p.startswith(str(Path.home())) and not p.startswith(str(repo_root)) and not p.startswith(str(tmp_path))
         ]
         assert home_state == [], f"suite wrote into the real home: {home_state}"
         assert state_dir.is_dir(), "the state dir should still be created, just where it was told"

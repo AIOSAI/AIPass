@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Fleet definition module — the public cross-branch gateway
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-08-30
 # Modified: 2026-08-30
 # =============================================
@@ -62,10 +62,14 @@ from aipass.prax import logger
 
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.monitor.registry_scope import (
+    DECLARED_ROOTS,
     RESIDENCY_CORE,
+    RESIDENCY_EXTERNAL,
     RESIDENCY_RESIDENT,
     accepted_resident_paths,
     declared_residency,
+    declared_roots,
+    external_branches,
     find_repo_root,
     fleet_branches,
 )
@@ -75,8 +79,12 @@ __all__ = [
     "find_repo_root",
     "declared_residency",
     "accepted_resident_paths",
+    "declared_roots",
+    "external_branches",
     "RESIDENCY_CORE",
     "RESIDENCY_RESIDENT",
+    "RESIDENCY_EXTERNAL",
+    "DECLARED_ROOTS",
 ]
 
 
@@ -93,7 +101,10 @@ def print_introspection() -> None:
     console.print("  find_repo_root(start=None)                        -> the repo anchor")
     console.print("  declared_residency(branch_path)                   -> what a passport declares")
     console.print("  accepted_resident_paths(repo_root=None)           -> resolved resident paths")
-    console.print("  RESIDENCY_CORE / RESIDENCY_RESIDENT               -> the declared values")
+    console.print("  declared_roots(repo_root=None)                    -> participating repo roots")
+    console.print("  external_branches(repo_root=None)                 -> citizens outside this repo")
+    console.print("  RESIDENCY_CORE / RESIDENT / EXTERNAL              -> the three tier labels")
+    console.print(f"  DECLARED_ROOTS                                    -> '{DECLARED_ROOTS}', the machine anchor")
     console.print()
     console.print("[dim]Library module — import from: aipass.memory.apps.modules.fleet[/dim]")
 
