@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-08-30] — the audit-tests lane: testing the tests (DPLAN-0320 campaign) · v2.8.0
 
 ### Added
 
@@ -56,7 +56,13 @@ PyPI version — not the changelog header.
   + the handle still deregistered (FPLAN-0455, todo 172 — found by the dead-code
   map on 2026-08-22, all prior tests only covered pids that die).
 
-### Added
+- **seedgo: CLI parsers refuse unknown tokens** — `audit -tests @backup` used to
+  silently drop the unknown token and run the standards audit on cached data (a
+  typo executing a different real command); now every unrecognised argument
+  refuses loudly with a did-you-mean (`ARGV`, exit code 7). `audit tests` is the
+  canonical spelling of the new lane (parallel to `audit aipass`), `audit-tests`
+  a permanent alias, and the word `tests` refuses ambiguity if a standards pack
+  ever claims it.
 
 - **devpulse: owner-guard refusal-exit pins** (`test_owner_guard_refusals.py`) —
   the 2026-08-22 exit-0 refusal fixes (feedback + admin_grant guards rendered
