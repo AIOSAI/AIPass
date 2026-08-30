@@ -154,7 +154,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 56 test files, 2118 tests
+├── tests/                           # 57 test files, 2362 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -276,7 +276,7 @@ second reason not to restate them here. Read the directory, or ask @hooks.
 
 ## Tests
 
-- **56 test files, 2118 tests** — 2305 passed, 1 skipped (2306 collected with parametrised cases expanded; run 2026-08-29)
+- **57 test files, 2362 tests** — 2573 passed, 1 skipped (2574 collected with parametrised cases expanded; run 2026-08-30)
 - **0 type errors** (pyright, via the audit pipeline)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 
@@ -358,8 +358,8 @@ Full detail and status live in **APLAN-0005** (the standing branch health record
 ## Latest Audit (2026-08-25)
 
 - **Seedgo score:** 100% (45 standards + diagnostics, 129 files) — all standards green
-- **Tests:** 2305 passed, 1 skipped (2118 test functions across 56 files)
-- **Coverage:** 267 public functions, 235 tested (88%)
+- **Tests:** 2573 passed, 1 skipped (2362 test functions across 57 files)
+- **Coverage:** 417 public functions, 341 tested (82%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)
 - **Bypass:** 28 rules. The removed-rules measurement — every rule live in the lane it names,

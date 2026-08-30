@@ -157,10 +157,75 @@ STATE = GateState()
 # =============================================================================
 
 
-def _under(path: str, root: str) -> bool:
-    """True if `path` is `root` itself or lives beneath it."""
+#: Every character THIS platform accepts as a path separator.
+#:
+#: On Windows that is BOTH "\\" and "/" - CPython accepts either in every path
+#: API, so an audit event can carry either depending on how the test spelled it.
+#: On POSIX it is "/" ALONE, because "\\" is a legal FILENAME character there and
+#: splitting on it would tear real names apart. `os.altsep` is exactly that
+#: distinction, which is why the set is derived rather than written out.
+#:
+#: THE DEFECT THIS ANSWERS (Windows CI, PR#749). `path.split(os.sep)` returned
+#: the whole POSIX-spelled path as ONE part on Windows, so `__pycache__` was
+#: never seen as a component and the basename was the entire string. A pycache
+#: write was classified `bytecode`, and a `.coverage` write fell all the way
+#: through to `violation/outside_copy` - a FALSE VIOLATION in hygiene evidence
+#: on any Windows suite that spells its paths with forward slashes.
+def accepted_separators(sep: str = os.sep, altsep: Optional[str] = os.altsep) -> Tuple[str, ...]:
+    """The separators a platform honours, as a pure function of its two values.
+
+    A FUNCTION, not an inline expression, because the inline form was
+    untestable: on POSIX `altsep` is None, so `(os.sep,)` and the full
+    derivation are the SAME TUPLE and no assertion on this machine could tell
+    a broken derivation from a correct one. That is the mirror-expect shape -
+    the test restates the implementation and dies with it. Taking sep/altsep
+    as arguments makes the Windows derivation checkable from Linux.
+    """
+    return tuple(dict.fromkeys(candidate for candidate in (sep, altsep) if candidate))
+
+
+SEPARATORS: Tuple[str, ...] = accepted_separators()
+
+
+def _split_path(path: str, separators: Optional[Tuple[str, ...]] = None) -> List[str]:
+    """Split `path` on every separator this platform honours.
+
+    `separators` is a parameter, and the default is read at CALL time rather
+    than bound at def time, so a test can monkeypatch `SEPARATORS` and drive
+    the whole of `classify()` through the Windows branch from Linux. A
+    cross-platform classifier whose other platform can only be exercised by CI
+    is a branch nobody can red-first.
+    """
+    separators = SEPARATORS if separators is None else separators
+    parts = [path]
+    for sep in separators:
+        parts = [piece for part in parts for piece in part.split(sep)]
+    return parts
+
+
+def _norm_sep(path: str, separators: Optional[Tuple[str, ...]] = None) -> str:
+    """Rewrite every accepted separator to `os.sep` so prefixes compare.
+
+    A no-op on POSIX, where the only accepted separator IS `os.sep`.
+    """
+    separators = SEPARATORS if separators is None else separators
+    for sep in separators:
+        if sep != os.sep:
+            path = path.replace(sep, os.sep)
+    return path
+
+
+def _under(path: str, root: str, separators: Optional[Tuple[str, ...]] = None) -> bool:
+    """True if `path` is `root` itself or lives beneath it.
+
+    Both sides are separator-normalised first: the copy root is built by the
+    lane (native separators) while the path comes from whatever the measured
+    test typed, so a mixed-spelling comparison would put a write INSIDE the
+    copy on the outside of it.
+    """
     if not root:
         return False
+    path, root = _norm_sep(path, separators), _norm_sep(root, separators)
     return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
@@ -181,7 +246,7 @@ def classify(path: str, state: GateState = STATE) -> Tuple[str, str]:
     if state.canary_path and path == state.canary_path:
         return "canary", "canary"
 
-    parts = path.split(os.sep)
+    parts = _split_path(path)
     if "__pycache__" in parts:
         return "allowed", "pycache_dir"
     if ".pytest_cache" in parts:

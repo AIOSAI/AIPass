@@ -38,6 +38,16 @@ plugin = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(plugin)
 
 
+def _outside_path(*parts: str) -> str:
+    """An absolute, native path that no allowance acquits, on either platform.
+
+    A POSIX literal like "/home/x/state.json" is drive-RELATIVE on Windows, so
+    `os.path.abspath` rewrites it against the current drive and any test that
+    hardcoded the literal compares against a path the code never produced.
+    """
+    return os.path.abspath(os.path.join(os.sep, "audit_tests_not_an_allowance", *parts))
+
+
 @pytest.fixture
 def state(tmp_path):
     """A gate state with a declared sandbox, so classification is meaningful."""
@@ -120,6 +130,68 @@ class TestAllowances:
             plugin.classify(os.path.join(state.pytest_basetemp, "f"), state)[1],
         }
         assert returned <= declared
+
+
+class TestSeparatorPortability:
+    """The Windows branch of the classifier, driven from any platform.
+
+    THE DEFECT (Windows CI, PR#749, 3 of the 6 failures, ONE cause). The
+    classifier split on `os.sep` alone. On Windows that is "\\", so a path
+    spelled with forward slashes - which CPython accepts everywhere - came back
+    as a SINGLE part: `__pycache__` was never seen as a component, and the
+    basename was the whole string. A pycache write was acquitted as `bytecode`
+    (right verdict, wrong reason) and a `.coverage` write was convicted as
+    `outside_copy` - A FALSE VIOLATION in hygiene evidence.
+
+    These drive `classify()` itself through the Windows separator set, because
+    a cross-platform branch only CI can exercise is one nobody can red-first.
+    """
+
+    WINDOWS = ("\\", "/")
+
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        monkeypatch.setattr(plugin, "SEPARATORS", self.WINDOWS)
+
+    def test_a_forward_slash_pycache_is_a_pycache_dir_on_windows_too(self, state, windows):
+        assert plugin.classify("/anywhere/__pycache__/m.pyc", state) == ("allowed", "pycache_dir")
+
+    def test_a_forward_slash_coverage_file_is_never_a_violation_on_windows(self, state, windows):
+        # The one that made the gate lie: it read as violation/outside_copy.
+        assert plugin.classify("/anywhere/.coverage.host.1", state) == ("allowed", "coverage_data")
+
+    def test_a_native_backslash_path_still_classifies_on_windows(self, state, windows):
+        assert plugin.classify("D:\\x\\__pycache__\\m.pyc", state) == ("allowed", "pycache_dir")
+
+    def test_a_backslash_is_a_filename_character_on_posix_and_never_a_separator(self):
+        # The other direction, and the reason the set is derived from os.altsep
+        # rather than written out: splitting on "\\" on POSIX would tear a legal
+        # filename into pieces and invent path components that do not exist.
+        assert plugin._split_path("/weird/back\\slash.txt", ("/",)) == ["", "weird", "back\\slash.txt"]
+
+    def test_the_windows_pair_is_derived_from_windows_values(self):
+        # Spelled out, NOT re-derived. Asserting against
+        # tuple(s for s in (os.sep, os.altsep) if s) was a mirror-expect: on
+        # POSIX altsep is None, so a mutant reading (os.sep,) produced the very
+        # same tuple and the assertion could not fail. Measured - that mutant
+        # SURVIVED - so the derivation now takes its inputs as arguments.
+        assert plugin.accepted_separators("\\", "/") == ("\\", "/")
+
+    def test_the_posix_single_separator_is_derived_from_posix_values(self):
+        assert plugin.accepted_separators("/", None) == ("/",)
+
+    def test_the_platform_set_always_contains_the_platform_separator(self):
+        assert os.sep in plugin.SEPARATORS
+        assert plugin.SEPARATORS == plugin.accepted_separators()
+
+    def test_a_copy_boundary_survives_mixed_spelling(self, state, windows):
+        # env_root is written by the lane with native separators while the path
+        # comes from whatever the measured test typed. Compared unnormalised, a
+        # write INSIDE the copy lands outside it and the gate misses a forgery.
+        assert plugin._under("C:/env/pkg/f.py", "C:\\env", self.WINDOWS) is True
+
+    def test_an_unrelated_tree_is_still_not_under_the_copy(self, state, windows):
+        assert plugin._under("C:/other/f.py", "C:\\env", self.WINDOWS) is False
 
 
 class TestWriteDetection:
@@ -225,14 +297,50 @@ class TestAttribution:
     def test_a_violation_carries_the_running_nodeid(self, state, monkeypatch):
         monkeypatch.setattr(plugin, "STATE", state)
         state.nodeid, state.phase = "tests/test_x.py::test_forges", "call"
-        plugin._record_write("open", "/home/somebody/.aipass/state.json")
-        assert ("tests/test_x.py::test_forges", "call", "open", "/home/somebody/.aipass/state.json") in state.violations
+        written = _outside_path("somebody", ".aipass", "state.json")
+        plugin._record_write("open", written)
+        assert ("tests/test_x.py::test_forges", "call", "open", written) in state.violations
+
+    def test_the_attribution_key_is_the_native_normalized_absolute_path(self, state, monkeypatch):
+        # THE CANONICAL FORM, pinned rather than left to whichever platform ran
+        # the suite. The key is os.path.normpath of an absolute path, so it
+        # carries NATIVE separators - on Windows a POSIX-spelled write is
+        # recorded as a Windows path. That is deliberate: this string is
+        # published in the artifact for a human to go and look at, and a path
+        # the reader's own shell cannot resolve is a worse record than an ugly
+        # one. Windows CI (PR#749) failed here against a hardcoded POSIX
+        # literal, which is a test that only ever described one platform.
+        monkeypatch.setattr(plugin, "STATE", state)
+        state.nodeid, state.phase = "tests/test_x.py::test_forges", "call"
+        spelled = _outside_path("somebody", "state.json").replace(os.sep, "/")
+        plugin._record_write("open", spelled)
+        recorded = [key[3] for key in state.violations]
+        assert recorded == [os.path.normpath(spelled)]
+        assert os.path.isabs(recorded[0])
 
     def test_a_relative_path_is_counted_not_guessed_at(self, state, monkeypatch):
         monkeypatch.setattr(plugin, "STATE", state)
         plugin._record_write("os.remove", "inner/file")
         assert state.relative_unattributable == 1
         assert state.violations == {}
+
+    def test_the_key_is_normalized_so_two_spellings_of_one_file_are_one_record(self, state, monkeypatch):
+        # Kills the mutant that deletes the normpath. The Windows-motivated
+        # tests above cannot: on POSIX, normpath of an already-clean absolute
+        # path is the identity, so deleting the call changed nothing and the
+        # mutant SURVIVED (measured). A path with a ".." segment needs
+        # normalising on EVERY platform, so this pin travels.
+        monkeypatch.setattr(plugin, "STATE", state)
+        state.nodeid, state.phase = "tests/test_x.py::test_forges", "call"
+        direct = _outside_path("pkg", "state.json")
+        # NOT built through _outside_path: that helper calls abspath, which
+        # normalises the detour away before the code under test ever sees it.
+        # First attempt did exactly that and the mutant survived again.
+        detoured = os.path.join(os.path.dirname(direct), "sub", "..", "state.json")
+        plugin._record_write("open", direct)
+        plugin._record_write("open", detoured)
+        assert [key[3] for key in state.violations] == [direct]
+        assert list(state.violations.values()) == [2]
 
     def test_repeat_writes_to_one_path_increment_rather_than_duplicate(self, state, monkeypatch):
         monkeypatch.setattr(plugin, "STATE", state)
@@ -581,7 +689,11 @@ class TestPythonResolution:
     """No interpreter path is hardcoded; a one-machine checker is not a checker."""
 
     def test_an_explicit_override_wins(self, tmp_path):
-        assert envcopy.find_python(tmp_path, "/opt/py/bin/python") == Path("/opt/py/bin/python")
+        # Built from tmp_path, never a POSIX literal: "/opt/py/bin/python" is
+        # DRIVE-RELATIVE on Windows, so find_python's abspath correctly resolves
+        # it against the current drive and the old literal could never match.
+        override = tmp_path / "opt" / "py" / "bin" / "python"
+        assert envcopy.find_python(tmp_path, str(override)) == override
 
     def test_a_nearby_venv_is_preferred_over_the_running_interpreter(self, tmp_path, monkeypatch):
         monkeypatch.delenv("AUDIT_TESTS_PYTHON", raising=False)
@@ -591,8 +703,40 @@ class TestPythonResolution:
         assert envcopy.find_python(tmp_path) == venv / "python"
 
     def test_the_environment_variable_is_honoured(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AUDIT_TESTS_PYTHON", "/opt/env/bin/python")
-        assert envcopy.find_python(tmp_path) == Path("/opt/env/bin/python")
+        chosen = tmp_path / "opt" / "env" / "bin" / "python"
+        monkeypatch.setenv("AUDIT_TESTS_PYTHON", str(chosen))
+        assert envcopy.find_python(tmp_path) == chosen
+
+    def test_a_relative_override_is_made_absolute(self, tmp_path, monkeypatch):
+        # Kills the mutant that drops abspath. The two tests above cannot: they
+        # pass an already-absolute tmp_path, for which abspath is the identity,
+        # so both mutants SURVIVED on Linux (measured) while Windows CI was the
+        # only thing defending the line. A RELATIVE override needs resolving on
+        # every platform - and the lane must never hand subprocess a path whose
+        # meaning depends on the working directory it happens to inherit.
+        monkeypatch.delenv("AUDIT_TESTS_PYTHON", raising=False)
+        monkeypatch.chdir(tmp_path)
+        resolved = envcopy.find_python(tmp_path, os.path.join("rel", "python"))
+        assert resolved.is_absolute()
+        assert resolved == Path(os.path.abspath(os.path.join("rel", "python")))
+
+    def test_a_tilde_override_is_expanded_to_the_home_directory(self, tmp_path, monkeypatch):
+        # Found by mutation while fixing the Windows failures, NOT caused by
+        # them: deleting .expanduser() killed no test. A "~" handed to
+        # subprocess is a literal directory named "~", not the user's home.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("AUDIT_TESTS_PYTHON", raising=False)
+        resolved = envcopy.find_python(tmp_path, os.path.join("~", "py", "python"))
+        assert "~" not in str(resolved)
+        assert resolved == tmp_path / "py" / "python"
+
+    def test_a_relative_environment_variable_is_made_absolute_too(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AUDIT_TESTS_PYTHON", os.path.join("rel", "envpython"))
+        monkeypatch.chdir(tmp_path)
+        resolved = envcopy.find_python(tmp_path)
+        assert resolved.is_absolute()
+        assert resolved == Path(os.path.abspath(os.path.join("rel", "envpython")))
 
 
 class TestSnapshotDiff:
