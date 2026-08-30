@@ -12,7 +12,7 @@ Covers:
 - connect_readonly: mode=ro connection actually refuses writes
 - initial_cursors / fetch_new_events: only-new-row cursor semantics
 - fetch_backfill: last-N-events context on start, bounded by cursor
-- display formatting: format_event, event_room, _snippet
+- display formatting: format_event, event_room, _join_body
 - FeedState: record/visible room filtering
 - _get_commons_db_path: env override
 """
@@ -298,25 +298,24 @@ class TestEventRoom:
         assert feed.event_room({}) == "commons"
 
 
-class TestSnippet:
-    def test_short_text_unchanged(self):
-        """Text under the length limit passes through unchanged."""
-        assert feed._snippet("short text") == "short text"
+class TestJoinBody:
+    def test_short_body_inlines_with_separator(self):
+        """A body that fits stays on the header line, whitespace collapsed."""
+        assert feed._join_body("h:", "a   b\n\nc", " ") == "h: a b c"
 
-    def test_collapses_whitespace(self):
-        """Runs of whitespace (including newlines) collapse to single spaces."""
-        assert feed._snippet("a   b\n\nc") == "a b c"
+    def test_long_body_breaks_to_full_multiline_never_truncates(self):
+        """A body over the inline limit renders IN FULL on its own lines — no ellipsis."""
+        body = "first line " + "x" * 120 + "\nsecond line"
+        result = feed._join_body("h:", body, " ")
+        assert result.startswith("h:\n")
+        assert "x" * 120 in result
+        assert result.endswith("second line")
+        assert "…" not in result
 
-    def test_truncates_long_text_with_ellipsis(self):
-        """Text over the length limit is truncated with a trailing ellipsis."""
-        text = "x" * 150
-        result = feed._snippet(text, length=100)
-        assert len(result) == 100
-        assert result.endswith("…")
-
-    def test_none_returns_empty_string(self):
-        """None input returns an empty string rather than raising."""
-        assert feed._snippet(None) == ""
+    def test_empty_body_returns_bare_header(self):
+        """None or empty content returns the header alone, no dangling separator."""
+        assert feed._join_body("h:", None, " ") == "h:"
+        assert feed._join_body("h:", "", " ") == "h:"
 
 
 # =============================================================================
