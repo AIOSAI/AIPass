@@ -109,18 +109,93 @@ logger.warning("Memory file not found, using defaults")
 logger.error("Failed to backup branch", exc_info=True)
 ```
 
-**Both forms are valid:**
+**All three forms are valid** — this standard is about **routing**, not binding style.
+`@prax` ranked them **2026-08-30**; the ranking is theirs, this check accepts all three:
 ```python
-# Canonical (full path)
+# RECOMMENDED — @prax's ruling 2026-08-30. 385 files already use it; all three
+# route identically, so consistency is the tiebreak.
+from aipass.prax import logger
+
+# Full path — valid, but see the warning below: this is the one form that CRASHES
+# under a mocked `aipass.prax`.
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# Shorthand (via prax/__init__.py)
-from aipass.prax import logger
+# Module form — valid. Resolves `.logger` at call time (see the testability note),
+# but that alone does not make it mockable.
+from aipass import prax
+...
+prax.logger.debug("...")
 
 # Never these
 import aipass.prax.system_logger  # ✗
 import logging; logging.getLogger()  # ✗ Use prax, not stdlib logging
 ```
+
+**Testability note — the recommended form is mockable by exactly one target.** The
+object forms bind the logger **object** into the consumer's globals at import time. The
+module form holds a *module* and resolves `.logger` at **call** time.
+
+That difference decides which mocking technique can reach a consumer. Measured against a
+real consumer of the recommended form (`aipass/backup/.../json_handler.py:18`), by object
+identity, with the real `prax` imported:
+
+| technique | reaches the consumer? |
+|---|---|
+| `patch("aipass.prax.logger")` | **no** |
+| `patch("aipass.prax.apps.modules.logger.system_logger")` | **no** |
+| `setitem(sys.modules, "aipass.prax", ...)` | **no** |
+| `setitem(sys.modules, "aipass.prax.apps.modules.logger", ...)` | **no** |
+| `patch("<the consuming module>.logger")` | **yes** |
+
+Those first four are the four techniques actually in use across this fleet's conftests.
+**All four reach nothing** — the consumer keeps the real `SystemLogger` for the whole
+session and real writes escape into `@prax`'s live state directory.
+
+The rule underneath is simpler than "rebindable vs not": **the last dot must be resolved
+at call time.** Patching upstream of a binding never reaches past it — and note that
+`aipass/prax/__init__.py` *itself* re-exports by binding (`from ...logger import
+system_logger as logger`), so the freeze happens twice and the deeper targets miss too.
+
+**So if you use an object form — and 385 files do, against 0 using the module form —
+mock it per consumer, by that consumer's own dotted path:**
+
+```python
+patch("aipass.<branch>.apps.handlers.<mod>.logger")
+```
+
+Raised by **@memory 2026-08-30**, who proposed the module form as a fix, tested it,
+found it insufficient alone, and mailed the correction before anyone spent a session on
+it. Their fleet numbers (1552 writes in `@memory`) reproduced here: **one** `@daemon`
+test under plain `pytest` performed **23 atomic writes into the real `prax_json/`**,
+attributed by audit hook rather than inferred from a before/after diff — on a live
+machine, ambient writes make that diff unattributable, and the control run drifted just
+as much as the treatment.
+
+This standard does **not** rank the three forms. Which form is *recommended* is `@prax`'s
+logging contract to set; the check accepts all three so that decision is never taken by
+a checker rejecting one of them.
+
+**Warning — the full-path form crashes against a mocked `aipass.prax`.** If a fixture
+puts a stand-in module in `sys.modules["aipass.prax"]`, the mock has no `apps`
+submodule, so the deep import raises rather than resolving:
+
+```
+ModuleNotFoundError: No module named 'aipass.prax.apps'; 'aipass.prax' is not a package
+```
+
+The other two forms import cleanly under the same mock. Reported and measured by
+`@prax` 2026-08-30, reproduced here.
+
+**The escaping writes are not the import form's fault.** `@prax` measured that
+importing `prax` writes **nothing** in any of the three spellings — the writes come
+from the **first call**, which starts the file watcher and auto-creates per-module
+JSON (26 writes on call one, 0 on call two, identical across all three forms). The
+actual cause is a **half-built seam in `prax` itself**: `config/load.py` already
+redirects *log files* to `/tmp/aipass_test_logs/` when it detects pytest, but
+`json_handler.PRAX_JSON_DIR` is a module-level constant built from `__file__` with no
+pytest branch. Measured on one `logger.info()` under `PYTEST_CURRENT_TEST`:
+**4 writes redirected, 24 writes into the real `prax_json/`.** `@prax` owns the fix
+(APLAN-0009) and it needs no cooperation from callers.
 
 **Output location:** Prax manages log files, branches don't need to worry about where logs go
 

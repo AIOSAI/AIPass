@@ -19,7 +19,7 @@ WHO COUNTS AS A CITIZEN (2.0.0, DPLAN-0319 wave 3)
 --------------------------------------------------
 This module decides who the scheduler fires for, who the steward rotation
 walks, and whose inbox the sweep looks in. It now answers that question the
-same way @memory's registry_scope and @ai_mail's registry/read.py answer it,
+same way @memory's fleet gateway and @ai_mail's registry/read.py answer it,
 because a fleet definition with three implementations agrees only by
 coincidence.
 
@@ -80,7 +80,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 # @memory's PUBLIC gateway to the fleet definition (apps/modules/fleet.py,
 # built on our dispatch 2a70bbcd): handlers/ is private implementation, and
 # importing it cross-branch failed encapsulation + handlers on the checklist.
-from aipass.memory.apps.modules import fleet as registry_scope
+from aipass.memory.apps.modules import fleet
 
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
 _SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
@@ -97,8 +97,8 @@ PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 
 # The values passport 2.0 defines for citizenship.residency. Re-exported from
 # @memory rather than re-spelled: two copies of a vocabulary drift silently.
-RESIDENCY_CORE = registry_scope.RESIDENCY_CORE
-RESIDENCY_RESIDENT = registry_scope.RESIDENCY_RESIDENT
+RESIDENCY_CORE = fleet.RESIDENCY_CORE
+RESIDENCY_RESIDENT = fleet.RESIDENCY_RESIDENT
 
 REQUIRED_JOB_KEYS = {"id", "schedule", "prompt"}
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
@@ -118,11 +118,11 @@ MANAGER_CLASS = "manager"
 def declared_residency(branch_path: Path) -> Optional[str]:
     """What the passport at *branch_path* declares itself to be.
 
-    Delegates to :mod:`registry_scope`, which owns the field. Kept as a name
+    Delegates through @memory's ``modules/fleet`` gateway, which owns the field. Kept as a name
     here because callers and tests in this branch import it from discovery,
     and because re-spelling the read is exactly the duplication 2.1.0 removes.
     """
-    return registry_scope.declared_residency(branch_path)
+    return fleet.declared_residency(branch_path)
 
 
 def _source_label(record: dict, repo_root: Path) -> str:
@@ -163,7 +163,7 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     WHO COUNTS IS NOT DECIDED HERE ANY MORE (FPLAN-0460). The core-registry
     read, the ``projects/*`` glob, the dot-filter and the two-key resident
     rule all used to live in this module in a second copy. They are now one
-    call to :func:`registry_scope.fleet_branches`, because a fleet definition
+    call to :func:`fleet.fleet_branches`, because a fleet definition
     with two implementations agrees only by coincidence — and the day the
     federated-external anchor lands in the core registry, this lane gains
     those citizens without a line changing here. That is the whole point of
@@ -196,7 +196,7 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     # name different directories. Deduplicated on daemon's own axis, and named.
     records = []
     seen: dict = {}
-    for citizen in registry_scope.fleet_branches(root, name_from="registry"):
+    for citizen in fleet.fleet_branches(root, name_from="registry"):
         email = citizen.get("email")
         if not email:
             logger.error(

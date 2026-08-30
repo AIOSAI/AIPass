@@ -1027,8 +1027,8 @@ def _harness(**overrides):
 class TestSelfCheck:
     """Published whether it passes or fails - never a silent pre-flight."""
 
-    def test_all_sixteen_checks_are_published(self):
-        assert [row["check"] for row in _harness()["checks"]] == list(range(1, 17))
+    def test_all_seventeen_checks_are_published(self):
+        assert [row["check"] for row in _harness()["checks"]] == list(range(1, 18))
 
     def test_a_sound_run_fails_nothing(self):
         assert _harness()["failed"] == 0
@@ -1045,7 +1045,10 @@ class TestSelfCheck:
         )
         assert [row["check"] for row in block["checks"] if row["status"] == "fail"] == [11]
 
-    def test_an_unattributed_change_fails_check_twelve(self):
+    def test_an_unattributed_change_fails_check_seventeen_not_twelve(self):
+        """Repointed 2026-08-30 on @trigger's report - the assertion is unchanged,
+        it just names the row that now owns it. Check 12 reds only on what the
+        gate SAW the suite write; an unattributed change is check 17's finding."""
         proof = {
             "probed": True,
             "real_tree_unchanged": False,
@@ -1054,9 +1057,11 @@ class TestSelfCheck:
             "files_fingerprinted": 12,
             "diff": {"added": ["/real/logs/operations.jsonl"]},
         }
-        assert 12 in [row["check"] for row in _harness(m10_proof=proof)["checks"] if row["status"] == "fail"]
+        failed = [row["check"] for row in _harness(m10_proof=proof)["checks"] if row["status"] == "fail"]
+        assert 17 in failed
+        assert 12 not in failed, "the suite wrote nothing, so the OBSERVER-FORGERY row must stay green"
 
-    def test_a_change_the_live_writer_probe_saw_first_does_not_fail_check_twelve(self):
+    def test_a_change_the_live_writer_probe_saw_first_does_not_fail_check_seventeen(self):
         # A live citizen writes its own logs throughout the window. The path is
         # still published in the diff - it is just not charged to this run.
         proof = {
@@ -1068,7 +1073,7 @@ class TestSelfCheck:
             "files_fingerprinted": 12,
             "diff": {"modified": ["/real/api_json/feed_log.json"]},
         }
-        row = [r for r in _harness(m10_proof=proof)["checks"] if r["check"] == 12][0]
+        row = [r for r in _harness(m10_proof=proof)["checks"] if r["check"] == 17][0]
         assert row["status"] == "pass" and "feed_log.json" in row["detail"]
 
     def test_a_concurrent_write_is_never_removed_from_the_published_diff(self):
@@ -1081,7 +1086,7 @@ class TestSelfCheck:
             "files_fingerprinted": 12,
             "diff": {"modified": ["/real/api_json/feed_log.json"]},
         }
-        row = [r for r in _harness(m10_proof=proof)["checks"] if r["check"] == 12][0]
+        row = [r for r in _harness(m10_proof=proof)["checks"] if r["check"] == 17][0]
         assert "1 attributed" in row["detail"] and "probe ran: True" in row["detail"]
 
     def test_an_unprobed_fingerprint_fails_checks_one_and_twelve(self):

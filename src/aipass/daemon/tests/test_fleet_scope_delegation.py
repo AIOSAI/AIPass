@@ -4,11 +4,11 @@ from unittest.mock import patch
 
 from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
 
-SCOPE = "aipass.daemon.apps.handlers.schedule.discovery.registry_scope"
+SCOPE = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
 
 
 class TestDelegatesToRegistryScope:
-    """The fleet definition is @memory's, consumed — not re-implemented here."""
+    """The fleet definition is @memory's, consumed through their modules/ door."""
 
     def test_a_branch_only_registry_scope_knows_is_discovered(self, tmp_path):
         """The whole point: externals arrive with no daemon code change.

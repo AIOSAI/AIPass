@@ -447,13 +447,24 @@ def _probe_live_writers(target: target_module.Target, options: dict) -> None:
     """
     if options.get("no_m10_proof"):
         return
+    options["live_writer_probe_seconds"] = None
+    started = time.perf_counter()
     try:
         options["live_writers"] = m10.live_writers(target.path)
         options["live_writers_probed"] = True
+        # PUBLISHED, not just measured. A bare `probed: true` reads as "probed
+        # ADEQUATELY", and this window is milliseconds against a run of tens of
+        # seconds - so a service writing once a minute is missed and its paths
+        # surface as unattributed. @trigger hit exactly that (a systemd user
+        # unit, six files) and only found it by identifying the paths by hand.
+        # The reader cannot make the comparison unless BOTH numbers are here.
+        options["live_writer_probe_seconds"] = round(time.perf_counter() - started, 4)
     except OSError as exc:
         # Recorded, never assumed empty: an unmeasured live-writer set makes
         # every concurrent write read as an M10 violation, which is the safe
-        # direction but must not look like a clean probe.
+        # direction but must not look like a clean probe. The window stays
+        # None rather than becoming the elapsed-until-failure, which would
+        # read as a window that measured something.
         logger.warning(f"[AUDIT-TESTS] live-writer probe of {target.path} failed: {exc}")
         options["live_writers_probed"] = False
 
@@ -514,6 +525,7 @@ def _m10_proof(
         "unattributed_changes": sorted(changed - recorded - concurrent),
         "attributed_to_concurrent_writers": sorted((changed & concurrent) - recorded),
         "live_writers_probed": bool(options.get("live_writers_probed")),
+        "live_writer_probe_seconds": options.get("live_writer_probe_seconds"),
         "gate_recorded_paths": len(recorded),
         "files_fingerprinted": len(before),
         "diff": diff,
@@ -569,6 +581,7 @@ def _m10_not_probed(reason: str) -> dict:
         "unattributed_changes": [],
         "attributed_to_concurrent_writers": [],
         "live_writers_probed": False,
+        "live_writer_probe_seconds": None,
         "gate_recorded_paths": 0,
         "files_fingerprinted": 0,
         "diff": {},

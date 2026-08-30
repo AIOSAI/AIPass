@@ -604,6 +604,67 @@ class TestCheckPraxLogger:
         assert "Prax logger" in result["message"]
 
 
+class TestCheckPraxLoggerAcceptsBothBindings:
+    """The standard is about ROUTING; both bindings route identically.
+
+    Raised by @memory 2026-08-30: `from aipass.prax import logger` binds the
+    logger OBJECT at import and is UNREBINDABLE, so a conftest swapping
+    sys.modules cannot reach it and real writes escape into @prax's live state
+    directory. Measured here: ONE daemon test under plain pytest made 23 atomic
+    writes into the real prax_json/. The module form is rebindable because the
+    attribute resolves at CALL time. Rejecting it was this checker enforcing a
+    binding style the standard never asked for.
+    """
+
+    def _check(self, source: str):
+        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
+            check_prax_logger,
+        )
+
+        return check_prax_logger(_lines(source), "/test.py")
+
+    def test_the_rebindable_module_form_passes(self):
+        assert self._check("from aipass import prax\n")["passed"] is True
+
+    def test_the_object_form_still_passes(self):
+        assert self._check("from aipass.prax import logger\n")["passed"] is True
+
+    def test_prax_inside_a_multi_name_import_counts(self):
+        assert self._check("from aipass import cli, prax\n")["passed"] is True
+
+    def test_an_aliased_prax_still_counts(self):
+        assert self._check("from aipass import prax as p\n")["passed"] is True
+
+    def test_a_sibling_package_is_not_mistaken_for_prax(self):
+        # `from aipass import cli` must NOT satisfy a prax-logging rule.
+        assert self._check("from aipass import cli\n")["passed"] is False
+
+    def test_a_name_that_merely_starts_with_prax_is_not_prax(self):
+        # Substring matching would accept this; the check splits the import
+        # list and compares whole names.
+        assert self._check("from aipass import praxis\n")["passed"] is False
+
+    def test_prax_imported_from_somewhere_that_is_not_aipass_does_not_count(self):
+        # Found by mutation: deleting the "from aipass import " prefix guard
+        # killed no test, so any package exporting a name `prax` would have
+        # satisfied an AIPASS logging rule.
+        assert self._check("from thirdparty import prax\n")["passed"] is False
+
+    def test_a_commented_out_import_does_not_count(self):
+        assert self._check("# from aipass import prax\n")["passed"] is False
+
+    def test_a_commented_out_OBJECT_form_import_does_not_count_either(self):
+        # The module form is rejected by the source-package guard even without
+        # the comment skip, so only the OBJECT form actually exercises it -
+        # found by mutation, the comment-skip mutant survived until this test.
+        assert self._check("# from aipass.prax import logger\n")["passed"] is False
+
+    def test_the_failure_message_offers_BOTH_spellings(self):
+        message = self._check("import os\n")["message"]
+        assert "from aipass.prax import logger" in message
+        assert "from aipass import prax" in message
+
+
 # -- check_handler_independence (imports) ------------------------------------
 
 

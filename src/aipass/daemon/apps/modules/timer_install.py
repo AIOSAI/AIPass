@@ -26,6 +26,13 @@ from aipass.daemon.apps.handlers.json import json_handler
 
 _DAEMON_ROOT = Path(__file__).resolve().parents[2]
 _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
+
+# The shared AIPass state directory. A MODULE CONSTANT rather than a
+# Path.home() call inside _install(), because a path computed at call time
+# has no seam: the test could patch _DAEMON_ROOT and _UNIT_DIR and still
+# watch the suite mkdir the real ~/.aipass, which holds admin_grant.key and
+# commons.db. Found by the audit-tests lane, red-first before this line moved.
+_STATE_DIR = Path.home() / ".aipass"
 _SERVICE_NAME = "daemon-tick.service"
 _TIMER_NAME = "daemon-tick.timer"
 
@@ -124,7 +131,7 @@ def _install() -> int:
     console.print("[dim]Verify: systemctl --user list-timers | grep daemon[/dim]")
     console.print()
 
-    Path.home().joinpath(".aipass").mkdir(parents=True, exist_ok=True)
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("[timer_install] daemon-tick timer installed and started")
     return 0
