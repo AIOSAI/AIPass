@@ -40,7 +40,7 @@ from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, gatelog
+from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, gatelog, nominators
 
 ADAPTER_API = 1
 ECOSYSTEM = "pytest"
@@ -48,10 +48,60 @@ ECOSYSTEM = "pytest"
 #: Groups this adapter contributes beyond the core spine. They are published
 #: NAMESPACED (`pytest.<name>`), so a Rust adapter never has to know these
 #: exist and a Rust species has somewhere to go.
-ADAPTER_GROUPS: tuple = (
-    "static_nominators",
+#:
+#: THE LIST IS EXPLICIT AND THE DISCOVERY IS MACHINE-CHECKED AGAINST IT. The
+#: static groups are also self-discovered from `<name>_check.py` files, so a
+#: nominator added without a line here would silently change the published
+#: group list - which is exactly what Law S3 exists to stop. A test pins the
+#: two together; adding a species stays three files and one line.
+STATIC_GROUPS: tuple = (
+    "static_assertion_shape",
+    "static_capture_never_read",
+    "static_coverage_slot",
+    "static_entry_point_diff",
+    "static_mock_drift",
+    "static_no_oracle",
+    "static_ruff_pt",
+    "static_self_skip",
+    "static_unentered_assert",
+)
+
+#: The execution groups this adapter declares but does not yet run. They are
+#: published `not_applicable` with a reason from day one, because the rev-4
+#: contracts binding them (kill_cause, the survival naming rule) have to land
+#: before the capability or they never land at all.
+UNBUILT_EXECUTION_GROUPS: tuple = (
     "scoped_survival",
     "targeted_mutation",
+)
+
+ADAPTER_GROUPS: tuple = STATIC_GROUPS + UNBUILT_EXECUTION_GROUPS
+
+#: Law S3 - a group may only VANISH by a recorded ruling, and the ruling
+#: travels in the artifact rather than in a commit message nobody will find.
+#:
+#: `pytest.static_nominators` was a phase-4 PLACEHOLDER. It was published by
+#: three real runs (@backup, @canary, @daemon) as a single `not_applicable`
+#: group standing in for the whole static tier, and the signed design never
+#: named it: design revision 2 section 4.2 specifies the nine namespaced
+#: `pytest.static_*` groups now shipping. Nothing it covered stopped being
+#: published - the placeholder split into the nine groups that measure the
+#: species it named. It is recorded here as a retirement anyway, because S3
+#: does not have a category for "split" and inventing one to avoid writing a
+#: ruling would be the paperwork version of a group quietly disappearing.
+RETIRED_GROUPS: tuple = (
+    {
+        "group": "pytest.static_nominators",
+        "date": "2026-08-29",
+        "ruling": (
+            "design revision 2 section 4.2 (reviewed and signed by @devpulse) specifies the nine "
+            "namespaced pytest.static_* groups; static_nominators was a phase-4 placeholder that "
+            "the design never named. Superseded by static_assertion_shape, static_capture_never_read, "
+            "static_coverage_slot, static_entry_point_diff, static_mock_drift, static_no_oracle, "
+            "static_ruff_pt, static_self_skip and static_unentered_assert - every species the "
+            "placeholder stood in for is still published, more finely. No measurement was withdrawn."
+        ),
+    },
 )
 
 #: The injected plugin, by path. Copied into the env, never imported here.
@@ -335,17 +385,45 @@ def fire_canary(spec: envcopy.EnvSpec) -> dict:
 def nominate(spec: envcopy.EnvSpec) -> dict:
     """Static species. Nominate-only, never scored, ever (Law M1).
 
-    Empty on day one and SAYING SO. A pack with a working hygiene gate and
-    zero nominators is a legitimate, shippable pack; a pack that returns a
-    silent empty dict is one that looks like it found nothing.
+    THE CORPUS IS THE COPY, NEVER THE REAL TREE. The nominators only read, so
+    pointing them at the real target would break nothing visible - and that is
+    precisely why it is worth stating: the static tier would then be the one
+    part of the lane measuring a different program from the rest of it, and a
+    rule reading one tree while the gate reads another produces two numbers
+    nobody can reconcile.
+
+    A group whose nominator could not run reports `not_applicable` with the
+    reason rather than an empty `measured`. Ruff's absence is the live case.
     """
-    return {
-        "static_nominators": gatelog.nomination_group(
-            "not built - the static species land in a later phase; static NOMINATES, execution CONVICTS (Law M1)"
+    documents = nominators.run(spec.target_copy)
+
+    for name in UNBUILT_EXECUTION_GROUPS:
+        documents[name] = gatelog.nomination_group(_unbuilt_reason(name))
+
+    for name in ADAPTER_GROUPS:
+        if name not in documents:
+            documents[name] = gatelog.nomination_group(
+                f"declared in ADAPTER_GROUPS but no nominator claimed '{name}' - the group is "
+                f"published empty rather than dropped, because a group that vanished is what "
+                f"Law S3 exists to catch"
+            )
+
+    return documents
+
+
+def _unbuilt_reason(group: str) -> str:
+    """Why a declared execution group has nothing to report yet."""
+    reasons = {
+        "scoped_survival": (
+            "not built - module gutting is not implemented in this release. When it is, it "
+            "measures ORACLE SURVIVAL and is never to be read as pseudo-testedness (contract 2)"
         ),
-        "scoped_survival": gatelog.nomination_group("not built - module gutting is not implemented in this release"),
-        "targeted_mutation": gatelog.nomination_group("not built - no mutant is executed by this release"),
+        "targeted_mutation": (
+            "not built - no mutant is executed by this release, so there is no kill to split "
+            "and Law S9's kill_cause requirement has nothing to check yet (contract 1)"
+        ),
     }
+    return reasons.get(group, "not built in this release")
 
 
 def declared_groups() -> List[str]:

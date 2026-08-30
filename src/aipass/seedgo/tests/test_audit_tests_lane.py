@@ -471,10 +471,19 @@ class TestNominate:
         for document in adapter.nominate(_spec_for(tmp_path)).values():
             assert document["score"] is None
 
-    def test_every_nominated_group_says_why_it_did_not_run(self, tmp_path):
-        for document in adapter.nominate(_spec_for(tmp_path)).values():
-            assert document["status"] == "not_applicable"
-            assert document["reason"]
+    def test_every_group_that_did_not_run_says_why(self, tmp_path):
+        # Written when NOTHING was built, so it asserted every group was
+        # not_applicable - which pinned the calendar, not the law. The law is
+        # Law S1: a group that did not run carries a reason. A group that DID
+        # run is a different document, and both now exist.
+        for name, document in adapter.nominate(_spec_for(tmp_path)).items():
+            if document["status"] == "not_applicable":
+                assert document["reason"], name
+
+    def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
+        for name in adapter.UNBUILT_EXECUTION_GROUPS:
+            document = adapter.nominate(_spec_for(tmp_path))[name]
+            assert document["status"] == "not_applicable" and document["reason"]
 
     def test_the_declared_groups_are_all_returned_by_nominate(self, tmp_path):
         # A declared group the adapter never fills would vanish from the
@@ -1071,3 +1080,264 @@ class TestVerbParsing:
         # Copy-always is the default deliberately: a symlinked sibling is
         # writable and a write through one lands in the real tree.
         assert "symlink_siblings" not in verb._parse(["@backup"])[1]
+
+
+# =============================================================================
+# LAW ARGV - the CLI seam refuses what it cannot read
+# =============================================================================
+
+
+def _audit_vocabulary():
+    """The `audit` verb's own flag list and sibling verbs, never a copy.
+
+    Read off the module under test rather than restated here: a suggestion
+    built from a private duplicate would keep offering flags the verb had
+    stopped accepting, which is the same silent drift Law ARGV exists to end.
+    """
+    from aipass.seedgo.apps.modules import standards_audit
+
+    return standards_audit.AUDIT_FLAGS, standards_audit.SIBLING_VERBS
+
+
+def _lane_vocabulary():
+    """The `audit-tests` verb's own flag list and sibling verbs."""
+    from aipass.seedgo.apps.modules import audit_tests as verb
+
+    return verb.LANE_FLAGS, verb.SIBLING_VERBS
+
+
+def _built_refusal():
+    """The ARGV refusal for the typo that started this, built as the verb builds it."""
+    flags, siblings = _audit_vocabulary()
+    argv = ["-tests", "@backup"]
+    return refusal.refusal_for_unknown_argument(
+        "-tests", refusal.suggested_command("-tests", "audit", argv, flags, siblings), "audit"
+    )
+
+
+def _capture_output(monkeypatch, module):
+    """Collect everything a verb prints, in order, without a real console."""
+    printed: list = []
+    monkeypatch.setattr(module, "error", lambda message, **kwargs: printed.append(str(message)))
+    monkeypatch.setattr(module, "console", _Recorder(printed))
+    return printed
+
+
+class _Recorder:
+    """A console stand-in that keeps the text instead of wrapping it."""
+
+    def __init__(self, printed: list) -> None:
+        self.printed = printed
+
+    def print(self, text: str = "", **kwargs) -> None:
+        """Record one printed line."""
+        self.printed.append(str(text))
+
+
+class TestUnknownArgumentSuggestion:
+    """The did-you-mean is a real command, rebuilt from what the caller typed."""
+
+    def test_the_space_typo_is_glued_back_into_the_verb_it_was_reaching_for(self):
+        # THE DEFECT, as typed: `drone @seedgo audit -tests @backup`. A hyphen
+        # where nothing belonged, and the audit ran anyway. The suggestion is
+        # the CANONICAL surface: `audit tests <target>`, two words, no hyphen.
+        flags, siblings = _audit_vocabulary()
+
+        assert (
+            refusal.suggested_command("-tests", "audit", ["-tests", "@backup"], flags, siblings)
+            == "drone @seedgo audit tests @backup"
+        )
+
+    def test_the_hyphenated_alias_is_still_a_suggestible_spelling(self):
+        # `audit-tests` did not stop existing when `audit tests` became
+        # canonical. A verb list that no longer carried it would be telling the
+        # caller a working command does not work - so the list is read off the
+        # module, and the glue is checked against a list holding only that form.
+        _, siblings = _audit_vocabulary()
+
+        assert "audit-tests" in siblings
+        assert refusal.sibling_verb("-tests", "audit", ("audit-tests",)) == "audit-tests"
+
+    def test_the_rest_of_the_line_is_carried_into_the_suggestion(self):
+        flags, siblings = _audit_vocabulary()
+
+        assert (
+            refusal.suggested_command("-tests", "audit", ["-tests", "@flow", "--full"], flags, siblings)
+            == "drone @seedgo audit tests @flow --full"
+        )
+
+    def test_a_near_miss_flag_is_offered_spelled_correctly(self):
+        flags, siblings = _audit_vocabulary()
+
+        assert (
+            refusal.suggested_command("--nobypass", "audit", ["aipass", "--nobypass"], flags, siblings)
+            == "drone @seedgo audit aipass --no-bypass"
+        )
+
+    def test_a_shared_verb_prefix_never_inflates_the_sibling_match(self):
+        # Measured against the whole glued spelling, `audit-zzz` scored 0.6
+        # against `audit-tests` on the shared `audit-` alone and offered the
+        # execution lane for a token that was only ever a bad flag. Only the
+        # DISTINGUISHING part is compared.
+        flags, siblings = _audit_vocabulary()
+
+        assert (
+            refusal.suggested_command("--zzz", "audit", ["aipass", "--zzz"], flags, siblings)
+            == "drone @seedgo audit --help"
+        )
+
+    def test_an_extra_bare_word_is_suggested_away(self):
+        flags, siblings = _audit_vocabulary()
+
+        assert (
+            refusal.suggested_command("@prax", "audit", ["aipass", "@flow", "@prax"], flags, siblings)
+            == "drone @seedgo audit aipass @flow"
+        )
+
+    def test_the_lane_offers_its_own_flag_back(self):
+        flags, siblings = _lane_vocabulary()
+
+        assert (
+            refusal.suggested_command("-budget", "audit-tests", ["@backup", "-budget", "300"], flags, siblings)
+            == "drone @seedgo audit-tests @backup --budget 300"
+        )
+
+    def test_the_verb_already_typed_is_never_suggested_back(self):
+        # A suggestion identical to the command that just failed is not a
+        # suggestion; it is the same twenty minutes again. Both guards are
+        # pinned: the exact spelling, and the fuzzy near-miss behind it.
+        assert refusal.sibling_verb("-audit", "audit", ("audit", "audit-tests")) == ""
+        assert refusal.sibling_verb("-tests", "audit-tests", ("audit-tests",)) == ""
+
+
+class TestUnknownArgumentRefusal:
+    """A refused token names itself, cites ARGV, and carries the fix."""
+
+    def test_the_refusal_names_the_offending_token(self):
+        built = _built_refusal()
+
+        assert "'-tests'" in built.reason
+
+    def test_the_refusal_carries_the_command_that_would_have_worked(self):
+        built = _built_refusal()
+
+        assert "did you mean: drone @seedgo audit tests @backup" in built.reason
+
+    def test_the_refusal_exits_non_zero(self):
+        built = _built_refusal()
+
+        assert built.code == refusal.EXIT_UNKNOWN_ARGUMENT
+        assert built.code != refusal.EXIT_PASSED
+        assert refusal.is_refusal(built.code), "a command nobody understood is a refusal, never a publication"
+
+    def test_the_stdout_line_cites_the_law_it_refuses_under(self):
+        line = _built_refusal().stdout_line()
+
+        assert line.startswith("REFUSED:")
+        assert "[ARGV]" in line
+
+    def test_the_detail_carries_a_pasteable_command(self):
+        assert "try: drone @seedgo audit tests @backup" in _built_refusal().detail
+
+    def test_argv_outranks_every_measurement_outcome_except_unproven(self):
+        """Nothing ran at all, so it must never rank quieter than a run that did."""
+        assert (
+            refusal.worst_code([refusal.EXIT_UNKNOWN_ARGUMENT, refusal.EXIT_BUDGET_EXHAUSTED])
+            == refusal.EXIT_UNKNOWN_ARGUMENT
+        )
+        assert refusal.worst_code([refusal.EXIT_UNKNOWN_ARGUMENT, refusal.EXIT_UNPROVEN]) == refusal.EXIT_UNPROVEN
+
+    def test_the_verb_prints_the_refused_line_the_code_and_the_detail(self, monkeypatch):
+        """The refusal is only real once a reader sees it."""
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        printed = _capture_output(monkeypatch, verb)
+
+        verb._refuse_unknown_argument("--nonsense", ["@backup", "--nonsense"])
+
+        assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)
+        assert any("exit code: 7" in line for line in printed)
+        assert any("try: drone @seedgo audit-tests" in line for line in printed)
+
+
+class TestLaneParsingRefusesTheUnrecognized:
+    """`audit-tests` collects what it could not read, and never drops it."""
+
+    def test_an_unknown_flag_is_collected(self):
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        assert verb._parse(["@backup", "--nonsense"])[2] == ["--nonsense"]
+
+    def test_a_second_target_is_collected_because_a_run_measures_one(self):
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        # `runner.run()` takes ONE argument, so a second bare word named
+        # nothing and used to vanish. `aipass` is the fleet form.
+        assert verb._parse(["@backup", "@flow"])[2] == ["@flow"]
+
+    def test_argv_order_is_kept_so_the_first_mistake_is_the_one_reported(self):
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        assert verb._parse(["--first", "@backup", "--second"])[2] == ["--first", "--second"]
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["@backup"],
+            ["."],
+            ["/tmp/some_project"],
+            ["aipass"],
+            ["@backup", "--budget", "300"],
+            ["@backup", "--prove-refusal"],
+            ["@backup", "--symlink-siblings"],
+            ["@backup", "--no-tmpdir-allowance"],
+            ["--prove-refusal", "@backup"],
+            ["@backup", "--budget", "300", "--prove-refusal", "--symlink-siblings", "--no-tmpdir-allowance"],
+        ],
+    )
+    def test_every_documented_invocation_still_parses_clean(self, argv):
+        """A refusal that rejects a valid command is worse than the bug it fixes."""
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        target, options, unrecognized = verb._parse(argv)
+
+        assert unrecognized == [], f"{argv} is documented usage and must not be refused"
+        assert target, f"{argv} names a target"
+
+    def test_a_budget_with_no_value_keeps_the_default_rather_than_being_refused(self):
+        """The flag IS known; only its value is missing. Refusing it would lie."""
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        target, options, unrecognized = verb._parse(["@backup", "--budget"])
+
+        assert unrecognized == []
+        assert options["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
+
+
+class TestLaneVerbRefusesTheUnrecognized:
+    """The refusal happens before anything is measured."""
+
+    def test_nothing_is_measured_once_a_token_is_unrecognized(self, monkeypatch):
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        printed = _capture_output(monkeypatch, verb)
+        monkeypatch.setattr(verb.runner, "run", lambda *a, **k: printed.append("MEASURED"))
+
+        verb._run(["@backup", "--nonsense"])
+
+        assert "MEASURED" not in printed, "the lane measured a target it had already failed to understand"
+        assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)
+
+    def test_a_help_flag_beside_an_unknown_token_still_explains(self, monkeypatch):
+        from aipass.seedgo.apps.modules import audit_tests as verb
+
+        # help_flag_safety: a help flag ANYWHERE means explain, never execute -
+        # and never refuse either. The unknown token is collected during the
+        # scan and acted on only after help has had its say.
+        seen: list = []
+        monkeypatch.setattr(verb, "_print_help", lambda: seen.append("help"))
+        monkeypatch.setattr(verb, "_run", lambda args: seen.append("ran"))
+
+        verb.handle_command("audit-tests", ["-tests", "--help"])
+
+        assert seen == ["help"]

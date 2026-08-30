@@ -40,12 +40,25 @@ from typing import List
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.audit_tests import runner
+from aipass.seedgo.apps.handlers.audit_tests import refusal, render, runner
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
 
 #: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("audit-tests", "audit_tests")
+
+#: Every option this verb accepts, for the did-you-mean a stray token gets.
+LANE_FLAGS: tuple = (
+    "--budget",
+    "--prove-refusal",
+    "--symlink-siblings",
+    "--no-tmpdir-allowance",
+    "--help",
+    "-h",
+)
+
+#: The verb one keystroke away from this one, in the other direction.
+SIBLING_VERBS: tuple = ("audit",)
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -79,7 +92,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 def _run(args: List[str]) -> None:
     """Parse the arguments, run every target, print what happened."""
-    argument, options = _parse(args)
+    argument, options, unrecognized = _parse(args)
+    if unrecognized:
+        # Before the missing-target message, because a token nobody read is the
+        # more specific fact: it may well BE the target, misspelt.
+        _refuse_unknown_argument(unrecognized[0], args)
+        return
     if not argument:
         error("audit-tests needs a target: @branch, a directory, or 'aipass' for every citizen")
         return
@@ -89,16 +107,44 @@ def _run(args: List[str]) -> None:
     _report(results, worst)
 
 
+def _refuse_unknown_argument(token: str, args: List[str]) -> None:
+    """Refuse a token this verb never claimed, and print the fix (Law ARGV).
+
+    The same five lines as the audit verb's, deliberately: display belongs to
+    the verb, and a handler that printed for both would be a handler carrying a
+    console. The rule they share is the refusal vocabulary, not the rendering.
+    """
+    refused = refusal.refusal_for_unknown_argument(
+        token,
+        refusal.suggested_command(token, "audit-tests", args, LANE_FLAGS, SIBLING_VERBS),
+        "audit-tests",
+    )
+    error(refused.stdout_line())
+    console.print(f"[dim]law: {refused.law}   exit code: {refused.code}[/dim]")
+    for line in refused.detail:
+        console.print(f"  [dim]{line}[/dim]")
+
+
 def _parse(args: List[str]) -> tuple:
-    """Split the argument list into `(target, options)`."""
+    """Split the argument list into `(target, options, unrecognized)`.
+
+    The third element is Law ARGV's whole mechanism: unknown tokens are
+    COLLECTED HERE, in the one loop that already knows what this verb accepts,
+    rather than screened by a second list that could drift out of step with it.
+    A token this loop does not claim is a token nobody claimed.
+    """
     options: dict = {}
+    unrecognized: List[str] = []
     target = ""
     index = 0
 
     while index < len(args):
         token = args[index]
-        if token == "--budget" and index + 1 < len(args):
-            options["budget_seconds"] = _as_int(args[index + 1])
+        if token == "--budget":
+            # A trailing '--budget' with nothing after it keeps the default and
+            # says so, rather than being refused as an argument nobody knows —
+            # the flag IS known; only its value is missing.
+            options["budget_seconds"] = _as_int(args[index + 1] if index + 1 < len(args) else "")
             index += 2
             continue
         if token == "--prove-refusal":
@@ -113,11 +159,19 @@ def _parse(args: List[str]) -> tuple:
             options["no_tmpdir_allowance"] = True
             index += 1
             continue
-        if not token.startswith("-") and not target:
-            target = token
+        if not token.startswith("-"):
+            # One target per run: `runner.run()` takes a single argument, so a
+            # second bare word names nothing. `aipass` is the fleet form.
+            if target:
+                unrecognized.append(token)
+            else:
+                target = token
+            index += 1
+            continue
+        unrecognized.append(token)
         index += 1
 
-    return target, options
+    return target, options, unrecognized
 
 
 def _as_int(raw: str) -> int:
@@ -130,21 +184,21 @@ def _as_int(raw: str) -> int:
 
 
 def _report(results: list, worst: int) -> None:
-    """Print one line per target, then the run's own caveats.
+    """Print each target's full report, then the fleet summary.
 
-    A per-target line prints for EVERY target regardless of the fleet code, so
-    the single number is never the only signal. A refusal prints its law and
-    its reason, because a refusal nobody can act on is barely better than a
-    wrong number.
+    ONE TARGET GETS THE FULL RENDER; A FLEET GETS ONE LINE EACH. Eighteen full
+    reports scroll the first seventeen off the screen, and a summary a reader
+    cannot see is a summary that did not happen. Either way the per-target line
+    prints for EVERY target regardless of the fleet code, so the single number
+    is never the only signal a caller has.
     """
-    console.print()
-    for result in results:
-        if result.refused:
-            error(result.summary_line())
-        elif result.document.get("groups", {}).get("hygiene", {}).get("score") == 100:
-            success(result.summary_line())
-        else:
-            warning(result.summary_line())
+    if len(results) == 1:
+        result = results[0]
+        render.render_target(result.document, str(result.path))
+    else:
+        console.print()
+        for result in results:
+            _summary_line(result)
 
     console.print()
     console.print(f"[dim]worst exit code: {worst} (a shell hint - the artifact carries the verdict)[/dim]")
@@ -153,7 +207,46 @@ def _report(results: list, worst: int) -> None:
     if scored:
         console.print("[dim]hygiene is the only scored group. SCORED is not GATING: this blocks nothing.[/dim]")
         console.print("[dim]Every other group reports not_applicable with a reason, never 0.[/dim]")
-        _print_blind_spots(scored)
+        if len(results) > 1:
+            # The single-target path already printed every group with its own
+            # count, so repeating the totals here would say the same thing
+            # twice on one screen. A fleet run has no such render and needs it.
+            _print_nomination_totals(scored)
+            _print_blind_spots(scored)
+
+
+def _summary_line(result) -> None:
+    """One target's line, styled by what happened to it."""
+    if result.refused:
+        error(result.summary_line())
+    elif result.document.get("groups", {}).get("hygiene", {}).get("score") == 100:
+        success(result.summary_line())
+    else:
+        warning(result.summary_line())
+
+
+def _print_nomination_totals(scored: list) -> None:
+    """The static tier's totals per species group, across every target.
+
+    Printed even when the total is zero, and SAYING it is zero. A tier that
+    prints nothing when it finds nothing is indistinguishable from a tier that
+    did not run, which is Law S1 applied to the terminal.
+    """
+    totals: dict = {}
+    for result in scored:
+        for name in result.document.get("group_list", []):
+            group = result.document.get("groups", {}).get(name, {})
+            if group.get("kind") != "nominate_only" or group.get("status") != "measured":
+                continue
+            totals[name] = totals.get(name, 0) + int(group.get("nomination_count", 0))
+
+    if not totals:
+        return
+
+    console.print()
+    console.print("[bold cyan]Static tier[/bold cyan] [dim](nominations - never scored, never verdicts: Law M1)[/dim]")
+    for name in sorted(totals):
+        console.print(f"  [dim]{name:34} {totals[name]} nomination(s)[/dim]")
 
 
 def _print_blind_spots(scored: list) -> None:

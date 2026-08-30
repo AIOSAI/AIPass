@@ -7,12 +7,10 @@
 # =============================================
 
 """
-Standards Audit Module
+Standards Audit Module — per-branch compliance against a checker pack.
 
-Scans all AIPass branches and generates compliance dashboard.
-Shows per-branch scores, system-wide metrics, and top issues.
-
-Run: seedgo audit
+`audit <pack> [@branch]` scores; `audit tests <target>` is the execution lane
+(the same command as `audit-tests <target>`), recognised here and handed off.
 """
 
 import sys
@@ -21,14 +19,7 @@ from pathlib import Path
 from typing import List
 from collections import defaultdict
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
+# IMPORTS — prax logger first, system-wide
 from aipass.prax import logger
 
 # CLI services (display/output formatting)
@@ -39,6 +30,7 @@ from aipass.cli.apps.modules import error, warning
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit handlers (implementation)
+from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
 from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
@@ -48,6 +40,14 @@ from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 
+# The audit-tests lane's refusal vocabulary, reused rather than re-invented:
+# Law ARGV, its exit code and its did-you-mean live in one place so the two
+# verbs that share the typo cannot drift into refusing it two different ways.
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+
+# The execution lane `audit tests <target>` hands off to, unchanged.
+from aipass.seedgo.apps.modules import audit_tests as lane_verb
+
 # Drone services for @ resolution
 from aipass.drone.apps.modules import normalize_branch_arg
 
@@ -56,31 +56,59 @@ from aipass.drone.apps.modules import normalize_branch_arg
 # COMMAND HANDLER
 # =============================================================================
 
+#: Every flag this verb accepts — the list a mistyped token is offered against.
+AUDIT_FLAGS: tuple = tuple(
+    "--show-bypasses --bypasses -b --no-bypass --full --artifact --no-artifact --help -h".split()
+)
+
+#: The sibling surfaces one keystroke away. `audit -tests @backup` is
+#: `audit tests @backup` with a stray hyphen, and that typo used to run this
+#: audit instead. The canonical two-word form is offered first; the hyphenated
+#: alias stays a valid spelling and still routes.
+SIBLING_VERBS: tuple = ("audit tests", "audit-tests")
+
+#: The first positional that means "not a pack, the execution lane". Recognised
+#: here and forwarded whole; `audit-tests <target>` remains the same lane.
+LANE_WORD = "tests"
+
+#: Pack, then @branch. A third bare word fills no slot: refused, never dropped.
+MAX_POSITIONAL = 2
+
+
+def _handlers_dir() -> Path:
+    """This branch's `handlers/` directory."""
+    return Path(__file__).parent.parent / "handlers"
+
 
 def _discover_packs() -> dict:
-    """Discover available checker packs from handlers/ directory.
+    """Scoring packs available to the audit, name -> path.
 
-    Convention: directories named *_standards/ containing *_check.py files.
-    Pack display name strips the _standards suffix.
-
-    Returns:
-        Dict mapping pack name to Path, e.g. {"aipass": Path("handlers/aipass_standards")}
+    Discovery and the `kind` refusal live in the discovery HANDLER: reading a
+    manifest off disk is not a module's job.
     """
-    handlers_dir = Path(__file__).parent.parent / "handlers"
-    packs = {}
-    if not handlers_dir.exists():
-        return packs
-    for d in sorted(handlers_dir.iterdir()):
-        if not d.is_dir():
-            continue
-        if not d.name.endswith("_standards"):
-            continue
-        # Must contain at least one *_check.py at top level
-        check_files = list(d.glob("*_check.py"))
-        if check_files:
-            pack_name = d.name.removesuffix("_standards")
-            packs[pack_name] = d
-    return packs
+    return discovery.discover_packs(_handlers_dir())
+
+
+def non_scoring_packs() -> dict:
+    """Packs that exist but belong to another lane. Name -> kind."""
+    return discovery.non_scoring_packs(_handlers_dir())
+
+
+def _print_non_scoring_packs() -> None:
+    """Name the packs this audit will NOT score, and say who owns them.
+
+    A pack directory that simply vanished from every listing is
+    indistinguishable from one that was never installed.
+    """
+    other = non_scoring_packs()
+    if not other:
+        return
+
+    console.print("[bold cyan]Not scored here (other lanes):[/bold cyan]")
+    for name, kind in other.items():
+        console.print(f"  [dim]{name}[/dim]  [dim]({kind} pack - not a standards pack)[/dim]")
+    console.print("  [dim]drone @seedgo audit tests <target> runs the execution lane.[/dim]")
+    console.print()
 
 
 def _show_audit_introspection() -> None:
@@ -103,6 +131,8 @@ def _show_audit_introspection() -> None:
         console.print(f"  [cyan]{name}[/cyan]  ({len(check_files)} checker{'s' if len(check_files) != 1 else ''})")
     console.print()
 
+    _print_non_scoring_packs()
+
     console.print("[yellow]Next:[/yellow]  Pick a pack to audit")
     first_pack = next(iter(packs))
     console.print(f"  [green]drone @seedgo audit {first_pack}[/green]              [dim]# All branches[/dim]")
@@ -117,7 +147,6 @@ def print_introspection() -> None:
     console.print("Pack-aware audit — scans branches against checker packs")
     console.print()
 
-    # Show discovered packs
     packs = _discover_packs()
     console.print("[yellow]Discovered Packs:[/yellow]")
     for name, pack_path in packs.items():
@@ -126,6 +155,8 @@ def print_introspection() -> None:
     if not packs:
         console.print("  [dim]No packs found[/dim]")
     console.print()
+
+    _print_non_scoring_packs()
 
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/audit/[/cyan]")
@@ -163,14 +194,10 @@ def _emit_artifact(
 ):
     """Write the complete-violation-set artifact and announce its path.
 
-    The display truncates by design; this file does not. Telling the user where
-    it landed is what makes it discoverable — one dim line, never a banner.
-
-    The line names the SCOPE as well as the path. Naming only the path invites a
-    consumer to read a single-branch document as if it covered the fleet, which
-    is the same silent-and-plausible failure the artifact exists to end. A
-    --no-bypass run is the same hazard one step further on — same tree, same
-    pack, lower numbers — so it says so here and lands in its own file.
+    The display truncates by design; this file does not. The line names the
+    SCOPE as well as the path: naming only the path invites a consumer to read
+    a single-branch document as if it covered the fleet, which is the same
+    silent-and-plausible failure the artifact exists to end.
 
     A write failure is reported loudly and never re-raised: the artifact is a
     side channel, so a full-disk or bad --artifact path must not swallow the
@@ -199,17 +226,45 @@ def _emit_artifact(
     return written
 
 
+def _print_refusal(refused) -> None:
+    """Print a refusal: its one line, the law and code, then the evidence.
+
+    Printing lives here, not beside the rule: a handler that displays is one
+    nobody can reuse without its console (the cli standard)."""
+    error(refused.stdout_line())
+    console.print(f"[dim]law: {refused.law}   exit code: {refused.code}[/dim]")
+    for line in refused.detail:
+        console.print(f"  [dim]{line}[/dim]")
+
+
+def _refuse_unknown_argument(token: str, args: List[str]) -> None:
+    """Refuse a token this verb never claimed, and print the fix (Law ARGV)."""
+    suggestion = refusal.suggested_command(token, "audit", args, AUDIT_FLAGS, SIBLING_VERBS)
+    _print_refusal(refusal.refusal_for_unknown_argument(token, suggestion, "audit"))
+
+
+def _dispatch_lane(args: List[str]) -> bool:
+    """Hand `audit tests <target>` to the execution lane, arguments verbatim.
+
+    PARSING ONLY: everything after the word is forwarded untouched and the lane
+    never touches this file's scoring engine. A pack really named `tests` would
+    give the word two meanings, and a silently preferred meaning is the species
+    the dropped `-tests` was, so that collision REFUSES and names both.
+    """
+    if LANE_WORD in _discover_packs():
+        _print_refusal(refusal.refusal_for_ambiguous_lane_word(LANE_WORD, "audit"))
+        return True
+    return lane_verb.handle_command("audit-tests", args[1:])
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'audit' command with pack-aware routing.
 
     Args:
         command: Command name
-        args: Additional arguments
-            [] → show audit introspection (available packs)
-            ["aipass"] → pack="aipass", branch=None (all branches)
-            ["aipass", "flow"] → pack="aipass", branch="FLOW"
-            ["--help"] → general help
+        args: [] introspects, ["aipass"] audits every branch, ["aipass",
+            "@flow"] audits one, ["tests", ...] is the lane, ["--help"] explains.
 
     Returns:
         True if handled, False if not this module's command
@@ -227,6 +282,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_help()
         return True
 
+    # `audit tests <target>` IS the execution lane, forwarded whole.
+    if args[0] == LANE_WORD:
+        return _dispatch_lane(args)
+
     # Parse pack name (first non-flag arg) and branch name (second non-flag arg)
     pack_name = None
     specific_branch = None
@@ -238,10 +297,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     expect_artifact_path = False
 
     positional = []
+    # Collected, never acted on until the whole list is read: a help flag further
+    # along is a question, and a question is answered even beside nonsense.
+    unrecognized: List[str] = []
     for arg in args:
-        # Before the value slots, never after: a flag consumed as a destination
-        # path is a flag nobody reads. '--artifact --help' wrote the artifact to
-        # a file named '--help' and ran the whole audit to fill it.
+        # Before the value slots, never after: '--artifact --help' wrote the
+        # artifact to a file named '--help' and ran the audit to fill it.
         if arg in DASHED_HELP_TOKENS:
             print_help()
             return True
@@ -273,6 +334,17 @@ def handle_command(command: str, args: List[str]) -> bool:
             return True
         if not arg.startswith("-"):
             positional.append(arg)
+            if len(positional) > MAX_POSITIONAL:
+                unrecognized.append(arg)
+            continue
+        # A dashed token no branch claimed. It used to fall off the end of this
+        # loop and be forgotten (Law ARGV).
+        unrecognized.append(arg)
+
+    if unrecognized:
+        # True, not False: a False has seedgo.py report 'Unknown command: audit'.
+        _refuse_unknown_argument(unrecognized[0], args)
+        return True
 
     if expect_artifact_path:
         error(
@@ -286,7 +358,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             pack_name = "aipass"
             specific_branch = normalize_branch_arg(positional[0])
         else:
-            pack_name = positional[0]
+            # `aipass_standards` reaches the `aipass` pack: the directory's own
+            # name is always an unambiguous spelling for the pack it holds.
+            pack_name = positional[0].removesuffix("_standards")
     if len(positional) >= 2 and specific_branch is None:
         branch_arg = positional[1]
         if not branch_arg.startswith("@"):
@@ -314,11 +388,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         warning("--show-bypasses not yet implemented in seedgo")
         return True
 
-    # =========================================================================
-    # PRIVATE BRANCH ACCESS CONTROL
-    # =========================================================================
-    # If targeting a private branch directly, only allow audit from inside
-    # that branch's directory. This enforces isolation per DPLAN-035.
+    # PRIVATE BRANCH ACCESS CONTROL — a private branch is auditable only from
+    # inside its own directory. Isolation per DPLAN-035.
     if specific_branch and _is_branch_private(specific_branch):
         if not check_internal_access(specific_branch):
             console.print(
@@ -329,18 +400,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Log audit start
     json_handler.log_operation("standards_audit_started", {"pack": pack_name, "specific_branch": specific_branch})
 
-    # Discover branches
-    # When targeting a specific private branch from inside its CWD,
-    # include private branches in discovery so we can find it
+    # A private branch targeted from inside its own CWD must be discoverable.
     _include_private = specific_branch is not None and _is_branch_private(specific_branch)
     console.print()
     header(f"{pack_name.upper()} BRANCH STANDARDS AUDIT")
     console.print()
 
     # Any suppression announces itself, and this one inverts the meaning of every
-    # number below it — an unlabelled --no-bypass run reads as a branch that just
-    # got worse. Said here, again next to the scores in the summary, and recorded
-    # in the artifact's metadata, because each of those is copied out on its own.
+    # number below it — an unlabelled --no-bypass run reads as a branch that got
+    # worse. Said here, in the summary, and in the artifact: each is copied alone.
     if no_bypass:
         console.print("[bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — every rule ignored[/dim]")
         console.print("[dim]Raw scores. Not comparable with a normal audit; expect them to read lower.[/dim]")
@@ -371,7 +439,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TextColumn("{task.completed}/{task.total}"),
-        # Elapsed ticks continuously — remaining-time estimates froze on the
+        # Elapsed ticks continuously; remaining-time estimates froze on the
         # bimodal cache workload (12 branches at 0.2s, then a 40s fresh one).
         TimeElapsedColumn(),
         console=console,
@@ -460,6 +528,7 @@ def print_help():
     console.print("  [green]drone @seedgo audit[/green]                      [dim]Show available packs[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]               [dim]All branches, aipass pack[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]         [dim]Single branch[/dim]")
+    console.print("  [green]drone @seedgo audit tests @backup[/green]        [dim]Execution lane[/dim]")
     console.print("  [green]drone @seedgo audit aipass --no-bypass[/green]   [dim]Score with rules OFF[/dim]")
     console.print("  [green]drone @seedgo audit aipass --full[/green]        [dim]Force full re-scan[/dim]")
     console.print("  [green]drone @seedgo audit aipass --artifact <path>[/green]  [dim]Artifact destination[/dim]")
@@ -482,13 +551,15 @@ def print_help():
     console.print("  [green]drone @seedgo audit aipass --full[/green]")
     console.print()
 
-    console.print("  [dim]# Write the complete violation set somewhere else[/dim]")
-    console.print("  [green]drone @seedgo audit aipass --artifact reports/audit.json[/green]")
+    console.print("  [dim]# The execution lane: run @backup's suite under the hygiene gate[/dim]")
+    console.print("  [green]drone @seedgo audit tests @backup[/green]")
     console.print()
 
     console.print("[yellow]REFERENCE:[/yellow]")
-    console.print("  Pack name is REQUIRED. Auto-discovers checkers from pack's handler directory.")
-    console.print("  Shows per-branch scores, system-wide metrics, and top issues.")
+    console.print("  Pack name is REQUIRED; checkers auto-discover from the pack's handler dir.")
+    console.print()
+    console.print("  'tests' is not a pack: 'audit tests <target>' is the EXECUTION lane, the")
+    console.print("  same command as 'audit-tests <target>'. Every lane flag is forwarded whole.")
     console.print()
     console.print("  --no-bypass runs the identical audit with an EMPTY rule set: no .seedgo/")
     console.print("  bypass.json rule applies, so the score is the branch's raw compliance — the")
@@ -499,10 +570,9 @@ def print_help():
     console.print()
     console.print("  Every run also writes the COMPLETE result set as JSON: a fleet run writes")
     console.print("  .seedgo/last_audit.json, a scoped run writes .seedgo/last_audit_{branch}.json")
-    console.print("  so it cannot overwrite the fleet document with one branch's results.")
-    console.print("  The console display truncates (10 files, 3 diagnostics, 5 violations, 60-char")
-    console.print("  messages); the artifact never does. Violations carry branch, standard and a")
-    console.print("  branch-relative file path, so they join straight onto .seedgo/bypass.json rules.")
+    console.print("  so it cannot overwrite the fleet document with one branch's results. The")
+    console.print("  console display truncates; the artifact never does. Violations carry branch,")
+    console.print("  standard and a branch-relative path, ready for .seedgo/bypass.json rules.")
     console.print()
 
 

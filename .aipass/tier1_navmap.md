@@ -45,7 +45,7 @@ src/aipass/<name>/
  - @aipass — the user's front-door concierge, its OWN CLI: run `aipass` directly, never `drone @aipass` (drone can't resolve it). Onboarding (`init`/`install`), `doctor` health, help chat, OS/system questions. Serves humans, not agents — reads, never writes.
  - @ai_mail — inter-agent email. `dispatch` = send + wake (default for handing work), `email` = no wake, plus inbox/view/reply/close.
  - @flow — plan lifecycle: create, list, close, templates, registry. See the Plans section.
- - @seedgo — code standards and audits. `audit` and `checklist` — the quality gate before and after building.
+ - @seedgo — code standards and audits. `audit` and `checklist` — the quality gate before and after building. `audit tests @branch` — test-quality lane: runs your suite under a write gate, advisory artifact.
  - @prax — logging and monitoring. The only logging system: `from aipass.prax import logger`. Real-time monitor, dashboards, runaway-log detection. Logs are the first diagnostic tool.
  - @memory — long-term memory. Archives overflowing `.trinity/` files into searchable vectors; `search` recalls past sessions.
  - @spawn — branch lifecycle. Creates, updates, syncs, retires agents — scaffolding, passports, registry, templates.
@@ -66,6 +66,7 @@ drone @ai_mail inbox                               # check mail → view <id> �
 drone @flow create . "Subject" [dplan]             # new plan (default FPLAN)
 drone @seedgo audit aipass @branch                 # standards audit (drop @branch = all)
 drone @seedgo checklist <file|dir>                 # quick standards check
+drone @seedgo audit tests @branch                  # test-quality lane (advisory, artifact in seedgo/.seedgo/)
 drone @trigger medic mute @<self>                  # BEFORE build/edit work — auto-expires 24h
 drone @git status / diff / log                     # read-only git awareness
 drone @memory search "query"                       # recall archived context

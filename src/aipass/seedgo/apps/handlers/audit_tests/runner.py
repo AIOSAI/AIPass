@@ -40,7 +40,7 @@ from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches
 from aipass.seedgo.apps.handlers.audit_tests import adapters, artifact, laws, refusal, spine, target as target_module
-from aipass.seedgo.apps.handlers.audit_tests import m10
+from aipass.seedgo.apps.handlers.audit_tests import cache, m10, selfcheck
 from aipass.seedgo.apps.handlers.json import json_handler
 
 #: Default wall-clock budget for one target's suite (Law T-BUDGET).
@@ -138,6 +138,7 @@ def refuse(
     ecosystem: str = "unknown",
     adapter_name: str = "none",
     group_list: Optional[List[str]] = None,
+    retired_groups: Optional[List[dict]] = None,
 ) -> RunResult:
     """Publish a complete refused artifact and return its result.
 
@@ -154,6 +155,7 @@ def refuse(
         adapter_api=adapters.SUPPORTED_ADAPTER_API,
         group_list=group_list,
         previous=previous,
+        retired_groups=retired_groups,
     )
     document["cache"] = dict(NO_CACHE_BLOCK)
 
@@ -233,11 +235,18 @@ def _measure(
     same species it exists to catch: a claim nothing could ever falsify. So it
     is measured, on every run, and the result is published whether it is good
     news or not.
+
+    THE CARRIER WINDOW OPENS FIRST, before the before-fingerprint, so that
+    every write THIS process makes into the real tree during the comparison
+    window is on record. Otherwise the audit's own logger appears in its own
+    diff as an unexplained change.
     """
     started = datetime.now(timezone.utc)
     clock = time.monotonic()
     spec = None
+    m10.start_carrier_recording(target.path)
     before = _fingerprint_target(target, options)
+    _probe_live_writers(target, options)
 
     try:
         with tempfile.TemporaryDirectory(prefix=SCRATCH_PREFIX) as scratch:
@@ -256,7 +265,7 @@ def _measure(
                 nominations,
                 started,
                 time.monotonic() - clock,
-                m10_proof=_m10_proof(target, before, options),
+                m10_proof=_m10_proof(target, before, options, run),
             )
     except Exception as exc:
         # A crash mid-measurement is a refusal, never a zero. The lane knows
@@ -274,6 +283,10 @@ def _measure(
             group_list=group_list,
         )
     finally:
+        # The window closes on every path out, including the crash one. A
+        # recorder left open would keep attributing the next target's writes
+        # to this run's roots.
+        m10.stop_carrier_recording()
         if spec is not None:
             adapter.teardown(spec)
 
@@ -307,12 +320,14 @@ def _publish(
             group_list=group_list,
         )
 
+    environment = spec.to_document()
+    config_note = str(run.get("config_note", target.config_note))
     hygiene = _hygiene_group(
         gate,
         budget_seconds=int(run.get("budget_seconds", DEFAULT_BUDGET_SECONDS)),
         elapsed_seconds=float(run.get("elapsed_seconds", elapsed)),
-        config_note=str(run.get("config_note", target.config_note)),
-        environment=spec.to_document(),
+        config_note=config_note,
+        environment=environment,
         liveness=liveness,
     )
 
@@ -328,14 +343,53 @@ def _publish(
         run_id=uuid.uuid4().hex[:12],
         started=started,
         elapsed=elapsed,
-        cache=dict(NO_CACHE_BLOCK),
+        cache=cache.cache_block(_pack_dir(adapter), environment.get("copied_siblings", [])),
         previous=previous,
+        retired_groups=_retirements(adapter, ecosystem),
         executed_order=list(run.get("executed_order") or []),
     )
     document["m10_proof"] = m10_proof or _m10_not_probed("the proof was not requested for this run")
+    document["harness"] = selfcheck.harness_block(
+        document=document,
+        hygiene=hygiene,
+        run=run,
+        environment=environment,
+        liveness=liveness,
+        m10_proof=document["m10_proof"],
+        config_note=config_note,
+    )
 
     path = artifact.publish(document, target, previous)
     return RunResult(target, document, path, artifact.exit_code_for(document))
+
+
+def _pack_dir(adapter) -> Optional[Path]:
+    """The adapter pack's directory, for the cache stamp, or None."""
+    payload = getattr(adapter, "PAYLOAD_DIR", None)
+    return Path(payload).parent if payload else None
+
+
+def _retirements(adapter, ecosystem: str) -> List[dict]:
+    """The adapter's recorded group retirements, namespaced and validated.
+
+    Law S3 lets a group vanish ONLY by a ruling, and the ruling is published
+    in the artifact rather than left in a commit message. An entry with no
+    ruling text is dropped here rather than passed on, so that S3's own
+    validator refuses the artifact instead of accepting a retirement nobody
+    signed - the check that catches an adapter retiring a group by writing an
+    empty string.
+    """
+    entries: List[dict] = []
+
+    for entry in getattr(adapter, "RETIRED_GROUPS", ()) or ():
+        group = str(entry.get("group", ""))
+        ruling = str(entry.get("ruling", ""))
+        if not group or not ruling:
+            logger.warning(f"[AUDIT-TESTS] adapter '{ecosystem}' declared a retirement with no group or ruling")
+            continue
+        entries.append({"group": group, "ruling": ruling, "date": str(entry.get("date", ""))})
+
+    return entries
 
 
 def _unproven_refusal(gate: dict, run: dict, elapsed: float) -> refusal.Refusal:
@@ -383,12 +437,46 @@ def _fingerprint_target(target: target_module.Target, options: dict) -> Optional
         return None
 
 
-def _m10_proof(target: target_module.Target, before: Optional[Dict[str, tuple]], options: dict) -> dict:
+def _probe_live_writers(target: target_module.Target, options: dict) -> None:
+    """Record which of the target's own paths move with no suite running.
+
+    Two back-to-back snapshots, taken before the copy exists. Whatever changes
+    between them belongs to something that is not this run - a live citizen's
+    daemon, server or logger - and the M10 proof subtracts that set so its
+    headline names writes nothing else was seen making.
+    """
+    if options.get("no_m10_proof"):
+        return
+    try:
+        options["live_writers"] = m10.live_writers(target.path)
+        options["live_writers_probed"] = True
+    except OSError as exc:
+        # Recorded, never assumed empty: an unmeasured live-writer set makes
+        # every concurrent write read as an M10 violation, which is the safe
+        # direction but must not look like a clean probe.
+        logger.warning(f"[AUDIT-TESTS] live-writer probe of {target.path} failed: {exc}")
+        options["live_writers_probed"] = False
+
+
+def _m10_proof(
+    target: target_module.Target,
+    before: Optional[Dict[str, tuple]],
+    options: dict,
+    run: Optional[dict] = None,
+) -> dict:
     """Whether the real tree survived the run untouched, measured both ends.
 
     A `not_probed` result is published in full rather than omitted. A missing
     proof block and a passing one must never look the same, which is the whole
     argument of Law S1 applied to the lane's own harness.
+
+    THE VERDICT IS JUDGED OVER NON-CARRIER PATHS. The audit's own machinery
+    writes into a live branch while it measures it, and the diff is partitioned
+    on PROVENANCE - what this process was recorded writing - never on what a
+    path looks like. `diff_snapshots` is asked NOT to record here because the
+    partition records instead: the alarm belongs to the changes nothing can
+    account for, and an ERROR that fires on the audit's own logs teaches
+    everyone to ignore Law M10.
     """
     if before is None:
         return _m10_not_probed("the before-fingerprint could not be taken, so no comparison is possible")
@@ -402,29 +490,91 @@ def _m10_proof(target: target_module.Target, before: Optional[Dict[str, tuple]],
         logger.warning(f"[AUDIT-TESTS] after-fingerprint of {target.path} failed, M10 unproven: {exc}")
         return _m10_not_probed(f"the after-fingerprint could not be taken: {exc}")
 
-    diff = m10.diff_snapshots(before, after)
+    recorded = _paths_the_gate_recorded(run)
+    writes, swallowed = m10.stop_carrier_recording()
+    partition = m10.carrier_partition(m10.diff_snapshots(before, after, record=False), writes, swallowed, recorded)
+
+    diff = partition["diff"]
     intact = not any(diff.values())
+    changed = _changed(diff)
+    concurrent = _changed(options.get("live_writers") or {})
+
+    # THE SUITE WROTE IT, in this instrument's own words. The strongest of the
+    # three signals: the hygiene gate watches the suite in-process and names
+    # every path it opens for writing, so a real-tree path in that record was
+    # written BY the measurement. This is the finding check 12 exists for, and
+    # it is read from the FULL diff: a path the carrier also wrote is never
+    # subtracted out of this list, because the suite's record convicts.
+    by_the_suite = sorted(_changed(partition["diff_before_carrier_subtraction"]) & recorded)
 
     return {
         "probed": True,
         "real_tree_unchanged": intact,
+        "changed_by_the_measured_suite": by_the_suite,
+        "unattributed_changes": sorted(changed - recorded - concurrent),
+        "attributed_to_concurrent_writers": sorted((changed & concurrent) - recorded),
+        "live_writers_probed": bool(options.get("live_writers_probed")),
+        "gate_recorded_paths": len(recorded),
         "files_fingerprinted": len(before),
         "diff": diff,
+        "diff_before_carrier_subtraction": partition["diff_before_carrier_subtraction"],
+        "carrier_writes": partition["carrier_writes"],
+        "attribution": partition["attribution"],
         "how": "content hash plus stat fields, before the copy and after teardown",
         "note": (
             "st_ctime alone does NOT catch a same-tick forge-then-restore - measured, "
-            "so content is hashed rather than inferred"
+            "so content is hashed rather than inferred. A target that is a LIVE citizen "
+            "writes its own logs during the measurement window, so the paths that moved "
+            "with no suite running are measured separately and subtracted here - never "
+            "exempted by path, because logs/operations.jsonl is precisely what this "
+            "campaign convicted a branch for forging. The subtraction under-detects on "
+            "purpose: a service that writes rarely will not appear in the probe window "
+            "and its path is reported as unattributed."
         ),
     }
 
 
+def _changed(diff: dict) -> set:
+    """Every path named anywhere in an M10 diff."""
+    return {path for paths in diff.values() for path in paths}
+
+
+def _paths_the_gate_recorded(run: Optional[dict]) -> set:
+    """Every path the hygiene gate saw the suite write.
+
+    The gate is per-interpreter, so this record is complete only to the extent
+    `gate_coverage` says it is - child processes and file-backed sqlite3
+    handles write where it cannot follow, and both are counted there. That is
+    why a path's ABSENCE from this set proves nothing on its own, and why the
+    M10 verdict treats "absent" as undetermined rather than as innocent.
+    """
+    if not run:
+        return set()
+    return {str(record.get("path")) for record in (run.get("violations") or []) if record.get("path")}
+
+
 def _m10_not_probed(reason: str) -> dict:
-    """The M10 block for a run that could not prove anything."""
+    """The M10 block for a run that could not prove anything.
+
+    The carrier block is built by the same partition the measured path uses,
+    on an empty diff, so an unprobed proof and a probed one cannot drift into
+    two different shapes - the second reader of this document would have no way
+    to tell a missing field from a subtraction nobody published.
+    """
+    empty = m10.carrier_partition({})
     return {
         "probed": False,
         "real_tree_unchanged": None,
+        "changed_by_the_measured_suite": [],
+        "unattributed_changes": [],
+        "attributed_to_concurrent_writers": [],
+        "live_writers_probed": False,
+        "gate_recorded_paths": 0,
         "files_fingerprinted": 0,
         "diff": {},
+        "diff_before_carrier_subtraction": empty["diff_before_carrier_subtraction"],
+        "carrier_writes": empty["carrier_writes"],
+        "attribution": empty["attribution"],
         "how": "not probed",
         "note": reason,
     }

@@ -26,6 +26,10 @@ The laws (design section 4.3):
          (b) no nomination may carry a delete-family verdict
     S8   any group carrying a score must carry `gate_coverage`
     S9   no mutant record without a `kill_cause` split           (rev 4)
+    M10  a published `m10_proof` carries the diff BEFORE the carrier
+         subtraction and a carrier block naming what was taken out, with the
+         evidence for each - a subtraction a reader cannot check is just a
+         smaller number
     T-BUDGET  every execution group carries budget + elapsed; exhausted is
               `refused`, never `measured`, never scored
 
@@ -57,13 +61,22 @@ DELETE_FAMILY: frozenset = frozenset({"useless", "delete", "remove", "worthless"
 #: Statuses a group document may carry.
 VALID_STATUSES: frozenset = frozenset({"measured", "not_applicable", "refused"})
 
+#: How an `m10_proof` reached its carrier subtraction. `measured` means every
+#: subtracted path was OBSERVED being written by this process; `partly
+#: declared` means at least one rested on a declaration instead, which is a
+#: weaker claim and must be readable as one.
+CARRIER_ATTRIBUTION: frozenset = frozenset({"measured", "partly declared"})
+
 #: One-line statements stamped into every artifact, so a reader never has to
 #: hold the design open beside it.
 LAW_STATEMENTS: Dict[str, str] = {
     "L0": "a test proves something when there EXISTS a change to production code that makes it fail",
     "M1": "static NOMINATES, execution CONVICTS",
     "M2": "a measurement that agrees with you everywhere is not evidence",
-    "M10": "run suites against a copy - the instrument must not import the tree it measures",
+    "M10": (
+        "run suites against a copy - the instrument must not import the tree it measures, and any "
+        "path subtracted from the proof because the audit itself wrote it is published with its evidence"
+    ),
     "M11": "deletion-safety is a row-level probe, not a group",
     "S1": "not-run is not_applicable with a reason, never 0",
     "S2": "every group declares its tier",
@@ -266,6 +279,80 @@ def check_budget(groups: Dict[str, dict]) -> List[str]:
     return problems
 
 
+def check_m10(proof: Optional[dict]) -> List[str]:
+    """M10 — a carrier subtraction is auditable, or the artifact is refused.
+
+    A refusal publishes no proof at all, so an ABSENT block is nothing to
+    check; a PRESENT one must carry the full unsubtracted diff and a
+    well-formed carrier block. Subtracting paths from the diff that decides
+    `real_tree_unchanged` and publishing neither the evidence nor what the
+    diff looked like first is the same species as a score with no
+    `gate_coverage`: a smaller number nobody can check.
+
+    THE TOTAL IS CROSS-CHECKED against the two lists rather than trusted,
+    because `total` is the one field a reader skimming the block will believe
+    without counting.
+    """
+    if not proof:
+        return []
+
+    problems: List[str] = []
+
+    if "diff_before_carrier_subtraction" not in proof:
+        problems.append("M10: m10_proof publishes a diff with no diff_before_carrier_subtraction to check it against")
+
+    attribution = proof.get("attribution")
+    if attribution not in CARRIER_ATTRIBUTION:
+        problems.append(
+            f"M10: m10_proof carries attribution {attribution!r}, expected one of {sorted(CARRIER_ATTRIBUTION)}"
+        )
+
+    carrier = proof.get("carrier_writes")
+    if not isinstance(carrier, dict):
+        problems.append("M10: m10_proof carries no carrier_writes block naming what the audit's own machinery wrote")
+        return problems
+
+    problems.extend(_carrier_block_problems(carrier, attribution))
+    return problems
+
+
+def _carrier_block_problems(carrier: dict, attribution: object) -> List[str]:
+    """Every shape problem in one `carrier_writes` block, all at once."""
+    problems: List[str] = []
+    observed, declared = carrier.get("observed"), carrier.get("declared")
+
+    if not carrier.get("note"):
+        problems.append("M10: carrier_writes states no note - a subtraction with no sentence for it is an exemption")
+    if carrier.get("swallowed_errors") is None:
+        problems.append("M10: carrier_writes declares no swallowed_errors count - a swallowed error shortens the list")
+
+    for field, rows, required in (
+        ("observed", observed, ("path", "evidence", "event")),
+        ("declared", declared, ("path", "surface", "owner", "why")),
+    ):
+        if not isinstance(rows, list):
+            problems.append(f"M10: carrier_writes declares no {field} list")
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or not all(row.get(key) for key in required):
+                problems.append(f"M10: a {field} carrier write does not name {', '.join(required)}")
+                break
+
+    if isinstance(observed, list) and isinstance(declared, list):
+        if carrier.get("total") != len(observed) + len(declared):
+            problems.append(
+                f"M10: carrier_writes totals {carrier.get('total')!r} against "
+                f"{len(observed)} observed and {len(declared)} declared"
+            )
+        if declared and attribution != "partly declared":
+            problems.append(
+                "M10: carrier_writes used a declared entry but attribution says 'measured' - "
+                "a declaration is not a measurement"
+            )
+
+    return problems
+
+
 def check_s5(cache: dict) -> List[str]:
     """S5 — a cache-served artifact is stamped and names what it cannot see."""
     problems: List[str] = []
@@ -303,6 +390,7 @@ def validate(document: dict, previous_group_list: Optional[List[str]] = None) ->
     problems.extend(check_s9(groups))
     problems.extend(check_budget(groups))
     problems.extend(check_s5(document.get("cache", {})))
+    problems.extend(check_m10(document.get("m10_proof")))
 
     if "group_baseline" not in document:
         problems.append("S3: artifact carries no group_baseline - a check that did not run must say so")

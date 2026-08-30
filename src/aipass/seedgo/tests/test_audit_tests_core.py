@@ -27,9 +27,12 @@ contract before the capability, and an untested contract is a promise.
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
 # seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
+from pathlib import Path
+
 import pytest
 
-from aipass.seedgo.apps.handlers.audit_tests import laws, refusal, spine
+from aipass.seedgo.apps.handlers.audit_tests import laws, m10, refusal, runner, spine
+from aipass.seedgo.apps.handlers.audit_tests import target as target_module
 
 
 # =============================================================================
@@ -476,3 +479,336 @@ class TestSpineIsLawfulByConstruction:
         }
 
         assert laws.validate(document) == []
+
+
+# =============================================================================
+# M10 - THE CARRIER'S OWN WRITES
+# =============================================================================
+
+
+def _target(tmp_path) -> target_module.Target:
+    """A directory target an M10 proof can be taken against."""
+    return target_module.Target(name="probe", path=tmp_path, kind="directory", resolved_from="test")
+
+
+def _write_where_the_hook_cannot_see(path: Path, text: str) -> None:
+    """Write a file the carrier recorder CANNOT see, as a real one arrives.
+
+    A PEP 578 hook is per-interpreter. A human's editor, a daemon, another
+    branch's server all write through interpreters this run never installed a
+    hook in, and the recorder sees nothing whatsoever - not a filtered event, no
+    event. Muting the recorder for the duration IS that situation, without
+    needing a second process to produce it.
+    """
+    m10.RECORDER.active = False
+    try:
+        path.write_text(text, encoding="utf-8")
+    finally:
+        m10.RECORDER.active = True
+
+
+def _proof(**overrides) -> dict:
+    """A lawful `m10_proof` block, for mutation by each law test."""
+    proof = {
+        "probed": True,
+        "real_tree_unchanged": True,
+        "files_fingerprinted": 3,
+        "diff": {"added": [], "removed": [], "modified": []},
+        "diff_before_carrier_subtraction": {"added": [], "removed": [], "modified": ["/t/x_log.json"]},
+        "carrier_writes": {
+            "note": m10.CARRIER_NOTE,
+            "observed": [{"path": "/t/x_log.json", "evidence": "carrier audit hook", "event": "open"}],
+            "declared": [],
+            "total": 1,
+            "swallowed_errors": 0,
+        },
+        "attribution": "measured",
+        "how": "content hash plus stat fields, before the copy and after teardown",
+        "note": "a note",
+    }
+    proof.update(overrides)
+    return proof
+
+
+@pytest.fixture
+def carrier_window():
+    """Hand back the opener, and guarantee the window closes afterwards.
+
+    `sys.addaudithook` cannot be removed, so a window a failing test left open
+    would keep recording for the rest of the session and silently subtract one
+    test's writes from another test's diff.
+    """
+    yield m10.start_carrier_recording
+    m10.stop_carrier_recording()
+
+
+class TestCarrierRecorder:
+    """What the AUDIT's own process writes, recorded rather than assumed."""
+
+    def test_a_write_by_this_process_is_recorded_with_the_event_that_made_it(self, tmp_path, carrier_window):
+        carrier_window(tmp_path)
+        (tmp_path / "state.json").write_text("{}", encoding="utf-8")
+
+        writes, _ = m10.stop_carrier_recording()
+        assert writes == {str(tmp_path / "state.json"): "open"}
+
+    def test_a_read_is_never_recorded(self, tmp_path, carrier_window):
+        """The hot path sees every read in the process; none of them is a write."""
+        probe = tmp_path / "state.json"
+        probe.write_text("{}", encoding="utf-8")
+        carrier_window(tmp_path)
+        probe.read_text(encoding="utf-8")
+
+        assert m10.stop_carrier_recording()[0] == {}
+
+    def test_a_write_outside_the_watched_tree_is_never_recorded(self, tmp_path, carrier_window):
+        outside = tmp_path / "outside"
+        watched = tmp_path / "watched"
+        outside.mkdir()
+        watched.mkdir()
+        carrier_window(watched)
+        (outside / "state.json").write_text("{}", encoding="utf-8")
+
+        assert m10.stop_carrier_recording()[0] == {}
+
+    def test_a_write_while_the_window_is_shut_is_not_recorded(self, tmp_path, carrier_window):
+        carrier_window(tmp_path)
+        m10.stop_carrier_recording()
+        (tmp_path / "late.json").write_text("{}", encoding="utf-8")
+
+        assert m10.stop_carrier_recording()[0] == {}
+
+    def test_the_recorded_path_is_the_fingerprinter_s_own_form(self, tmp_path, carrier_window):
+        """THE CANONICALISATION PIN. A mismatch subtracts nothing, silently.
+
+        The fingerprint keys are `os.walk` joins onto the root it was given, so
+        a recorded path is comparable with a diff entry only if it normalises
+        the same way. Written through a `..` component precisely because a
+        recorder that stored the raw string would still look correct on every
+        tidy path and match nothing at all here.
+        """
+        (tmp_path / "sub").mkdir()
+        carrier_window(tmp_path)
+        (tmp_path / "sub" / ".." / "state.json").write_text("{}", encoding="utf-8")
+
+        writes, _ = m10.stop_carrier_recording()
+        assert set(writes) == {str(tmp_path / "state.json")}
+        assert set(writes) <= set(m10.snapshot_tree(tmp_path))
+
+    def test_a_malformed_event_is_swallowed_and_counted(self, carrier_window, tmp_path):
+        """A hook that raises fires inside somebody else's write. It must not.
+
+        And a swallowed error is PUBLISHED: an exception nobody sees shortens
+        the observed list without shortening the diff, which is a fail-open
+        subtraction wearing a clean face.
+        """
+        carrier_window(tmp_path)
+        m10.carrier_hook("open", 42)
+
+        assert m10.stop_carrier_recording()[1] == 1
+
+    def test_stopping_twice_hands_back_the_same_record(self, tmp_path, carrier_window):
+        """The runner's `finally` stops a window the proof already closed."""
+        carrier_window(tmp_path)
+        (tmp_path / "state.json").write_text("{}", encoding="utf-8")
+
+        assert m10.stop_carrier_recording() == m10.stop_carrier_recording()
+
+
+class TestCarrierSubtraction:
+    """The diff is partitioned on PROVENANCE, never on what a path looks like."""
+
+    def test_an_observed_carrier_write_is_subtracted_and_the_tree_reads_unchanged(self, tmp_path, carrier_window):
+        probe = tmp_path / "prax_json" / "jsonl_writer_log.json"
+        probe.parent.mkdir()
+        probe.write_text("{}", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        probe.write_text('{"logged": true}', encoding="utf-8")
+
+        proof = runner._m10_proof(_target(tmp_path), before, {})
+        assert proof["real_tree_unchanged"] is True
+        assert proof["diff"]["modified"] == []
+        assert proof["carrier_writes"]["observed"] == [
+            {"path": str(probe), "evidence": "carrier audit hook", "event": "open"}
+        ]
+
+    def test_an_added_source_file_is_not_absorbed_by_the_logs_beside_it(self, tmp_path, carrier_window):
+        """THE CASE THE WHOLE DESIGN TURNS ON.
+
+        A fleet run subtracted 29 `*_log.json` files under `seedgo_json/` and,
+        in the same run, an ADDED `entry_point_diff_check.py` - a source file a
+        human wrote while the audit was running. Any classification keyed on
+        the path (under the branch, ends `_log.json`, sits in this directory)
+        swallows the second along with the first, and with it every real
+        escape. Provenance keeps them apart: the logs were OBSERVED being
+        written by this process and the source file was not.
+        """
+        directory = tmp_path / "seedgo_json"
+        directory.mkdir()
+        log = directory / "adapter_log.json"
+        log.write_text("{}", encoding="utf-8")
+        source = directory / "entry_point_diff_check.py"
+        before = m10.snapshot_tree(tmp_path)
+
+        carrier_window(tmp_path)
+        log.write_text('{"logged": true}', encoding="utf-8")
+        _write_where_the_hook_cannot_see(source, "def check():\n    return True\n")
+
+        proof = runner._m10_proof(_target(tmp_path), before, {})
+        assert proof["real_tree_unchanged"] is False
+        assert proof["diff"]["added"] == [str(source)]
+        assert proof["diff"]["modified"] == []
+        assert [row["path"] for row in proof["carrier_writes"]["observed"]] == [str(log)]
+
+    def test_the_full_diff_survives_the_subtraction(self, tmp_path, carrier_window):
+        """The unsubtracted truth is what makes the subtraction auditable."""
+        probe = tmp_path / "state_log.json"
+        probe.write_text("{}", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        probe.write_text('{"logged": true}', encoding="utf-8")
+
+        proof = runner._m10_proof(_target(tmp_path), before, {})
+        assert proof["diff"]["modified"] == []
+        assert proof["diff_before_carrier_subtraction"]["modified"] == [str(probe)]
+
+    def test_a_declared_surface_written_by_another_process_is_subtracted(self, tmp_path, carrier_window):
+        engine = tmp_path / "src" / "aipass" / "hooks" / "logs" / "engine.jsonl"
+        engine.parent.mkdir(parents=True)
+        engine.write_text("{}\n", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        _write_where_the_hook_cannot_see(engine, '{"event": "PostToolUse"}\n')
+
+        proof = runner._m10_proof(_target(tmp_path), before, {})
+        assert proof["real_tree_unchanged"] is True
+        assert [row["path"] for row in proof["carrier_writes"]["declared"]] == [str(engine)]
+        assert proof["carrier_writes"]["declared"][0]["owner"]
+        assert proof["carrier_writes"]["declared"][0]["why"]
+
+    def test_attribution_is_measured_when_only_the_hook_was_used(self, tmp_path, carrier_window):
+        probe = tmp_path / "state_log.json"
+        probe.write_text("{}", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        probe.write_text('{"logged": true}', encoding="utf-8")
+
+        assert runner._m10_proof(_target(tmp_path), before, {})["attribution"] == "measured"
+
+    def test_attribution_says_partly_declared_only_when_a_declaration_was_used(self, tmp_path, carrier_window):
+        """A declaration is a claim taken on trust; it may not read as measured."""
+        engine = tmp_path / "src" / "aipass" / "hooks" / "logs" / "engine.jsonl"
+        engine.parent.mkdir(parents=True)
+        engine.write_text("{}\n", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        _write_where_the_hook_cannot_see(engine, '{"event": "PostToolUse"}\n')
+
+        assert runner._m10_proof(_target(tmp_path), before, {})["attribution"] == "partly declared"
+
+    def test_a_path_the_gate_saw_the_suite_write_is_never_subtracted(self, tmp_path, carrier_window):
+        """Both can be true at once on a cross-branch log. The suite convicts.
+
+        The carrier's evidence may EXPLAIN a path; it may never acquit one, or
+        a suite forging the very log this process also writes would be filed as
+        the instrument's own noise.
+        """
+        probe = tmp_path / "operations.jsonl"
+        probe.write_text("{}", encoding="utf-8")
+        before = m10.snapshot_tree(tmp_path)
+        carrier_window(tmp_path)
+        probe.write_text('{"forged": true}', encoding="utf-8")
+
+        proof = runner._m10_proof(_target(tmp_path), before, {}, {"violations": [{"path": str(probe)}]})
+        assert proof["real_tree_unchanged"] is False
+        assert proof["diff"]["modified"] == [str(probe)]
+        assert proof["carrier_writes"]["observed"] == []
+        assert proof["changed_by_the_measured_suite"] == [str(probe)]
+
+    def test_the_carrier_block_is_published_when_nothing_was_subtracted(self, tmp_path):
+        """A missing block and an empty one must never look the same."""
+        proof = runner._m10_proof(_target(tmp_path), m10.snapshot_tree(tmp_path), {})
+
+        assert proof["carrier_writes"]["total"] == 0
+        assert proof["carrier_writes"]["note"]
+        assert proof["attribution"] == "measured"
+
+    def test_an_unprobed_proof_carries_the_same_carrier_shape(self, tmp_path):
+        proof = runner._m10_proof(_target(tmp_path), None, {})
+
+        assert proof["probed"] is False
+        assert laws.check_m10(proof) == []
+
+
+class TestCarrierLaw:
+    """M10 — a subtraction a reader cannot check is just a smaller number."""
+
+    def test_a_document_carrying_a_lawful_proof_passes(self):
+        assert laws.validate(_lawful_document(m10_proof=_proof())) == []
+
+    def test_a_refusal_publishes_no_proof_and_that_is_lawful(self):
+        assert laws.check_m10(None) == []
+
+    def test_a_proof_without_the_unsubtracted_diff_is_caught(self):
+        proof = _proof()
+        del proof["diff_before_carrier_subtraction"]
+
+        assert any("diff_before_carrier_subtraction" in p for p in laws.validate(_lawful_document(m10_proof=proof)))
+
+    def test_a_proof_without_a_carrier_block_is_caught(self):
+        proof = _proof()
+        del proof["carrier_writes"]
+
+        assert any(p.startswith("M10") for p in laws.validate(_lawful_document(m10_proof=proof)))
+
+    def test_an_unknown_attribution_is_caught(self):
+        assert any("attribution" in p for p in laws.check_m10(_proof(attribution="probably fine")))
+
+    def test_a_carrier_block_without_its_note_is_caught(self):
+        proof = _proof()
+        proof["carrier_writes"]["note"] = ""
+
+        assert any("no note" in p for p in laws.check_m10(proof))
+
+    def test_a_carrier_block_that_hides_its_swallowed_errors_is_caught(self):
+        proof = _proof()
+        del proof["carrier_writes"]["swallowed_errors"]
+
+        assert any("swallowed_errors" in p for p in laws.check_m10(proof))
+
+    def test_an_observed_write_with_no_evidence_is_caught(self):
+        proof = _proof()
+        proof["carrier_writes"]["observed"] = [{"path": "/t/x_log.json", "event": "open"}]
+
+        assert any("observed carrier write" in p for p in laws.check_m10(proof))
+
+    def test_a_declared_write_that_names_no_owner_is_caught(self):
+        proof = _proof()
+        proof["carrier_writes"]["declared"] = [{"path": "/t/engine.jsonl", "surface": "s", "why": "w"}]
+        proof["carrier_writes"]["total"] = 2
+        proof["attribution"] = "partly declared"
+
+        assert any("declared carrier write" in p for p in laws.check_m10(proof))
+
+    def test_a_total_that_does_not_match_the_lists_is_caught(self):
+        """`total` is the one field a reader believes without counting."""
+        proof = _proof()
+        proof["carrier_writes"]["total"] = 9
+
+        assert any("totals" in p for p in laws.check_m10(proof))
+
+    def test_a_declaration_reported_as_a_measurement_is_caught(self):
+        proof = _proof()
+        proof["carrier_writes"]["declared"] = [{"path": "/t/engine.jsonl", "surface": "s", "owner": "o", "why": "w"}]
+        proof["carrier_writes"]["total"] = 2
+
+        assert any("not a measurement" in p for p in laws.check_m10(proof))
+
+    def test_the_law_reports_every_problem_at_once(self):
+        proof = _proof(attribution="invented")
+        del proof["diff_before_carrier_subtraction"]
+        proof["carrier_writes"]["note"] = ""
+
+        problems = laws.check_m10(proof)
+        assert len(problems) == 3

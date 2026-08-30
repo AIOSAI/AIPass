@@ -173,14 +173,26 @@ def refused_artifact(
     adapter_api: int = 0,
     group_list: Optional[List[str]] = None,
     previous: Optional[dict] = None,
+    retired_groups: Optional[List[dict]] = None,
 ) -> dict:
     """A full artifact for a refused run - every group `not_applicable`.
 
     A refusal still publishes a complete document. An empty file, or no file
     at all, is indistinguishable from a run that never happened, and the whole
     point of the refusal vocabulary is that those two are different.
+
+    EVERY GROUP THE PREVIOUS ARTIFACT PUBLISHED IS CARRIED FORWARD. A refusal
+    reached before an adapter was selected knows only the core spine, so the
+    adapter's groups would VANISH from the list - and S3 would then refuse the
+    refusal itself, turning a diagnosable "no adapter claims this target" into
+    an artifact that never reached disk. A group that could not be measured
+    stays in the list saying so; that is the whole difference between S1 and a
+    hole.
     """
     names = list(group_list or spine.CORE_SPINE)
+    for previous_name in previous_group_list(previous) or []:
+        if previous_name not in names:
+            names.append(previous_name)
     groups = {}
     for name in names:
         # The base document differs by origin: a spine group brings its own
@@ -207,6 +219,7 @@ def refused_artifact(
         adapter=adapter,
         adapter_api=adapter_api,
         previous=previous,
+        retired_groups=retired_groups,
         refused=refused,
     )
 
