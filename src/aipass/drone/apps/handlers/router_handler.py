@@ -221,7 +221,7 @@ def detect_caller_signal(cwd: Path) -> CallerSignal:
     return CallerSignal(None, None)
 
 
-def resolve_caller_identity_signal(cwd: Path) -> CallerIdentity:
+def resolve_caller_identity_signal(cwd: Path | None) -> CallerIdentity:
     """Resolve who is CALLING drone, WITH the provenance of the answer.
 
     Two signals can answer "who is calling", and they are not the same kind of
@@ -256,7 +256,12 @@ def resolve_caller_identity_signal(cwd: Path) -> CallerIdentity:
     service in this system.
     """
     assigned = os.environ.get("AIPASS_BRANCH_NAME") or None
-    standing, source = detect_caller_signal(cwd)
+    # None means the process has NO working directory — the caller deleted the
+    # one it was standing in. That is not a cwd we failed to read, it is the
+    # absence of the signal, and inferring from a directory that no longer
+    # exists would answer a question nobody can answer. The assigned identity
+    # still holds: who this process IS never depended on where it stood.
+    standing, source = detect_caller_signal(cwd) if cwd is not None else CallerSignal(None, None)
 
     if assigned and standing and assigned.lower() != standing.lower():
         if source == "passport":
@@ -299,7 +304,7 @@ def resolve_caller_identity_signal(cwd: Path) -> CallerIdentity:
     return CallerIdentity(None, None)
 
 
-def resolve_caller_identity(cwd: Path) -> str | None:
+def resolve_caller_identity(cwd: Path | None) -> str | None:
     """Resolve who is CALLING drone — the name alone.
 
     The bare-name view of :func:`resolve_caller_identity_signal`, kept because
