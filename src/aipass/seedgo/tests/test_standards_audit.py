@@ -20,6 +20,10 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 
+#: The REAL discovery handler, bound before any fixture replaces it in sys.modules.
+from aipass.seedgo.apps.handlers.audit import discovery as real_discovery  # noqa: E402
+
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock all heavy infrastructure imports so the module loads cleanly.
@@ -78,8 +82,22 @@ def _mock_infrastructure(monkeypatch):
     discovery_mod.discover_branches = MagicMock(return_value=[])
     discovery_mod._is_branch_private = MagicMock(return_value=False)
     discovery_mod.check_internal_access = MagicMock(return_value=True)
+    # Pack discovery and the pack-kind refusal live in the handler. A bare
+    # MagicMock answers both with a MagicMock, which is truthy, iterates empty
+    # and reads as "packs found, none of them" - so the return values are
+    # spelled out rather than inherited from the mock's willingness to answer.
+    discovery_mod.SCORING_PACK_KIND = "standards"
+    discovery_mod.discover_packs = MagicMock(return_value={"aipass": Path("handlers/aipass_standards")})
+    discovery_mod.non_scoring_packs = MagicMock(return_value={"tests_pytest": "execution"})
+    discovery_mod.pack_kind = MagicMock(return_value="standards")
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.discovery", discovery_mod)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", MagicMock())
+    # `from ...audit import discovery` reads the ATTRIBUTE off the package
+    # before it looks in sys.modules, so a bare package mock would hand back a
+    # different object than the one configured above - the module-level patch
+    # would silently not apply.
+    audit_pkg = MagicMock()
+    audit_pkg.discovery = discovery_mod
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
 
     branch_audit_mod = MagicMock()
     branch_audit_mod.audit_branch = MagicMock(return_value={"scores": {}, "average": 100})
@@ -111,6 +129,23 @@ def _mock_infrastructure(monkeypatch):
 
     # Force re-import so the mocks take effect
     monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.standards_audit", raising=False)
+
+    yield
+
+    # The re-import under mocks minted a NEW module object, and the import
+    # system hung it on the parent package as an attribute. monkeypatch
+    # restores sys.modules but never recorded that attribute — and records
+    # nothing at all when the module had never been imported before this
+    # file ran — so the mock-bound corpse outlives the test, and
+    # `from ... import standards_audit` in ANOTHER test file hands it back:
+    # its console is a MagicMock that prints nowhere (the CI 3.12/gw1 flake
+    # where capsys read ''). Scrub both homes here; monkeypatch's own undo
+    # then restores the real module wherever one was recorded, and the next
+    # from-import rebinds the package attribute to the real thing.
+    sys.modules.pop("aipass.seedgo.apps.modules.standards_audit", None)
+    _parent = sys.modules.get("aipass.seedgo.apps.modules")
+    if _parent is not None and hasattr(_parent, "standards_audit"):
+        delattr(_parent, "standards_audit")
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +234,14 @@ def test_handle_command_unknown_pack():
     assert result is True
 
 
-def test_discover_packs_returns_dict(tmp_path, monkeypatch):
-    """_discover_packs discovers *_standards dirs containing *_check.py files."""
-    # Build: tmp_path/handlers/ with pack subdirectories
+def test_discover_packs_returns_dict(tmp_path):
+    """Pack discovery finds *_standards dirs holding *_check.py files.
+
+    Exercises the HANDLER directly, through the reference bound at import time:
+    the autouse fixture mocks the handler wholesale, so asserting through the
+    module - or importing inside the test body - would only prove the mock
+    answered, and the discovery rules this test is about would never run.
+    """
     handlers_dir = tmp_path / "handlers"
     handlers_dir.mkdir()
 
@@ -209,25 +249,21 @@ def test_discover_packs_returns_dict(tmp_path, monkeypatch):
     valid_pack.mkdir()
     (valid_pack / "style_check.py").write_text("# checker", encoding="utf-8")
 
-    empty_pack = handlers_dir / "empty_standards"
-    empty_pack.mkdir()  # no *_check.py files -- should be skipped
+    (handlers_dir / "empty_standards").mkdir()  # no *_check.py -- skipped
+    (handlers_dir / "random_dir").mkdir()  # not *_standards -- skipped
 
-    not_a_pack = handlers_dir / "random_dir"
-    not_a_pack.mkdir()  # not *_standards -- should be skipped
+    execution_pack = handlers_dir / "tests_rust_standards"
+    execution_pack.mkdir()
+    (execution_pack / "shape_check.py").write_text("# nominator", encoding="utf-8")
+    (execution_pack / "pack.json").write_text('{"kind": "execution"}', encoding="utf-8")
 
-    import aipass.seedgo.apps.modules.standards_audit as sa_mod
-
-    # Patch __file__ so Path(__file__).parent.parent / "handlers" -> handlers_dir
-    fake_file = tmp_path / "modules" / "standards_audit.py"
-    fake_file.parent.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(sa_mod, "__file__", str(fake_file))
-
-    packs = sa_mod._discover_packs()
+    packs = real_discovery.discover_packs(handlers_dir)
     assert isinstance(packs, dict)
-    assert "code" in packs, "Should discover 'code' from code_standards/"
     assert packs["code"] == valid_pack
     assert "empty" not in packs, "Should skip dirs without *_check.py"
     assert "random_dir" not in packs, "Should skip non-*_standards dirs"
+    assert "tests_rust" not in packs, "An execution pack must never be offered for scoring"
+    assert real_discovery.non_scoring_packs(handlers_dir) == {"tests_rust": "execution"}
 
 
 def test_handle_command_unknown_command_returns_false():
@@ -446,3 +482,416 @@ def test_artifact_flag_still_takes_a_real_destination(monkeypatch):
 
     assert handle_command("audit", ["aipass", "@flow", "--artifact", "out.json"]) is True
     assert audit_mock.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Law ARGV -- an argument nobody recognises is refused by name, never dropped
+# ---------------------------------------------------------------------------
+
+
+def _refusal_text():
+    """Everything the module sent to error() this test, as one string.
+
+    The autouse fixture's error() is a MagicMock, so the message arrives whole
+    -- a real console would wrap the line and split the very command the
+    assertions are about.
+    """
+    import sys
+
+    calls = sys.modules["aipass.cli.apps.modules"].error.call_args_list
+    return "\n".join(str(call.args[0]) if call.args else "" for call in calls)
+
+
+def _refused_argv() -> bool:
+    """True when this run refused under Law ARGV."""
+    return "REFUSED: [ARGV]" in _refusal_text()
+
+
+def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
+    """`audit -tests @backup` -- a space where a hyphen belonged.
+
+    The token was dropped, `@backup` was read as the branch, and a cached
+    standards audit printed as though it were the execution lane. Twenty
+    minutes were spent reading one lane's numbers as another's.
+    """
+    audit_mock = _wire_branches(monkeypatch, "BACKUP")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["-tests", "@backup"]) is True
+    assert audit_mock.call_count == 0, "the audit ran on a command it had not understood"
+    assert _refused_argv()
+
+
+def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
+    """Patrick's ruling: it should have failed AND given the solution."""
+    _wire_branches(monkeypatch, "BACKUP")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["-tests", "@backup"])
+
+    assert "'-tests'" in _refusal_text()
+    assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
+
+
+def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
+    _wire_branches(monkeypatch, "BACKUP")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["-tests", "@backup"])
+
+    assert _refusal_text().startswith("REFUSED: [ARGV]")
+    # The code is printed beside the law, and it is not a pass.
+    assert "exit code: 7" in _console_text()
+
+
+def test_an_extra_positional_is_refused_rather_than_ignored(monkeypatch):
+    """Pack, then @branch. A third bare word filled no slot and vanished."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["aipass", "@flow", "@prax", "--no-artifact"]) is True
+    assert audit_mock.call_count == 0
+    assert "'@prax'" in _refusal_text()
+
+
+def test_the_first_unrecognized_token_is_the_one_reported(monkeypatch):
+    """Argv order, so the report names the mistake the caller made first."""
+    _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["aipass", "--first", "--second"])
+
+    assert "'--first'" in _refusal_text()
+    assert "'--second'" not in _refusal_text()
+
+
+def test_a_help_flag_beside_an_unknown_token_still_explains(monkeypatch):
+    """help_flag_safety outranks ARGV: a question is answered, never refused."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["-tests", "--help"]) is True
+    assert not _refused_argv(), "a help flag anywhere means explain, and explaining is not refusing"
+    assert audit_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["aipass"],
+        ["aipass", "@flow"],
+        ["@flow"],
+        ["aipass", "--no-bypass"],
+        ["aipass", "--full"],
+        ["aipass", "@flow", "--full", "--no-bypass"],
+        ["aipass", "--artifact", "out.json"],
+        ["aipass", "--artifact=out.json"],
+        ["aipass", "--no-artifact"],
+        ["aipass", "--no-bypass", "@flow", "--no-artifact"],
+    ],
+)
+def test_every_valid_audit_invocation_still_runs(monkeypatch, argv):
+    """A refusal that rejects a valid command is worse than the bug it fixes."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", argv) is True
+    assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
+    assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
+
+
+@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"], ["aipass", "--show-bypasses"], ["aipass", "-b"]])
+def test_every_valid_non_auditing_invocation_still_answers(monkeypatch, argv):
+    """The forms that print rather than audit: still no refusal."""
+    _wire_branches(monkeypatch, "FLOW")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", argv) is True
+    assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
+
+
+# ---------------------------------------------------------------------------
+# `audit tests <target>` -- the canonical surface for the execution lane
+# ---------------------------------------------------------------------------
+
+
+def _wire_lane(monkeypatch):
+    """Stand in for the execution lane and record what it was handed.
+
+    The lane is replaced rather than run: this file is about the PARSING seam,
+    and a test that actually ran a suite would prove the copy-runner works
+    while proving nothing about the word that reached it.
+
+    Imported through `import_module`, never `from ... import standards_audit`:
+    the autouse fixture drops the module from `sys.modules` but the PACKAGE
+    still holds an attribute of the same name, so the short form hands back the
+    previous test's module object and the patch lands on something the verb
+    under test never reads -- and the real lane runs a real suite.
+    """
+    import importlib
+
+    standards_audit = importlib.import_module("aipass.seedgo.apps.modules.standards_audit")
+
+    calls: list = []
+
+    def _record(command, args):
+        """Record one hand-off and claim it, exactly as the real verb does."""
+        calls.append((command, list(args)))
+        return True
+
+    lane = MagicMock()
+    lane.handle_command = MagicMock(side_effect=_record)
+    monkeypatch.setattr(standards_audit, "lane_verb", lane)
+    return calls
+
+
+def _forwarded(monkeypatch, argv):
+    """The argument list `audit <argv>` handed the lane, or None if it never did."""
+    calls = _wire_lane(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", argv) is True
+    return calls[0][1] if calls else None
+
+
+def test_audit_tests_reaches_the_lane_with_the_target(monkeypatch):
+    """Patrick's ask: `audit tests @backup`, a plain word where a hyphen was.
+
+    The hyphen was the whole defect -- `audit -tests @backup` was one keystroke
+    from correct and ran the wrong lane. A word cannot be mistyped as a flag.
+    """
+    audit_mock = _wire_branches(monkeypatch, "BACKUP")
+
+    assert _forwarded(monkeypatch, ["tests", "@backup"]) == ["@backup"]
+    assert audit_mock.call_count == 0, "the standards engine must never see the execution lane's target"
+    assert not _refused_argv()
+
+
+def test_the_lane_is_claimed_under_its_own_verb_name(monkeypatch):
+    """The hand-off names `audit-tests`, so the lane's own refusals stay truthful.
+
+    A lane told it was invoked as `audit` would build did-you-means against the
+    wrong flag list -- the drift Law ARGV exists to prevent.
+    """
+    calls = _wire_lane(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["tests", "@backup"])
+
+    assert calls and calls[0][0] == "audit-tests"
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        ["."],
+        ["/some/path"],
+        ["aipass"],
+        ["@backup", "--budget", "300"],
+        ["@backup", "--prove-refusal"],
+        ["@backup", "--symlink-siblings"],
+        ["@backup", "--no-tmpdir-allowance"],
+        ["@backup", "--budget", "300", "--prove-refusal", "--symlink-siblings", "--no-tmpdir-allowance"],
+        ["--help"],
+        [],
+    ],
+)
+def test_every_lane_argument_is_forwarded_verbatim(monkeypatch, tail):
+    """Whatever follows `tests` is handed on untouched, in order.
+
+    Verbatim is the contract: this verb parses ONE word and then stops reading.
+    A flag rewritten, reordered or dropped here would be a lane measuring
+    something other than what was asked for -- and looking normal doing it.
+    """
+    assert _forwarded(monkeypatch, ["tests", *tail]) == tail
+
+
+def test_the_forwarded_line_parses_exactly_as_the_alias_does(monkeypatch):
+    """`audit tests X` and `audit-tests X` reach the lane's parser identically.
+
+    Asserted through the lane's OWN `_parse`, not through a restated
+    expectation: the two spellings are the same command only if the thing that
+    reads them cannot tell them apart.
+    """
+    from aipass.seedgo.apps.modules import audit_tests as lane
+
+    argv = ["@backup", "--budget", "300", "--prove-refusal"]
+
+    forwarded = _forwarded(monkeypatch, ["tests", *argv])
+    assert forwarded is not None, "the audit verb never handed the lane anything"
+    assert lane._parse(forwarded) == lane._parse(argv)
+
+
+def test_the_hyphenated_alias_still_claims_the_lane():
+    """`audit-tests` did not stop working when `audit tests` became canonical."""
+    from aipass.seedgo.apps.modules import audit_tests as lane
+
+    assert "audit-tests" in lane.COMMANDS
+    assert lane.handle_command("audit-tests", []) is True
+    assert lane.handle_command("audit", []) is False, "the lane must not claim the audit verb"
+
+
+def test_the_lane_word_is_recognised_before_pack_validation(monkeypatch):
+    """`tests` is not a pack, and must never be reported as an unknown one."""
+    _wire_branches(monkeypatch, "BACKUP")
+    import sys
+
+    sys.modules["aipass.cli.apps.modules"].error.reset_mock()
+    _forwarded(monkeypatch, ["tests", "@backup"])
+
+    assert "Unknown pack" not in _refusal_text()
+
+
+def test_the_space_typo_now_suggests_the_canonical_two_word_form(monkeypatch):
+    """`audit -tests @backup` still refuses -- and points at `audit tests`.
+
+    The hyphen form remains valid, but a did-you-mean that offers the spelling
+    one keystroke from the typo invites the typo back.
+    """
+    audit_mock = _wire_branches(monkeypatch, "BACKUP")
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["-tests", "@backup"]) is True
+
+    assert _refused_argv()
+    assert audit_mock.call_count == 0
+    assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
+
+
+# ---------------------------------------------------------------------------
+# THE COLLISION GUARD -- one word, two meanings, and neither picked quietly
+# ---------------------------------------------------------------------------
+
+
+def _collide(monkeypatch):
+    """Make a scoring pack named `tests` resolve, so the word means two things.
+
+    No such pack exists today and the guard therefore cannot fire in
+    production. That is exactly why it is simulated: a guard nobody has ever
+    seen fire is a guard nobody knows works, and the day someone adds
+    `handlers/tests_standards/` is the day it has to be right the first time.
+    """
+    import sys
+
+    monkeypatch.setattr(
+        sys.modules["aipass.seedgo.apps.handlers.audit.discovery"],
+        "discover_packs",
+        MagicMock(
+            return_value={"aipass": Path("handlers/aipass_standards"), "tests": Path("handlers/tests_standards")}
+        ),
+    )
+
+
+def test_a_pack_named_tests_makes_the_word_ambiguous_and_it_refuses(monkeypatch):
+    """Both meanings apply, so NEITHER runs."""
+    audit_mock = _wire_branches(monkeypatch, "BACKUP")
+    calls = _wire_lane(monkeypatch)
+    _collide(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["tests", "@backup"]) is True
+
+    assert _refused_argv(), "an ambiguous word must refuse, never resolve by preference"
+    assert calls == [], "the lane must not be picked silently"
+    assert audit_mock.call_count == 0, "the pack must not be picked silently"
+
+
+def test_the_ambiguity_refusal_names_both_meanings(monkeypatch):
+    """A refusal that says only 'ambiguous' leaves the reader to guess what collided."""
+    _wire_branches(monkeypatch, "BACKUP")
+    _wire_lane(monkeypatch)
+    _collide(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["tests", "@backup"])
+    text = _refusal_text() + "\n" + _console_text()
+
+    assert "'tests'" in text
+    assert "audit-tests lane" in text, "the execution lane is one of the two meanings"
+    assert "standards pack" in text, "the pack is the other"
+
+
+def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(monkeypatch):
+    """Naming the collision is half the fix; the other half is how to say each one."""
+    _wire_branches(monkeypatch, "BACKUP")
+    _wire_lane(monkeypatch)
+    _collide(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["tests", "@backup"])
+    text = _console_text()
+
+    assert "drone @seedgo audit-tests <target>" in text
+    assert "drone @seedgo audit tests_standards" in text
+
+
+def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
+    """The existing vocabulary, not a parallel one: same law, same code 7."""
+    _wire_branches(monkeypatch, "BACKUP")
+    _wire_lane(monkeypatch)
+    _collide(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    handle_command("audit", ["tests", "@backup"])
+
+    assert _refusal_text().startswith("REFUSED: [ARGV]")
+    assert "exit code: 7" in _console_text()
+
+
+def test_a_pack_named_tests_is_still_reachable_by_its_directory_name(monkeypatch):
+    """The advice the refusal prints has to work, or it is not advice.
+
+    `audit tests_standards` names the directory, which no lane answers to, so
+    the collision has an exit for the pack as well as for the lane.
+    """
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    calls = _wire_lane(monkeypatch)
+    _collide(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["tests_standards", "@flow", "--no-artifact"]) is True
+
+    assert calls == [], "the directory name is the pack's spelling, never the lane's"
+    assert not _refused_argv()
+    assert audit_mock.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["aipass"],
+        ["aipass", "@flow"],
+        ["aipass_standards"],
+        ["aipass_standards", "@flow"],
+        ["@flow"],
+        ["aipass", "--no-bypass"],
+        ["aipass", "--full"],
+        ["aipass", "@flow", "--full", "--no-bypass"],
+        ["aipass", "--artifact", "out.json"],
+        ["aipass", "--artifact=out.json"],
+        ["aipass", "--no-artifact"],
+        ["aipass", "--no-bypass", "@flow", "--no-artifact"],
+    ],
+)
+def test_the_lane_word_leaves_every_ordinary_pack_audit_alone(monkeypatch, argv):
+    """A parsing special case that captured a normal audit would be the worse bug."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    calls = _wire_lane(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", argv) is True
+    assert calls == [], f"{argv} is a standards audit and must never reach the execution lane"
+    assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
+    assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
+
+
+@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"], ["aipass", "--show-bypasses"], ["aipass", "-b"]])
+def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv):
+    """The forms that print rather than audit: still no lane, still no refusal."""
+    _wire_branches(monkeypatch, "FLOW")
+    calls = _wire_lane(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", argv) is True
+    assert calls == []
+    assert not _refused_argv()

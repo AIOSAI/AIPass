@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-08-08
+# Modified: 2026-08-29
 # =============================================
 
 """
@@ -26,6 +26,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from rich.markup import escape as rich_escape
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
@@ -213,14 +215,21 @@ def fetch_backfill(conn: sqlite3.Connection, cursors: Dict[str, int], limit: int
 # =============================================================================
 
 
-def _snippet(text: Optional[str], length: int = 100) -> str:
-    """Collapse whitespace and truncate to ~length chars with an ellipsis."""
+INLINE_BODY_MAX = 100
+
+
+def _join_body(header: str, text: Optional[str], sep: str) -> str:
+    """Header + body: inline when the body fits, else the FULL body on its own lines.
+
+    The feed is where agents get read live — a long message breaks to
+    multi-line instead of truncating, so nothing an agent says is lost."""
     if not text:
-        return ""
+        return header
     collapsed = " ".join(text.split())
-    if len(collapsed) <= length:
-        return collapsed
-    return collapsed[: length - 1].rstrip() + "…"
+    if len(collapsed) <= INLINE_BODY_MAX:
+        return f"{header}{sep}{collapsed}"
+    lines = [line.rstrip() for line in text.strip().splitlines()]
+    return header + "\n" + "\n".join(lines)
 
 
 def event_room(event: dict) -> str:
@@ -233,10 +242,10 @@ def format_event(event: dict) -> str:
     kind = event["kind"]
 
     if kind == "post":
-        return f'{event["author"]} posted: "{event["title"]}" — {_snippet(event["content"])}'
+        return _join_body(f'{event["author"]} posted: "{event["title"]}"', event["content"], " — ")
     if kind == "comment":
         target = event.get("post_author") or "?"
-        return f"{event['author']} replied to {target}: {_snippet(event['content'])}"
+        return _join_body(f"{event['author']} replied to {target}:", event["content"], " ")
     if kind == "vote":
         direction = "up" if (event.get("direction") or 0) > 0 else "down"
         return f"{event['agent_name']} voted {direction} on {event['target_type']} #{event['target_id']}"
@@ -252,7 +261,8 @@ def _print_feed_event(room: str, message: str, mood: Optional[str]) -> None:
     ts = datetime.now().strftime("%H:%M:%S")
     color = MOOD_COLORS.get(mood or "", DEFAULT_ROOM_COLOR)
     label = f"[{room}]"
-    console.print(f"[dim]{ts}[/dim] [{color}]{label:<{ROOM_LABEL_WIDTH}}[/{color}] {message}")
+    # message is agent-authored text — escape it so brackets survive Rich verbatim
+    console.print(f"[dim]{ts}[/dim] [{color}]{label:<{ROOM_LABEL_WIDTH}}[/{color}] {rich_escape(message)}")
 
 
 def _emit(event: dict, room_moods: Dict[str, str]) -> None:

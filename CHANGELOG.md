@@ -9,9 +9,43 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-08-30] — the audit-tests lane: testing the tests (DPLAN-0320 campaign) · v2.8.0
+
+### Added
+
+- **seedgo: the audit-tests lane — the fleet's first real test-quality measurement**
+  (`drone @seedgo audit-tests <target>`, FPLAN-0459 phases 1–5, DPLAN-0320/0321
+  campaign). One day from directive to running product: 2,453 fleet tests read
+  by eyes (taxonomy of 41 defect species, three laws), a signed 2,053-line
+  design (three adversarial review rounds, 21 findings, both sides caught wrong
+  once on the record), and a working lane. What it does: copies the target's
+  tree (M10 — measured by before/after fingerprint, not asserted), runs the
+  suite under a `sys.addaudithook` write gate with a mandatory canary
+  (refuse-if-not-caught), attributes every live-state write to its exact test
+  nodeid, runs nine static nominators (OR-ESCAPE, NO-ORACLE, MOCK-DRIFT…
+  nominate-only — static never convicts), and publishes a lawful artifact:
+  refuse-never-zero, unbuilt probes say `not_applicable` with a reason, the
+  gate prints its own blind spots (child processes, sqlite3 handles) beside any
+  100 so a clean score can never be read as proof. Advisory only — SCORED is
+  not GATING; exit codes demoted to hints. First live results: backup hygiene
+  0/100 (807 attributed write events from 64 tests, including 4 records touching
+  `~/.secrets/aipass/`), canary 100 clean. Old Test_Quality standard measured as
+  a constant (100% on all 18 citizens by construction) — retirement by recorded
+  ruling rides the fleet announcement.
+- **aipass: OSS test-quality tooling research** (`docs/test_quality_tooling_research.md`,
+  1,721 lines) — five research agents, licenses verified from LICENSE files,
+  tools run against this fleet. Verdict: the category is empty in every language
+  (§0.1 checks the commercial field too — CodeRabbit resells OSS linters under
+  an LLM and never runs your suite; the one product selling our criterion is
+  JVM-only). Two published ideas adopted: the AssertionError kill-split (Law S9)
+  and per-function extreme mutation (banked).
 
 ### Fixed
+
+- **prax: the commons live feed prints full agent messages** — `_snippet()`
+  capped every post/comment at 100 chars, which made boardroom debates
+  unreadable from the phone; long bodies now render whole (multi-line, no
+  ellipsis) and agent text is markup-escaped so brackets survive Rich verbatim.
 
 - **devpulse watchdog: cancel no longer reports KILLED for a process that survived
   SIGTERM** — `registry.kill_watch` returned `"killed": killed or True` (always
@@ -22,7 +56,13 @@ PyPI version — not the changelog header.
   + the handle still deregistered (FPLAN-0455, todo 172 — found by the dead-code
   map on 2026-08-22, all prior tests only covered pids that die).
 
-### Added
+- **seedgo: CLI parsers refuse unknown tokens** — `audit -tests @backup` used to
+  silently drop the unknown token and run the standards audit on cached data (a
+  typo executing a different real command); now every unrecognised argument
+  refuses loudly with a did-you-mean (`ARGV`, exit code 7). `audit tests` is the
+  canonical spelling of the new lane (parallel to `audit aipass`), `audit-tests`
+  a permanent alias, and the word `tests` refuses ambiguity if a standards pack
+  ever claims it.
 
 - **devpulse: owner-guard refusal-exit pins** (`test_owner_guard_refusals.py`) —
   the 2026-08-22 exit-0 refusal fixes (feedback + admin_grant guards rendered

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_user_message_relay.py
 # Description: Tests for user message relay — UserPromptSubmit hook handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-08-28
 # =============================================
 
 """
@@ -18,7 +18,8 @@ Tests cover:
   - _is_system_noise: system notifications, task notifications, local-command
     output, Caveat line, dispatch wake prompts
   - handle(): skip subagent, skip empty, skip system noise, skip TG-origin,
-    skip dupe, happy path
+    skip dupe, happy path (switch pinned ON — the gate itself is covered by
+    test_relay_switch_gate.py)
   - Dedup: consecutive identical messages skipped, different messages pass
 """
 
@@ -29,6 +30,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.skills.lib.telegram.apps.handlers.user_message_relay as relay_mod
+from aipass.skills.apps.handlers.json import json_handler as jh
 from aipass.skills.lib.telegram.apps.handlers.user_message_relay import (
     _is_pending_tg_message,
     _is_system_noise,
@@ -49,6 +51,25 @@ def _reset_dedup():
     relay_mod._last_relay_hash = ""
     yield
     relay_mod._last_relay_hash = ""
+
+
+@pytest.fixture(autouse=True)
+def _switch_on(tmp_path, monkeypatch):
+    """Pin the skills switch ON in a temp dir for this whole file.
+
+    handle() consults the skills off-switch first (relay v1.5.0). Without this
+    these tests read the LIVE switch_state.json, so every relay assertion would
+    silently depend on whether telegram happens to be switched on on this
+    machine — and with telegram off since 2026-08-18 they would all fail while
+    the relay itself is perfectly correct. This file tests relay behaviour; the
+    gate has its own file, test_relay_switch_gate.py.
+    """
+    state_dir = tmp_path / "skills_json"
+    state_dir.mkdir()
+    (state_dir / "switch_state.json").write_text(
+        json.dumps({"skills": {"telegram": {"enabled": True}}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(jh, "SKILLS_JSON_DIR", state_dir)
 
 
 @pytest.fixture()

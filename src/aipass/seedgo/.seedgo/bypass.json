@@ -41,7 +41,7 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
-      "reason": "Display handler is an exception to the handler-no-console rule \u2014 its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
+      "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
@@ -61,42 +61,42 @@
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_generator.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/readme/readme_ops.py",
       "standard": "naming",
-      "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
+      "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
       "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
-      "reason": "scan() depth 6 \u2014 state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
+      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
-      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) \u2014 deep AST traversal with isinstance chains inherent to pattern detection"
+      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
-      "reason": "print_branch_summary() depth 6 \u2014 full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
+      "reason": "print_branch_summary() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
     },
     {
       "file": "_content.py",
@@ -124,12 +124,12 @@
     {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
-      "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
+      "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate \u2014 wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import \u2014 add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
+      "reason": "Pure predicate — wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."
     },
     {
       "file": "tests/test_checkers_batch10.py",
@@ -138,7 +138,47 @@
     {
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
-      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead — it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "log_visibility",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "json_structure",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "unused_function",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** — granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import — so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design §7 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger — a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/",
+      "standard": "json_structure",
+      "reason": "PATH-SCOPED, handlers/tests_pytest_standards/**. The nine nominators, the shared corpus and render_spec are PURE LEAF FUNCTIONS: they take a parsed corpus and return rows, and they produce no operational output of their own. The operational record is emitted once by their orchestrator, nominators.py, whose static_tier_completed entry carries per-group counts, files and units scanned, unparseable counts on both sides and every rejection - strictly more information than nine separate log lines, and one entry per run instead of nine per run per target across a 21-target fleet. Adding the import to a module that logs nothing would be an import placed to satisfy a checker, which is the COVERAGE-SLOT species this very pack ships a detector for. payload/** keeps its own separate grant."
+    },
+    {
+      "file": "apps/handlers/audit_tests/cache.py",
+      "standard": "json_structure",
+      "reason": "Leaf function module: computes a hash and returns a dict. Its caller, runner.py, writes the operational record. Same reasoning as the tests_pytest_standards leaves."
+    },
+    {
+      "file": "apps/handlers/audit_tests/render.py",
+      "standard": "json_structure",
+      "reason": "Display-only module: reads a published artifact and prints it. It performs no operation there is anything to record; runner.py logs the run that produced the artifact it renders."
+    },
+    {
+      "file": "apps/handlers/audit_tests/render.py",
+      "standard": "cli",
+      "reason": "Display handler is an exception to the handler-no-console rule - its entire purpose is Rich console formatting. Same grounds as apps/handlers/audit/audit_display.py above (known debt tracked in DPLAN-0047); this is that existing in-branch precedent applied to the audit-tests lane's renderer, not a new class of exception."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/render_spec.py",
+      "standard": "unused_function",
+      "reason": "render_markdown() is the GENERATOR for the pack's nine *.md triplet files, which seedgo's own triplet proof requires every standard to ship. Its output is checked byte-for-byte against the files on disk by test_every_shipped_md_is_BYTE_IDENTICAL_to_what_the_spec_renders, so a SPECIFICATION edited without regenerating fails the suite - the .md is output, not a second statement of the rule. Same shape as the format_summary() and print_branch_diagnostics() entries above: public API consumed by tests, not called in the production path."
     }
   ],
   "notes": {

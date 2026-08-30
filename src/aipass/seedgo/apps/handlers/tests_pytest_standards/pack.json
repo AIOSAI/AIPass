@@ -1,0 +1,15 @@
+{
+  "kind": "execution",
+  "ecosystem": "pytest",
+  "adapter_api": 1,
+  "display_name": "tests_pytest",
+  "reason": "these standards run a test suite; the audit file-walk must never invoke them",
+  "granted": {
+    "bypass_scope": "handlers/tests_pytest_standards/payload/**",
+    "standards": ["log_visibility", "trigger"],
+    "granted_by": "@devpulse",
+    "date": "2026-08-29",
+    "citation": "Law M10 + r/boardroom-audit-tests post 6",
+    "condition": "conditional on adapters.execution_isolation(); the pack fails registration if any payload file imports aipass"
+  }
+}

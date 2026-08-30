@@ -179,3 +179,75 @@ def check_internal_access(branch_name: str) -> bool:
 
     cwd = Path.cwd()
     return cwd == _branch_path or cwd.is_relative_to(_branch_path)
+
+
+#: The `kind` a pack must declare to be scored by the standards audit.
+SCORING_PACK_KIND = "standards"
+
+
+def pack_kind(pack_dir: Path) -> str:
+    """The `kind` a checker pack declares, defaulting to `standards`.
+
+    A pack with no manifest is a standards pack - that is what every pack was
+    before execution packs existed, and changing the default would silently
+    unregister the pack this branch has audited eighteen citizens with. An
+    unreadable manifest gets the same answer, loudly: refusing to score a pack
+    because its manifest has a typo is a worse failure than scoring it.
+    """
+    manifest = pack_dir / "pack.json"
+    if not manifest.is_file():
+        return SCORING_PACK_KIND
+    try:
+        return str(json.loads(manifest.read_text(encoding="utf-8")).get("kind") or SCORING_PACK_KIND)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        logger.warning(f"[seedgo] {pack_dir.name}/pack.json is unreadable, treating as standards: {exc}")
+        return SCORING_PACK_KIND
+
+
+def discover_packs(handlers_dir: Path, kind: str = SCORING_PACK_KIND) -> Dict[str, Path]:
+    """Every `*_standards/` pack of one kind, name -> path.
+
+    AN EXECUTION PACK IS REFUSED HERE, NOT SCORED. `tests_pytest_standards/`
+    ships nine `*_check.py` nominators, so it matches the filename convention
+    exactly - but its checkers define `nominate()` rather than `check_module`
+    or `check_branch`, so the scoring engine would load them, keep none, and
+    then report a number for a branch audited against ZERO standards. A pack
+    that scores 100 because nothing ran is the precise defect the audit-tests
+    lane exists to catch, and it would have been introduced BY that lane.
+
+    Design section 2.1. The shape gate stops the scoring ENGINE; this stops the
+    pack being offered as something to score in the first place.
+    """
+    packs: Dict[str, Path] = {}
+    if not handlers_dir.is_dir():
+        return packs
+
+    for entry in sorted(handlers_dir.iterdir()):
+        if not entry.is_dir() or not entry.name.endswith("_standards"):
+            continue
+        if not list(entry.glob("*_check.py")):
+            continue
+        if pack_kind(entry) == kind:
+            packs[entry.name.removesuffix("_standards")] = entry
+    return packs
+
+
+def non_scoring_packs(handlers_dir: Path) -> Dict[str, str]:
+    """Packs that exist but belong to another lane. Name -> kind.
+
+    Published rather than hidden: a pack directory that simply vanished from
+    every listing is indistinguishable from one that was never installed, and
+    an operator who can see `tests_pytest` is an execution pack knows where to
+    look for its numbers.
+    """
+    found: Dict[str, str] = {}
+    if not handlers_dir.is_dir():
+        return found
+
+    for entry in sorted(handlers_dir.iterdir()):
+        if not entry.is_dir() or not entry.name.endswith("_standards"):
+            continue
+        kind = pack_kind(entry)
+        if kind != SCORING_PACK_KIND:
+            found[entry.name.removesuffix("_standards")] = kind
+    return found

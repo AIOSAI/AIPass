@@ -1,6 +1,6 @@
 # Backup System ignore patterns (gitignore-style)
 # Lines starting with # are comments. Blank lines are ignored.
-# Edit this file to customize. Source defaults: handlers/ignore/patterns.py
+# Edit this file to customize. Source defaults: templates/backupignore.template
 
 .backup/
 .git/
@@ -23,6 +23,8 @@ node_modules/
 Thumbs.db
 build/
 dist/
+target/
 *.log
+logs/
 .ruff_cache/
 .coverage

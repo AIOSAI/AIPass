@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user_message_relay.py
 # Description: Relay user messages from non-TG doors to the branch TG chat
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-14
-# Modified: 2026-07-30
+# Modified: 2026-08-28
 # =============================================
 
 """
@@ -40,6 +40,36 @@ TELEGRAM_MAX_LENGTH = 4096
 _DISPATCH_WAKE_PREFIX = "Hi. Check inbox, process new emails"
 
 _last_relay_hash: str = ""
+
+_SKILL_NAME = "telegram"
+
+
+def _relay_is_switched_off() -> bool:
+    """Report whether the telegram skill is switched OFF for this relay.
+
+    The third door (APLAN-0016, S115). The off-switch has two gates already —
+    systemd masking, and the one inside run_skill — and both hold. Neither is on
+    THIS path: the hooks bridge invokes this file by its file path, so run_skill
+    is never entered and its gate is never consulted. Without this check a skill
+    that `drone @skills switch` reports as OFF still sends on every prompt;
+    measured at 508 relayed user messages in the ten days after telegram was
+    switched off on 2026-08-18.
+
+    Fails CLOSED, deliberately. Unreadable state, an unimportable switch handler,
+    any error at all is treated as OFF. Answering "cannot tell" with a send
+    resurrects exactly the traffic an operator deliberately stopped — which is
+    the same defect this function exists to close.
+
+    Returns:
+        bool: True when nothing may be sent.
+    """
+    try:
+        from aipass.skills.apps.handlers.switch_handler import is_enabled
+
+        return not is_enabled(_SKILL_NAME)
+    except Exception as exc:
+        logger.warning("[TG] relay gate cannot read the skills switch, staying silent: %s", exc)
+        return True
 
 
 def _try_load_bot(path: Path) -> dict | None:
@@ -165,12 +195,19 @@ def _is_system_noise(prompt: str) -> bool:
 def handle(hook_data: dict) -> dict:
     """UserPromptSubmit hook handler — relay user message to branch TG chat.
 
-    Skips: identified subagents (non-empty agent_id), system noise (notifications,
+    Skips: a switched-off telegram skill (checked first, fails closed),
+    identified subagents (non-empty agent_id), system noise (notifications,
     local-command output, dispatch wakes), TG-origin messages, duplicate
     consecutive messages, and branches with no TG bot configured.
     """
     global _last_relay_hash  # noqa: PLW0603
     try:
+        # The switch gate comes first, before any other consideration: a skill
+        # that is switched off does no work at all on this path, not even the
+        # cheap checks below.
+        if _relay_is_switched_off():
+            return {"stdout": "", "exit_code": 0}
+
         # agent_type is NOT a reliable subagent indicator — main branch chats run
         # with agent_type="claude" (--agent claude). Subagents spawned by tools
         # never fire UserPromptSubmit. Defensive: skip only if agent_id is
