@@ -99,6 +99,34 @@ class Target:
 # =============================================================================
 
 
+def _canonical_branch(name: str, branch_paths: Dict[str, Path]) -> str:
+    """The registry's own spelling of a branch name. Raises if it has none.
+
+    The registry stores some names uppercase (`CANARY`) and everyone types
+    `@canary`, so an exact-match-only lookup refuses targets that plainly
+    exist. The fallback returns the CANONICAL spelling rather than the typed
+    one, which keeps `artifact_name()` stable no matter how the argument was
+    capitalised — two spellings of one branch must never produce two artifacts.
+
+    An AMBIGUOUS match raises rather than picking one. Two branches differing
+    only in case is a registry problem, and guessing which was meant is how a
+    lane measures the wrong tree while looking like it worked.
+    """
+    if name in branch_paths:
+        return name
+
+    matches = sorted(known for known in branch_paths if known.lower() == name.lower())
+    if len(matches) == 1:
+        return matches[0]
+
+    json_handler.log_operation("target_unresolved", {"argument": f"@{name}", "candidates": matches})
+    if matches:
+        raise ValueError(f"'@{name}' matches more than one registered branch ({', '.join(matches)}) - name one exactly")
+    raise ValueError(
+        f"'@{name}' is not a registered branch - pass a directory path to measure something outside the registry"
+    )
+
+
 def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Target:
     """Resolve a command-line target argument into a Target.
 
@@ -113,13 +141,7 @@ def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Ta
     branch_paths = branch_paths or {}
 
     if argument.startswith("@"):
-        name = argument[1:]
-        if name not in branch_paths:
-            json_handler.log_operation("target_unresolved", {"argument": argument})
-            raise ValueError(
-                f"'{argument}' is not a registered branch - "
-                f"pass a directory path to measure something outside the registry"
-            )
+        name = _canonical_branch(argument[1:], branch_paths)
         return Target(
             name=name,
             path=Path(branch_paths[name]),

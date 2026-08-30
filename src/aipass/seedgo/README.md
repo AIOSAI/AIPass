@@ -29,6 +29,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 - Single-file checklist validation against all standards (consumed by PostToolUse auto-fix hook)
 - Proof certification via proof/proof_query (triplet, plugin integrity, README currency)
 - Custom function test coverage mapping via test_map
+- Execution-tier test quality via audit-tests: runs a target's suite inside a copy under a `sys.addaudithook` write gate, refuses to publish unless a planted canary proves the gate can fire, and states what the gate cannot see beside every score
 - README auto-generation and freshness checking
 
 ### What I Don't Do
@@ -72,6 +73,9 @@ drone @seedgo proof_query aipass_proof triplet          # Query proof standard c
 
 # Test Coverage
 drone @seedgo test_map @seedgo                         # Function-level test coverage mapping
+drone @seedgo audit-tests @branch                      # Execution-tier test quality (hygiene gate)
+drone @seedgo audit-tests <directory>                  # Any directory with pytest targets
+drone @seedgo audit-tests aipass                       # Every citizen
 
 # README
 drone @seedgo readme update @flow                      # README auto-generation for a branch
@@ -108,6 +112,7 @@ seedgo/
 │   │                                #   discover_modules() loads apps/modules/*.py
 │   │                                #   route_command() dispatches to first handler returning True
 │   ├── modules/                     # 10 business logic modules
+│   │   ├── audit_tests.py           # Execution-tier test quality (runs the suite in a copy)
 │   │   ├── standards_audit.py       # Pack-aware compliance audit orchestrator
 │   │   ├── standards_query.py       # Pack-aware content query
 │   │   ├── diagnostics_audit.py     # Pyright diagnostics via audit pipeline
@@ -149,7 +154,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 55 test files, 2022 tests
+├── tests/                           # 56 test files, 2118 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -271,7 +276,7 @@ second reason not to restate them here. Read the directory, or ask @hooks.
 
 ## Tests
 
-- **55 test files, 2022 tests** — 2163 passed, 1 skipped (2164 collected with parametrised cases expanded; run 2026-08-29)
+- **56 test files, 2118 tests** — 2305 passed, 1 skipped (2306 collected with parametrised cases expanded; run 2026-08-29)
 - **0 type errors** (pyright, via the audit pipeline)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 
@@ -353,7 +358,7 @@ Full detail and status live in **APLAN-0005** (the standing branch health record
 ## Latest Audit (2026-08-25)
 
 - **Seedgo score:** 100% (45 standards + diagnostics, 129 files) — all standards green
-- **Tests:** 2163 passed, 1 skipped (2022 test functions across 55 files)
+- **Tests:** 2305 passed, 1 skipped (2118 test functions across 56 files)
 - **Coverage:** 267 public functions, 235 tested (88%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

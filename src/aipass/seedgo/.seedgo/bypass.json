@@ -139,6 +139,21 @@
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
       "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py \u2014 dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead \u2014 it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "log_visibility",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "json_structure",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. NOT named in the grant's recorded standards list (which named log_visibility and trigger); it is inside the granted PATH and is the same M10 consequence, and it is reported to @devpulse for confirmation rather than assumed. Narrow or revoke on their word."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
+      "standard": "unused_function",
+      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. every function flagged is a pytest hook called BY NAME by pytest inside the copy, so no aipass call site can exist by construction. NOT named in the grant's recorded standards list; reported to @devpulse for confirmation rather than assumed."
     }
   ],
   "notes": {
