@@ -130,6 +130,23 @@ def _mock_infrastructure(monkeypatch):
     # Force re-import so the mocks take effect
     monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.standards_audit", raising=False)
 
+    yield
+
+    # The re-import under mocks minted a NEW module object, and the import
+    # system hung it on the parent package as an attribute. monkeypatch
+    # restores sys.modules but never recorded that attribute — and records
+    # nothing at all when the module had never been imported before this
+    # file ran — so the mock-bound corpse outlives the test, and
+    # `from ... import standards_audit` in ANOTHER test file hands it back:
+    # its console is a MagicMock that prints nowhere (the CI 3.12/gw1 flake
+    # where capsys read ''). Scrub both homes here; monkeypatch's own undo
+    # then restores the real module wherever one was recorded, and the next
+    # from-import rebinds the package attribute to the real thing.
+    sys.modules.pop("aipass.seedgo.apps.modules.standards_audit", None)
+    _parent = sys.modules.get("aipass.seedgo.apps.modules")
+    if _parent is not None and hasattr(_parent, "standards_audit"):
+        delattr(_parent, "standards_audit")
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -700,7 +717,9 @@ def test_the_forwarded_line_parses_exactly_as_the_alias_does(monkeypatch):
 
     argv = ["@backup", "--budget", "300", "--prove-refusal"]
 
-    assert lane._parse(_forwarded(monkeypatch, ["tests", *argv])) == lane._parse(argv)
+    forwarded = _forwarded(monkeypatch, ["tests", *argv])
+    assert forwarded is not None, "the audit verb never handed the lane anything"
+    assert lane._parse(forwarded) == lane._parse(argv)
 
 
 def test_the_hyphenated_alias_still_claims_the_lane():
