@@ -149,7 +149,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 50 test files, 1712 tests
+├── tests/                           # 54 test files, 1926 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -271,7 +271,7 @@ second reason not to restate them here. Read the directory, or ask @hooks.
 
 ## Tests
 
-- **50 test files, 1712 tests** — 1712 passed, 0 failed (run 2026-08-25)
+- **54 test files, 1926 tests** — 2104 passed, 1 skipped (2105 collected with parametrised cases expanded; run 2026-08-29)
 - **0 type errors** (pyright, via the audit pipeline)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 
@@ -353,7 +353,7 @@ Full detail and status live in **APLAN-0005** (the standing branch health record
 ## Latest Audit (2026-08-25)
 
 - **Seedgo score:** 100% (45 standards + diagnostics, 129 files) — all standards green
-- **Tests:** 1712 passed, 0 failed
+- **Tests:** 2104 passed, 1 skipped (1926 test functions across 54 files)
 - **Coverage:** 267 public functions, 235 tested (88%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

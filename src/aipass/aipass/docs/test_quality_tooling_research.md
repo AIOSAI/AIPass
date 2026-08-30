@@ -60,6 +60,133 @@ off-the-shelf plugin with the same shape, `pytest-litter`, **passed that same ca
 
 ---
 
+### 0.1 The commercial neighbours — considered and excluded
+
+*(added 2026-08-29 late evening, after Patrick asked about CodeRabbit and Aikido. Verified against vendor
+pricing/docs/licensing pages and, where those were blocked, against analyzer source. Nothing else in this
+document was altered.)*
+
+Finding 1 says the category is empty. That claim is only worth something if it was checked against the paid
+field too, so here is the paid field. **Verdict up front: nothing here fills the category, and naming them
+strengthens the claim rather than weakening it.** The bar stays strict — *does it read an EXISTING test suite
+and tell you which tests are weak?* Generation, coverage, flakiness telemetry and test selection all score **no**.
+
+| Product | Grades oracle quality? | License | Free tier | Verdict |
+|---|---|---|---|---|
+| **CodeRabbit** | **No** | 🔴 proprietary SaaS, no license, no OSS component | free for public repos (see below) | **Excluded** — usable only as an AI-advisory comparison baseline |
+| **Aikido Security** | **No** | 🔴 proprietary SaaS platform | 2 users / 10 repos | **Excluded** (platform); its **Opengrep** is LGPL-2.1 and separately adoptable |
+| **Sourcery** | No | 🔴 proprietary (PyPI `License: Proprietary`) | OSS tier, 3 repos | **Excluded** |
+| **Greptile** | No | 🔴 proprietary SaaS | 50 credits/mo | **Excluded** — but see the note below, it is the closest to *execution* |
+| **Codecov** (Test Analytics) | No — flakiness only | 🔴 **FSL-1.1-Apache-2.0**, *not OSI-approved* | free for public/OSS repos | **Excluded** |
+| **SonarQube** commercial editions | No | 🔴 analyzers SSALv1 since 2024-11-29 | Community Build LGPL-3.0 | **Excluded** — and no commercial edition adds a Python test rule |
+
+**CodeRabbit** — LLM-over-diff PR review that orchestrates ~50 third-party linters in sandboxes (for Python:
+**Ruff, Pylint, Flake8** — i.e. it *resells the OSS static tier §2 already recommends*). Its tool catalogue
+contains **zero** coverage, mutation or test-quality tools, and there is no claim anywhere that it runs your
+suite. It reviews test files that appear in a diff, and its Pro+ unit-test *generation* writes new tests without
+running them. Custom pre-merge checks are free-text natural-language LLM gates, so you *could* write "flag tests
+with no meaningful assertion" — **that is the "static NOMINATES" half with no conviction step, which is exactly
+the half this campaign says is not enough.** Data policy is genuinely strong and worth quoting since we reject
+it on license, not conduct: *"CodeRabbit never uses customer code for model training… whether data retention is
+enabled or disabled"* — though it does store encrypted code caches and vector representations, and full
+retention opt-out is Enterprise-self-hosted only. ⚠️ **Sources disagree on the free tier and the doc wins over
+the marketing page:** [coderabbit.ai/pricing](https://www.coderabbit.ai/pricing) promises *"free reviews forever
+for public repositories"*, while [docs.coderabbit.ai/management/plans](https://docs.coderabbit.ai/management/plans)
+splits it — the **Free** plan is *"PR summarization only"* with reviews via IDE/CLI, and a separate **Open
+source** tier gives Pro+ features rate-limited to 1–10 reviews/hr/repo, with **manual triggering required for
+public repos under 10 stars**. Paid: Pro $24/dev/mo annual, Pro+ $48, Enterprise custom. **`github.com/coderabbitai`
+has no product source** — forks, demos and issue-tracker-only repos.
+
+**Aikido Security** — SCA/SAST/secrets/IaC/container/DAST, plus a newer **AI Code Quality** product scoring PRs
+on four categories: maintainability, readability, performance, reliability. **No test category, nothing
+executes tests** — verified against Aikido's own documentation endpoint rather than assumed. It *is* openly a
+wrapper over OSS scanners and says so at [aikido.dev/open-source](https://www.aikido.dev/open-source): it
+maintains **Opengrep** (LGPL-2.1, the vendor-neutral Semgrep-CE fork the industry moved to after the Dec-2024
+registry relicensing noted in §2.2), **Zen** and **Safe Chain** (AGPL-3.0 dual-licensed), **Betterleaks**, and
+forks of Checkov (Apache-2.0) and python-hcl2 (MIT). 🟢 **Worth stating plainly: Aikido is a real OSS
+contributor, not a repackager** — but none of it touches test quality.
+
+**The kin, one line each.** **Sourcery** pivoted away from the open Python refactoring CLI on **2023-11-09**;
+the PyPI package is `License: Proprietary` and `github.com/sourcery-ai/sourcery` is an MIT wrapper repo with no
+engine — no test-quality feature. **Greptile** is the most interesting of the group: its **TREX** runs your PR
+branch in a sandbox, starts services, mocks APIs and *writes and runs targeted tests* — **genuine execution,
+the "execution CONVICTS" half of law L0, shipping commercially** — but it convicts *production code*, never
+reports that an existing test is weak. **Codecov** detects flaky tests **from history, not by rerunning**
+(source: `apps/worker/services/test_results.py` emits a flake rate from tests that both passed and failed for
+the same commit across uploaded JUnit XML) — the same cheap signal Gruber et al. found sufficient in §4.1, and
+free for public repos, but flakiness is not oracle quality. **SonarQube commercial editions** add no Python test
+rule at all; their only test-adjacent commercial feature is **AI Code Assurance**, whose sole testing condition
+is **coverage ≥80%** — a coverage gate, exactly the metric §2.7 shows is the weakest of the three.
+
+⚠️ **Two corrections to facts stated elsewhere in this document, found while checking the above:**
+- **§2.2 says Sonar has no Python test-quality rule beyond `S5914`. That was too strong.** `sonar-python` ships
+  **seven** test rules, all on by default and all in the **free LGPL-3.0 Community Build** — `S5914`
+  (assertions that unconditionally pass or fail), **`S5905`** (assert on a tuple literal — always true, a BUG at
+  Blocker severity), **`S5915`** (assertions after a block expecting an exception — unreachable), plus
+  `S5845`/`S5899`/`S5906`/`S5918`. **The §2.1 verdict does not change**, and the reason is the useful part:
+  **Ruff (MIT) already covers the same species** — `F631` ≈ `S5905`, `PLW0129`/`B011` ≈ `S5914`'s family,
+  `B017`/`PT010` ≈ `S5915`. The SSALv1 analyzer offers **no oracle capability the OSS field lacks**.
+  *(`S2699` having no Python implementation is re-confirmed: its rule JSON 404s in the analyzer's own resources
+  and it is absent from the 398-rule `Sonar_way_profile.json`.)*
+- **Codecov's owner changed twice, not once.** Sentry sold it: **Harness acquired Codecov on 2026-06-02**
+  (`codecov/umbrella/LICENSE.md` now reads *"Copyright 2018-2026 Harness, Inc."*). ⚠️ Codecov's own Test
+  Analytics product page still says *"Codecov by Sentry"* — a live inconsistency. And the "Codecov is now open
+  source" announcement was **retracted to Fair Source**: the umbrella repo is **FSL-1.1-Apache-2.0**, not
+  OSI-approved, Apache-2.0 only after the delay window. `codecov/codecov-api` was archived 2025-06-13.
+- 🟢 **One thing got better:** `pr-agent` (§6.4) was **donated to the community and relicensed MIT** — its repo
+  description now explicitly reads *"This project is not the Qodo free tier."* Qodo itself states
+  *"We don't offer a permanent free tier"*, and `qodo-cover` (AGPL-3.0) is **confirmed dead** — its last commit,
+  2025-06-24, is literally *"Adding EOL"*.
+
+**The wider sweep, for completeness.** 🔴 Nothing exists matching "mutation testing as a service for Python",
+"assertion quality grading SaaS", or "test smell detection SaaS". **Diffblue Cover** is Java/Kotlin only, and its
+Nov-2025 "Test Asset Insights" reads your existing suite in order to *imitate* it when generating, never to judge
+it. **Launchable no longer exists as a brand** (redirects to CloudBees Smart Tests) — selection and flakiness
+only. **Datadog Test Optimization** does flakiness both ways (history *and* rerun) and supports Python, but
+Test Impact Analysis is coverage-based selection. **Trunk Flaky Tests** (free to 5 committers) and **BuildPulse**
+(no permanent free tier) are pass-on-retry detectors. **Stryker Dashboard** is genuinely Apache-2.0 and free —
+and **does not support Python**. **CodeScene** (free Community Edition for OSS) has two genuinely test-specific
+smells, *Large Assertion Blocks* and *Duplicated Assertion Blocks* — maintainability, in the tsDetect tradition
+of §2.3, not oracle strength. **Tessl's `test-suite-health-audit`** scores a suite on four axes and then
+disclaims the category itself: it *"does not own… assertion specificity, mocking technique, or naming."*
+⚠️ **Watch item, deliberately not counted:** *The Mutating Company* (`mutating.tech`) positions around
+"deterministic verification… testing infrastructure for the agents writing tomorrow's software" but has no
+product page, no languages and no pricing. Too early to cite.
+
+🟢 **The three strongest pieces of counter-evidence, stated in full because they are the honest test of finding 1:**
+
+1. **`arcmutate` is the one commercial product implementing the actual criterion.** Its extreme-mutation add-on
+   detects *"pseudo-tested methods (covered by tests, but do not have their behaviour verified)"* — that is the
+   NULL-ORACLE criterion, sold commercially, and it confirms §1.4's claim that this is the right idea. 🔴 **It is
+   JVM-only, with zero Python, and proprietary** (§1.7 already excludes it). ⚠️ Its "free for open source"
+   claim appears only in a search snippet; `arcmutate.com/pricing/` 404s and the licence document contains no
+   such clause, so it is **not asserted here**. And a structural limit worth recording since it bounds *our* plan
+   too: **mutation testing cannot see MIRROR-EXPECT by construction** — mutating the source also mutates the
+   imported expectation, so the test still passes and the mutant is scored as equivalent. That is not a gap in
+   arcmutate; it is a reason the static tier cannot be dropped.
+2. **Sonar's seven Python test rules are real static detectors of tests that can never fail** — and they are
+   narrow syntactic nominators already matched by Ruff, emitting per-issue findings rather than a suite verdict,
+   under a non-OSI license. Nomination without conviction, again.
+3. **Greptile TREX and Sonar's newly-acquired Gitar** (acquired 2026-05-21; *"applies real fixes, validates them
+   against CI, retries flaky tests"*) genuinely execute code in anger. **Neither ever asks the campaign's
+   question:** *does there exist a change to production code that makes this existing test fail?*
+
+**So the precise form of the claim, hardened:** the category is empty **for Python, for oracle quality, and for
+existing suites**. The commercial field is not ahead of the OSS field on any of those three axes — it is ahead
+only on **flakiness telemetry and test selection**, neither of which is what this lane measures. 🟢 **The
+intellectual home of the category is academic, not commercial**, and there is now a manifesto to cite for it:
+McMinn et al., *"Beyond Test Flakiness: A Manifesto for a Holistic Approach to Test Suite Health"* (2025), which
+lists **pseudo-testedness** and low mutation scores among nine test-suite health indicators.
+
+⚠️ **Unverified in this subsection, flagged rather than filled in from memory:** `rules.sonarsource.com` does not
+resolve from this machine — the Sonar rule facts above were taken from the analyzer's own source, which is a
+stronger primary source, but the rules site itself was never read. `arcmutate` pricing (page 404s), Datadog's
+per-committer price (JS-rendered page), Diffblue's exact Community Edition EULA text (bot-blocked), and Aikido's
+per-rule Code Quality list (auth-gated) are all **unconfirmed**. `coderabbit.ai/privacy` 404s; the data-policy
+quotes come from `docs.coderabbit.ai/faq` verbatim.
+
+---
+
 ## 1. Mutation testing for Python, and mutation at scale
 
 ### 1.1 The Python tool landscape
