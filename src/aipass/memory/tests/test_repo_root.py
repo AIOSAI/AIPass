@@ -20,6 +20,8 @@ So the pins here come in two species, deliberately:
     an environment we do not run locally is not a guard, it is a report.
 """
 
+import importlib
+import inspect
 import re
 import subprocess
 import sys
@@ -268,6 +270,43 @@ _IMPORT_TIME_LANES = [
     "aipass.memory.apps.handlers.rollover.orchestrator",
 ]
 
+# --- BUILDING THE WORLD, TWICE, BECAUSE ONE WAY DOES NOT EXIST EVERYWHERE ----
+#
+# The original recipe deletes the process's working directory. That is a REAL
+# world on POSIX and an IMPOSSIBLE one on Windows: Windows holds a lock on the
+# directory a process is standing in, so the rmdir raises PermissionError
+# (WinError 32) and every pin built this way dies at SETUP rather than at its
+# claim — which is how these arrived on the Windows CI leg.
+#
+# The condition being pinned is NOT "a directory was deleted". It is
+# "``os.getcwd()`` raises", which is what ``Path.cwd()`` does underneath and the
+# only thing this code can actually observe. Deleting the directory is one way
+# to cause it; a disconnected network share or an ejected volume is another, and
+# those DO happen on Windows. So the primary construction denies ``getcwd``
+# directly — the failure itself rather than one cause of it — and runs on every
+# platform.
+#
+# Injecting it is not faking the world, on the same reasoning that lets the
+# marker be denied in-process: the interpreter raises the real exception from
+# the real call site. And the claim does not rest on that argument alone —
+# ``TestBothConstructionsAgree`` runs BOTH recipes on POSIX and asserts they
+# produce the same outcome, which is what licenses using the injected one where
+# the real one cannot be built.
+_DENY_CWD = "import os\nos.getcwd = lambda: (_ for _ in ()).throw(FileNotFoundError(2, 'No such file or directory'))\n"
+
+_DELETE_CWD = "import os, tempfile\nd = tempfile.mkdtemp()\nos.chdir(d); os.rmdir(d)\n"
+
+_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "Windows locks a process's working directory, so it cannot be deleted from inside — "
+        "this WORLD cannot be built here by this construction (PermissionError WinError 32 at "
+        "the rmdir, before the pin's own claim is ever reached). The same defect is pinned on "
+        "every platform by the getcwd-denial construction, and the two are proved equivalent "
+        "on POSIX by TestBothConstructionsAgree."
+    ),
+)
+
 
 class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
     """Importing must never raise, in any world. Subprocess, because cwd is process-wide.
@@ -299,16 +338,10 @@ class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
 
     _NOT_OURS = "/aipass/prax/"
 
+    @pytest.mark.parametrize("world", [_DENY_CWD, pytest.param(_DELETE_CWD, marks=_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD)])
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
-    def test_importing_survives(self, module):
-        probe = (
-            "import os, sys, tempfile\n"
-            f"sys.path.insert(0, {_src_root()!r})\n"
-            "d = tempfile.mkdtemp()\n"
-            "os.chdir(d); os.rmdir(d)\n"
-            f"import {module}\n"
-            "print('OK')\n"
-        )
+    def test_importing_survives(self, module, world):
+        probe = f"import os, sys\nsys.path.insert(0, {_src_root()!r})\n{world}import {module}\nprint('OK')\n"
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
         assert result.returncode == 0, (
             f"{module} could not be imported in a dead cwd. "
@@ -336,15 +369,15 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
     still asserts, and it names exactly what it held constant.
     """
 
+    @pytest.mark.parametrize("world", [_DENY_CWD, pytest.param(_DELETE_CWD, marks=_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD)])
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
-    def test_this_branch_imports_in_a_bare_world(self, module):
+    def test_this_branch_imports_in_a_bare_world(self, module, world):
         probe = (
-            "import os, sys, tempfile, pathlib\n"
+            "import os, sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
             "import aipass.prax.apps.handlers.config.load as prax_load\n"
             f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
-            "d = tempfile.mkdtemp()\n"
-            "os.chdir(d); os.rmdir(d)\n"
+            f"{world}"
             f"import {module}\n"
             "print('OK')\n"
         )
@@ -374,7 +407,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
         report from an environment we do not run.
         """
         probe = (
-            "import os, sys, tempfile, pathlib\n"
+            "import os, sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
             "import aipass.prax.apps.handlers.config.load as prax_load\n"
             f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
@@ -384,8 +417,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             "pathlib.Path.exists = lambda self, *a, **k: (\n"
             "    False if self.name.endswith('_REGISTRY.json') else _real_exists(self, *a, **k)\n"
             ")\n"
-            "d = tempfile.mkdtemp()\n"
-            "os.chdir(d); os.rmdir(d)\n"
+            f"{_DENY_CWD}"
             f"import {module} as target\n"
             "print('OK')\n"
         )
@@ -397,19 +429,198 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
 
 
 class TestTheDeadCwdProbeIsAHonestInstrument:
-    """The pin above proves nothing unless a dead cwd really does break things."""
+    """The pins above prove nothing unless the world they build really is hostile.
 
-    def test_reading_the_cwd_still_raises_in_that_world(self):
-        """If this passes trivially, the probe stopped creating the condition."""
-        probe = (
-            "import os, tempfile, pathlib\n"
-            "d = tempfile.mkdtemp()\n"
-            "os.chdir(d); os.rmdir(d)\n"
-            "try:\n"
-            "    pathlib.Path.cwd()\n"
-            "    print('NO_RAISE')\n"
-            "except FileNotFoundError:\n"
-            "    print('RAISED')\n"
+    Both constructions get a positive control, because the whole argument for
+    using the injected one on Windows is that it produces the SAME condition —
+    and an unchecked instrument is what let a blinded filter report a vacuous
+    sweep as green earlier tonight.
+    """
+
+    _CHECK = (
+        "import pathlib\n"
+        "try:\n"
+        "    pathlib.Path.cwd()\n"
+        "    print('NO_RAISE')\n"
+        "except FileNotFoundError:\n"
+        "    print('RAISED')\n"
+    )
+
+    def test_denying_getcwd_makes_reading_the_cwd_raise(self):
+        """The portable construction. Runs on Windows, where the other cannot."""
+        result = subprocess.run([sys.executable, "-c", _DENY_CWD + self._CHECK], capture_output=True, text=True)
+        assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
+
+    @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
+    def test_deleting_the_cwd_makes_reading_the_cwd_raise(self):
+        """The real world, where the platform allows it to be built."""
+        result = subprocess.run([sys.executable, "-c", _DELETE_CWD + self._CHECK], capture_output=True, text=True)
+        assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
+
+
+class TestBothConstructionsAgree:
+    """What licenses using the injected world where the real one cannot be built.
+
+    Windows locks a process's working directory, so ``_DELETE_CWD`` cannot run
+    there at all — it raises PermissionError at the rmdir, before any claim is
+    reached. That is not a reason to stop pinning the defect on Windows; it is a
+    reason to pin the CONDITION (``os.getcwd()`` raises) rather than one cause
+    of it.
+
+    But "these two are equivalent" is an argument, and arguments belong in
+    tests. On POSIX both worlds can be built, so both are built and compared —
+    against the cured code AND against the defect restored. If they ever stop
+    agreeing, the Windows coverage is resting on a claim that has expired.
+    """
+
+    _ASK = (
+        "import sys, pathlib\n"
+        f"sys.path.insert(0, {_src_root()!r})\n"
+        "_real = pathlib.Path.exists\n"
+        "pathlib.Path.exists = lambda self, *a, **k: (\n"
+        "    False if self.name.endswith('_REGISTRY.json') else _real(self, *a, **k)\n"
+        ")\n"
+        "import aipass.prax.apps.handlers.config.load as prax_load\n"
+        "prax_load._find_repo_root = lambda: pathlib.Path(__file__ if False else '/')\n"
+        "from aipass.memory.apps.handlers import repo_root\n"
+        "print('ANSWER', repo_root.find_repo_root())\n"
+    )
+
+    @staticmethod
+    def _run(world):
+        """Ask the resolver the same question in *world* and report what came back."""
+        return subprocess.run(
+            [sys.executable, "-c", world + TestBothConstructionsAgree._ASK],
+            capture_output=True,
+            text=True,
         )
-        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
-        assert "RAISED" in result.stdout, result.stdout
+
+    @_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD
+    def test_the_two_worlds_produce_the_same_answer(self):
+        denied, deleted = self._run(_DENY_CWD), self._run(_DELETE_CWD)
+        assert denied.returncode == 0, denied.stderr
+        assert deleted.returncode == 0, deleted.stderr
+        assert denied.stdout.strip() == deleted.stdout.strip(), (
+            f"the injected world and the real one disagree — the Windows coverage rests on them "
+            f"agreeing.\ndenied:  {denied.stdout!r}\ndeleted: {deleted.stdout!r}"
+        )
+
+
+class TestAFilenameIsNotAnExistsCall:
+    """``exists_exactly`` — the half of the pair with no glob to warn a reader.
+
+    @seedgo published it as their own discriminator's blind spot on 2026-08-31:
+    a cased LITERAL folds too, so ``(dir / "AIPASS_REGISTRY.json").exists()``
+    returns True for a file actually named ``aipass_registry.json`` on Windows
+    and on a macOS default volume.
+
+    It lives here rather than at each caller because ``find_repo_root`` IS such
+    a check, run at module level in four modules. A folded bait file accepted as
+    THE REPO ROOT hands every writer downstream a tree nobody chose — which is
+    the quiet defect this module was built to end, arriving through a door it
+    did not cover.
+    """
+
+    def test_the_injected_world_really_folds(self, tmp_path, case_insensitive_exists):
+        """Positive control. A fold that does not fold makes every pin below vacuous."""
+        (tmp_path / "aipass_registry.json").write_text("{}", encoding="utf-8")
+
+        assert (tmp_path / "AIPASS_REGISTRY.json").exists(), "the emulation is not folding"
+
+    def test_a_folded_name_is_not_the_name_that_was_asked_for(self, tmp_path, case_insensitive_exists):
+        (tmp_path / "aipass_registry.json").write_text("{}", encoding="utf-8")
+
+        assert rr.exists_exactly(tmp_path / "AIPASS_REGISTRY.json") is False
+
+    def test_the_exact_name_still_answers_yes(self, tmp_path, case_insensitive_exists):
+        """The guard must not refuse the file it exists to find."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+        assert rr.exists_exactly(tmp_path / "AIPASS_REGISTRY.json") is True
+
+    def test_absent_is_absent_without_listing_anything(self, tmp_path):
+        assert rr.exists_exactly(tmp_path / "AIPASS_REGISTRY.json") is False
+
+    def test_an_unlistable_parent_trusts_exists_rather_than_inventing_a_refusal(self, tmp_path, monkeypatch):
+        """The documented fallback, pinned so it is a decision and not an accident.
+
+        This is a READ anchor and today's behaviour is ``exists()`` alone.
+        Refusing a file that is demonstrably there because its directory could
+        not be enumerated would be a new failure invented by the guard.
+        """
+        target = tmp_path / "AIPASS_REGISTRY.json"
+        target.write_text("{}", encoding="utf-8")
+
+        def _denied(*args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(rr.os, "scandir", _denied)
+
+        assert rr.exists_exactly(target) is True
+
+    def test_the_repo_root_walk_does_not_anchor_on_a_folded_bait_file(self, tmp_path, case_insensitive_exists):
+        """The whole reason this guard is in THIS module.
+
+        A directory carrying a lowercase ``aipass_registry.json`` must not be
+        answered as the repo root. Every writer in this tree resolves through
+        here, and a guessed root is a write into somebody else's directory.
+        """
+        bait = tmp_path / "someone_elses_repo"
+        (bait / "deep").mkdir(parents=True)
+        (bait / "aipass_registry.json").write_text("{}", encoding="utf-8")
+
+        found = rr.find_repo_root(bait / "deep", caller="test")
+
+        assert found != bait
+        assert found == rr.SOURCE_ROOT, "the fallback is the source tree, never a folded guess"
+
+    def test_the_walk_still_finds_a_correctly_spelled_marker(self, tmp_path, case_insensitive_exists):
+        """The positive half: the guard must not blind the walk it protects."""
+        real = tmp_path / "a_real_repo"
+        (real / "deep").mkdir(parents=True)
+        (real / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+        assert rr.find_repo_root(real / "deep", caller="test") == real
+
+
+class TestTheFilterHasOneImplementationForFourWalks:
+    """``exactly_named`` moved here the day the third and fourth walks turned up.
+
+    It was written in ``registry_scope`` for that module's two globs, with a
+    docstring claiming a third walk could not be written without it. @drone's
+    sweep and @seedgo's fleet discriminator then named two more in this tree —
+    ``detector`` and ``memory_watcher`` — both written years before the filter
+    existed. The claim was true about the future and said nothing about the
+    past, so the body moved to the module all four already import.
+    """
+
+    def test_registry_scope_delegates_rather_than_carrying_a_twin(self):
+        from aipass.memory.apps.handlers.monitor import registry_scope
+
+        source = inspect.getsource(registry_scope._exactly_named)
+
+        assert "repo_root.exactly_named" in source, "the ten-copy lesson, one package over"
+        assert "endswith" not in source.split('"""')[-1], "a second implementation is a second answer"
+
+    @pytest.mark.parametrize(
+        "module_name",
+        [
+            "aipass.memory.apps.handlers.monitor.detector",
+            "aipass.memory.apps.handlers.monitor.memory_watcher",
+            "aipass.memory.apps.handlers.monitor.registry_scope",
+        ],
+    )
+    def test_no_registry_glob_in_this_tree_is_left_unfiltered(self, module_name):
+        """The structural pin: catch it where it is WRITTEN, not only where it runs.
+
+        Last night's lesson cost a second CI red — a cure that landed on one of
+        N identical sites while the rest kept the disease. This reads the source
+        rather than the behaviour, so a fifth walk added tomorrow is red on the
+        line it is typed on.
+        """
+        source = inspect.getsource(importlib.import_module(module_name))
+
+        for number, line in enumerate(source.splitlines(), start=1):
+            if "glob(" not in line or "_REGISTRY.json" not in line:
+                continue
+            assert "exactly_named(" in line, f"{module_name}:{number} globs registries with no exact-case filter"

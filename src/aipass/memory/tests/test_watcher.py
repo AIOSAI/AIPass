@@ -20,8 +20,11 @@ callback, and edge cases like missing watchdog or already-running observers.
 All tests use mocks -- no live filesystem watchers or infrastructure access.
 """
 
+import json
 import sys
 from unittest.mock import MagicMock
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -569,3 +572,97 @@ class TestMemoryFileWatcherOnModified:
         # file_key should NOT be in _recent_modifications from normalize (may be from rollover)
         mocks["check_single_file"].return_value = {"success": True, "should_rollover": False}
         assert file_key not in watcher._recent_modifications
+
+
+class TestTheBranchPathWalkReadsNamesNotSpellings:
+    """The fourth of this tree's ``*_REGISTRY.json`` walks — detector's twin.
+
+    Same caller-cwd walk, and the consequence is the one that reaches disk: a
+    folded match's "branches" become paths this watcher ROLLS OVER, which means
+    rewrites them. @seedgo's fleet discriminator named this site alongside
+    ``detector`` after ``registry_scope`` was cured; the filter now has one
+    implementation in ``handlers/repo_root.py`` for all four.
+
+    A NOTE ON WHAT THIS NEARLY SHIPPED. ``_get_branch_paths`` rebinds the local
+    name ``repo_root`` to a Path, shadowing the module import of the same name,
+    so the first version of this fix read ``repo_root.exactly_named`` off a
+    Path. It did not fail the suite — nothing exercised the line. The module
+    imports ``exactly_named`` by name now, and this class is what would have
+    caught it.
+    """
+
+    @pytest.fixture
+    def caller_tree(self, tmp_path, monkeypatch):
+        from aipass.memory.apps.handlers.monitor import detector
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        home = tmp_path / "aipass_home"
+        home.mkdir()
+        (home / "AIPASS_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
+        monkeypatch.setattr(memory_watcher, "_find_repo_root", lambda: home)
+        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
+
+        foreign = tmp_path / "foreign_project"
+        (foreign / "src" / "real").mkdir(parents=True)
+        (foreign / "src" / "bait").mkdir(parents=True)
+        (foreign / "FOREIGN_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "real", "path": "src/real", "status": "active"}]}), encoding="utf-8"
+        )
+        (foreign / "flow_json_registry.json").write_text(
+            json.dumps({"branches": [{"name": "bait", "path": "src/bait", "status": "active"}]}), encoding="utf-8"
+        )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(foreign))
+        return foreign
+
+    def test_the_injected_world_really_widens(self, caller_tree, case_insensitive_filesystem):
+        """Positive control, before anything below is believed."""
+        matched = sorted(path.name for path in caller_tree.glob("*_REGISTRY.json"))
+
+        assert matched == ["FOREIGN_REGISTRY.json", "flow_json_registry.json"]
+
+    def test_a_folded_registry_never_contributes_a_path_to_roll_over(self, caller_tree, case_insensitive_filesystem):
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        names = {path.name for path in memory_watcher._get_branch_paths()}
+
+        assert "real" in names, "the genuine branch was lost while excluding the impostor"
+        assert "bait" not in names
+
+
+class TestTheTrinityMatchIsAFilenameNotAPattern:
+    """``local.json`` has no wildcard in it, so it was never a glob's job.
+
+    On a folding filesystem ``trinity_dir.glob("local.json")`` also matches
+    ``Local.json``, and what this loop matches gets ROLLED OVER — rewritten.
+    A near-miss here is damage, not a miscount, which is why it moved to
+    ``repo_root.exists_exactly``.
+    """
+
+    def test_a_differently_cased_memory_file_is_not_checked(self, tmp_path, monkeypatch, case_insensitive_filesystem):
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        branch = tmp_path / "src" / "aipass" / "impostor"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "Local.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(memory_watcher, "_get_branch_paths", lambda: [branch])
+        # check_and_rollover is once-per-process by design; without this reset
+        # the SECOND test in this class reads "already checked" and asserts
+        # nothing. Found by the positive half failing, which is what it is for.
+        monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
+
+        assert memory_watcher.check_and_rollover()["files_checked"] == 0
+
+    def test_the_correctly_spelled_file_is_still_checked(self, tmp_path, monkeypatch, case_insensitive_filesystem):
+        """The guard must not blind the lane it protects."""
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        branch = tmp_path / "src" / "aipass" / "genuine"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "local.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(memory_watcher, "_get_branch_paths", lambda: [branch])
+        # check_and_rollover is once-per-process by design; without this reset
+        # the SECOND test in this class reads "already checked" and asserts
+        # nothing. Found by the positive half failing, which is what it is for.
+        monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
+
+        assert memory_watcher.check_and_rollover()["files_checked"] == 1

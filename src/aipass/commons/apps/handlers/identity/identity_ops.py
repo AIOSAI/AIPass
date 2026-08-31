@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-08-07
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -118,6 +118,10 @@ def _find_caller_registries() -> List[Path]:
     for every miss. Results are sorted so a directory holding more than
     one registry always resolves the same way.
 
+    The suffix is re-checked case-sensitively after the glob: on Windows
+    and default macOS the pattern also matches *_registry.json, and a
+    lowercase counter would otherwise answer an identity lookup.
+
     Returns:
         List of registry paths from the nearest matching directory, or [].
     """
@@ -137,7 +141,14 @@ def _find_caller_registries() -> List[Path]:
         matches = sorted(
             path
             for path in directory.glob("*_REGISTRY.json")
-            if path.name != "AIPASS_REGISTRY.json" and path.resolve() != primary
+            # Windows and default macOS are case-insensitive, so this glob also
+            # returns *_registry.json — plan counters and .template_registry.json
+            # (pathlib's * matches dotfiles). Re-check the SUFFIX case-sensitively;
+            # never the stem, because external projects name registries after
+            # themselves and vera_studio_REGISTRY.json is a real citizen.
+            if path.name.endswith("_REGISTRY.json")
+            and path.name != "AIPASS_REGISTRY.json"
+            and path.resolve() != primary
         )
         if matches:
             return matches

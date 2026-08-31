@@ -114,7 +114,10 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         # main registry so a local branch always wins a name collision.
         # Live miss 2026-08-12: watchdog agent @baud said agent-not-found
         # minutes after the admin lane's first dispatch reached that seat.
-        for reg in sorted((repo_root / "projects").glob("*/*_REGISTRY.json")):
+        # glob is case-insensitive on Windows — re-check the suffix exactly so
+        # a *_registry.json counter is never read as a trust anchor
+        project_regs = (repo_root / "projects").glob("*/*_REGISTRY.json")
+        for reg in sorted(p for p in project_regs if p.name.endswith("_REGISTRY.json")):
             result = _search_registry(reg, target)
             if result is not None:
                 return result
@@ -134,6 +137,8 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
         if not root.is_dir():
             continue
         for reg in root.glob("*_REGISTRY.json"):
+            if not reg.name.endswith("_REGISTRY.json"):
+                continue  # Windows globs case-insensitively; exact-case names only
             resolved = reg.resolve()
             if resolved in seen:
                 continue

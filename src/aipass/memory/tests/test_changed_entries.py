@@ -851,3 +851,115 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         assert mine[0].get("functions") == ["changed_entries"], (
             f"the exemption is not narrowed to the one function it was argued for: {mine[0]}"
         )
+
+
+class TestTheNearCapLineArrivesWhileThereIsStillRoom:
+    """@ai_mail's ask, and their own evidence was the argument for it.
+
+    They wrote over the cap FOUR HOURS after being burned by it — knowing the
+    number, with it in front of them. Their sentence, which is the design
+    brief: "nothing in the act of writing shows you the limit — the only
+    instrument is downstream." A refusal teaches at the moment it is already
+    too late. This teaches one entry early.
+    """
+
+    def test_an_authored_entry_close_to_the_cap_is_reported(self) -> None:
+        mod = _get_entry_limits()
+        before = {"key_learnings": {"a": "short"}}
+        after = {"key_learnings": {"a": "short", "b": "x" * 190}}
+
+        near = mod.classify_entries(before, after, _KEY_LEARNINGS_ONLY)["near"]
+
+        assert [hit["key"] for hit in near] == ["b"]
+        assert near[0]["length"] == 190
+        assert near[0]["cap"] == 200
+
+    def test_a_comfortable_entry_is_not_reported(self) -> None:
+        """The signal is only worth having if most writes do not trip it."""
+        mod = _get_entry_limits()
+        after = {"key_learnings": {"a": "x" * 179}}
+
+        assert mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)["near"] == []
+
+    def test_the_boundary_is_at_the_ratio_not_past_it(self) -> None:
+        mod = _get_entry_limits()
+        after = {"key_learnings": {"exact": "x" * 180}}
+
+        assert len(mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)["near"]) == 1
+
+    def test_an_over_cap_entry_is_a_violation_and_never_also_near(self) -> None:
+        """No entry wears both labels — the same rule the authored/carried split obeys."""
+        mod = _get_entry_limits()
+        after = {"key_learnings": {"fat": "x" * 250}}
+
+        split = mod.classify_entries({}, after, _KEY_LEARNINGS_ONLY)
+
+        assert len(split["authored"]) == 1
+        assert split["near"] == []
+
+    def test_carried_near_cap_text_is_not_reported(self) -> None:
+        """The discriminator that decides refusals, applied to the softer signal.
+
+        A near-cap entry this write did not author is not this write's business,
+        and a line on every write about text nobody touched is how a channel
+        becomes noise nobody reads.
+        """
+        mod = _get_entry_limits()
+        standing = {"key_learnings": {"old": "x" * 195}}
+
+        split = mod.classify_entries(standing, standing, _KEY_LEARNINGS_ONLY)
+
+        assert split["near"] == []
+        assert split["authored"] == []
+
+    def test_editing_a_near_cap_entry_at_all_reports_it_again(self) -> None:
+        """Carried is about the TEXT, so touching it makes it authored again."""
+        mod = _get_entry_limits()
+        before = {"key_learnings": {"old": "x" * 195}}
+        after = {"key_learnings": {"old": "y" * 195}}
+
+        assert len(mod.classify_entries(before, after, _KEY_LEARNINGS_ONLY)["near"]) == 1
+
+    def test_it_works_on_list_containers_too(self) -> None:
+        """Both container shapes, because a rule honoured by one is a coincidence."""
+        mod = _get_entry_limits()
+        after = {"sessions": [{"summary": "x" * 275}]}
+
+        near = mod.classify_entries({}, after, _SESSIONS_ONLY)["near"]
+
+        assert [hit["key"] for hit in near] == ["0"]
+        assert near[0]["cap"] == 300
+
+    def test_a_type_with_no_cap_has_nothing_to_be_near(self) -> None:
+        """cap 0 means "no cap configured". Reporting there would flag everything."""
+        mod = _get_entry_limits()
+
+        assert mod.is_near_cap({"ok": True, "length": 5000, "cap": 0}) is False
+
+    def test_a_refusal_verdict_is_never_near(self) -> None:
+        mod = _get_entry_limits()
+
+        assert mod.is_near_cap({"ok": False, "length": 250, "cap": 200}) is False
+
+    def test_the_near_line_names_the_headroom_on_a_real_write(self, tmp_path, monkeypatch) -> None:
+        """End to end: the warning reaches the log with a number to act on."""
+        import logging
+
+        from aipass.memory.apps.handlers.json import memory_files
+
+        branch = tmp_path / "src" / "aipass" / "somebranch"
+        (branch / ".trinity").mkdir(parents=True)
+        target = branch / ".trinity" / "local.json"
+        target.write_text(json.dumps({"key_learnings": {}}), encoding="utf-8")
+
+        monkeypatch.setattr(memory_files, "load_entry_limits", lambda branch_name: _KEY_LEARNINGS_ONLY)
+
+        records: list[str] = []
+        monkeypatch.setattr(
+            memory_files.logger, "warning", lambda message, *a, **k: records.append(str(message)), raising=False
+        )
+
+        memory_files._validate_entry_limits(target, {"key_learnings": {"b": "x" * 190}})
+
+        assert any("NEAR" in line and "190/200" in line and "10 chars of headroom" in line for line in records), records
+        assert logging  # the import is the point: nothing here reconfigures logging

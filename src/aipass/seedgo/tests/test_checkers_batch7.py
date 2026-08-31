@@ -2070,3 +2070,127 @@ class TestAutoDetectionAsksAboutThePublicSurface:
         """A file we could not read is not evidence the parameter is absent."""
         result = self._check("def log_operation(operation, module_name=None):\n    pass\n\ndef broken(:\n")
         assert result is not None and result["passed"] is False
+
+
+class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
+    """@spawn's report (2026-08-31): `except FileNotFoundError: return "absent"`
+    was flagged as a swallow. It is the opposite — the exception's information
+    becomes the return value and the caller asserts on it. A logger call in a
+    test helper would route production logging out of a suite, which is what the
+    hygiene lane exists to stop, so two standards were pulling opposite ways.
+
+    Two clauses, both measured: a SPECIFIC exception type (bare / Exception says
+    only "it failed"), and a body of exactly one `return <constant>`.
+    """
+
+    def _lines(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        result = silent_catch_check.check_module(str(target))
+        return result["checks"][0]["message"], result["checks"][0]["passed"]
+
+    def test_a_named_exception_returning_a_constant_is_not_a_silent_catch(self, tmp_path):
+        source = (
+            "def final_state(path):\n"
+            "    try:\n        return path.read_text()\n"
+            "    except FileNotFoundError:\n        return 'absent'\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is True
+
+    def test_a_tuple_of_named_exceptions_still_qualifies(self, tmp_path):
+        source = (
+            "def verdict(run):\n"
+            "    try:\n        return run()\n"
+            "    except (AssertionError, ValueError):\n        return 'FAILED'\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is True
+
+    def test_a_dotted_exception_name_qualifies(self, tmp_path):
+        """pytest.skip.Exception is the shape @spawn actually catches."""
+        source = (
+            "import pytest\n\n"
+            "def verdict(run):\n"
+            "    try:\n        return run()\n"
+            "    except pytest.skip.Exception:\n        return 'SKIPPED'\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is True
+
+    def test_catching_Exception_broadly_keeps_its_finding(self, tmp_path):
+        """ "It failed" is not a classification: the type carries no meaning, so
+        the caller learns nothing the return value could not have hidden."""
+        source = "def f(run):\n    try:\n        return run()\n    except Exception:\n        return False\n"
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_a_bare_except_keeps_its_finding(self, tmp_path):
+        source = "def f(run):\n    try:\n        return run()\n    except:\n        return None\n"
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_a_named_exception_that_only_passes_keeps_its_finding(self, tmp_path):
+        """No value leaves the handler, so nothing was classified."""
+        source = "def f(run):\n    try:\n        run()\n    except FileNotFoundError:\n        pass\n"
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_a_named_exception_that_continues_keeps_its_finding(self, tmp_path):
+        source = (
+            "def f(items):\n    for i in items:\n        try:\n            i()\n"
+            "        except FileNotFoundError:\n            continue\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_extra_statements_before_the_return_keep_the_finding(self, tmp_path):
+        """The shape is a CONVERSION, not a body that happens to end in one —
+        work done on the way out is work the finding should still be read for."""
+        source = (
+            "def f(run, state):\n    try:\n        return run()\n"
+            "    except FileNotFoundError:\n        state['seen'] = True\n        return 'absent'\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_a_computed_return_is_not_a_constant(self, tmp_path):
+        source = (
+            "def f(run, fallback):\n    try:\n        return run()\n"
+            "    except FileNotFoundError:\n        return fallback()\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_a_return_carrying_the_caught_exception_qualifies(self, tmp_path):
+        """`return ("FAILED", str(exc))` carries MORE than a constant does.
+        Keying on ast.Constant alone flagged the better version of the pattern —
+        found by running the rule against @spawn's real file, not my examples."""
+        source = (
+            "def verdict(run):\n"
+            "    try:\n        return ('PASSED', '')\n"
+            "    except AssertionError as exc:\n        return ('FAILED', str(exc))\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is True
+
+    def test_a_computed_return_that_never_mentions_the_exception_stays_flagged(self, tmp_path):
+        """Binding `as exc` is not enough — the value has to carry it."""
+        source = (
+            "def f(run, fallback):\n    try:\n        return run()\n"
+            "    except FileNotFoundError as exc:\n        return fallback()\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False
+
+    def test_counting_the_exception_and_continuing_stays_flagged(self, tmp_path):
+        """A counter may be asserted on later or may be read by nobody, and this
+        checker cannot see which — so the finding stands and the reader rules."""
+        source = (
+            "def f(items):\n    missing = 0\n    for i in items:\n        try:\n            i()\n"
+            "        except FileNotFoundError:\n            missing += 1\n            continue\n    return missing\n"
+        )
+        _message, passed = self._lines(tmp_path, source)
+        assert passed is False

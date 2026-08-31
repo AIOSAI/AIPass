@@ -383,3 +383,70 @@ def _an_external_citizen_exists(repo_root, declared):
                 if branch_path and (root / branch_path / ".trinity" / "passport.json").is_file():
                     return True
     return False
+
+
+@pytest.fixture
+def case_insensitive_filesystem(monkeypatch):
+    """Make ``Path.glob`` match the way Windows and macOS match.
+
+    THE CONDITION BEING PINNED IS "the glob returned more than the pattern
+    spells", not "the test is running on Windows". @drone hit this on the
+    Windows CI leg — ``*_REGISTRY.json`` also matched a real lowercase file in
+    their tree — and a skipif here would mean the pin only ever fires on the
+    one platform where the defect has already shipped. Injecting the widened
+    match runs the same code path on the Linux dev box, red-first, before CI.
+
+    The emulation is deliberately literal: split the pattern on ``/``, walk one
+    level per part, compare case-folded. ``fnmatchcase`` on lowered strings
+    rather than ``fnmatch``, because ``fnmatch`` itself consults the host
+    platform and would make this fixture a no-op on the box that needs it most.
+    """
+    import fnmatch
+
+    real_glob = Path.glob
+
+    def widened(self, pattern, *args, **kwargs):
+        if "**" in pattern:
+            return real_glob(self, pattern, *args, **kwargs)
+        current = [self]
+        for part in pattern.split("/"):
+            nxt = []
+            for base in current:
+                if base.is_dir():
+                    nxt.extend(
+                        child for child in base.iterdir() if fnmatch.fnmatchcase(child.name.lower(), part.lower())
+                    )
+            current = nxt
+        return iter(sorted(current))
+
+    monkeypatch.setattr(Path, "glob", widened)
+    return widened
+
+
+@pytest.fixture
+def case_insensitive_exists(monkeypatch):
+    """Make ``Path.exists`` answer about a case-folded name, as Windows does.
+
+    @seedgo published this as their own discriminator's blind spot and it is the
+    worse half of the pair: ``(dir / "AIPASS_REGISTRY.json").exists()`` reads a
+    lowercase file with no glob in the line to warn a reader.
+
+    The emulation only ever ADDS a True — an exact hit still answers exactly —
+    so patching it globally cannot break the machinery around the test the way a
+    replacement implementation would.
+    """
+    import os as _os
+
+    real_exists = Path.exists
+
+    def folded(self, *args, **kwargs):
+        if real_exists(self, *args, **kwargs):
+            return True
+        try:
+            with _os.scandir(self.parent) as entries:
+                return any(entry.name.lower() == self.name.lower() for entry in entries)
+        except OSError:
+            return False
+
+    monkeypatch.setattr(Path, "exists", folded)
+    return folded

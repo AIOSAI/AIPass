@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: repo_root.py
-# Description: The one answer to "which repo root does this source tree sit in" — never the process cwd
-# Version: 1.0.0
+# Description: The one answer to "which repo root is this" — never the process cwd, never a folded filename
+# Version: 1.1.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -44,6 +44,21 @@ The source-derived answer is not a guess: on a registry-less checkout it IS the
 checkout, which is the true answer there.  And the absence is said out loud,
 because a fallback nobody can see is how the next one survives.
 
+A FILENAME IS NOT A GLOB AND NOT AN ``exists()`` (1.1.0, 2026-08-31)
+-------------------------------------------------------------------
+Windows and macOS-default filesystems fold case.  ``*_REGISTRY.json`` matches
+``flow_json_registry.json`` there, and ``(parent / "AIPASS_REGISTRY.json").exists()``
+returns True for a file actually named ``aipass_registry.json``.  @drone found
+the first form on the Windows CI leg; @seedgo's fleet discriminator published
+the second as its own blind spot, and it is the worse of the two because there
+is no glob in the line to warn a reader.
+
+Both belong here rather than at each walk.  ``find_repo_root`` IS a cased
+literal check, run at module level in four callers, so a folded bait file would
+be accepted as THE REPO ROOT and every writer built on it would write into a
+tree nobody chose — the quiet defect this module exists to prevent, arriving
+through a different door.
+
 IMPORTING THIS MODULE MUST NEVER RAISE
 --------------------------------------
 Four callers resolve their root at module level, so anything this file does at
@@ -58,6 +73,7 @@ would be a cycle, and the cycle would only appear in whichever import order CI
 happened to take.
 """
 
+import os
 from pathlib import Path
 
 from aipass.memory.apps.handlers.json import json_handler
@@ -79,6 +95,64 @@ SOURCE_ROOT = next(
     (parent.parent for parent in Path(__file__).resolve().parents if parent.name == "src"),
     Path(__file__).resolve().parents[-1],
 )
+
+
+def exists_exactly(path: Path) -> bool:
+    """True when *path* exists AND is spelled on disk exactly as asked.
+
+    ``Path.exists()`` asks the filesystem, and Windows and macOS-default
+    filesystems answer about a case-folded name. So a directory holding
+    ``aipass_registry.json`` reports True for ``AIPASS_REGISTRY.json``, and a
+    caller that meant the one blessed filename silently gets a different file.
+
+    The only reliable way to learn the real spelling is to LIST the parent —
+    ``resolve()`` would work on Windows but follows symlinks, so a legitimately
+    symlinked registry would come back under its target's name and be refused.
+    The listing is cheap where it matters: it only runs when ``exists()``
+    already said yes, which in a walk is at most once.
+
+    An unlistable parent returns True rather than False. This is a READ anchor,
+    and today's behaviour is ``exists()`` alone; refusing a file that is
+    demonstrably there because its directory could not be enumerated would be a
+    new failure invented by the guard.
+
+    Args:
+        path: The exact filename being asserted.
+
+    Returns:
+        True when a directory entry with that exact name exists.
+    """
+    candidate = Path(path)
+    if not candidate.exists():
+        return False
+    try:
+        with os.scandir(candidate.parent) as entries:
+            return any(entry.name == candidate.name for entry in entries)
+    except OSError as exc:
+        logger.debug(
+            f"[repo_root] Cannot enumerate {candidate.parent} ({exc}) — trusting exists() for {candidate.name}"
+        )
+        return True
+
+
+def exactly_named(candidates: list[Path], suffix: str) -> list[Path]:
+    """Keep only the candidates whose filename ends with *suffix* in EXACT case.
+
+    The post-filter for every ``*_REGISTRY.json`` glob in this tree. A glob is
+    a pattern the OS interprets; the rule it spells is about names, and on a
+    folding filesystem those are not the same set.
+
+    The narrowing only ever removes, and it never reorders — callers sort
+    before filtering and the order is the answer in at least one of them.
+
+    Args:
+        candidates: Paths returned by a glob.
+        suffix: The exact-case filename ending required.
+
+    Returns:
+        The candidates whose ``name`` genuinely ends with *suffix*.
+    """
+    return [path for path in candidates if path.name.endswith(suffix)]
 
 
 def _record_fallback(caller: str, marker: str, current: Path) -> None:
@@ -129,7 +203,7 @@ def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, ca
     """
     current = Path(start) if start is not None else Path(__file__).resolve().parent
     for parent in [current] + list(current.parents):
-        if (parent / marker).exists():
+        if exists_exactly(parent / marker):
             return parent
     _record_fallback(caller, marker, current)
     return SOURCE_ROOT

@@ -677,24 +677,35 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
 
 
 class TestRepoRootNeverReadsTheProcessDirectory:
-    """A registry-less world must resolve, deterministically, without cwd."""
+    """A registry-less world must resolve, deterministically, without cwd.
 
+    Runs on every platform, Windows included — see ``_PROBE`` for why the world
+    is built by denying ``getcwd`` rather than by deleting a directory.
+    """
+
+    # The condition is "os.getcwd() raises", NOT "a directory was deleted".
+    # Deleting the working directory is one cause of it and the one @drone's
+    # repro used; it is also IMPOSSIBLE on Windows, which locks the directory a
+    # process stands in, so the rmdir raises PermissionError before the pin's
+    # own claim is reached. Denying getcwd produces the same condition from the
+    # same call site on every platform. test_repo_root.py proves the two worlds
+    # agree on POSIX, which is what licenses using this one where the other
+    # cannot be built.
     _PROBE = (
-        "import os, sys, tempfile, pathlib\n"
+        "import os, sys, pathlib\n"
         "sys.path.insert(0, {src!r})\n"
-        "d = tempfile.mkdtemp()\n"
-        "os.chdir(d); os.rmdir(d)\n"  # the working directory is now gone
+        "os.getcwd = lambda: (_ for _ in ()).throw(FileNotFoundError(2, 'No such file or directory'))\n"
         "{body}\n"
     )
 
     @classmethod
     def _in_a_dead_cwd(cls, body):
-        """Run *body* in a subprocess whose working directory has been deleted.
+        """Run *body* in a subprocess that cannot read its working directory.
 
         A subprocess because the condition is process-wide and unfixable from
-        inside: once cwd is gone, every `Path.cwd()` in the interpreter raises,
-        including pytest's own. Deleting the test runner's cwd would take the
-        suite with it.
+        inside: once cwd cannot be read, every `Path.cwd()` in the interpreter
+        raises, including pytest's own. Imposing it on the test runner would
+        take the suite with it.
         """
         src = str(Path(rs.__file__).resolve().parents[6])
         return subprocess.run(
@@ -791,3 +802,44 @@ class TestRepoRootNeverReadsTheProcessDirectory:
         (root / rs.CORE_REGISTRY).write_text("{}", encoding="utf-8")
 
         assert rs.find_repo_root(root / "src" / "aipass") == root
+
+
+class TestTheResidentWalkReadsNamesNotSpellings:
+    """The same widening @drone found on Windows, on the other of my two globs.
+
+    ``*/*_REGISTRY.json`` is a rule about names; a glob on a case-insensitive
+    filesystem is wider than the rule it spells. The consequence here differs
+    from the external walk's and is worse in one way: this one does not refuse,
+    it ADMITS. A project carrying a lowercase registry beside its real one gets
+    both read, and a branch nobody declared active in the file that counts
+    becomes a resident on Windows and not on Linux.
+
+    See ``case_insensitive_filesystem`` in conftest for why this is injected
+    rather than skipped off-platform.
+    """
+
+    def test_the_injected_world_really_widens(self, fleet, case_insensitive_filesystem):
+        """Positive control: a blinded emulation reports green exactly like a cure."""
+        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+
+        matched = sorted(path.name for path in (fleet / "projects").glob(rs.RESIDENT_REGISTRY_GLOB))
+
+        assert "live_registry.json" in matched and "LIVE_REGISTRY.json" in matched
+
+    def test_a_lowercase_registry_is_not_discovered(self, fleet, case_insensitive_filesystem):
+        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+
+        found = [path.name for path in rs.resident_registry_paths(fleet)]
+
+        assert "live_registry.json" not in found
+        assert "LIVE_REGISTRY.json" in found
+
+    def test_a_lowercase_registry_never_mints_a_resident(self, fleet, case_insensitive_filesystem):
+        """The end-to-end shape: presence in the wrong file must not reach the fleet."""
+        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+        _write(fleet / "projects/live/src/mirage/mirage/.trinity/passport.json", _passport("resident"))
+
+        names = {Path(path).name for path in rs.accepted_resident_paths(fleet)}
+
+        assert "mirage" not in names
+        assert "live" in names, "the real resident was lost while excluding the impostor"

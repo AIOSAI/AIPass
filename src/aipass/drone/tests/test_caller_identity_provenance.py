@@ -192,6 +192,7 @@ class TestProvenanceIsStampedIntoTheEnvironment:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.deletable_cwd
 class TestRoutingFromADeletedDirectory:
     """``drone rm`` on your own cwd now succeeds — so the NEXT command runs here.
 
@@ -308,3 +309,73 @@ class TestRoutingFromADeletedDirectory:
 
         assert result.returncode == 0, result.stderr
         assert "imported registry_handler" in result.stdout
+
+
+class TestRoutingWithoutACwdOnEveryOS:
+    """The same three claims as the class above, built portably.
+
+    Those tests delete the directory they stand in, which Windows refuses (see
+    WINDOWS_CWD_REASON in conftest), so on Windows they are skipped and this is
+    the only cover routing's cwd guards have there.
+
+    Supplied state, not produced: ``Path.cwd`` raises the ENOENT it raises for
+    real. The fourth claim of that class — that the handlers package IMPORTS at
+    all from a dead directory — has no portable sibling and is not given a fake
+    one. Its own docstring says why: the import-time walk reaches ``os.getcwd``
+    inside C via ``Path.resolve()``, where patching ``Path.cwd`` reproduces
+    nothing. On Windows that claim is genuinely untested, and saying so is
+    better than a test that would pass without exercising it.
+    """
+
+    @pytest.fixture()
+    def no_cwd(self, monkeypatch):
+        def gone():
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        yield
+
+    @staticmethod
+    def _route(tmp_path):
+        """Route one command with execution stubbed; return the captured kwargs."""
+        from unittest.mock import MagicMock, patch
+
+        from aipass.drone.apps.handlers import router_handler
+
+        branch = tmp_path / "branch"
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return MagicMock(stdout="", stderr="", exit_code=0)
+
+        with (
+            patch.object(router_handler, "find_entry_point", return_value=branch / "apps" / "x.py"),
+            patch.object(router_handler, "execute_command", side_effect=_capture),
+        ):
+            router_handler.execute_branch_command(branch_path=str(branch), branch_name="x", command="ping")
+        return captured
+
+    def test_routing_does_not_crash(self, no_cwd, tmp_path):
+        assert self._route(tmp_path), "routing died with no current directory"
+
+    def test_the_absent_cwd_is_omitted_rather_than_faked(self, no_cwd, tmp_path):
+        """The target reads AIPASS_CALLER_CWD as a location. It must not get a lie.
+
+        Omitted, not blanked: an empty string is a value the target would try to
+        resolve, and a sentinel is a path somebody eventually treats as one.
+        """
+        captured = self._route(tmp_path)
+
+        assert "AIPASS_CALLER_CWD" not in captured["env"]
+
+    def test_assigned_identity_still_answers(self, no_cwd, monkeypatch):
+        """Who this process IS never depended on where it was standing (S102)."""
+        from aipass.drone.apps.handlers import router_handler
+
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+
+        identity = router_handler.resolve_caller_identity_signal(router_handler.caller_cwd())
+
+        assert identity.name == "commons"
+        assert identity.source == "assigned"

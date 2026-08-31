@@ -38,33 +38,91 @@ import ast
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
+import pytest
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
+
+
+def _answer(result) -> str:
+    """The last line a probe printed — its answer, not its noise."""
+    return result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
 
 
 APPS_DIR = Path(repo_root_mod.__file__).resolve().parents[1]
 REPO_SRC = str(Path(repo_root_mod.__file__).resolve().parents[5])
 
 
-def _run_with_dead_cwd(body: str) -> subprocess.CompletedProcess:
-    """Run a snippet in a process whose working directory has been deleted."""
-    script = textwrap.dedent(
-        f"""
-        import os, shutil, sys, tempfile
-        _d = tempfile.mkdtemp()
-        os.chdir(_d)
-        shutil.rmtree(_d)
-        try:
-            os.getcwd()
-            print("INVALID-PROBE: cwd still alive")
-            raise SystemExit(3)
-        except OSError:
-            pass
+# The condition these tests pin is "os.getcwd() raises" — NOT "a directory was
+# deleted". Deleting the working directory is one CAUSE of that condition, and it
+# is the one cause Windows makes structurally impossible: the OS locks a process's
+# current directory, so rmtree fails with WinError 32 and the world dies at SETUP,
+# never reaching the claim. @memory owns the shared recipe and ruled on
+# 2026-08-31: inject the condition instead. Same call site, same exception, same
+# import-time crash — and it runs on every platform.
+#
+# A skipif(win32) would have been an honest test stating its world, and it is
+# still refused: it would retire the pin on the exact platform whose CI leg found
+# the defect. TestBothConstructionsAgree below licenses the substitution — the
+# injection stands in for the deletion only for as long as that test says the two
+# worlds give the identical answer from the identical call site.
+_INJECT_DEAD_CWD = """
+import os as _os
+
+
+def _no_working_directory(*_args, **_kwargs):
+    raise FileNotFoundError(2, "No such file or directory")
+
+
+_os.getcwd = _no_working_directory
+try:
+    _os.getcwd()
+    print("INVALID-PROBE: the working directory still answers")
+    raise SystemExit(3)
+except FileNotFoundError:
+    pass
+"""
+
+_DELETE_CWD = """
+import os as _os, shutil as _shutil, tempfile as _tempfile
+_d = _tempfile.mkdtemp()
+_os.chdir(_d)
+_shutil.rmtree(_d)
+try:
+    _os.getcwd()
+    print("INVALID-PROBE: the working directory still answers")
+    raise SystemExit(3)
+except OSError:
+    pass
+"""
+
+
+# Without this the dead-cwd probes are weaker than they look on a developer
+# machine: the marker walk SUCCEEDS here, so the fallback that reads the working
+# directory is never reached and the probe proves only that the happy path does
+# not need a cwd. CI has no registry (it is gitignored), which is why the defect
+# showed there and not here. Making the marker unfindable puts every machine in
+# CI's world for the length of the probe.
+_MARKER_ABSENT = """
+from aipass.prax.apps.handlers import repo_root as _rr
+_rr.REGISTRY_MARKER = "AIPASS_REGISTRY_THAT_CANNOT_EXIST.json"
+"""
+
+
+def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, marker_absent: bool = True):
+    """Run a snippet in a process whose working directory cannot be read."""
+    script = (
+        world
+        + textwrap.dedent(
+            f"""
+        import sys
         sys.path.insert(0, {REPO_SRC!r})
         """
-    ) + textwrap.dedent(body)
+        )
+        + (_MARKER_ABSENT if marker_absent else "")
+        + textwrap.dedent(body)
+    )
     # Fed on STDIN, not with -c, and that detail is the test. A `-c` caller
     # produces no usable stack filename so introspection bails early; a `<stdin>`
     # caller produces a RELATIVE pseudo-filename, which is exactly what
@@ -78,22 +136,65 @@ def _run_with_dead_cwd(body: str) -> subprocess.CompletedProcess:
 
 
 class TestSourceRoot:
-    """The fallback is derived from the FILE, and nothing else."""
+    """The fallback is derived from the FILE, and nothing else.
 
-    def test_the_directory_containing_src_is_the_checkout(self):
-        assert repo_root_mod.source_root(Path("/x/checkout/src/aipass/prax/a.py")) == Path("/x/checkout")
+    The component walk is pinned through _walk_to_source_root on BOTH path
+    dialects, from either platform. @devpulse's Windows CI leg found the first
+    version of these tests asserting on ``Path("/x/checkout/src/...")``, which is
+    rooted-but-driveless and therefore NOT absolute as a WindowsPath — so
+    source_root's guard refused the fabricated start and answered with the real
+    checkout. The verdict was TEST-WORLD, not production: source_root calls no
+    resolve() at all, and the module's only resolve() is on __file__, which is
+    absolute and needs no working directory. A fabricated POSIX literal simply
+    stops being the world you meant on the other platform.
+    """
 
-    def test_no_src_component_falls_to_the_filesystem_root(self):
+    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
+    def test_the_directory_containing_src_is_the_checkout(self, flavour):
+        start = flavour("/x/checkout/src/aipass/prax/a.py")
+        assert repo_root_mod._walk_to_source_root(start) == flavour("/x/checkout")
+
+    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
+    def test_no_src_component_falls_to_the_root(self, flavour):
         """Defined, incapable of raising, and absurd enough to fail loudly.
 
         A plausible-looking answer here is worse than an absurd one: it would
         resolve quietly into somebody's home directory.
         """
-        assert repo_root_mod.source_root(Path("/nowhere/at/all/a.py")) == Path("/")
+        walked = repo_root_mod._walk_to_source_root(flavour("/nowhere/at/all/a.py"))
+        assert walked == flavour("/")
+
+    def test_a_drive_qualified_windows_path_walks_to_its_own_checkout(self):
+        """The spelling a real Windows caller actually produces."""
+        start = PureWindowsPath(r"D:\a\AIPass\AIPass\src\aipass\prax\a.py")
+        assert repo_root_mod._walk_to_source_root(start) == PureWindowsPath(r"D:\a\AIPass\AIPass")
+
+    @pytest.mark.parametrize("flavour", [PurePosixPath, PureWindowsPath])
+    def test_the_src_match_is_exact_case_not_folded(self, flavour):
+        """A deliberate semantic, pinned because a mutation folding it survived.
+
+        Case-folding the component match would "work" on Windows and GUESS on
+        Linux, where SRC/ and src/ are genuinely different directories. Guessing
+        across case is the same move that made Path.glob read a lowercase file as
+        the registry trust anchor. An unrecognised layout takes the loud last
+        resort instead — which is what the last resort is for.
+        """
+        assert repo_root_mod._walk_to_source_root(flavour("/x/SRC/aipass/prax/a.py")) == flavour("/")
 
     def test_a_relative_start_is_refused_not_resolved(self):
         """Resolving it would read the working directory this module exists to avoid."""
         assert repo_root_mod.source_root(Path("relative/a.py")) == repo_root_mod.source_root()
+
+    def test_a_rooted_driveless_start_is_refused_on_windows_spelling(self):
+        """The exact shape that made the CI leg red, now stated as the rule.
+
+        source_root only trusts an ABSOLUTE start. On Windows a rooted path with
+        no drive is not absolute, so it is refused — correctly, because resolving
+        it would read the working directory. Pinned so nobody 'fixes' the guard
+        to accept it.
+        """
+        assert not PureWindowsPath("/x/checkout/src/aipass/prax/a.py").is_absolute()
+        assert PurePosixPath("/x/checkout/src/aipass/prax/a.py").is_absolute()
 
 
 class TestFindRepoRoot:
@@ -179,7 +280,7 @@ class TestDeadCwd:
     """@memory's condition: the working directory is gone and something imports."""
 
     def test_the_resolver_answers_without_a_working_directory(self):
-        result = _run_with_dead_cwd(
+        result = _run_without_a_working_directory(
             """
             from aipass.prax.apps.handlers import repo_root
             from pathlib import Path
@@ -198,7 +299,7 @@ class TestDeadCwd:
         introspection.detect_branch_from_path resolves a RELATIVE path first and
         dies one frame earlier.
         """
-        result = _run_with_dead_cwd(
+        result = _run_without_a_working_directory(
             """
             from aipass.prax.apps.modules.logger import get_system_logger
             print("LOGGER", get_system_logger().name)
@@ -207,8 +308,33 @@ class TestDeadCwd:
         assert result.returncode == 0, result.stderr
         assert "LOGGER" in result.stdout, result.stderr
 
+    def test_the_fallback_path_is_the_one_being_exercised(self):
+        """Positive control on the WORLD, not the claim — and the honesty note.
+
+        On this machine the marker walk succeeds, so without _MARKER_ABSENT these
+        probes would only prove the happy path needs no working directory. That
+        is exactly why the defect showed on CI (no registry — it is gitignored)
+        and not here. This asserts the answer really is the source-root fallback,
+        so the branch under test is the one that used to read Path.cwd().
+
+        What this pin CANNOT do is fail against the pre-fix code on a machine that
+        has a registry: the old walk hardcoded its own marker, so nothing in this
+        process could make it miss. That negative control needs a registry-less
+        checkout, and it was run as one — @memory's traceback, reproduced and then
+        cured, 2026-08-31.
+        """
+        result = _run_without_a_working_directory(
+            """
+            from aipass.prax.apps.handlers import repo_root
+            from pathlib import Path
+            print("ANSWER", repo_root.find_repo_root(Path(repo_root.__file__)))
+            """
+        )
+        assert result.returncode == 0, result.stderr
+        assert _answer(result).split(" ", 1)[1] == str(repo_root_mod.source_root())
+
     def test_the_system_logs_dir_resolves_without_a_working_directory(self):
-        result = _run_with_dead_cwd(
+        result = _run_without_a_working_directory(
             """
             from aipass.prax.apps.handlers.config.load import get_system_logs_dir
             print("LOGS", get_system_logs_dir())
@@ -270,6 +396,65 @@ class TestCallerPathResolution:
         assert introspection._resolve_caller_path("/absolute/but/unresolvable.py") is None
 
 
+class TestBothConstructionsAgree:
+    """The licence for substituting the injected world for the deleted one.
+
+    @memory's ruling allows injecting a raising os.getcwd in place of deleting
+    the working directory, because the CONDITION is what the pins are about. This
+    class is the condition on that licence: on POSIX both worlds are buildable,
+    so both must produce the IDENTICAL answer from the IDENTICAL call site. The
+    day they diverge, the stand-in stops being a stand-in and these go red rather
+    than the substitution quietly drifting.
+
+    Skipped on Windows for the reason the substitution exists at all — the OS
+    locks a process's current directory, so the deletion world cannot be built
+    there to compare against.
+    """
+
+    PROBE = """
+        from aipass.prax.apps.handlers import repo_root
+        from pathlib import Path
+        print("ANSWER", repo_root.find_repo_root(Path("/no/such/src/aipass/x/a.py")))
+        """
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the deleted-cwd world is unbuildable on Windows — WinError 32, the OS locks it",
+    )
+    def test_the_injected_world_and_the_deleted_world_give_the_same_answer(self):
+        injected = _run_without_a_working_directory(self.PROBE, world=_INJECT_DEAD_CWD)
+        deleted = _run_without_a_working_directory(self.PROBE, world=_DELETE_CWD)
+
+        assert injected.returncode == 0, injected.stderr
+        assert deleted.returncode == 0, deleted.stderr
+        assert _answer(injected) == _answer(deleted), (
+            f"injected={_answer(injected)!r} deleted={_answer(deleted)!r} — the stand-in no longer stands in"
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="the deleted-cwd world is unbuildable on Windows — WinError 32, the OS locks it",
+    )
+    def test_both_worlds_really_do_break_the_working_directory(self):
+        """Positive control on the WORLDS, not on the claim.
+
+        Each recipe's own INVALID-PROBE guard fires if the working directory
+        still answers; this proves the guard is reachable, so a world that
+        silently failed to break anything could not pass as a dead-cwd test.
+        """
+        probe = """
+            import os
+            try:
+                os.getcwd()
+                print("ALIVE")
+            except OSError:
+                print("BROKEN")
+            """
+        for name, world in (("injected", _INJECT_DEAD_CWD), ("deleted", _DELETE_CWD)):
+            result = _run_without_a_working_directory(probe, world=world)
+            assert "BROKEN" in result.stdout, f"{name}: {result.stdout!r} {result.stderr!r}"
+
+
 # =============================================================================
 # THE SWEEP — no ninth copy
 # =============================================================================
@@ -278,6 +463,19 @@ class TestCallerPathResolution:
 # refresh` with no argument means "the branch I am standing in", and the cwd IS
 # the question there rather than a fallback for a question it could not answer.
 CWD_ALLOWLIST = {"apps/modules/dashboard.py"}
+
+
+def _module_key(relative: PurePath) -> str:
+    """The one spelling a module is named by, on every platform.
+
+    Normalised at the sweep BOUNDARY rather than at each comparison, because a
+    separator-sensitive key is the kind of thing that gets fixed in one place and
+    stays broken in the next. Path.relative_to returns the OS's own separators,
+    so on Windows the raw str() disagreed with the forward-slash allowlist and
+    the sweep convicted a line it had been told to ignore (@devpulse, Windows CI,
+    2026-08-31).
+    """
+    return relative.as_posix()
 
 
 def _modules_reading_the_cwd(root: Path) -> dict:
@@ -299,7 +497,7 @@ def _modules_reading_the_cwd(root: Path) -> dict:
             if (name == "Path" and node.func.attr == "cwd") or (name == "os" and node.func.attr == "getcwd"):
                 lines.append(node.lineno)
         if lines:
-            found[str(path.relative_to(root.parent))] = lines
+            found[_module_key(path.relative_to(root.parent))] = lines
     return found
 
 
@@ -322,6 +520,20 @@ class TestNoPrivateCwdFallback:
         planted.parent.mkdir(parents=True)
         planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n")
         assert _modules_reading_the_cwd(tmp_path / "apps")
+
+    def test_the_allowlist_matches_a_windows_spelled_key(self):
+        """@devpulse's Windows CI leg: the sweep convicted an EXEMPTED line.
+
+        Path.relative_to gives back the OS's own separators, so on Windows the
+        key was ``apps\\modules\\dashboard.py`` while the allowlist holds a
+        forward-slash literal. No match, so an allowlisted file was reported as
+        an offender — the sweep accused the one line it had been told to ignore.
+
+        Pinned with a Windows-spelled relative path so it runs red-first on
+        Linux; a live-path assertion could never have caught this from here.
+        """
+        assert _module_key(PureWindowsPath(r"apps\modules\dashboard.py")) in CWD_ALLOWLIST
+        assert _module_key(PurePosixPath("apps/modules/dashboard.py")) in CWD_ALLOWLIST
 
     def test_the_allowlist_names_only_files_that_exist(self):
         """An allowlist entry for a deleted file is a hole nobody can see."""
@@ -360,7 +572,7 @@ class TestEveryLaneUsesTheSharedResolver:
                     for inner in ast.walk(node)
                 )
                 if not delegates:
-                    private.setdefault(str(path.relative_to(APPS_DIR.parent)), []).append(node.lineno)
+                    private.setdefault(_module_key(path.relative_to(APPS_DIR.parent)), []).append(node.lineno)
         assert not private, (
             f"these modules walk for the repo root themselves instead of calling handlers/repo_root.py: {private}"
         )

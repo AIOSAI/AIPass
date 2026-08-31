@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-13
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -56,6 +56,19 @@ measurement.
   ``classify_entries()`` → both halves from ONE traversal:
       ``["authored"]`` — what this write wrote.   Refuse these.
       ``["carried"]``  — what it carries from disk. Report these.
+      ``["near"]``     — authored and CLOSE to the cap. Report these too.
+
+THE NEAR-CAP LINE (1.7.0, 2026-08-31), asked for by @ai_mail with the best
+argument available: they wrote over the cap FOUR HOURS after being burned by it,
+knowing the number, with it in front of them.  Their words, and the reason this
+is not a knowledge problem: "nothing in the act of writing shows you the limit —
+the only instrument is downstream."  A refusal teaches you at the moment it is
+too late to matter; a near-cap line arrives while there is still room to act.
+
+Only AUTHORED entries are reported near.  A carried near-cap entry is not this
+write's doing, and warning about it on every write is how a channel becomes
+noise nobody reads — the same discriminator that decides refusals, applied to
+the softer signal for the same reason.
 
   ``changed_entries()`` is the authored half alone, kept because @hooks'
   edit_gate calls it by that name — the published contract, unchanged in
@@ -111,6 +124,13 @@ _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 # already imports this module: defining it there and importing it back would
 # close a cycle (entry_limits -> trinity_push -> memory_files -> entry_limits).
 RESHAPE_ONLY_SECTIONS = ("todos",)
+
+
+# How close to the cap earns a line. 0.9 puts a 200-char cap's warning at 180,
+# which is roughly one more sentence of headroom — enough to act on, not so
+# early that most writes trip it. A ratio rather than a fixed margin so it
+# scales with caps that differ by an order of magnitude across entry types.
+NEAR_CAP_RATIO = 0.9
 
 
 def _deep_merge_entry_types(
@@ -362,6 +382,30 @@ def _found_type(value: Any, field: str) -> str:
     return type(value).__name__
 
 
+def is_near_cap(verdict: dict[str, Any]) -> bool:
+    """True when a PASSING verdict is close enough to its cap to be worth a word.
+
+    Deliberately not a second measurement: it reads the numbers
+    :func:`check_entry` already produced, so the warning and the refusal can
+    never disagree about a length.
+
+    A cap of 0 means "no cap known for this type", and there is nothing to be
+    near. Returning True there would put a line on every entry of every type
+    nobody has configured.
+
+    Args:
+        verdict: A verdict dict from :func:`check_entry`.
+
+    Returns:
+        True when the entry is within cap but at or above
+        :data:`NEAR_CAP_RATIO` of it.
+    """
+    cap = verdict.get("cap", 0)
+    if not verdict.get("ok") or cap <= 0:
+        return False
+    return verdict["length"] >= cap * NEAR_CAP_RATIO
+
+
 def _violation(
     type_name: str,
     container: str,
@@ -407,7 +451,7 @@ def _check_dict_container(
     before_container: Any,
     after_container: Any,
     limits: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a dict-shaped container's over-cap entries into authored / carried.
 
     Args:
@@ -419,25 +463,29 @@ def _check_dict_container(
         limits: The dict returned by :func:`load_entry_limits`.
 
     Returns:
-        ``(authored, carried)``. An entry byte-identical to the one under the
-        same key on disk is CARRIED — this write did not write it. Everything
-        else over cap is AUTHORED.
+        ``(authored, carried, near)``. An entry byte-identical to the one under
+        the same key on disk is CARRIED — this write did not write it.
+        Everything else over cap is AUTHORED. ``near`` holds the authored
+        entries that PASS but sit close to the cap.
     """
     if not isinstance(after_container, dict):
-        return [], []
+        return [], [], []
     before_dict = before_container if isinstance(before_container, dict) else {}
     authored: list[dict[str, Any]] = []
     carried: list[dict[str, Any]] = []
+    near: list[dict[str, Any]] = []
 
     for key, after_value in after_container.items():
         after_text = _extract_text(after_value, field)
         verdict = check_entry(type_name, after_text, limits)
+        on_disk = _is_unchanged(after_text, after_value, key in before_dict, before_dict.get(key), field)
         if verdict["ok"]:
+            if is_near_cap(verdict) and not on_disk:
+                near.append(_violation(type_name, container, str(key), verdict))
             continue
         hit = _violation(type_name, container, str(key), verdict, _found_type(after_value, field), field)
-        on_disk = _is_unchanged(after_text, after_value, key in before_dict, before_dict.get(key), field)
         (carried if on_disk else authored).append(hit)
-    return authored, carried
+    return authored, carried, near
 
 
 def _check_list_container(
@@ -447,7 +495,7 @@ def _check_list_container(
     before_container: Any,
     after_container: Any,
     limits: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a list-shaped container's over-cap entries into authored / carried.
 
     Identity is the TEXT, never the index. Rollover removes the tail and every
@@ -463,10 +511,10 @@ def _check_list_container(
         limits: The dict returned by :func:`load_entry_limits`.
 
     Returns:
-        ``(authored, carried)``.
+        ``(authored, carried, near)``. See :func:`_check_dict_container`.
     """
     if not isinstance(after_container, list):
-        return [], []
+        return [], [], []
     before_list = before_container if isinstance(before_container, list) else []
     before_texts = {t for t in (_extract_text(item, field) for item in before_list) if t is not None}
     # Unmeasurable entries are identified by their RAW value, never by the
@@ -476,19 +524,22 @@ def _check_list_container(
     before_unmeasurable = [item for item in before_list if _extract_text(item, field) is None]
     authored: list[dict[str, Any]] = []
     carried: list[dict[str, Any]] = []
+    near: list[dict[str, Any]] = []
 
     for idx, after_item in enumerate(after_container):
         after_text = _extract_text(after_item, field)
         verdict = check_entry(type_name, after_text, limits)
-        if verdict["ok"]:
-            continue
-        hit = _violation(type_name, container, str(idx), verdict, _found_type(after_item, field), field)
         if after_text is None:
             on_disk = after_item in before_unmeasurable
         else:
             on_disk = after_text in before_texts
+        if verdict["ok"]:
+            if is_near_cap(verdict) and not on_disk:
+                near.append(_violation(type_name, container, str(idx), verdict))
+            continue
+        hit = _violation(type_name, container, str(idx), verdict, _found_type(after_item, field), field)
         (carried if on_disk else authored).append(hit)
-    return authored, carried
+    return authored, carried, near
 
 
 def classify_entries(
@@ -511,12 +562,13 @@ def classify_entries(
         limits: The dict returned by :func:`load_entry_limits`.
 
     Returns:
-        ``{"authored": [...], "carried": [...]}`` — violation dicts in the
+        ``{"authored": [...], "carried": [...], "near": [...]}`` — dicts in the
         published six-key shape.
     """
     entry_types = limits.get("entry_types", {})
     authored: list[dict[str, Any]] = []
     carried: list[dict[str, Any]] = []
+    near: list[dict[str, Any]] = []
 
     for type_name, type_def in entry_types.items():
         container = type_def.get("container", "")
@@ -536,11 +588,14 @@ def classify_entries(
         else:
             continue
 
-        type_authored, type_carried = checker(type_name, container, field, before_container, after_container, limits)
+        type_authored, type_carried, type_near = checker(
+            type_name, container, field, before_container, after_container, limits
+        )
         authored.extend(type_authored)
         carried.extend(type_carried)
+        near.extend(type_near)
 
-    return {"authored": authored, "carried": carried}
+    return {"authored": authored, "carried": carried, "near": near}
 
 
 def changed_entries(

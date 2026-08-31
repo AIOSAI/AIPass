@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-09
 # Modified: 2026-08-31
 # =============================================
@@ -40,7 +40,7 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
 from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.router_handler import caller_cwd
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 
 _DEFAULT_SOCKET_DIR = ".ai_central"
 _SOCKET_NAME = "drone_broker.sock"
@@ -65,12 +65,12 @@ def _find_project_root() -> Path | None:
     cwd = caller_cwd()
     if cwd is not None:
         for parent in [cwd, *cwd.parents]:
-            if list(parent.glob("*_REGISTRY.json")):
+            if registries_in(parent):
                 return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
 

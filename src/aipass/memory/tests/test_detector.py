@@ -862,3 +862,93 @@ class TestKnownRegistries:
         names = [b["name"] for b in branches]
         assert "memory" in names
         assert "mybranch" in names
+
+
+class TestTheCallerCwdWalkReadsNamesNotSpellings:
+    """The third of this tree's four ``*_REGISTRY.json`` walks, and the costliest.
+
+    @drone found the case-folding widening on the Windows CI leg and @devpulse
+    routed it to every walk owner; ``registry_scope`` was cured first and this
+    site was named next, by @seedgo's measured fleet discriminator.
+
+    WHY THIS ONE HAD THE MOST TO LOSE. It walks up from the CALLER'S directory —
+    an arbitrary repo this branch does not own — so the bait is not
+    hypothetical: flow's plan counters and ``.spawn/.template_registry.json``
+    sit in every branch. And a folded match here is not merely read once:
+
+    * it is ``persist_registry()``'d into known_registries.json PERMANENTLY, so
+      one run on a folding filesystem leaves the wrong file in the fleet's
+      state forever, and
+    * the ``break`` after the first hit means a spurious NEARER match stops the
+      walk before the real registry above it is ever seen.
+
+    Refusing, admitting and forgetting — the other three walks each do one of
+    those. This one does all three.
+
+    See ``case_insensitive_filesystem`` in conftest for why the condition is
+    injected rather than skipped off-platform.
+    """
+
+    @pytest.fixture
+    def caller_tree(self, tmp_path, monkeypatch):
+        """A caller standing in someone else's repo, with the bait beside the real file."""
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
+        (tmp_path / "aipass_home").mkdir()
+
+        foreign = tmp_path / "foreign_project"
+        foreign.mkdir()
+        (foreign / "FOREIGN_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
+        (foreign / "flow_json_registry.json").write_text('{"branches":[]}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(foreign))
+        return foreign
+
+    def test_the_injected_world_really_widens(self, caller_tree, case_insensitive_filesystem):
+        """Positive control — a blinded fixture reports green exactly like a cure."""
+        matched = sorted(path.name for path in caller_tree.glob("*_REGISTRY.json"))
+
+        assert matched == ["FOREIGN_REGISTRY.json", "flow_json_registry.json"]
+
+    def test_a_lowercase_counter_file_is_never_read_as_a_registry(self, caller_tree, case_insensitive_filesystem):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        found = [path.name for path in detector._find_caller_registries()]
+
+        assert found == ["FOREIGN_REGISTRY.json"]
+
+    def test_a_lowercase_counter_file_is_never_persisted(self, caller_tree, case_insensitive_filesystem):
+        """The part that outlives the run. State written once is believed forever."""
+        from aipass.memory.apps.handlers.monitor import detector
+
+        detector._find_caller_registries()
+
+        persisted = json.loads(detector._KNOWN_REGISTRIES_PATH.read_text(encoding="utf-8"))["registries"]
+        assert not any("flow_json_registry.json" in entry for entry in persisted)
+
+    def test_bait_nearer_than_the_real_registry_does_not_end_the_walk(
+        self, tmp_path, monkeypatch, case_insensitive_filesystem
+    ):
+        """The ``break`` is the second defect, and it is invisible in the first test.
+
+        With the bait in a SUBdirectory the walk starts from, an unfiltered glob
+        stops there and the genuine registry one level up is never found — a
+        silent narrowing, not a noisy wrong answer.
+        """
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
+        (tmp_path / "aipass_home").mkdir()
+
+        foreign = tmp_path / "foreign_project"
+        inner = foreign / "subdir"
+        inner.mkdir(parents=True)
+        (foreign / "FOREIGN_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
+        (inner / "flow_json_registry.json").write_text('{"branches":[]}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(inner))
+
+        found = [path.name for path in detector._find_caller_registries()]
+
+        assert found == ["FOREIGN_REGISTRY.json"]

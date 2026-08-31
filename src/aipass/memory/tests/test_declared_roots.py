@@ -209,8 +209,12 @@ class TestDeclarationOrderSurvivesToTheDoor:
     def test_the_external_walk_visits_roots_in_declaration_order(self, machine):
         """The order has to survive the caller too, or the fix stops at the reader."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
-        visited = [str(item["path"]) for item in rs.external_branches(machine)]
-        roots = [next((name for name in ("wren", "Demo") if f"/{name}/" in path), None) for path in visited]
+        visited = [Path(item["path"]) for item in rs.external_branches(machine)]
+        # Path.parts, never a string split. A separator is an OS detail, and
+        # asking "/wren/" of a path spelled with backslashes answers no on
+        # Windows for every root — which read as "no citizens" rather than as
+        # "the test cannot see them".
+        roots = [next((name for name in ("wren", "Demo") if name in path.parts), None) for path in visited]
         assert {"wren", "Demo"} <= set(roots), f"both roots must contribute citizens, got {visited}"
         assert roots.index("wren") < roots.index("Demo")
 
@@ -480,3 +484,117 @@ class TestTheLiveMachineIsReachable:
         assert not declared, (
             f"external citizens now declare a residency: {declared} -- the presence rule can be revisited"
         )
+
+
+class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
+    """``*_REGISTRY.json`` is a rule about names, and a glob is not that rule.
+
+    @drone hit this on the Windows CI leg: their own tree carries a real
+    lowercase ``..._registry.json``, and Windows globs case-insensitively, so
+    the pattern matched a file the rule excludes. @devpulse routed the question
+    to every walk owner. Both of mine were exposed.
+
+    IT IS NOT A COSMETIC WIDENING HERE, which is why it earns pins rather than
+    a note. Both walks read the match COUNT as meaning: zero registries at a
+    declared root is an error, and more than one is a named refusal rather than
+    a ``sorted()[0]`` pick. So a spurious lowercase neighbour does not add a
+    stray citizen — it silently turns a root that works on Linux into a root
+    that refuses on Windows, and every citizen behind it vanishes from the
+    fleet with a message blaming the repo owner for a file they never wrote.
+    """
+
+    def test_the_injected_world_really_widens(self, machine, case_insensitive_filesystem):
+        """The positive control: prove the fixture has teeth before trusting it.
+
+        A blinded instrument reports green for the same reason a cured defect
+        does. This asserts the raw glob — no filter — genuinely returns the
+        lowercase neighbour, so the pins below are testing a real widening and
+        not an emulation that quietly does nothing.
+        """
+        wren = machine.parent / "wren"
+        _write(wren / "wren_registry.json", _registry(_branch("mirage", "src/mirage")))
+
+        matched = sorted(path.name for path in wren.glob(rs.EXTERNAL_REGISTRY_GLOB))
+
+        assert matched == ["WREN_REGISTRY.json", "wren_registry.json"]
+
+    def test_a_lowercase_neighbour_does_not_make_a_root_ambiguous(self, machine, case_insensitive_filesystem):
+        """The defect: one stray filename, and every citizen behind it is gone."""
+        wren = machine.parent / "wren"
+        _write(wren / "wren_registry.json", _registry(_branch("mirage", "src/mirage")))
+        _write(wren / "src/mirage/.trinity/passport.json", {"citizenship": {}})
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
+
+        names = {item["name"] for item in rs.external_branches(machine)}
+
+        assert "wren" in names, "the declared root refused itself over a file it does not declare"
+        assert "mirage" not in names, "a lowercase registry was read as though it spelled the rule"
+
+    def test_a_lowercase_registry_is_not_a_root_s_only_registry(self, machine, case_insensitive_filesystem):
+        """A root carrying ONLY a lowercase name carries none: absence, said out loud.
+
+        The complement of the case above, and the one that would look like a
+        fix if the filter were written as "drop the extras". There is nothing
+        to keep here, and the walk has to reach the no-registry error rather
+        than read the file.
+        """
+        lonely = machine.parent / "Lonely"
+        _write(lonely / "lonely_registry.json", _registry(_branch("nobody", "src/nobody")))
+        _write(lonely / "src/nobody/.trinity/passport.json", {"citizenship": {}})
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../Lonely")))
+
+        assert rs.external_branches(machine) == []
+
+
+class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
+    """The predicate on its own, on every platform, with no filesystem at all."""
+
+    def test_it_keeps_the_exact_case_and_drops_every_other_spelling(self):
+        candidates = [
+            Path("/x/AIPASS_REGISTRY.json"),
+            Path("/x/WREN_REGISTRY.json"),
+            Path("/x/wren_registry.json"),
+            Path("/x/Wren_Registry.Json"),
+            Path("/x/WREN_REGISTRY.JSON"),
+        ]
+
+        kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
+
+        assert [path.name for path in kept] == ["AIPASS_REGISTRY.json", "WREN_REGISTRY.json"]
+
+    def test_the_suffix_has_to_END_the_name_not_merely_appear_in_it(self):
+        """A backup beside the registry is not a registry.
+
+        ``in`` instead of ``endswith`` reads ``AIPASS_REGISTRY.json.bak`` as the
+        fleet and hands a stale document to every lane behind this walk. It is
+        the one substitution in this predicate a test can actually see.
+
+        AN EQUIVALENT MUTANT, recorded because a mutation run that reports it as
+        killed is lying and the next reader deserves the reason. Swapping
+        ``path.name.endswith(suffix)`` for ``str(path).endswith(suffix)``
+        SURVIVES every test in this class, and no test can kill it: the suffix
+        contains no separator, so a full path can only end with it when its last
+        component does. The two are the same function on any input. ``.name`` is
+        written anyway because it says what the rule IS — a rule about
+        filenames — and the equivalence is a property of this suffix rather than
+        a promise the next one will keep.
+        """
+        kept = rs._exactly_named(
+            [Path("/x/AIPASS_REGISTRY.json.bak"), Path("/x/AIPASS_REGISTRY.json")], rs.CORE_REGISTRY_SUFFIX
+        )
+
+        assert [path.name for path in kept] == ["AIPASS_REGISTRY.json"]
+
+    def test_it_narrows_and_never_reorders(self):
+        """The walk sorts before filtering; the filter must not undo that.
+
+        The sample is deliberately one a case-folding re-sort would reverse
+        (``B`` before ``aa`` by ASCII, after it by ``lower()``). A first draft
+        used ``A``/``C`` and a re-sorting mutant survived it — any order-blind
+        sample makes an order claim that cannot fail.
+        """
+        candidates = [Path("/x/B_REGISTRY.json"), Path("/x/skip_registry.json"), Path("/x/aa_REGISTRY.json")]
+
+        kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
+
+        assert kept == [Path("/x/B_REGISTRY.json"), Path("/x/aa_REGISTRY.json")]

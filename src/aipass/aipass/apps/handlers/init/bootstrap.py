@@ -48,6 +48,7 @@ from aipass.aipass.shared.project_home import (
     is_projects_child,
     is_throwaway_path,
 )
+from aipass.aipass.shared.registry_discovery import registries_in
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,7 @@ def update_project(target: Path) -> dict:
 
     # Locate the project registry to confirm this is an AIPass project and
     # derive the project name without parsing JSON (filename encodes the name).
-    registry_files = list(target.glob("*_REGISTRY.json"))
+    registry_files = registries_in(target)
     if not registry_files:
         raise ValueError("No AIPass project found — run 'aipass init' first")
     registry_path = registry_files[0]

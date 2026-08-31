@@ -47,6 +47,7 @@ except ImportError:
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
 from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
 from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers.repo_root import exactly_named, exists_exactly  # noqa: E402
 from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
 from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
 from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
@@ -149,7 +150,10 @@ def check_and_rollover() -> Dict[str, Any]:
         if not trinity_dir.exists():
             continue
         for pattern in ["local.json", "observations.json"]:
-            for memory_file in trinity_dir.glob(pattern):
+            # Not glob(): the pattern has no wildcard, and a folding filesystem
+            # would serve Local.json here. Rollover REWRITES what this matches,
+            # so a near-miss is damage rather than a miscount.
+            for memory_file in [trinity_dir / pattern] if exists_exactly(trinity_dir / pattern) else []:
                 results["files_checked"] += 1
 
                 try:
@@ -406,7 +410,10 @@ def _get_branch_paths() -> list[Path]:
 
     cwd_found: list[Path] = []
     for parent in [caller_cwd] + list(caller_cwd.parents):
-        for reg in parent.glob("*_REGISTRY.json"):
+        # EXACT CASE -- detector's twin of this walk, and the consequence here
+        # is that a folded match's "branches" become paths this watcher ROLLS
+        # OVER, i.e. rewrites. See repo_root.exactly_named.
+        for reg in exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
         if cwd_found:

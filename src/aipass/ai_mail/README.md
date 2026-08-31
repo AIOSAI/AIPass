@@ -954,6 +954,56 @@ There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and 
 
 **Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins — the fleet ruling's own tie-break — and an error line names every losing claimant. This was a known gap for one day: `declared_roots()` returned `sorted(found)`, so the winner was alphabetical-by-resolved-path and the tie-break the ruling names could not reach this door. Re-reading the anchor here to recover it would have been a second reader of the file the gateway exists to own, so the collision was made loud and the disagreement raised with @memory instead — who dropped the sort (`registry_scope` 4.1.0, 2026-08-30). The error line stays: a tie-break being correct does not make a collision expected.
 
+## Registry Globs Are Re-Checked in Python
+
+`pathlib` delegates glob matching to the filesystem, so on Windows and default
+macOS `*_REGISTRY.json` **also matches** `*_registry.json`. This repo is full of
+bait — 237 lowercase files on this machine when the sweep ran:
+`drone_command_registry.json` sits directly beside drone's tree, every branch
+carries `.spawn/.template_registry.json` (pathlib `*` matches dotfiles, unlike the
+`glob` module), and @flow keeps ten `flow_json/*_registry.json` plan counters.
+Found on `ef029782`'s windows-setup leg, root-caused by @drone, swept fleet-wide.
+
+**Every registry walk in this branch goes through `paths.registries_in()`.** The
+glob still does the walking — only the filesystem knows where files are — but it
+is not trusted with the *answer*: the name is compared again in Python with
+`str.endswith(REGISTRY_SUFFIX)`, where case means what it says. Refusals are
+logged, so on Windows there is a record that the filesystem returned something the
+pattern never asked for.
+
+**Suffix, never the stem.** External projects name registries after themselves —
+`Vera-Studio_REGISTRY.json`, `vera_studio_REGISTRY.json`, `feel_good_app_REGISTRY.json`.
+A filter keyed on the stem would delete real citizens in order to fix this bug, so
+all three spellings are pinned as must-survive.
+
+| Site | What it decides | Reached via |
+|---|---|---|
+| `paths.find_project_root` | which project this is, for the delivery fence | walk up |
+| `users/branch_detection._find_caller_registry` | which registry names the caller | walk up |
+| `email/reply._validate_reply_path` | may a reply leave toward this inbox | ancestors |
+| `registry/read.resident_registry_paths` | the resident roster | `projects/*/` |
+| `registry/read.get_project_tree_branches` | the verified-admin bridge roster | `projects/*/` |
+| `registry/read.get_caller_project_branches` | the caller's citizens | walk up |
+
+The last three were **not** on the sweep's list of four — found by sweeping the
+tree rather than working the list, and all three decide *which citizens exist*.
+
+**What the defect actually did here, measured rather than assumed.** The brief
+said mail would land as the wrong citizen. That needs a decoy carrying a
+`branches` key, and **zero of the 237 lowercase files on this machine have one** —
+so the identity swap is reachable but not currently armed. What *was* live: the
+walk-up sites return the **first** registry they meet and stop, so a counter file
+ends the walk and a genuine external caller resolves to nothing; and
+`find_project_root` returned `src/aipass/drone` as a "project root", which changes
+the cross-project fence's answer with no `branches` key needed at all. Both
+reproduced against the real tree before the fix and dead after it.
+
+**The ban is structural.** `test_registry_case_sweep.py` AST-walks `apps/` and
+fails on any `.glob()`/`.rglob()` reaching for a registry pattern outside the one
+reader — catching a **named constant** as well as a literal, because the
+literal-only version reported my own `resident_registry_paths` site clean while it
+still held the defect.
+
 ## Architecture
 
 Follows the standard AIPass 3-layer pattern:

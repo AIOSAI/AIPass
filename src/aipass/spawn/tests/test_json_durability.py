@@ -25,6 +25,7 @@ a temp already) say so rather than pretending.
 import ast
 import errno
 import json
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -176,8 +177,30 @@ class _Racer:
             t.join(timeout=30)
         return self
 
+    def final_state(self) -> str:
+        """One direct read of the target, after the threads have stopped.
+
+        Returns exactly one of: ``absent`` (never created — not a tear),
+        ``empty`` / ``unparseable`` (torn, right now, on disk), ``unreadable``
+        (the open itself was refused — share-mode or permissions, which is not
+        evidence of tearing and must not be convicted as such), or ``whole``.
+        """
+        try:
+            raw = self.target.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "absent"
+        except OSError:
+            return "unreadable"
+        if raw == "":
+            return "empty"
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError:
+            return "unparseable"
+        return "whole"
+
     def assert_clean(self):
-        """Fail on a torn read; SKIP when the race never happened.
+        """Fail on a torn file; SKIP when the race never happened.
 
         Order matters and is the whole safety argument: the tear check runs
         FIRST, so an observed tear fails loudly no matter how few reads or
@@ -185,24 +208,40 @@ class _Racer:
         unexercised race downgrade to a skip — a test may say "I could not
         measure this", but it may never say "this is broken" when that is what
         it means.
+
+        The tear check reads the target DIRECTLY here as well as through the
+        reader threads' samples. @prax asked for exactly this when reviewing
+        the skip ordering (2026-08-31), and it was a real gap rather than a
+        formality: the readers poll on a 1ms yield, so a file left torn by the
+        final write can go unsampled entirely — and a run ending with reads == 0
+        would then take the skip branch while the target sits torn on disk. One
+        open at assert time cannot be starved by the scheduler. A missing target
+        is still not a tear; never-created is the case the skip exists for.
         """
+        final = self.final_state()
         bad = self.empty + self.unparseable
-        assert bad == 0, (
-            f"concurrent reader observed a torn file: {self.empty} EMPTY + "
-            f"{self.unparseable} UNPARSEABLE out of {self.reads} reads "
-            f"({bad / self.reads * 100:.2f}% unusable) across {self.writes} writes"
+
+        sampled = f"{self.empty} EMPTY + {self.unparseable} UNPARSEABLE out of {self.reads} reads"
+        if self.reads:
+            sampled += f" ({bad / self.reads * 100:.2f}% unusable)"
+
+        assert bad == 0 and final not in ("empty", "unparseable"), (
+            f"torn file: sampled {sampled}; file on disk at the end of the run "
+            f"is {final.upper()} — across {self.writes} writes"
         )
 
         if self.writes == 0:
             pytest.skip(
                 "race not exercised: harness never rewrote the target "
-                f"(reads={self.reads}, writes=0) — 0 writes is a result, not a defect"
+                f"(reads={self.reads}, writes=0, final={final}) — 0 writes is a "
+                "result, not a defect"
             )
         if self.reads == 0:
             pytest.skip(
                 "race not exercised: harness never read "
                 f"(reads=0, writes={self.writes}, target-absent={self.missing}, "
-                f"open-refused={self.refused}) — nothing is claimed either way"
+                f"open-refused={self.refused}, final={final}) — the file itself was "
+                "checked directly and is not torn; nothing else is claimed either way"
             )
 
 
@@ -1298,3 +1337,108 @@ class TestRacerReportsWeatherHonestly:
         racer.assert_clean()
 
         assert racer.reads > 0 and racer.writes > 0
+
+
+@contextmanager
+def _target(content):
+    """A _Racer over a throwaway file with a known final state, zero samples.
+
+    ``content=None`` leaves the target absent. The counters start at zero on
+    purpose: these pins measure what the DIRECT read contributes, so the
+    sampling readers must have contributed nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "final_state.json"
+        if content is not None:
+            target.write_text(content, encoding="utf-8")
+        racer = _Racer(target, lambda n: True)
+        racer.reads = 0
+        racer.writes = 0
+        yield racer
+
+
+def _verdict(racer):
+    """Classify what assert_clean DID: FAILED / SKIPPED / PASSED.
+
+    The pins below must be able to tell a red apart from a skip, and
+    ``pytest.raises(AssertionError)`` cannot: ``pytest.skip`` raises its own
+    exception, which sails straight past the raises block and reports the whole
+    test as SKIPPED — a defeat wearing a pass's clothes. That is the same
+    species @memory killed in their own guard tests on 2026-08-30. Catching
+    both here makes the verdict a value the test asserts on.
+    """
+    try:
+        racer.assert_clean()
+    except AssertionError as exc:
+        return "FAILED", str(exc)
+    except pytest.skip.Exception as exc:
+        return "SKIPPED", str(exc)
+    return "PASSED", ""
+
+
+class TestTheFinalStateIsCheckedDirectly:
+    """@prax's review question, answered by closing it rather than agreeing.
+
+    Reviewing the skip ordering, @prax wrote: "If your tear check reads the file
+    directly at the end rather than only through the reader thread's samples,
+    that closes the last thing I would have asked about."
+
+    It did not, and the honest answer was to build it. ``assert_clean`` judged
+    only what the reader THREADS happened to sample, so a target left torn on
+    disk was invisible whenever no sample landed on the write that tore it —
+    and the run then SKIPPED, with the very reasonable-sounding explanation that
+    nothing had been observed. The ordering was already right; the evidence set
+    was too small. A direct read costs one open and cannot be starved by the
+    scheduler, which is the exact condition under which the sampling reader
+    fails.
+    """
+
+    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self):
+        """reads == 0 must not launder a file that is torn right now."""
+        with _target('{"half') as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "FAILED", (
+            f"a file left torn on disk was reported {verdict} — the sampling "
+            f"readers saw nothing, so only a direct read can catch it: {message}"
+        )
+        assert "torn" in message.lower()
+        assert "UNPARSEABLE" in message
+
+    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self):
+        with _target("") as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "FAILED", f"an empty target was reported {verdict}: {message}"
+        assert "EMPTY" in message
+
+    def test_a_missing_target_is_still_a_skip_not_a_tear(self):
+        """Never created is not torn — the distinction the skip exists for."""
+        with _target(None) as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "SKIPPED", f"a never-created target was reported {verdict}"
+        assert "final=absent" in message
+
+    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self):
+        """Positive control — the direct read must not manufacture reds."""
+        with _target('{"round": 7}\n') as racer:
+            racer.reads = 5
+            racer.writes = 5
+            verdict, message = _verdict(racer)
+
+        assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
+
+    def test_an_unreadable_target_is_not_convicted_as_torn(self):
+        """Share-mode / permission refusal is not evidence of tearing."""
+        with _target('{"whole": true}') as racer:
+            racer.target.chmod(0o000)
+            try:
+                verdict, message = _verdict(racer)
+            finally:
+                racer.target.chmod(0o644)
+
+        if verdict == "PASSED":
+            pytest.skip("running as root — the chmod did not make the file unreadable")
+        assert verdict == "SKIPPED", f"an unreadable target was reported {verdict}: {message}"
+        assert "final=unreadable" in message

@@ -33,6 +33,40 @@ from aipass.spawn.apps.handlers.json import json_handler
 
 
 # =============================================================================
+# REGISTRY DISCOVERY
+# =============================================================================
+
+REGISTRY_SUFFIX = "_REGISTRY.json"
+
+
+def _registry_in(root):
+    """Return the fleet registry directly inside ``root``, or None.
+
+    Filters the glob's results by a case-SENSITIVE suffix check, because the
+    glob alone is not a filter everywhere it runs. On Windows (and on macOS's
+    default case-insensitive volumes) ``glob("*_REGISTRY.json")`` also returns
+    lowercase ``*_registry.json`` files — and ``pathlib``'s ``*`` matches dotted
+    names, unlike a shell glob. Every branch in the fleet carries
+    ``.spawn/.template_registry.json`` and ten ``flow_json`` plan counters, and
+    a dotted name sorts FIRST, so on a case-insensitive volume this lane could
+    hand a template's file-hash counter to the code that repairs registries.
+    Reported by @drone via @devpulse from the round-2 Windows gate, 2026-08-31.
+
+    The check is on the SUFFIX only, never the stem: external projects name
+    their registry after themselves and nothing promises an uppercase stem.
+
+    Picking the first of the sorted matches is inherited behaviour, restated
+    here rather than decided here — one implementation for both call sites so
+    they cannot drift apart, which is the only claim this extraction makes.
+    """
+    root = Path(root)
+    for candidate in sorted(root.glob("*" + REGISTRY_SUFFIX)):
+        if candidate.name.endswith(REGISTRY_SUFFIX):
+            return candidate
+    return None
+
+
+# =============================================================================
 # REGISTRY PATH UPDATE
 # =============================================================================
 
@@ -362,10 +396,7 @@ def detect_pollution(project_root):
     issues = []
     project_name = project_root.name
 
-    registry_path = None
-    for f in sorted(project_root.glob("*_REGISTRY.json")):
-        registry_path = f
-        break
+    registry_path = _registry_in(project_root)
 
     nested = project_root / project_name
     if nested.is_dir():
@@ -483,10 +514,7 @@ def repair_project(project_path, dry_run=False):
     if not project_path.is_dir():
         return {"success": False, "error": f"Project path does not exist: {project_path}"}
 
-    registry_path = None
-    for f in sorted(project_path.glob("*_REGISTRY.json")):
-        registry_path = f
-        break
+    registry_path = _registry_in(project_path)
 
     if registry_path is None:
         return {"success": False, "error": f"No *_REGISTRY.json found in {project_path}"}

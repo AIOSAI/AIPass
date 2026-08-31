@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
 # Modified: 2026-08-31
 # =============================================
@@ -33,7 +33,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import caller_cwd, route_command
+from aipass.drone.apps.modules.router import caller_cwd, registries_in, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
@@ -194,13 +194,13 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
         for i, parent in enumerate([cwd] + list(cwd.parents)):
             if i >= max_depth:
                 break
-            if list(parent.glob("*_REGISTRY.json")):
+            if registries_in(parent):
                 return True
     # AIPASS_HOME fallback — for external projects / global drone usage
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return True
     return False
 

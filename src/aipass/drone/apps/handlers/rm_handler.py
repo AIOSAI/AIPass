@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-02
 # Modified: 2026-08-31
 # =============================================
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.router_handler import caller_cwd
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
@@ -45,12 +45,12 @@ def _find_project_root() -> Path | None:
     cwd = caller_cwd()
     if cwd is not None:
         for parent in [cwd, *cwd.parents]:
-            if list(parent.glob("*_REGISTRY.json")):
+            if registries_in(parent):
                 return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
 

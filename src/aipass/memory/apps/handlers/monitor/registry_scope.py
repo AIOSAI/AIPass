@@ -107,6 +107,10 @@ RESIDENCY_EXTERNAL = "external"
 DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
+# The exact-case ending both globs are narrowed to. Windows and macOS glob
+# case-insensitively, so the pattern alone is wider than the rule it spells.
+CORE_REGISTRY_SUFFIX = "_REGISTRY.json"
+
 
 # The root implied by this SOURCE TREE's layout, re-exported from the one
 # module that computes it. Named here because this module's own pins read it.
@@ -243,11 +247,42 @@ def resident_registry_paths(repo_root: Path | None = None) -> list[Path]:
         return []
 
     found = []
-    for path in sorted(projects.glob(RESIDENT_REGISTRY_GLOB)):
+    for path in _exactly_named(sorted(projects.glob(RESIDENT_REGISTRY_GLOB)), CORE_REGISTRY_SUFFIX):
         if any(part.startswith(".") for part in path.relative_to(projects).parts):
             continue
         found.append(path)
     return found
+
+
+def _exactly_named(candidates: list[Path], suffix: str) -> list[Path]:
+    """Keep only the candidates whose filename ends with *suffix* in EXACT case.
+
+    ``Path.glob`` is case-insensitive on Windows and macOS, so ``*_REGISTRY.json``
+    also matches ``drone_command_registry.json`` there. @drone hit this on the
+    Windows CI leg with a real file in their own tree; @devpulse routed it to
+    every walk owner and this is mine.
+
+    IT IS NOT A COSMETIC WIDENING. Both walks here treat the match count as
+    meaningful: a declared root with no registry is an ERROR, and one with more
+    than one is a REFUSAL by name rather than a sorted()[0] pick. So a spurious
+    lowercase match does not add a stray citizen — it turns a root that works on
+    Linux into a root that refuses on Windows, for a file nobody declared.
+
+    The glob still runs first; this only narrows. A filter that has to be
+    applied at two call sites lives in one function so a third walk cannot be
+    written without it.
+
+    Args:
+        candidates: Paths returned by a glob.
+        suffix: The exact-case filename ending required.
+
+    Returns:
+        The candidates whose ``name`` genuinely ends with *suffix*.
+    """
+    # The body lives in handlers/repo_root.py: detector and memory_watcher
+    # carry the same walk, and a filter re-implemented per walk is how the
+    # ten-copy _find_repo_root defect got written in the first place.
+    return repo_root.exactly_named(candidates, suffix)
 
 
 def read_registry_branches(registry_path: Path, name_from: str = "path") -> list[dict[str, Any]]:
@@ -490,7 +525,7 @@ def external_branches(repo_root: Path | None = None, name_from: str = "path") ->
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
     for root in declared_roots(repo_root):
-        registries = sorted(root.glob(EXTERNAL_REGISTRY_GLOB))
+        registries = _exactly_named(sorted(root.glob(EXTERNAL_REGISTRY_GLOB)), CORE_REGISTRY_SUFFIX)
         if not registries:
             logger.error(
                 f"[registry_scope] Declared root {root} carries no {EXTERNAL_REGISTRY_GLOB} at its top level — "

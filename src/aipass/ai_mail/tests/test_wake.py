@@ -2191,3 +2191,80 @@ class TestModelPolicyReachesBothSpawnLanes:
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
         assert calls["tmux"] == []
+
+
+class TestDispatchStatusLabelsAreACrossBranchContract:
+    """@daemon's scheduler classifies BLOCKED-vs-FAILED by these four step
+    LABELS plus a fail status — never by matching ``status.summary``, because
+    summary is human prose I am free to reword (their S53, 2026-08-30).
+
+    That makes the labels a contract between two branches, and the contract is
+    pinned HERE rather than in their tree: the rename would be written in this
+    file, so this is where it has to go red. If one of these disappears, their
+    scheduler silently reclassifies "never started" as "ran and failed", stamps
+    last_run, and starts eating scheduling periods again — the exact defect they
+    fixed. Renaming one is allowed; doing it without telling @daemon is not.
+    """
+
+    CONTRACT = ("pause", "lock", "blocked", "lock-acquire")
+
+    def test_every_contracted_label_still_exists_in_the_wake_lane(self):
+        """Cheap and total: the four strings @daemon reads must still be emitted
+        somewhere in wake.py. A grep, deliberately — it survives refactors of
+        WHICH path emits a label, and only fails when a label truly leaves."""
+        src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
+        missing = [label for label in self.CONTRACT if f'"{label}"' not in src]
+        assert missing == [], (
+            f"@daemon's scheduler reads these step labels: {missing} no longer exist. "
+            "Tell them before moving one — their block-vs-fail classification depends on it."
+        )
+
+    def test_pause_is_a_named_fail_step(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        pause = tmp_path / ".aipass" / "autonomous_pause"
+        pause.parent.mkdir(parents=True, exist_ok=True)
+        pause.touch()
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is False
+        assert status.find_step("pause")[0] == "fail"
+
+    def test_an_active_lock_is_a_named_fail_step_under_auto(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _check_lock=lambda p: {"pid": 999, "timestamp": "now"})
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is False
+        assert status.find_step("lock")[0] == "fail"
+
+    def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _is_branch_occupied=lambda p: True)
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is False
+        assert status.find_step("blocked")[0] == "fail"
+
+    def test_a_refused_lock_acquire_is_its_own_named_step(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _acquire_lock=lambda p, pid: (False, "held by 4242"))
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert status.find_step("lock-acquire")[0] == "fail"
+
+    def test_resolve_and_blocklist_stay_failures_on_purpose(self, tmp_path, monkeypatch):
+        """The other half of their rule, pinned so it is not "fixed" into
+        consistency later: neither is transient, so nothing about waiting two
+        more minutes changes the answer. They must NOT join the blocked set."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+
+        status, ok = wake_branch("@nonexistent")
+
+        assert ok is False
+        assert status.find_step("resolve")[0] == "fail"
+        assert status.find_step("blocked") is None, "a missing branch is not a transient block"

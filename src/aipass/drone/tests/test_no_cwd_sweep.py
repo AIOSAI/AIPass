@@ -136,6 +136,7 @@ class TestTheDeleteLaneSurvives:
         assert "current directory" in results[0][2].lower(), results
 
 
+@pytest.mark.deletable_cwd
 class TestTheDeleteLaneSurvivesForReal:
     """The end-to-end case, in a subprocess with a genuinely deleted directory.
 
@@ -299,3 +300,78 @@ class TestTheSweepIsComplete:
                     offenders.append(f"{source.relative_to(root)}:{number}")
 
         assert offenders == [], "bare working-directory reads outside caller_cwd(): " + ", ".join(offenders)
+
+
+class TestTheWindowsSkipIsNarrow:
+    """A skip that fires everywhere reports its own defeat as a pass.
+
+    Nine tests in this branch build their world by deleting the directory they
+    stand in, and Windows will not let a process do that (conftest's
+    WINDOWS_CWD_REASON states the ruling: the recipe is unavailable there, not
+    the state). They carry ``@pytest.mark.deletable_cwd`` and conftest skips
+    them on win32 only.
+
+    "Only" is the whole load-bearing word. A condition that quietly became true
+    everywhere would turn nine red tests into nine green ones and read the same
+    in the summary line — @memory found exactly that mutant surviving in their
+    own tree, which is why this is measured rather than asserted about the
+    marker object.
+    """
+
+    MARKED = (
+        "tests/test_deletion_log.py::TestRecordFailureIsContained::test_record_deletion_does_not_raise_when_cwd_is_gone"
+    )
+
+    def test_a_marked_test_runs_on_every_platform_but_windows(self):
+        import aipass.drone.apps as drone_apps
+
+        branch_root = Path(drone_apps.__file__).resolve().parent.parent
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", self.MARKED, "-q", "-rs", "--timeout=120", "-p", "no:randomly"],
+            cwd=str(branch_root),
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        if sys.platform == "win32":
+            assert "1 skipped" in result.stdout, result.stdout
+            assert "current directory" in result.stdout, "the skip did not say why"
+        else:
+            assert "1 passed" in result.stdout, result.stdout
+            assert "skipped" not in result.stdout, (
+                "a deletable-cwd test was skipped on a platform that can delete its own cwd: " + result.stdout
+            )
+
+    def test_the_hook_skips_marked_items_on_windows_and_only_there(self, monkeypatch):
+        """The Windows half of the ruling, checked from a machine that is not Windows.
+
+        The subprocess pin above can only observe THIS platform, so a
+        ``pytest_collection_modifyitems`` that stopped matching the marker
+        entirely would leave it green here and hand Windows nine reds back.
+        The hook is a function; called directly with the platform it branches
+        on, both of its answers are observable anywhere.
+        """
+        from types import SimpleNamespace
+
+        from aipass.drone.tests import conftest as drone_conftest
+
+        def one_item():
+            recorded = []
+            return SimpleNamespace(
+                keywords={drone_conftest.DELETABLE_CWD_MARKER: True},
+                recorded=recorded,
+                add_marker=recorded.append,
+            )
+
+        monkeypatch.setattr(drone_conftest.sys, "platform", "win32")
+        on_windows = one_item()
+        drone_conftest.pytest_collection_modifyitems(None, [on_windows])
+        assert on_windows.recorded, "a deletable-cwd test was left to run on Windows"
+        assert drone_conftest.WINDOWS_CWD_REASON in str(on_windows.recorded[0])
+
+        monkeypatch.setattr(drone_conftest.sys, "platform", "linux")
+        elsewhere = one_item()
+        unmarked = SimpleNamespace(keywords={}, recorded=[], add_marker=lambda m: None)
+        drone_conftest.pytest_collection_modifyitems(None, [elsewhere, unmarked])
+        assert not elsewhere.recorded, "the skip reached a platform that can delete its own cwd"

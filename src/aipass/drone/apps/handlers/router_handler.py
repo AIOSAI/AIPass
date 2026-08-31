@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-09
-# Modified: 2026-08-08
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -102,6 +102,33 @@ def find_entry_point(branch_path: str, branch_name: str) -> Path:
 
 
 _REGISTRY_SUFFIX = "_REGISTRY.json"
+_REGISTRY_GLOB = f"*{_REGISTRY_SUFFIX}"
+
+
+def registries_in(directory: Path) -> List[Path]:
+    """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted.
+
+    THE GLOB IS NOT THE FILTER. ``Path.glob`` asks the FILESYSTEM to match, and
+    on a case-insensitive one — Windows, and macOS by default — ``*_REGISTRY.json``
+    also matches ``*_registry.json``. That is not hypothetical: this repository
+    ships ``drone_command_registry.json`` beside the drone package, plus
+    ``flow_json/fplan_registry.json`` and a ``.spawn/.template_registry.json`` in
+    every branch (pathlib's ``*`` matches dotfiles, unlike the ``glob`` module).
+    Windows CI caught it as a test red — ``find_registry()`` returned
+    ``src/aipass/drone/drone_command_registry.json`` — but the red was the
+    smaller half. A registry file is a project's TRUST ANCHOR: it decides which
+    installation a caller belongs to, which project name gets stamped on their
+    identity, and where the delete lane thinks the project root is. A plan-id
+    counter served in that role answers a question it was never asked.
+
+    So the name is re-checked in Python, where ``str.endswith`` is case-sensitive
+    on every platform. Suffix only, never the stem: external projects name their
+    registry after themselves and nothing promises the stem is uppercase.
+
+    One reader, called from every walk in this tree — the tenth private copy of
+    ``glob("*_REGISTRY.json")`` is how a fix lands on some of N identical paths.
+    """
+    return sorted(p for p in directory.glob(_REGISTRY_GLOB) if p.name.endswith(_REGISTRY_SUFFIX))
 
 
 def _project_name_from_registry(reg_file: Path) -> str | None:
@@ -210,9 +237,12 @@ def detect_caller_signal(cwd: Path) -> CallerSignal:
     # Fallback: detect project name from registry file (callers at a project root)
     current = cwd.resolve()
     for _ in range(10):
-        # sorted() so a directory holding two registries resolves the same way
-        # every time, matching registry_handler._first_registry_in.
-        for reg_file in sorted(current.glob(f"*{_REGISTRY_SUFFIX}")):
+        # registries_in() sorts, so a directory holding two registries resolves
+        # the same way every time, matching registry_handler._first_registry_in
+        # — and drops the case-insensitive filesystem's extra matches, which
+        # here would have stamped the caller with a project name derived from
+        # whatever lowercase *_registry.json the walk passed first.
+        for reg_file in registries_in(current):
             project_name = _project_name_from_registry(reg_file)
             if project_name:
                 return CallerSignal(project_name, "project")

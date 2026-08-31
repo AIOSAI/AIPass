@@ -113,7 +113,16 @@ def _find_caller_registries() -> List[Path]:
 
     cwd_found: List[Path] = []
     for parent in [caller_cwd] + list(caller_cwd.parents):
-        for reg in parent.glob("*_REGISTRY.json"):
+        # EXACT CASE, and this walk is the one that had most to lose by it.
+        # It runs from the CALLER'S directory -- an arbitrary repo -- and a
+        # folding filesystem serves any lowercase *_registry.json there:
+        # flow's plan counters, .spawn/.template_registry.json, bait in every
+        # branch. A match here is not merely read, it is persist_registry()'d
+        # into known_registries.json permanently, and the `break` below means a
+        # spurious nearer hit STOPS the walk before the real registry above it
+        # is ever seen. Refusing, admitting, and forgetting -- this one does all
+        # three. See repo_root.exactly_named.
+        for reg in repo_root.exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
         if cwd_found:

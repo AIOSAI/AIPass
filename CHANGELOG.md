@@ -106,6 +106,62 @@ PyPI version — not the changelog header.
     satisfied by the function's own last-resort return); two POSIX separator
     pins converted to `Path.parts`.
 
+- **Windows joins the one universe: the case-fold registry defect, closed at
+  every site in the fleet** (FPLAN-0461 round 3, dawn shift). ef029782's
+  windows-setup leg — the last red gate, 20/21 green — failed only in the
+  night's own new tests, and the diagnosis found a real cross-platform defect
+  under the noise: pathlib's glob is case-insensitive on Windows (and default
+  macOS), so `*_REGISTRY.json` also matches `*_registry.json` — and the bait is
+  everywhere (ten `flow_json/*_registry.json` plan counters, spawn's dotfile
+  `.template_registry.json` in every branch; pathlib's `*` matches dotfiles).
+  CI's proof: `find_registry()` served `drone_command_registry.json` as a
+  trust-anchor candidate. **44 exposed walk sites cured across 9 branches**
+  (drone 13 → one `registries_in` reader; aipass 7 incl. the shared
+  `registry_discovery` everyone imports; ai_mail 6 — two more than any list
+  named, one hidden behind a CONSTANT pattern a literal grep cannot see, and
+  the live harm measured rather than assumed: a walk that ENDS at the decoy
+  resolved an external caller to None, and `find_project_root` handed the
+  fence a wrong root; seedgo 9 → one reader + the measured two-clause checker
+  discriminator, build queued; memory 4 — detector PERSISTED the folded match
+  into fleet state forever and a nearer decoy `break`-ended the walk above the
+  real registry; spawn 2; prax 1; commons 1 — whose
+  `name != "AIPASS_REGISTRY.json"` filter was the instructive near-miss; and
+  devpulse 2). Fix shape everywhere: glob, then re-check the name with
+  case-sensitive `endswith("_REGISTRY.json")` — suffix only, never the stem,
+  so externally-named registries survive. Memory's follow-through went one
+  door further: a cased LITERAL folds too, so `find_repo_root`'s
+  `(parent / "AIPASS_REGISTRY.json").exists()` could accept a lowercase file
+  as THE repo root — `exists_exactly` now guards it and three sibling lanes.
+  All pins red-first on Linux by emulating the widened listing, with positive
+  AND negative instrument controls (aipass's first control re-implemented the
+  matcher's logic and proved nothing while the walk visited zero files;
+  commons measured that without the control, breaking the emulator turns every
+  pin green). Precedent noted for the record: prax's branch_detector and eight
+  aipass sites already carried the exact cure — it never traveled to the sites
+  that globbed.
+
+- **The dead-cwd test world, made honest on Windows** (same round). The night's
+  deleted-cwd pins died at SETUP on Windows — `WinError 32`, the OS locks a
+  process's cwd, the world is unbuildable by chdir+rmdir. Two rulings, both
+  pinned, each owner choosing per claim: memory's — pin the CONDITION
+  (`os.getcwd()` raises), not the CAUSE (a deleted directory): inject a raising
+  `getcwd` in the child, licensed by `TestBothConstructionsAgree` (both worlds
+  must agree on POSIX or the stand-in expires); drone's — Windows removes the
+  RECIPE, not the STATE (a disconnected share is a live dead cwd), so the
+  deletion tests keep running where they can under a registered
+  `deletable_cwd` marker whose skip is itself pinned observable from Linux,
+  with portable siblings supplying the state and the one genuinely lost claim
+  named out loud. Spawn measured which ruling their defect needed instead of
+  picking by taste, and added the round's best control: a negative control for
+  the positive control, after a mutant showed a lying `CONTROL_LIVE` probe
+  turning every portable pin vacuously green. Prax's entry found the deeper
+  vacancy: their dead-cwd pins passed on dev machines because the marker walk
+  succeeds there and the cwd fallback never runs — the probes now hide the
+  marker so every machine runs CI's world. Hooks' two remaining Windows reds
+  were separator spellings in the tests (`Path.parts` tail comparison now) —
+  and the fence-fix measurement arrived: TestScriptedLaneCatches is GREEN on
+  the real Windows runner; the dual-dialect gate holds on every OS.
+
 ### Added
 
 - **daemon+ai_mail+hooks+memory: Vera woke** (FPLAN-0460 closed, c9d0327e —

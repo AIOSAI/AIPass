@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-08-31T03:00:00.000000"
+    "last_updated": "2026-08-31T05:00:00.000000"
   },
   "bypass": [
     {
@@ -184,11 +184,6 @@
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure argument-inspection predicate \u2014 no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log prax itself is meant to keep readable. Same rule and same measured reason adopted by @memory, @trigger, @drone and @ai_mail for their help_flags handlers (convention settled 2026-08-13, DPLAN-0291 rule E)."
-    },
-    {
-      "file": "apps/handlers/repo_root.py",
-      "standard": "json_structure",
-      "reason": "Architectural \u2014 this handler runs INSIDE the construction of prax's system logger (config/load.py calls it while logger.py is still building). json_handler.log_operation() WRITES state, so wiring it here would put a file write on the import path of every branch in the fleet \u2014 the import-time-write defect @drone flagged on 2026-08-31, in the one module that must be reachable before logging exists. Importing json_handler would also break the pin that this module imports nothing from aipass, which is @memory's caveat: a diagnostic that needs the logger it is being emitted from is a second crash wearing a diagnostic's clothes. Raised with @seedgo as a candidate standing exemption rather than taken silently."
     }
   ],
   "notes": {

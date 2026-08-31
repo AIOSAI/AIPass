@@ -52,6 +52,7 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_tmux,
     detect_wt,
 )
+from aipass.aipass.shared.registry_discovery import registries_in
 
 try:
     import questionary as _questionary  # type: ignore[import-untyped]
@@ -819,7 +820,7 @@ def run_init(
 
     # Ensure scaffold exists — only for aipass_framework
     cwd = Path.cwd()
-    if template == TEMPLATE_AIPASS and not list(cwd.glob("*_REGISTRY.json")):
+    if template == TEMPLATE_AIPASS and not registries_in(cwd):
         from aipass.aipass.apps.handlers.init.bootstrap import init_project
 
         if not dry_run:

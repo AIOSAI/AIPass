@@ -18,21 +18,15 @@ from typing import Dict, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers import registry_scan
 
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    cwd = Path.cwd()
-    for parent in [cwd] + list(cwd.parents):
-        matches = sorted(parent.glob("*_REGISTRY.json"))
-        if matches:
-            return matches[0]
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        matches = sorted(parent.glob("*_REGISTRY.json"))
-        if matches:
-            return matches[0]
-    return Path.cwd() / "AIPASS_REGISTRY.json"
+    # Delegates: the name is the contract, the private glob walk was the disease.
+    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
+    # a flow_json plan counter could be served as the trust anchor.
+    return registry_scan.find_registry()
 
 
 def discover_branches() -> List[Dict]:

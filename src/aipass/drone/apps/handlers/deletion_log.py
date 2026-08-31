@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-08-31
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -43,7 +43,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd, resolve_caller_identity
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in, resolve_caller_identity
 
 _LOG_DIR_NAME = ".ai_central"
 _LOG_NAME = "deletions.jsonl"
@@ -92,12 +92,12 @@ def _find_project_root() -> Path | None:
     """
     cwd = caller_cwd()
     for parent in [cwd, *cwd.parents] if cwd is not None else []:
-        if list(parent.glob("*_REGISTRY.json")):
+        if registries_in(parent):
             return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
 

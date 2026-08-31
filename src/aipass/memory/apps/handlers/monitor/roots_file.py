@@ -129,18 +129,34 @@ def _resolve(repo_root: Path | None, raw: str) -> Path:
 
 
 def _spell(repo_root: Path | None, resolved: Path) -> str:
-    """Relative to home when it fits, absolute when it does not.
+    """Relative to home when it fits, absolute when it does not — POSIX-spelled either way.
 
     Relative keeps ``/home/<someone>`` out of a public repo and survives a
     checkout move as long as siblings stay siblings; a root that lives nowhere
     near home has no relative spelling worth reading and keeps its absolute one.
+
+    THE SEPARATOR IS PART OF THE CONTRACT, decided 2026-08-31 after a Windows CI
+    red, and decided rather than worked around: a declared row is ALWAYS written
+    with forward slashes. ``str()`` on a Windows path yields ``..\\wren``, so the
+    same declaration had two spellings depending on which machine ran ``add``.
+
+    Forward slashes because they are the only spelling BOTH platforms read:
+    ``Path("../wren")`` and ``Path("C:/proj/wren")`` resolve correctly on
+    Windows, while ``..\\wren`` is a filename on POSIX, not a path. One
+    spelling means a row can be compared, copied and diffed without knowing who
+    wrote it — and the anchor is a declaration Patrick blesses, so it has to
+    read the same to a human on either machine.
+
+    Bending the test instead would have left the writer emitting whichever
+    separator the OS happened to prefer, which is not a contract, it is a
+    coincidence that has been holding.
     """
     root = (Path(repo_root) if repo_root is not None else find_repo_root()).resolve()
     try:
-        return str(Path("..") / resolved.relative_to(root.parent))
+        return (Path("..") / resolved.relative_to(root.parent)).as_posix()
     except ValueError:
         logger.debug(f"[roots_file] {resolved} is not a sibling of {root} — declaring it absolute")
-        return str(resolved)
+        return resolved.as_posix()
 
 
 def init_roots(repo_root: Path | None = None, today: str | None = None) -> tuple[bool, str]:

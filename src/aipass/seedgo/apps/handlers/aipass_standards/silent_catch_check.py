@@ -65,6 +65,81 @@ def _has_raise(nodes: list[ast.stmt]) -> bool:
     return False
 
 
+#: Catching these says "something went wrong", which is not a classification.
+#: DOTTED names are compared whole: ``pytest.skip.Exception`` is a specific type
+#: whose last component happens to read "Exception", and matching on the
+#: attribute alone rejected it (found by its own pin, 2026-08-31).
+_BROAD_EXCEPTIONS = frozenset({"Exception", "BaseException", "builtins.Exception", "builtins.BaseException"})
+
+
+def _caught_type_names(handler: ast.ExceptHandler) -> list[str]:
+    """The exception names this handler catches; empty for a bare ``except:``."""
+    caught = handler.type
+    if caught is None:
+        return []
+    nodes = caught.elts if isinstance(caught, ast.Tuple) else [caught]
+    names = []
+    for node in nodes:
+        dotted = _dotted_name(node)
+        if dotted:
+            names.append(dotted)
+    return names
+
+
+def _dotted_name(node: ast.expr) -> str:
+    """``pytest.skip.Exception`` for an Attribute chain, ``ValueError`` for a Name."""
+    parts = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return ""
+    parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
+def _converts_the_exception_to_a_value(handler: ast.ExceptHandler) -> bool:
+    """True when the handler turns a NAMED exception into a returned constant.
+
+    ``except FileNotFoundError: return "absent"`` does not swallow anything —
+    the exception's information becomes the return value and the caller decides
+    (@spawn, 2026-08-31, whose final_state() and _verdict() helpers answer
+    'absent' / 'unreadable' / 'FAILED' / 'SKIPPED'). A logger call there would
+    route production logging out of a suite, which is what the hygiene lane
+    exists to stop, so the two standards were pulling opposite ways.
+
+    TWO CLAUSES, both measured here:
+      1. the handler names a SPECIFIC exception type — a bare ``except:`` or
+         ``except Exception`` catches everything, so "it failed" is all the
+         caller learns and the type carries no meaning;
+      2. the body is exactly one ``return <constant>`` — control leaves with a
+         value. Anything else (a second statement, a computed return, a pass, a
+         continue) is not this shape and keeps its finding.
+
+    Measured across the fleet before landing: 17 handlers match (14 in tests,
+    3 in production), out of 27 single-return-constant handlers — the other 10
+    catch Exception or bare and stay flagged. A narrow shape, not an amnesty.
+    """
+    names = _caught_type_names(handler)
+    if not names or set(names) & _BROAD_EXCEPTIONS:
+        return False
+    if len(handler.body) != 1:
+        return False
+    only = handler.body[0]
+    if not isinstance(only, ast.Return) or only.value is None:
+        return False
+    if isinstance(only.value, ast.Constant):
+        return True
+    # `except AssertionError as exc: return ("FAILED", str(exc))` carries MORE
+    # than a constant does. Keying on ast.Constant alone flagged the better
+    # version of the same pattern (@spawn's _verdict, caught by running the
+    # rule against their real file rather than against my own examples).
+    if handler.name:
+        return any(isinstance(node, ast.Name) and node.id == handler.name for node in ast.walk(only.value))
+    return False
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check a Python file for silent exception catches.
@@ -153,6 +228,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         # An except block is "silent" when it has neither a logger call
         # nor a raise -- it swallows the exception without reporting it
         if _has_logger_call(body) or _has_raise(body):
+            continue
+
+        # Classifying, not swallowing: a named exception becomes a returned value.
+        if _converts_the_exception_to_a_value(node):
             continue
 
         silent_lines.append(node.lineno)

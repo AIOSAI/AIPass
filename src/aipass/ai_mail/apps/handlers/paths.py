@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: paths.py
 # Description: Shared path utilities for ai_mail handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -40,6 +40,70 @@ _CWD_FALLBACK_WARNED = False
 # and is on the ancestor chain from this package, so the right answer was always
 # available on a fresh checkout; it was simply never asked for.
 REPO_ROOT_MARKERS = ("AIPASS_REGISTRY.json", "pyproject.toml")
+
+# The suffix a registry file must END with, case exactly as written.
+#
+# SUFFIX, never the stem. External projects name their registry after
+# themselves — Vera-Studio_REGISTRY.json, vera_studio_REGISTRY.json — so a check
+# keyed on the stem would delete real citizens in order to fix this bug.
+REGISTRY_SUFFIX = "_REGISTRY.json"
+REGISTRY_GLOB = f"*{REGISTRY_SUFFIX}"
+
+
+def registries_in(directory: Path, pattern: str = REGISTRY_GLOB) -> list:
+    """Registry files under *directory*, with the NAME re-checked case-sensitively.
+
+    The one filtered reader every registry walk in this branch goes through.
+    ``pathlib`` delegates matching to the filesystem, so on Windows and default
+    macOS ``*_REGISTRY.json`` also matches ``*_registry.json`` — and this repo is
+    full of bait: ``drone_command_registry.json`` sits beside drone's tree, every
+    branch carries ``.spawn/.template_registry.json`` (pathlib ``*`` matches
+    dotfiles, unlike the ``glob`` module), and @flow keeps ten
+    ``flow_json/*_registry.json`` plan counters. Measured on CI, ``find_registry``
+    returned a command table as the trust-anchor candidate (@drone, ef029782).
+
+    The glob still does the walking — only the filesystem knows where the files
+    are. What it cannot be trusted with is the ANSWER, so the name is compared
+    again here in Python, where case means what it says.
+
+    Why this matters in ai_mail specifically: these walks are identity-bearing.
+    They answer "which project is this" for the cross-project delivery fence and
+    "which registry names the caller" for branch detection. A counter file
+    accepted as a registry is the directory-name-as-identity species arriving
+    through a different door.
+
+    Args:
+        directory: Where to look.
+        pattern: Glob pattern, defaulting to one level. Callers pass a deeper
+            pattern (``*/*_REGISTRY.json``) for tree discovery; the SUFFIX check
+            below is applied whatever the depth, which is the whole point of
+            routing every depth through one function.
+
+    Returns:
+        Sorted list of matching paths. Sorted for a deterministic pick when a
+        directory holds several — callers that only want existence read the
+        list's truthiness.
+    """
+    try:
+        found = list(directory.glob(pattern))
+    except OSError as exc:
+        logger.warning("[paths] registries_in: glob failed at %s: %s", directory, exc)
+        return []
+
+    kept = []
+    for candidate in found:
+        if candidate.name.endswith(REGISTRY_SUFFIX):
+            kept.append(candidate)
+        else:
+            # Named, never silent. On Linux this branch is unreachable and the
+            # log stays empty; on Windows it is the only record that the
+            # filesystem handed back something the pattern did not ask for.
+            logger.info(
+                "[paths] registries_in: %s refused — name does not end with %s (case-insensitive filesystem)",
+                candidate.name,
+                REGISTRY_SUFFIX,
+            )
+    return sorted(kept)
 
 
 def find_repo_root() -> Path:
@@ -102,17 +166,24 @@ def find_repo_root() -> Path:
 def find_project_root(start: Path) -> Optional[Path]:
     """Walk up from *start* to find the first *_REGISTRY.json (project root).
 
+    Reads through :func:`registries_in`, so a lowercase counter file cannot be
+    mistaken for a registry on a case-insensitive filesystem. This answer feeds
+    the cross-project delivery fence (``delivery.py``), where a wrong root makes
+    the fence compare two different questions and refuse ordinary same-project
+    mail.
+
+    One behaviour change came with that: an unreadable directory used to abort
+    the whole walk and return None. It now skips that level and keeps climbing —
+    a registry found higher up is still a real registry, and for the fence the
+    new direction fails CLOSED (a found root can refuse; None always allows).
+
     Returns the directory containing the registry, or None if not found.
     Stops at filesystem root.
     """
     current = start.resolve()
     for candidate in [current] + list(current.parents):
-        try:
-            if any(candidate.glob("*_REGISTRY.json")):
-                return candidate
-        except OSError as exc:
-            logger.warning("[paths] find_project_root: glob failed at %s: %s", candidate, exc)
-            break
+        if registries_in(candidate):
+            return candidate
     return None
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -23,6 +23,10 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
     caller_cwd,
+    # Re-exported, not used here: apps/drone.py reaches handlers through this
+    # module rather than importing them directly (the same route caller_cwd
+    # already takes), so the entry point keeps one seam into the handler layer.
+    registries_in,  # noqa: F401
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch

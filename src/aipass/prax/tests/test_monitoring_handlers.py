@@ -999,6 +999,56 @@ _FAKE_HOME = Path("/fakehome/user")
 _FAKE_PROJECTS = _FAKE_HOME / "Projects"
 
 
+class TestExactCaseRegistries:
+    """Path.glob is case-INSENSITIVE on Windows, and the registry is a trust anchor.
+
+    @memory found both of their registry walks exposed to this on 2026-08-31 and
+    closed it with an exact-case post-filter; @devpulse asked whether any prax
+    walk globbed a cased pattern. One did: the projects/ sweep in branch_detector.
+
+    Pinned by driving the FILTER with a stand-in glob, so the assertion runs on
+    Linux — where the real glob is case-sensitive and could never produce the
+    input that breaks it. A live-directory test here would be green on the only
+    platform I can run and silent on the one that has the defect.
+    """
+
+    def test_a_lowercase_registry_is_rejected_even_when_the_glob_returns_it(self, tmp_path, monkeypatch):
+        mod = _import_branch_detector()
+
+        real = tmp_path / "PROJECT_REGISTRY.json"
+        windows_only = tmp_path / "project_registry.json"
+        for path in (real, windows_only):
+            path.write_text("{}")
+
+        # Stand in for the Windows matcher: return BOTH, the way it would there.
+        monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
+
+        assert mod._exact_case_registries(tmp_path) == [real]
+
+    def test_the_exact_case_name_still_passes(self, tmp_path):
+        mod = _import_branch_detector()
+        real = tmp_path / "AIPASS_REGISTRY.json"
+        real.write_text("{}")
+        (tmp_path / "notes.json").write_text("{}")
+
+        assert mod._exact_case_registries(tmp_path) == [real]
+
+    def test_the_stand_in_really_would_have_passed_the_bad_name_through(self, tmp_path, monkeypatch):
+        """Positive control: without the filter the lowercase file gets in.
+
+        Otherwise a stand-in that quietly returned one path would make the pin
+        vacuous and it would read as proof.
+        """
+        real = tmp_path / "PROJECT_REGISTRY.json"
+        windows_only = tmp_path / "project_registry.json"
+        for path in (real, windows_only):
+            path.write_text("{}")
+        monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
+
+        unfiltered = sorted(tmp_path.glob("*_REGISTRY.json"))
+        assert windows_only in unfiltered
+
+
 class TestFindRepoRoot:
     """Tests for BranchDetector._find_repo_root()."""
 

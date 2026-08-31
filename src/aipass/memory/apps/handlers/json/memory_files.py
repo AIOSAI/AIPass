@@ -135,6 +135,21 @@ def _validate_entry_limits(
             f"not written by this write, not refused; only @{branch} can cure it"
         )
 
+    # --- Near the cap: the line that arrives while there is still room --------
+    # @ai_mail's ask, and their evidence was the argument: they wrote over the
+    # cap FOUR HOURS after being burned by it, knowing the number. "Nothing in
+    # the act of writing shows you the limit — the only instrument is
+    # downstream." A refusal teaches at the moment it is too late; this teaches
+    # one entry early. Authored only: warning about carried near-cap text on
+    # every write is how a channel becomes noise nobody reads.
+    for close in split["near"]:
+        logger.warning(
+            f"[entry_limits] NEAR {branch} {file_path.name} "
+            f"{close['container']}[{close['key']}] "
+            f"{close['length']}/{close['cap']} — "
+            f"{close['cap'] - close['length']} chars of headroom left; the next edit may be refused"
+        )
+
     if not over:
         return None
 

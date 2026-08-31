@@ -37,6 +37,7 @@ the original bytes and printing what it could not carry across.
 """
 
 import json
+import pathlib
 from pathlib import Path
 
 import pytest
@@ -431,3 +432,67 @@ class TestTheOperatorLane:
 
         assert hasattr(roots, "handle_command")
         assert not hasattr(fleet, "add_root"), "the write lane leaked onto the read gateway"
+
+
+class _WindowsFlavour(pathlib.PureWindowsPath):
+    """A path that spells itself the way Windows does, on any machine.
+
+    ``_spell`` is a STRING contract, and on Linux every separator is already a
+    forward slash — so a test that just asserts "no backslash" passes whether
+    or not the code does anything, which is a green light wired to nothing. The
+    flavour is what has to be injected for the pin to have teeth here.
+
+    ``resolve`` returns self because these paths are already absolute and there
+    is no filesystem behind them; the walk being pinned is arithmetic on names.
+    """
+
+    def resolve(self):
+        return self
+
+
+class TestTheDeclaredSpellingIsPosixOnEveryMachine:
+    """One declaration, one spelling — decided after a Windows CI red.
+
+    ``str()`` on a Windows path yields ``..\\wren``, so before this the same
+    ``roots add`` produced two different rows depending on which machine ran
+    it. Forward slashes are the only spelling BOTH platforms read: Windows
+    resolves ``../wren`` correctly, while ``..\\wren`` on POSIX is a FILENAME
+    containing a backslash, not a path — so the row that a Windows box wrote
+    would silently declare a root that does not exist when read back on Linux.
+
+    The anchor is a file Patrick blesses. It has to read the same to a human on
+    either machine, and it has to diff.
+    """
+
+    def test_a_sibling_is_spelled_with_forward_slashes(self, monkeypatch):
+        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
+
+        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"C:\proj\wren"))
+
+        assert spelled == "../wren"
+
+    def test_an_absolute_declaration_is_spelled_with_forward_slashes_too(self, monkeypatch):
+        """The other return path. A contract honoured on one branch is a coincidence."""
+        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
+
+        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"D:\elsewhere\wren"))
+
+        assert spelled == "D:/elsewhere/wren"
+
+    def test_no_declaration_this_verb_writes_can_carry_a_backslash(self, home):
+        """The end-to-end guard, in the file that ships."""
+        rf.init_roots(home, today=TODAY)
+        rf.add_root(home, str(home.parent / "wren"), today=TODAY)
+
+        assert "\\" not in (home / rs.DECLARED_ROOTS).read_text(encoding="utf-8")
+
+    def test_the_reader_resolves_what_the_writer_spelled(self, home):
+        """The two halves are pinned against each other, not against a literal.
+
+        A writer and a reader that agree because both were changed to match a
+        test string agree about the test. This asserts the round trip.
+        """
+        rf.init_roots(home, today=TODAY)
+        rf.add_root(home, str(home.parent / "wren"), today=TODAY)
+
+        assert rs.declared_roots(home) == [(home.parent / "wren").resolve()]

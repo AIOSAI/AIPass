@@ -268,7 +268,10 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
     # Read registry
     registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-    if not registry_path.exists():
+    # exists_exactly, not exists(): a folding filesystem answers this question
+    # about aipass_registry.json, and this lane REWRITES every memory file the
+    # answer names. See handlers/repo_root.py.
+    if not repo_root.exists_exactly(registry_path):
         return {"success": False, "error": "AIPASS_REGISTRY.json not found"}
 
     try:

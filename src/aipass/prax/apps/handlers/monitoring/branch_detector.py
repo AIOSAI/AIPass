@@ -28,6 +28,27 @@ from aipass.prax.apps.handlers.repo_root import find_repo_root
 logger = get_direct_logger()
 
 
+def _exact_case_registries(project_dir: Path) -> list:
+    """Glob for project registries, then re-check the case EXACTLY.
+
+    ``Path.glob`` is case-INSENSITIVE on Windows, so ``*_REGISTRY.json`` also
+    matches ``project_registry.json`` there and a file that is not the trust
+    anchor gets read as one. @memory found the same exposure in both their
+    registry walks on 2026-08-31 and closed it with an exact-case post-filter;
+    this is that filter, in prax's one exposed walk.
+
+    The post-filter is the fix rather than a different pattern, because the
+    case-folding lives in the OS matcher and no pattern spelling escapes it.
+
+    Args:
+        project_dir: A directory under ``projects/`` to look in.
+
+    Returns:
+        Sorted registry files whose names really do end in ``_REGISTRY.json``.
+    """
+    return sorted(path for path in project_dir.glob("*_REGISTRY.json") if path.name.endswith("_REGISTRY.json"))
+
+
 class BranchDetector:
     """
     Detects branch ownership for files, logs, and modules.
@@ -184,7 +205,7 @@ class BranchDetector:
             return
 
         for project_dir in project_dirs:
-            for registry_file in sorted(project_dir.glob("*_REGISTRY.json")):
+            for registry_file in _exact_case_registries(project_dir):
                 try:
                     data = json.loads(registry_file.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError) as exc:

@@ -70,6 +70,30 @@ def sibling_projects(tmp_path: Path) -> dict:
     }
 
 
+def _names(targets, *parts: str) -> bool:
+    """True when some target ends in these components, in any OS's spelling.
+
+    THE CONTRACT, ruled 2026-08-31: the target list stays OS-NATIVE. These are
+    the Path objects edit_gate hands to _find_project_root, which globs the real
+    filesystem for *_REGISTRY.json — a list canonicalised to POSIX spelling
+    would be unwalkable on Windows, so the fence would go dark in exactly the
+    place this whole train was fixing. 1.2.0 normalises separators on the way
+    IN, before pathlib parses a token; it deliberately does not normalise on the
+    way out.
+
+    So a test may not assert on str(target). @devpulse's windows-setup run
+    caught two that did — they expected "/other/Project/x.json" and got
+    "\\other\\Project\\x.json". That spelling is pathlib's own __str__ on
+    Windows, not anything 1.2.0 did: a rooted-but-driveless path is not
+    absolute there, and joining it onto the cwd REPLACES the cwd, so the same
+    two pins were red on Windows before 1.2.0 for the same reason.
+
+    Comparing components says what the test actually means — this command
+    surrendered that path — in a spelling neither OS owns.
+    """
+    return any(tuple(t.parts[-len(parts) :]) == parts for t, _ in targets)
+
+
 def _run(cwd: str, *, command: str | None = None, file_path: str | None = None, tool: str = "Bash") -> dict:
     from aipass.hooks.apps.handlers.security.edit_gate import handle
 
@@ -364,16 +388,16 @@ class TestBashWritesParser:
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
         command = "python3 <<'EOF'\nfrom pathlib import Path\nPath('/other/Project/x.json').write_text('{}')\nEOF"
-        targets = [str(t) for t, _ in write_targets(command, "/tmp")]
-        assert "/other/Project/x.json" in targets
+        targets = write_targets(command, "/tmp")
+        assert _names(targets, "other", "Project", "x.json"), f"heredoc body surrendered nothing: {targets}"
 
     def test_a_real_redirection_on_the_heredoc_opening_line_still_counts(self):
         """Only the BODY stops being syntax — the opening line is still shell."""
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
         command = "cat <<'EOF' > /other/Project/out.txt\njust some text\nEOF"
-        targets = [str(t) for t, _ in write_targets(command, "/tmp")]
-        assert "/other/Project/out.txt" in targets
+        targets = write_targets(command, "/tmp")
+        assert _names(targets, "other", "Project", "out.txt"), f"opening-line redirection lost: {targets}"
 
     def test_the_residual_gap_is_published_not_implied(self):
         """What the parser cannot see is data, so the reply, README and tests agree."""
@@ -559,4 +583,53 @@ class TestBothSpellingsAreRead:
 
         assert any("operating system" in gap for gap in bash_writes.NOT_CAUGHT), (
             "the cross-OS root residual is not in NOT_CAUGHT"
+        )
+
+
+class TestTargetSpellingIsNotPartOfTheContract:
+    """The two pins @devpulse's windows-setup run left red, pinned in-process.
+
+    Both asserted on str(target) and expected the POSIX spelling. Neither could
+    ever pass on Windows, and neither failure was about the parser — the target
+    was correct, the test was reading it through __str__.
+    """
+
+    def test_names_accepts_the_windows_rendering(self):
+        """The exact spelling from the CI log, compared on any OS.
+
+        This is the half that matters: the tests above are green here either
+        way, so without this one I would be shipping a fix to a Windows failure
+        with no evidence it addresses the Windows failure.
+        """
+        from pathlib import PureWindowsPath
+
+        as_windows = [(PureWindowsPath(r"\other\Project\x.json"), "python3 (interpreter)")]
+
+        assert _names(as_windows, "other", "Project", "x.json")
+
+    def test_names_does_not_match_a_shorter_tail(self):
+        """A comparison loose enough to pass anywhere proves nothing."""
+        from pathlib import PurePosixPath
+
+        targets = [(PurePosixPath("/somewhere/else/x.json"), "why")]
+
+        assert not _names(targets, "other", "Project", "x.json")
+
+    def test_the_target_list_stays_os_native(self):
+        """The ruling, pinned: normalise on the way IN, never on the way out.
+
+        edit_gate hands these straight to _find_project_root, which globs the
+        real filesystem for *_REGISTRY.json. A list canonicalised to one
+        spelling would be unwalkable on the other OS — the fence would go dark
+        in precisely the place this train was fixing.
+        """
+        from pathlib import Path as LocalPath
+
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        targets = write_targets("echo x > sub/out.txt", str(LocalPath.cwd()))
+
+        assert targets, "precondition: the command must name a target"
+        assert all(isinstance(t, LocalPath) for t, _ in targets), (
+            f"targets are not the local Path flavour the fence must walk: {targets}"
         )

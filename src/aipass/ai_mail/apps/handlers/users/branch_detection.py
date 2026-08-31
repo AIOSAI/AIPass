@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-18
-# Modified: 2026-08-21
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -24,7 +24,7 @@ from typing import Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -136,7 +136,7 @@ def _find_caller_registry() -> Optional[Path]:
     candidate = Path(caller_cwd)
     aipass_registry = BRANCH_REGISTRY_PATH.resolve()
     for path in [candidate] + list(candidate.parents)[:10]:
-        for registry in sorted(path.glob("*_REGISTRY.json")):
+        for registry in registries_in(path):
             try:
                 if registry.resolve() != aipass_registry:
                     return registry

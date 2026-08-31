@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-17
 # Modified: 2026-08-31
 # =============================================
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
@@ -107,7 +107,7 @@ def find_repo_root() -> Path:
     cwd = caller_cwd()
     current = cwd
     while current is not None and current != current.parent:
-        if any(current.glob("*_REGISTRY.json")):
+        if registries_in(current):
             return current
         current = current.parent
 
@@ -115,11 +115,11 @@ def find_repo_root() -> Path:
         aipass_home = os.environ.get("AIPASS_HOME")
         if aipass_home:
             home = Path(aipass_home)
-            if home.is_dir() and any(home.glob("*_REGISTRY.json")):
+            if home.is_dir() and registries_in(home):
                 return home
         here = Path(__file__).resolve()
         for parent in here.parents:
-            if any(parent.glob("*_REGISTRY.json")):
+            if registries_in(parent):
                 return parent
         # Last resort, and the world CI actually runs in: a clean checkout has
         # no registry anywhere (it is gitignored and machine-local). Marker-based,

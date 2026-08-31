@@ -42,7 +42,7 @@ diagnostic must never become the crash it was diagnosing.
 """
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,20 @@ def source_root(start: Optional[Path] = None) -> Path:
         component exists. Never the process working directory.
     """
     anchor = start if (start is not None and start.is_absolute()) else _THIS_FILE
+    return Path(_walk_to_source_root(anchor))
+
+
+def _walk_to_source_root(anchor: PurePath) -> PurePath:
+    """The component walk, with no filesystem and no process state in it.
+
+    Split out from :func:`source_root` so it can be exercised on PurePosixPath
+    AND PureWindowsPath from either platform. @devpulse's Windows CI leg found
+    prax's first pins asserting on a POSIX literal like ``/x/checkout/src/...``
+    — which is NOT absolute as a WindowsPath (rooted, no drive), so the
+    is_absolute guard in the caller correctly refused it and the test measured
+    the real checkout instead of the world it meant to build. The logic was
+    never wrong; the fabricated world was.
+    """
     for parent in anchor.parents:
         if parent.name == SOURCE_DIR_NAME:
             return parent.parent

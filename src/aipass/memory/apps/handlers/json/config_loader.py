@@ -313,7 +313,11 @@ def materialize_per_branch() -> dict[str, Any]:
     """Build per_branch from AIPASS_REGISTRY.json, seeded from rollover.defaults."""
     repo_root = _find_repo_root()
     registry_path = repo_root / "AIPASS_REGISTRY.json"
-    if not registry_path.exists():
+    from aipass.memory.apps.handlers import repo_root
+
+    # exists_exactly, not exists(): see handlers/repo_root.py. Function-local
+    # import for the same cycle reason _find_repo_root uses one.
+    if not repo_root.exists_exactly(registry_path):
         logger.warning("[config_loader] AIPASS_REGISTRY.json not found")
         return {}
 
