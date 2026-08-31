@@ -21,6 +21,7 @@ Two rulings from @devpulse are pinned here rather than described:
 """
 
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -228,10 +229,19 @@ class TestDeclaredRootsResolve:
 # ---------------------------------------------------------------------------
 
 
+# A path these records merely CARRY — never resolved, never touched. Named once
+# so the four malformed cases below say "the path is not what is wrong here".
+_SOME_PATH = Path(tempfile.gettempdir()) / "x" / "src" / "a"
+
+
 def _external(name: str, root: str) -> dict:
+    # tempfile.gettempdir() rather than a "/tmp" literal: Windows CI runs this
+    # suite and has no /tmp. The path is never touched on disk — only matched by
+    # substring — so the literal broke nothing, which is exactly why it survived
+    # two sessions in a file that has been red on Windows the whole time.
     return {
         "name": name,
-        "path": Path(f"/tmp/{root}/src/{name}"),
+        "path": Path(tempfile.gettempdir()) / root / "src" / name,
         "registry": f"{root.upper()}_REGISTRY.json",
         "email": f"@{name}",
         "residency": fleet.RESIDENCY_EXTERNAL,
@@ -325,10 +335,10 @@ class TestMalformedRecordsAreSkippedNotTrusted:
     @pytest.mark.parametrize(
         "broken",
         [
-            {"path": Path("/tmp/x/src/a"), "registry": "X_REGISTRY.json"},
+            {"path": _SOME_PATH, "registry": "X_REGISTRY.json"},
             {"name": "a", "registry": "X_REGISTRY.json"},
-            {"name": "a", "path": Path("/tmp/x/src/a")},
-            {"name": "", "path": Path("/tmp/x/src/a"), "registry": "X_REGISTRY.json"},
+            {"name": "a", "path": _SOME_PATH},
+            {"name": "", "path": _SOME_PATH, "registry": "X_REGISTRY.json"},
         ],
         ids=["no-name", "no-path", "no-registry", "empty-name"],
     )
@@ -376,7 +386,10 @@ class TestResolutionEndToEnd:
         ):
             resolved = resolve_branch("@alpha_agent")
 
-        assert resolved.endswith("alpha/src/alpha/worker")
+        # Path parts, not a string suffix — Windows CI runs this suite and its
+        # separator is not "/". This pin predates tonight and would have red
+        # there whatever the resolver did.
+        assert Path(resolved).parts[-4:] == ("alpha", "src", "alpha", "worker"), resolved
 
     def test_an_undeclared_repo_is_still_refused(self, standin):
         from aipass.drone.apps.modules.resolver import BranchNotFoundError, resolve_branch

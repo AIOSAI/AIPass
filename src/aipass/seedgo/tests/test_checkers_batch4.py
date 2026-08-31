@@ -483,8 +483,13 @@ class TestUnusedFunctionCheck:
             "from modules.bloat import used_func\ndef handle_command():\n    return used_func()\n",
         )
         result = unused_function_check_branch(str(branch))
-        unused_checks = [c for c in result["checks"] if "unused" in c["message"].lower()]
+        # Keyed on the check's own PAYLOAD, not on prose in its message. This
+        # used to grep the message for "unused"; when the wording was narrowed
+        # to "no caller in this branch" (2026-08-31, @memory's overclaim report)
+        # the test went red without anything about the finding having changed.
+        unused_checks = [c for c in result["checks"] if c.get("unused")]
         assert len(unused_checks) > 0
+        assert any("never_called_delta" in u["name"] for c in unused_checks for u in c["unused"])
 
     def test_unused_function_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""

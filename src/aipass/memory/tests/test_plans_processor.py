@@ -15,7 +15,6 @@ import hashlib
 import json
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -388,40 +387,40 @@ class TestStoreVectors:
 
 
 class TestFindRepoRoot:
-    """Test _find_repo_root function."""
+    """This lane no longer walks — it delegates to ``handlers/repo_root.py``.
 
-    def test_find_repo_root_with_registry(self, monkeypatch, tmp_path):
+    THE TEST THAT USED TO LIVE HERE ASSERTED THE DEFECT. ``test_find_repo_root_
+    falls_back_to_cwd`` pinned ``result == Path.cwd()``, so the exact construct
+    that took CI down twice on 2026-08-31 had a green test standing guard over
+    it. Both are rewritten rather than deleted: what a suite used to guarantee
+    is worth more in the record than a clean diff, and a reversed pin says out
+    loud that the contract changed on purpose.
+
+    The walk itself is pinned once, in ``test_repo_root.py``. Pinning it again
+    per lane would recreate the ten-copies problem in the tests.
+    """
+
+    def test_it_delegates_instead_of_walking_itself(self, monkeypatch, tmp_path):
+        """A private walk here is how the first cure missed nine other files."""
         mod = _import_plans_processor(monkeypatch)
-        # Create a fake registry file
-        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-        sub = tmp_path / "a" / "b" / "c"
-        sub.mkdir(parents=True)
-        fake_file = sub / "plans_processor.py"
-        fake_file.write_text("", encoding="utf-8")
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            mod.repo_root,
+            "find_repo_root",
+            lambda *args, **kwargs: (seen.append(kwargs), tmp_path)[1],
+        )
 
-        # Patch __file__ to be inside tmp_path tree
-        monkeypatch.setattr(mod, "__file__", str(fake_file))
+        assert mod._find_repo_root() == tmp_path
+        assert seen and seen[0].get("caller") == "plans_processor", (
+            f"the lane did not name itself to the shared resolver: {seen}"
+        )
 
-        # Re-call _find_repo_root which reads __file__ at module level;
-        # but the function uses Path(__file__) inside, so we need to patch the
-        # function's reference to __file__. We do this by calling it after
-        # monkeypatching the module's __file__.
-        result = mod._find_repo_root()
-
-        assert result == tmp_path
-
-    def test_find_repo_root_falls_back_to_cwd(self, monkeypatch, tmp_path):
+    def test_it_never_returns_the_process_directory(self, monkeypatch, tmp_path):
+        """The reversal. Standing somewhere must not change where the code lives."""
         mod = _import_plans_processor(monkeypatch)
-        # Point __file__ to a location with no registry
-        nowhere = tmp_path / "nowhere" / "file.py"
-        nowhere.parent.mkdir(parents=True)
-        nowhere.write_text("", encoding="utf-8")
-        monkeypatch.setattr(mod, "__file__", str(nowhere))
         monkeypatch.chdir(tmp_path)
 
-        result = mod._find_repo_root()
-
-        assert result == Path.cwd()
+        assert mod._find_repo_root() != tmp_path
 
 
 class TestGetMemoryPython:

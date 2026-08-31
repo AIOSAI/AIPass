@@ -31,6 +31,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 
 # =============================================================================
@@ -39,12 +40,16 @@ from aipass.prax.apps.handlers.json import json_handler
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up from this file to find the repo root, never reading the cwd.
+
+    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
+    this walk, every one ending ``return Path.cwd()`` — @memory reported the
+    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
+    most of the fleet, so a deleted working directory crashed the import, and a
+    registry-less checkout (every clean CI clone) resolved against wherever the
+    shell stood.
+    """
+    return find_repo_root(Path(__file__))
 
 
 def _get_aipass_registry() -> Path:

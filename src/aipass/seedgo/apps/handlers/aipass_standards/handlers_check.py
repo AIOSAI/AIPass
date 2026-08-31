@@ -265,14 +265,52 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
     return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-branch handler imports"}
 
 
+def _public_function_takes_module_name(content: str) -> bool:
+    """True when a PUBLIC function accepts a ``module_name`` parameter.
+
+    Auto-detection exists so a CALLER does not have to name itself: log_operation(
+    operation, data, module_name=None) is the shape, and it is part of a handler's
+    published surface. A private helper's parameter is internal plumbing — my own
+    _module_file(module_name, source_root) resolves a dotted name it was given and
+    has no caller to detect, and the regex that used to answer this question
+    convicted it on the parameter NAME alone (found by dogfooding, 2026-08-31).
+
+    The leading underscore is the discriminator because it is a real, visible
+    property of the module's surface, not a spelling: renaming a public function
+    to buy the exemption removes it from the API.
+
+    An unparseable file falls back to the old text scan rather than answering no —
+    a file we could not read is not evidence that the parameter is absent.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("handlers: unparseable, falling back to the text scan for module_name: %s", exc)
+        return bool(re.search(r"def\s+\w+\([^)]*module_name", content))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        args = node.args
+        names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+        if args.vararg:
+            names.append(args.vararg.arg)
+        if args.kwarg:
+            names.append(args.kwarg.arg)
+        if "module_name" in names:
+            return True
+    return False
+
+
 def check_auto_detection(content: str) -> Optional[Dict]:
     """
     Check for auto-detection pattern if handler accepts module_name
 
     If handler has module_name parameter, should use inspect.stack() auto-detection
     """
-    # Check if any function accepts module_name parameter
-    has_module_name_param = bool(re.search(r"def\s+\w+\([^)]*module_name", content))
+    has_module_name_param = _public_function_takes_module_name(content)
 
     if not has_module_name_param:
         return None  # No module_name parameter, auto-detection not needed

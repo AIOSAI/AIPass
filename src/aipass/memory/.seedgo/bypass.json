@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-08-16"
+    "last_updated": "2026-08-31"
   },
   "bypass": [
     {
@@ -578,6 +578,14 @@
       "file": "apps/handlers/cli/json_flag.py",
       "standard": "json_structure",
       "reason": "Pure argument-inspection predicate -- no I/O, no state, no branch imports by design, the --json sibling of help_flags.py above. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
+    },
+    {
+      "file": "apps/handlers/json/entry_limits.py",
+      "standard": "unused_function",
+      "functions": [
+        "changed_entries"
+      ],
+      "reason": "Cross-branch entry point the branch-local scan cannot see: @hooks calls it by name via importlib in apps/handlers/security/edit_gate.py (the entry-cap half of the write gate for the whole fleet). Deleting it to satisfy the checker disables that gate. Narrowed to this one function, and the claim is pinned by tests/test_changed_entries.py::TestTheBypassClaimIsMeasuredNotAsserted so the bypass goes red the day @hooks stops calling it."
     }
   ],
   "notes": {

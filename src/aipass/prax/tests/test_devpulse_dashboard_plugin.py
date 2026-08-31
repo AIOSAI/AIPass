@@ -104,7 +104,7 @@ class TestGitSection:
         # Still writes section with empty/default values
         assert result is True
 
-    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section._find_repo_root")
+    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section._find_git_root")
     def test_build_git_section_no_git_dir(self, mock_find_root, branch_path):
         """Test git section when no .git directory exists."""
         from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section

@@ -135,3 +135,19 @@ Example bypass rule:
 - **Scope:** `branch_level`
 - **Entry point:** `check_branch(branch_path, bypass_rules)`
 - **Standard label:** `UNUSED_FUNCTION`
+
+## What this check actually measures
+
+**"No caller in this branch"** — not "unused". It is a static, per-branch AST scan, so
+**cross-branch and dynamic (`importlib`) callers are invisible to it in principle.**
+Confirm before deleting.
+
+**Why the wording matters.** On 2026-08-31 this check nominated
+`memory/apps/handlers/json/entry_limits.changed_entries()` — called by `@hooks` at
+`security/edit_gate.py:496` through a dynamic import. It is the entry-cap half of the
+fleet's write gate; deleting it would have disabled that gate for every branch.
+
+The danger is that this check is **useful**. `@memory` had correctly acted on it earlier
+the same night and dropped a genuinely dead helper. An agent that trusts the word
+"unused" will eventually delete a real cross-branch entry point to get a green audit —
+and the audit will go green. The measurement was sound; only the word overclaimed.

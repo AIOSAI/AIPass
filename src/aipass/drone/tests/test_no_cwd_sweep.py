@@ -183,20 +183,64 @@ class TestTheGitLaneSurvives:
 
         assert git_module._detect_branch_dir() is None
 
-    def test_the_repo_root_still_answers_from_the_package(self, no_cwd):
+    def test_the_repo_root_comes_from_aipass_home_when_there_is_no_cwd(self, no_cwd, home_root):
         """``find_repo_root`` promises a Path, not an Optional — so it must find one.
 
         With no cwd both the walk and the toplevel-query fallback lose their
         starting point, so the answer comes from the sources that never needed
-        one. This mirrors ``find_registry``'s existing precedence exactly rather
-        than inventing a second order for the same question.
+        one. AIPASS_HOME is the first of them, and it is checkable against a
+        stand-in rather than against this machine.
         """
         from aipass.drone.apps.handlers.git import lock_handler
+
+        assert lock_handler.find_repo_root() == home_root
+
+    def test_with_no_registry_findable_anywhere_it_still_returns_a_real_directory(self, no_cwd, monkeypatch):
+        """The bare-runner world, reproduced — and the assertion this file got wrong.
+
+        The first cut asserted ``list(root.glob("*_REGISTRY.json"))`` — "the
+        answer is a project root". That reads the MACHINE. ``*_REGISTRY.json``
+        is gitignored and machine-local, so a clean checkout has none, and it
+        red on CI with "/home/runner/work/AIPass/AIPass is not a project root"
+        — which was the honest answer to a question nobody should have asked.
+        The half-present world this file's own sweep was written about, committed
+        in the one test the sweep added. @devpulse caught it on PR#750.
+
+        The registry walk is switched off here rather than assumed absent, so
+        the marker leg — the only leg a bare runner reaches — actually executes.
+
+        WHAT IS DURABLE, and true in both worlds: with no cwd the answer is a
+        real absolute directory that CONTAINS this package. Never a relative
+        sentinel, never the deleted directory, never a raise. Whether that
+        directory happens to hold a registry is a fact about the checkout, not
+        about the function.
+        """
+        from aipass.drone.apps.handlers.git import lock_handler
+
+        real_glob = Path.glob
+
+        def no_registries(self, pattern, *args, **kwargs):
+            if pattern == "*_REGISTRY.json":
+                return iter(())
+            return real_glob(self, pattern, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "glob", no_registries)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
 
         root = lock_handler.find_repo_root()
 
         assert isinstance(root, Path)
-        assert list(root.glob("*_REGISTRY.json")), f"{root} is not a project root"
+        assert root.is_absolute(), f"a relative answer names nowhere in particular: {root}"
+        assert root.is_dir(), f"a lock cannot be written into {root}"
+        assert Path(lock_handler.__file__).resolve().is_relative_to(root), (
+            f"{root} does not contain the package that answered from it"
+        )
+        # "Contains the package" alone is too weak — apps/handlers/git/ satisfies
+        # it, and that is the last-resort return. A project root is a directory
+        # that DECLARES itself one, and a bare checkout still has .git.
+        assert any((root / marker).exists() for marker in lock_handler._PROJECT_MARKERS), (
+            f"{root} carries no project marker — a lock would land in a subdirectory"
+        )
 
 
 class TestTheAuthGateFailsClosed:

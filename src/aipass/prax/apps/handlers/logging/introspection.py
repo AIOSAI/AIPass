@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-10
-# Modified: 2026-03-09
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -116,6 +116,38 @@ _SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outsi
 _REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
 
 
+def _resolve_caller_path(module_path: str) -> Optional[Path]:
+    """Resolve a caller's path without ever requiring a working directory.
+
+    The stack hands back whatever ``__file__`` says, and that is not always an
+    absolute path to a real file: a heredoc or an embedded interpreter reports
+    ``<stdin>``, and a module imported via a relative entry reports a relative
+    name. ``Path.resolve()`` on either of those reads the process working
+    directory — so in a process whose cwd has been deleted this raised
+    FileNotFoundError while prax was building the logger, one frame EARLIER than
+    the config/load.py crash @memory reported on 2026-08-31 (their caller was a
+    real absolute file, so their traceback walked past this line).
+
+    Returns:
+        The resolved path, or None when the caller cannot be located — which is
+        an answer, not a failure. Branch detection is a routing hint; not knowing
+        where the caller lives must never take down the caller's import.
+    """
+    # ONE guard, not two. An explicit ``startswith("<")`` check was written here
+    # first and then removed: a pseudo-filename is not absolute, so is_absolute()
+    # already refuses it, and a mutation dropping the "<" check killed no test —
+    # correctly, because it could not. Two guards where one decides is a reader
+    # believing both are load-bearing.
+    candidate = Path(module_path) if module_path else None
+    if candidate is None or not candidate.is_absolute():
+        return None
+    try:
+        return candidate.resolve()
+    except OSError as exc:
+        logger.info("Caller path %s could not be resolved: %s", module_path, exc)
+        return None
+
+
 def detect_branch_from_path(module_path: str) -> Optional[str]:
     """Detect branch name from module file path
 
@@ -132,10 +164,9 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
     Returns:
         Module/branch name (e.g., "flow") or None
     """
-    if not module_path:
+    path = _resolve_caller_path(module_path)
+    if path is None:
         return None
-
-    path = Path(module_path).resolve()
 
     # Primary: src/aipass/{branch}/...
     try:
@@ -178,10 +209,9 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     Returns:
         (project_name, project_root) or None if path is inside AIPass or unresolvable
     """
-    if not module_path:
+    path = _resolve_caller_path(module_path)
+    if path is None:
         return None
-
-    path = Path(module_path).resolve()
 
     # If the path is inside the AIPass repo, it's not external
     try:

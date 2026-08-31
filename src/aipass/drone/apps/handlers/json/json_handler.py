@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for drone data files
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-17
 # Modified: 2026-08-31
 # =============================================
@@ -57,7 +57,7 @@ _TEST_DIR_ENV_VAR = "AIPASS_TEST_LOG_DIR"
 
 
 def _current_json_dir() -> Path:
-    """Where JSON state belongs RIGHT NOW — resolved per call, never at import.
+    r"""Where JSON state belongs RIGHT NOW — resolved per call, never at import.
 
     Measured on this tree before this existed: under pytest the env var held a
     temp directory and the module constant STILL pointed at the live

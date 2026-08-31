@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
+from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.json import json_handler
 
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
@@ -107,22 +108,17 @@ DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
 
-# The repo root this FILE sits in, derived from the layout and nothing else.
-# `src/` is the marker because it is the one directory the package layout
-# guarantees; the last-resort value is the filesystem root, which is defined,
-# never raises, and is absurd enough to fail loudly downstream instead of
-# quietly resolving against somebody's home directory.
-_SOURCE_ROOT = next(
-    (parent.parent for parent in Path(__file__).resolve().parents if parent.name == "src"),
-    Path(__file__).resolve().parents[-1],
-)
+# The root implied by this SOURCE TREE's layout, re-exported from the one
+# module that computes it. Named here because this module's own pins read it.
+_SOURCE_ROOT = repo_root.SOURCE_ROOT
 
 
 def find_repo_root(start: Path | None = None) -> Path:
     """Walk up from *start* to the directory holding ``AIPASS_REGISTRY.json``.
 
-    Falls back to the root implied by THIS FILE's location — never to the
-    process working directory. Two defects lived in that one `Path.cwd()`:
+    Falls back to the root implied by the SOURCE TREE's location — never to the
+    process working directory. Two defects lived in the ``Path.cwd()`` this
+    replaced:
 
     THE LOUD ONE, reported by @drone with an isolated repro. ``REPO_ROOT`` is
     resolved at MODULE level, and a clean checkout has no registry (it is
@@ -142,26 +138,23 @@ def find_repo_root(start: Path | None = None) -> Path:
     same objection @drone raised against ``_first_registry_in``: a fallback
     wearing a determinism costume.
 
-    The source-derived answer is not a guess. On a registry-less checkout it
-    IS the checkout, which is the true answer there. And the absence is said
-    out loud, because a fallback nobody can see is how the next one survives.
+    THE BODY LIVES IN ``handlers/repo_root.py``, and that is the third lesson.
+    Curing it here cured ONE of ten byte-identical copies; CI went red on
+    ``detector.py`` — same package, one file over — inside the hour, caught by
+    the very pin written for this fix. A fix that lands on some of N identical
+    paths is not a fix, so there is one implementation now and this is a name
+    for it. The fleet gateway still exports this name because callers ask
+    ``registry_scope`` where the repo is, and that is the right door for them.
 
     Args:
-        start: Directory to walk up from. Defaults to this file's directory.
+        start: Directory to walk up from. Defaults to the source tree's own
+            location.
 
     Returns:
         The directory holding ``CORE_REGISTRY``, or ``_SOURCE_ROOT`` when no
         registry exists anywhere above *start*. Never reads the process cwd.
     """
-    current = Path(start) if start is not None else Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / CORE_REGISTRY).exists():
-            return parent
-    logger.warning(
-        f"[registry_scope] No {CORE_REGISTRY} above {current} — "
-        f"resolving to the source tree at {_SOURCE_ROOT}, never the process directory"
-    )
-    return _SOURCE_ROOT
+    return repo_root.find_repo_root(start, marker=CORE_REGISTRY, caller="registry_scope")
 
 
 REPO_ROOT = find_repo_root()

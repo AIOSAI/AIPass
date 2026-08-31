@@ -293,12 +293,20 @@ def section(name: str) -> dict[str, Any]:
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    IMPORTED INSIDE THE FUNCTION, not at module level. ``handlers/json/__init__``
+    imports this module, and ``repo_root`` imports ``handlers.json`` for its
+    audit line, so a module-level edge here would be a cycle that only appears
+    in whichever import order CI happens to take.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    from aipass.memory.apps.handlers import repo_root
+
+    return repo_root.find_repo_root(caller="config_loader")
 
 
 def materialize_per_branch() -> dict[str, Any]:

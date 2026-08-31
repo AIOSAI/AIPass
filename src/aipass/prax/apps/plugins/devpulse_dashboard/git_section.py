@@ -20,9 +20,21 @@ from aipass.prax.apps.modules.dashboard import write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-def _find_repo_root(start: Path) -> Path:
-    """Walk up from start to find .git directory."""
-    current = start.resolve()
+def _find_git_root(start: Path) -> Path:
+    """Walk up from start to find a .git directory.
+
+    RENAMED from _find_repo_root on 2026-08-31. It asks a different question from
+    the branch's other _find_repo_root functions — .git, not AIPASS_REGISTRY.json
+    — and sharing their name made it a false positive in the sweep that keeps
+    those honest. It was never the same defect: it takes an explicit start and
+    raises rather than falling back to the working directory.
+
+    A relative ``start`` is refused rather than resolved, because resolve() reads
+    the working directory and a process whose cwd was deleted would die here.
+    """
+    if not start.is_absolute():
+        raise ValueError("start must be absolute; resolving a relative path reads the cwd")
+    current = start
     while current != current.parent:
         if (current / ".git").exists():
             return current
@@ -57,7 +69,7 @@ def build_git_section(branch_path: Path) -> bool:
     Returns:
         True if write_section succeeded, False otherwise.
     """
-    repo_root = _find_repo_root(branch_path)
+    repo_root = _find_git_root(branch_path)
 
     # Current branch
     branch = _run_git(repo_root, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"

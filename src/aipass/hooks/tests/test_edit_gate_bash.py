@@ -383,3 +383,180 @@ class TestBashWritesParser:
         joined = " ".join(NOT_CAUGHT)
         for named in ("symlink", "xargs", "chmod", "git"):
             assert named in joined
+
+
+def _win(path) -> str:
+    """Spell a path the way Windows spells it, on whatever OS is reading.
+
+    This is the whole trick that makes the class below runnable anywhere. On
+    Windows ``str(tmp_path)`` is already backslashed and this is a no-op. On
+    Linux it turns a real absolute POSIX path into ``\\tmp\\...\\f.json`` — the
+    exact spelling that killed the parser — and the gate must still resolve it
+    back to the same real file under the same real fence. The claim under test
+    is "separators are understood", and that claim is OS-independent even
+    though drive letters are not.
+    """
+    return str(path).replace("/", "\\")
+
+
+class TestWindowsSpelledPathsAreStillFenced:
+    """Backslash separators must not walk a foreign write past the fence.
+
+    THE DEFECT (@devpulse, windows-test.yml, 2026-08-31): every test in
+    TestScriptedLaneCatches failed on Windows CI, all in the ALLOW direction —
+    exit 0 on `sed -i` into a sibling project. Their reading was "path
+    extraction or the fence comparison never matches that spelling". The
+    measurement puts it one layer earlier than either: shlex runs in POSIX
+    mode, where a backslash is an ESCAPE, so it ate every separator and
+    `C:\\Users\\me\\Vera-Studio\\f.json` arrived as the single token
+    `C:UsersmeVera-Studiof.json`. A drive-absolute foreign path became one
+    relative filename, resolved under the caller's OWN project, and read as a
+    local write. The extraction and the comparison were both working
+    correctly on a path that had already been destroyed.
+
+    Reproduced on Linux before the fix, no Windows box involved — which is the
+    point: the parser never needed a Windows runner to be wrong, it needed a
+    backslash. The class had never been green on Windows since the day it
+    shipped, and NOT_CAUGHT did not name it. A category believed caught and
+    silently uncaught on one OS is worse than a named blind spot.
+    """
+
+    def _cmd(self, sibling_projects: dict, command: str) -> dict:
+        return _run(sibling_projects["plain_seat"], command=command)
+
+    def test_sed_in_place_with_backslash_separators(self, sibling_projects, grant_withheld):
+        """The exact shape of devpulse's log line: exit 0 where 2 belonged."""
+        target = _win(sibling_projects["foreign_file"])
+
+        result = self._cmd(sibling_projects, f"sed -i s/a/b/ {target}")
+
+        assert _blocked(result), f"backslash-spelled sed -i was ALLOWED: {result}"
+        assert "Vera-Studio" in _reason(result)
+
+    def test_redirection_with_backslash_separators(self, sibling_projects, grant_withheld):
+        target = _win(Path(sibling_projects["vera"]) / "notes.txt")
+
+        assert _blocked(self._cmd(sibling_projects, f"echo x > {target}")), "backslash redirection allowed"
+
+    def test_copy_destination_with_backslash_separators(self, sibling_projects, grant_withheld):
+        target = _win(Path(sibling_projects["vera"]) / "copy.txt")
+
+        assert _blocked(self._cmd(sibling_projects, f"cp local.txt {target}")), "backslash cp allowed"
+
+    def test_interpreter_holding_a_backslash_path(self, sibling_projects, grant_withheld):
+        """The regex knew only "/" — so on a Windows path it matched NOTHING.
+
+        Not a degraded reading: the interpreter mode, the broadest catch this
+        parser has, returned an empty list for every Windows-spelled command.
+        """
+        target = _win(sibling_projects["foreign_file"])
+
+        result = self._cmd(sibling_projects, f"python3 -c \"open('{target}', 'w')\"")
+
+        assert _blocked(result), f"interpreter holding a backslash path was ALLOWED: {result}"
+
+    def test_cd_chain_with_backslash_separators(self, sibling_projects, grant_withheld):
+        """`cd` moves the ground for the next segment in either spelling."""
+        vera = _win(sibling_projects["vera"])
+
+        result = self._cmd(sibling_projects, f"cd {vera} && tee out.txt")
+
+        assert _blocked(result), f"backslash cd-chain was ALLOWED: {result}"
+
+    def test_directory_target_with_no_extension(self, sibling_projects, grant_withheld):
+        """`mkdir C:\\Proj\\Vera\\newdir` — no dot anywhere to fall back on.
+
+        Mutation found this one: with the backslash clause removed from
+        _looks_like_path every other Windows case still passed, because a
+        filename carries a dot and the dot clause caught it by luck of
+        spelling. A directory target has no dot, so the separator is the only
+        evidence that the token is a path at all.
+        """
+        target = _win(Path(sibling_projects["vera"]) / "newdir")
+        assert "." not in target, f"precondition lost — this path has a dot to fall back on: {target}"
+
+        assert _blocked(self._cmd(sibling_projects, f"mkdir {target}")), "backslash mkdir allowed"
+
+    def test_local_write_stays_allowed_in_both_spellings(self, sibling_projects, grant_withheld):
+        """The fix must not convict the seat's own project of being foreign.
+
+        Reading a backslash as a separator only ever ADDS path components, so
+        it cannot move a write upward out of its own project — this pins that
+        reasoning rather than trusting it.
+        """
+        own = _win(Path(sibling_projects["plain_seat"]) / "mine.txt")
+
+        result = self._cmd(sibling_projects, f"echo x > {own}")
+
+        assert result["exit_code"] == 0, f"a write into the seat's own project was refused: {result}"
+
+
+class TestBothSpellingsAreRead:
+    """Parser level: neither dialect may be chosen at the other's expense."""
+
+    def test_posix_escaped_space_survives(self):
+        """shlex's escape reading is still produced — it is correct for POSIX.
+
+        `cp a\\ b.txt dest` names ONE source file with a space in it. If the
+        separator reading had replaced the escape reading rather than joining
+        it, this filename would have become two tokens on every OS.
+        """
+        from aipass.hooks.apps.modules import bash_writes
+
+        readings = bash_writes._readings(r"cp a\ b.txt /tmp/dest.txt")
+
+        assert ["cp", "a b.txt", "/tmp/dest.txt"] in readings, f"escape reading lost: {readings}"
+
+    def test_separator_reading_is_produced_too(self):
+        """The reading that was missing entirely until 2026-08-31."""
+        from aipass.hooks.apps.modules import bash_writes
+
+        readings = bash_writes._readings(r"sed -i s/a/b/ C:\Proj\Vera\f.json")
+
+        assert any(r"C:\Proj\Vera\f.json" in tokens for tokens in readings), (
+            f"no reading kept the separators: {readings}"
+        )
+
+    def test_a_command_with_no_backslash_is_read_once(self):
+        """No cost where the dialects agree — and no duplicate refusal lines."""
+        from aipass.hooks.apps.modules import bash_writes
+
+        assert len(bash_writes._readings("echo hi > out.txt")) == 1
+
+    def test_a_target_named_twice_is_reported_once(self):
+        """Both readings can find the SAME write; the caller is told once.
+
+        The first cut of this test used a Windows-spelled target, where the two
+        readings produce two DIFFERENT paths and there is nothing to dedupe —
+        it passed with the dedupe removed. Mutation caught it. The command here
+        carries a backslash (so both readings run) on something that is not the
+        target, so both readings agree on `out.txt` and the duplicate is real.
+        """
+        from aipass.hooks.apps.modules import bash_writes
+
+        command = r'python3 -c "print(\"hi\")" > out.txt'
+        assert len(bash_writes._readings(command)) == 2, "precondition: both readings must run"
+
+        hits = bash_writes.write_targets(command, str(Path.cwd()))
+
+        assert len(hits) == len(set(hits)), f"the same write was reported twice: {hits}"
+
+    def test_separators_alone_are_not_a_path(self):
+        """Widening the run to accept "\\" made every escaped quote match.
+
+        Harmless to the verdict — filesystem root holds no registry — but a
+        refusal listing paths the command never named is one nobody believes.
+        """
+        from aipass.hooks.apps.modules import bash_writes
+
+        hits = bash_writes.write_targets(r'python3 -c "print(\"hi\")"', str(Path.cwd()))
+
+        assert all(any(c.isalnum() for c in t.name) for t, _ in hits), f"separator-only target: {hits}"
+
+    def test_the_cross_os_root_limit_is_published(self):
+        """A drive letter names nothing on Linux — said as data, not discovered."""
+        from aipass.hooks.apps.modules import bash_writes
+
+        assert any("operating system" in gap for gap in bash_writes.NOT_CAUGHT), (
+            "the cross-OS root residual is not in NOT_CAUGHT"
+        )

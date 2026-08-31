@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -78,9 +78,12 @@ _INTERPRETERS = frozenset(
 # Redirection tokens. `>&` is a descriptor dup (`2>&1`), never a filename.
 _REDIRECT_OPS = frozenset({">", ">>", ">|"})
 
-# A run of characters containing a slash — how a path looks inside interpreter
-# source, where quoting has already been stripped or mangled by the lexer.
-_PATH_RUN = re.compile(r"[~\w.@+\-]*/[~\w./@+\-]*")
+# A run of characters containing a separator — how a path looks inside
+# interpreter source, where quoting has already been stripped or mangled by the
+# lexer. BOTH separators count: a regex that only knew "/" returned nothing at
+# all for a Windows-spelled path, so the interpreter mode was not merely
+# degraded on Windows, it was blind (measured 2026-08-31).
+_PATH_RUN = re.compile(r"[~\w.@+\-]*[/\\][~\w./\\@+\-]*")
 
 # The opening of a heredoc: << or <<-, an optionally quoted delimiter word.
 _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
@@ -98,6 +101,9 @@ NOT_CAUGHT: tuple[str, ...] = (
     "metadata-only changes: chmod, chown, touch -t on an existing file",
     "git, gh, drone and aipass — they name no write verb this parser reads; their own fences apply",
     "writes made by a process the command merely starts (a server, a test runner)",
+    "a path spelled for the OTHER operating system's filesystem — 'C:\\Proj\\x' read on Linux "
+    "names no drive that exists here, so it resolves relative and reads as local. Separators are "
+    "understood on every OS; ROOTS are only walkable on the OS that has them.",
 )
 
 
@@ -172,6 +178,40 @@ def _tokenize(command: str) -> list[str]:
         return command.split()
 
 
+def _readings(command: str) -> list[list[str]]:
+    """Every token stream this command could honestly be. Usually one.
+
+    THE BUG THIS EXISTS FOR (@devpulse, windows-test.yml, 2026-08-31): in POSIX
+    mode a backslash is an ESCAPE, so shlex ate every separator of a Windows
+    path — ``C:\\Users\\me\\Vera-Studio\\f.json`` arrived as the single token
+    ``C:UsersmeVera-Studiof.json``. That is not a degraded reading, it is the
+    dangerous one: a drive-absolute foreign path became one relative filename,
+    resolved under the CALLER'S OWN project, and read as a local write. Every
+    catch category the fleet closed on 08-30 returned exit 0 on Windows. The
+    class had never been green there.
+
+    A fence must not have to guess which dialect it is reading. Both readings
+    are produced and their results are UNIONED, so neither spelling can be used
+    to slip past the other:
+
+    - escape reading — shlex's own, correct for POSIX ``cp a\\ b.txt dest``
+    - separator reading — backslashes doubled so the lexer emits them literally,
+      correct for a Windows path
+
+    Where they agree (no backslash anywhere) there is one reading and no cost.
+    Where they disagree the union is strictly safer: reading ``\\`` as a
+    separator only ever adds path components, so a local write can never become
+    foreign by it — while the reverse, the escape reading, is exactly how a
+    foreign write became local on Windows.
+    """
+    readings = [_tokenize(_strip_heredoc_bodies(command))]
+    if "\\" in command:
+        protected = _tokenize(_strip_heredoc_bodies(command).replace("\\", "\\\\"))
+        if protected != readings[0]:
+            readings.append(protected)
+    return readings
+
+
 def _segments(tokens: list[str]) -> list[list[str]]:
     """Group tokens into individual commands, split on shell separators."""
     out: list[list[str]] = []
@@ -198,7 +238,7 @@ def _looks_like_path(token: str) -> bool:
         return False
     if "$" in token or "*" in token or "?" in token:
         return False
-    return "/" in token or "." in token or token.isidentifier()
+    return "/" in token or "\\" in token or "." in token or token.isidentifier()
 
 
 def _resolve(token: str, cwd: Path) -> Path | None:
@@ -206,6 +246,14 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     token = token.strip().strip(_TRAILING_JUNK)
     if not token:
         return None
+    # Separators are normalised on EVERY OS, not just Windows. pathlib accepts
+    # "/" natively on Windows (WindowsPath("C:/a/b") is absolute and correct),
+    # so one spelling reaches Path from both dialects and the parser's reading
+    # of a command stops depending on which machine happens to run it. What
+    # does NOT become portable is the ROOT: a drive letter names nothing on
+    # Linux, so it resolves relative and reads as local — published in
+    # NOT_CAUGHT rather than left to be discovered.
+    token = token.replace("\\", "/")
     try:
         candidate = Path(token).expanduser()
         return candidate if candidate.is_absolute() else (cwd / candidate)
@@ -284,6 +332,13 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
         token = match.strip(_TRAILING_JUNK)
         if not token or token in seen or "$" in token:
             continue
+        # Separators alone are not a path. Widening the run to accept "\\" made
+        # every escaped quote inside a python -c body (\\") match as one, which
+        # would have put filesystem root in a refusal that named a real target
+        # elsewhere. Harmless to the verdict — root holds no registry — but a
+        # refusal listing paths the command never named is one nobody believes.
+        if not any(char.isalnum() for char in token):
+            continue
         seen.add(token)
         target = _resolve(token, cwd)
         if target is not None:
@@ -314,25 +369,35 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
     # Two texts, deliberately: heredoc bodies are stripped for the SYNTAX read
     # (a quoted command in a mail body is not a command) and kept for the
     # interpreter read (a heredoc handed to python really can write anything).
-    tokens = _tokenize(_strip_heredoc_bodies(command))
     hits: list[tuple[Path, str]] = []
-    current = base
-    for segment in _segments(tokens):
-        if not segment:
-            continue
-        verb = Path(segment[0]).name
+    seen: set[tuple[Path, str]] = set()
+    for tokens in _readings(command):
+        current = base
+        for segment in _segments(tokens):
+            if not segment:
+                continue
+            verb = Path(segment[0]).name
 
-        # `cd` inside a chain moves the ground the next segment stands on. Not
-        # tracking it would let `cd ../Other && sed -i s/a/b/ f.json` resolve
-        # f.json against the caller's own project and read as a local write.
-        if verb == "cd" and len(segment) > 1:
-            moved = _resolve(segment[1], current)
-            if moved is not None:
-                current = moved
-            continue
+            # `cd` inside a chain moves the ground the next segment stands on.
+            # Not tracking it would let `cd ../Other && sed -i s/a/b/ f.json`
+            # resolve f.json against the caller's own project and read as a
+            # local write.
+            if verb == "cd" and len(segment) > 1:
+                moved = _resolve(segment[1], current)
+                if moved is not None:
+                    current = moved
+                continue
 
-        hits.extend(_redirect_targets(segment, current))
-        hits.extend(_verb_targets(segment, current))
-        hits.extend(_interpreter_targets(segment, command, current))
+            for hit in (
+                *_redirect_targets(segment, current),
+                *_verb_targets(segment, current),
+                *_interpreter_targets(segment, command, current),
+            ):
+                # The two readings overlap heavily; a caller told the same
+                # thing twice would see a refusal that names one write as two.
+                if hit in seen:
+                    continue
+                seen.add(hit)
+                hits.append(hit)
 
     return hits

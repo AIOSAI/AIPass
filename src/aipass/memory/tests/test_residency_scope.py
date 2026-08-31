@@ -480,7 +480,7 @@ class TestTheRecordCarriesTheAddress:
         unaddressed = [r["name"] for r in records if not r.get("email")]
         assert not unaddressed, f"live citizens with no address in their registry row: {unaddressed}"
 
-    def test_each_record_gets_its_OWN_rows_address_not_a_neighbours(self, tmp_path):
+    def test_each_record_gets_its_own_rows_address_not_a_neighbours(self, tmp_path):
         """Three rows, three addresses, none guessable from its own name.
 
         Found by mutation: a version handing every record the FIRST row's email
@@ -711,7 +711,16 @@ class TestRepoRootNeverReadsTheProcessDirectory:
             "from aipass.memory.apps.handlers.monitor import registry_scope as rs\n"
             f"print('OK', rs.find_repo_root(pathlib.Path({str(bare)!r})))"
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, (
+            "find_repo_root died in a dead cwd. "
+            + (
+                "THE CRASH IS IN @prax, not here — cured 2026-08-31, so this is a regression "
+                "in their tree. Route it there.\n"
+                if "/aipass/prax/" in result.stderr
+                else ""
+            )
+            + result.stderr
+        )
         assert "OK" in result.stdout, result.stdout
 
     def test_importing_the_module_survives_a_deleted_working_directory(self):
@@ -722,11 +731,31 @@ class TestRepoRootNeverReadsTheProcessDirectory:
         cannot go red here. It is the CI shape, kept because that is the
         environment the defect lives in and a test that only runs where the bug
         cannot happen is the one nobody writes until after the outage.
+
+        AND IT WORKED — twice. On CI it went red on ``detector.py``, the same
+        defect one file over, which is what put the whole ten-copy sweep in
+        ``handlers/repo_root.py``. Then, with all ten cured, it went red again
+        on @prax: every handler in the fleet calls ``get_system_logger()`` at
+        module level and prax's ``config/load.py`` carries the same species. So
+        @prax swept eight sites of the same species and their fix landed the
+        same night, verified here: 11/11 memory modules import clean in a dead
+        cwd against their tree with no substitution. So this is a HARD failure
+        again — an xfail that outlives its blocker stops reporting regressions —
+        and what survives is the attribution in the message.
         """
         result = self._in_a_dead_cwd(
             "from aipass.memory.apps.handlers.monitor import registry_scope as rs\nprint('OK', rs.REPO_ROOT)"
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, (
+            "importing registry_scope died in a dead cwd. "
+            + (
+                "THE CRASH IS IN @prax, not here — cured 2026-08-31, so this is a regression "
+                "in their tree. Route it there.\n"
+                if "/aipass/prax/" in result.stderr
+                else ""
+            )
+            + result.stderr
+        )
 
     def test_a_registryless_world_resolves_to_the_source_tree_not_the_caller(self, tmp_path, monkeypatch):
         """The QUIET defect: cwd is a guess about where the code lives.

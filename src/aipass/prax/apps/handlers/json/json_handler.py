@@ -119,12 +119,20 @@ def _current_json_dir() -> Path:
     to a previous run's mkdtemp.
 
     A SURVIVING MUTANT, reported rather than swept: dropping ``and PRAX_JSON_DIR
-    != default`` kills no test, and it cannot — when the attribute EQUALS default,
-    returning it and returning ``default`` yield the same path. The clause is
-    value-neutral by construction, not untested. It is kept because it states the
-    two-fixed-point rule this contract published and @drone/@daemon implement in
-    the same shape; a unilateral narrowing here would fork three trees to delete a
-    line that changes nothing. Raised with the adopters instead.
+    != default`` kills no test on POSIX, and it cannot — when the attribute EQUALS
+    default, returning it and returning ``default`` yield the same path. It is
+    kept because it states the two-fixed-point rule this contract published and
+    @drone/@daemon implement in the same shape.
+
+    CORRECTED 2026-08-31 by @drone, who reproduced the mutant and then found the
+    asymmetry: prax called the clause "value-neutral by construction", and that
+    holds only on POSIX. ``PurePath.__eq__`` is case-FOLDED on Windows, so
+    ``PureWindowsPath("C:/Temp/Prax_Json") == PureWindowsPath("c:/temp/prax_json")``
+    is True while ``str()`` of the two differs. There, returning the attribute
+    instead of ``default`` yields the same FILE under a different STRING —
+    invisible to a write, visible in a log line or in any assertion comparing
+    paths as text. The clause is the cheaper side on merit, not merely the tidier
+    one.
 
     Comparing against both fixed points has no such stale reference. The cost is
     one lost distinction, stated rather than hidden: a test that patches this to

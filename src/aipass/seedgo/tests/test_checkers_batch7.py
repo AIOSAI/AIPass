@@ -1690,3 +1690,383 @@ class TestImportsCheckLineNumbersSurviveDocstringFiltering:
         rows = imports_check.check_module(str(target))["checks"]
         root_rows = [r for r in rows if r["name"] == "No AIPASS_ROOT"]
         assert root_rows and root_rows[0]["passed"], root_rows
+
+
+class TestJsonStructureExemptsDeclarationOnlyModules:
+    """ "Every module must log operations" is a rule about modules that PERFORM them.
+
+    Raised by @drone 2026-08-31 on drone/apps/handlers/exceptions.py — 86 lines,
+    ten exception classes, zero functions. It USED to pass, by carrying
+    `log_operation("exceptions_loaded")` at module level. That turned out to be a
+    real defect: running at import, it fired during pytest COLLECTION, before any
+    fixture existed, so no seam could intercept it. Removing it took the file
+    from passing to 0.
+
+    So the check was REWARDING the defect, and both routes to green were worse
+    than the violation: put the import-time write back, or add a function to a
+    file of pure class definitions purely so there is somewhere to call
+    log_operation from — dead code written to satisfy a grep, which
+    unused_function would then flag.
+
+    A module that defines no callable code performs no operations, so it has
+    nothing to log. The exemption is keyed on that structural fact and nothing
+    else: ONE method anywhere, and the module is back in scope.
+    """
+
+    def _score(self, source, tmp_path):
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        # MUST land under apps/handlers or the checker returns not-applicable
+        # on the PATH and every assertion below passes for the wrong reason —
+        # which is exactly what the first cut of this class did.
+        target = tmp_path / "apps" / "handlers" / "routing" / "mod.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        return json_structure_check.check_module(str(target))
+
+    DECLARATIONS_ONLY = '"""Doc."""\n\n\nclass RoutingError(Exception):\n    """Boom."""\n\n\nclass BranchNotFound(RoutingError):\n    pass\n'
+
+    def test_a_module_of_pure_exception_classes_is_not_applicable(self, tmp_path):
+        result = self._score(self.DECLARATIONS_ONLY, tmp_path)
+        assert result["score"] == 100, result["checks"]
+
+    def test_the_exemption_is_PUBLISHED_not_a_silent_pass(self, tmp_path):
+        """A skip nobody can read is indistinguishable from a check that ran."""
+        result = self._score(self.DECLARATIONS_ONLY, tmp_path)
+        text = " ".join(c["message"] for c in result["checks"]).lower()
+        assert "declar" in text or "no operations" in text, result["checks"]
+
+    def test_ONE_method_puts_the_module_back_in_scope(self, tmp_path):
+        source = '"""Doc."""\n\n\nclass Thing:\n    def do(self):\n        return 1\n'
+        assert self._score(source, tmp_path)["score"] < 100
+
+    def test_a_module_level_function_is_still_in_scope(self, tmp_path):
+        source = '"""Doc."""\n\n\ndef work():\n    return 1\n'
+        assert self._score(source, tmp_path)["score"] < 100
+
+    def test_a_dataclass_with_no_methods_is_exempt(self, tmp_path):
+        source = '"""Doc."""\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass Point:\n    x: int\n'
+        assert self._score(source, tmp_path)["score"] == 100
+
+    def test_constants_alone_do_not_earn_the_exemption_back(self, tmp_path):
+        """Declarations plus data is still declarations."""
+        source = '"""Doc."""\n\nLIMIT = 10\n\n\nclass E(Exception):\n    pass\n'
+        assert self._score(source, tmp_path)["score"] == 100
+
+    def test_an_UNPARSEABLE_file_does_not_earn_the_exemption(self, tmp_path):
+        """A syntax error is not evidence of purity. Answering "no callable
+        code" for a file we could not read hands out the exemption on
+        ignorance — and the first cut of these pins let that mutant live."""
+        assert self._score('"""Doc."""\n\nclass Broken(\n', tmp_path)["score"] < 100
+
+    def test_the_REAL_drone_file_is_exempt(self, tmp_path):
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        target = Path(__file__).resolve().parents[2] / "drone" / "apps" / "handlers" / "exceptions.py"
+        if not target.exists():
+            import pytest
+
+            pytest.skip("drone exceptions.py not on disk")
+        assert json_structure_check.check_module(str(target))["score"] == 100
+
+
+class TestUnusedFunctionSaysWhatItActuallyMeasured:
+    """The check measures "no caller in THIS branch" and said "unused".
+
+    @memory 2026-08-31: `entry_limits.changed_entries()` was reported unused. It
+    is called by @hooks at security/edit_gate.py:496 through a dynamic
+    importlib import — a cross-branch consumer a same-branch AST scan cannot see
+    in principle. Deleting it would disable the entry-cap half of the write gate
+    for the whole fleet.
+
+    The danger is precisely that the check is USEFUL: @memory had already acted
+    on it correctly once the same night and dropped a genuinely dead helper. An
+    agent that trusts it will eventually delete a real cross-branch entry point
+    to get a green audit, and the audit will go green.
+
+    They asked for the cheapest of three options and were right about which:
+    the measurement is sound, only the WORD overclaims. Same species as this
+    pack's AIPASS_ROOT substring bug — the checker stating more than it measured.
+    """
+
+    def _report(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.aipass_standards import unused_function_check
+
+        # This module's autouse _mock_infrastructure fixture replaces
+        # bypass.ignore_handler with a MagicMock, so is_seedgo_ignored() returns
+        # a TRUTHY Mock and the collector silently skips every file — the report
+        # then reads "No .py files found in branch" and any assertion about the
+        # message passes or fails for reasons unrelated to the message. A
+        # stand-in more generous than the real function, which is the exact trap
+        # @memory described on 2026-08-30. Pinned back to the real answer here.
+        monkeypatch.setattr(unused_function_check, "is_seedgo_ignored", lambda *a, **k: False)
+        monkeypatch.setattr(unused_function_check, "load_ignore_entries", lambda *a, **k: [])
+
+        # A neutral branch root INSIDE tmp_path: pytest names tmp_path after the
+        # test, and the collector's skip set is matched against every path part.
+        root = tmp_path / "branchroot"
+        pkg = root / "apps" / "handlers"
+        pkg.mkdir(parents=True)
+        (pkg / "mod.py").write_text("def never_called_here():\n    return 1\n", encoding="utf-8")
+        return unused_function_check.check_branch(str(root))
+
+    def test_the_message_does_not_claim_the_function_is_unused(self, tmp_path, monkeypatch):
+        report = self._report(tmp_path, monkeypatch)
+        blob = str(report).lower()
+        assert "no caller in this branch" in blob, report
+
+    def test_the_message_names_the_limit_of_the_scan(self, tmp_path, monkeypatch):
+        """A reader must be able to tell that cross-branch callers were not checked."""
+        blob = str(self._report(tmp_path, monkeypatch)).lower()
+        # NOT an `or` over synonyms: the first cut accepted either phrase, so a
+        # mutant deleting the cross-branch clause kept passing on "this branch"
+        # alone. Both halves of the disclosure are pinned.
+        assert "cross-branch" in blob
+        assert "importlib" in blob
+        assert "confirm before deleting" in blob
+
+
+class TestCliCheckAllowsRelayingACapturedSubprocessStream:
+    """A router passing a child's bytes through is not "your output, undecorated".
+
+    Raised via @devpulse 2026-08-31 for drone.py, which has eight of these. The
+    dispatch guessed they were the `--json` machine surface; they are something
+    simpler and better justified — every one is
+    `sys.stdout.write(result.stdout)` / `sys.stderr.write(result.stderr)`,
+    drone relaying a completed subprocess's captured output verbatim.
+
+    The `cli` rule means "route YOUR OWN output through Rich". Rich would
+    interpret markup in, wrap, and re-style bytes drone did not author, which is
+    precisely what a router must not do. The checker was grepping a VERB where
+    the rule asks an AUTHORSHIP question — the same species as this pack's
+    AIPASS_ROOT substring bug and the json_structure and unused_function items
+    ruled the same night.
+
+    The exemption is narrow by construction and keyed on the ARGUMENT, so it
+    cannot be borrowed: writing a literal, an f-string, or a value you built is
+    still a violation. It also requires the streams to CORRESPOND — writing a
+    captured stderr to stdout stays red, because that is a real routing bug this
+    check should keep catching.
+    """
+
+    def _lines(self, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+
+        return [i for i, line in enumerate(source.splitlines(), 1) if cli_check._is_raw_write_violation(line)]
+
+    def test_relaying_captured_stdout_attribute_is_allowed(self):
+        assert self._lines("        sys.stdout.write(result.stdout)") == []
+
+    def test_relaying_captured_stdout_subscript_is_allowed(self):
+        assert self._lines('        sys.stdout.write(result["stdout"])') == []
+
+    def test_relaying_captured_stderr_to_stderr_is_allowed(self):
+        assert self._lines("        sys.stderr.write(result.stderr)") == []
+
+    def test_a_literal_is_STILL_a_violation(self):
+        assert self._lines('        sys.stdout.write("hello")') != []
+
+    def test_an_fstring_is_STILL_a_violation(self):
+        assert self._lines('        sys.stdout.write(f"{count} done")') != []
+
+    def test_a_value_you_built_is_STILL_a_violation(self):
+        assert self._lines("        sys.stdout.write(rendered_table)") != []
+
+    def test_CROSSED_streams_stay_a_violation(self):
+        """Captured stderr written to stdout is a routing bug, not a relay."""
+        assert self._lines("        sys.stdout.write(result.stderr)") != []
+        assert self._lines('        sys.stderr.write(result["stdout"])') != []
+
+    def test_a_commented_out_relay_is_not_examined_at_all(self):
+        assert self._lines("        # sys.stdout.write(result.stdout)") == []
+
+    def test_a_commented_out_VIOLATION_is_not_flagged(self):
+        """The relay case above is inert either way — a mutant that stopped
+        stripping comments survived it. This one only passes if comments are
+        actually stripped."""
+        assert self._lines('        # sys.stdout.write("hello")') == []
+
+    def test_a_trailing_comment_does_not_hide_a_real_violation(self):
+        assert self._lines('        sys.stdout.write("hello")  # relay') != []
+
+    def test_the_REAL_drone_entry_point_has_no_raw_write_violations(self):
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+
+        target = Path(__file__).resolve().parents[2] / "drone" / "apps" / "drone.py"
+        if not target.exists():
+            import pytest
+
+            pytest.skip("drone.py not on disk")
+        lines = target.read_text(encoding="utf-8").splitlines()
+        assert [i for i, line in enumerate(lines, 1) if cli_check._is_raw_write_violation(line)] == []
+
+
+class TestJsonStructureExemptsPreLoggingBootstrapModules:
+    """The pre-logging bootstrap class @prax reported (2026-08-31).
+
+    A module the logging substrate itself imports cannot import json_handler
+    back: log_operation() WRITES, so wiring it there puts a file write on the
+    import path of every branch — the ungateable write that fires during pytest
+    COLLECTION. Two clauses decide it, both MEASURED here: no aipass import of
+    any kind, AND the logging chain's own imports reach the module. Either
+    clause alone hands out the exemption far too widely.
+    """
+
+    def _universe(self, tmp_path):
+        """A miniature src/aipass with a logger that imports one bootstrap module."""
+        root = tmp_path / "src" / "aipass"
+        prax = root / "prax" / "apps"
+        (prax / "modules").mkdir(parents=True)
+        (prax / "handlers").mkdir(parents=True)
+        (prax / "modules" / "logger.py").write_text(
+            "from aipass.prax.apps.handlers.boot import find_root\ndef get_system_logger():\n    return find_root()\n",
+            encoding="utf-8",
+        )
+        return root
+
+    def _check(self, path):
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        return json_structure_check._is_prelogging_bootstrap(path, path.read_text(encoding="utf-8"))
+
+    def test_a_stdlib_only_module_the_logger_imports_is_exempt(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "import logging\nfrom pathlib import Path\n\ndef find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is True
+
+    def test_the_same_module_loses_the_exemption_the_moment_it_imports_aipass(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax.apps.handlers.json import json_handler\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_an_aipass_import_inside_a_function_still_disqualifies(self, tmp_path):
+        """The dependency is taken wherever it is written. A module that can reach
+        aipass from inside a function can reach json_handler the same way."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n\n"
+            "def find_root():\n"
+            "    from aipass.prax.apps.handlers.json import json_handler\n"
+            "    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_a_stdlib_only_module_the_chain_never_reaches_is_NOT_exempt(self, tmp_path):
+        """Clause 2 is what keeps the exemption from being free — 79 fleet modules
+        import nothing from aipass, and only 9 are in the chain."""
+        root = self._universe(tmp_path)
+        lonely = root / "prax" / "apps" / "handlers" / "lonely.py"
+        lonely.write_text(
+            "import re\n\ndef parse(text):\n    return re.findall(r'x', text)\n",
+            encoding="utf-8",
+        )
+        assert self._check(lonely) is False
+
+    def test_an_unparseable_file_is_not_exempt(self, tmp_path):
+        """_aipass_imports answers [] for a file it could not read, which would
+        otherwise read as 'holds no aipass import'. No exemption on ignorance."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text("def find_root(:\n    pass\n", encoding="utf-8")
+        assert self._check(boot) is False
+
+    def test_a_file_outside_any_aipass_source_root_is_not_exempt(self, tmp_path):
+        loose = tmp_path / "loose.py"
+        loose.write_text("import re\n\ndef parse(t):\n    return t\n", encoding="utf-8")
+        assert self._check(loose) is False
+
+    def test_the_REAL_prax_repo_root_scores_100(self):
+        """The live case that prompted the rule — pinned against the real tree so a
+        regression shows up as prax going red again, not as a green unit test."""
+        from pathlib import Path
+
+        import pytest
+
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        target = Path(__file__).resolve().parents[2] / "prax" / "apps" / "handlers" / "repo_root.py"
+        if not target.exists():
+            pytest.skip("prax/apps/handlers/repo_root.py not on disk")
+        result = json_structure_check.check_module(str(target))
+        assert result["score"] == 100
+        assert "bootstrap" in result["checks"][0]["message"]
+
+    def test_the_REAL_memory_repo_root_is_NOT_exempt(self):
+        """Same filename, same purpose, different position: memory's copy imports
+        json_handler and the prax logger, so it is a consumer and stays in scope."""
+        from pathlib import Path
+
+        import pytest
+
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        target = Path(__file__).resolve().parents[2] / "memory" / "apps" / "handlers" / "repo_root.py"
+        if not target.exists():
+            pytest.skip("memory/apps/handlers/repo_root.py not on disk")
+        assert json_structure_check._is_prelogging_bootstrap(target, target.read_text(encoding="utf-8")) is False
+
+
+class TestAutoDetectionAsksAboutThePublicSurface:
+    """The auto-detection rule means "a caller should not have to name itself",
+    and that is a question about a handler's PUBLISHED functions. It was measured
+    by grepping every `def ...(... module_name` in the file, so a private helper
+    that resolves a dotted name it was handed — with no caller to detect — was
+    convicted on the parameter NAME (found by dogfooding this checker on its own
+    tree, 2026-08-31)."""
+
+    def _check(self, content):
+        from aipass.seedgo.apps.handlers.aipass_standards import handlers_check
+
+        return handlers_check.check_auto_detection(content)
+
+    def test_a_public_function_taking_module_name_still_needs_auto_detection(self):
+        result = self._check("def log_operation(operation, data, module_name=None):\n    pass\n")
+        assert result is not None and result["passed"] is False
+
+    def test_a_private_helper_taking_module_name_is_not_the_rules_business(self):
+        assert self._check("def _module_file(module_name, source_root):\n    return None\n") is None
+
+    def test_a_keyword_only_module_name_on_a_public_function_still_counts(self):
+        result = self._check("def write(data, *, module_name=None):\n    pass\n")
+        assert result is not None and result["passed"] is False
+
+    def test_a_public_function_with_auto_detection_passes(self):
+        content = (
+            "import inspect\n\n"
+            "def log_operation(operation, data, module_name=None):\n"
+            "    frame = inspect.stack()[1]\n    return frame\n"
+        )
+        result = self._check(content)
+        assert result is not None and result["passed"] is True
+
+    def test_a_file_with_no_module_name_parameter_is_silent(self):
+        assert self._check("def check(path):\n    return path\n") is None
+
+    def test_the_word_in_a_docstring_or_a_call_does_not_convict(self):
+        """The old text scan keyed on `def name(... module_name`; the AST keys on
+        the parameter itself, so prose and call sites cannot trigger it."""
+        content = (
+            'def resolve(path):\n    """Resolves a module_name for the caller."""\n    return log(module_name=path)\n'
+        )
+        assert self._check(content) is None
+
+    def test_an_unparseable_file_falls_back_to_the_text_scan(self):
+        """A file we could not read is not evidence the parameter is absent."""
+        result = self._check("def log_operation(operation, module_name=None):\n    pass\n\ndef broken(:\n")
+        assert result is not None and result["passed"] is False

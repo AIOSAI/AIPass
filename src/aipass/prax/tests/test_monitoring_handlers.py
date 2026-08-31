@@ -1011,51 +1011,75 @@ class TestFindRepoRoot:
         result = detector._find_repo_root()
         assert result is sentinel
 
-    def test_walks_parents_to_find_registry(self):
-        """Should walk up from __file__ to find AIPASS_REGISTRY.json."""
+    def test_walks_parents_to_find_registry(self, tmp_path, monkeypatch):
+        """Should find AIPASS_REGISTRY.json above the module file.
+
+        Rewritten 2026-08-31. The previous version mocked the Path class inside
+        branch_detector to fake a walk that no longer lives there — it asserted
+        the shape of an implementation, so it went red the moment the walk moved
+        into handlers/repo_root.py while the ANSWER stayed identical. This drives
+        the real resolver over a real directory instead.
+        """
+        from aipass.prax.apps.handlers import repo_root as repo_root_mod
+
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
 
-        mock_parent = MagicMock(spec=Path)
-        mock_registry = MagicMock(spec=Path)
-        mock_registry.exists.return_value = True
-        mock_parent.__truediv__ = MagicMock(return_value=mock_registry)
+        root = tmp_path / "checkout"
+        start = root / "src" / "aipass" / "prax" / "a.py"
+        start.parent.mkdir(parents=True)
+        (root / "AIPASS_REGISTRY.json").write_text("{}")
+        monkeypatch.setattr(mod, "find_repo_root", lambda _start=None: repo_root_mod.find_repo_root(start))
 
-        mock_resolved = MagicMock()
-        mock_resolved.parent = mock_parent
-        mock_resolved.parents = []
+        assert detector._find_repo_root() == root
 
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.return_value.resolve.return_value = mock_resolved
-            result = detector._find_repo_root()
+    def test_a_registry_less_tree_never_falls_back_to_the_cwd(self, tmp_path, monkeypatch):
+        """REPLACES test_fallback_to_cwd_when_registry_missing.
 
-        assert result is mock_parent
+        That test asserted the defect: @memory reported on 2026-08-31 that the
+        Path.cwd() fallback crashes any import in a process whose working
+        directory was deleted, and silently resolves against the caller's shell
+        on every registry-less checkout — which is every clean CI clone, since
+        the marker is gitignored. The old pin is not weakened here, it is
+        INVERTED: the cwd answer is now the wrong one, so the assertion says so.
+        """
+        from aipass.prax.apps.handlers import repo_root as repo_root_mod
 
-    def test_fallback_to_cwd_when_registry_missing(self):
-        """Should fall back to Path.cwd() when no AIPASS_REGISTRY.json found."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
         detector._repo_root = None
 
-        mock_parent = MagicMock(spec=Path)
-        mock_no_registry = MagicMock(spec=Path)
-        mock_no_registry.exists.return_value = False
-        mock_parent.__truediv__ = MagicMock(return_value=mock_no_registry)
-        mock_parent.parents = []
+        start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
+        start.parent.mkdir(parents=True)
+        monkeypatch.setattr(mod, "find_repo_root", lambda _start=None: repo_root_mod.find_repo_root(start))
 
-        mock_resolved = MagicMock()
-        mock_resolved.parent = mock_parent
-        mock_resolved.parents = []
+        resolved = detector._find_repo_root()
+        assert resolved == tmp_path / "checkout"
+        assert resolved != Path.cwd()
 
-        fake_cwd = Path("/fake/cwd")
+    def test_the_answer_is_cached_per_instance(self):
+        """The cache survived the delegation — it is called per registry entry."""
+        mod = _import_branch_detector()
+        detector = _make_detector_with_branches(mod)
+        detector._repo_root = None
 
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.return_value.resolve.return_value = mock_resolved
-            mock_path_cls.cwd.return_value = fake_cwd
-            result = detector._find_repo_root()
+        calls = []
 
-        assert result is fake_cwd
+        def counting(start=None):
+            calls.append(start)
+            return Path("/counted/root")
+
+        original = mod.find_repo_root
+        mod.find_repo_root = counting
+        try:
+            first = detector._find_repo_root()
+            second = detector._find_repo_root()
+        finally:
+            mod.find_repo_root = original
+
+        assert first == second == Path("/counted/root")
+        assert len(calls) == 1
 
 
 class TestRegisterBranch:

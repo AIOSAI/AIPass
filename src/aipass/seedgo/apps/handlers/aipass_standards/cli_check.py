@@ -30,6 +30,35 @@ AUDIT_SCOPE = "all_files"
 APPLIES_TO = "production"
 
 
+#: `sys.stdout.write(x.stdout)`, `sys.stderr.write(x["stderr"])` and friends —
+#: a router handing a completed subprocess's captured output straight through.
+#: The stream names must CORRESPOND: writing a captured stderr to stdout is a
+#: routing bug this check should keep catching, so it is not matched here.
+_RELAYED_STREAM = re.compile(
+    r"sys\.(?P<sink>stdout|stderr)\.write\(\s*[A-Za-z_][\w.]*"
+    r"(?:\.(?P=sink)\b|\[\s*[\"'](?P=sink)[\"']\s*\]|\.get\(\s*[\"'](?P=sink)[\"'])"
+)
+
+
+def _is_raw_write_violation(line: str) -> bool:
+    """Is this line a raw stream write the CLI standard should object to?
+
+    The rule means "route YOUR OWN output through Rich". @drone's router relays
+    a child process's captured bytes verbatim — `sys.stdout.write(result.stdout)`
+    — and Rich would interpret markup in, wrap and re-style output drone never
+    authored, which is exactly what a router must not do (@devpulse, 2026-08-31).
+    The checker was grepping a VERB where the rule asks an AUTHORSHIP question.
+
+    The exemption is keyed on the ARGUMENT so it cannot be borrowed: a literal,
+    an f-string or a value you built is still a violation. It also requires the
+    streams to correspond, so a captured stderr written to stdout stays red.
+    """
+    code_part = line.split("#")[0] if "#" in line else line
+    if "sys.stdout.write(" not in code_part and "sys.stderr.write(" not in code_part:
+        return False
+    return not _RELAYED_STREAM.search(code_part)
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check if module follows CLI standards
@@ -391,14 +420,10 @@ def check_print_usage(
             else:
                 format_help_lines.append(i)
 
-        # Check for raw sys.stdout.write() / sys.stderr.write() (bypasses Rich)
-        if "sys.stdout.write(" in stripped or "sys.stderr.write(" in stripped:
-            if "#" in line:
-                code_part = line.split("#")[0]
-                if "sys.stdout.write(" in code_part or "sys.stderr.write(" in code_part:
-                    raw_write_lines.append(i)
-            else:
-                raw_write_lines.append(i)
+        # Raw sys.stdout/stderr.write() — bypasses Rich, EXCEPT when it is a
+        # verbatim relay of a captured subprocess stream (see the helper).
+        if _is_raw_write_violation(line):
+            raw_write_lines.append(i)
 
         # Use regex to find BARE print() - not preceded by . or word character
         # This excludes: console.print(), logger.print(), pprint(), etc.

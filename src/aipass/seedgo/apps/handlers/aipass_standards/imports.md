@@ -151,6 +151,13 @@ Those first four are the four techniques actually in use across this fleet's con
 **All four reach nothing** — the consumer keeps the real `SystemLogger` for the whole
 session and real writes escape into `@prax`'s live state directory.
 
+The fifth row is not "nobody", and @spawn corrected me on it (2026-08-31): they already
+had exactly one correct call site — `tests/test_file_ops.py:176`, a `@patch` decorator
+naming `file_ops.logger`, written before any of this came up. The technique was in the
+fleet; it just was not in the *shared fixture*, which is where it mattered. Someone
+arriving at the right answer without publishing it is the same failure mode as this
+standard recommending a form without the technique that goes with it.
+
 The rule underneath is simpler than "rebindable vs not": **the last dot must be resolved
 at call time.** Patching upstream of a binding never reaches past it — and note that
 `aipass/prax/__init__.py` *itself* re-exports by binding (`from ...logger import

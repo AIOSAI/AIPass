@@ -319,9 +319,35 @@ introspection, so this list and the code cannot drift apart:
 - metadata-only changes: `chmod`, `chown`, `touch -t` on an existing file
 - `git`, `gh`, `drone`, `aipass` — they name no write verb this parser reads; their own fences apply
 - writes made by a process the command merely starts (a server, a test runner)
+- a path spelled for the *other* operating system's filesystem — `C:\Proj\x` read on Linux names no
+  drive that exists here, so it resolves relative and reads as local
 
 A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
 a parser that has learned nothing about a command must not convict on it.
+
+**Both separator spellings are read (2026-08-31).** `shlex` runs in POSIX mode, where a backslash is
+an *escape* — so it ate every separator of a Windows path and
+`C:\Users\me\Vera-Studio\f.json` arrived as the single token `C:UsersmeVera-Studiof.json`. That is
+not a degraded reading, it is the dangerous one: a drive-absolute foreign path became one relative
+filename, resolved under the caller's **own** project, and read as a local write. Every catch
+category in the table returned exit 0 on Windows, and the class had never been green there since the
+day it shipped. Found by @devpulse in `windows-test.yml` (which runs the whole tree, unlike main CI);
+reproduced on Linux at the parser level, because the bug never needed a Windows runner — only a
+backslash.
+
+The fix does not pick a dialect. A command containing a backslash is lexed **twice** — once with
+shlex's escape rules (correct for POSIX `cp a\ b.txt dest`) and once with backslashes protected
+(correct for a Windows path) — and the write targets are unioned. Reading `\` as a separator only
+ever *adds* path components, so a local write can never become foreign by it, while the reverse is
+exactly how a foreign write became local. Separators are then normalised before `pathlib` sees the
+token, on every OS: `WindowsPath("C:/a/b")` is absolute and correct, so one spelling reaches `Path`
+from both dialects and the parser's reading stops depending on which machine runs it.
+
+What is *not* portable is the **root**, which is why the drive-letter entry is in the residual list
+above rather than left to be discovered. The tests pin the Windows spelling in-process on any OS by
+back-slashing a real local path (`str(p).replace("/", "\\")`) — a no-op on Windows, and on Linux the
+exact spelling that killed the parser, still resolving to the same real file under the same real
+fence.
 
 > **CONFIG WIRE — landed 2026-08-30, the lane is live.** `pre_edit_gate` now carries
 > `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` (the matcher `git_gate`

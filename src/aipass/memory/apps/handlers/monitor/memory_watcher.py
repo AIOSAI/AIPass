@@ -46,6 +46,7 @@ except ImportError:
 # Handler imports (relative within package — after conditional watchdog block)
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
 from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
+from aipass.memory.apps.handlers import repo_root
 from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
 from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
 from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
@@ -330,12 +331,17 @@ def _check_code_archive() -> Dict[str, Any]:
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="memory_watcher")
 
 
 def _paths_from_registry(registry_path: Path, root: Path) -> list[Path]:

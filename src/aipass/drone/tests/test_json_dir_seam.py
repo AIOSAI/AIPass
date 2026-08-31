@@ -314,6 +314,11 @@ class TestTheAnchorIsEnvIndependent:
         anchor = next(line.split(" ", 1)[1] for line in result.stdout.splitlines() if line.startswith("ANCHOR"))
         redirect = next(line.split(" ", 1)[1] for line in result.stdout.splitlines() if line.startswith("REDIRECT"))
 
-        assert anchor.endswith("drone/drone_json"), f"the anchor was seeded from the environment: {anchor}"
+        # Compared as PATH PARTS, not as a string suffix: Windows CI runs this
+        # whole suite and separators differ there. A pin that only holds on
+        # POSIX is the machine-reading species this branch spent the night on.
+        assert Path(anchor).parts[-2:] == ("drone", "drone_json"), (
+            f"the anchor was seeded from the environment: {anchor}"
+        )
         assert str(tmp_path) not in anchor, f"the anchor IS the redirect — the seam has no fixed point: {anchor}"
         assert str(tmp_path) in redirect, f"the env var was exported before import and ignored: {redirect}"

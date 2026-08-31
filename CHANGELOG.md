@@ -66,6 +66,46 @@ PyPI version — not the changelog header.
     races exercised) — it was the one intermittent red in prax's 1380-file
     fleet batch.
 
+- **Round two, caught by the first round's own pins on CI** (same night):
+  - memory: nine private repo-root walks with `Path.cwd()` fallbacks became ONE
+    implementation (`handlers/repo_root.py`) behind the existing names, with a
+    parse-tree pin — no lane may define a walk that is not a delegation, no
+    `return Path.cwd()` anywhere in apps/ — that named all ten offenders
+    red-first and carries a positive control (a mutant that blinded the filter
+    left the suite green; skip-reads-green, caught twice in one night). One
+    reversed test told the whole story: `test_find_repo_root_falls_back_to_cwd`
+    had pinned the defect as the contract — a green test standing guard over
+    the bug.
+  - prax `config/load.py`: the same cwd fallback under `get_system_logger()` —
+    called at module level by nearly every handler in the fleet — fixed within
+    the hour of memory's cross-branch report (memory verified 11/11 bare-world
+    imports clean, then removed their own xfail hatch the moment the blocker
+    died).
+  - **hooks bash_writes 1.2.0 — the Windows fence was open**: `shlex`'s POSIX
+    lexer eats backslashes as escapes, so a drive-absolute foreign path arrived
+    as one relative token and resolved LOCAL — every scripted-lane category
+    allowed with exit 0 on Windows CI. Fixed by dual-dialect lexing with
+    unioned write targets (reading `\` as a separator can only ADD components,
+    so local can never become foreign by it — the reverse is exactly what
+    happened); unwalkable foreign roots published as NOT_CAUGHT entry 8, never
+    a silent allow. Reproduced and pinned on Linux — the bug needed a
+    backslash, not a Windows box.
+  - seedgo: three "deliberate violations" ruled — all three were checkers
+    overclaiming, all three taught instead of waived (pure-declaration modules
+    `not_applicable` for json_structure; relaying a captured subprocess stream
+    is an authorship class, and crossed streams are now caught under the same
+    rule; unused_function says "no caller in this branch" and warns about
+    cross-branch/dynamic callers it cannot see — the dead-code checker had
+    nominated the fleet's most load-bearing function, memory's
+    `changed_entries`, called by hooks' write gate via importlib). Adopted
+    rule: a structurally detectable exemption goes in the checker; a waiver is
+    only for what cannot be measured.
+  - drone: the no-cwd sweep's own new test asserted a fact about the machine
+    (registry presence) instead of the function — rebuilt against stand-ins,
+    claim strengthened to "carries a project marker" (the weak claim was
+    satisfied by the function's own last-resort return); two POSIX separator
+    pins converted to `Path.parts`.
+
 ### Added
 
 - **daemon+ai_mail+hooks+memory: Vera woke** (FPLAN-0460 closed, c9d0327e —

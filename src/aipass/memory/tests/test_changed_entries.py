@@ -788,3 +788,66 @@ class TestRenamedFieldEntryDoesNotBrickRollover:
 
         assert mod.changed_entries(before, after, _SESSIONS_ONLY) == []
         assert len(mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]) == 1
+
+
+class TestTheBypassClaimIsMeasuredNotAsserted:
+    """`.seedgo/bypass.json` claims @hooks calls `changed_entries` — this checks it.
+
+    seedgo's unused_function checker is branch-local, so it correctly cannot see
+    that this function's only caller lives in another tree. The bypass rule is
+    the sanctioned way to say so, but a bypass is a CLAIM, and a claim nobody
+    measures is how a real entry point gets deleted for a green audit two
+    refactors from now.
+
+    So the justification is pinned. The day @hooks stops calling it, this goes
+    red and the bypass is provably stale — which is the moment to delete the
+    function, not before.
+
+    READ-ONLY and TOLERANT OF ABSENCE: it greps @hooks' tree for the call rather
+    than pinning a line number, and skips where hooks is not installed, because
+    an external checkout of this branch alone is a real world and not a failure.
+    """
+
+    @staticmethod
+    def _hooks_root():
+        """@hooks' source tree, or None when this checkout does not carry it."""
+        from aipass.memory.apps.handlers import repo_root
+
+        candidate = repo_root.SOURCE_ROOT / "src" / "aipass" / "hooks" / "apps"
+        return candidate if candidate.is_dir() else None
+
+    def test_hooks_still_calls_the_function_the_bypass_exempts(self) -> None:
+        root = self._hooks_root()
+        if root is None:
+            pytest.skip("@hooks is not installed in this checkout — nothing to measure")
+
+        callers = [
+            path.relative_to(root)
+            for path in root.rglob("*.py")
+            if ".archive" not in path.parts and "changed_entries(" in path.read_text(encoding="utf-8")
+        ]
+        assert callers, (
+            "no file in @hooks calls changed_entries() any more — the unused_function bypass in "
+            ".seedgo/bypass.json is now a false claim. Either the caller moved (update the reason) "
+            "or the function is genuinely dead (delete it and drop the bypass)."
+        )
+
+    def test_the_bypass_rule_is_narrowed_to_that_one_function(self) -> None:
+        """A file-wide exemption would hide the NEXT orphan in the same file."""
+        import json as _json
+        from aipass.memory.apps.handlers import repo_root
+
+        rules = _json.loads(
+            (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".seedgo" / "bypass.json").read_text(
+                encoding="utf-8"
+            )
+        )["bypass"]
+        mine = [
+            rule
+            for rule in rules
+            if rule.get("standard") == "unused_function" and rule.get("file", "").endswith("entry_limits.py")
+        ]
+        assert mine, "the unused_function bypass for entry_limits.py is gone"
+        assert mine[0].get("functions") == ["changed_entries"], (
+            f"the exemption is not narrowed to the one function it was argued for: {mine[0]}"
+        )
