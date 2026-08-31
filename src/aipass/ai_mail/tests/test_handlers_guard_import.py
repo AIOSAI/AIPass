@@ -256,3 +256,81 @@ class TestLinecacheSwallowsItsOwnErrors:
             f"linecache now raises when {module}.{attr} is denied — the except in "
             "_find_real_caller is load-bearing again, and the guard needs a pin for it"
         )
+
+
+class TestTheCallerIsNoneBranchRunsForReal:
+    """The behavioural sibling to the AST ban, per @spawn's correction relayed
+    2026-08-31: the deleted second ``inspect.stack()`` walk is unreachable from
+    IMPORT-shaped pins, not unreachable full stop.
+
+    ``apps/__init__.py`` always supplies a real-file frame, so importing the
+    package can never drive ``caller_file is None``. Calling
+    ``_guard_branch_access()`` DIRECTLY from a ``python -c`` child can: every
+    frame is a string-pseudo or importlib, both skipped, so ``_find_real_caller``
+    returns None and the branch runs. A regrown walk dies there under a realpath
+    denial; the cured plain ``return`` survives.
+
+    ``-c`` and never a script file: @commons' lesson — a world spelled too
+    realistically is silently inert, because running the probe as a script makes
+    every frame a real on-disk file and ``getsourcefile`` early-returns.
+    """
+
+    ARM_AND_CALL = """
+    import os, os.path, sys
+    _real_realpath = os.path.realpath
+
+    # ARMING PROBE 1 — the denial actually bites. Without this the whole test
+    # can pass in a world where nothing was ever denied.
+    def _denied(*a, **k):
+        raise OSError(9, "realpath denied")
+    os.path.realpath = _denied
+    import inspect
+    try:
+        inspect.stack()
+        print("ARM1:INERT")
+    except OSError:
+        print("ARM1:LIVE")
+
+    from aipass.ai_mail.apps.handlers import _find_real_caller, _guard_branch_access
+
+    # ARMING PROBE 2 — the branch under test is the one being exercised. If a
+    # real frame leaks in, the guard takes the ordinary path and the pin below
+    # proves nothing about the None branch.
+    caller, line = _find_real_caller()
+    print("ARM2:CALLER=" + repr(caller))
+
+    _guard_branch_access()
+    print("GUARD:RETURNED")
+    """
+
+    def test_the_denial_is_live_and_the_none_branch_is_the_one_reached(self):
+        """Both arming probes, asserted before the claim that depends on them."""
+        result = _run(self.ARM_AND_CALL)
+        assert "ARM1:LIVE" in result.stdout, f"denial inert: {result.stdout!r} {result.stderr!r}"
+        assert "ARM2:CALLER=None" in result.stdout, (
+            f"a real frame leaked in — the None branch was not exercised: {result.stdout!r}"
+        )
+
+    def test_the_guard_returns_instead_of_dying_there(self):
+        """The claim. Red against a regrown stack walk, green against the cured
+        plain return."""
+        result = _run(self.ARM_AND_CALL)
+        assert "GUARD:RETURNED" in result.stdout, (
+            f"the caller-is-None branch still needs a filesystem:\n{result.stderr}"
+        )
+
+    def test_this_negative_control_cannot_fail_for_the_bans_reason(self):
+        """@spawn's check, applied to my OWN control: their docstring control
+        asserted the whole live guard file clean, so it was a second copy of the
+        ban wearing a control's name — restoring the walk redded it too.
+
+        Mine parses a synthetic source string that no edit to the guard can
+        change, so it can only fail if the matcher itself stops matching. Pinned
+        so a later 'simplification' to read the live file is caught.
+        """
+        source = Path(__file__).resolve().read_text(encoding="utf-8")
+        control = source.split("def test_that_ban_would_convict_a_real_call")[1].split("def ")[0]
+        assert "SOURCE" not in control and "read_text" not in control, (
+            "the ban's negative control must not read the live guard file — "
+            "a control that fails for the ban's reason is a second ban"
+        )

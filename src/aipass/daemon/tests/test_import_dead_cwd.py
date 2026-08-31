@@ -29,15 +29,33 @@ TWO WORLDS, AND THEY ARE NOT REDUNDANT - measured here, not assumed:
   B - os.path.realpath denied outright while the working directory still
       reads.
 
-World A AS CONSTRUCTED HERE convicts the RESOLVE half and CANNOT convict the
-inspect.stack() half. The qualifier is load-bearing - @devpulse reconciled this
-with @cli's one-world claim on 2026-08-31 and the deciding variable is ABSPATH.
-Deny os.getcwd, as this file does, and abspath dies with it. Give abspath
-ntpath's non-raising behaviour instead and getmodule proceeds to the unguarded
-realpath, so world A DOES convict stack. Both measurements are true of different
-instruments. Verified here before banking:
-  getcwd denied, abspath dies with it   -> STACK_LIVES
-  getcwd denied, abspath left functional -> STACK_DIES
+WORLD A'S STACK OUTCOME IS PLATFORM-DEPENDENT, and the qualifier took two
+corrections to get right. The deciding variable is ABSPATH:
+
+  POSIX - posixpath.abspath calls os.getcwd() for its normalisation, so denying
+      getcwd kills abspath too. inspect.getmodule then dies on the way IN, at
+      getabsfile, and that call sits inside getmodule's own
+      `except (TypeError, FileNotFoundError): return None`. getmodule returns
+      None, inspect.stack() COMPLETES. World A cannot convict the stack half here.
+  WINDOWS - ntpath.abspath rides Win32 _getfullpathname and never touches
+      getcwd, so it SURVIVES the denial. getmodule proceeds past getabsfile and
+      reaches the `os.path.realpath(f)` line further down - the one outside
+      every try - and inspect.stack() DIES.
+
+The history is worth keeping because the rule came out of it. Round 4 measured
+the POSIX half here and wrote it as "world A cannot convict stack" - unqualified.
+@cli measured the opposite in a variant that patched abspath functional, and
+@devpulse reconciled the two: same world name, different instruments. That
+produced the tightening "world A AS CONSTRUCTED HERE". Then round 4 shipped and
+the real Windows runner redded this very pin with its own assertion text
+(windows-setup, run 33431848734) - because there was one more dimension the
+sentence still did not carry. The rule now reads: AS CONSTRUCTED HERE, ON THIS
+PLATFORM. A measurement is of an instrument AND a platform, and naming only the
+instrument is how a true sentence travels somewhere it is false.
+
+The pin did exactly what it was built to do - it went red the moment the
+measured behaviour stopped matching, on the platform that could show it. It is
+now a TABLE rather than a single expectation; see STACK_IN_WORLD_A.
 Measured 2026-08-31: denying os.getcwd also kills os.path.abspath, so
 inspect.getmodule dies on its way IN, at getabsfile - and that call sits inside
 `except (TypeError, FileNotFoundError): return None`. getmodule returns None,
@@ -67,6 +85,7 @@ it is the truth.
 """
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -182,7 +201,51 @@ import aipass.daemon.apps.daemon_wakeup  # noqa: F401
 sys.stdout.write("IMPORTED\\n")
 """
 
-APPS = Path(__file__).resolve().parents[1] / "apps"
+# Whether world A's denial reaches the unguarded realpath inside getmodule, by
+# platform. Keyed on os.name because the deciding variable - which abspath
+# implementation is in play - is exactly what os.name selects.
+#
+# PROVENANCE, stated because the two halves are not equally strong:
+#   "posix" is MEASURED LIVE by this file on every POSIX run. If it is wrong,
+#       this test fails here, today.
+#   "nt" is DERIVED FROM A CI FAILURE - windows-setup run 33431848734, where the
+#       previous single-expectation form of this pin failed on the Windows
+#       runner carrying its own assertion text. That red IS the Windows
+#       measurement; no one has stepped through ntpath by hand. It becomes
+#       measured-live the first time this file runs green on a Windows box.
+STACK_IN_WORLD_A = {
+    "posix": "STACK_LIVES",
+    "nt": "STACK_DIES",
+}
+
+_BRANCH = Path(__file__).resolve().parents[1]
+APPS = _BRANCH / "apps"
+
+# tools/ is swept too, and that is a correction rather than completeness for its
+# own sake. Round 4 named tools/verify_branch.py as a deliberate EXCLUSION - the
+# reasoning was that nothing imports it, so it cannot take an import down, and
+# that reasoning still holds. What it missed is that the file is a TOOL a person
+# runs, and a tool that dies on its own first line because the working directory
+# is gone is broken exactly when someone is trying to diagnose something.
+# @spawn measured it and found five branches carrying five different md5s of
+# this file - pasted, never distributed, so there is no upstream to fix.
+# A sweep scoped to apps/ could never have caught it.
+#
+# tools/ IS GITIGNORED (.gitignore:57, a blanket `tools/` rule), so it exists on
+# a developer machine and NOT in a fresh clone. The roots list therefore names
+# it unconditionally - that is a fact about what this branch sweeps - while the
+# sweep itself skips roots that are not on disk. Requiring the directory to
+# EXIST would be a pin that encodes today's machine and goes red on CI, which is
+# a species this branch has shipped before (S51: two live-fleet pins broke the
+# hour the fleet grew).
+SWEPT_ROOTS = (APPS, _BRANCH / "tools")
+
+
+def _sweepable(root: Path):
+    """Python files under *root*, or nothing if the root is not on this machine."""
+    if not root.is_dir():
+        return []
+    return [f for f in sorted(root.rglob("*.py")) if ".archive" not in f.parts]
 
 
 def _run_world(denial: str) -> subprocess.CompletedProcess:
@@ -196,18 +259,26 @@ def _run_world(denial: str) -> subprocess.CompletedProcess:
     )
 
 
-def _assert_world(result: subprocess.CompletedProcess, label: str, *, convicts_stack: bool) -> str:
-    """Assert the imports survived, and that the world was armed for what it can prove.
+def _assert_world(result: subprocess.CompletedProcess, label: str, *, expect_stack: str) -> str:
+    """Assert the imports survived, and that the world behaved exactly as tabled.
+
+    expect_stack is the EXACT token required, not a boolean, and both directions
+    are asserted. That is a fix for a surviving mutant: with a boolean, only the
+    STACK_DIES direction was ever checked, so neutering the table comparison left
+    the whole file green on POSIX - the platform whose entry is STACK_LIVES. An
+    expectation that can only fail one way is half an expectation.
 
     Args:
         result: The finished child process.
         label: "A" or "B", for the failure message.
-        convicts_stack: Whether inspect.stack() is expected to DIE in this
-            world. Measured per world, never assumed - see the module docstring.
+        expect_stack: "STACK_DIES" or "STACK_LIVES" - what inspect.stack() must
+            do in this world on THIS platform. Measured per world and per
+            platform, never assumed; see STACK_IN_WORLD_A.
 
     Returns:
         The child's stdout, so a caller can assert on the parts it owns.
     """
+    assert expect_stack in ("STACK_DIES", "STACK_LIVES"), expect_stack
     out = result.stdout
     assert "IMPORTED" in out, (
         f"world {label}: import died under the dead-cwd world:\nstdout={out}\nstderr={result.stderr}"
@@ -224,48 +295,83 @@ def _assert_world(result: subprocess.CompletedProcess, label: str, *, convicts_s
 
     assert "PROBE_ARMED" in out, f"world {label}: probe reported neither outcome: {out}"
 
-    if convicts_stack:
-        # The negative control FOR the positive control: a world that cannot
-        # kill the old shape proves nothing about the new one, and every import
-        # assertion above it would be vacuously green.
-        assert "STACK_DIES" in out, (
-            f"world {label}: inspect.stack() SURVIVED the denial, so this world "
-            "cannot convict the shape the guard was cured of - every import "
-            "assertion above is vacuous"
-        )
+    # The negative control FOR the positive control, asserted in BOTH directions.
+    # STACK_DIES missing where expected means the world cannot convict the shape
+    # the guard was cured of, and every import assertion above it is vacuous.
+    # STACK_LIVES missing where expected means the world became more hostile than
+    # it was measured to be, and the table is now describing something else.
+    observed = "STACK_DIES" if "STACK_DIES" in out else "STACK_LIVES" if "STACK_LIVES" in out else None
+    assert observed is not None, f"world {label}: the stack probe reported neither outcome:\n{out}"
+    assert observed == expect_stack, (
+        f"world {label} on os.name={os.name!r}: inspect.stack() {observed}, table "
+        f"says {expect_stack}. If {expect_stack} was STACK_DIES, this world can no "
+        "longer convict the cured shape and the import assertions above are "
+        "vacuous; if it was STACK_LIVES, the world got more hostile than measured. "
+        "Either way: re-measure both worlds on this platform before trusting either."
+    )
     return out
 
 
 def test_daemon_imports_survive_world_a_ntpath_emulation():
     """The resolve half: every module-level Path(__file__).resolve() is denied.
 
-    This world does NOT convict inspect.stack() - see the module docstring and
-    test_world_a_cannot_convict_inspect_stack. It is kept because it is the only
-    one of the two that denies the working-directory READ itself, which is the
-    condition a deleted cwd actually creates.
+    Whether this world ALSO convicts inspect.stack() depends on the platform -
+    see STACK_IN_WORLD_A and the module docstring. It is kept on both platforms
+    because it is the only one of the two that denies the working-directory READ
+    itself, which is the condition a deleted cwd actually creates.
     """
-    _assert_world(_run_world(WORLD_A), "A", convicts_stack=False)
+    _assert_world(_run_world(WORLD_A), "A", expect_stack=STACK_IN_WORLD_A[os.name])
 
 
 def test_daemon_imports_survive_world_b_realpath_denied():
-    """The stack half: the only world that reaches getmodule's unguarded realpath."""
-    _assert_world(_run_world(WORLD_B), "B", convicts_stack=True)
+    """The stack half, and the one world that convicts it on EVERY platform.
 
-
-def test_world_a_cannot_convict_inspect_stack():
-    """Pin the asymmetry, so the two worlds are never collapsed into one.
-
-    If this ever goes red because world A started killing inspect.stack(), the
-    honest response is to tighten world A's expectation above - not to delete
-    world B. If it goes red the other way round the recipe has been quietly
-    simplified and the stack half of the cure lost its only instrument.
+    World B leaves the working directory readable and denies os.path.realpath
+    outright, so abspath succeeds on posixpath and ntpath alike and getmodule
+    always reaches the unguarded realpath. That platform-independence is why it
+    is the load-bearing instrument for the stack half, and why world A's
+    per-platform table below is a fact to record rather than a gap to fill.
     """
-    out = _assert_world(_run_world(WORLD_A), "A", convicts_stack=False)
-    if "PROBE_ARMED" in out:
-        assert "STACK_LIVES" in out, (
-            "world A now convicts inspect.stack() - measured behaviour changed; "
-            "re-measure both worlds before trusting either"
-        )
+    _assert_world(_run_world(WORLD_B), "B", expect_stack="STACK_DIES")
+
+
+def test_world_a_stack_outcome_matches_the_platform_table():
+    """Pin world A's stack outcome to the table, so the two worlds stay distinct.
+
+    This test earned its keep: in its previous single-expectation form it went
+    RED on the Windows CI runner carrying its own assertion text, which is how
+    the platform dimension was found at all. The table is the fix; the pin is
+    unchanged in purpose.
+
+    A red here means the observed behaviour left the table on THIS platform.
+    The honest response is to re-measure both worlds on this platform and
+    correct the entry - never to delete world B, and never to widen the
+    assertion until it cannot fail. Which entry is measured live and which is
+    derived from CI is recorded on STACK_IN_WORLD_A itself.
+    """
+    expected = STACK_IN_WORLD_A.get(os.name)
+    if expected is None:
+        pytest.skip(f"no measured world-A stack outcome for os.name={os.name!r} - add one rather than guessing")
+
+    # The comparison itself lives in _assert_world, which asserts the exact
+    # token in BOTH directions. A second copy here was removed rather than kept:
+    # a mutant proved it unkillable, and an assertion no mutant can kill is
+    # decoration that makes the file look better covered than it is.
+    _assert_world(_run_world(WORLD_A), "A", expect_stack=expected)
+
+
+def test_the_platform_table_covers_the_platforms_this_fleet_runs_on():
+    """A table with a hole reads green by skipping - so the hole is a test.
+
+    AIPass CI runs Linux, macOS (both os.name == 'posix') and Windows
+    ('nt'). If either key disappears, the skip above would quietly retire the
+    pin on the platform whose CI failure created the table in the first place.
+    """
+    assert set(STACK_IN_WORLD_A) == {"posix", "nt"}, STACK_IN_WORLD_A
+    assert set(STACK_IN_WORLD_A.values()) <= {"STACK_LIVES", "STACK_DIES"}, STACK_IN_WORLD_A
+    assert os.name in STACK_IN_WORLD_A, (
+        f"this machine is os.name={os.name!r} and the table has no entry - the pin is skipping rather than measuring"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -321,11 +427,10 @@ class TestTheGuardNeverCallsInspectStack:
     def test_no_daemon_module_calls_inspect_stack(self):
         """The sweep, so the next copy of the template line is caught at birth."""
         offenders = []
-        for source in sorted(APPS.rglob("*.py")):
-            if ".archive" in source.parts:
-                continue
-            for lineno in _inspect_stack_calls(source.read_text(encoding="utf-8")):
-                offenders.append(f"{source.relative_to(APPS)}:{lineno}")
+        for root in SWEPT_ROOTS:
+            for source in _sweepable(root):
+                for lineno in _inspect_stack_calls(source.read_text(encoding="utf-8")):
+                    offenders.append(f"{source.relative_to(_BRANCH)}:{lineno}")
 
         assert offenders == [], "inspect.stack() calls in daemon: " + ", ".join(offenders)
 
@@ -382,13 +487,37 @@ def _module_level_resolves(source: str) -> list:
 class TestNoModuleLevelResolveSurvives:
     def test_every_module_level_resolve_routes_through_module_file(self):
         offenders = []
-        for source in sorted(APPS.rglob("*.py")):
-            if ".archive" in source.parts:
-                continue
-            for lineno in _module_level_resolves(source.read_text(encoding="utf-8")):
-                offenders.append(f"{source.relative_to(APPS)}:{lineno}")
+        for root in SWEPT_ROOTS:
+            for source in _sweepable(root):
+                for lineno in _module_level_resolves(source.read_text(encoding="utf-8")):
+                    offenders.append(f"{source.relative_to(_BRANCH)}:{lineno}")
 
         assert offenders == [], "module-level .resolve() outside module_file(): " + ", ".join(offenders)
+
+    def test_the_roots_list_still_names_tools(self):
+        """The roots list is a fact about the code, so it is pinned like one.
+
+        The apps/-only scope is exactly what let tools/verify_branch.py stand
+        uncured through round 4. This goes red if tools/ is dropped from the
+        sweep - which is a code change someone makes - and stays green when the
+        directory is merely absent, which is what a fresh clone looks like,
+        because tools/ is gitignored.
+        """
+        assert APPS in SWEPT_ROOTS, "apps/ dropped out of the sweep"
+        assert _BRANCH / "tools" in SWEPT_ROOTS, "tools/ dropped out of the sweep"
+
+    def test_the_sweep_reads_tools_when_it_is_present(self):
+        """And when the directory IS here, it must actually be read.
+
+        Skipped rather than failed where tools/ is absent: on CI that absence is
+        the truth (gitignored), and a pin that fails for it would be asserting a
+        fact about the machine. The skip states which world it saw.
+        """
+        tools = _BRANCH / "tools"
+        if not tools.is_dir():
+            pytest.skip("tools/ is not on this machine - gitignored, so a fresh clone has none")
+
+        assert _sweepable(tools), "tools/ is present but the sweep reads no Python from it"
 
     def test_the_matcher_convicts_the_shape_that_was_cured(self):
         """Positive control - the exact pre-cure line, from json_handler.py:35."""

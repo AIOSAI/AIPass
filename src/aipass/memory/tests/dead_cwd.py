@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_cwd.py
 # Description: The one definition of the dead-cwd world used by this branch's subprocess pins
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -104,6 +104,24 @@ ACCESSOR_SHAPE = "class _Accessor:\n    getcwd = os.getcwd\n_accessor = _Accesso
 # Denying ``realpath`` directly lands on that same unprotected call on both
 # platforms.  It is the injection that denies the call the DEFECT actually
 # makes — @spawn's rule, applied to their own finding.
+# NEVER CONCATENATE THIS WITH ``DEAD_CWD_WORLD``. The two denials MASK each
+# other, and the combination is LESS hostile than this one alone — measured
+# here on CPython 3.12, and independently by @prax, who found it while curing
+# the same species in their tree:
+#
+#     getcwd denied              -> inspect.stack() SURVIVES
+#     realpath denied            -> inspect.stack() DIES
+#     getcwd AND realpath denied -> inspect.stack() SURVIVES
+#
+# The outer denial wins because ``getabsfile`` is called INSIDE
+# ``except (TypeError, FileNotFoundError)``: deny getcwd and ``abspath`` raises
+# there, inspect swallows it and returns None before the unprotected realpath
+# is ever reached. More denial is not more hostile — it is a different world,
+# and this one happens to be a kinder one.
+#
+# It is exactly the trap a reader reaching for "let me make the world as hostile
+# as possible" falls into, so it is pinned behaviourally in
+# ``TestTheTwoWorldsMustNotBeStacked`` rather than left as a comment nobody runs.
 REALPATH_DENIED_WORLD = (
     "import os\n"
     "def _denied_realpath(*a, **k):\n"

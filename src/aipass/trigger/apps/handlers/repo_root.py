@@ -152,6 +152,17 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
             f"[{caller}] No {marker} above {current} — "
             f"resolving to the source tree at {SOURCE_ROOT}, never the process directory"
         )
+        # The operations record, in @memory's ratified shape. Function-local
+        # because json_handler imports config and config is imported above —
+        # a module-level edge would close the loop, and it would only show up
+        # in whichever import order CI happened to take.
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        json_handler.log_operation(
+            "repo_root_fallback",
+            {"caller": caller, "marker": marker, "searched_from": str(current), "resolved": str(SOURCE_ROOT)},
+            module_name=MODULE_NAME,
+        )
     except Exception as exc:  # noqa: BLE001 - an audit line must never take an import down
         # The record of the failed record. Not a swallow: the reason is kept
         # where a reader can find it, because the alternative — raising from a

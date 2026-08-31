@@ -118,6 +118,43 @@ def _warn_routing(module_name: str, destination: object) -> None:
         )
 
 
+#: A frame whose co_filename is bracketed has no file behind it — `<stdin>`,
+#: `<string>` from ``python -c`` or ``exec``, `<frozen importlib._bootstrap>`.
+_PSEUDO_FILENAME = ("<", ">")
+
+
+def _module_name_from_filename(filename: str) -> str:
+    """Turn a frame's ``co_filename`` into a module name, or admit there is none.
+
+    A PSEUDO-FRAME HAS NO MODULE, AND THE NAME GOES ON TO BE A DIRECTORY. Found
+    by the Windows CI runner 2026-08-31 (run 33431848734): ``Path("<stdin>").stem``
+    is ``"<stdin>"``, and :func:`get_module_logs_dir` mkdirs what it is given.
+    Linux creates a directory literally called ``<stdin>`` — ten of them were
+    sitting in /tmp from prax's own test probes before anyone looked. Windows
+    reserves ``<`` and ``>`` in a path component, so the same line raises there,
+    from the logging path, which is the worst place for an unhandled raise.
+
+    The defect predates the sys._getframe cure: ``inspect.stack()[1].filename``
+    read the same co_filename and had the same hole. The dead-cwd pins are
+    simply the first callers that ever reached this from an interpreter
+    started with ``-c`` or fed on stdin.
+
+    Guessing a name from ``<...>`` is worse than having none: it invents an
+    attribution AND builds a directory for it. So a pseudo-frame gets the same
+    answer as no caller at all.
+
+    Args:
+        filename: A frame's ``co_filename``.
+
+    Returns:
+        The module name, or ``"unknown"`` when the frame has no file behind it.
+    """
+    if filename.startswith(_PSEUDO_FILENAME[0]) and filename.endswith(_PSEUDO_FILENAME[1]):
+        return "unknown"
+    name = Path(filename).stem
+    return name or "unknown"
+
+
 def _get_caller_module_name(depth: int = 1) -> str:
     """Name the module `depth` frames above this one, without touching the disk.
 
@@ -147,7 +184,7 @@ def _get_caller_module_name(depth: int = 1) -> str:
         frame = sys._getframe(depth)
     except ValueError:
         return "unknown"
-    return Path(frame.f_code.co_filename).stem
+    return _module_name_from_filename(frame.f_code.co_filename)
 
 
 def get_module_logs_dir(module_name: Optional[str] = None) -> Path:

@@ -437,15 +437,92 @@ class TestUpdateCentral:
         assert "error" in result
 
     def test_logs_operation(self, monkeypatch, tmp_path):
-        """Should call json_handler.log_operation on success."""
+        """Should log update_central exactly once — counted by OPERATION, not by mock.
+
+        THIS PIN WENT RED ON ALL FOUR PYTHON VERSIONS ON CI (2026-08-31, round
+        5) and was green on every developer machine, which is the whole lesson.
+
+        ``assert_called_once()`` counted every call on a mock the CONFTEST
+        installs before import, and ``_import_central_writer`` performs the
+        import inside the test window. On a bare checkout ``repo_root``'s marker
+        walk finds no ``AIPASS_REGISTRY.json``, logs a ``repo_root_fallback``
+        diagnostic through that same mock, and the count is 2. Production was
+        behaving exactly as designed; the TEST pinned a number that depended on
+        whether the machine had a registry above it.
+
+        So the count is now taken over the calls that name THIS operation. That
+        is the claim the test always meant — update_central logs itself, once —
+        and it still catches a double-log of update_central, which a bare
+        ``assert_any_call`` would not. Diagnostics from other lanes ride along
+        without touching it, which is what a diagnostic should be able to do.
+        """
         cw = _import_central_writer(monkeypatch, tmp_path)
         mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
 
         cw.update_central()
 
-        mock_handler.log_operation.assert_called_once()
-        call_args = mock_handler.log_operation.call_args
-        assert call_args[0][0] == "update_central"
+        ours = [call for call in mock_handler.log_operation.call_args_list if call[0][0] == "update_central"]
+        assert len(ours) == 1, (
+            f"expected exactly one update_central log, got {mock_handler.log_operation.call_args_list}"
+        )
+
+
+class TestTheBareWorldTheOldPinCouldNotSurvive:
+    """CI's world, built here: no marker above the walk, so the fallback fires.
+
+    @devpulse asked for both worlds stated rather than for the red one to be
+    silenced, and this is the half that was missing. The pin above proves the
+    count is stable WHEN a diagnostic rides along; this one proves the
+    diagnostic genuinely rides along and that the write still lands underneath
+    it. Without it, "counted by operation" would be a claim about a world no
+    test ever builds.
+
+    Only markers on the REAL checkout are denied. A blunt ``lambda: False``
+    was tried first and took 21 unrelated tests down with it — every test that
+    builds its own marker in ``tmp_path`` and expects the walk to find it. A
+    world too hostile to be true does not report CI, it reports the probe.
+    """
+
+    @staticmethod
+    def _bare(monkeypatch):
+        """Deny the marker on the live tree only — prax's hide-the-marker trick."""
+        from aipass.memory.apps.handlers import repo_root as rr
+
+        real = rr.exists_exactly
+        live = rr.SOURCE_ROOT
+
+        def _exists_exactly(path):
+            try:
+                Path(path).relative_to(live)
+            except ValueError:
+                return real(path)
+            return False
+
+        monkeypatch.setattr(rr, "exists_exactly", _exists_exactly)
+
+    def test_the_fallback_really_does_fire_in_this_world(self, monkeypatch, tmp_path):
+        """Arming probe: without this, the test below passes for the wrong reason."""
+        self._bare(monkeypatch)
+        cw = _import_central_writer(monkeypatch, tmp_path)
+        mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
+
+        cw.update_central()
+
+        operations = [call[0][0] for call in mock_handler.log_operation.call_args_list]
+        assert "repo_root_fallback" in operations, (
+            "the marker denial did not reach repo_root, so the world below is not CI's: " + str(operations)
+        )
+
+    def test_the_write_still_lands_with_the_diagnostic_riding_along(self, monkeypatch, tmp_path):
+        self._bare(monkeypatch)
+        cw = _import_central_writer(monkeypatch, tmp_path)
+        mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
+
+        result = cw.update_central()
+
+        assert result["success"] is True
+        ours = [call for call in mock_handler.log_operation.call_args_list if call[0][0] == "update_central"]
+        assert len(ours) == 1
 
 
 # ===========================================================================

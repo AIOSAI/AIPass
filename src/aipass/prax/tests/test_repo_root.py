@@ -35,6 +35,7 @@ resolve() reads the cwd there too.
 """
 
 import ast
+import os
 import subprocess
 import sys
 import textwrap
@@ -149,6 +150,68 @@ def _no_realpath(*_args, **_kwargs):
 
 _ospath.realpath = _no_realpath
 """
+
+# WINDOWS, EMULATED ON LINUX. Three facts about ntpath vs posixpath in 3.12:
+#   1. ntpath.realpath calls os.getcwd() unconditionally on its first lines.
+#   2. ntpath.abspath does NOT — it calls the Win32 _getfullpathname, which reads
+#      the process directory from the OS and never touches os.getcwd.
+#   3. posixpath routes BOTH through os.getcwd.
+#
+# That third fact is the whole POSIX/Windows asymmetry, and it is why the same
+# injected getcwd denial produces opposite verdicts on the two platforms. On
+# Windows abspath survives the denial and realpath does not, so inspect's
+# getabsfile succeeds and the walk reaches the unguarded realpath: ALL THREE
+# worlds below convict there. On Linux the denial kills abspath first, inside
+# getabsfile's own except, and inspect returns None before the dangerous line.
+#
+# Measured on the real Windows runner 2026-08-31 (run 33431848734, reported by
+# @devpulse): getcwd-denied DIED, realpath-denied DIED, ntpath-shaped DIED.
+# This world reproduces that reading on Linux, which is the only way prax can
+# check it — there is no Windows box here.
+_WINDOWS_EMULATED = """
+import os as _os
+import os.path as _ospath
+
+_OS_LEVEL_CWD = _os.getcwd()
+_real_realpath = _ospath.realpath
+_real_join = _ospath.join
+_real_normpath = _ospath.normpath
+
+
+def _no_working_directory(*_args, **_kwargs):
+    raise FileNotFoundError(2, "No such file or directory")
+
+
+def _win_abspath(path):
+    path = _os.fspath(path)
+    if not _ospath.isabs(path):
+        path = _real_join(_OS_LEVEL_CWD, path)
+    return _real_normpath(path)
+
+
+def _win_realpath(path, *_args, **_kwargs):
+    _os.getcwd()
+    return _real_realpath(path, *_args, **_kwargs)
+
+
+_ospath.abspath = _win_abspath
+_ospath.realpath = _win_realpath
+_os.getcwd = _no_working_directory
+"""
+
+# The measured answer to "which worlds kill inspect.stack()", PER PLATFORM.
+#
+# This table used to be one universal shape asserting SURVIVED / SURVIVED /
+# DIED, and it went red on the real Windows runner — correctly. The control was
+# built to refuse a POSIX expectation passing silently where it is false, and
+# the first platform it met was the one that proved it necessary. Encoding a
+# measurement from one OS as a property of the interpreter is the same mistake
+# as the one the pins in this file exist to catch, one level up.
+EXPECTED_WORLD_VERDICTS = (
+    {"getcwd-denied": "DIED", "realpath-denied": "DIED", "ntpath-shaped": "DIED"}
+    if os.name == "nt"
+    else {"getcwd-denied": "SURVIVED", "realpath-denied": "SURVIVED", "ntpath-shaped": "DIED"}
+)
 
 _DELETE_CWD = """
 import os as _os, shutil as _shutil, tempfile as _tempfile
@@ -903,13 +966,11 @@ class TestCallerAttributionWithoutAWorkingDirectory:
             )
             verdicts[name] = probe.stdout.strip()
 
-        assert verdicts["ntpath-shaped"] == "DIED", (
-            "the ntpath-shaped world no longer kills inspect.stack(), so the attribution pins "
-            f"below prove nothing about this defect: {verdicts}"
-        )
-        assert verdicts["getcwd-denied"] == "SURVIVED" and verdicts["realpath-denied"] == "SURVIVED", (
-            "a getcwd denial now kills inspect.stack() on this interpreter — if that is real, the "
-            f"comment on _NTPATH_SHAPED is out of date and should be rewritten from measurement: {verdicts}"
+        assert verdicts == EXPECTED_WORLD_VERDICTS, (
+            f"the worlds no longer bite the way {os.name} was measured to bite. Expected "
+            f"{EXPECTED_WORLD_VERDICTS}, got {verdicts}. If the new reading is real, re-derive the "
+            "table from measurement rather than relaxing the assertion — this control exists to "
+            "refuse a platform's expectation being carried onto a platform where it is false."
         )
 
     @pytest.mark.parametrize("world", ATTRIBUTION_WORLDS)
@@ -949,27 +1010,45 @@ class TestCallerAttributionWithoutAWorkingDirectory:
         "unknown". @trigger saw it twice in a single import chain. Degraded is
         not cured: the audit log stops naming anyone exactly when a machine is
         in the state that makes the log worth reading.
+
+        THE CALLER IS A REAL FILE ON DISK, written for this probe, and that is
+        load-bearing in two directions. It has to be real, because after the
+        pseudo-frame cure "unknown" is the CORRECT answer for a `<stdin>`
+        caller — so a stdin caller leaves this pin unable to tell a frame with
+        no module from a frame read that failed, which is the whole claim. And
+        it must not be the ONLY frame: @commons measured that a stack of purely
+        on-disk frames makes getsourcefile early-return before getmodule, so the
+        realpath denial goes inert. The probe itself still runs from stdin, so
+        that frame stays on the stack and inspect still reaches the unguarded
+        call. Real name available, world still hostile.
         """
         result = _run_without_a_working_directory(
             """
-            from aipass.prax.apps.handlers.json import json_handler
+            import sys
+            import tempfile
+            from pathlib import Path
 
+            CALLER_SOURCE = [
+                "from aipass.prax.apps.handlers.json import json_handler",
+                "",
+                "",
+                "def stands_in_for_log_operation():",
+                "    return json_handler._get_caller_module_name()",
+                "",
+                "",
+                "def ask():",
+                "    # Two levels: _get_caller_module_name skips [0]=itself and",
+                "    # [1]=log_operation to reach [2], the real caller.",
+                "    return stands_in_for_log_operation()",
+            ]
 
-            def stands_in_for_log_operation():
-                return json_handler._get_caller_module_name()
+            caller_dir = Path(tempfile.mkdtemp(prefix="prax_caller_"))
+            (caller_dir / "a_real_caller.py").write_text(chr(10).join(CALLER_SOURCE), encoding="utf-8")
+            sys.path.insert(0, str(caller_dir))
 
+            import a_real_caller
 
-            def the_actual_caller():
-                # Two levels, because _get_caller_module_name skips
-                # [0]=itself and [1]=log_operation to reach [2]. Calling it
-                # directly from module level leaves a stack of two and it
-                # returns "unknown" for a reason that has nothing to do with
-                # the defect — a shape that would have made this pin pass
-                # against the cure and against the bug alike.
-                return stands_in_for_log_operation()
-
-
-            print("CALLER", the_actual_caller())
+            print("CALLER", a_real_caller.ask())
             """,
             world=world,
         )
@@ -977,11 +1056,11 @@ class TestCallerAttributionWithoutAWorkingDirectory:
             f"importing json_handler died without a working directory.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "CALLER unknown" not in result.stdout, (
-            "the caller was attributed as 'unknown' — the stack read needed a working "
-            f"directory, was caught, and threw the answer away.\nstdout: {result.stdout}"
+        assert "CALLER a_real_caller" in result.stdout, (
+            "the caller was not attributed to the real file that asked — either the frame read "
+            f"needed a working directory and threw the answer away, or it named the wrong "
+            f"frame.\nstdout: {result.stdout}"
         )
-        assert "CALLER " in result.stdout, f"nothing came back: {result.stdout}"
 
 
 class TestTheGuardsUndeterminableCallerBranch:
@@ -1064,3 +1143,138 @@ class TestTheGuardsUndeterminableCallerBranch:
             f"usable realpath.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert result.returncode == 0, f"child exited {result.returncode}: {result.stderr}"
+
+
+# Characters Windows refuses in a path component. Checked on every platform,
+# because the point is that a name derived here must be creatable EVERYWHERE —
+# Linux will happily make a directory called `<stdin>` and did, dozens of times,
+# before anyone noticed.
+_WINDOWS_RESERVED_CHARS = set('<>:"|?*')
+
+
+class TestACallerNameIsNotAlwaysAModuleName:
+    """A frame's co_filename is not always a file, and never automatically a name.
+
+    FOUND BY THE WINDOWS RUNNER, 2026-08-31 (run 33431848734, @devpulse). Three
+    parametrised worlds of test_the_log_dir_resolver_names_its_caller_without_a_cwd
+    went red there and none of them went red here, and the working directory
+    turned out to have nothing to do with it.
+
+    `get_module_logs_dir()` derives its caller's module name from a frame and
+    then MKDIRS it. From `python -c`, from stdin, from an eval or a frozen
+    loader, that frame's co_filename is a pseudo-filename — `<stdin>`,
+    `<string>`, `<frozen importlib._bootstrap>` — and `Path("<stdin>").stem` is
+    `<stdin>`. On Linux that silently creates a directory called `<stdin>`; I
+    found ten of them on this machine, made by these very pins. On Windows `<`
+    and `>` are reserved and mkdir raises, from the logging path, which is
+    exactly where an unhandled raise is worst.
+
+    So the defect is not the working directory and it is not new — the old
+    `inspect.stack()[1]` read the same co_filename and had the same hole. The
+    round-4 pin is simply the first thing that ever called this from a
+    pseudo-frame on a platform that objects.
+
+    THE RULE: a pseudo-frame has no module behind it, so it gets the same answer
+    as no caller at all. Guessing a name from `<...>` is worse than admitting
+    there is none — it invents an attribution AND builds a directory for it.
+    """
+
+    def test_the_log_dir_from_a_pseudo_frame_is_creatable_on_every_platform(self):
+        """The claim the Windows runner actually made, checkable here."""
+        result = _run_without_a_working_directory(
+            """
+            import os
+            import tempfile
+
+            os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="prax_probe_logs_")
+            from aipass.prax.apps.handlers.config.load import get_module_logs_dir
+
+            print("LOGDIR", get_module_logs_dir().name)
+            """,
+            world=_NTPATH_SHAPED,
+        )
+        assert result.returncode == 0, f"probe died: {result.stdout}\n{result.stderr}"
+        name = _answer(result).split("LOGDIR ", 1)[1]
+        offending = sorted(_WINDOWS_RESERVED_CHARS & set(name))
+        assert not offending, (
+            f"get_module_logs_dir() derived the directory name {name!r} from a pseudo-frame and "
+            f"created it. Windows refuses {offending} in a path component, so this raises there — "
+            "from the logging path. A frame with no file behind it has no module name to give."
+        )
+
+    def test_the_operations_log_does_not_attribute_to_a_pseudo_frame(self):
+        """json_handler reads the same co_filename and had the same hole.
+
+        Less damaging — it names a record rather than creating a directory — but
+        an operations log that attributes work to `<stdin>` is asserting
+        something false about who did it.
+        """
+        result = _run_without_a_working_directory(
+            """
+            from aipass.prax.apps.handlers.json import json_handler
+
+
+            def stands_in_for_log_operation():
+                return json_handler._get_caller_module_name()
+
+
+            def the_actual_caller():
+                return stands_in_for_log_operation()
+
+
+            print("CALLER", the_actual_caller())
+            """,
+            world=_NTPATH_SHAPED,
+        )
+        assert result.returncode == 0, f"probe died: {result.stdout}\n{result.stderr}"
+        name = _answer(result).split("CALLER ", 1)[1]
+        assert not (_WINDOWS_RESERVED_CHARS & set(name)), (
+            f"the operations log attributed an entry to {name!r} — a pseudo-frame is not a module, "
+            "and 'unknown' is the honest answer where there is nobody to name"
+        )
+
+    @pytest.mark.skipif(os.name == "nt", reason="on Windows this world IS the platform, not an emulation")
+    def test_the_windows_emulation_reproduces_the_measured_windows_table(self):
+        """The emulation is only worth having if it reads like the real runner.
+
+        prax has no Windows box, so every Windows claim here is made through
+        _WINDOWS_EMULATED. This asserts that world produces the table @devpulse
+        measured on run 33431848734 — all three worlds convicting — rather than
+        the POSIX table. Without it the emulation is an assertion about ntpath
+        wearing the clothes of a measurement.
+        """
+        verdicts = {}
+        for world, name in (
+            (_INJECT_DEAD_CWD, "getcwd-denied"),
+            (_DENY_REALPATH, "realpath-denied"),
+            (_NTPATH_SHAPED, "ntpath-shaped"),
+        ):
+            # The emulation goes FIRST: it captures the real cwd before any
+            # world takes getcwd away, which is what Win32 _getfullpathname has
+            # and a patched os.getcwd does not.
+            probe = subprocess.run(
+                [sys.executable, "-"],
+                input=_WINDOWS_EMULATED
+                + world
+                + textwrap.dedent(
+                    """
+                    import inspect
+
+                    try:
+                        inspect.stack()
+                        print("SURVIVED")
+                    except BaseException:
+                        print("DIED")
+                    """
+                ),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            verdicts[name] = _answer(probe)
+
+        assert verdicts == {
+            "getcwd-denied": "DIED",
+            "realpath-denied": "DIED",
+            "ntpath-shaped": "DIED",
+        }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"

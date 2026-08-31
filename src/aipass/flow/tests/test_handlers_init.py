@@ -238,11 +238,14 @@ class TestGuardBranchAccess:
         by owning the whole stack in a subprocess, which the mocked version
         never did.
 
-        Behaviour cannot pin the DELETION — ``apps/__init__.py`` always supplies
-        a real-file frame, so no import-shaped world enters this branch at all
+        NO IMPORT-SHAPED pin can reach the DELETION — ``apps/__init__.py``
+        always supplies a real-file frame, so no import enters this branch at all
         (@trigger restored the walk in their tree and 1058 tests stayed green).
-        The AST ban in ``tests/test_import_dead_cwd.py`` is what convicts a
-        reintroduction.
+        An earlier version of this docstring said behaviour could not pin it at
+        all; @spawn measured the correction (relayed by @devpulse 2026-08-31).
+        Calling the guard DIRECTLY from a ``python -c`` child does reach it, and
+        ``tests/test_import_dead_cwd.py`` carries both instruments now: the AST
+        ban and that behavioural sibling. A regrown walk kills both.
         """
         for world in ("<string>", "<stdin>", "no special frames"):
             with patch(

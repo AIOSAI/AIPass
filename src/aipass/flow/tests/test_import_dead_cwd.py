@@ -292,6 +292,68 @@ except OSError as exc:
         )
 
 
+class TestTheCallerIsNoneBranchSurvivesADeniedRealpath:
+    """The behavioural sibling of the AST ban, and the correction that produced it.
+
+    The round-4 guidance said the deleted second ``inspect.stack()`` walk is
+    unreachable and only an AST ban can watch it. That was TOO STRONG, and
+    @spawn measured the correction (relayed by @devpulse 2026-08-31): the branch
+    is unreachable from IMPORT-shaped pins — ``apps/__init__.py`` always supplies
+    a real-file frame, the nine-branch reproduction stands — but it IS reachable
+    by calling ``_guard_branch_access()`` DIRECTLY from a ``python -c`` child.
+    Every frame there is a string pseudo-file or importlib, both skipped, so
+    ``_find_real_caller`` returns None and the branch RUNS. Under a realpath
+    denial a regrown walk dies in it; the cured plain ``return`` survives.
+
+    Kept ALONGSIDE the AST ban rather than replacing it. The ban needs no
+    subprocess, names the offending line, and catches a reintroduction anywhere
+    in the tree; this one proves the cure in the world it was built for. A mutant
+    that regrows the walk kills both.
+
+    TWO ARMING PROBES, because one is not enough here (@spawn's rules 2 and 4):
+    probe 1 proves the denial actually bites this interpreter, and probe 2 proves
+    ``_find_real_caller`` genuinely returned None — without it the child could be
+    exercising the same-branch allow instead, and the test would pass while
+    watching nothing.
+
+    Runs as ``python -c``, never a script and never a heredoc (@commons,
+    @hooks): a script frame is a real on-disk file, ``getsourcefile``
+    early-returns, and the denial is silently inert.
+    """
+
+    BODY = """
+import aipass.flow.apps.handlers as guard
+
+# Probe 2 BEFORE the assertion: the branch under test must actually be entered.
+_ns = {"g": guard, "OUT": None}
+exec(compile("OUT = g._find_real_caller()", "<string>", "exec"), _ns)
+print("CALLER_IS_NONE: " + ("YES" if _ns["OUT"] == (None, None) else "NO -> " + str(_ns["OUT"])))
+
+try:
+    exec(compile("g._guard_branch_access()", "<string>", "exec"), {"g": guard})
+    print("GUARD: RETURNED")
+except OSError as exc:
+    print("GUARD DIED: " + type(exc).__name__ + ": " + exc.__class__.__name__)
+except ImportError:
+    print("GUARD: BLOCKED")
+"""
+
+    def test_calling_the_guard_directly_under_a_realpath_denial_returns(self):
+        result = _run_world(_WORLD_B, _STACK_CONTROL, self.BODY)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        # Arming probe 1: the denial bites inspect.stack() on this interpreter.
+        assert "STACK_DIES: YES" in result.stdout, (
+            "world B did not arm — a regrown walk would survive it and this test would pass.\n" + result.stdout
+        )
+        # Arming probe 2: the branch under test is the one being exercised.
+        assert "CALLER_IS_NONE: YES" in result.stdout, (
+            "_find_real_caller did not return None, so the guard took a different "
+            "path and this test is watching nothing.\n" + result.stdout
+        )
+        assert "GUARD: RETURNED" in result.stdout, result.stdout
+
+
 class TestNoModuleLevelLocationCallSurvives:
     """The structural half, because behaviour cannot reach every reintroduction.
 
@@ -299,8 +361,15 @@ class TestNoModuleLevelLocationCallSurvives:
     ``inspect.stack()`` walk and watched 1058 tests stay green: the walk sat in
     ``_guard_branch_access``'s caller-is-None branch, and no import-shaped world
     ever enters it — ``apps/__init__.py`` always supplies a real-file frame, so
-    ``_find_real_caller`` never returns None during an import. A parse of the
-    tree is the only instrument that sees it.
+    ``_find_real_caller`` never returns None during an import.
+
+    CORRECTED 2026-08-31 (@spawn, relayed by @devpulse): this docstring used to
+    end "a parse of the tree is the only instrument that sees it". That was TOO
+    STRONG. The branch is unreachable from IMPORT-shaped pins, which is not the
+    same as unreachable — calling the guard DIRECTLY from a ``python -c`` child
+    reaches it, and ``TestTheCallerIsNoneBranchSurvivesADeniedRealpath`` above is
+    that pin. Both are kept: regrowing the walk kills both, and this one needs no
+    subprocess and names the offending line anywhere in the tree.
 
     The ban is on the CALL — ``ast.Call`` whose func is ``inspect.stack`` — never
     on the string, because this file and the cured modules SPELL the defect in

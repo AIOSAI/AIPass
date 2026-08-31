@@ -23,6 +23,33 @@ import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 
+# Pre-import every module that calls find_repo_root() at MODULE level, for a
+# different reason: to move an IMPORT-TIME diagnostic out of every test window.
+#
+# find_repo_root logs repo_root_fallback through json_handler.log_operation when
+# the marker walk finds nothing. AIPASS_REGISTRY.json is gitignored and
+# machine-local, so on a dev box the fallback never runs and on a bare CI
+# checkout it runs on EVERY import. These six modules take that walk while
+# LOADING, so on CI the diagnostic lands in whichever test window happens to
+# trigger the first import — and mock_json_handler (autouse) counts it.
+#
+# That is what reddened test_push_central on all four Python versions of commit
+# 28ee90d5 (round 5, @devpulse). The count it broke was not wrong; it was
+# measuring the host. A per-test fix would have left the other sites one
+# xdist worker-split away: measured in a bare world, running each
+# count-asserting test in FULL isolation, TWO of the ten fail — CI had only
+# found one. Importing here settles the walk before any test window exists, on
+# every machine, and the counts go back to meaning what they say.
+#
+# TestThePreImportListIsComplete (tests/test_conftest_fixtures.py) fails if a
+# new module-level caller appears and is not added here.
+import aipass.flow.apps.handlers.dashboard.push_central  # noqa: F401
+import aipass.flow.apps.handlers.mbank.process  # noqa: F401
+import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
+import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
+import aipass.flow.apps.modules.aggregate_central  # noqa: F401
+import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+
 
 def pytest_configure(config):
     """Register flow's markers where BOTH test universes can see them.

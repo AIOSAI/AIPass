@@ -2,10 +2,11 @@
   "metadata": {
     "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
-    "updated": "2026-08-13",
+    "updated": "2026-08-31",
     "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
     "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
-    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead."
+    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead.",
+    "line_scope_2026_08_31": "Round 5. FOUR line-scoped rules had gone stale: the round-4 dead-cwd sweep shifted every line below its edits, and a line-scoped waiver whose number moves stops suppressing SILENTLY — the violation resurfaces and reads as new breakage. That is what the round-5 CI red actually was. Re-derived by A/B (all four removed, checkers re-run, each rule matched to one surviving violation): encapsulation/log_watcher_service 26 (unchanged), help_text/log_watcher_service 17 (unchanged), encapsulation/runaway_handler 344 -> 336. The fourth, debug_print on log_watcher_service lines [67,78,86,105,108], is DELETED rather than re-derived: those five prints are prax logger calls now, so the rule suppresses nothing. Cure beat waiver. STANDING HAZARD: a line-scoped waiver is a pointer into a file that edits move. Re-derive by A/B after any edit above a waived line — never hand-adjust."
   },
   "bypass": [
     {
@@ -105,41 +106,10 @@
       "reason": "L23 imports apps/modules/core because setup_handlers() calls trigger.on() for every handler. FILE-WIDE: architecture_check passes no line."
     },
     {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "encapsulation",
-      "lines": [
-        344
-      ],
-      "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it."
-    },
-    {
       "file": "apps/log_watcher_service.py",
       "standard": "cli",
       "pattern": "bare print() + no --help",
       "reason": "Systemd unit, not a CLI module: started by trigger-log-watcher.service and never routed through drone. Its stdout is the journal, where rich markup would be noise. FILE-WIDE rather than line-scoped because the '--help not implemented' finding carries no line, so a `lines` key would cover the prints and silently drop the --help half."
-    },
-    {
-      "file": "apps/log_watcher_service.py",
-      "standard": "debug_print",
-      "lines": [
-        67,
-        78,
-        86,
-        105,
-        108
-      ],
-      "pattern": "journald status lines",
-      "reason": "LINE-SCOPED AND HONOURED: debug_print_check filters per line. These are the daemon's lifecycle lines going to journald (signal received, both watchers failed, running, reloading on changed handler code, stopped). The print in the __main__ block the checker already exempts. Re-derived 2026-08-12 after the reload-sentinel wiring shifted every number and added the reload line - nudged numbers are how a line-scoped bypass rots."
-    },
-    {
-      "file": "apps/log_watcher_service.py",
-      "standard": "help_text",
-      "lines": [
-        17
-      ],
-      "pattern": "python -m in module docstring",
-      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form."
     },
     {
       "file": "apps/config.py",
@@ -172,6 +142,12 @@
       "reason": "NAME-SCOPED AND HONOURED. The plain-list accessor beside get_volume_muted_branches_detail(); medic.py renders the detail variant, so only the 5 assertions in test_medic_state.py call this one. Kept as the symmetric half of the public read API — delete it and the tests if that symmetry is not worth the rule."
     },
     {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "pattern": "pure predicate — no json_handler import",
+      "reason": "Pure argument inspection: no I/O, no state, no branch imports beyond typing, so it can be called as the FIRST thing in every handle_command before anything else runs. log_operation() here would write a line per CLI invocation into the operation log, and would make the help gate depend on the JSON layer it is meant to run ahead of. Same call and same reason as @memory's identical helper (their bypass.json, 2026-08-13); their file is the standard's own reference implementation."
+    },
+    {
       "file": "apps/log_watcher_service.py",
       "standard": "encapsulation",
       "lines": [
@@ -181,10 +157,22 @@
       "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it."
     },
     {
-      "file": "apps/handlers/cli/help_flags.py",
-      "standard": "json_structure",
-      "pattern": "pure predicate — no json_handler import",
-      "reason": "Pure argument inspection: no I/O, no state, no branch imports beyond typing, so it can be called as the FIRST thing in every handle_command before anything else runs. log_operation() here would write a line per CLI invocation into the operation log, and would make the help gate depend on the JSON layer it is meant to run ahead of. Same call and same reason as @memory's identical helper (their bypass.json, 2026-08-13); their file is the standard's own reference implementation."
+      "file": "apps/log_watcher_service.py",
+      "standard": "help_text",
+      "lines": [
+        17
+      ],
+      "pattern": "python -m in module docstring",
+      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form."
+    },
+    {
+      "file": "apps/handlers/events/runaway_handler.py",
+      "standard": "encapsulation",
+      "lines": [
+        336
+      ],
+      "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it. | LINE RE-DERIVED 2026-08-31: was [344], now [336]. The round-4 dead-cwd sweep deleted a _find_repo_root copy from this file and every line below it moved up; the waiver kept pointing at the old number and silently stopped suppressing."
     }
   ],
   "notes": {

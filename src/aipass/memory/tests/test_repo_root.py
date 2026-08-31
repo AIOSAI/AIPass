@@ -947,12 +947,22 @@ class TestTheStackReadIsReproducibleAfterAll:
       real-file frame exists above the guard, and a package import always has
       one: ``apps/__init__.py`` does ``from . import handlers``, so it is
       always the caller. Restoring ``inspect.stack()`` there leaves every
-      behavioural pin GREEN and only the structural sweep convicts it.
+      IMPORT-shaped pin GREEN.
 
-    That second bullet is the argument for keeping the structural pin beside
-    this one. A behavioural pin can only judge the lines its probe executes,
-    and "unreachable from any import I can construct" is not the same as
-    "unreachable", especially in a file the whole fleet copies.
+    CORRECTED THE NEXT MORNING, AND THE CORRECTION IS AGAINST MY OWN SENTENCE.
+    I wrote "only the structural sweep convicts it" and @devpulse relayed that
+    fleet-wide. It was too strong. Import-shaped pins cannot reach that branch;
+    a DIRECT CALL to ``_guard_branch_access()`` from a ``python -c`` child
+    reaches it easily, and @spawn measured that while I was still calling it
+    unreachable. ``TestTheDiagnosticBranchIsReachableAfterAll`` below is the
+    behavioural sibling, and the regrown-walk mutant now dies to both
+    instruments.
+
+    The structural pin stays regardless, and for a reason the correction does
+    not touch: it needs no subprocess, it names the defect on the line it is
+    written on, and it convicts files no probe imports. What changed is the
+    claim, not the pin — "unreachable from the probes I built" was reported as
+    "unreachable", and those are not the same sentence.
     """
 
     _WORLD = REALPATH_DENIED_WORLD
@@ -1002,3 +1012,136 @@ class TestTheStackReadIsReproducibleAfterAll:
             "A frame from a real file reached the unprotected realpath, which contradicts "
             "getsourcefile()'s os.path.exists fast path: " + result.stdout
         )
+
+
+class TestTheDiagnosticBranchIsReachableAfterAll:
+    """The second correction of the day, and it is against my own sentence.
+
+    I wrote — and @devpulse relayed fleet-wide — that the guard's
+    ``caller_file is None`` branch can only be watched structurally. The true
+    sentence is narrower: it is unreachable from IMPORT-shaped pins, because
+    ``apps/__init__.py`` does ``from . import handlers`` and so always supplies
+    a real-file frame. It is perfectly reachable by CALLING
+    ``_guard_branch_access()`` directly from a ``python -c`` child: every frame
+    is then a string pseudo-name or importlib, both skipped, ``_find_real_caller``
+    returns None, and the branch RUNS.
+
+    @spawn measured that; @devpulse confirmed it in their own tree before
+    relaying it. It is a better sentence than mine and it costs about fifteen
+    lines, so the excuse for not having the behavioural sibling was never the
+    price.
+
+    TWO ARMING PROBES, because this world has two ways to be silently inert and
+    each would leave the pin green while measuring nothing:
+
+    * the realpath denial might not bite at all, and
+    * the guard might be reaching a DIFFERENT path — if ``_find_real_caller``
+      returns a real file, the branch under test never runs and the assertion
+      below is about code that did not execute.
+
+    The second probe is the one I would not have written a week ago. "The test
+    passed" and "the test ran the line" are different claims, and only the
+    second one is worth anything in a world built by injection.
+    """
+
+    _WORLD = REALPATH_DENIED_WORLD
+    _SETUP = "import aipass.memory.apps.handlers as h\n"
+
+    def _child(self, body: str) -> subprocess.CompletedProcess:
+        probe = f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}{self._SETUP}{body}"
+        return subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+
+    def test_the_denial_bites_in_this_child(self):
+        """Arming probe 1: the world is hostile where the defect would live."""
+        result = self._child(
+            "import inspect\n"
+            "try:\n"
+            "    inspect.stack()\n"
+            "except FileNotFoundError:\n"
+            "    print('ARMED')\n"
+            "else:\n"
+            "    print('INERT')\n"
+        )
+        assert result.returncode == 0, result.stderr
+        assert "ARMED" in result.stdout, "realpath is not denied in this child: " + result.stdout
+
+    def test_the_guard_really_takes_the_caller_is_none_branch_here(self):
+        """Arming probe 2: the line under test is the line that runs."""
+        result = self._child("print('CALLER', h._find_real_caller())\n")
+        assert result.returncode == 0, result.stderr
+        assert "CALLER (None, None)" in result.stdout, (
+            "a real-file frame reached the walk, so the diagnostic branch is NOT what the "
+            "pin below exercises: " + result.stdout
+        )
+
+    def test_the_diagnostic_branch_returns_instead_of_crashing(self):
+        result = self._child("h._guard_branch_access()\nprint('RETURNED')\n")
+        assert result.returncode == 0, (
+            "the caller-is-None branch crashed with os.path.realpath denied — this is the "
+            "second inspect.stack() walk, regrown.\n" + result.stderr
+        )
+        assert "RETURNED" in result.stdout
+
+
+class TestTheTwoWorldsMustNotBeStacked:
+    """Denying MORE can deny LESS. Pinned because the trap is inviting.
+
+    ``dead_cwd.py`` publishes two hostile worlds as source prefixes, and a
+    reader who wants "the most hostile world available" will reach for both.
+    That combination is strictly kinder than the realpath denial alone, and
+    silently so: every pin built on it goes green while measuring a world in
+    which the defect cannot fire.
+
+    The mechanism is one line of ``inspect.getmodule``::
+
+        try:
+            file = getabsfile(object, _filename)
+        except (TypeError, FileNotFoundError):
+            return None
+
+    Deny getcwd and ``posixpath.abspath`` raises INSIDE that try, inspect
+    swallows it, and the function returns before reaching
+    ``modulesbyfile[os.path.realpath(f)]`` — the call with nothing around it.
+    Let abspath succeed and you arrive at the unprotected line.
+
+    Found by @prax while curing this species in their own tree, and measured
+    here three ways before adopting it. The pin is behavioural rather than a
+    comment because the day CPython moves that try/except, this is a fact the
+    fleet's shared world-builder needs to relearn out loud.
+    """
+
+    _PROBE = (
+        "import inspect\n"
+        "try:\n"
+        "    inspect.stack()\n"
+        "except Exception:\n"
+        "    print('DIES')\n"
+        "else:\n"
+        "    print('SURVIVES')\n"
+    )
+
+    def _verdict(self, world: str) -> str:
+        result = subprocess.run([sys.executable, "-c", world + self._PROBE], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_realpath_alone_convicts(self):
+        assert self._verdict(REALPATH_DENIED_WORLD) == "DIES"
+
+    def test_getcwd_alone_does_not(self):
+        assert self._verdict(DEAD_CWD_WORLD) == "SURVIVES"
+
+    def test_stacking_them_undoes_the_conviction(self):
+        assert self._verdict(DEAD_CWD_WORLD + REALPATH_DENIED_WORLD) == "SURVIVES", (
+            "The two worlds no longer mask each other. That is a CHANGE in CPython's "
+            "inspect.getmodule, not a fix — re-read dead_cwd.py before trusting either world."
+        )
+
+    def test_no_probe_in_this_branch_stacks_them(self):
+        """Structural: the trap is not sprung anywhere, today."""
+        offenders = []
+        for path in sorted(Path(__file__).parent.rglob("test_*.py")):
+            text = path.read_text(encoding="utf-8")
+            if "DEAD_CWD_WORLD + REALPATH_DENIED_WORLD" in text and path.name != Path(__file__).name:
+                offenders.append(path.name)
+        assert not offenders, "these stack the two denials and measure a kinder world: " + ", ".join(offenders)

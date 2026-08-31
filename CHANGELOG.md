@@ -13,6 +13,45 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 5: the round-4 pins met the real Windows platform, and every red
+  taught a structural rule** (FPLAN-0461 continued). CI on the round-4 commit
+  came back red where the new pins *measured the platform for the first time* —
+  POSIX facts asserted as universal. Eight branches cured by their owners:
+  per-platform expectation tables replace universal assertions, each stating
+  which rows are measured live here vs derived from the CI red (a CI red is a
+  *negative* measurement — it proves not-unconditionally-X, never which value;
+  recording a guess is inventing a measurement, so unfalsifiable rows are
+  pinned as `None` *decisions*). The round's converged rules, each named to its
+  finder: **emulate the platform, not just the denial** (prax — getcwd-denied
+  Linux is a genuinely different world from Windows-with-no-cwd, because
+  `ntpath.abspath` never touches getcwd); **split cause / outcome / link into
+  separate pins** (canary — a future red names its own mechanism, and the link
+  pin makes derived rows falsifiable locally); **key the table on the variable
+  that actually decides** (ai_mail — `os.name` answers which path module,
+  `sys.platform` answers does-the-filesystem-fold: darwin folds on posixpath);
+  **a table row no local platform can falsify enters silently** (ai_mail's
+  darwin mutant — the original defect's shape, one platform along); **separate
+  the judgement from the world** (commons — their first rebuild shipped the
+  unreachable-branch species one level up in the instrument: four survivors all
+  mutated branches Linux never executes; judgements became plain functions fed
+  synthetic values, every platform case reachable on any host); **a line-scoped
+  waiver whose number moves fails open and silent** (trigger — one round-4
+  edit shifted four bypass.json waivers, resurfacing as "new" violations;
+  re-derive, never hand-adjust); **mutate the source, never the test** (daemon
+  — deleting a currently-true assertion proves nothing). Real defects found
+  under the noise: prax's log-dir resolver mkdir'd the literal `<stdin>` (21
+  such dirs in /tmp; reserved-character crash on Windows — cured, bracketed
+  names → "unknown"); backup's fence compared one normalised operand against
+  one raw (refused its *own kin* on Windows — cured both sides); trigger's
+  `_systemctl` had never been executed by its suite (extraction exposed it;
+  `return True` left all 40 tests green — 9 pins now). Exactly-once log pins
+  on Linux cured at conftest altitude (flow/memory — the bare-checkout world
+  logs a fallback diagnostic *inside* the test window on CI only). Daemon
+  caught their own CI-red-in-waiting pre-commit (a pin asserting the
+  gitignored `tools/` exists — verified in the absent world). Composed
+  universe green before commit; per-branch by owners, both rootdirs, audits
+  100 across every touched branch.
+
 - **Round 4: the import-time dead-cwd defect cured in all 16 branches (~150
   sites), and the instrument that watches the cure** (FPLAN-0461 continued).
   `ntpath.realpath` reads `os.getcwd()` unconditionally and `Path.resolve()`

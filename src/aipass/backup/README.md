@@ -222,6 +222,22 @@ Removing a now-ignored tree from a store is currently a manual `rm -rf` of the c
 
 ---
 
+### Kinship is spelled, not compared raw (round 5)
+
+The handlers fence asks one question -- is this caller inside my branch? -- and
+until 2026-08-31 it asked it with a raw substring test that normalised only ONE
+side. On Windows `_BRANCH_ROOT` arrives from `Path` with backslashes while the
+caller had just had its backslashes replaced with forward slashes, so the test
+could never match: every file in this branch read as FOREIGN and the whole tree
+died at the door with backup's own ACCESS DENIED message.
+
+Both sides now go through `_spell_for_kinship()`. Case is folded only when
+`os.name == "nt"` -- folding everywhere would ADMIT a foreign `/tmp/BACKUP` on a
+case-sensitive filesystem, which is a wider fence, not a safer one. The guard's
+own-frame skip uses the same rule for a sharper reason: if that skip misses,
+`__init__.py` becomes the reported caller, is trivially kin, and the real
+foreign frame beneath it is never examined.
+
 ## Path Resolution — why nothing here calls `resolve()` at import
 
 `ntpath.realpath` reads `os.getcwd()` **unconditionally** (posixpath only does so

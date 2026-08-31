@@ -27,6 +27,7 @@ silent hole.
 """
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -89,3 +90,83 @@ class TestTheOptOutIsRealAndNarrow:
     def test_unmarked_tests_still_get_the_mock(self, mock_logger):
         """Negative control: the opt-out must not leak to its neighbours."""
         assert load_registry_module.logger is mock_logger
+
+
+class TestThePreImportListIsComplete:
+    """A new module-level ``find_repo_root`` caller must not re-arm the landmine.
+
+    ``conftest.py`` pre-imports the six modules that walk for the repo root while
+    LOADING, so the fallback's import-time ``log_operation`` cannot land inside a
+    test window on a bare checkout. That fix is only as good as the list, and a
+    list in a test file is exactly where an undercount hides — so the list is
+    MEASURED off the tree by parse and compared against what ``conftest.py``
+    actually imports, also by parse. Neither side is hand-copied here.
+
+    Round 5's defect (@devpulse): a count assertion that was green on every dev
+    machine and red on all four Python versions of CI, because the marker it
+    depended on is gitignored. Measured in a bare world with every
+    count-asserting test run in FULL isolation, TWO of the ten failed — CI had
+    named one. This pin is why the eighth one cannot come back quietly.
+    """
+
+    @staticmethod
+    def _module_level_repo_root_callers() -> set[str]:
+        """Modules whose repo-root walk is evaluated when they load."""
+        import ast
+
+        import aipass.flow.apps as flow_apps
+
+        root = Path(flow_apps.__file__).parent
+        callers = set()
+        for source in sorted(root.rglob("*.py")):
+            if "__pycache__" in source.parts or ".archive" in source.parts:
+                continue
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Name)
+                        and sub.func.id in ("find_repo_root", "_find_repo_root")
+                    ):
+                        rel = source.relative_to(root).with_suffix("")
+                        parts = [part for part in rel.parts if part != "__init__"]
+                        callers.add(".".join(["aipass.flow.apps", *parts]))
+        return callers
+
+    @staticmethod
+    def _conftest_preimports() -> set[str]:
+        """Dotted names ``conftest.py`` imports at module level, by parse."""
+        import ast
+
+        conftest = Path(__file__).parent / "conftest.py"
+        tree = ast.parse(conftest.read_text(encoding="utf-8"))
+        return {alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names}
+
+    def test_every_module_level_caller_is_pre_imported(self):
+        missing = self._module_level_repo_root_callers() - self._conftest_preimports()
+
+        assert missing == set(), (
+            "a module walks for the repo root at IMPORT time and conftest.py does not "
+            "pre-import it — on a bare checkout its fallback log lands in whichever test "
+            f"window triggers the first import, and any count assertion there breaks: {sorted(missing)}"
+        )
+
+    def test_the_caller_detector_actually_finds_them(self):
+        """Control: an empty detector would make the test above vacuously green."""
+        callers = self._module_level_repo_root_callers()
+
+        assert len(callers) >= 6, f"the parse found only {len(callers)} module-level callers — it is not measuring"
+        assert "aipass.flow.apps.handlers.dashboard.push_central" in callers, (
+            "the module CI reddened is not in the measured set"
+        )
+
+    def test_the_conftest_parse_actually_reads_the_imports(self):
+        """Control for the other side of the comparison."""
+        preimports = self._conftest_preimports()
+
+        assert "aipass.flow.apps.handlers.json.json_handler" in preimports, (
+            "the conftest parse is not seeing imports that are demonstrably there"
+        )

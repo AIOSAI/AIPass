@@ -108,6 +108,72 @@ class TestFindRepoRoot:
         assert Path.cwd() == elsewhere
 
 
+class TestTheBareWorldIsStatedNotInherited:
+    """Both marker worlds are asserted here, so neither is inherited from the host.
+
+    ``AIPASS_REGISTRY.json`` is gitignored and machine-local. Every test above
+    ran on a machine that HAS it, and that is exactly how
+    ``test_success_returns_true`` shipped green and reddened all four Python
+    versions on CI (round 5, @devpulse): with no marker the walk takes the
+    fallback, the fallback LOGS, and the autouse ``mock_json_handler`` counted
+    two calls where the test pinned one. The production code was right the whole
+    time; the assertion was measuring the host.
+
+    The count assertions are fixed in ``tests/conftest.py`` — the six
+    module-level callers are pre-imported, so the import-time diagnostic can
+    never land in a test window. These two tests are the other half: they say
+    out loud what the bare world DOES, so it is a pinned behaviour rather than a
+    condition nobody on a dev box ever sees.
+    """
+
+    def test_no_marker_means_source_root_and_a_logged_fallback(self, monkeypatch):
+        """Marker absent → SOURCE_ROOT, said out loud, never the process cwd."""
+        from aipass.flow.apps.handlers import repo_root
+
+        monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
+        logged = []
+        monkeypatch.setattr(
+            repo_root,
+            "_record_fallback",
+            lambda caller, marker, current: logged.append((caller, marker)),
+        )
+
+        result = repo_root.find_repo_root(caller="push_central")
+
+        assert result == repo_root.SOURCE_ROOT
+        assert logged == [("push_central", repo_root.CORE_REGISTRY)], (
+            "the fallback did not announce itself — a fallback nobody can see is how the next one survives"
+        )
+
+    def test_the_marker_denial_is_live(self, tmp_path, monkeypatch):
+        """Control: a denial that never bites makes the test above vacuous."""
+        from aipass.flow.apps.handlers import repo_root
+
+        marker = tmp_path / repo_root.CORE_REGISTRY
+        marker.write_text("{}", encoding="utf-8")
+        assert repo_root.find_repo_root(tmp_path) == tmp_path
+
+        monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
+        assert repo_root.find_repo_root(tmp_path) == repo_root.SOURCE_ROOT
+
+    def test_the_fallback_records_without_ever_raising(self, monkeypatch):
+        """Six callers reach _record_fallback at IMPORT time.
+
+        A diagnostic write that fails in a bare world must not become the import
+        crash the module exists to prevent, so the real recorder is exercised
+        here with its json_handler dead.
+        """
+        from aipass.flow.apps.handlers import repo_root
+
+        def explode(*args, **kwargs):
+            raise OSError("no writable tree")
+
+        monkeypatch.setattr("aipass.flow.apps.handlers.json.json_handler.log_operation", explode)
+
+        # Must not raise.
+        repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, Path("/nowhere"))
+
+
 # =============================================
 # 2. _get_all_registry_files
 # =============================================

@@ -30,12 +30,46 @@ files), and a NEGATIVE control proving the instrument can still say no.
 
 import ast
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 
 REAL_GLOB = Path.glob
+
+
+# ─── Per-platform filesystem expectations ───────────────────────────────
+#
+# A MEASUREMENT IS OF AN INSTRUMENT AND A PLATFORM. Round 4 asserted
+# `_host_folds_case(...) is False` — a Linux fact stated as a universal — and it
+# went red on the real Windows runner (windows-setup, 28ee90d5, run 33431848734).
+# The production cure was never wrong; the PIN's premise was.
+#
+# WHICH HALF IS MEASURED WHERE, stated rather than implied:
+#   linux  — MEASURED LIVE every time this file runs here.
+#   win32  — DERIVED from that CI red. The failure carried this file's own
+#            assertion text, which is what makes it a Windows measurement rather
+#            than a guess. It becomes measured-live the first time this file runs
+#            GREEN on a Windows box.
+#   darwin — DELIBERATELY None. See below.
+#
+# KEYED ON sys.platform, NOT os.name, and this is a considered deviation from the
+# fleet shape. os.name collapses darwin into "posix", and default macOS folds
+# case — so an os.name table would assert False on a folding host, which is
+# EXACTLY the species of error this round exists to fix. macOS is also
+# formattable either way, so no fixed expectation is honest there: the row is
+# None, meaning "both legal, assert only the link".
+_FOLDS_BY_PLATFORM = {
+    "linux": False,
+    "win32": True,
+    "darwin": None,
+}
+
+
+def _expected_folding():
+    """The table's row for this host, or None where no fixed answer is honest."""
+    return _FOLDS_BY_PLATFORM.get(sys.platform, None)
 
 
 @pytest.fixture
@@ -192,10 +226,99 @@ class TestTheInstrumentIsHonest:
         assert decoy in list(tmp_path.glob("*_REGISTRY.json"))
         assert registries_in(tmp_path) == []
 
-    def test_the_probe_reports_case_sensitive_on_this_host(self, tmp_path):
-        """Its twin, and the reason both are here: on the CI matrix these two
-        tests take opposite branches, and each is the other's control."""
-        assert _host_folds_case(tmp_path) is False
+    def test_cause_the_host_folds_exactly_as_its_platform_row_says(self, tmp_path):
+        """CAUSE. What this filesystem does, against the table's expectation.
+
+        Round 4 wrote `is False` here and CI proved that is a Linux fact, not a
+        universal. A platform whose row is None (macOS, formattable either way)
+        asserts nothing here — the LINK pin below still holds it to account.
+        """
+        expected = _expected_folding()
+        if expected is None:
+            pytest.skip(f"{sys.platform}: filesystem case-folding is configurable — see the LINK pin")
+        assert _host_folds_case(tmp_path) is expected
+
+    def test_outcome_the_raw_glob_sees_the_decoy_exactly_when_the_row_says_so(self, tmp_path):
+        """OUTCOME. What that means for the thing under test: whether an
+        uppercase pattern reaches the lowercase counter file."""
+        expected = _expected_folding()
+        if expected is None:
+            pytest.skip(f"{sys.platform}: filesystem case-folding is configurable — see the LINK pin")
+        decoy = _decoy(tmp_path)
+        assert (decoy in list(tmp_path.glob("*_REGISTRY.json"))) is expected
+
+    def test_link_the_outcome_follows_from_the_cause_on_every_platform(self, tmp_path):
+        """LINK. Holds with NO platform row at all, which is why macOS can skip
+        the two above and still be covered: whatever this host does, the glob's
+        behaviour must follow from the probe's verdict, and the production
+        reader must refuse the counter EITHER WAY.
+
+        A future red then names its own mechanism — cause pin red means the
+        table is wrong about the platform, outcome red means glob disagrees with
+        the probe, link red means the two are no longer connected at all.
+        """
+        folds = _host_folds_case(tmp_path)
+        decoy = _decoy(tmp_path)
+
+        assert (decoy in list(tmp_path.glob("*_REGISTRY.json"))) is folds
+        from aipass.ai_mail.apps.handlers.paths import registries_in
+
+        assert registries_in(tmp_path) == [], "the reader refuses the counter on any filesystem"
+
+    def test_the_windows_row_is_driven_here_so_it_cannot_rot(self, tmp_path, case_insensitive_fs):
+        """The win32 row is derived, so on Linux it would sit unexecuted between
+        Windows CI runs. @prax's rule: emulate the PLATFORM, not just the denial.
+
+        The round-4 folding emulator already IS a platform emulation, so the
+        Windows row runs on every Linux run: probe says folding, raw glob sees
+        the decoy, reader still refuses it — the same three claims the three pins
+        above make, driven through the row that cannot be measured here.
+        """
+        assert _FOLDS_BY_PLATFORM["win32"] is True
+
+        folds = _host_folds_case(tmp_path)
+        assert folds is True, "emulated Windows must present as folding"
+
+        decoy = _decoy(tmp_path)
+        assert decoy in list(tmp_path.glob("*_REGISTRY.json"))
+
+        from aipass.ai_mail.apps.handlers.paths import registries_in
+
+        assert registries_in(tmp_path) == []
+
+    def test_darwin_is_deliberately_unfixed_not_forgotten(self, tmp_path):
+        """A None row looks like an omission, so it is pinned as a decision.
+
+        Giving darwin a fixed row survives every other mutant in this file on
+        Linux — there is no Darwin runner here to contradict it — so without
+        this pin the table could acquire a false macOS expectation and nothing
+        would notice until a Mac ran it. macOS is formattable either way AND
+        folds by default, which is why no fixed answer is honest.
+
+        This is also why the table keys on sys.platform rather than os.name: the
+        fleet shape says os.name, but that collapses darwin into "posix" and
+        would assert False on a folding host — the exact species of error this
+        round exists to fix.
+        """
+        assert _FOLDS_BY_PLATFORM["darwin"] is None
+        assert "darwin" in _FOLDS_BY_PLATFORM, "an absent key and a None row read the same at runtime"
+
+    def test_the_fixtures_never_write_case_twins(self, tmp_path):
+        """@memory's round-4 lesson, applied to my own fixtures: a case-twin
+        decoy cannot COEXIST on a folding filesystem — it OVERWRITES. A probe or
+        fixture that writes twins measures an overwrite while claiming to
+        measure case-globbing.
+
+        Mine do not (`wrong_registry.json` vs `PROJECT_REGISTRY.json`, and the
+        host probe unlinks its marker), and that is pinned rather than trusted,
+        because it is silent on Linux and destructive on Windows.
+        """
+        decoy = _decoy(tmp_path)
+        real = _real_registry(tmp_path)
+
+        assert decoy.name.lower() != real.name.lower(), "fixtures would collide on a folding host"
+        assert decoy.exists() and real.exists()
+        assert len({decoy.name.lower(), real.name.lower()}) == 2
 
     def test_the_decoy_would_genuinely_seat_the_wrong_citizen(self, tmp_path):
         """The decoy is a real registry naming a real branch. Without this, a

@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 974 tests across 29 files
+├── tests/                       # 981 tests across 29 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -280,10 +280,37 @@ process directory only when `AIPASS_CALLER_CWD` is absent. They are named in
 the exemption is keyed on **(file, function)**, not on the name alone.
 
 Enforced by `tests/test_import_dead_cwd.py`: two injected worlds with their own
-liveness controls, plus AST bans that behaviour cannot reach (@trigger restored
-the deleted `inspect.stack()` walk in their tree and 1058 tests stayed green —
-`apps/__init__.py` always supplies a real-file frame, so no import-shaped world
-enters that branch).
+liveness controls, an AST ban, **and** a behavioural sibling that reaches the
+caller-is-None branch by calling the guard directly from a `python -c` child
+under a realpath denial. Both instruments are kept: regrowing the deleted walk
+kills both, and each catches what the other cannot — the ban names the offending
+line anywhere in the tree with no subprocess, the behavioural pin proves the cure
+in the world it was built for. (The round-4 guidance said only an AST ban could
+watch that branch; @spawn measured the correction — it is unreachable from
+*import-shaped* pins, not unreachable.)
+
+### The bare-checkout world is a tested world
+
+`AIPASS_REGISTRY.json` is **gitignored and machine-local**, so a dev box and a CI
+runner disagree about whether `find_repo_root` takes its fallback. That is not a
+detail — it is a whole second world flow's tests must pass in, and it is where
+round 5's CI red came from.
+
+The fallback logs `repo_root_fallback` through `json_handler.log_operation`, and
+six modules take the walk while **loading**. On a bare checkout that import-time
+diagnostic lands inside whichever test window triggers the first import, where
+the autouse `mock_json_handler` counts it — so a test pinning
+`assert_called_once` breaks on CI and passes everywhere else.
+
+`tests/conftest.py` therefore **pre-imports all six module-level callers**,
+settling the walk before any test window exists on every machine. The list is
+guarded by `TestThePreImportListIsComplete`, which measures the callers off the
+tree by parse and compares them against what conftest actually imports — neither
+side hand-copied, because a hand-written list is exactly where an undercount
+hides.
+
+Measured, not assumed: with the marker denied and every count-asserting test run
+in **full isolation**, **2 of 10** failed. CI had named one.
 
 ---
 
@@ -412,7 +439,7 @@ aggregation untouched, plus anything auto-closed during the run.
 ## Quality
 
 - **Seedgo:** 100% (46 standards, no type errors)
-- **Tests:** 974 tests in 29 files — 993 cases collected after parametrisation, 992 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`). 100/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Tests:** 981 tests in 29 files — 1000 cases collected after parametrisation, 999 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
 - **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**

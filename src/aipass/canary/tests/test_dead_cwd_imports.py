@@ -45,6 +45,7 @@ stdin: linecache caches stdin, and the probe would lie green (@hooks).
 """
 
 import ast
+import os
 import subprocess
 import sys
 import tempfile
@@ -175,13 +176,62 @@ def test_control_catches_a_dead_injection(world):
     )
 
 
-def test_world_a_cannot_convict_inspect_stack():
-    """Pins WHY two worlds exist, so nobody collapses them into one.
+# The world-A/inspect.stack outcome is PLATFORM-DEPENDENT, and the deciding
+# fact is whether os.path.abspath survives a getcwd denial:
+#
+#   POSIX    posixpath.abspath calls os.getcwd() for a relative path, so the
+#            denial kills it. getabsfile raises inside getmodule's OWN except,
+#            getmodule returns None, and inspect.stack() never reaches the
+#            unguarded realpath at inspect.py:1009 -> STACK SURVIVES.
+#            MEASURED HERE, live, by test_world_a_abspath_outcome below.
+#
+#   WINDOWS  ntpath.abspath rides the Win32 _getfullpathname and never touches
+#            getcwd, so it SURVIVES the denial. getmodule proceeds to realpath
+#            - which world A wraps to read getcwd first - and it dies there
+#            -> STACK DIES. Windows convicts inspect.stack naturally, which is
+#            why the platform found this defect and POSIX did not.
+#            MEASURED ON CI, not here: this pin's own round-4 assertion text
+#            came back red from windows-setup on 28ee90d5 (run 33431848734).
+#            That failure IS the measurement; canary has no Windows box.
+#
+# Neither outcome is a bug. World B exists because the POSIX half cannot
+# convict inspect.stack; on Windows world A already does. Deleting either
+# branch of this table retires a live measurement on one platform.
 
-    @daemon measured this: under world A, denying getcwd also kills
-    os.path.abspath, so inspect.getmodule dies at getabsfile inside its own
-    except and inspect.stack() returns normally. A single-world pin would
-    therefore give the inspect.stack species a clean bill of health.
+STACK_SURVIVES_WORLD_A = os.name != "nt"
+
+
+def test_world_a_abspath_outcome_is_the_mechanism():
+    """The fact the table above turns on, measured on whatever platform runs.
+
+    Asserting the mechanism rather than only the outcome means a future
+    interpreter that changes the abspath/getcwd coupling reds HERE, naming
+    the cause, instead of reding the stack pin with no explanation.
+    """
+    body = _WORLD_A + (
+        "import os, os.path\n"
+        "try:\n"
+        "    os.path.abspath('rel.py')\n"
+        "    print('ABSPATH_SURVIVED')\n"
+        "except OSError:\n"
+        "    print('ABSPATH_DIED')\n"
+    )
+    result = _run_child(body)
+    expected = "ABSPATH_DIED" if os.name != "nt" else "ABSPATH_SURVIVED"
+    assert expected in result.stdout, (
+        f"on {os.name}, world A's getcwd denial was expected to produce "
+        f"{expected} from os.path.abspath. If this changed, the two-world "
+        f"split and the stack table below both need re-deriving, not "
+        f"deleting:\n{result.stdout}\n{result.stderr[-800:]}"
+    )
+
+
+def test_world_a_stack_outcome_matches_the_platform_table():
+    """world A convicts inspect.stack on Windows and not on POSIX.
+
+    Round 4 pinned the POSIX half as universal. It is not: windows-setup
+    turned this assertion red on the real platform, which is the pin doing
+    its job on a world it had never run in. The table is per-platform now.
     """
     body = _WORLD_A + (
         "import inspect\n"
@@ -192,10 +242,54 @@ def test_world_a_cannot_convict_inspect_stack():
         "    print('STACK_DIED')\n"
     )
     result = _run_child(body)
-    assert "STACK_SURVIVED" in result.stdout, (
-        "world A now convicts inspect.stack. If the interpreter changed, the "
-        "two-world split needs re-deriving rather than deleting:\n"
-        f"{result.stdout}\n{result.stderr[-1000:]}"
+    expected = "STACK_SURVIVED" if STACK_SURVIVES_WORLD_A else "STACK_DIED"
+    assert expected in result.stdout, (
+        f"world A on {os.name} was expected to produce {expected} from "
+        f"inspect.stack(). See the platform table above: re-derive the table "
+        f"rather than deleting the pin, and check "
+        f"test_world_a_abspath_outcome_is_the_mechanism first — it names the "
+        f"cause:\n{result.stdout}\n{result.stderr[-800:]}"
+    )
+
+
+def test_the_windows_half_of_the_table_reproduces_here():
+    """Run the WINDOWS branch's mechanism on this platform, whatever it is.
+
+    The table's Windows row would otherwise be an untested claim on every
+    machine canary can actually run on — true today because CI said so, and
+    unfalsifiable here forever after. The deciding fact is abspath surviving
+    the getcwd denial, and that is emulable: patch abspath to ignore the cwd
+    exactly as ntpath's _getfullpathname does, keep world A otherwise
+    intact, and inspect.stack() must then die at the unguarded realpath.
+
+    This does NOT make canary a Windows box and is not evidence about the
+    real platform — @daemon and @cli measured the same reconciliation
+    directly. It pins the CAUSAL LINK the table asserts, so the Windows row
+    cannot quietly stop being true between CI runs.
+    """
+    body = _WORLD_A + (
+        "import os, os.path, inspect\n"
+        "os.path.abspath = lambda p, *a, **k: p if p.startswith('/') else '/fake/' + p\n"
+        "try:\n"
+        "    os.path.abspath('rel.py')\n"
+        "    print('ABSPATH_SURVIVED')\n"
+        "except OSError:\n"
+        "    print('ABSPATH_DIED')\n"
+        "try:\n"
+        "    inspect.stack()\n"
+        "    print('STACK_SURVIVED')\n"
+        "except OSError:\n"
+        "    print('STACK_DIED')\n"
+    )
+    result = _run_child(body)
+    assert "ABSPATH_SURVIVED" in result.stdout, (
+        "the ntpath emulation did not take — this pin proves nothing until "
+        f"abspath survives:\n{result.stdout}\n{result.stderr[-800:]}"
+    )
+    assert "STACK_DIED" in result.stdout, (
+        "with abspath surviving the getcwd denial, inspect.stack() was "
+        "expected to die at inspect.py:1009 — that causal link is the whole "
+        f"reason the Windows row of the table reads STACK_DIES:\n{result.stdout}"
     )
 
 
@@ -336,3 +430,66 @@ def test_module_file_returns_an_absolute_path_when_resolve_fails():
     result = _run_child(body)
     assert "ABS=True" in result.stdout, result.stdout + result.stderr[-1000:]
     assert f"VAL={GUARD_FILE}" in result.stdout, result.stdout
+
+
+# ---------------------------------------------------------------------------
+# THE BEHAVIOURAL SIBLING for the caller-is-None branch
+# ---------------------------------------------------------------------------
+# CORRECTION TO THIS FILE'S ROUND-4 CLAIM. I reported that the AST ban was the
+# ONLY instrument able to watch the deleted second walk. That was too strong,
+# and @spawn measured the correction: the branch is unreachable from
+# IMPORT-shaped pins (apps/__init__.py always supplies a real-file frame, so
+# caller_file is never None on an import), but it IS reachable by calling
+# _guard_branch_access() DIRECTLY from a python -c child — every frame is then
+# string-pseudo or importlib, both skipped, so _find_real_caller returns None
+# and the branch runs. Under a realpath denial a regrown walk dies there; the
+# cured plain return survives.
+#
+# Both instruments are kept. The AST ban needs no subprocess and names the
+# defect precisely; this one proves the cured branch actually behaves.
+
+
+def test_caller_is_none_branch_survives_a_realpath_denial():
+    """Call the guard directly, with no real-file frame, under world B.
+
+    Two arming probes first, because this pin is worthless if the world is
+    not hostile or if the branch under test never ran:
+      probe 1 — the denial bites (realpath raises).
+      probe 2 — _find_real_caller() really returned None, so the guard took
+                the caller-is-None path and not some other early return.
+
+    ON PROBE 2 AND ITS MUTANT, recorded rather than left as a gap. Deleting
+    probe 2 leaves this pin green (mutant M10 survives), because in TODAY's
+    world the caller genuinely is None — it is an equivalent mutant here.
+    It is not decorative: measured 2026-08-31, if _find_real_caller returns a
+    KIN path instead, the guard still returns — via the kin early-return, the
+    wrong reason entirely — and without probe 2 this pin passes vacuously
+    while the branch it names is never executed. Probe 2 is what makes the
+    pin's subject provable, so it stays.
+    """
+    body = (
+        "".join(f"import {m}\n" for m in PRELOAD)
+        + "import aipass.canary.apps.handlers as H\n"
+        + _WORLD_B
+        + "import os.path\n"
+        "try:\n"
+        "    os.path.realpath('x')\n"
+        "    print('ARM1_DENIAL_INERT')\n"
+        "except OSError:\n"
+        "    print('ARM1_DENIAL_BITES')\n"
+        "print('ARM2_CALLER=' + repr(H._find_real_caller()[0]))\n"
+        "H._guard_branch_access()\n"
+        "print('GUARD_RETURNED')\n"
+    )
+    result = _run_child(body)
+    assert "ARM1_DENIAL_BITES" in result.stdout, (
+        f"world B was inert — this pin proves nothing:\n{result.stdout}\n{result.stderr[-800:]}"
+    )
+    assert "ARM2_CALLER=None" in result.stdout, (
+        f"_find_real_caller did not return None, so the caller-is-None branch was never exercised:\n{result.stdout}"
+    )
+    assert "GUARD_RETURNED" in result.stdout, (
+        "the guard raised on the caller-is-None path under a realpath denial "
+        f"— a frame walk has regrown there:\n{result.stdout}\n"
+        f"{result.stderr[-1200:]}"
+    )

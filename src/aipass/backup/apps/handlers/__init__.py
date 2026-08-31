@@ -7,6 +7,7 @@ on Windows for a process whose cwd was deleted.
 """
 
 import linecache
+import os
 import sys
 from pathlib import Path
 
@@ -19,8 +20,40 @@ MY_BRANCH = "backup"
 _PSEUDO_FRAME_PREFIX = "<"
 _IMPORT_MACHINERY = "importlib"
 
+#: Windows spells paths with backslashes and folds case; POSIX does neither.
+_IS_WINDOWS = os.name == "nt"
+
 _HANDLER_DIR = str(module_file(__file__).parent)
 _BRANCH_ROOT = str(branch_root(__file__, 2))
+
+
+def _spell_for_kinship(path: str, *, windows: bool) -> str:
+    """Spell a path for the kinship test. BOTH sides must go through this.
+
+    Round 5, measured on the windows-setup runner: this guard used to normalise
+    only the CALLER (``caller_file.replace("\\", "/")``) and compare it against
+    a ``_BRANCH_ROOT`` that came straight from ``Path`` -- backslashed on
+    Windows. A forward-slashed caller can never contain a backslashed root, so
+    every file in the branch read as FOREIGN, the door import raised, and the
+    whole tree died at the fence with backup's own ACCESS DENIED message.
+
+    Case is folded only on Windows. Folding everywhere would ADMIT a foreign
+    ``/tmp/BACKUP`` on a case-sensitive filesystem, which is a wider fence, not
+    a safer one.
+    """
+    spelled = path.replace("\\", "/")
+    return spelled.lower() if windows else spelled
+
+
+def _is_kin(caller_file: str, branch_root: str, *, windows: bool | None = None) -> bool:
+    """Is ``caller_file`` inside ``branch_root``?
+
+    Pure, and parametrised on the dialect, so the Windows reading is testable
+    from Linux -- the defect needs a backslash, not a Windows box.
+    """
+    if windows is None:
+        windows = _IS_WINDOWS
+    return _spell_for_kinship(branch_root, windows=windows) in _spell_for_kinship(caller_file, windows=windows)
 
 
 def _find_real_caller():
@@ -58,7 +91,11 @@ def _find_real_caller():
         except OSError:
             resolved = filename
 
-        if this_file in resolved:
+        # Same spelling rule as the kinship test, and for a sharper reason:
+        # if the self-skip MISSES, this file becomes the reported caller, it is
+        # trivially kin, and the real foreign caller below it is never examined
+        # -- a case difference would open the fence, not just close it.
+        if _spell_for_kinship(this_file, windows=_IS_WINDOWS) in _spell_for_kinship(resolved, windows=_IS_WINDOWS):
             frame = frame.f_back
             continue
 
@@ -89,7 +126,7 @@ def _guard_branch_access():
     if caller_file is None:
         return
 
-    if _BRANCH_ROOT in caller_file.replace("\\", "/"):
+    if _is_kin(caller_file, _BRANCH_ROOT):
         return
 
     caller_branch = _extract_branch_name(caller_file)

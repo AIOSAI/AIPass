@@ -208,7 +208,18 @@ def _get_caller_module_name() -> str:
     except ValueError:
         return "unknown"
 
-    module_name = Path(caller_frame.f_code.co_filename).stem
+    # A pseudo-frame has no module behind it. `<stdin>`, `<string>` from
+    # python -c or exec, `<frozen importlib._bootstrap>` — Path("<stdin>").stem
+    # is "<stdin>", and an operations log that attributes work to that is
+    # asserting something false about who did it. Same read as config/load.py's
+    # _module_name_from_filename, which is where the full account lives; it is
+    # not imported because this module is reached from inside logger
+    # construction and must stay independent of it.
+    filename = caller_frame.f_code.co_filename
+    if filename.startswith("<") and filename.endswith(">"):
+        return "unknown"
+
+    module_name = Path(filename).stem
 
     # Validate module name
     if module_name and not module_name.startswith("_"):

@@ -25,7 +25,7 @@ pytest src/aipass/canary/tests -v
 ```
 
 Several of those functions are parametrized, so pytest collects and passes
-more cases than there are `def test_` lines — 49 functions collect as 79 cases
+more cases than there are `def test_` lines — 52 functions collect as 82 cases
 today. Both counts are true of different things; the tree below states the
 function count, which is what the standards audit measures.
 
@@ -70,7 +70,7 @@ CANARY/
 │   └── plugins/            # Scaffold, empty
 ├── artifacts/              # Test artifacts written during dispatches
 ├── canary_json/            # Where the json shim writes — test data, nothing depends on it
-├── tests/                  # 49 test functions, all passing as of 2026-08-31
+├── tests/                  # 52 test functions, all passing as of 2026-08-31
 ├── docs/
 └── README.md
 ```

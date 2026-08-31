@@ -37,7 +37,7 @@ import json
 import subprocess
 import sys
 import textwrap
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -300,3 +300,173 @@ class TestFenceStillRefusesForeignCallers:
     def test_pseudo_frame_caller_is_allowed(self, guard) -> None:
         """A <string> frame is skipped, not resolved -- that skip is the cure."""
         self._call_guard_as(guard, "<string>")
+
+
+class TestKinshipSurvivesTheWindowsSpelling:
+    """The fence must recognise its OWN files when paths are spelled Windows.
+
+    Round 5, from the windows-setup runner on 28ee90d5: every test in this file
+    errored at import with backup's own ACCESS DENIED message -- the fence was
+    refusing backup's own ``apps/__init__.py``.
+
+    The mechanism is one-sided normalisation. The guard normalised the CALLER
+    (``caller_file.replace("\\\\", "/")``) and compared it against a
+    ``_BRANCH_ROOT`` that came straight from ``Path``, i.e. spelled with
+    BACKSLASHES on Windows. A forward-slashed caller can never contain a
+    backslashed root, so kinship failed for every file in the branch and the
+    door import that arms the fence raised instead.
+
+    Reproduced on Linux by fabricating the Windows spelling with
+    ``PureWindowsPath`` -- the bug needs a backslash, not a Windows box.
+    """
+
+    WIN_ROOT = PureWindowsPath(r"C:\Actions\AIPass\src\aipass\backup")
+    WIN_KIN = WIN_ROOT / "apps" / "__init__.py"
+
+    def test_windows_spelled_kin_is_recognised(self, guard) -> None:
+        """The exact CI shape: backslashed root, backslashed own file."""
+        assert guard._is_kin(str(self.WIN_KIN), str(self.WIN_ROOT))
+
+    def test_the_fabrication_really_carries_backslashes(self) -> None:
+        """Control: if PureWindowsPath rendered POSIX here, the pin proves nothing."""
+        assert "\\" in str(self.WIN_KIN)
+        assert "/" not in str(self.WIN_KIN)
+
+    def test_mixed_spellings_agree(self, guard) -> None:
+        """Either side may arrive in either dialect; both readings are kin."""
+        assert guard._is_kin(str(self.WIN_KIN), self.WIN_ROOT.as_posix())
+        assert guard._is_kin(self.WIN_KIN.as_posix(), str(self.WIN_ROOT))
+
+    def test_drive_letter_case_folds_on_windows(self, guard) -> None:
+        """C: vs c: is the same drive. Windows folds case; the comparison must."""
+        lowered = str(self.WIN_KIN).replace("C:", "c:", 1)
+        assert guard._is_kin(lowered, str(self.WIN_ROOT), windows=True)
+
+    def test_case_does_not_fold_on_posix(self, guard) -> None:
+        """The negative control for the fold: POSIX case-sensitivity is not weakened.
+
+        Folding unconditionally would ADMIT a foreign /tmp/BACKUP on Linux, so
+        the fold is gated on the platform rather than applied to be safe.
+        """
+        root = "/home/x/src/aipass/backup"
+        assert not guard._is_kin(f"{root.upper()}/apps/evil.py", root, windows=False)
+        assert guard._is_kin(f"{root}/apps/ok.py", root, windows=False)
+
+    def test_foreign_windows_caller_is_still_refused(self, guard) -> None:
+        """Separator-safety must not turn into admit-everything."""
+        foreign = PureWindowsPath(r"C:\Actions\AIPass\src\aipass\memory\apps\x.py")
+        assert not guard._is_kin(str(foreign), str(self.WIN_ROOT))
+
+    def test_guard_allows_windows_spelled_own_file_end_to_end(self, guard, monkeypatch) -> None:
+        """The whole decision, not just the helper -- this is what CI ran.
+
+        Red before the cure: ImportError, ACCESS DENIED, on backup's own file,
+        with "Caller branch: backup" in the message -- the fence naming ITSELF
+        as the foreigner, which is exactly what the runner printed.
+
+        Noted for the next reader: on Linux a drive-lettered path is RELATIVE,
+        so ``_find_real_caller`` resolves it under cwd and the branch root is
+        prefixed onto it. The kinship substring is still the thing under test
+        (this pin was red before the cure), but the pure-function pins above
+        are the ones that carry the argument without that artifact.
+        """
+        monkeypatch.setattr(guard, "_BRANCH_ROOT", str(self.WIN_ROOT))
+        code = compile("check()", str(self.WIN_KIN), "exec")
+        exec(code, {"check": guard._guard_branch_access})
+
+    def test_guard_still_refuses_windows_spelled_foreigner(self, guard, monkeypatch) -> None:
+        """Same end-to-end path, refuse side -- the fence still closes."""
+        monkeypatch.setattr(guard, "_BRANCH_ROOT", str(self.WIN_ROOT))
+        foreign = PureWindowsPath(r"C:\Actions\AIPass\src\aipass\memory\apps\x.py")
+        code = compile("check()", str(foreign), "exec")
+        with pytest.raises(ImportError, match="ACCESS DENIED"):
+            exec(code, {"check": guard._guard_branch_access})
+
+    def test_self_skip_uses_the_same_spelling_rule(self, guard) -> None:
+        """The guard's own-frame skip is the same comparison, and it matters more.
+
+        If the self-skip misses, ``__init__.py`` itself is returned as the
+        caller -- trivially kin -- and the foreign frame beneath it is never
+        looked at. A case-fragile self-skip OPENS the fence.
+        """
+        source = GUARD_FILE.read_text(encoding="utf-8")
+        assert "if this_file in resolved:" not in source
+        assert source.count("_spell_for_kinship(") >= 4
+
+
+#: Behavioural sibling to the AST ban, spawn's shape (relayed by devpulse).
+#: The round-4 guidance said the caller-is-None branch is unreachable and only a
+#: parse-tree pin can watch it. The true sentence is narrower: it is unreachable
+#: from IMPORT-shaped pins. Called DIRECTLY from a ``-c`` child every frame is
+#: string-pseudo or importlib, both skipped, ``_find_real_caller`` returns None,
+#: and the branch RUNS -- so a regrown ``inspect.stack()`` walk dies there under
+#: a realpath denial while the cured plain return survives.
+_NONE_BRANCH_PROBE = textwrap.dedent(
+    """
+    import json, os, os.path, sys
+    # Imported BEFORE the denial: the guard's own import needs realpath.
+    import aipass.backup.apps.handlers as g
+
+    result = {}
+    def _denied(*a, **k):
+        raise OSError(9999, "realpath denied")
+    os.path.realpath = _denied
+
+    # ARMING PROBE 1 -- the denial must bite the construct under test. Without
+    # this the pin passes in a world where nothing was ever denied.
+    import inspect
+    try:
+        inspect.stack()
+        result["denial_bites"] = False
+    except OSError as exc:
+        result["denial_bites"] = exc.errno == 9999
+
+    # ARMING PROBE 2 -- the branch under test must be the one entered. Without
+    # this the world could silently exercise the ordinary kin path instead.
+    try:
+        result["caller_is_none"] = g._find_real_caller() == (None, None)
+    except BaseException as exc:
+        result["caller_is_none"] = "raised " + type(exc).__name__
+
+    # THE PIN.
+    try:
+        g._guard_branch_access()
+        result["guard_returns"] = True
+    except BaseException as exc:
+        result["guard_returns"] = "raised " + type(exc).__name__ + ": " + str(exc)
+
+    print(json.dumps(result))
+    """
+)
+
+
+class TestTheCallerIsNoneBranchIsWatchedBehaviourally:
+    """The deleted second stack walk, pinned by RUNNING it -- not only by shape.
+
+    ``-c`` and never a script: run this as a file and every frame is a real
+    on-disk path, ``getsourcefile`` early-returns, and the denial is silently
+    inert (commons, round 4).
+    """
+
+    @staticmethod
+    def _run() -> dict:
+        proc = subprocess.run(
+            [sys.executable, "-c", _NONE_BRANCH_PROBE],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    def test_the_denial_bites(self) -> None:
+        """Arming probe: an unguarded inspect.stack() really dies in this world."""
+        assert self._run()["denial_bites"] is True
+
+    def test_the_none_branch_is_actually_entered(self) -> None:
+        """Arming probe: _find_real_caller returned None, so the branch ran."""
+        assert self._run()["caller_is_none"] is True
+
+    def test_the_guard_returns_instead_of_walking(self) -> None:
+        """The pin. A regrown inspect.stack() walk raises OSError here."""
+        assert self._run()["guard_returns"] is True
