@@ -258,3 +258,62 @@ class TestTheSavePathCreatesItsOwnDirectory:
 
         assert json_handler.save_json("probe", "log", []) is True
         assert (target / "probe_log.json").is_file()
+
+
+class TestTheAnchorIsEnvIndependent:
+    """The precondition this seam rests on, pinned instead of asserted in prose.
+
+    ``_current_json_dir`` treats "differs from BOTH fixed points" as proof of a
+    deliberate override. That reasoning is only sound while ``real`` really is
+    the real tree — and ``real`` is ``_IMPORT_TIME_JSON_DIR``, captured once at
+    import. If that anchor were seeded from ``AIPASS_TEST_LOG_DIR``, then any
+    run where the variable is already exported at import time makes the ANCHOR a
+    redirect. A later test pointing the variable somewhere else leaves the stale
+    anchor differing from both fixed points, which reads as an explicit patch,
+    and the seam dies for the rest of the process.
+
+    That is not hypothetical and it is not drone's: @prax shipped the contract
+    and then violated this precondition in their own implementation, took two CI
+    reds for it (deterministic from the repo root, green from the branch dir),
+    and named my docstring's "load-bearing" line as the bug report. Their
+    mechanism needs NO ``importlib.reload`` — an env var already exported at
+    import is enough, which makes it a wider hole than the reload write-back
+    @daemon and I both hit.
+
+    Drone is immune BY CONSTRUCTION — the anchor is ``_BRANCH_ROOT /
+    "drone_json"`` and reads no environment. But "immune by construction" was
+    exactly the shape of two guards this week that turned out to be unobservable,
+    so it is a test now.
+
+    IT MUST BE A SUBPROCESS. In-process the property is unfalsifiable: the import
+    already happened, so setting the variable now proves nothing about what the
+    anchor was seeded from. @prax's form, adopted.
+    """
+
+    def test_importing_with_the_env_var_already_set_leaves_the_anchor_on_the_real_tree(self, tmp_path):
+        import subprocess
+        import sys
+        import textwrap
+
+        probe = textwrap.dedent(
+            """
+            import os, sys
+            os.environ["AIPASS_TEST_LOG_DIR"] = sys.argv[1]
+            from aipass.drone.apps.handlers.json import json_handler as jh
+            print("ANCHOR", jh._IMPORT_TIME_JSON_DIR)
+            print("REDIRECT", jh._current_json_dir())
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(tmp_path)],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        anchor = next(line.split(" ", 1)[1] for line in result.stdout.splitlines() if line.startswith("ANCHOR"))
+        redirect = next(line.split(" ", 1)[1] for line in result.stdout.splitlines() if line.startswith("REDIRECT"))
+
+        assert anchor.endswith("drone/drone_json"), f"the anchor was seeded from the environment: {anchor}"
+        assert str(tmp_path) not in anchor, f"the anchor IS the redirect — the seam has no fixed point: {anchor}"
+        assert str(tmp_path) in redirect, f"the env var was exported before import and ignored: {redirect}"

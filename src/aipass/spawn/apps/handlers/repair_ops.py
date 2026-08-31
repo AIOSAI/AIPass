@@ -208,6 +208,10 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
     """
     if registry_path is None:
         registry_path = find_registry()
+    if registry_path is None:
+        msg = "No *_REGISTRY.json found above the current directory — nothing to relocate against"
+        logger.error("[repair] %s", msg)
+        return {"success": False, "error": msg, "moved": False, "registry_updated": False}
     registry_path = Path(registry_path)
     project_root = registry_path.parent
 

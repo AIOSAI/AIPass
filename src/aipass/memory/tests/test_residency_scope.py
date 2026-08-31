@@ -51,6 +51,9 @@ strength of another still standing.
 """
 
 import json
+import logging
+import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -639,3 +642,123 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         (record,) = rs.read_registry_branches(registry, name_from="name")
         assert record["name"] == "alpha"
         assert record["email"] is None
+
+
+# ===========================================================================
+# THE MODULE-LEVEL CWD FALLBACK (2026-08-31)
+# ===========================================================================
+#
+# @drone, routed by @devpulse with an isolated repro: `find_repo_root` ends
+# `return Path.cwd()` when the walk up from `__file__` finds no
+# AIPASS_REGISTRY.json, and `REPO_ROOT = find_repo_root()` runs at MODULE
+# level. A clean checkout has no registry — it is gitignored and machine-local
+# — so a bare CI runner takes that fallback on every import, and a process
+# whose working directory has been deleted raises FileNotFoundError while
+# merely IMPORTING this module.
+#
+# It took down every import of drone on CI — router, `drone rm`, `drone
+# systems` — because their registry_handler imported the gateway at module
+# level. They contained their half honestly (the import moved inside the guard
+# that already promised the gateway could not take routing down) and reported
+# the line as mine rather than patching my tree. It is mine, and it was latent
+# for every other consumer.
+#
+# TWO DEFECTS IN ONE LINE. The crash is the loud one. The quiet one is that
+# `Path.cwd()` is a GUESS: the directory a process happened to start in has
+# nothing to do with where this source file lives, so on a registry-less tree
+# every fleet lane would silently resolve against whatever the caller's shell
+# was pointing at. That is the fallback species Patrick outlawed — the same
+# ruling as `_first_registry_in`, "a fallback wearing a determinism costume".
+#
+# THE ANSWER: the root is derived from THIS FILE's own location, never from the
+# process. `src/` is the layout's own marker, so a registry-less checkout
+# resolves to the checkout — which is the true answer there, not a guess — and
+# the absence is said out loud at WARNING rather than passed over.
+
+
+class TestRepoRootNeverReadsTheProcessDirectory:
+    """A registry-less world must resolve, deterministically, without cwd."""
+
+    _PROBE = (
+        "import os, sys, tempfile, pathlib\n"
+        "sys.path.insert(0, {src!r})\n"
+        "d = tempfile.mkdtemp()\n"
+        "os.chdir(d); os.rmdir(d)\n"  # the working directory is now gone
+        "{body}\n"
+    )
+
+    @classmethod
+    def _in_a_dead_cwd(cls, body):
+        """Run *body* in a subprocess whose working directory has been deleted.
+
+        A subprocess because the condition is process-wide and unfixable from
+        inside: once cwd is gone, every `Path.cwd()` in the interpreter raises,
+        including pytest's own. Deleting the test runner's cwd would take the
+        suite with it.
+        """
+        src = str(Path(rs.__file__).resolve().parents[6])
+        return subprocess.run(
+            [sys.executable, "-c", cls._PROBE.format(src=src, body=body)],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_find_repo_root_survives_a_deleted_working_directory(self, tmp_path):
+        """@drone's isolated repro, exactly: no registry above, no cwd beneath."""
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        result = self._in_a_dead_cwd(
+            "from aipass.memory.apps.handlers.monitor import registry_scope as rs\n"
+            f"print('OK', rs.find_repo_root(pathlib.Path({str(bare)!r})))"
+        )
+        assert result.returncode == 0, result.stderr
+        assert "OK" in result.stdout, result.stdout
+
+    def test_importing_the_module_survives_a_deleted_working_directory(self):
+        """The CI chain: REPO_ROOT is resolved at import, so import is the crash site.
+
+        Honest about its own reach: on a machine that HAS a registry above this
+        file the walk succeeds and the fallback is never taken, so this pin
+        cannot go red here. It is the CI shape, kept because that is the
+        environment the defect lives in and a test that only runs where the bug
+        cannot happen is the one nobody writes until after the outage.
+        """
+        result = self._in_a_dead_cwd(
+            "from aipass.memory.apps.handlers.monitor import registry_scope as rs\nprint('OK', rs.REPO_ROOT)"
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_a_registryless_world_resolves_to_the_source_tree_not_the_caller(self, tmp_path, monkeypatch):
+        """The QUIET defect: cwd is a guess about where the code lives.
+
+        Stand in a directory that is not the repo and ask about a tree with no
+        registry. The old answer was "wherever you happen to be standing".
+        """
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        resolved = rs.find_repo_root(bare)
+
+        assert resolved != tmp_path, "the caller's directory is not a repo root"
+        assert resolved == Path(rs.__file__).resolve().parents[6], (
+            "a registry-less world must resolve from this file's own location"
+        )
+
+    def test_the_missing_registry_is_said_out_loud(self, tmp_path, caplog):
+        """A fallback nobody can see is the species this whole sweep is about."""
+        bare = tmp_path / "bare"
+        bare.mkdir()
+
+        with caplog.at_level(logging.WARNING):
+            rs.find_repo_root(bare)
+
+        assert rs.CORE_REGISTRY in caplog.text, "the walk failed silently"
+
+    def test_a_real_registry_still_wins(self, tmp_path):
+        """The fallback must not shadow an answer the walk can actually find."""
+        root = tmp_path / "repo"
+        (root / "src" / "aipass").mkdir(parents=True)
+        (root / rs.CORE_REGISTRY).write_text("{}", encoding="utf-8")
+
+        assert rs.find_repo_root(root / "src" / "aipass") == root

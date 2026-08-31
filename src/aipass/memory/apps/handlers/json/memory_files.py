@@ -115,7 +115,7 @@ def _validate_entry_limits(
             before = {}  # Unparseable — treat as empty (all entries "new")
 
     split = classify_entries(before, data, filtered_limits)
-    over = split["authored"] + split["carried"]
+    over = split["authored"]
 
     # --- Carried debt: report, never refuse -----------------------------------
     # An over-cap entry byte-identical to the one on disk was not written by

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for drone data files
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-08-18
+# Modified: 2026-08-31
 # =============================================
 
 """JSON auto-creating handler for drone data files.
@@ -91,6 +91,25 @@ def _current_json_dir() -> Path:
     An EMPTY env value is absence, not a redirect. ``Path("") / "x"`` is
     relative, so honouring it would scatter state wherever the process happens
     to be standing.
+
+    THE SECOND COMPARISON IS VALUE-NEUTRAL AND IS KEPT ANYWAY — @prax found this
+    by mutating their own copy, and it reproduces here: dropping
+    ``and current != default`` kills no test in this suite (1309 green with the
+    mutant). It cannot, on POSIX. The only branch the two forms disagree on is
+    ``current != real and current == default``, where one returns ``current``
+    and the other ``default`` — and ``Path`` equality on POSIX means identical
+    string parts, so the returned path is the same path. Untested by
+    construction, not a gap in coverage.
+
+    ONE ASYMMETRY MAKES KEEPING IT THE CHEAPER SIDE, and it is the reason this
+    is not simply dead weight: ``PurePath.__eq__`` compares case-folded on
+    Windows, so ``PureWindowsPath(r"C:\Temp\Drone_Json")`` equals
+    ``PureWindowsPath(r"c:\temp\drone_json")`` while ``str()`` of the two
+    differs. There, returning ``current`` instead of ``default`` yields the same
+    FILE under a different string — invisible to a write, visible in a log line
+    or in any assertion that compares paths as text. The clause also states the
+    two-fixed-point rule that three trees now implement identically, which is
+    worth more than removing a line that costs nothing.
     """
     real = _IMPORT_TIME_JSON_DIR
     test_dir = os.environ.get(_TEST_DIR_ENV_VAR)

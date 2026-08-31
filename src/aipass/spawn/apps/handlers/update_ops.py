@@ -247,6 +247,9 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
     Returns list of result dicts.
     """
     registry_path = find_registry()
+    if registry_path is None:
+        logger.error("[update] No *_REGISTRY.json found above the current directory — no branches to update")
+        return []
     registry = load_registry(registry_path)
     branches = branches_as_list(registry.get("branches", []))
 
@@ -335,6 +338,9 @@ def _read_citizen_class(branch_dir: Path) -> str:
 def _resolve_branch_path(branch_name: str) -> Path | None:
     """Resolve a branch name to its absolute directory path via the registry."""
     registry_path = find_registry()
+    if registry_path is None:
+        logger.info("[update] No *_REGISTRY.json found — cannot resolve a branch path without one")
+        return None
     project_root = registry_path.parent
     registry = load_registry(registry_path)
 

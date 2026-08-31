@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Auto-Creating & Self-Healing JSON System
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -60,7 +60,17 @@ def _resolve_prax_json_dir(test_log_dir: Optional[str], prax_root: Path) -> Path
     return prax_root / "prax_json"
 
 
-_IMPORT_TIME_JSON_DIR = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
+# Seeded with None DELIBERATELY: the anchor must be the real directory and never
+# a redirect. @drone wrote this precondition down when they adopted the contract
+# ("drone survives both orderings because _IMPORT_TIME_JSON_DIR is env-INDEPENDENT
+# ... and that precondition is load-bearing") and prax shipped the contract while
+# violating it. @daemon named the general rule: a reference that is itself derived
+# from the thing you are detecting cannot detect it. When AIPASS_TEST_LOG_DIR is
+# already exported at import — every repo-root pytest run, where some other
+# branch's conftest sets it first — an env-derived anchor makes PRAX_JSON_DIR a
+# redirect, and the next call that sees a DIFFERENT redirect reads the stale one
+# as an explicit patch and returns it for the rest of the process.
+_IMPORT_TIME_JSON_DIR = _resolve_prax_json_dir(None, _PRAX_ROOT)
 
 # Kept as a module attribute because ~20 tests across this suite redirect state
 # with ``monkeypatch.setattr(mod, "PRAX_JSON_DIR", tmp_path)``. That remains the
@@ -100,6 +110,21 @@ def _current_json_dir() -> Path:
     post-reload default is the REDIRECT, so the two differ and a value comparison
     also reads "explicitly patched" — and the writes go back to the live tree,
     silently, for the rest of the session.
+
+    Both fixed points are only genuinely fixed if the anchor this module seeds
+    ``PRAX_JSON_DIR`` from is env-INDEPENDENT — see ``_IMPORT_TIME_JSON_DIR``.
+    While it was env-derived the seed itself could BE a redirect, and then case 1
+    fired on a stale redirect nobody patched. Measured by @devpulse on the CI
+    train: two prax pins that pass alone and fail in a repo-root batch, resolving
+    to a previous run's mkdtemp.
+
+    A SURVIVING MUTANT, reported rather than swept: dropping ``and PRAX_JSON_DIR
+    != default`` kills no test, and it cannot — when the attribute EQUALS default,
+    returning it and returning ``default`` yield the same path. The clause is
+    value-neutral by construction, not untested. It is kept because it states the
+    two-fixed-point rule this contract published and @drone/@daemon implement in
+    the same shape; a unilateral narrowing here would fork three trees to delete a
+    line that changes nothing. Raised with the adopters instead.
 
     Comparing against both fixed points has no such stale reference. The cost is
     one lost distinction, stated rather than hidden: a test that patches this to

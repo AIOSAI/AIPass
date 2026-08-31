@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-02
-# Modified: 2026-06-02
+# Modified: 2026-08-31
 # =============================================
 
 """Contained safe-delete handler.
@@ -27,17 +27,26 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
 
 
 def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if list(parent.glob("*_REGISTRY.json")):
-            return parent.resolve()
+    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
+
+    THE LIVE ONE. @trigger reproduced this: delete the directory you are standing
+    in, then run a second ``drone rm`` to clean up — the recovery command is the
+    one that crashed here, exit 1, before any of the delete lane's own guards ran.
+    The walk is skipped when there is nowhere to walk from; AIPASS_HOME answers
+    without a location and always could have.
+    """
+    cwd = caller_cwd()
+    if cwd is not None:
+        for parent in [cwd, *cwd.parents]:
+            if list(parent.glob("*_REGISTRY.json")):
+                return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
@@ -106,10 +115,17 @@ def _find_branch_root(path: Path, project_root: Path) -> Path | None:
 
 
 def _detect_current_branch(project_root: Path | None) -> str | None:
-    """Return the branch name the CWD lives in, or None."""
+    """Return the branch name the CWD lives in, or None.
+
+    Already Optional, and "no CWD" is one more way the answer is unknown — the
+    branch is inferred from where the caller stands, not from who they are.
+    """
     if project_root is None:
         return None
-    branch_root = _find_branch_root(Path.cwd().resolve(), project_root)
+    cwd = caller_cwd()
+    if cwd is None:
+        return None
+    branch_root = _find_branch_root(cwd.resolve(), project_root)
     return branch_root.name if branch_root else None
 
 
@@ -190,9 +206,28 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     json_handler.log_operation("rm", {"paths": paths, "roots": [str(r) for r in roots]})
 
     results: list[tuple[str, bool, str]] = []
+    cwd = caller_cwd()
     for path_str in paths:
         original = Path(path_str)
-        absolute = original if original.is_absolute() else (Path.cwd() / original)
+        if original.is_absolute():
+            absolute = original
+        elif cwd is not None:
+            absolute = cwd / original
+        else:
+            # A relative path names a place RELATIVE TO somewhere, and there is
+            # no somewhere. Refused per path rather than for the whole call, so
+            # `drone rm ./scratch /tmp/victim` still deletes what it can name.
+            message = f"Cannot resolve relative path '{path_str}' — this process has no current directory"
+            results.append((path_str, False, message))
+            logger.info("rm: %s", message)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=path_str,
+                resolved=original,
+                reason=message,
+            )
+            continue
 
         exists_on_disk = absolute.exists() or absolute.is_symlink()
         if not exists_on_disk:

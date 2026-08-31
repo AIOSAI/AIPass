@@ -9,6 +9,74 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-31] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461)
+
+### Fixed
+
+- **The two-test-universes defect class, closed at root cause across 7 branches**
+  (FPLAN-0461, night shift on Patrick's brief "every change we make it turns
+  red — is it a norm?"; answer: no). The commit gate runs each branch's suite
+  with rootdir pinned to the branch by its own `pytest.ini`, so the repo-root
+  `conftest.py` never loads there — while CI composes every conftest in one
+  process under xdist. All 30 CI reds classified with zero speculation, each
+  fixed by its owner, every fix independently verified by devpulse:
+  - repo-root conftest guard (devpulse): consult the handler's own
+    `_current_json_dir()` seam instead of re-deriving from constants — the
+    substring scan read seam-adopted modules as unpatched and skipped writes
+    their tests asserted on (12 reds).
+  - prax json_handler 1.4.0: the import-time anchor was seeded WITH
+    `AIPASS_TEST_LOG_DIR`, violating the env-independence its own adopters
+    pinned as load-bearing; an env-derived anchor is sufficient for the defect
+    alone, no reload needed — and prax's own suite was green only by
+    import-order luck (2 reds). Subprocess import pins now bite in both
+    universes.
+  - drone registry tests: a stand-in installation that passes the credential
+    gate on merit, not unverifiability; the memory-gateway import moved inside
+    the never-take-routing-down guard (5 CI-only reds, one a real bare-world
+    import crash).
+  - memory: marker7 guarded on `live_all_tiers` — existence is not sufficiency,
+    a registry with no rows or no external tier is a half-present world that
+    skips with a named reason (2 reds); plus registry_scope's module-level
+    `Path.cwd()` fallback replaced with a `__file__`-derived source root
+    (the import-time crash behind drone's).
+  - **the CI polluter, fingerprinted and killed**: `tests/e2e` `routing_root`
+    wrote a 3-branch synthetic `AIPASS_REGISTRY.json` at the repo root for a
+    whole module — true sequentially, poison under xdist (40/60 parallel reads
+    saw the synthetic in @aipass's repro), and on a live machine it overwrote
+    the real fleet registry with the backup held only in process memory
+    (kill -9 repro: the 22 rows existing nowhere). The fixture now builds a
+    throwaway root under tmp — no repo write exists, no teardown left to fail.
+    Only macOS/Windows CI run e2e, which is why only those jobs saw `{'core'}`.
+  - aipass `find_registry`: absence is `None`, never `Path.cwd()/…` — the old
+    code answered a question about one directory with a file from wherever the
+    caller stood; paired with spawn's `load_registry` minting a fresh
+    `metadata.id` for missing paths, two lines conjured a registry with a new
+    trust credential out of nothing (loaded gun, unfired, disarmed). Spawn moved
+    the mint to `resolve_project_credential`, called by name from the two
+    create sites — the create path knows it is creating; the load path knows
+    nothing — and hardened all fifteen resolver call sites to refuse in their
+    own vocabulary (four were live `None.exists()` crashes, one an
+    AttributeError escaping a narrow except inside the delete-protection
+    check). Their live-fleet baseline test now guards on what the WORLD
+    contains, not where the process runs (`GITHUB_ACTIONS` was protecting one
+    CI provider and nobody else).
+  - spawn: the read-torn race harness reports weather as weather (warmup until
+    both sides prove live, skip-with-counted-reasons backstop, tear-check-first
+    pinned so a skip can never mask a real tear; proved under load 5.29 with
+    races exercised) — it was the one intermittent red in prax's 1380-file
+    fleet batch.
+
+### Added
+
+- **daemon+ai_mail+hooks+memory: Vera woke** (FPLAN-0460 closed, c9d0327e —
+  entry owed from that commit). The first external citizen fired by the real
+  clock; scheduled manager wakes are headless dispatches under Patrick's
+  rulings (always bypass permissions, managers-are-Fable-only-managers, marked
+  sessions, blocked-is-not-ran three-state runstate); hooks edit_gate 1.7.0
+  verifies the admin seat through ai_mail's 5-leg grant and bash_writes.py
+  closes the scripted lane for everyone else; memory's entry_limits 1.6.0
+  refuses what a write AUTHORS, never what it CARRIES.
+
 ## [2026-08-30] — the audit-tests lane: testing the tests (DPLAN-0320 campaign) · v2.8.0
 
 ### Added

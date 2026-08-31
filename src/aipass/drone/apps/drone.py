@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -33,7 +33,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import route_command
+from aipass.drone.apps.modules.router import caller_cwd, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
@@ -181,13 +181,21 @@ def print_introspection() -> None:
 
 
 def _cwd_has_registry(max_depth: int = 10) -> bool:
-    """Check if CWD is within a project that has a *_REGISTRY.json."""
-    cwd = Path.cwd()
-    for i, parent in enumerate([cwd] + list(cwd.parents)):
-        if i >= max_depth:
-            break
-        if list(parent.glob("*_REGISTRY.json")):
-            return True
+    """Check if CWD is within a project that has a *_REGISTRY.json.
+
+    A caller whose directory was deleted has no CWD to be "within", so the walk
+    is skipped and AIPASS_HOME — which never needed a location — still answers.
+    """
+    # No location is not a failure to read one. ``caller_cwd`` is the single
+    # reader (router_handler); a private try/except here would be the tenth copy
+    # of the same three lines, which is the species this sweep closed.
+    cwd = caller_cwd()
+    if cwd is not None:
+        for i, parent in enumerate([cwd] + list(cwd.parents)):
+            if i >= max_depth:
+                break
+            if list(parent.glob("*_REGISTRY.json")):
+                return True
     # AIPASS_HOME fallback — for external projects / global drone usage
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
@@ -445,8 +453,13 @@ def _find_seat_inbox() -> Path | None:
 
     Stops at the first directory holding a passport — that seat's inbox is the
     only one this caller may address, whether or not the file exists yet.
+
+    No CWD means no seat: the seat is inferred from where the caller stands,
+    and a caller standing nowhere addresses nothing.
     """
-    cwd = Path.cwd()
+    cwd = caller_cwd()
+    if cwd is None:
+        return None
     for parent in [cwd] + list(cwd.parents):
         if not (parent / ".trinity" / "passport.json").exists():
             continue

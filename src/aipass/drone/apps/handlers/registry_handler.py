@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-09
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
-from aipass.memory.apps.modules import fleet
 from .exceptions import (
     RegistryCorruptError,
     RegistryMismatchError,
@@ -411,7 +410,23 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
             logger.warning("External tier: cannot locate a project root to scope declared roots: %s", exc)
             return []
 
+    # Imported HERE, not at module level, and the import sits INSIDE the guard.
+    # A module-level import made every failure in @memory's import chain a
+    # failure to import drone — router, `drone rm`, `drone systems`, all of it —
+    # which is the opposite of the containment this function's docstring
+    # promises. The live instance: registry_scope.py runs
+    # `REPO_ROOT = find_repo_root()` at module level and falls back to
+    # Path.cwd() when the walk up from __file__ finds no AIPASS_REGISTRY.json.
+    # A clean checkout has no registry (gitignored, machine-local), so CI takes
+    # that fallback, and a process whose directory was deleted raises ENOENT
+    # there. Theirs to fix; ours not to die of.
+    #
+    # sys.modules caches the module object, so this stays the SAME object the
+    # suite patches with patch.object(fleet, ...) — a call-time import is not a
+    # fresh one.
     try:
+        from aipass.memory.apps.modules import fleet
+
         records = fleet.external_branches(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(

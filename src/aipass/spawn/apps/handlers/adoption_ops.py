@@ -33,7 +33,7 @@ from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
 from aipass.spawn.apps.handlers.receipt_ops import RECEIPT_NAME, write_birth_receipt
 from aipass.spawn.apps.handlers.registry import (
-    load_registry,
+    resolve_project_credential,
     find_registry,
     add_to_registry,
     fix_passport_registry_id,
@@ -98,7 +98,7 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
     # Same mint-once ordering as the template path: the credential and the
     # citizen id are resolved BEFORE the passport is written, so the file and the
     # registry entry that follows it carry one value each, not two.
-    resolved_registry_id = load_registry(reg_path).get("metadata", {}).get("id", "")
+    resolved_registry_id = resolve_project_credential(reg_path)
     citizen_id = str(uuid.uuid4())
 
     passport_path = target / ".trinity" / "passport.json"
@@ -168,6 +168,13 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
     detected_profile = profile or detect_profile(target)
 
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
+    if reg_path is None:
+        # Adoption registers an EXISTING citizen into an EXISTING project. With
+        # no registry above the target there is nothing to adopt it into, and
+        # choosing a location would be spawn deciding where a project begins.
+        msg = f"Cannot adopt {target}: no *_REGISTRY.json found above it"
+        logger.error("[adopt] %s", msg)
+        return {"branch": get_branch_name(target), "success": False, "error": msg}
 
     # Read purpose from passport if not provided
     if not purpose:

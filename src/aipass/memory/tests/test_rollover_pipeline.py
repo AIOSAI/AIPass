@@ -27,6 +27,7 @@ All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 import json
 import logging
 import subprocess
+import types
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -2011,6 +2012,44 @@ class TestASkippedTriggerIsVisibleOnScreen:
 class TestRolloverSurvivesCarriedDebt:
     """The live deadlock, driven through the extractor against the real writer."""
 
+    @pytest.fixture
+    def ext(self, monkeypatch):
+        """The extractor with its REAL dependencies — the point of this class.
+
+        `_import_extractor` above leaves a cached extractor module bound to a
+        MagicMock `memory_files`, and that binding outlives the monkeypatch
+        that created it: restoring sys.modules does not re-bind names already
+        imported into a cached module. Without this eviction these tests pass
+        alone and fail in the suite, reading `read_memory_file_data` as a mock
+        returning None.
+
+        Evicted with `monkeypatch.delitem`, never a bare `sys.modules.pop` — a
+        bare pop is one-way and outlives the test, which is how two receipt
+        tests went red on a single xdist worker in session 163.
+        """
+        for name in (
+            "aipass.memory.apps.handlers.json",
+            "aipass.memory.apps.handlers.json.json_handler",
+            "aipass.memory.apps.handlers.json.config_loader",
+            "aipass.memory.apps.handlers.json.entry_limits",
+            "aipass.memory.apps.handlers.json.memory_files",
+            "aipass.memory.apps.handlers.rollover.extractor",
+        ):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+        parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
+        if parent is not None and hasattr(parent, "extractor"):
+            monkeypatch.delattr(parent, "extractor", raising=False)
+
+        from aipass.memory.apps.handlers.rollover import extractor
+
+        # Prove the real writer is wired, not a mock. A test class whose whole
+        # purpose is "run against the real gate" must not silently run against
+        # a double.
+        assert isinstance(extractor.write_memory_file_simple, types.FunctionType), (
+            "extractor is bound to a mocked writer — this class would prove nothing"
+        )
+        return extractor
+
     @staticmethod
     def _seedgo_shaped_file(tmp_path):
         """A file over its session count, carrying one over-cap summary in the HEAD.
@@ -2030,18 +2069,13 @@ class TestRolloverSurvivesCarriedDebt:
                 "schema_version": "3.0.0",
             },
             "sessions": [{"number": 20, "date": "2026-08-30", "summary": "X" * 343}]
-            + [
-                {"number": n, "date": "2026-08-29", "summary": f"session {n}"}
-                for n in range(19, 0, -1)
-            ],
+            + [{"number": n, "date": "2026-08-29", "summary": f"session {n}"} for n in range(19, 0, -1)],
         }
         file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return file_path
 
-    def test_entries_actually_leave_the_file(self, monkeypatch, tmp_path):
+    def test_entries_actually_leave_the_file(self, ext, tmp_path):
         """Not "reported success" — MEASURED on disk, which is where the lie was."""
-        from aipass.memory.apps.handlers.rollover import extractor as ext
-
         file_path = self._seedgo_shaped_file(tmp_path)
         before_count = len(json.loads(file_path.read_text(encoding="utf-8"))["sessions"])
 
@@ -2054,30 +2088,32 @@ class TestRolloverSurvivesCarriedDebt:
             "extracted count disagrees with what left the file — the 3-hour lie exactly"
         )
 
-    def test_the_carried_entry_is_still_there_and_still_over_cap(self, monkeypatch, tmp_path):
+    def test_the_carried_entry_is_still_there_and_still_over_cap(self, ext, tmp_path):
         """Rollover must not 'fix' the fat entry — it is not rollover's to touch.
 
         The cure for a carried entry is its own agent trimming it, or the entry
         ageing into the tail and being archived whole. A shrink lane that
         started editing text to satisfy a cap would be authoring memories.
         """
-        from aipass.memory.apps.handlers.rollover import extractor as ext
-
         file_path = self._seedgo_shaped_file(tmp_path)
-        ext.extract_items(file_path)
+        result = ext.extract_items(file_path)
+
+        # Assert the run DID something first. A refused write leaves the file
+        # untouched, so "the fat entry is still there" would pass on a run that
+        # archived nothing — the test would be green about a dead lane.
+        assert result["success"] is True, result.get("error")
+        assert result["extracted_count"] > 0, "nothing was archived — this pin would pass vacuously"
 
         head = json.loads(file_path.read_text(encoding="utf-8"))["sessions"][0]
         assert head["summary"] == "X" * 343, "rollover edited an entry it only moves past"
 
-    def test_a_second_run_is_not_re_archiving_the_same_entries(self, monkeypatch, tmp_path):
+    def test_a_second_run_is_not_re_archiving_the_same_entries(self, ext, tmp_path):
         """The duplicate-work loop the refusal caused, pinned from the outside.
 
         While the write was refused the file never changed, so every run
         extracted and vectorised the same entries again. If the file shrinks,
         the second run has strictly less to do.
         """
-        from aipass.memory.apps.handlers.rollover import extractor as ext
-
         file_path = self._seedgo_shaped_file(tmp_path)
         first = ext.extract_items(file_path)
         second = ext.extract_items(file_path)

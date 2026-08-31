@@ -208,6 +208,27 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[5]
 
 
+def _is_hidden_path(passport: Path, base: Path) -> bool:
+    """True when any directory between ``base`` and ``.trinity`` starts with a dot.
+
+    A citizen directory never begins with a dot, so this is a rule rather than a
+    blocklist of names — ``.archive``, ``.backup``, ``.git`` and whatever the
+    next retirement convention is are all refused by the same sentence, and no
+    real citizen is ever caught by it. ``.trinity`` itself is excluded because it
+    is part of the shape being matched, not part of the location.
+    """
+    try:
+        relative = passport.relative_to(base)
+    except ValueError:
+        # Not under the scanned root at all. Both globs are anchored at base, so
+        # this is unreachable today — but a refusal nobody can see is how a
+        # future caller passing an unanchored path gets silently migrated.
+        logger.warning(f"[spawn] Passport outside the scanned root, refused: {passport}")
+        return True
+    # Drop the trailing ".trinity/passport.json" the globs both end with.
+    return any(part.startswith(".") for part in relative.parts[:-2])
+
+
 def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:
     """Glob every live fleet passport under ``root``.
 
@@ -217,7 +238,14 @@ def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:
     is precisely the thing being corrected.
 
     Backups (``.backup/``), archives and the template under
-    ``spawn/templates/`` never match either glob, so they cannot be swept in.
+    ``spawn/templates/`` are refused BY RULE — ``_is_hidden_path`` drops any
+    candidate with a dotted directory component between the root and
+    ``.trinity``. That used to be true only by luck of layout: pathlib's ``*``
+    matches dotted names, so ``src/aipass/.archive/.trinity/passport.json`` was
+    a match waiting for such a directory to exist (measured 2026-08-31).
+    Vera-Studio holds five such passports today under ``src/.archive/``, which
+    is what the rule exists for: retiring a citizen is a REGISTRY act, and a
+    passport walk cannot tell a retired citizen from a live one.
 
     Args:
         root: Repo root to scan. Defaults to the live repo root.
@@ -229,6 +257,8 @@ def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:
 
     targets: list[PassportTarget] = []
     for match in sorted(base.glob(CORE_GLOB)):
+        if _is_hidden_path(match, base):
+            continue
         targets.append(
             PassportTarget(
                 path=match,
@@ -238,6 +268,8 @@ def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:
             )
         )
     for match in sorted(base.glob(RESIDENT_GLOB)):
+        if _is_hidden_path(match, base):
+            continue
         # projects/<project>/src/<pkg>/<branch>/.trinity/passport.json
         project_root = match.parents[4]
         targets.append(

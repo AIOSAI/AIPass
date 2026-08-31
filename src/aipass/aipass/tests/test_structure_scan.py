@@ -9,6 +9,7 @@
 """Tests for structure scanner handler — agent detection, placement, pollution, registry."""
 
 import json
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -375,14 +376,65 @@ class TestFindRegistry:
         assert result is not None
         assert result.name == "AIPASS_REGISTRY.json"
 
-    def test_fallback_when_missing(self, tmp_path: Path) -> None:
-        """Shared find_registry returns fallback when no registry in isolated dir."""
+    def test_absence_returns_none_not_a_cwd_guess(self, tmp_path: Path) -> None:
+        """Absence is reported as None — never as a path the caller might trust.
+
+        The old last resort returned ``Path.cwd() / "AIPASS_REGISTRY.json"``:
+        a guess about where the caller happens to stand, dressed as a fact
+        about the machine.  A consumer that skips the ``.exists()`` guard --
+        or a consumer like @spawn's ``load_registry``, which mints a fresh
+        ``metadata.id`` for a path it is handed -- acts on that guess.
+        """
         from aipass.aipass.shared.registry_discovery import find_registry
 
         isolated = tmp_path / "no_registry"
         isolated.mkdir()
-        result = find_registry(start_path=isolated)
-        assert result.parent != isolated or not result.exists()
+        assert find_registry(start_path=isolated) is None
+
+    def test_absence_is_none_even_when_cwd_has_a_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The mutant that matters: cwd's registry must not answer for start_path.
+
+        This is the exact defect.  The caller asked about ``isolated``; a cwd
+        that happens to hold a registry made the old code answer with *that*
+        file, discarding the question.  Restoring the fallback makes this red.
+        """
+        from aipass.aipass.shared.registry_discovery import find_registry
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(elsewhere)
+
+        isolated = tmp_path / "no_registry"
+        isolated.mkdir()
+        assert find_registry(start_path=isolated) is None
+
+    def test_package_root_fallback_still_answers(self, tmp_path: Path) -> None:
+        """None is the LAST resort — the package_root walk still resolves first."""
+        from aipass.aipass.shared.registry_discovery import find_registry
+
+        root = tmp_path / "proj"
+        (root / "pkg" / "deep").mkdir(parents=True)
+        (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+        isolated = tmp_path / "no_registry"
+        isolated.mkdir()
+        found = find_registry(start_path=isolated, package_root=str(root / "pkg" / "deep"))
+        assert found == root / "AIPASS_REGISTRY.json"
+
+    def test_env_var_still_wins_and_need_not_exist(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AIPASS_REGISTRY is an explicit instruction, not a discovery result.
+
+        An operator who names a path is not guessing, so this one path is
+        returned unchecked -- and it stays a Path, never None.
+        """
+        from aipass.aipass.shared.registry_discovery import find_registry
+
+        target = tmp_path / "declared" / "AIPASS_REGISTRY.json"
+        monkeypatch.setenv("AIPASS_REGISTRY", str(target))
+        assert find_registry(start_path=tmp_path) == target
 
 
 # =============================================================================

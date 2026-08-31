@@ -120,6 +120,13 @@ def delete_branch(
     """
     # 1. Resolve registry (needed for protection check and branch resolution)
     registry_path = find_registry()
+    if registry_path is None:
+        # No registry means no protection check and no entry to resolve. Refuse
+        # rather than proceed — a delete that cannot consult the protection
+        # layer is exactly the delete that must not run.
+        msg = "Cannot delete: no *_REGISTRY.json found above the current directory"
+        logger.error("[delete] %s", msg)
+        return _error_result(branch_name, msg)
 
     # Safety: check protected branches (hardcoded floor + registry owner + active passport)
     protected, reason = is_protected(branch_name, registry_path=registry_path)

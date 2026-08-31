@@ -107,13 +107,61 @@ DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
 
+# The repo root this FILE sits in, derived from the layout and nothing else.
+# `src/` is the marker because it is the one directory the package layout
+# guarantees; the last-resort value is the filesystem root, which is defined,
+# never raises, and is absurd enough to fail loudly downstream instead of
+# quietly resolving against somebody's home directory.
+_SOURCE_ROOT = next(
+    (parent.parent for parent in Path(__file__).resolve().parents if parent.name == "src"),
+    Path(__file__).resolve().parents[-1],
+)
+
+
 def find_repo_root(start: Path | None = None) -> Path:
-    """Walk up from *start* to the directory holding ``AIPASS_REGISTRY.json``."""
+    """Walk up from *start* to the directory holding ``AIPASS_REGISTRY.json``.
+
+    Falls back to the root implied by THIS FILE's location — never to the
+    process working directory. Two defects lived in that one `Path.cwd()`:
+
+    THE LOUD ONE, reported by @drone with an isolated repro. ``REPO_ROOT`` is
+    resolved at MODULE level, and a clean checkout has no registry (it is
+    gitignored and machine-local), so a bare CI runner took the fallback on
+    every import — and a process whose working directory has been deleted
+    raises ``FileNotFoundError`` from ``Path.cwd()`` while merely IMPORTING
+    this module. It took down every import of drone on CI, router and
+    ``drone rm`` included, because their handler imported the gateway at module
+    level. They fixed their half and reported this line rather than patching
+    another branch's tree.
+
+    THE QUIET ONE, which would have outlived the crash: cwd is a GUESS. The
+    directory a process happened to start in says nothing about where this
+    source file lives, so on a registry-less tree every fleet lane would have
+    resolved against whatever the caller's shell was pointing at — silently,
+    and differently per caller. That is the species Patrick outlawed and the
+    same objection @drone raised against ``_first_registry_in``: a fallback
+    wearing a determinism costume.
+
+    The source-derived answer is not a guess. On a registry-less checkout it
+    IS the checkout, which is the true answer there. And the absence is said
+    out loud, because a fallback nobody can see is how the next one survives.
+
+    Args:
+        start: Directory to walk up from. Defaults to this file's directory.
+
+    Returns:
+        The directory holding ``CORE_REGISTRY``, or ``_SOURCE_ROOT`` when no
+        registry exists anywhere above *start*. Never reads the process cwd.
+    """
     current = Path(start) if start is not None else Path(__file__).resolve().parent
     for parent in [current] + list(current.parents):
         if (parent / CORE_REGISTRY).exists():
             return parent
-    return Path.cwd()
+    logger.warning(
+        f"[registry_scope] No {CORE_REGISTRY} above {current} — "
+        f"resolving to the source tree at {_SOURCE_ROOT}, never the process directory"
+    )
+    return _SOURCE_ROOT
 
 
 REPO_ROOT = find_repo_root()

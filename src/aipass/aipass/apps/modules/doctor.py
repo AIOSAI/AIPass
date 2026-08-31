@@ -103,7 +103,7 @@ class CheckResult(NamedTuple):
 def _find_registry() -> Path | None:
     """Find *_REGISTRY.json via shared discovery (walk-up from CWD + branch root)."""
     result = _discover_registry(package_root=str(_BRANCH_ROOT))
-    return result if result.exists() else None
+    return result if result is not None and result.exists() else None
 
 
 def _check_system() -> List[CheckResult]:

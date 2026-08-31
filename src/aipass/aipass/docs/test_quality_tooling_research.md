@@ -509,7 +509,7 @@ taxonomy asks for. cosmic-ray offers only killed/survived/incompetent/no-test.
 | # | Species | Ruff (MIT) | pylint (GPL-2.0) | Sonar Python (🔴 SSALv1) | PyNose (Apache-2.0, dead) | flake8-* | Verdict |
 |---|---|---|---|---|---|---|---|
 | 1 | **NO-ORACLE** | — | — | ◐ `S5899`,`S5918` | ● *Unknown Test* | — | **BUILD** |
-| 2 | **TAUTOLOGY** | ● `PT015`,`B011`,`PLW0129`,`PLR0124`,`PLR0133`,`F631`,`B015` | ● `W0129`,`R0124`,`R0133`,`W0199` | ● **`S5914`** (best rule anywhere) | ● *Redundant Assertion* | — | **ADOPT + extend** |
+| 2 | **TAUTOLOGY** | ● `PT015`,`B011`,`PLW0129`,`PLR0124`,`PLR0133`,`F631`,`B015` | ● `W0129`,`R0124`,`R0133`,`W0199` | ● **`S5914`** + 6 more test rules — see §0.1 | ● *Redundant Assertion* | — | **ADOPT + extend** |
 | 3 | **TYPE-ONLY** | — | — | — | — | — | **BUILD** (nothing exists, anywhere) |
 | 4 | **OR-ESCAPE** | — | — | ◐ | — | — | **BUILD** |
 | 5 | **MIRROR-EXPECT** | — | — | — | — | — | **BUILD** (hardest; needs import resolution) |
@@ -537,7 +537,14 @@ taxonomy asks for. cosmic-ray offers only killed/survived/incompetent/no-test.
   remains LGPL-3.0 — **the Python rules are precisely the part that isn't open source.** Also verified by listing
   the rules tree: **`S2699` "Tests should include assertions" has NO Python implementation** — the one rule
   everyone assumes covers NO-ORACLE does not exist for Python. Its rule *specifications* are still the best in
-  the survey (see §7).
+  the survey (see §7). ⚠️ **CORRECTED in §0.1 — read that before quoting this bullet.** "No Python test-quality
+  rule beyond `S5914`" was too strong: `sonar-python` ships **seven** test rules, all default-on and all in the
+  **free LGPL-3.0 Community Build**, including `S5905` (assert on a tuple literal — always true, BUG/Blocker)
+  and `S5915` (assertion after a block expecting an exception — unreachable). **The verdict above does not
+  move**, and the reason is the useful part: **Ruff (MIT) already covers the same species** (`F631` ≈ `S5905`,
+  `PLW0129`/`B011` ≈ `S5914`'s family, `B017`/`PT010` ≈ `S5915`), so the SSALv1 analyzer offers no oracle
+  capability the OSS field lacks. `S2699`-has-no-Python-implementation is re-confirmed from the analyzer's own
+  rule resources.
 - 🔴 **CodeQL — not free for this use.** Free terms cover OSI-licensed codebases and academic research, and
   **explicitly do not authorize generating databases "for or during automated analysis, CI or CD."** A local
   `codeql` CLI in your own CI needs paid GitHub Advanced Security. It has no test-quality queries anyway.

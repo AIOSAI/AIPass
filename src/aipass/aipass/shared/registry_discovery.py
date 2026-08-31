@@ -35,17 +35,29 @@ def find_registry(start_path=None, package_root=None):
     If multiple exist in the same directory, picks the first alphabetically.
 
     Priority:
-    1. AIPASS_REGISTRY environment variable
+    1. AIPASS_REGISTRY environment variable — an explicit instruction, returned
+       unchecked: an operator who names a path is not guessing.
     2. Walk up from start_path/cwd — first dir containing *_REGISTRY.json
     3. Walk up from package_root (caller's __file__ location) — fallback
-    4. Last resort: cwd / AIPASS_REGISTRY.json (backwards compat)
+    4. Absence — return None.
+
+    On (4) this used to return ``Path.cwd() / "AIPASS_REGISTRY.json"``.  That
+    was a guess about where the caller happens to stand, dressed as a fact
+    about the machine, and it DISCARDED the ``start_path`` it was asked about:
+    a caller asking "is there a registry under /x" was answered with a file in
+    the process's cwd.  Every consumer here guards with ``.exists()``, so
+    nothing fired — but a path that need not exist is a lie with a type
+    signature, and @spawn's ``load_registry`` mints a fresh ``metadata.id``
+    for exactly such a path.  Absence is a fact; say it as one and let the
+    caller refuse by name.  (Sibling precedent already in this branch:
+    ``apps/handlers/init/git_auth.py:find_registry`` returns ``Optional[Path]``.)
 
     Args:
         start_path: Directory to start searching from (default: cwd).
         package_root: Optional fallback directory for package-relative search.
 
     Returns:
-        Path to *_REGISTRY.json.
+        Path to *_REGISTRY.json, or None when no registry was found.
     """
     env_path = os.environ.get("AIPASS_REGISTRY")
     if env_path:
@@ -64,4 +76,4 @@ def find_registry(start_path=None, package_root=None):
             if found:
                 return found
 
-    return Path.cwd() / "AIPASS_REGISTRY.json"
+    return None

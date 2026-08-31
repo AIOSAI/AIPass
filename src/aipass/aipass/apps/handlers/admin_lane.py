@@ -69,7 +69,7 @@ def _registry_path() -> Path | None:
     """Locate the root ``*_REGISTRY.json``, or None."""
     branch_root = Path(__file__).resolve().parents[2]
     result = _discover_registry(package_root=str(branch_root))
-    return result if result.exists() else None
+    return result if result is not None and result.exists() else None
 
 
 def _read_json(path: Path) -> dict | None:

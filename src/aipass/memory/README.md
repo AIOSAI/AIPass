@@ -520,6 +520,16 @@ into a slightly less fat one is authorship and is refused. Identity in a list is
 the index — a prepend shifts every entry down, and an index-keyed diff would call the whole file
 newly authored on exactly the write that authored nothing.
 
+**The lane that broke could not see what broke it.** With the rule fixed, restoring the defect as a
+mutant killed exactly three tests — all at the *writer*, in `test_changed_entries.py`. Not one
+rollover test died, because every extractor test mocks `memory_files` away: correct for testing
+extraction logic, blind to the component that actually refused. @hooks found the mirror image in
+their own tree the same evening — a mutant making their checker return nothing left all 115 of their
+end-to-end tests green, because the union ran @memory's real diff. When two halves overlap, a suite
+that cannot tell them apart proves neither. `TestRolloverSurvivesCarriedDebt` mocks nothing below the
+extractor and asserts on **what is written to disk**, because "success" is exactly what the lane
+reported for three hours while the file never changed. The mutant now kills six.
+
 ### keep 15 now keeps 15
 
 `extractor._extract_tail_excess` floored the drain at `max(len - limit, 1)`, so a file sitting at

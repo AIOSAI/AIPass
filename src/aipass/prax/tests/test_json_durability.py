@@ -41,6 +41,8 @@ proof the retry path exists at all.
 import errno
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -442,3 +444,72 @@ class TestTestLogDirSeam:
         monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
         resolved = json_handler_mod._current_json_dir()
         assert resolved.name == "prax_json" and resolved.parent.name == "prax"
+
+    def test_the_import_time_anchor_is_env_independent(self, tmp_path):
+        """The precondition @drone wrote down when they adopted this contract.
+
+        _current_json_dir() detects an explicit override by comparing against two
+        fixed points. A reference that is itself derived from the thing being
+        detected cannot detect it (@daemon's sentence) — so if the anchor is
+        seeded from AIPASS_TEST_LOG_DIR, then in any run where the variable was
+        already exported at import time PRAX_JSON_DIR *is* a redirect, and the
+        moment anything points the variable somewhere else that stale redirect
+        reads as a deliberate patch and wins forever.
+
+        Measured in a SUBPROCESS on purpose. In-process this is invisible: prax's
+        own suite is green from the branch directory only because something
+        imports this module before tests/conftest.py exports the variable — the
+        anchor lands on the real tree by import-order luck, not by design. From
+        the repo root another branch's conftest exports it first and the same
+        assertion goes red. A pin that can only bite in one of the two universes
+        is not a pin; running the import with the variable set makes the property
+        observable in both.
+        """
+        code = (
+            "from aipass.prax.apps.handlers.json import json_handler as m\n"
+            "print(m._IMPORT_TIME_JSON_DIR)\n"
+            "print(m.PRAX_JSON_DIR)\n"
+            "print(m._resolve_prax_json_dir(None, m._PRAX_ROOT))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "AIPASS_TEST_LOG_DIR": str(tmp_path)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        anchor, live, real = result.stdout.strip().splitlines()[-3:]
+
+        assert anchor == real, f"the anchor is env-derived: {anchor} — it must always be the real tree"
+        assert live == real, (
+            f"PRAX_JSON_DIR was seeded with a redirect: {live} — a later change of "
+            "AIPASS_TEST_LOG_DIR makes this stale value look like an explicit patch"
+        )
+
+    def test_a_redirect_set_before_import_still_follows_a_later_change(self, tmp_path):
+        """The defect end to end, in the ordering the repo-root suite creates.
+
+        Export the variable, import, then point it somewhere else and ask where a
+        write would land. It must follow the CURRENT value. Before the anchor was
+        made env-independent this returned the first redirect for the rest of the
+        process — the two reds @devpulse reproduced on the CI train.
+        """
+        first, second = tmp_path / "first", tmp_path / "second"
+        code = (
+            "import os\n"
+            "from aipass.prax.apps.handlers.json import json_handler as m\n"
+            f"os.environ['AIPASS_TEST_LOG_DIR'] = {str(second)!r}\n"
+            "print(m.get_json_path('probe', 'config'))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env={**os.environ, "AIPASS_TEST_LOG_DIR": str(first)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        built = Path(result.stdout.strip().splitlines()[-1])
+
+        assert built == second / "prax" / "prax_json" / "probe_config.json", (
+            f"resolution stuck on the import-time redirect: {built}"
+        )

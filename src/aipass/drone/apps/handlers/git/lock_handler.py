@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -25,9 +25,15 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.router_handler import caller_cwd
 
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
+
+# What marks a project root when no registry file exists to mark it — the same
+# set find_registry() falls back to, because a second opinion on "where is the
+# root" is how two answers to one question start disagreeing.
+_PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
 
 def _pid_alive_windows(pid: int) -> bool:
@@ -86,15 +92,43 @@ def find_repo_root() -> Path:
 
     Any ``*_REGISTRY.json`` marks a project root, not just AIPass's own —
     external projects name theirs after themselves (VERA-STUDIO_REGISTRY.json),
-    and hardcoding the AIPass name sent them down the rev-parse fallback while
-    registry resolution found the real root, so the two could disagree.
+    and hardcoding the AIPass name sent them down the toplevel-query fallback
+    while registry resolution found the real root, so the two could disagree.
+
+    NO-CWD PATH. This returns ``Path``, not ``Optional[Path]``, so unlike its
+    siblings in this sweep it cannot answer "unknown" — callers build a lock
+    path out of it. Both location-derived sources lose their starting point at
+    once (the walk has nowhere to start, and the toplevel query would be handed
+    the same dead directory), so the answer falls to the two sources that never
+    needed a location: AIPASS_HOME, then the walk up from this file. That is
+    ``find_registry``'s existing precedence, reused rather than re-invented —
+    two orders for one question is how the answers start disagreeing.
     """
-    cwd = Path.cwd()
+    cwd = caller_cwd()
     current = cwd
-    while current != current.parent:
+    while current is not None and current != current.parent:
         if any(current.glob("*_REGISTRY.json")):
             return current
         current = current.parent
+
+    if cwd is None:
+        aipass_home = os.environ.get("AIPASS_HOME")
+        if aipass_home:
+            home = Path(aipass_home)
+            if home.is_dir() and any(home.glob("*_REGISTRY.json")):
+                return home
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            if any(parent.glob("*_REGISTRY.json")):
+                return parent
+        # Last resort, and the world CI actually runs in: a clean checkout has
+        # no registry anywhere (it is gitignored and machine-local). Marker-based,
+        # the same markers find_registry falls back to. Never the deleted
+        # directory, which is the one place a lock could not be written.
+        for parent in here.parents:
+            if any((parent / marker).exists() for marker in _PROJECT_MARKERS):
+                return parent
+        return here.parent
 
     # Fallback: git rev-parse --show-toplevel
     try:

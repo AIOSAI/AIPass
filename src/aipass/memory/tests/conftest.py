@@ -222,8 +222,11 @@ def live_fleet():
     from aipass.memory.apps.handlers.templates import trinity_push
 
     for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
-        if not (root / registry_scope.CORE_REGISTRY).is_file():
+        registry = root / registry_scope.CORE_REGISTRY
+        if not registry.is_file():
             pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+        if not _registry_branch_rows(registry):
+            pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
     return registry_scope.REPO_ROOT
 
 
@@ -273,3 +276,110 @@ def live_residents(live_fleet):
             f"not installed at {live_fleet} ({', '.join(missing)}) -- live-state guard skipped"
         )
     return live_fleet
+
+
+@pytest.fixture
+def live_all_tiers(live_residents):
+    """A repo root carrying ALL THREE tiers — core, resident AND external — or SKIP.
+
+    `live_fleet` answers "is aipass installed here", `live_residents` adds "are
+    the four resident projects on disk". Neither says anything about the
+    external tier, and a test asserting on all three needs all three.
+
+    CI on PR#750 is why this exists. A bare ubuntu checkout ships no registry
+    and no `AIPASS_ROOTS.json` (both gitignored) and no `projects/`, so every
+    tier but core resolves empty — and something in the whole-repo run MINTED a
+    core-only registry mid-run. `live_fleet` asked "is there a registry" and
+    there was, so the three-tier assertion ran in a one-tier world and reported
+    the world's shape as a defect in the record.
+
+    EXISTENCE IS NOT SUFFICIENCY. That is the whole lesson, and it applies to
+    each tier separately: a registry can exist with no rows, a roots anchor can
+    exist declaring nothing, and a declared root can exist holding no citizen.
+    Each of those is a half-present world, and each gets its own reason here so
+    a skip on CI names which tier was missing rather than "guard skipped".
+
+    MEASURED WITH pathlib AND json, never through `registry_scope`. Asking the
+    resolver whether its own inputs are sufficient would turn every regression
+    in it into a SKIP — the guard deleting the failure it exists to expose.
+    `declared_roots()` is the code these tests judge; reading the anchor by hand
+    is what keeps the guard independent of it. Same argument as the literal
+    resident paths above, one tier further out.
+
+    Returns:
+        The repo root carrying all three tiers.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    anchor = live_residents / registry_scope.DECLARED_ROOTS
+    if not anchor.is_file():
+        pytest.skip(
+            f"no {registry_scope.DECLARED_ROOTS} at {live_residents} "
+            f"-- no external tier declared, live-state guard skipped"
+        )
+
+    try:
+        declared = json.loads(anchor.read_text(encoding="utf-8")).get("roots", [])
+    except (OSError, ValueError, AttributeError) as exc:
+        pytest.skip(f"unreadable {registry_scope.DECLARED_ROOTS} at {anchor} ({exc}) -- guard skipped")
+
+    if not _an_external_citizen_exists(live_residents, declared):
+        pytest.skip(
+            f"{registry_scope.DECLARED_ROOTS} declares {len(declared)} root(s) but no reachable "
+            f"external citizen -- the third tier is absent, live-state guard skipped"
+        )
+    return live_residents
+
+
+def _registry_branch_rows(registry_path):
+    """Branch rows in a registry file, or an empty list — NEVER an exception.
+
+    A guard that raises is worse than a guard that skips: it turns "this
+    machine has no fleet" into a red nobody can act on. Corrupt is absence.
+
+    Both registry shapes are read because both ship: `branches` is a list on
+    some registries and a name-keyed dict on others, and a guard that knew only
+    one would call half the fleet empty.
+    """
+    try:
+        data = json.loads(Path(registry_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    branches = data.get("branches", [])
+    if isinstance(branches, dict):
+        return [row for row in branches.values() if isinstance(row, dict)]
+    if isinstance(branches, list):
+        return [row for row in branches if isinstance(row, dict)]
+    return []
+
+
+def _an_external_citizen_exists(repo_root, declared):
+    """True when some declared root really holds a citizen, read off disk.
+
+    A declaration is not a citizen — `AIPASS_ROOTS.json` can name four sibling
+    repositories and every one of them be gone, which on a fresh machine is the
+    normal case. The tier is present only if a passport is actually reachable
+    through one of them.
+
+    Deliberately shallow, mirroring the walk law the resolver obeys: a
+    registry at the root's top level, then that registry's own branches. A
+    recursive passport hunt here would make the guard find citizens the code
+    under test would refuse to.
+    """
+    for row in declared:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("path", "")
+        if not raw:
+            continue
+        root = Path(raw) if Path(raw).is_absolute() else (repo_root / raw)
+        if not root.is_dir():
+            continue
+        for registry in sorted(root.glob("*_REGISTRY.json")):
+            for entry in _registry_branch_rows(registry):
+                branch_path = entry.get("path", "")
+                if branch_path and (root / branch_path / ".trinity" / "passport.json").is_file():
+                    return True
+    return False

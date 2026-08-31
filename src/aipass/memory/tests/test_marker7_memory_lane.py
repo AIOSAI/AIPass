@@ -33,6 +33,9 @@ import json
 import sys
 import types
 from pathlib import Path
+
+import pytest
+from _pytest.outcomes import Skipped  # what pytest.skip() raises — caught here, never raised
 from unittest.mock import patch
 
 # Imported at MODULE level on purpose. conftest's autouse fixture replaces
@@ -135,8 +138,13 @@ class TestOneFleetOneDefinition:
         assert not outsiders, f"the push would write into another repository: {[i['name'] for i in outsiders]}"
         assert all(str(item["path"]).startswith(str(registry_scope.REPO_ROOT)) for item in scoped)
 
-    def test_every_fleet_record_carries_exactly_the_five_agreed_keys(self, live_fleet):
+    def test_every_fleet_record_carries_exactly_the_five_agreed_keys(self, live_all_tiers):
         """The whole record shape, across ALL THREE TIERS, not just externals.
+
+        Guarded on `live_all_tiers`, not `live_fleet`: this is the test CI
+        failed with "got {'core'}" — the guard confirmed a registry existed and
+        said nothing about the two tiers this assertion is actually about. A
+        test that needs three tiers must be guarded on three tiers.
 
         The `scheduler` field was withdrawn from the record on 2026-08-30 at the
         request of the only branch that ever wanted it, and the replacement pin
@@ -146,7 +154,7 @@ class TestOneFleetOneDefinition:
         past a test on the way in — which only works if the test covers the
         tiers a new field would actually be added to.
         """
-        rows = registry_scope.fleet_branches(live_fleet)
+        rows = registry_scope.fleet_branches(live_all_tiers)
         assert rows, "an empty fleet proves nothing about record shape"
         tiers = {row["residency"] for row in rows}
         assert tiers == {
@@ -157,8 +165,14 @@ class TestOneFleetOneDefinition:
         for row in rows:
             assert set(row) == {"name", "path", "registry", "email", "residency"}, row
 
-    def test_the_normalize_lane_never_reaches_into_another_repository(self, monkeypatch):
+    def test_the_normalize_lane_never_reaches_into_another_repository(self, live_fleet, monkeypatch):
         """The third writing lane, found by @trigger's escalation not by design.
+
+        GUARDED 2026-08-31, found by running this suite against a bare-checkout
+        stand-in: it reads `fleet_branches()` off the live machine and its own
+        `assert seen` correctly refuses to pass over an empty fleet — so on CI
+        it was a RED where the honest answer is "this machine has no fleet to
+        measure". The assertion was right; the guard was missing.
 
         `_normalize_rolled` resolved `fleet_branches()` — the whole fleet,
         externals included — and then matched rolled branches BY NAME. It
@@ -187,8 +201,15 @@ class TestOneFleetOneDefinition:
         outside = [p for _, p in seen if home not in p.resolve().parents and p.resolve() != home]
         assert not outside, f"normalize would write outside this repo: {outside}"
 
-    def test_a_branch_whose_frame_could_not_be_written_is_named(self, monkeypatch, caplog):
+    def test_a_branch_whose_frame_could_not_be_written_is_named(self, live_fleet, monkeypatch, caplog):
         """The normalizer reports failure by return value; the caller dropped it.
+
+        GUARDED 2026-08-31, same stand-in run, same species one step subtler:
+        `_normalize_rolled(["memory"])` resolves @memory through the live fleet
+        to decide it is in scope. With no registry the branch is not in scope,
+        so the OUT-OF-SCOPE warning fires instead of the write-failure one and
+        the test fails naming the wrong message. It reads as a defect in the
+        reporting it pins, and it is a statement about the machine.
 
         `if normalize_branch(...)["success"]:` — a False just failed to
         increment a counter. The `except` below it catches exceptions the
@@ -843,3 +864,214 @@ class TestTheDeadTemplateLaneIsRetired:
         assert status["gold"] == template_bump.gold_versions()
         assert status["branches"], "no branch receipts read"
         assert all("branch" in row and "carries" in row for row in status["branches"])
+
+
+# ===========================================================================
+# THE GUARD THAT TRUSTED EXISTENCE (2026-08-31)
+# ===========================================================================
+#
+# CI on PR#750, bare ubuntu checkout, `pytest -n auto --dist loadscope` from the
+# repo root: `test_every_fleet_record_carries_exactly_the_five_agreed_keys`
+# failed with "all three tiers must be exercised, got {'core'}".
+#
+# The guard was not absent — it PASSED. `live_fleet` asks one question, "is
+# there an AIPASS_REGISTRY.json here", and on that worker there was one. It held
+# core rows only: no `projects/` in a checkout, so no residents, and
+# AIPASS_ROOTS.json is gitignored, so no externals. A three-tier assertion ran
+# against a one-tier world and reported the world's shape as a code defect.
+#
+# @devpulse's evidence for WHY a registry was there at all: on the same worker,
+# one test observed registry-absent and a later test observed a core-only
+# registry. Nothing ships one. Something in the whole-repo run mints it.
+#
+# EXISTENCE IS NOT SUFFICIENCY, and it was never only about the third tier —
+# `test_the_push_and_the_registry_lane_agree_on_the_fleet` asserts
+# `push_names <= registry_names`, which TWO EMPTY SETS satisfy. Its own
+# docstring says it is guarded against exactly that, and it was not: an empty
+# minted registry passes a file-exists check and the test then agrees about
+# nothing. So the guard now reads the rows, not the filename.
+#
+# The narrowing follows `live_residents`' precedent rather than tightening
+# `live_fleet` for everyone: two of its consumers legitimately need only core,
+# and a guard that demanded three tiers from all of them would convert honest
+# coverage into skips. One question per fixture.
+#
+# Ground truth is read with pathlib and json, NEVER through registry_scope.
+# Asking the code under test whether its own inputs are sufficient would turn
+# every regression in the resolver into a SKIP — the guard deleting the failure
+# it exists to expose. Same argument as live_residents' literal paths.
+
+
+class TestTheLiveGuardRefusesAHalfPresentWorld:
+    """The fixtures themselves, against stand-in worlds built on disk."""
+
+    @staticmethod
+    def _world(
+        tmp_path,
+        *,
+        rows,
+        residents=False,
+        roots=False,
+        external_citizen=False,
+        registered_but_absent=False,
+        dict_shaped=False,
+    ):
+        """Build a stand-in repo root with a chosen subset of the three tiers."""
+        root = tmp_path / "standin_repo"
+        (root / "src" / "aipass").mkdir(parents=True)
+
+        if rows is not None:
+            (root / "AIPASS_REGISTRY.json").write_text(
+                json.dumps({"metadata": {"version": "1.0.0"}, "branches": rows}, indent=2),
+                encoding="utf-8",
+            )
+        if residents:
+            for project, stem in (
+                ("baud", "BAUD"),
+                ("earmark", "EARMARK"),
+                ("finch", "FINCH"),
+                ("aipass-site", "AIPASS-SITE"),
+            ):
+                directory = root / "projects" / project
+                directory.mkdir(parents=True)
+                (directory / f"{stem}_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        if roots:
+            sibling = tmp_path / "Sibling-Repo"
+            sibling.mkdir()
+            if external_citizen or registered_but_absent:
+                rows_json = (
+                    {"wren": {"name": "wren", "path": "wren"}} if dict_shaped else [{"name": "wren", "path": "wren"}]
+                )
+                (sibling / "SIBLING_REGISTRY.json").write_text(json.dumps({"branches": rows_json}), encoding="utf-8")
+            if external_citizen:
+                trinity = sibling / "wren" / ".trinity"
+                trinity.mkdir(parents=True)
+                (trinity / "passport.json").write_text(json.dumps({"branch_info": {}}), encoding="utf-8")
+            (root / "AIPASS_ROOTS.json").write_text(
+                json.dumps({"roots": [{"path": "../Sibling-Repo"}]}, indent=2), encoding="utf-8"
+            )
+        return root
+
+    @staticmethod
+    def _resolved(request, name):
+        """Resolve a guard fixture, turning an over-skip into a RED.
+
+        `pytest.skip()` inside a fixture marks the requesting test SKIPPED, and
+        a skip reads as green. So every positive guard test — "a real world
+        must pass the guard" — was silenceable by the exact failure it exists
+        to catch: a mutant that skipped unconditionally turned them into skips,
+        not failures, and survived.
+
+        Found by mutation, not by reading. A test that cannot fail is not a
+        test, and one that reports its own defeat as a pass is worse.
+        """
+        try:
+            return request.getfixturevalue(name)
+        except Skipped as skipped:  # noqa: F841 — re-raised as a failure, deliberately
+            pytest.fail(f"{name} skipped a world it should have accepted: {skipped}")
+
+    @staticmethod
+    def _point_both_lanes_at(monkeypatch, root):
+        """Both roots move together — a guard reading one lane is half a guard."""
+        monkeypatch.setattr(registry_scope, "REPO_ROOT", root)
+        monkeypatch.setattr(trinity_push, "_REPO_ROOT", root)
+
+    _CORE_ROWS = [{"name": "memory", "path": "src/aipass/memory"}]
+
+    def test_a_registry_that_exists_but_holds_no_rows_is_not_a_fleet(self, request, monkeypatch, tmp_path):
+        """The minted-empty case. `push_names <= registry_names` is true of nothing."""
+        self._point_both_lanes_at(monkeypatch, self._world(tmp_path, rows=[]))
+
+        with pytest.raises(Skipped) as skipped:
+            request.getfixturevalue("live_fleet")
+        assert "no branch rows" in str(skipped.value)
+
+    def test_an_unreadable_registry_is_absence_not_presence(self, request, monkeypatch, tmp_path):
+        """Corrupt is not a fleet either — and it must not raise out of a guard."""
+        root = self._world(tmp_path, rows=self._CORE_ROWS)
+        (root / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        self._point_both_lanes_at(monkeypatch, root)
+
+        with pytest.raises(Skipped):
+            request.getfixturevalue("live_fleet")
+
+    def test_a_real_core_registry_still_passes_the_guard(self, request, monkeypatch, tmp_path):
+        """The hardening must not convert honest core coverage into skips."""
+        root = self._world(tmp_path, rows=self._CORE_ROWS)
+        self._point_both_lanes_at(monkeypatch, root)
+
+        assert self._resolved(request, "live_fleet") == root
+
+    def test_the_ci_shape_is_refused_by_the_three_tier_guard(self, request, monkeypatch, tmp_path):
+        """THE CI FAILURE, as a test: core rows present, residents and externals absent."""
+        self._point_both_lanes_at(monkeypatch, self._world(tmp_path, rows=self._CORE_ROWS))
+
+        with pytest.raises(Skipped) as skipped:
+            request.getfixturevalue("live_all_tiers")
+        assert "resident" in str(skipped.value).lower()
+
+    def test_residents_without_a_roots_file_is_still_half_present(self, request, monkeypatch, tmp_path):
+        """Two tiers is not three. The roots anchor is machine-local and gitignored."""
+        root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True)
+        self._point_both_lanes_at(monkeypatch, root)
+
+        with pytest.raises(Skipped) as skipped:
+            request.getfixturevalue("live_all_tiers")
+        assert registry_scope.DECLARED_ROOTS in str(skipped.value)
+
+    def test_a_roots_file_declaring_nothing_reachable_is_not_a_third_tier(self, request, monkeypatch, tmp_path):
+        """A declaration is not a citizen. The anchor can be present and empty."""
+        root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True, roots=True)
+        self._point_both_lanes_at(monkeypatch, root)
+
+        with pytest.raises(Skipped) as skipped:
+            request.getfixturevalue("live_all_tiers")
+        assert "external" in str(skipped.value).lower()
+
+    def test_a_genuine_three_tier_world_passes(self, request, monkeypatch, tmp_path):
+        """All three tiers really on disk — the guard must let the assertion run.
+
+        Without this the whole class could be satisfied by a fixture that skips
+        unconditionally, which would silence the CI red by deleting the test.
+        """
+        root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True, roots=True, external_citizen=True)
+        self._point_both_lanes_at(monkeypatch, root)
+
+        assert self._resolved(request, "live_all_tiers") == root
+
+    def test_a_registered_external_branch_with_no_passport_is_not_a_citizen(self, request, monkeypatch, tmp_path):
+        """A ROW is not a citizen either — found by a mutant, not by design.
+
+        Deleting the passport check from the guard left every test green: my
+        only "no external" world had no registry at all, so the walk stopped
+        one step earlier and the passport line never ran. Membership is
+        PRESENCE — a sibling registry naming `wren` while `wren/` is gone is a
+        declaration about a citizen who is not there, which is the ordinary
+        state of a machine that has moved on.
+        """
+        root = self._world(tmp_path, rows=self._CORE_ROWS, residents=True, roots=True, registered_but_absent=True)
+        self._point_both_lanes_at(monkeypatch, root)
+
+        with pytest.raises(Skipped) as skipped:
+            request.getfixturevalue("live_all_tiers")
+        assert "external" in str(skipped.value).lower()
+
+    def test_a_dict_shaped_registry_is_read_not_called_empty(self, request, monkeypatch, tmp_path):
+        """Both registry shapes ship. A reader that knows one calls half the fleet empty.
+
+        Also a mutant's find: making the dict branch return `[]` passed every
+        test, because every world I had written used the list shape. A guard
+        that reads only one shape would skip on a real installation of the
+        other and call it "no fleet here".
+        """
+        root = self._world(
+            tmp_path,
+            rows={"memory": {"name": "memory", "path": "src/aipass/memory"}},
+            residents=True,
+            roots=True,
+            external_citizen=True,
+            dict_shaped=True,
+        )
+        self._point_both_lanes_at(monkeypatch, root)
+
+        assert self._resolved(request, "live_all_tiers") == root
