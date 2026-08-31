@@ -119,7 +119,7 @@ class TestTheAnchorIsADeclarationNotADiscovery:
 
     def test_relative_paths_resolve_against_the_repo_root(self, machine):
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
-        assert [path.name for path in rs.declared_roots(machine)] == ["Demo", "wren"]
+        assert sorted(path.name for path in rs.declared_roots(machine)) == ["Demo", "wren"]
 
     def test_an_absolute_path_is_accepted(self, machine):
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row(str(machine.parent / "wren"))))
@@ -164,6 +164,95 @@ class TestTheAnchorIsADeclarationNotADiscovery:
         """
         _write(machine / rs.DECLARED_ROOTS, _roots(row, _root_row("../Demo")))
         assert [path.name for path in rs.declared_roots(machine)] == ["Demo"]
+
+
+class TestDeclarationOrderSurvivesToTheDoor:
+    """@ai_mail's abe8141b, answered in code.
+
+    The fleet ruling says an N-root tie is broken by DECLARATION order, but
+    this reader used to hand back ``sorted(found)`` — alphabetical by resolved
+    path. @ai_mail found the gap the honest way: they reported that the order
+    reaching their door could not be the order the ruling names, and refused to
+    guess at it. They were right, and the reader was wrong.
+
+    Alphabetical-by-resolved-path is an accident of what someone named a
+    directory. The row order in the anchor is a statement: a human wrote these
+    rows in this sequence. Both are deterministic — only one carries intent, so
+    only one can break a tie the ruling says intent breaks.
+    """
+
+    def test_roots_come_back_in_the_order_they_were_declared(self, machine):
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
+        assert [path.name for path in rs.declared_roots(machine)] == ["wren", "Demo"]
+
+    def test_the_reverse_declaration_gives_the_reverse_order(self, machine):
+        """Paired with the above so alphabetical order cannot pass both."""
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../Demo"), _root_row("../wren")))
+        assert [path.name for path in rs.declared_roots(machine)] == ["Demo", "wren"]
+
+    def test_a_skipped_row_does_not_reorder_the_rows_that_survive(self, machine):
+        """Refusals close the gap in place; they never shuffle the remainder."""
+        _write(
+            machine / rs.DECLARED_ROOTS,
+            _roots(_root_row("../wren"), _root_row("../nowhere"), _root_row("../Demo")),
+        )
+        assert [path.name for path in rs.declared_roots(machine)] == ["wren", "Demo"]
+
+    def test_a_root_declared_twice_keeps_its_FIRST_position(self, machine):
+        """Dedup by first occurrence — a later duplicate cannot promote a root."""
+        _write(
+            machine / rs.DECLARED_ROOTS,
+            _roots(_root_row("../wren"), _root_row("../Demo"), _root_row("../wren/")),
+        )
+        assert [path.name for path in rs.declared_roots(machine)] == ["wren", "Demo"]
+
+    def test_the_external_walk_visits_roots_in_declaration_order(self, machine):
+        """The order has to survive the caller too, or the fix stops at the reader."""
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
+        visited = [str(item["path"]) for item in rs.external_branches(machine)]
+        roots = [next((name for name in ("wren", "Demo") if f"/{name}/" in path), None) for path in visited]
+        assert {"wren", "Demo"} <= set(roots), f"both roots must contribute citizens, got {visited}"
+        assert roots.index("wren") < roots.index("Demo")
+
+
+class TestARetiredCitizenStaysRetired:
+    """@spawn's archive hazard, measured on the real machine and pinned here.
+
+    Preparing their external migration, @spawn checked the obvious extension of
+    their resident glob -- ``src/*/*/.trinity/passport.json`` -- against the live
+    fleet and found FIVE archived passports under Vera-Studio's
+    ``src/.archive/``. A passport walk would have "found" 11 external citizens
+    where the fleet has 6, and offered to write into five directories somebody
+    deliberately retired.
+
+    Measured against the live machine at the time of writing: the passport walk
+    returns 9 Vera-Studio branches, the registry-led walk returns 4. That gap is
+    the whole argument. A passport on disk cannot tell you whether its citizen
+    is live -- retiring is a REGISTRY act, so only the registry knows. This is
+    why the walk law is a law and not a preference, and it is pinned
+    synthetically here so the rule survives without depending on anyone's
+    machine still having that .archive directory.
+    """
+
+    def test_an_archived_passport_is_not_a_citizen(self, machine):
+        _write(machine.parent / "wren/src/.archive/ghosttown/.trinity/passport.json", {"citizenship": {}})
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
+        names = [item["name"] for item in rs.external_branches(machine)]
+        assert "ghosttown" not in [n.lower() for n in names], names
+        assert names, "the live citizens must still be found -- an empty result would pass vacuously"
+
+    def test_a_registry_that_retired_a_branch_does_not_return_it(self, machine):
+        """The registry is the authority on liveness, and it is consulted."""
+        root = machine.parent / "wren"
+        _write(
+            root / "WREN_REGISTRY.json",
+            _registry(_branch("live", "src/live"), _branch("gone", "src/gone", status="retired")),
+        )
+        for who in ("live", "gone"):
+            _write(root / f"src/{who}/.trinity/passport.json", {"citizenship": {}})
+        _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
+        names = [item["name"].lower() for item in rs.external_branches(machine)]
+        assert "live" in names and "gone" not in names, names
 
 
 class TestAMalformedAnchorRefusesInsteadOfCrashing:

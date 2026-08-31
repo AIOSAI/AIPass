@@ -184,26 +184,29 @@ class TestChangedEntryOverCap:
 
 
 class TestUnchangedLegacyFatEntry:
-    """THE KEY TEST, rewritten 2026-08-27 when the clause was narrowed.
+    """THE KEY TEST, and it has been rewritten twice.
 
-    "Unchanged and over cap passes" was written for a fleet full of legacy
-    drift. The trinity push cured that fleet-wide, so for an ARCHIVABLE
-    container the clause now hides new drift rather than protecting old:
-    an over-cap entry written straight to disk would read as "already there"
-    on every subsequent write and never surface. Only `todos` keep the
-    exemption — see TestReshapeOnlyKeepsTheExemption.
+    2026-08-27 narrowed "unchanged and over cap passes" to `todos`, on the
+    reasoning that the trinity push had cured drift fleet-wide and the clause
+    now hid new drift instead of protecting old.
+
+    2026-08-30 reversed it: drift recurs, and this gate never sees the writes
+    that cause it (Bash lanes bypass @hooks entirely). Refusing the next write
+    deadlocked rollover — the one lane whose write is always a shrink. The
+    entry is now CARRIED: not refused, and no longer silent either.
     """
 
-    def test_unchanged_500char_key_learning_is_now_flagged(self) -> None:
+    def test_unchanged_500char_key_learning_is_carried_not_flagged(self) -> None:
         mod = _get_entry_limits()
         fat_text = "z" * 500
         before = {"key_learnings": {"legacy": fat_text}}
         after = {"key_learnings": {"legacy": fat_text}}
 
-        result = mod.changed_entries(before, after, _KEY_LEARNINGS_ONLY)
+        assert mod.changed_entries(before, after, _KEY_LEARNINGS_ONLY) == []
 
-        assert len(result) == 1
-        assert result[0]["entry_type"] == "key_learnings"
+        carried = mod.classify_entries(before, after, _KEY_LEARNINGS_ONLY)["carried"]
+        assert len(carried) == 1
+        assert carried[0]["entry_type"] == "key_learnings"
 
 
 class TestReshapeOnlyKeepsTheExemption:
@@ -355,16 +358,15 @@ class TestListContainer:
         assert result[0]["key"] == "1"
         assert result[0]["over_by"] == 100
 
-    def test_existing_unchanged_items_are_now_flagged(self) -> None:
-        """Post-push, "unchanged" means "written and not yet caught"."""
+    def test_existing_unchanged_items_are_carried_not_flagged(self) -> None:
+        """Reversed 2026-08-30: unchanged means "this write did not author it"."""
         mod = _get_entry_limits()
         fat_item = {"session_number": 1, "summary": "s" * 400}
         before = {"sessions": [fat_item]}
         after = {"sessions": [fat_item]}
 
-        result = mod.changed_entries(before, after, _SESSIONS_ONLY)
-
-        assert len(result) == 1
+        assert mod.changed_entries(before, after, _SESSIONS_ONLY) == []
+        assert len(mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]) == 1
 
 
 # ===========================================================================
@@ -375,12 +377,14 @@ class TestListContainer:
 class TestListPrependIdentityMatch:
     """Prepending a new entry must NOT re-flag shifted legacy over-cap entries."""
 
-    def test_prepend_reports_the_legacy_entries_it_shifted_past(self) -> None:
-        """The prepend itself is clean; the five over-cap entries beneath are not.
+    def test_prepend_carries_the_legacy_entries_it_shifted_past(self) -> None:
+        """The prepend is clean, and the five it shifted past are not its doing.
 
-        Before the 2026-08-27 narrowing this returned nothing, and that silence
-        was the point of the clause. Now the write is told exactly which five
-        entries are over cap — the new one is not among them.
+        Identity is the TEXT, never the index — the whole point. A prepend
+        moves every legacy entry one slot down; an index-keyed diff would call
+        all five newly authored and refuse a write that authored one short
+        entry. They are reported as carried debt instead, and the new entry is
+        not among them because it is within cap.
         """
         mod = _get_entry_limits()
         legacy = [{"session_number": i, "summary": "s" * 400} for i in range(5, 0, -1)]
@@ -388,11 +392,12 @@ class TestListPrependIdentityMatch:
         new_entry = {"session_number": 6, "summary": "short new"}
         after = {"sessions": [new_entry] + legacy}
 
-        result = mod.changed_entries(before, after, _SESSIONS_ONLY)
+        assert mod.changed_entries(before, after, _SESSIONS_ONLY) == []
 
-        assert len(result) == 5
-        assert all(hit["entry_type"] == "sessions" for hit in result)
-        assert "0" not in {hit["key"] for hit in result}
+        carried = mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]
+        assert len(carried) == 5
+        assert all(hit["entry_type"] == "sessions" for hit in carried)
+        assert "0" not in {hit["key"] for hit in carried}
 
     def test_edited_existing_entry_text_still_caught(self) -> None:
         """Changing an existing entry's text to over-cap is still flagged."""
@@ -522,9 +527,15 @@ class TestEnforceModeRejects:
 
 
 class TestEnforceAllowsUnchangedLegacy:
-    """THE CRITICAL ROLLOVER-SAFE TEST: enforce mode allows writing back same fat data."""
+    """THE CRITICAL ROLLOVER-SAFE TEST: enforce mode allows writing back same fat data.
 
-    def test_enforce_now_refuses_same_data_with_fat_entries(
+    The class name has been right the whole time; between 2026-08-27 and
+    2026-08-30 the method under it asserted the opposite, which is its own
+    small lesson — a name describing a rule the body no longer holds reads as
+    proof the rule is there.
+    """
+
+    def test_enforce_allows_same_data_with_fat_entries(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -543,9 +554,10 @@ class TestEnforceAllowsUnchangedLegacy:
 
         result = mem_mod.write_memory_file(local_path, fat_data)
 
-        # Narrowed 2026-08-27: key_learnings is archivable, so an over-cap
-        # entry is refused even when the write did not create it.
-        assert result["success"] is False
+        # Reversed 2026-08-30: the write authored nothing, so it is not refused.
+        # Refusing it cured nothing and deadlocked rollover, whose write is
+        # always the smaller document.
+        assert result["success"] is True
         on_disk = json.loads(local_path.read_text(encoding="utf-8"))
         assert on_disk["key_learnings"]["legacy"] == "z" * 500
 
@@ -595,3 +607,184 @@ class TestPassportUnaffected:
         assert passport_path.exists()
         written = json.loads(passport_path.read_text(encoding="utf-8"))
         assert written == data
+
+
+# ===========================================================================
+# 13. THE SHRINK-WRITE DEADLOCK (2026-08-30)
+# ===========================================================================
+#
+# @devpulse, via four @trigger repeat-signatures: rollover erroring identically
+# every 20 minutes for three hours. The extractor removed the tail, wrote the
+# document back, and the write gate refused the WHOLE file for an entry the
+# extraction never touched — @seedgo's 343-char summary sitting in the head.
+#
+# That is a deadlock with the archiver on the losing side: the file cannot get
+# smaller because it is too big. The lane that preserves everything else was
+# bricked by one entry it is not allowed to shrink.
+#
+# THE NARROWING THAT CAUSED IT (2026-08-27) reasoned that the trinity push had
+# cured drift fleet-wide, so "unchanged and over cap passes" now hid new drift
+# instead of protecting old. Both halves were wrong about the world:
+#
+#   - Drift is not cured, it RECURS. @ai_mail carried three over-cap
+#     key_learnings the same evening; @seedgo one.
+#   - The write gate is structurally BLIND to how drift arrives. @hooks'
+#     edit_gate says so in its own refusal text: writes made through Bash
+#     (python -c, heredoc, sed) never reach it. @baud drifted to 2529/300 for
+#     a week through that lane. An entry the gate never saw written cannot be
+#     caught by refusing the next write — it can only be caught by READING THE
+#     FILE, which is exactly what `drone @memory lint` does, on demand, fleet-
+#     wide, read-only.
+#
+# So the narrowing put the detection job on the one component that cannot see
+# the drift arrive, and paid for it with rollover.
+#
+# THE RULE, restored and widened: a write is judged by what it AUTHORS, never
+# by what it carries. An entry byte-identical to one already on disk was not
+# written by this write and cannot be refused to it. The silence that the
+# narrowing rightly objected to is cured where silence was the actual defect —
+# carried debt is now REPORTED on every write instead of skipped without a
+# word, and `lint` remains the lane that reads disk.
+#
+# This is one classifier with two labels, not two rules: `changed_entries`
+# answers "what did this write author", `carried_entries` answers "what is it
+# carrying". Each consumer sets its own policy from the same measurement.
+
+
+_FAT_SUMMARY = "X" * 343  # the @seedgo shape: over the 300-char sessions cap
+
+
+class TestShrinkWriteIsNeverRefused:
+    """Rollover's write REMOVES entries and authors nothing. It cannot be refused."""
+
+    def test_removing_the_tail_passes_with_a_fat_entry_in_the_head(self, tmp_path: Path, monkeypatch) -> None:
+        """The live deadlock, reproduced: 3 sessions in, tail archived, 2 out."""
+        mem_mod = _get_memory_files()
+
+        trinity = tmp_path / "seedgo" / ".trinity"
+        trinity.mkdir(parents=True)
+        local_path = trinity / "local.json"
+
+        before = {
+            "sessions": [
+                {"number": 3, "summary": _FAT_SUMMARY},  # head — kept, over cap, untouched
+                {"number": 2, "summary": "within cap"},
+                {"number": 1, "summary": "oldest — what rollover archives"},
+            ]
+        }
+        local_path.write_text(json.dumps(before, indent=2), encoding="utf-8")
+
+        enforce_limits = _full_limits(enforce=True)
+        monkeypatch.setattr(mem_mod, "load_entry_limits", lambda branch: enforce_limits)
+
+        after = {"sessions": before["sessions"][:2]}  # strictly a removal
+        result = mem_mod.write_memory_file(local_path, after)
+
+        assert result["success"] is True, f"shrink write refused: {result.get('error')}"
+        assert len(json.loads(local_path.read_text(encoding="utf-8"))["sessions"]) == 2
+
+    def test_the_carried_entry_is_reported_not_swallowed(self, tmp_path: Path, monkeypatch) -> None:
+        """Passing silently is what the narrowing was right to object to."""
+        mem_mod = _get_memory_files()
+        mock_logger = mem_mod.logger
+
+        trinity = tmp_path / "seedgo" / ".trinity"
+        trinity.mkdir(parents=True)
+        local_path = trinity / "local.json"
+        before = {"sessions": [{"number": 2, "summary": _FAT_SUMMARY}, {"number": 1, "summary": "old"}]}
+        local_path.write_text(json.dumps(before, indent=2), encoding="utf-8")
+
+        monkeypatch.setattr(mem_mod, "load_entry_limits", lambda branch: _full_limits(enforce=True))
+
+        result = mem_mod.write_memory_file(local_path, {"sessions": before["sessions"][:1]})
+
+        assert result["success"] is True
+        warnings = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "CARRIED" in warnings, "carried debt passed without a word"
+        assert "343/300" in warnings, "the report does not name the entry"
+        assert "seedgo" in warnings, "the report does not name the owner"
+
+
+class TestAuthoringIsStillRefused:
+    """Widening the exemption must not open the door it was narrowed to close."""
+
+    def test_a_new_over_cap_session_is_refused(self, tmp_path: Path, monkeypatch) -> None:
+        mem_mod = _get_memory_files()
+
+        trinity = tmp_path / "somebranch" / ".trinity"
+        trinity.mkdir(parents=True)
+        local_path = trinity / "local.json"
+        local_path.write_text(json.dumps({"sessions": [{"number": 1, "summary": "ok"}]}), encoding="utf-8")
+
+        monkeypatch.setattr(mem_mod, "load_entry_limits", lambda branch: _full_limits(enforce=True))
+
+        after = {"sessions": [{"number": 2, "summary": _FAT_SUMMARY}, {"number": 1, "summary": "ok"}]}
+        result = mem_mod.write_memory_file(local_path, after)
+
+        assert result["success"] is False
+        assert "343/300" in result["error"]
+
+    def test_editing_a_carried_entry_and_leaving_it_over_cap_is_refused(self) -> None:
+        """Touch it and you own it — the exemption covers only byte-identical text."""
+        mod = _get_entry_limits()
+        before = {"sessions": [{"number": 1, "summary": "z" * 500}]}
+        after = {"sessions": [{"number": 1, "summary": "y" * 400}]}
+
+        result = mod.changed_entries(before, after, _SESSIONS_ONLY)
+
+        assert len(result) == 1
+        assert result[0]["over_by"] == 100
+
+
+class TestCarriedEntries:
+    """The second label: what the write is carrying, measured from the same diff."""
+
+    def test_carried_reports_the_untouched_over_cap_entry(self) -> None:
+        mod = _get_entry_limits()
+        fat = {"number": 1, "summary": _FAT_SUMMARY}
+        before = {"sessions": [fat]}
+        after = {"sessions": [fat]}
+
+        assert mod.changed_entries(before, after, _SESSIONS_ONLY) == []
+        carried = mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]
+        assert len(carried) == 1
+        assert carried[0]["container"] == "sessions"
+        assert carried[0]["length"] == 343
+        assert carried[0]["cap"] == 300
+
+    def test_an_authored_entry_is_never_also_carried(self) -> None:
+        """The two labels partition the over-cap set — no entry wears both."""
+        mod = _get_entry_limits()
+        before = {"sessions": [{"number": 1, "summary": "z" * 500}]}
+        after = {
+            "sessions": [
+                {"number": 2, "summary": _FAT_SUMMARY},  # authored now
+                {"number": 1, "summary": "z" * 500},  # carried
+            ]
+        }
+
+        authored = mod.changed_entries(before, after, _SESSIONS_ONLY)
+        carried = mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]
+
+        assert [v["length"] for v in authored] == [343]
+        assert [v["length"] for v in carried] == [500]
+
+    def test_within_cap_entries_are_not_carried_debt(self) -> None:
+        mod = _get_entry_limits()
+        same = {"sessions": [{"number": 1, "summary": "well within"}]}
+
+        assert mod.classify_entries(same, same, _SESSIONS_ONLY)["carried"] == []
+
+
+class TestRenamedFieldEntryDoesNotBrickRollover:
+    """An unmeasurable legacy entry is carried, not refused — same deadlock."""
+
+    def test_a_legacy_renamed_field_entry_is_carried(self) -> None:
+        """@ai_mail and @api carried `learning` where the config says `value`."""
+        mod = _get_entry_limits()
+        legacy = {"number": 1, "learning": "z" * 500}  # canonical field absent
+        before = {"sessions": [legacy]}
+        after = {"sessions": [legacy]}
+
+        assert mod.changed_entries(before, after, _SESSIONS_ONLY) == []
+        assert len(mod.classify_entries(before, after, _SESSIONS_ONLY)["carried"]) == 1

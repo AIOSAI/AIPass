@@ -903,3 +903,72 @@ class TestSyncRegistryBacksUpBeforeItsWrite:
         assert backup.exists(), "sync-registry --fix rewrote a passport with no pre_v2 backup"
         assert backup.read_text(encoding="utf-8") == original
         assert _read(path)["identity"]["citizen_class"] == "specialist"
+
+
+def _unwrapped(text: str) -> str:
+    """Strip ALL whitespace so an assertion cannot depend on terminal width.
+
+    Rich hard-wraps at the console width and inserts a bare newline mid-token,
+    so a tmp_path long enough to cross the boundary arrives as
+    "..._other_rep\no". The first version of the pin below asserted on the raw
+    text and passed only because that run's tmp_path happened to be short —
+    a test that passes by luck about its own fixture is worse than no test.
+    """
+    return "".join(text.split())
+
+
+class TestEmptyScanIsNotAnAllClear:
+    """A root with nothing findable must not read as a clean bill of health.
+
+    MEASURED 2026-08-30 against a real sibling repository:
+
+        drone @spawn migrate-passports --dry-run --root /home/patrick/Projects/wren
+        Scanned: 0  (core 0 / resident 0)
+        Nothing to migrate — every scanned passport is already 2.0.
+
+    @wren's passport is schema 1.0 and was never touched. The sentence is
+    technically true of the empty set and false about the world: discover_passports
+    globs `src/aipass/*/` and `projects/*/src/*/*/`, both shaped like THIS
+    repository, so any external repo yields zero targets and the report calls that
+    success. @memory's fleet ruling depends on this command reaching six external
+    citizens, and a green summary is exactly what would have hidden that it cannot.
+    """
+
+    def test_zero_scanned_says_zero_scanned(self, tmp_path, capsys):
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        empty_root = tmp_path / "some_other_repo"
+        (empty_root / "src").mkdir(parents=True)
+
+        assert handle_migrate_passports(["--root", str(empty_root)]) == 0
+
+        captured = capsys.readouterr()
+        # The zero-scan line is a warning() — stderr by seedgo's routing rule —
+        # while the layout hint stays on stdout, so read both streams.
+        both = _unwrapped(captured.out + captured.err)
+        assert _unwrapped("already 2.0") not in both, "an empty scan must not report the fleet as migrated"
+        assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
+
+    def test_zero_scanned_names_the_root_it_searched(self, tmp_path, capsys):
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        empty_root = tmp_path / "some_other_repo"
+        empty_root.mkdir()
+
+        handle_migrate_passports(["--root", str(empty_root)])
+
+        captured = capsys.readouterr()
+        assert _unwrapped(str(empty_root)) in _unwrapped(captured.out + captured.err)
+
+    def test_a_populated_root_still_reports_the_all_clear(self, synthetic_fleet, capsys):
+        """The fix must not silence the real all-clear — migrate, then re-run."""
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        handle_migrate_passports(["--root", str(synthetic_fleet), "--confirm"])
+        capsys.readouterr()
+
+        handle_migrate_passports(["--root", str(synthetic_fleet)])
+
+        captured = capsys.readouterr()
+        assert _unwrapped("already 2.0") in _unwrapped(captured.out)
+        assert _unwrapped("No passports found") not in _unwrapped(captured.out + captured.err)

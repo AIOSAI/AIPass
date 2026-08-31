@@ -132,22 +132,29 @@ def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
     try/except decorative and turned a refusal into a silent no-op.
 
     That is the worst possible failure mode for an archiver, and it was live:
-    the trinity cap validator refuses a whole document when any entry is over
-    its limit, so ONE 343-character session summary in @seedgo's file refused
-    every rollover write to it. The extraction still reported the 12
-    key_learnings it had removed in memory, the orchestrator saw success with
-    old_lines == new_lines, vectorized them, stored them — and the file kept all
-    27. The next run extracted the same 12 and stored them again. The archive
-    was accepting, permanently and in duplicate, what the source never gave up.
+    ONE 343-character session summary in @seedgo's file refused every rollover
+    write to it. The extraction still reported the 12 key_learnings it had
+    removed in memory, the orchestrator saw success with old_lines == new_lines,
+    vectorized them, stored them — and the file kept all 27. The next run
+    extracted the same 12 and stored them again. The archive was accepting,
+    permanently and in duplicate, what the source never gave up.
+
+    Making the False loud then exposed the defect BEHIND it: the refusal itself
+    was wrong. The cap gate judged the whole document, so a shrink write was
+    refused for an entry in the head it is not allowed to touch, and the lane
+    re-failed identically every 20 minutes for three hours. Since 2026-08-30 a
+    write is judged by what it AUTHORS (entry_limits 1.6.0), and rollover
+    authors nothing — it removes and reorders. A cap refusal can no longer
+    reach this function; what remains here is real I/O failure.
 
     Fail to errors, never fall back silently: a False here becomes an OSError so
     the caller's existing restore-from-backup path can do its job.
     """
     if not write_memory_file_simple(file_path, data):
         raise OSError(
-            f"write refused for {file_path} — the memory-file writer returned False "
-            f"(entry caps are validated whole-file, so one over-limit entry anywhere "
-            f"refuses the entire document)"
+            f"write refused for {file_path} — the memory-file writer returned False. "
+            f"Rollover authors no text, so a cap refusal here would be a bug in the "
+            f"gate, not drift in the file; see prax for the writer's own reason"
         )
 
 

@@ -29,6 +29,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -844,11 +845,20 @@ class TestReplaceRetriesThroughSharingViolations:
         and becomes decoration. It survived a mutation run on 2026-08-18.
         Counting the sleeps pins the wait without asserting on wall-clock time,
         which would be flaky on a loaded runner.
+
+        The patch replaces atomic_write's OWN ``time`` name, not the attribute
+        on the shared time module. ``setattr(aw.time, "sleep", ...)`` reached
+        every thread in the process, so this list collected foreign sleeps too
+        and the test failed intermittently in a full-suite run (seen
+        2026-08-30). Same rule as the logger fixture: patch the consuming
+        module's binding, not something upstream of it. atomic_write uses
+        nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
+        carrying only ``sleep`` is the whole surface.
         """
         import aipass.spawn.apps.handlers.atomic_write as aw
 
         sleeps = []
-        monkeypatch.setattr(aw.time, "sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
         monkeypatch.setattr(
             aw.os,
             "replace",

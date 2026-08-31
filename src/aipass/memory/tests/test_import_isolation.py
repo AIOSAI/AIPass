@@ -248,7 +248,6 @@ class TestNobodyEvictsThePackageOneWay:
         "test_rollover.py::aipass.memory.apps.handlers.intake",
         "test_rollover.py::aipass.memory.apps.handlers.monitor",
         "test_rollover.py::aipass.memory.apps.handlers.rollover",
-        "test_rollover_pipeline.py::aipass.memory.apps.handlers",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.monitor",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.rollover",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.tracking",

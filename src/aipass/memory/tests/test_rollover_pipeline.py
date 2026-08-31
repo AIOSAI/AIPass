@@ -31,6 +31,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 import pytest
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 
@@ -176,12 +177,17 @@ def _import_rollover_module(monkeypatch):
     rollover_pkg = MagicMock()
     rollover_pkg.orchestrator = mock_orchestrator
 
-    handlers_pkg = MagicMock()
-
+    # A real ModuleType, not a MagicMock: the stand-in has to survive being
+    # treated as a package by the import machinery, and a MagicMock raises
+    # AttributeError for __spec__ the moment importlib asks.
+    handlers_pkg = ModuleType("aipass.memory.apps.handlers")
+    # A package stand-in must carry a __path__ that reaches the REAL package
     # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
-
-    # submodule import under it then dies with "is not a package".
-
+    # submodule import under it then dies with "is not a package". modules/
+    # rollover.py imports handlers.cli.help_flags, which this harness does not
+    # stand in for, so without this line the whole file only passes when some
+    # earlier test file happens to have imported handlers for real.
+    handlers_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "apps" / "handlers")]
     handlers_pkg.monitor = monitor_pkg
     handlers_pkg.rollover = rollover_pkg
 
@@ -1868,3 +1874,215 @@ class TestValveLoggingIsBounded:
         entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
         kept, _warnings, _debugs = self._run(entries, 15, 65)
         assert kept == []
+
+
+class TestASkippedTriggerIsNotSilentlyDropped:
+    """A trigger counted as neither success nor failure is a hole in the tally.
+
+    Same species as the 0/N silence fixed earlier: the detector says a file is
+    ready, the extractor finds nothing to archive, and the loop ``continue``s
+    without touching ``success_count`` OR ``failed``. The run then reports
+    ``0/1 successful`` with an empty failure list — a number that says something
+    went wrong and a list that says nothing did. Whoever reads that output has
+    to guess, and the file is left in whatever state the detector objected to.
+
+    The extractor's own skip path can even have WRITTEN the file (a newest-first
+    order repair with nothing to archive persists), so "skipped" is not reliably
+    "nothing happened" either.
+    """
+
+    @staticmethod
+    def _trigger(name="guinea.local"):
+        trigger = MagicMock()
+        trigger.__str__ = lambda self: name
+        trigger.file_path = Path("/tmp/does-not-matter/local.json")
+        trigger.branch = "guinea"
+        trigger.memory_type = "local"
+        return trigger
+
+    def _run_with_skip(self):
+        from aipass.memory.apps.handlers.rollover import orchestrator
+
+        with (
+            patch.object(
+                orchestrator.detector,
+                "check_all_branches",
+                return_value={"success": True, "triggers": [self._trigger()]},
+            ),
+            patch.object(
+                orchestrator.extractor,
+                "create_rollover_backup",
+                return_value={"success": True, "message": "backed up"},
+            ),
+            patch.object(
+                orchestrator.extractor,
+                "extract_with_metadata",
+                return_value={"success": True, "skipped": True, "message": "No entries exceed v2 limits"},
+            ),
+        ):
+            return orchestrator.execute_rollover()
+
+    def test_a_skipped_trigger_is_reported_somewhere(self):
+        result = self._run_with_skip()
+        accounted = result["success_count"] + len(result["failed"]) + len(result.get("skipped", []))
+        assert accounted == result["triggers_count"], (
+            f"1 trigger in, {accounted} accounted for: {result['success_count']} succeeded, "
+            f"{len(result['failed'])} failed, {len(result.get('skipped', []))} skipped"
+        )
+
+    def test_the_skip_carries_the_reason_the_extractor_gave(self):
+        skipped = self._run_with_skip().get("skipped", [])
+        assert skipped, "the skip must be reported, not dropped"
+        assert "exceed" in skipped[0]["reason"], skipped[0]
+
+    def test_a_skipped_trigger_is_not_counted_as_a_success(self):
+        """The file was not archived. Calling it a success would be the lie."""
+        assert self._run_with_skip()["success_count"] == 0
+
+    def test_a_run_that_only_skipped_did_not_fail(self):
+        """Nothing broke — 'nothing to do' is a legitimate outcome, just a named one."""
+        assert self._run_with_skip()["success"] is True
+
+
+class TestASkippedTriggerIsVisibleOnScreen:
+    """The handler counting it is only half — the operator has to be able to read it."""
+
+    def test_the_skip_and_its_reason_are_printed(self, monkeypatch):
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 1,
+            "success_count": 0,
+            "failed": [],
+            "skipped": [{"trigger": "guinea.local (16/15 sessions)", "reason": "No entries exceed v2 limits"}],
+            "results": [],
+        }
+
+        rollover.run_rollover()
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        assert "0/1" in printed, printed
+        assert "guinea.local" in printed and "skipped" in printed, printed
+
+    def test_a_run_with_no_skips_prints_no_skip_line(self, monkeypatch):
+        """The absence of a category must not print an empty heading."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 1,
+            "success_count": 1,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+        }
+
+        rollover.run_rollover()
+
+        assert "skipped" not in " ".join(str(c) for c in mocks["console"].print.call_args_list)
+
+
+# ===========================================================================
+# THE LANE AGAINST THE REAL WRITE GATE (2026-08-30)
+# ===========================================================================
+#
+# Every test above imports the extractor with `memory_files` MOCKED — correct
+# for testing extraction logic, and blind to the one thing that actually took
+# this lane down.
+#
+# On 2026-08-30 the cap gate refused rollover's write for an entry in the head
+# it never touched, and the lane re-failed identically every 20 minutes for
+# three hours against @seedgo's real file. When the rule was fixed, restoring
+# the defect as a mutant killed exactly three tests — all of them in
+# test_changed_entries.py, at the WRITER. Not one rollover test died. The suite
+# for the lane that broke could not see what broke it, because it mocks the
+# component that refused.
+#
+# @hooks found the mirror image of this in their own tree the same evening: a
+# mutant that made their checker return NOTHING left all 115 of their
+# end-to-end tests green, because the union ran @memory's real diff. When two
+# halves overlap, a suite that cannot tell them apart proves neither.
+#
+# So this class mocks NOTHING below the extractor. Real memory_files, real
+# entry_limits, real caps, a real file on disk — and it asserts on what is
+# actually written, because "success" is what the lane reported for three
+# hours while the file never changed.
+
+
+class TestRolloverSurvivesCarriedDebt:
+    """The live deadlock, driven through the extractor against the real writer."""
+
+    @staticmethod
+    def _seedgo_shaped_file(tmp_path):
+        """A file over its session count, carrying one over-cap summary in the HEAD.
+
+        The 343-char summary is @seedgo's real shape. It sits at the top, where
+        rollover archives from the BOTTOM — so the lane can never shrink it,
+        and a gate that refuses the document for it can never be satisfied.
+        """
+        trinity = tmp_path / "standin" / ".trinity"
+        trinity.mkdir(parents=True)
+        file_path = trinity / "local.json"
+        data = {
+            "document_metadata": {
+                "document_type": "session_history",
+                "document_name": "standin.LOCAL",
+                "version": "2.0.0",
+                "schema_version": "3.0.0",
+            },
+            "sessions": [{"number": 20, "date": "2026-08-30", "summary": "X" * 343}]
+            + [
+                {"number": n, "date": "2026-08-29", "summary": f"session {n}"}
+                for n in range(19, 0, -1)
+            ],
+        }
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return file_path
+
+    def test_entries_actually_leave_the_file(self, monkeypatch, tmp_path):
+        """Not "reported success" — MEASURED on disk, which is where the lie was."""
+        from aipass.memory.apps.handlers.rollover import extractor as ext
+
+        file_path = self._seedgo_shaped_file(tmp_path)
+        before_count = len(json.loads(file_path.read_text(encoding="utf-8"))["sessions"])
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True, result.get("error")
+        after = json.loads(file_path.read_text(encoding="utf-8"))["sessions"]
+        assert len(after) < before_count, "the lane reported success and the file never shrank"
+        assert result["extracted_count"] == before_count - len(after), (
+            "extracted count disagrees with what left the file — the 3-hour lie exactly"
+        )
+
+    def test_the_carried_entry_is_still_there_and_still_over_cap(self, monkeypatch, tmp_path):
+        """Rollover must not 'fix' the fat entry — it is not rollover's to touch.
+
+        The cure for a carried entry is its own agent trimming it, or the entry
+        ageing into the tail and being archived whole. A shrink lane that
+        started editing text to satisfy a cap would be authoring memories.
+        """
+        from aipass.memory.apps.handlers.rollover import extractor as ext
+
+        file_path = self._seedgo_shaped_file(tmp_path)
+        ext.extract_items(file_path)
+
+        head = json.loads(file_path.read_text(encoding="utf-8"))["sessions"][0]
+        assert head["summary"] == "X" * 343, "rollover edited an entry it only moves past"
+
+    def test_a_second_run_is_not_re_archiving_the_same_entries(self, monkeypatch, tmp_path):
+        """The duplicate-work loop the refusal caused, pinned from the outside.
+
+        While the write was refused the file never changed, so every run
+        extracted and vectorised the same entries again. If the file shrinks,
+        the second run has strictly less to do.
+        """
+        from aipass.memory.apps.handlers.rollover import extractor as ext
+
+        file_path = self._seedgo_shaped_file(tmp_path)
+        first = ext.extract_items(file_path)
+        second = ext.extract_items(file_path)
+
+        assert first["extracted_count"] > 0
+        assert second.get("extracted_count", 0) < first["extracted_count"], (
+            "the second run extracted as much as the first — the file did not shrink"
+        )

@@ -294,6 +294,7 @@ def execute_rollover() -> Dict[str, Any]:
             "triggers_count": 0,
             "success_count": 0,
             "failed": [],
+            "skipped": [],
         }
 
     triggers = triggers_result.get("triggers", [])
@@ -304,6 +305,7 @@ def execute_rollover() -> Dict[str, Any]:
             "triggers_count": 0,
             "success_count": 0,
             "failed": [],
+            "skipped": [],
             "results": [],
         }
 
@@ -312,6 +314,7 @@ def execute_rollover() -> Dict[str, Any]:
     # Process each trigger
     success_count = 0
     failed = []
+    skipped = []
     results = []
 
     for trigger in triggers:
@@ -342,7 +345,14 @@ def execute_rollover() -> Dict[str, Any]:
             continue
 
         if extract_result.get("skipped"):
-            logger.info(f"[rollover] Extraction skipped for {trigger}: {extract_result.get('message', 'no excess')}")
+            # Reported, never dropped. A trigger that increments neither tally
+            # produced "0/1 successful" beside an empty failure list — a count
+            # saying something broke and a list saying nothing did. The skip is
+            # also not reliably a no-op: the extractor persists a newest-first
+            # order repair on its way out of this same branch.
+            reason = extract_result.get("message", "no excess")
+            logger.info(f"[rollover] Extraction skipped for {trigger}: {reason}")
+            skipped.append({"trigger": str(trigger), "reason": reason})
             continue
 
         memories = extract_result.get("entries", [])
@@ -524,21 +534,30 @@ def execute_rollover() -> Dict[str, Any]:
         except Exception as e:
             logger.info(f"[rollover] Memory pool check: {e}")
 
+    # Gated on success_count alone, a run whose every trigger was legitimately
+    # SKIPPED reported failure while nothing had gone wrong -- "nothing needed
+    # archiving" is an outcome, not a fault. The existing contract that a mixed
+    # run still succeeds is deliberately preserved: partial progress with the
+    # failures printed by name is not the same as a broken run.
+    run_ok = not failed or success_count > 0
+
     json_handler.log_operation(
         "rollover_execute",
         {
             "triggers": len(triggers),
             "success_count": success_count,
             "failed_count": len(failed),
-            "success": success_count > 0 or len(triggers) == 0,
+            "skipped_count": len(skipped),
+            "success": run_ok,
         },
     )
 
     return {
-        "success": success_count > 0 or len(triggers) == 0,
+        "success": run_ok,
         "triggers_count": len(triggers),
         "success_count": success_count,
         "failed": failed,
+        "skipped": skipped,
         "results": results,
     }
 

@@ -153,8 +153,23 @@ def mock_infrastructure(tmp_path):
 
 @pytest.fixture
 def mock_logger():
-    """Mock aipass.prax logger for testing log calls."""
-    with patch("aipass.prax.logger") as m:
+    """Mock the logger that ``file_ops`` actually calls.
+
+    MEASURED by @memory and reproduced by @seedgo (2026-08-30): the previous
+    spelling, ``patch("aipass.prax.logger")``, reached NOTHING. ``file_ops``
+    does ``from aipass.prax.apps.modules.logger import system_logger as logger``
+    at import, so the object is copied into its globals before any fixture runs
+    — and ``aipass/prax/__init__.py`` copies it once more one level up. Patching
+    at or above ``aipass.prax`` is always upstream of a copy already taken, so
+    every test using this fixture was talking to a mock nobody consults while
+    the real SystemLogger kept writing into @prax's live state directory.
+
+    The rule underneath: THE LAST DOT MUST BE RESOLVED AT CALL TIME. So the
+    patch names the CONSUMING module. ``tests/test_conftest_fixtures.py`` pins
+    that this fixture reaches ``file_ops.logger`` by object identity, so a
+    future rename cannot silently return it to a mock that mocks nothing.
+    """
+    with patch("aipass.spawn.apps.handlers.file_ops.logger") as m:
         yield m
 
 

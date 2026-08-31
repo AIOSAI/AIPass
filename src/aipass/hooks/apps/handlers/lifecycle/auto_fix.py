@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-08-27
+# Modified: 2026-08-30
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
 
+import importlib
 import json
 import os
 import re
@@ -228,6 +229,73 @@ def _run_pyright_check(file_path: str) -> list[dict]:
     return []
 
 
+_CHECKLIST_MARKER_FALLBACK = "[FAIL]"
+
+
+def _checklist_marker() -> str:
+    """The token @seedgo's checklist prints on a finding — read, never restated.
+
+    This consumer grepped for a cross for months after checklist stopped
+    printing one. @seedgo changed the marker to plain ASCII for a good reason
+    (@spawn scripted against the cross, got zero hits across all 18 files of a
+    branch, and nearly deleted 41 bypass rules on that "proof") and the reader
+    was not moved with it. The failure was silent by construction: an empty list
+    reads exactly like a clean file, so the gate reported compliance while
+    catching nothing.
+
+    Reading the constant off the owner's module is the fix for the SPECIES, not
+    just this instance — the next marker change cannot silently disagree with
+    this file. When seedgo is not importable at all, fall back and SAY SO: a
+    quiet fallback is how the first one lasted.
+    """
+    try:
+        checklist = importlib.import_module("aipass.seedgo.apps.modules.checklist")
+    except Exception as exc:
+        logger.warning(
+            "[HOOKS] auto_fix: seedgo checklist module unreadable (%s) — using fallback marker %r",
+            exc,
+            _CHECKLIST_MARKER_FALLBACK,
+        )
+        return _CHECKLIST_MARKER_FALLBACK
+    marker = getattr(checklist, "FINDING_MARKER", "")
+    if isinstance(marker, str) and marker:
+        return marker
+    logger.warning(
+        "[HOOKS] auto_fix: seedgo publishes no FINDING_MARKER — using fallback %r",
+        _CHECKLIST_MARKER_FALLBACK,
+    )
+    return _CHECKLIST_MARKER_FALLBACK
+
+
+def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
+    """Pull findings out of checklist output, rejoining Rich's wrapped lines.
+
+    The output is laid out for a human at a fixed console width, so a long
+    detail continues on the next line WITHOUT the marker. Reading one line per
+    finding truncated the detail mid-sentence — the standard's name survived and
+    the reason for the finding did not.
+    """
+    findings: list[str] = []
+    current: str | None = None
+    for raw in stdout.split("\n"):
+        line = raw.strip()
+        if line.startswith(marker):
+            if current:
+                findings.append(current)
+            current = line[len(marker) :].strip().lstrip("—-").strip()
+            continue
+        if current is None:
+            continue
+        if not line or line.startswith("✓") or line.startswith("All "):
+            findings.append(current)
+            current = None
+            continue
+        current = f"{current} {line}"
+    if current:
+        findings.append(current)
+    return [f for f in findings if f]
+
+
 def _run_seedgo_checklist(file_path: str) -> list[str]:
     if "/.claude/hooks/" in file_path:
         return []
@@ -242,16 +310,20 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
             timeout=15,
             cwd=aipass_home,
         )
+        # The exit code carries nothing: checklist never calls sys.exit on a
+        # standards failure, so it returns 0 with eight findings on stdout
+        # (measured 2026-08-30). Discarding output on a non-zero code would
+        # therefore throw away the ONLY signal there is the moment seedgo ever
+        # does start exiting non-zero — the same drift that produced the marker
+        # bug, pre-armed. Parse the text either way; report a non-zero code
+        # rather than act on it.
         if result.returncode != 0:
-            return []
-        violations: list[str] = []
-        for line in result.stdout.split("\n"):
-            line = line.strip()
-            if line.startswith("✗"):
-                violation = line[1:].strip()
-                if violation:
-                    violations.append(violation)
-        return violations[:5]
+            logger.info(
+                "[HOOKS] auto_fix: seedgo checklist exited %d for %s (parsing stdout anyway)",
+                result.returncode,
+                Path(file_path).name,
+            )
+        return _parse_checklist_findings(result.stdout, _checklist_marker())[:5]
     except FileNotFoundError:
         logger.info("[HOOKS] auto_fix: drone not found for seedgo checklist")
     except Exception as exc:

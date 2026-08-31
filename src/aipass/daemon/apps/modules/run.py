@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-08-12
+# Modified: 2026-08-30
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     is_job_due,
     update_job_runstate,
     record_job_failure,
+    record_job_blocked,
     job_key,
     prune_orphans,
 )
@@ -43,6 +44,23 @@ _DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
 LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}
+
+# What a single fire attempt ended as. Three states, not two: a wake that was
+# REFUSED before anything started is neither a run nor a failure, and collapsing
+# it into either one is the defect this vocabulary exists to prevent.
+OUTCOME_FIRED = "fired"
+OUTCOME_FAILED = "failed"
+OUTCOME_BLOCKED = "blocked"
+
+# wake_branch gates that refuse BEFORE a process exists. Read by step LABEL from
+# the DispatchStatus rather than by matching the prose in `summary`, which is a
+# human-facing string ai_mail is free to reword.
+#
+# Deliberately NOT here: "resolve" (the branch does not exist) and "blocklist"
+# (the target is refused by policy). Both are decided, not transient - nothing
+# about the next two minutes changes the answer, so retrying them on every tick
+# inside the window is noise. Those stay failures and keep the failure backoff.
+_BLOCKED_STEPS = ("pause", "lock", "blocked", "lock-acquire")
 
 
 def print_introspection():
@@ -122,6 +140,20 @@ def _should_notify(job: dict) -> bool:
     return job.get("notify", True)
 
 
+def _blocked_reason(status) -> str:
+    """Name the gate that refused to START this wake, or "" if none did.
+
+    Reads the gate's own verdict via find_step() — a step counts only when it
+    actually FAILED, because the same labels are written on the happy path too
+    ("lock: No active lock — agent is sleeping" is an `ok`, not a refusal).
+    """
+    for label in _BLOCKED_STEPS:
+        step = status.find_step(label)
+        if step is not None and step[0] == "fail":
+            return f"{label}: {step[2]}"
+    return ""
+
+
 def _fire_job(job: dict, runstate: dict) -> tuple:
     """Fire a single job via direct wake_branch import (DPLAN-0204 path A).
 
@@ -129,10 +161,18 @@ def _fire_job(job: dict, runstate: dict) -> tuple:
     are handed to the rotation module, which owns target selection and pointer
     state (DPLAN-0287).
 
-    Returns (ok: bool, error_msg: str).
+    Returns (outcome: str, detail: str) where outcome is one of OUTCOME_FIRED,
+    OUTCOME_FAILED or OUTCOME_BLOCKED. The third state is the point: only a wake
+    that actually STARTED consumes the job's period.
+
+    Rotation keeps the two-state answer and is mapped, not reclassified. A busy
+    steward is already a recorded MISS there — the pointer advanced and a
+    different citizen gets the night — so that night is genuinely spent, and
+    calling it blocked would re-fire a rotation whose turn was already taken.
     """
     if job.get("schedule", {}).get("type") == ROTATION_TYPE:
-        return fire_rotation(job, runstate)
+        ok, detail = fire_rotation(job, runstate)
+        return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
     # Cross-branch handler import authorized by DPLAN-0204 §2.8
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch  # noqa: E402
@@ -163,26 +203,44 @@ def _fire_job(job: dict, runstate: dict) -> tuple:
             auto=True,
             sender="@daemon",
             model=model,
+            # Every wake this module makes was fired by a clock, so it is a
+            # scheduled wake by definition — the flag describes THIS caller's
+            # lane, never the target. A manager target then goes headless
+            # through dispatch_monitor (self-terminating, context pin, bounce
+            # mail, lock cleanup) instead of an interactive tmux room that
+            # nothing ever closes, and which blocked the next night's fire.
+            # Deciding it per-target would mean reading the target's passport
+            # here — a second copy of the manager gate wake_branch owns.
+            scheduled=True,
         )
         if ok:
             _log(f"OK: {owner}/{job_id} — {status.summary}")
             logger.info("[run] Fired %s/%s successfully", owner, job_id)
             if notify:
                 notify_complete(owner, job_id, status.summary)
-            return True, ""
-        else:
-            msg = status.summary
-            _log(f"FAIL: {owner}/{job_id} — {msg}")
-            logger.warning("[run] Failed to fire %s/%s: %s", owner, job_id, msg)
-            if notify:
-                notify_error(owner, job_id, msg)
-            return False, msg
+            return OUTCOME_FIRED, ""
+
+        blocked = _blocked_reason(status)
+        if blocked:
+            # No telegram: a deferral is not an error, and a target that stays
+            # busy would otherwise ping once per retry for as long as it sat
+            # there. The console line and the prax record still name it.
+            _log(f"BLOCKED: {owner}/{job_id} — {blocked}; stays due, retries this window")
+            logger.info("[run] Blocked firing %s/%s: %s — not recorded as a run", owner, job_id, blocked)
+            return OUTCOME_BLOCKED, blocked
+
+        msg = status.summary
+        _log(f"FAIL: {owner}/{job_id} — {msg}")
+        logger.warning("[run] Failed to fire %s/%s: %s", owner, job_id, msg)
+        if notify:
+            notify_error(owner, job_id, msg)
+        return OUTCOME_FAILED, msg
     except Exception as e:
         logger.error("[run] Exception firing %s/%s: %s", owner, job_id, e)
         _log(f"ERROR: {owner}/{job_id} — {e}")
         if notify:
             notify_error(owner, job_id, str(e))
-        return False, str(e)
+        return OUTCOME_FAILED, str(e)
 
 
 def run_tick(dry_run: bool = False) -> dict:
@@ -197,6 +255,7 @@ def run_tick(dry_run: bool = False) -> dict:
         "due": 0,
         "fired": 0,
         "failed": 0,
+        "blocked": 0,
         "skipped": 0,
     }
 
@@ -253,19 +312,27 @@ def run_tick(dry_run: bool = False) -> dict:
 
     # Step 4: Fire due jobs
     for job in due_jobs:
-        ok, error_msg = _fire_job(job, runstate)
-        if ok:
+        outcome, detail = _fire_job(job, runstate)
+        if outcome == OUTCOME_FIRED:
             results["fired"] += 1
             update_job_runstate(runstate, job["owner"], job["id"], job["schedule"])
+        elif outcome == OUTCOME_BLOCKED:
+            # Never stamps last_run — the job stays due and the next tick tries
+            # again inside the same window.
+            results["blocked"] += 1
+            record_job_blocked(runstate, job["owner"], job["id"], detail)
         else:
             results["failed"] += 1
-            record_job_failure(runstate, job["owner"], job["id"], error_msg)
+            record_job_failure(runstate, job["owner"], job["id"], detail)
         save_runstate(runstate)
 
         if job != due_jobs[-1]:
             time.sleep(1.0)
 
-    _log(f"Tick complete: {results['fired']} fired, {results['failed']} failed, {results['skipped']} skipped")
+    _log(
+        f"Tick complete: {results['fired']} fired, {results['failed']} failed, "
+        f"{results['blocked']} blocked, {results['skipped']} skipped"
+    )
     return results
 
 

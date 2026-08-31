@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-30
 
 ---
 
@@ -216,6 +216,46 @@ The trust model is asymmetric on purpose. A passport can never *add* scope (noth
 - `fresh` (bool) — start a fresh Claude session (true) or resume (false)
 - `model` (string, optional) — `"haiku"` or `"sonnet"` recommended for light wakes
 
+### What a fire consumes (2026-08-30)
+
+**Only a wake that actually STARTED consumes the job's period.** A fire ends in one
+of three states, not two, and each writes a different record:
+
+| Outcome | What happened | `last_run` | Next tick |
+|---------|---------------|-----------|-----------|
+| `fired` | An agent started | stamped | period consumed |
+| `blocked` | The wake was refused before anything started — the target is busy (`lock`), holds an interactive session (`occupancy`), autonomous_pause is on, or the dispatch lock could not be taken | **untouched** | still due; retries inside the same window after a 5-min hold |
+| `failed` | The wake ran and went wrong, or the target is a decided refusal (`resolve` — no such branch; `blocklist`) | stamped | measured from the last SUCCESS; 10-min backoff |
+
+The middle row is the fix for a scheduler that planted the blocker for its own next
+fire: an interactive room left open in a branch made `wake_branch` refuse, the refusal
+was recorded as a run, and the next day's fire was swallowed by a room nobody was
+sitting in. Blocked is not ran.
+
+Both holds are **bounds, not suppressions**. Removing a suppression without adding a
+bound is how you turn one swallowed fire into a spawn storm: a windowed schedule allows
+±15 min at a ~2-minute tick, and an interval job measures from its last *attempt*, which
+a block deliberately does not write. Blocked holds for less than a failure (5 min vs 10)
+because nothing spawned and the target being busy usually clears itself.
+
+`queue` renders the new `blocked` value in its existing `last_status` column — the
+`--json` schema is unchanged.
+
+### The scheduled lane
+
+Every wake `run` makes was fired by a clock, so it passes `scheduled=True` to
+`wake_branch` unconditionally. The flag describes **this caller's lane, never the
+target** — deciding it per-target would mean reading the target's passport here, a
+second copy of the manager gate `wake_branch` already owns.
+
+What it changes: a **manager** target goes headless through `dispatch_monitor`
+(self-terminating, context pin, bounce mail, lock cleanup, a register entry something
+closes) instead of an interactive tmux session that nothing ever closes — which was the
+room that blocked the next night's fire. A **`WAKE_BLOCKLIST`** target (`@devpulse`) is
+refused outright in this lane; `@devpulse/cl-harvest-resume` is the one job that would
+meet that fence, and it ships disabled. Every other target is unaffected.
+`rotation.py` already took this lane for managers; `run.py` was the odd path out.
+
 ### Staggering
 
 No native offset field. To stagger jobs, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
@@ -368,11 +408,11 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-- **454 tests** across 19 test files
+- **559 tests** across 23 test files
 - 10/10 modules covered, 46/50 public functions tested
 - Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-08-30*
 
 ---
 [← Back to AIPass](../../../README.md)

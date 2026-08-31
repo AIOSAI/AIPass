@@ -941,6 +941,12 @@ def run_rollover() -> bool:
     marker = "[green]>[/green]" if success_count else "[yellow]>[/yellow]"
     console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
 
+    # A trigger the extractor declined is neither a win nor a break, and printing
+    # neither left "0/1 successful" above an empty failure list — a count saying
+    # something went wrong beside a list saying nothing did.
+    for item in result.get("skipped", []):
+        console.print(f"  [yellow]-[/yellow] {item['trigger']} skipped: {item['reason']}")
+
     if failed:
         console.print()
         for fail in failed:

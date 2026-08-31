@@ -121,7 +121,7 @@ memory/
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1323 test functions on disk — 1222 collected, 1222 pass, 5 skip
+├── tests/                       # 1471 test functions on disk — 1428 collected, 1428 pass, 5 skip
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -188,6 +188,14 @@ with no rollover ever running on them.
 registry's own branches. Never a passport walk — `projects/` holds 8 passports for 4 residents,
 because `@baud` carries `.backup/` copies. A root that overlaps AIPass home is refused in either
 direction; a root holding several registries is a named refusal, not a `sorted()[0]` pick.
+
+**Declaration order is the order** (4.1.0). `declared_roots()` used to `sorted()` its result, so an
+N-root tie arrived at every door as alphabetical-by-resolved-path — an accident of what someone named
+a directory — while the fleet ruling breaks that tie by *declaration* order. Both are deterministic;
+only the rows a human wrote carry intent. @ai_mail found it by noticing the order at their door could
+not be the order the ruling names, and reported the disagreement instead of guessing at it. The reader
+moved, not the ruling: rows come back in file order, first declaration wins a duplicate. On this
+machine every one of the four roots changed position.
 
 ### The external tier declares itself (2026-08-30)
 
@@ -439,8 +447,9 @@ The refusal payload keeps `length`/`cap`/`over_by` as ints (the @hooks `edit_gat
 `%d`) and adds `reason: "unmeasurable"` and `found_type`. When this shipped, **unchanged legacy
 entries still passed** — `enforce: true` was live and 9 branches carried list-shaped notes, so only a
 *new or edited* unmeasurable entry was refused and the fix could not brick the fleet it was meant to
-protect. That exemption has since been narrowed to `todos` alone — see
-[The grandfather clause, narrowed to todos](#the-grandfather-clause-narrowed-to-todos-2026-08-27).
+protect. That exemption was narrowed to `todos` alone on 2026-08-27 and widened back to every container on
+2026-08-30 — see
+[Judged by what it authors, not by what it carries](#judged-by-what-it-authors-not-by-what-it-carries-2026-08-30).
 
 #### …and a field it cannot FIND is the same species (fixed 2026-08-26)
 
@@ -465,23 +474,51 @@ the reading that shape belongs to the trinity checker rather than to a char-cap 
 more than it bought: the write gate refuses those entries, so a branch could be told it was compliant
 and then be blocked on its next write for a shape lint had already seen. `run_lint` now names them.
 
-#### The grandfather clause, narrowed to todos (2026-08-27)
+#### Judged by what it authors, not by what it carries (2026-08-30)
 
-"Unchanged and over cap passes untouched" was written for a fleet full of legacy drift: without it a
-maintenance write — a rollover, a frame re-render — would be refused whole over an entry it was not
-touching, and the branch's memories would stop rolling. The push has since cured that drift, so for
-the three archivable containers the clause protected nothing real and hid everything new: a fresh
-over-cap `sessions` entry written straight to disk read as "already there" on the next write and never
-surfaced. In `sessions`, `key_learnings` and `observations` an over-cap entry is now a violation
-whether or not the current write created it.
+**A write is refused for the text it wrote, never for the text it is holding.** `classify_entries`
+splits every over-cap entry in one traversal: `["authored"]` — new or edited, and the only thing a
+write may be refused for — and `["carried"]` — byte-identical to what is on disk, reported and let
+through. `changed_entries` is the authored half alone, kept under that name because @hooks'
+`edit_gate` calls it; the six-key payload is unchanged.
 
-`todos` keep the exemption, and only todos — `entry_limits.RESHAPE_ONLY_SECTIONS`, the single list the
-write gate and the push's prune lane share (`trinity_push` re-exports it) rather than each restating
-it. A non-canonical todo can sit in a branch indefinitely BY DESIGN, because the push is forbidden to
-archive open work and only that branch's own agent can cure it; refusing every write to such a file
-would brick its rollover, preserving the debt by destroying the lane that preserves everything else.
-The exemption covers what is **already on disk** — a newly written over-cap todo is refused like
-anything else.
+This reverses a narrowing made on 2026-08-27, and the reversal was expensive to learn. That change
+exempted `todos` alone, reasoning that the trinity push had cured legacy drift fleet-wide so
+"unchanged and over cap passes" now hid new drift instead of protecting old. Both halves were wrong
+about the world:
+
+- **Drift recurs.** The evening the deadlock was reported, @ai_mail carried three over-cap
+  `key_learnings` and @seedgo one 343-char `summary`.
+- **This gate never measures the writes that cause it.** @hooks' `edit_gate` says so in its own
+  refusal text: caps are measured on the Edit/Write lane only. A write made from the shell reaches
+  their handler — the project fence runs there — but never reaches the cap check, and @baud drifted
+  to 2529/300 for a week through that gap. An entry the gate never measured cannot be caught by
+  refusing the *next* write.
+
+So the narrowing put drift detection on the one component structurally blind to how drift arrives —
+and charged rollover for it. **Rollover's write is always a shrink**: it removes the tail and hands
+back a smaller document, and it may not edit the entry in the head it is being refused for. On
+2026-08-30 that ran as an identical failure every 20 minutes for three hours against @seedgo's file,
+until @trigger escalated four repeat signatures. The file could not get smaller because it was too
+big.
+
+What the narrowing was **right** about is the silence: the old clause skipped a carried entry without
+a word. Carried debt is now reported on every write, naming the branch, the entry and the numbers —
+and drift detection sits where it belongs, in the lane that reads disk:
+
+```
+drone @memory lint            # scans every branch's entries, read-only, owes nothing to write order
+```
+
+`todos` are no longer a special case here — the rule is one rule. `RESHAPE_ONLY_SECTIONS` remains
+`("todos",)` for the question it actually answers: the containers **no machine may prune**. The push
+re-exports it for its prune lane and @hooks reads it for the missing-canonical-field refusal, one
+list so the two cannot disagree within a release.
+
+Touch an entry and you own it: the exemption covers byte-identical text only, so editing a fat entry
+into a slightly less fat one is authorship and is refused. Identity in a list is the **text**, never
+the index — a prepend shifts every entry down, and an index-keyed diff would call the whole file
+newly authored on exactly the write that authored nothing.
 
 ### keep 15 now keeps 15
 
@@ -600,8 +637,9 @@ itself fails, and a second destination fails after the first succeeded. Absent a
 
 Shape **and** size, because they are two different scan groups in the standard and an entry can pass
 one while failing the other. A perfectly-shaped 315-char session summary under a 300 cap is
-canonical to look at and still leaves its branch short of 100 — and until 2026-08-27 it was exactly
-the entry @hooks' `edit_gate` grandfathered, that clause now covering `todos` only. Caps come from
+canonical to look at and still leaves its branch short of 100 — and it is exactly the entry @hooks'
+`edit_gate` grandfathers when the write did not author it (refused between 2026-08-27 and 08-30, when
+that refusal was found to deadlock rollover). Caps come from
 `entry_limits.resolve_entry_types`, the same resolver the write gate and the tab renderer use, so the
 push cannot prune on a number the gate does not enforce.
 
@@ -862,7 +900,7 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 ## Quality
 
 - **Tests:** 1222 passed, 0 failures, 5 skipped, 21.8s (re-measured 2026-08-27 from the branch dir after the marker-7 build, which archived two test files with the retired lane and added `tests/test_marker7_memory_lane.py` and `tests/test_templates_lane.py`; the repo-root invocation behind the earlier 1201 reading was not repeated here). The push added 69 of those in `tests/test_trinity_push.py`, and 10 mutations were run against the lane — all 10 bite, each on its own tests. The first pass had one survivor (`_verify_ingestion` ignoring absent vectors, caught anyway by the content comparison that follows); rather than accept a provably-equivalent survivor, two tests were added pinning that an ABSENT vector and a CORRUPTED one produce different refusal sentences, and the mutation now bites. The 5 skips are the parked symbolic-fragments tier and its embedder — see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout").
-  *Two different numbers, deliberately:* `grep def test_` over `tests/*.py` finds **1323 test functions** on disk. 237 of those live in 5 modules that call `pytest.skip(allow_module_level=True)` at import, so pytest never collects them individually (they surface as the 5 skips). The rest expand through `@pytest.mark.parametrize` into **1222** collected cases, and all 1222 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1323 on disk, a green board counts the 1222 that execute.
+  *Two different numbers, deliberately:* `grep def test_` over `tests/*.py` finds **1471 test functions** on disk. Some of those live in 5 modules that call `pytest.skip(allow_module_level=True)` at import, so pytest never collects them individually (they surface as the 5 skips). The rest expand through `@pytest.mark.parametrize` into **1428** collected cases, and all 1428 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1471 on disk, a green board counts the 1428 that execute.
 - **Seedgo:** 100% across every rule including the `trinity` standard, 0 type errors — re-run `--full` 2026-08-27 after the marker 7 build. Two findings that build itself introduced were fixed, not bypassed: extracting `_handle_rollover_verb()` out of `rollover.handle_command()` moved the no-args gate behind a delegation (`introspection` 85%, and the checker was right — the entry seam should say for itself that a bare `rollover` introspects), and adding the renamed verb to the top-level `elif` chain pushed it to depth 5 (`deep_nesting`); the chain is now flat `if`/`return`, one arm per command. The four findings the first audit raised on the new files were fixed rather than bypassed: report rendering moved out of the module into `handlers/templates/push_report.py` (modules do no direct file I/O), `json_handler` logging added to both new handlers, and the `unused_function` hit on `is_canonical()` was cleared by giving it a real caller — the guard that measures the push's own session note against the same gate everything else was pruned against. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
 - **Bypass registry:** **114** rules in `.seedgo/bypass.json` (`last_updated: 2026-08-16`). The old claim here — "113 rules, all pointing at files that exist", verified 2026-08-13 — is **stale on both counts**: re-measured 2026-08-25, **37 of the 114 point at 10 files that are no longer in the tree**, all of them parked on 08-14 / 08-18 (`symbolic/*.py`, `vector/embedder.py`, `storage/chroma.py`, `search/vector_search.py`, `learnings/manager.py`). One duplicate `(file, standard)` pair as well. The rules are inert — a bypass for an absent file suppresses nothing — but the registry is now a record of a tree that stopped existing. Cleanup is an open item, not fixed tonight.
 

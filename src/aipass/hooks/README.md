@@ -94,6 +94,7 @@ src/aipass/hooks/
 │   │   ├── hooksound.py         # Sound control (drone @hooks hooksound on/off)
 │   │   ├── hookstatus.py        # Config viewer (drone @hooks status)
 │   │   ├── alert_dismiss.py      # Dismiss alerts (drone @hooks dismiss <id>)
+│   │   ├── bash_writes.py       # Write targets a shell command names — edit_gate's scripted lane
 │   │   ├── presence.py          # Branch presence — claim/release/refresh for .ai_central/PRESENCE.central.json
 │   │   ├── sandbox.py           # Kernel sandbox — srt/bwrap wrapper + per-role policy generator
 │   │   └── wire_verify.py       # Wire verification — provider ↔ project hook wiring checker
@@ -144,7 +145,7 @@ src/aipass/hooks/
 │       └── json_handler.py      #   Auto-creating JSON handler for hooks data files
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1711 tests across 50 test files (1709 pass, 2 env-skipped)
+└── tests/                       # 1763 tests across 51 test files (1761 pass, 2 env-skipped)
 ```
 
 ## How It Works
@@ -185,7 +186,7 @@ Every handler is verified wired in `hooks.json` (31 entries, 30 distinct names).
 | Event | Hooks | Description |
 |---|---|---|
 | UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
-| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, registry_gate | Security gates + guardrails + sound |
+| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (scripted cross-project lane) once its matcher is widened — see the CONFIG WIRE note under Edit Gate |
 | PostToolUse | auto_fix, auto_watchdog, post_compact_regrounding | Diagnostics + watchdog + post-compaction re-ground backstop |
 | SubagentStop | subagent_gate | Seedgo validation |
 | Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
@@ -255,6 +256,108 @@ The project fence is directional, unlike the mail fence:
 Trust runs downward. Downward writes also have to stay open because the host tree carries artifact registries of its own — `flow/flow_json/PLAN_REGISTRY.json`, `.backup/snapshots/` — which a strict rule would read as foreign projects to the very branches that own them.
 
 Where no project root is resolvable on either side, the gate allows the write: a fence that cannot locate a boundary must not invent one.
+
+### The admin exemption — one seat reaches outwards
+
+Patrick's ruling, 2026-08-30 (compassed as @devpulse entry 322): the cross-project fence stays for
+every agent, and **@devpulse is the sole exemption** — *"It is only you who can reach outwards.
+Nobody else."*
+
+The exemption is granted on a **verified** identity, never a claimed one. `_is_admin_seat()` consumes
+@ai_mail's `is_verified_admin_caller()` — the same boolean their projects sweep gates on, which
+delegates to @devpulse's `admin_grant` reference implementation and its 5-leg contract (caller,
+registry-resolved cert, cert content, HMAC-SHA256 signature, registry admin flag). No second
+implementation lives here, and `ADMIN_SEAT = "devpulse"` decides nothing — it appears in the log line
+only. A session standing in a directory named `devpulse` with no valid grant on the machine is
+refused.
+
+**What a hook has to supply.** That rail reads identity from the env drone's router stamps
+(`AIPASS_CALLER_BRANCH` / `AIPASS_CALLER_CWD`), and a PreToolUse hook is not drone-invoked — measured
+2026-08-30: a hook process carries `AIPASS_BRANCH_NAME` and `AIPASS_SESSION_TYPE`, and neither caller
+variable. Left alone the rail answers "unprovable" for every seat and the exemption never opens. So
+the gate stamps `AIPASS_CALLER_CWD` from the platform's own record of the session directory — the
+same species of evidence drone stamps, from the same kind of source — and lets the rail do the rest.
+An existing stamp is never overwritten, and the stamp does not outlive the check.
+
+**Residual, stated rather than discovered:** leg 1 resolves through the session directory, so a
+session whose cwd is devpulse's tree *and* a validly signed grant on this machine together satisfy
+it. That is the grant's own stated threat model (`admin_grant.py`, "Security note": every agent here
+shares one OS user; the signature buys tamper-evidence, not attack-proofing). It is also no new
+reach — a session standing in devpulse's tree already writes that tree under the cross-branch fence,
+which keys on the same cwd.
+
+The exemption is narrow: it opens the **cross-project** fence only. Inbox writes, the cross-branch
+fence, daemon confinement and the `.trinity` caps are unchanged for every seat including the admin.
+
+### The scripted lane — writes made through Bash
+
+Until 2026-08-30 every fence above was invisible to a write made through the shell, because the gate
+matched only Edit/Write/MultiEdit/NotebookEdit. @devpulse measured it live: their `Edit` into a
+sibling project was correctly refused and `sed -i` on the same file went straight through — for all
+18 citizens, not just the admin seat.
+
+`apps/modules/bash_writes.py` reads a Bash command and reports the paths it can be **seen** to write;
+`edit_gate` then applies the identical direction rules and prints the identical refusal. Two reading
+modes:
+
+| Mode | Commands | What is reported |
+|---|---|---|
+| Directed verbs | `>`, `>>`, `tee`, `sed -i`, `cp`, `mv`, `ln`, `install`, `rsync`, `dd of=`, `touch`, `mkdir`, `truncate` | The target the verb's own grammar names — so `cat /other/x > ./mine` names `./mine`, and reading a foreign file stays legal |
+| Interpreters | `python`, `python3`, `node`, `perl`, `ruby`, `php`, `sh`, `bash`, `zsh`, `awk` — inline script or heredoc | **Every** path the command holds, because arbitrary code has no grammar naming its target |
+
+`cd` inside a chain moves the ground the next segment stands on, so `cd ../Other && sed -i s/a/b/ f.json`
+is resolved against `../Other`.
+
+**What it deliberately does NOT catch.** A perfect shell parser is not the bar and is not achievable;
+the residual is published as data in `bash_writes.NOT_CAUGHT` and printed by `drone @hooks` module
+introspection, so this list and the code cannot drift apart:
+
+- paths built from shell or program variables (`$DIR/x`) — there is nothing to resolve
+- paths reached through a symlink pointing into another project
+- `find -exec` / `xargs`, which name the write verb but not the operand
+- background or detached writes (`nohup`, `disown`, `at`, `cron`, `systemd-run`)
+- metadata-only changes: `chmod`, `chown`, `touch -t` on an existing file
+- `git`, `gh`, `drone`, `aipass` — they name no write verb this parser reads; their own fences apply
+- writes made by a process the command merely starts (a server, a test runner)
+
+A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
+a parser that has learned nothing about a command must not convict on it.
+
+> **CONFIG WIRE — landed 2026-08-30, the lane is live.** `pre_edit_gate` now carries
+> `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` (the matcher `git_gate`
+> and `registry_gate` already had). Before that widening, Bash events never reached the handler at
+> all and the scripted lane was dark no matter what the code did. Because any byte change to
+> `hooks.json` invalidates the trust hash in `~/.aipass/trusted_projects.json`, the edit was followed
+> immediately by `aipass trust /home/patrick/Projects/AIPass` — an un-re-enrolled config edit takes
+> *every* hook dark. Verify with `drone @hooks hookstatus`; re-run `aipass trust` after any further
+> edit to that file.
+
+### `.trinity` caps — a write is judged on what it AUTHORS
+
+`edit_gate` also measures `.trinity/local.json` and `observations.json` against @memory's published
+caps (`memory.config.json` → `entry_limits`, read through their `entry_limits` module — this gate
+never restates a cap). An entry over its character limit is refused, and so is an entry whose
+canonical field is *missing*: a renamed `learning` where the config says `value` leaves the extractor
+with no key to read, and `""` and "cannot read this" are different answers.
+
+**Both refusals apply only to entries the write authored.** An entry byte-identical to the one
+already on disk is *carried*, not authored — reported at INFO with a pointer to `drone @memory lint`,
+never blocked. This was narrowed to `todos` on 2026-08-27 and made universal again on 2026-08-30
+after @memory measured what the narrowing did: their rollover lane failed identically every 20
+minutes for three hours, because the extractor removed a tail, wrote the *smaller* document back, and
+this gate refused the whole file over an entry in the head the extraction never touched. The archiver
+is always on the losing side of that trade — the file cannot get smaller because it is too big.
+
+The other half of the evidence is this gate's own refusal text: writes made through Bash reach the
+scripted lane's *project* fence, not the cap check, so a write gate is structurally blind to how
+drift ARRIVES and was never the thing that could detect it. Detecting drift already on disk is
+`drone @memory lint`'s job, which reads the file.
+
+Identity is the raw entry, never its index. A prepend shifts every position down, so an index-keyed
+diff would call the whole file newly authored on exactly the write that authored nothing.
+
+Carrying a drifted entry does not license adding another in the same shape: a NEW entry with a
+missing canonical field is authored, and refused.
 
 ### The diagnostics block
 
@@ -345,7 +448,7 @@ restated.
 - All branches via hook dispatch — every Claude Code session routes through the engine
 - @ai_mail dispatch_monitor — `build_policy` + `build_srt_config` + `resolve_bwrap_command` at the agent launch boundary
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-08-30*
 
 ---
 

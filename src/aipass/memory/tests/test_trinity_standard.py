@@ -87,22 +87,25 @@ class TestUnmeasurableFieldIsAViolation:
         assert hits[0]["reason"] == "unmeasurable"
         assert hits[0]["found_type"] == "list"
 
-    def test_a_legacy_unchanged_list_entry_is_now_refused(self):
-        """Rewritten 2026-08-27 — the fleet the exemption protected no longer exists.
+    def test_a_legacy_unchanged_list_entry_is_carried_not_refused(self):
+        """Rewritten twice: refused 2026-08-27, carried again 2026-08-30.
 
-        The nine branches carrying list-shaped notes were cured by the trinity
-        push; every one of those entries is in vectors and out of the files.
-        Keeping the exemption past that point protects nothing and hides the
-        next list-shaped note somebody writes. `todos` keep it, and only todos:
-        that is the one container no machine may prune, so refusing writes
-        there would brick the branch's rollover.
+        The 08-27 reasoning was that the push had cured the list-shaped-note
+        fleet, so the exemption protected nothing. What it missed is that this
+        gate never sees the writes that CAUSE drift — Bash lanes bypass @hooks
+        entirely — so refusing the next write cannot catch the drift, it can
+        only stop rollover, whose write is always the smaller document. The
+        entry is reported as carried debt instead; `lint` reads disk.
         """
         legacy = {"number": 1, "note": [{"title": "x" * 500}]}
         before = {"observations": [legacy]}
         after = {"observations": [dict(legacy)]}
-        hits = el.changed_entries(before, after, _limits())
-        assert len(hits) == 1
-        assert hits[0]["key"] == "0"
+
+        assert el.changed_entries(before, after, _limits()) == []
+
+        carried = el.classify_entries(before, after, _limits())["carried"]
+        assert len(carried) == 1
+        assert carried[0]["key"] == "0"
 
     def test_the_exemption_survives_for_todos_alone(self):
         """The container the push may not cure keeps its rollover-safety."""
@@ -112,13 +115,20 @@ class TestUnmeasurableFieldIsAViolation:
         after = {"todos": [dict(legacy)]}
         assert el.changed_entries(before, after, limits) == []
 
-    def test_both_list_entries_are_refused_in_an_archivable_container(self):
-        """Post-narrowing there is nothing to exempt here: both are reported."""
+    def test_a_second_list_shaped_note_is_refused_beside_a_carried_one(self):
+        """The exemption must not license a NEW entry of the same broken shape.
+
+        Identity is the raw value, never the sentinel: were every unmeasurable
+        entry to collapse to one None, a branch with a single legacy
+        list-shaped note could add ten more and each would read as "already on
+        disk". The new one is authored and refused; the legacy one is carried.
+        """
         legacy = {"number": 1, "note": [{"title": "old"}]}
         before = {"observations": [legacy]}
         after = {"observations": [{"number": 2, "note": [{"title": "new"}]}, dict(legacy)]}
-        hits = el.changed_entries(before, after, _limits())
-        assert {hit["key"] for hit in hits} == {"0", "1"}
+
+        assert {hit["key"] for hit in el.changed_entries(before, after, _limits())} == {"0"}
+        assert {hit["key"] for hit in el.classify_entries(before, after, _limits())["carried"]} == {"1"}
 
     def test_a_second_list_shaped_todo_beside_a_legacy_one_is_still_refused(self):
         """The hole a text-identity dedup would leave, in the container that kept the exemption.
@@ -747,26 +757,29 @@ class TestMissingFieldIsAViolation:
         for key in ("entry_type", "container", "key"):
             assert isinstance(hit[key], str)
 
-    def test_untouched_legacy_drift_is_now_refused_too(self):
-        """Rewritten 2026-08-27: the push cured the renamed shape fleet-wide.
+    def test_untouched_renamed_field_drift_is_carried_not_refused(self):
+        """A renamed field deadlocks rollover exactly like an over-cap one.
 
-        The exemption existed so drifted branches could keep writing while the
-        reset was pending. The reset happened. What is left in an archivable
-        container is not legacy, it is new.
+        @ai_mail and @api carried `learning` where the config says `value`.
+        Refusing every write to those files would have bricked their rollover
+        for a shape only their own agent can rename — the same trade the
+        archiver always loses.
         """
         legacy = {"number": 1, "observation": "x" * 500}
         before = {"observations": [legacy]}
         after = {"observations": [dict(legacy)]}
-        hits = el.changed_entries(before, after, _limits())
-        assert len(hits) == 1
+
+        assert el.changed_entries(before, after, _limits()) == []
+        assert len(el.classify_entries(before, after, _limits())["carried"]) == 1
 
     def test_carrying_one_drifted_entry_does_not_license_a_second(self):
-        """Both are reported now — the new one, and the one that was tolerated."""
+        """The carried entry buys no cover for the one written beside it."""
         legacy = {"number": 1, "observation": "x" * 500}
         before = {"observations": [legacy]}
         after = {"observations": [{"number": 2, "observation": "y" * 500}, dict(legacy)]}
-        hits = el.changed_entries(before, after, _limits())
-        assert {hit["key"] for hit in hits} == {"0", "1"}
+
+        assert {hit["key"] for hit in el.changed_entries(before, after, _limits())} == {"0"}
+        assert {hit["key"] for hit in el.classify_entries(before, after, _limits())["carried"]} == {"1"}
 
     def test_a_dict_container_refuses_a_missing_field_too(self):
         limits = _limits(max_chars=200, field="value", container="key_learnings")

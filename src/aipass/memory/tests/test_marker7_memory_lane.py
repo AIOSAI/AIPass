@@ -496,17 +496,23 @@ class TestSyncLinesTellsTheTruth:
 
 
 class TestGrandfatherNarrowedToTodos:
-    """Post-push the clause hides drift — except where drift is legitimate.
+    """The clause was narrowed to todos on 2026-08-27 and widened back on 08-30.
 
-    A non-canonical todo may sit in a branch forever: the push is forbidden to
-    archive open work (1.1.0) and only its own agent can reshape it.  Refusing
-    every write to such a file would brick that branch's ROLLOVER, which is
-    the slow-motion data loss item 7 exists to prevent.  So `todos` keeps the
-    exemption and the three archivable containers lose it.
+    The narrowing's own argument for the todos exemption — refusing every
+    write to a file carrying a debt no machine may prune BRICKS that branch's
+    rollover, the slow-motion data loss item 7 exists to prevent — turned out
+    to hold for every container, because rollover's write is always a shrink
+    and it may not touch the entry it is refused for. Three hours of identical
+    errors were the receipt.
 
-    Mutation notes: removing the clause everywhere (bricks a drifted-todo
-    branch), keeping it everywhere (hides new over-cap sessions), or keying
-    the exemption on anything other than the push's own constant.
+    So the rule is one rule now: a write is refused for what it AUTHORS.
+    todos are no longer a special case at the cap gate; they remain the one
+    container the PUSH may not prune, which is a different question and keeps
+    its own constant.
+
+    Mutation notes: refusing carried entries (deadlocks rollover), skipping
+    carried entries silently (the 08-27 objection, still valid), or matching
+    list identity on index instead of text (a prepend re-authors the file).
     """
 
     @staticmethod
@@ -521,14 +527,15 @@ class TestGrandfatherNarrowedToTodos:
             },
         }
 
-    def test_an_unchanged_over_cap_session_is_now_a_violation(self):
+    def test_an_unchanged_over_cap_session_is_carried_not_a_violation(self):
         fat = {"number": 1, "date": "2026-08-27", "summary": "x" * 99, "status": "done"}
         before = {"sessions": [fat]}
         after = {"sessions": [dict(fat)]}
 
-        hits = entry_limits.changed_entries(before, after, self._limits())
+        assert entry_limits.changed_entries(before, after, self._limits()) == []
 
-        assert [hit["entry_type"] for hit in hits] == ["sessions"]
+        carried = entry_limits.classify_entries(before, after, self._limits())["carried"]
+        assert [hit["entry_type"] for hit in carried] == ["sessions"]
 
     def test_an_unchanged_over_cap_todo_is_still_exempt(self):
         """The one container the push may not cure keeps its exemption."""

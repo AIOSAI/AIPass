@@ -1071,7 +1071,11 @@ class TestWakeBranch:
         assert any(s[0] == "ok" and s[1] == "manager" for s in status.steps)
         # ...and the spawn is an interactive tmux session, not the headless monitor.
         assert any(s[0] == "ok" and s[1] == "spawn" and "tmux" in s[2] for s in status.steps)
-        assert [c[:2] for c in tmux_calls] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        assert [c[:2] for c in tmux_calls] == [
+            ["tmux", "new-session"],
+            ["tmux", "set-option"],
+            ["tmux", "send-keys"],
+        ]
         # Prompt travels via file (quoting-proof, debuggable).
         prompt_file = branch_path / ".daemon" / "last_wake_prompt.txt"
         assert prompt_file.read_text(encoding="utf-8") == "continue the work"
@@ -1504,7 +1508,11 @@ class TestScheduledManagerLane:
         status, ok = wake_branch("@testbranch", sender="@daemon")
 
         assert ok is True
-        assert [c[:2] for c in calls["tmux"]] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        assert [c[:2] for c in calls["tmux"]] == [
+            ["tmux", "new-session"],
+            ["tmux", "set-option"],
+            ["tmux", "send-keys"],
+        ]
         assert calls["popen"] == [], "interactive manager wake must not reach the monitor pipeline"
         # No monitor process means no pin site at all.
         assert not any(str(wake_mod.MONITOR_SCRIPT) in " ".join(c) for c in calls["tmux"])
@@ -1588,7 +1596,11 @@ class TestScheduledManagerLane:
         status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=False)
 
         assert ok is True
-        assert [c[:2] for c in calls["tmux"]] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        assert [c[:2] for c in calls["tmux"]] == [
+            ["tmux", "new-session"],
+            ["tmux", "set-option"],
+            ["tmux", "send-keys"],
+        ]
         assert calls["popen"] == []
 
     def test_scheduled_non_manager_spawn_is_byte_identical(self, tmp_path, monkeypatch):
@@ -1886,3 +1898,296 @@ class TestIsManager:
         as long as it did (@devpulse P0, 2026-08-21)."""
         src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
         assert "wake skipped, mail delivered" not in src
+
+
+# --- wake-lane rulings, Patrick 2026-08-30 ------------------------------
+
+
+class TestWakeModelPolicy:
+    """resolve_wake_model() — "managers are fable thats it, only manager run fable".
+
+    Two halves tested separately because they fail in opposite directions: the
+    manager half over-applies Fable if it is wrong, the non-manager half lets it
+    leak. A test suite that only pinned the first would pass a policy that gave
+    Fable to everybody.
+    """
+
+    def test_manager_with_no_requested_model_gets_fable(self):
+        assert wake_mod.resolve_wake_model("manager", None) == "fable"
+
+    def test_manager_request_is_overridden_not_honoured(self):
+        """A schedule naming a model is a preference; the ruling is a policy."""
+        assert wake_mod.resolve_wake_model("manager", "sonnet") == "fable"
+
+    def test_manager_already_asking_for_fable_still_gets_fable(self):
+        assert wake_mod.resolve_wake_model("manager", "claude-fable-5") == "fable"
+
+    def test_non_manager_with_no_request_keeps_todays_default(self):
+        """The ruling changed who gets Fable, not what everyone else defaults to."""
+        assert wake_mod.resolve_wake_model("aipass_framework", None) == DEFAULT_MODEL
+
+    def test_non_manager_request_is_honoured_as_today(self):
+        assert wake_mod.resolve_wake_model("aipass_framework", "sonnet") == "sonnet"
+
+    def test_non_manager_asking_for_fable_falls_back_never_refuses(self):
+        """Refusing the wake would punish the target for its schedule's model
+        field. The wake happens; the model does not."""
+        assert wake_mod.resolve_wake_model("aipass_framework", "fable") == DEFAULT_MODEL
+
+    def test_non_manager_full_fable_id_is_refused_too(self):
+        """The spelling that walks past an equality check. `--model` takes both
+        `fable` and `claude-fable-5`, so a policy comparing to the bare alias
+        would hand a non-manager the exact model the ruling forbids."""
+        assert wake_mod.resolve_wake_model("aipass_framework", "claude-fable-5") == DEFAULT_MODEL
+
+    def test_non_manager_fable_is_refused_whatever_the_casing(self):
+        assert wake_mod.resolve_wake_model("specialist", "FABLE") == DEFAULT_MODEL
+
+    def test_unclassified_citizen_is_treated_as_non_manager(self):
+        """An unreadable passport reaches this function as "". Failing toward
+        manager would silently move an ordinary branch onto Fable — the same
+        direction is_manager() already refuses to fail in."""
+        assert wake_mod.resolve_wake_model("", None) == DEFAULT_MODEL
+        assert wake_mod.resolve_wake_model("", "fable") == DEFAULT_MODEL
+
+    def test_fable_is_a_known_alias(self):
+        """The lane names a model the CLI actually resolves."""
+        assert "fable" in KNOWN_MODEL_ALIASES
+
+
+def _tmux_line(calls, verb):
+    """The single tmux invocation whose second word is `verb`, as one string."""
+    matches = [c for c in calls["tmux"] if len(c) > 1 and c[1] == verb]
+    assert len(matches) == 1, f"expected exactly one 'tmux {verb}', got {matches}"
+    return " ".join(matches[0])
+
+
+class TestUnattendedWakesBypassPermissions:
+    """Ruling 1, Patrick 2026-08-30: "always bypass permissions always, claude
+    alone will nvr work."
+
+    @vera's first external wake launched as a bare `claude`, sat in default
+    permission mode, and had Bash DENIED mid-playbook with nobody present to
+    approve it. The headless lane has carried the flag for months; the
+    interactive manager lane was the one still spawning plain claude.
+    """
+
+    def test_interactive_manager_lane_carries_the_bypass_flag(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        assert "--permission-mode bypassPermissions" in _tmux_line(calls, "send-keys")
+
+    def test_interactive_manager_lane_names_its_model_never_a_bare_claude(self, tmp_path, monkeypatch):
+        """Naming nothing is how @vera reached Fable by accident — right answer,
+        no decision behind it. The lane states the model it means."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        assert "--model fable" in _tmux_line(calls, "send-keys")
+
+    def test_headless_lane_still_bypasses(self, tmp_path, monkeypatch):
+        """Regression guard: the lane that already complied must keep complying."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True)
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        assert "--permission-mode" in cmd
+        assert cmd[cmd.index("--permission-mode") + 1] == "bypassPermissions"
+
+
+class TestDaemonSessionMarking:
+    """Ruling 3, Patrick 2026-08-30: a daemon-started session must be
+    recognizably daemon work, or a human kills it as a leftover.
+
+    He killed @vera's live session mid-run — `daemon-vera-192848` read as his
+    own stale tmux. Two markings, and only the first is guaranteed: tmux either
+    creates the session under the loud name or new-session already failed.
+    """
+
+    def test_session_name_is_unmistakably_a_daemon_wake(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        new_session = [c for c in calls["tmux"] if c[1] == "new-session"][0]
+        session = new_session[new_session.index("-s") + 1]
+        assert session.startswith(wake_mod.DAEMON_SESSION_PREFIX)
+
+    def test_the_session_name_that_got_killed_cannot_come_back(self, tmp_path, monkeypatch):
+        """`daemon-vera-192848` is not a hypothesis — Patrick read that exact
+        shape as his own leftover tmux and killed it mid-playbook.
+
+        The pin above reads DAEMON_SESSION_PREFIX, so it passes for ANY value
+        the constant holds, including the one that already failed. This one
+        names the failed string instead, and asks the name to say out loud that
+        a machine started the session.
+        """
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        new_session = [c for c in calls["tmux"] if c[1] == "new-session"][0]
+        session = new_session[new_session.index("-s") + 1]
+        assert not session.startswith("daemon-"), "this is the name a human already killed"
+        assert "AIPASS" in session, "the name must say a machine started this, not a person"
+
+    def test_marking_lands_before_the_agent_starts(self, tmp_path, monkeypatch):
+        """A window is killable from the moment it exists. Marking after
+        send-keys leaves exactly the gap this closes."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        verbs = [c[1] for c in calls["tmux"]]
+        assert verbs == ["new-session", "set-option", "send-keys"]
+
+    def test_the_marker_is_queryable_and_names_the_branch(self, tmp_path, monkeypatch):
+        """A user option any tool can read back, rather than string-matching a
+        session-name prefix."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        option = [c for c in calls["tmux"] if c[1] == "set-option"][0]
+        assert "@aipass_daemon_wake" in option
+        payload = json.loads(option[-1])
+        assert payload["branch"] == "@testbranch"
+        assert payload["sender"] == "@daemon"
+
+    def test_a_marking_failure_warns_and_still_wakes(self, tmp_path, monkeypatch):
+        """The session is already alive when the option is set. Refusing to
+        start the agent over a cosmetic label trades real work for a tag —
+        but the thin marking is said out loud, never swallowed."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        real_run = wake_mod.subprocess.run
+
+        def _run(cmd, **kwargs):
+            if len(cmd) > 1 and cmd[1] == "set-option":
+                raise subprocess.CalledProcessError(1, cmd, stderr="no server running")
+            return real_run(cmd, **kwargs)
+
+        monkeypatch.setattr(wake_mod.subprocess, "run", _run)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True, "a failed label must not cancel the wake"
+        assert "send-keys" in [c[1] for c in calls["tmux"]]
+        mark = status.find_step("mark")
+        assert mark is not None and mark[0] == "warn"
+
+    def test_the_interactive_lane_is_not_written_to_the_dispatch_register(self, tmp_path, monkeypatch):
+        """Deliberate, and the reason is the register's own contract:
+        open_dispatch() takes expected_seconds from the lane's timeout, and this
+        lane has no monitor and no timeout. Every entry would stay outstanding
+        forever and go overdue against an invented number — a crash detector
+        full of false alarms. Marking a window and tracking a promised dispatch
+        are two questions; only one of them has a monitor to close it."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
+
+        opened = []
+        monkeypatch.setattr(register_mod, "open_dispatch", lambda **kw: opened.append(kw) or "id", raising=True)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        assert opened == [], "the interactive lane must not mint a dispatch nothing can close"
+
+
+class TestModelPolicyReachesBothSpawnLanes:
+    """The policy is decided once, above the fork. These pin that BOTH lanes
+    read that one decision — a rule enforced in only one lane is the shape the
+    fleet keeps paying for."""
+
+    def test_manager_schedule_asking_for_sonnet_still_spawns_fable(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", model="sonnet")
+
+        assert ok is True
+        assert "--model fable" in _tmux_line(calls, "send-keys")
+
+    def test_headless_manager_wake_is_fable_too(self, tmp_path, monkeypatch):
+        """A manager on the scheduled lane never touches tmux, and the ruling
+        does not stop at the tmux door."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True, model="opus")
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        assert cmd[cmd.index("--model") + 1] == "fable"
+
+    def test_non_manager_asking_for_fable_spawns_on_the_default(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="specialist")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", model="claude-fable-5")
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
+
+    def test_the_model_decision_is_a_named_step(self, tmp_path, monkeypatch):
+        """Which model ran, and on what classification, readable from the status
+        without grepping a log."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", model="sonnet")
+
+        step = status.find_step("model")
+        assert step is not None
+        assert "fable" in step[2] and "manager" in step[2]
+
+    def test_a_branch_with_no_passport_never_lands_on_fable(self, tmp_path, monkeypatch):
+        """The hoisted default, end to end. citizen_class is bound before the
+        passport read, and it is bound to "" — an unreadable passport must not
+        be able to promote a branch onto the managers-only model."""
+        _make_wake_fixtures(tmp_path, monkeypatch)  # no .trinity/passport.json
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
+        assert calls["tmux"] == []

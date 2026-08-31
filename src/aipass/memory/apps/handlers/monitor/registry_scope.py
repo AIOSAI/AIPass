@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
 # Description: The one definition of "the fleet" — core, passport-declared residents, declared-root externals
-# Version: 4.0.0
+# Version: 4.1.0
 # Created: 2026-08-27
 # Modified: 2026-08-30
 # =============================================
@@ -340,8 +340,18 @@ def declared_roots(repo_root: Path | None = None) -> list[Path]:
     Args:
         repo_root: AIPass home; defaults to this checkout's.
 
+    Order is DECLARATION order, and that is load-bearing rather than
+    incidental.  The fleet ruling breaks an N-root tie by declaration order, so
+    a reader that sorted its result put alphabetical-by-resolved-path in front
+    of the rule and the tie-breaker was never available at any door.  Both
+    orders are deterministic; only the rows a human wrote carry intent, and
+    directory names carry none.  Reported by @ai_mail (abe8141b), who found the
+    order at their door could not be the order the ruling names and said so
+    instead of guessing.
+
     Returns:
-        Existing directories, resolved, deduplicated, sorted. Never this repo.
+        Existing directories, resolved, deduplicated, in the order declared.
+        First declaration wins a duplicate. Never this repo.
     """
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     anchor = root / DECLARED_ROOTS
@@ -404,7 +414,9 @@ def declared_roots(repo_root: Path | None = None) -> list[Path]:
         seen.add(key)
         found.append(candidate)
 
-    return sorted(found)
+    # NOT sorted(): see the docstring. Declaration order is the tie-breaker the
+    # fleet ruling names, and sorting here discarded it before any caller saw it.
+    return found
 
 
 def external_branches(repo_root: Path | None = None, name_from: str = "path") -> list[dict[str, Any]]:

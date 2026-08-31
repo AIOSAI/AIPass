@@ -11,6 +11,7 @@
 Covers: from aipass.memory.apps.handlers.intake.plans_processor import process_plans
 """
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -21,6 +22,11 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 # Import helper
 # ---------------------------------------------------------------------------
+
+
+def _sha(path):
+    """The content hash the manifest records — spelled here so fixtures cannot drift from it."""
+    return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
 def _import_plans_processor(monkeypatch):
@@ -159,6 +165,73 @@ class TestChunkPlanText:
 # ===========================================================================
 # Tests: _load_manifest / _save_manifest
 # ===========================================================================
+
+
+class TestUnfilledPlaceholderSectionsAreNotVectorized:
+    """@flow's proposal, 2026-08-30, built as proposed and measured before shipping.
+
+    A plan template ships sections the author is meant to fill in. Unfilled, the
+    body is nothing but the bracketed prompt — `[What do you want to achieve?]`
+    — and vectorizing it stores a question the template asked, attributed to a
+    plan that never answered it.
+
+    NARROW ON PURPOSE. @flow's own plan-level heuristic (`is_template_content`)
+    was retired after it false-positived on real-but-minimal FPLANs and destroyed
+    the file, the registry row and the archive together. This is chunk-level, so
+    the worst case is a dropped empty section rather than a lost plan — and the
+    rule only fires when EVERY content line of the body is bracketed. One line of
+    real prose anywhere and the chunk is kept.
+
+    Measured against the live collection before building: 452 of 8,433 vectors
+    (5.4%) match, and ZERO of them contain unbracketed prose. Not the ~27% @flow
+    estimated — most of that redundancy is identical FILLED template prose
+    ('## Agent Preparation', '## Notepad', '## Listen'), which is real content
+    and stays.
+    """
+
+    def test_an_unfilled_section_is_dropped(self, monkeypatch):
+        mod = _import_plans_processor(monkeypatch)
+        text = "### Goal\n[What do you want to achieve? Specific end state.]\n"
+        assert mod._chunk_plan_text(text, "p.md") == []
+
+    def test_a_trailing_horizontal_rule_does_not_save_it(self, monkeypatch):
+        """The live shape: the two biggest blocks both end in a `---` separator."""
+        mod = _import_plans_processor(monkeypatch)
+        text = "## Notes\n\n[Working notes, issues encountered, decisions made]\n\n---\n"
+        assert mod._chunk_plan_text(text, "p.md") == []
+
+    def test_one_line_of_real_prose_keeps_the_whole_section(self, monkeypatch):
+        mod = _import_plans_processor(monkeypatch)
+        text = (
+            "### Goal\n"
+            "[What do you want to achieve? Specific end state.]\n"
+            "Actually we want the rollover valve to stop refusing today's entries.\n"
+        )
+        chunks = mod._chunk_plan_text(text, "p.md")
+        assert len(chunks) == 1
+        assert "rollover valve" in chunks[0]["text"]
+
+    def test_a_filled_section_is_untouched(self, monkeypatch):
+        mod = _import_plans_processor(monkeypatch)
+        text = "## Summary\n\nThe declared-roots anchor shipped and the fleet reads 28 citizens.\n"
+        chunks = mod._chunk_plan_text(text, "p.md")
+        assert len(chunks) == 1
+
+    def test_a_section_that_is_only_a_rule_or_blank_is_not_called_a_placeholder(self, monkeypatch):
+        """Absence of content is not the same as an unfilled prompt.
+
+        A body with no content lines at all is already dropped by the length
+        gate. Routing it through the placeholder rule instead would make the
+        rule's own log and meaning wrong about why it went.
+        """
+        mod = _import_plans_processor(monkeypatch)
+        assert mod._is_placeholder_only("## Notes\n\n---\n") is False
+        assert mod._is_placeholder_only("## Notes\n\n") is False
+
+    def test_markdown_link_syntax_is_not_a_placeholder(self, monkeypatch):
+        """`[text](url)` opens with a bracket and is real content."""
+        mod = _import_plans_processor(monkeypatch)
+        assert mod._is_placeholder_only("## Refs\n[the seedgo audit](./audit.md)\n") is False
 
 
 class TestManifest:
@@ -390,6 +463,175 @@ class TestGetMemoryPython:
 # ===========================================================================
 
 
+class TestTheManifestKeysOnContentNotOnlyOnAName:
+    """@flow's finding, 2026-08-30: a restored plan is never re-vectorized.
+
+    `process_plans` skipped any file whose NAME appeared in the manifest. Restore
+    puts the plan file back but nothing removes its manifest row, so when that
+    plan is genuinely closed later its FINAL content is silently never stored and
+    the collection keeps only its pre-restore text. Three live cases, all APLANs
+    @devpulse restored after a mistaken close.
+
+    @flow offered two seams: an entry point they call on restore, or keying the
+    manifest on content. Content keying wins because it needs nothing from them
+    and it is self-healing — it also covers a plan edited after close, which the
+    callback seam would still miss.
+
+    Measured before choosing the migration: 491 manifest rows, 488 files present,
+    and ZERO present files modified after they were processed. So backfilling a
+    hash for a legacy row cannot skip a change that already happened, and the
+    mtime guard below covers one arriving later.
+    """
+
+    def _mock_config(self, monkeypatch, mod, plans_dir):
+        mock_cl = MagicMock()
+        mock_cl.section.return_value = {
+            "enabled": True,
+            "path": str(plans_dir),
+            "supported_extensions": [".md"],
+            "collection_name": "flow_plans",
+        }
+        monkeypatch.setattr(mod, "config_loader", mock_cl)
+
+    def _stub_pipeline(self, monkeypatch, mod, seen):
+        monkeypatch.setattr(
+            mod, "_embed_texts", lambda texts, timeout=120: {"success": True, "embeddings": [[0.1]] * len(texts)}
+        )
+        monkeypatch.setattr(
+            mod,
+            "_store_vectors",
+            lambda emb, texts, metas, coll: seen.append(metas[0]["source_file"]) or {"success": True},
+        )
+
+    def test_changed_content_reprocesses_even_though_the_name_is_known(self, monkeypatch, tmp_path):
+        mod = _import_plans_processor(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        plan = plans / "APLAN-0013_branch_audit_api_2026-08-13.md"
+        plan.write_text("## Summary\n\nthe text as it was before the restore\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        self._stub_pipeline(monkeypatch, mod, seen)
+
+        first = mod.process_plans()
+        assert first["files_processed"] == 1, first
+
+        # Unchanged: must NOT re-embed.
+        seen.clear()
+        assert mod.process_plans()["files_processed"] == 0
+        assert seen == []
+
+        # Restored with different content, same name — this is the defect.
+        plan.write_text("## Summary\n\nthe FINAL text, written after the restore\n", encoding="utf-8")
+        seen.clear()
+        again = mod.process_plans()
+
+        assert again["files_processed"] == 1, "a restored plan's final content was never vectorized"
+        assert seen == [plan.name]
+
+    def test_a_newly_processed_plan_records_its_content_not_just_a_time(self, monkeypatch, tmp_path):
+        """The write side, pinned separately from the read side.
+
+        A mutant reverting `_manifest_entry` to a bare timestamp survived every
+        other test here: the legacy read path is tolerant enough that the next
+        run still answered "not stale" via mtime. So the row would quietly go
+        back to naming a time instead of a content, and the restore defect would
+        return for every plan processed from then on — invisibly, because
+        nothing asserted what the row actually said.
+        """
+        mod = _import_plans_processor(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        plan = plans / "FPLAN-9001_new_plan_2026-08-30.md"
+        plan.write_text("## Summary\n\nA plan with enough real content to make a chunk.\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        self._stub_pipeline(monkeypatch, mod, [])
+
+        assert mod.process_plans()["files_processed"] == 1
+
+        entry = json.loads(manifest_path.read_text(encoding="utf-8"))[plan.name]
+        assert isinstance(entry, dict), f"row is not content-keyed: {entry!r}"
+        assert entry["content_sha256"] == _sha(plan)
+        assert entry["processed_at"]
+
+    def test_a_legacy_row_is_backfilled_not_re_embedded(self, monkeypatch, tmp_path):
+        """491 rows carry a bare timestamp. Re-embedding them all would be a storm.
+
+        The migration records what the row was always missing — the hash — and
+        does not pay for embeddings it has no reason to believe are stale.
+        """
+        mod = _import_plans_processor(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        plan = plans / "FPLAN-0208_dashboard_count_test_plan_2026-05-10.md"
+        plan.write_text("## Summary\n\nunchanged since the day it was processed\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        # The legacy shape, exactly as it sits on disk today: a bare ISO string.
+        manifest_path.write_text(json.dumps({plan.name: "2999-01-01T00:00:00"}), encoding="utf-8")
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        self._stub_pipeline(monkeypatch, mod, seen)
+
+        result = mod.process_plans()
+
+        assert result["files_processed"] == 0, "a legacy row with unchanged content must not re-embed"
+        assert seen == []
+        entry = json.loads(manifest_path.read_text(encoding="utf-8"))[plan.name]
+        assert isinstance(entry, dict) and entry.get("content_sha256"), entry
+
+    def test_a_legacy_row_whose_file_is_newer_than_its_row_reprocesses(self, monkeypatch, tmp_path):
+        """The safety net for the case the one-time measurement cannot cover.
+
+        A legacy row carries no hash, so 'unchanged' is a belief, not a fact. If
+        the file was written AFTER the row was recorded, that belief is wrong —
+        which is exactly what a restore does to a plan.
+        """
+        mod = _import_plans_processor(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        plan = plans / "APLAN-0017_branch_audit_commons_2026-08-13.md"
+        plan.write_text("## Summary\n\nrestored, and the row predates this file\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        manifest_path.write_text(json.dumps({plan.name: "2001-01-01T00:00:00"}), encoding="utf-8")
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        self._stub_pipeline(monkeypatch, mod, seen)
+
+        assert mod.process_plans()["files_processed"] == 1
+        assert seen == [plan.name]
+
+    def test_a_manifest_row_whose_file_is_gone_is_left_alone(self, monkeypatch, tmp_path):
+        """The three live cases are rows for files that LEFT processed_plans.
+
+        Pruning them would re-vectorize the whole plan from scratch the moment it
+        came back, discarding nothing but paying for everything. The row is not
+        the problem; trusting the row's NAME was. Left in place on purpose.
+        """
+        mod = _import_plans_processor(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        manifest_path = tmp_path / ".plans_processed.json"
+        gone = "APLAN-0018_branch_audit_aipass_2026-08-13.md"
+        manifest_path.write_text(json.dumps({gone: "2026-05-10T13:03:05"}), encoding="utf-8")
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+
+        mod.process_plans()
+
+        assert gone in json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
 class TestProcessPlans:
     """Test process_plans main entry point."""
 
@@ -461,7 +703,15 @@ class TestProcessPlans:
         )
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
         manifest_path = tmp_path / ".plans_processed.json"
-        manifest_path.write_text(json.dumps({"done.md": "2026-01-01T00:00:00"}), encoding="utf-8")
+        # The row must POSTDATE the file. Written as 2026-01-01 against a file
+        # created moments ago, this fixture was the restore shape by accident —
+        # a plan whose content is newer than the row claiming to have processed
+        # it — and it only read as "already processed" while the check ignored
+        # everything but the name.
+        manifest_path.write_text(
+            json.dumps({"done.md": {"processed_at": "2026-01-01T00:00:00", "content_sha256": _sha(plan_file)}}),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
 
         result = mod.process_plans()

@@ -13,6 +13,8 @@ from unittest.mock import patch
 from aipass.daemon.apps.modules.run import (
     run_tick,
     handle_command,
+    OUTCOME_FAILED,
+    OUTCOME_FIRED,
     _fire_job,
     HANDLED_COMMANDS,
 )
@@ -72,7 +74,7 @@ class TestRunTick:
         assert results["due"] == 0
 
     @patch("aipass.daemon.apps.modules.run.save_runstate")
-    @patch("aipass.daemon.apps.modules.run._fire_job", return_value=(True, ""))
+    @patch("aipass.daemon.apps.modules.run._fire_job", return_value=(OUTCOME_FIRED, ""))
     @patch("aipass.daemon.apps.modules.run.discover_jobs")
     @patch("aipass.daemon.apps.modules.run.load_runstate", return_value={"jobs": {}})
     def test_fires_due_job(self, mock_rs, mock_discover, mock_fire, mock_save):
@@ -93,7 +95,7 @@ class TestRunTick:
         mock_save.assert_called()
 
     @patch("aipass.daemon.apps.modules.run.save_runstate")
-    @patch("aipass.daemon.apps.modules.run._fire_job", return_value=(False, "wake failed"))
+    @patch("aipass.daemon.apps.modules.run._fire_job", return_value=(OUTCOME_FAILED, "wake failed"))
     @patch("aipass.daemon.apps.modules.run.discover_jobs")
     @patch("aipass.daemon.apps.modules.run.load_runstate", return_value={"jobs": {}})
     def test_failed_fire_counted(self, mock_rs, mock_discover, mock_fire, mock_save):
@@ -184,9 +186,11 @@ class TestRotationDelegation:
             "prompt": "STEWARD NIGHT for {branch}.",
         }
         runstate = {"jobs": {}}
+        # fire_rotation keeps its own (ok, detail) answer; _fire_job maps it onto
+        # the three-state outcome the tick loop now reads.
         with patch(f"{RUN}.fire_rotation", return_value=(True, "woke @backup")) as mock_rotation:
-            ok, detail = _fire_job(job, runstate)
-        assert ok is True
+            outcome, detail = _fire_job(job, runstate)
+        assert outcome == OUTCOME_FIRED
         assert detail == "woke @backup"
         mock_rotation.assert_called_once_with(job, runstate)
 
@@ -195,6 +199,6 @@ class TestRotationDelegation:
             patch(f"{RUN}.fire_rotation") as mock_rotation,
             patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("no wake")),
         ):
-            ok, _detail = _fire_job(live_job(), {"jobs": {}})
-        assert ok is False
+            outcome, _detail = _fire_job(live_job(), {"jobs": {}})
+        assert outcome == OUTCOME_FAILED
         mock_rotation.assert_not_called()

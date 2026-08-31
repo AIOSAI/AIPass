@@ -228,3 +228,32 @@ class TestTheRedirectSurvivesAModuleReload:
         assert jh.JSON_DIR == jh._IMPORT_TIME_JSON_DIR
         assert jh.JSON_DIR is not jh._IMPORT_TIME_JSON_DIR, "the reload signature this pin exists for did not reproduce"
         assert jh.get_json_path("some_module", "log") == (tmp_path / "daemon" / "daemon_json" / "some_module_log.json")
+
+    def test_the_reverse_ordering_prax_reported_also_survives(self, tmp_path, monkeypatch):
+        """@prax's follow-up (mail 80088f4a): import FIRST, env set AFTERWARDS.
+
+        Their correction is right about prax and wrong about daemon, and the
+        difference is structural rather than lucky. prax's import-time constant
+        is ITSELF env-derived, so it takes a different VALUE across a reload
+        that straddles the env being set - which is why comparing against it
+        goes stale whichever operator you use. Daemon's _IMPORT_TIME_JSON_DIR
+        is never env-derived: it is the real directory and nothing else, so it
+        recomputes to the same value every reload and is already a fixed point.
+        Pinned so a later refactor cannot quietly make it env-derived.
+        """
+        import importlib
+
+        monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
+        importlib.reload(jh)
+        before = jh.JSON_DIR
+        jh.JSON_DIR = tmp_path / "transient"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "redirect"))
+        try:
+            importlib.reload(jh)
+        finally:
+            jh.JSON_DIR = before
+
+        assert jh._IMPORT_TIME_JSON_DIR == before, (
+            "the import-time default became env-derived - the prax failure now applies here"
+        )
+        assert jh.get_json_path("m", "log") == (tmp_path / "redirect" / "daemon" / "daemon_json" / "m_log.json")

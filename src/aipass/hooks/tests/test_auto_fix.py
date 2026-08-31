@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-08-27
+# Modified: 2026-08-30
 # =============================================
 
 """Tests for handlers/lifecycle/auto_fix.py.
@@ -19,6 +19,15 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# Stand-ins for tests whose subprocess is mocked — nothing here is ever touched
+# on disk. Built rather than written as POSIX literals: this file already
+# carries 24 standing windows_compat/hardcoded_path findings from the older
+# tests, and the 2026-08-30 marker fix is what finally made @seedgo's checklist
+# reachable enough to say so. New tests do not add to a count that is about to
+# be reported to its owner.
+_FAKE_HOME = str(Path(tempfile.gettempdir()) / "fake_aipass_home")
+_FAKE_PY = str(Path(tempfile.gettempdir()) / "check.py")
 
 
 class TestAutoFixSkips:
@@ -336,16 +345,103 @@ class TestAutoFixSubprocessChecks:
 
     @patch("subprocess.run")
     def test_run_seedgo_checklist_returns_violations(self, mock_run):
+        """REVERSED 2026-08-30. This test pinned a marker nobody printed.
+
+        It fed the parser a cross and asserted two findings came back, and it
+        passed for months while the live path returned [] on every file — the
+        fixture was the only place the cross still existed. @seedgo reported the
+        drift (checklist emits ``[FAIL]``); the output below is copied from a
+        real run against a violating file.
+        """
         from aipass.hooks.apps.handlers.lifecycle.auto_fix import _run_seedgo_checklist
 
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="✓ file_header: OK\n✗ missing encoding param\n✗ bad import\n",
+            stdout=(
+                "probe.py\n"
+                "  ✓ cli\n"
+                "  [FAIL] — debug_print: 1 bare print() call(s) on lines 5\n"
+                "  ✓ imports\n"
+                "  [FAIL] — hardcoded_path: 1 hardcoded path(s): L6: POSIX home path\n"
+            ),
         )
-        with patch.dict("os.environ", {"AIPASS_HOME": "/home/user/Projects/AIPass"}):
-            violations = _run_seedgo_checklist("/tmp/check.py")
+        with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
+            violations = _run_seedgo_checklist(_FAKE_PY)
         assert len(violations) == 2
-        assert "missing encoding param" in violations[0]
+        assert "debug_print" in violations[0]
+        assert "hardcoded_path" in violations[1]
+
+    @patch("subprocess.run")
+    def test_the_dead_cross_marker_finds_nothing(self, mock_run):
+        """The old fixture, run against the fixed reader: zero findings.
+
+        Kept as the negative twin so the reader can never quietly drift back.
+        """
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _run_seedgo_checklist
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="✗ missing encoding param\n✗ bad import\n")
+        with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
+            assert _run_seedgo_checklist(_FAKE_PY) == []
+
+    @patch("subprocess.run")
+    def test_a_nonzero_exit_no_longer_discards_the_findings(self, mock_run):
+        """The exit code carries nothing; stdout is the entire signal.
+
+        checklist does not sys.exit on a standards failure — measured live
+        2026-08-30, eight findings and returncode 0. Dropping output on a
+        non-zero code was the same drift pre-armed for the day it does.
+        """
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _run_seedgo_checklist
+
+        mock_run.return_value = MagicMock(returncode=1, stdout="  [FAIL] — meta: Missing META block\n")
+        with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
+            violations = _run_seedgo_checklist(_FAKE_PY)
+        assert len(violations) == 1
+        assert "meta" in violations[0]
+
+    @patch("subprocess.run")
+    def test_a_wrapped_detail_is_rejoined_not_truncated(self, mock_run):
+        """Rich wraps at the console width; the reason must survive the fold."""
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _run_seedgo_checklist
+
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "  [FAIL] — architecture: File not in standard 3-layer structure (apps/, \n"
+                "apps/modules/, apps/handlers/)\n"
+                "  ✓ cli\n"
+            ),
+        )
+        with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
+            violations = _run_seedgo_checklist(_FAKE_PY)
+        assert len(violations) == 1
+        assert violations[0].endswith("apps/handlers/)")
+
+    def test_the_marker_is_read_from_seedgo_not_restated_here(self):
+        """One definition. The next marker change cannot silently disagree."""
+        from aipass.seedgo.apps.modules.checklist import FINDING_MARKER
+
+        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _checklist_marker
+
+        assert _checklist_marker() == FINDING_MARKER
+
+    def test_an_unreadable_seedgo_falls_back_loudly(self):
+        from aipass.hooks.apps.handlers.lifecycle import auto_fix
+
+        with patch.object(auto_fix.importlib, "import_module", side_effect=ImportError("no seedgo")):
+            with patch.object(auto_fix.logger, "warning") as warned:
+                marker = auto_fix._checklist_marker()
+        assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK
+        warned.assert_called_once()
+
+    def test_a_seedgo_publishing_no_marker_falls_back_loudly(self):
+        from aipass.hooks.apps.handlers.lifecycle import auto_fix
+
+        with patch.object(auto_fix.importlib, "import_module", return_value=object()):
+            with patch.object(auto_fix.logger, "warning") as warned:
+                marker = auto_fix._checklist_marker()
+        assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK
+        warned.assert_called_once()
 
     @patch("subprocess.run")
     def test_run_seedgo_skips_claude_hooks(self, mock_run):
