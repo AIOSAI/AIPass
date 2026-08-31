@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: db.py
 # Description: The Commons SQLite connection manager
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -27,6 +27,7 @@ from typing import Optional, TypeVar, Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
+from aipass.commons.apps.handlers.module_root import module_file
 
 # =============================================================================
 # DATABASE PATHS
@@ -42,7 +43,9 @@ def _find_branch_root() -> Optional[Path]:
     Returns:
         Path to branch root (src/aipass/commons/), or None if not found.
     """
-    current = Path(__file__).resolve().parent
+    # module_file() rather than a bare .resolve(): DB_PATH calls this at module
+    # scope, so on Windows a bare resolve reads cwd at import time.
+    current = module_file(__file__).parent
     for _ in range(10):
         if (current / ".trinity").is_dir():
             return current
@@ -386,8 +389,10 @@ def _find_branch_registry() -> Optional[Path]:
     if aipass_root:
         search_paths.append(Path(aipass_root) / "AIPASS_REGISTRY.json")
 
-    # Walk up from this package to find project root
-    current = Path(__file__).resolve().parent
+    # Walk up from this package to find project root. Not reached at import
+    # time, but it shares the helper: on a machine with an unreadable cwd the
+    # right answer is still this file's own absolute path, not an OSError.
+    current = module_file(__file__).parent
     for _ in range(10):
         candidate = current / "AIPASS_REGISTRY.json"
         if candidate.exists():

@@ -38,12 +38,13 @@ logger = get_direct_logger()
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
 from .status import calculate_quick_status, merge_quick_status  # noqa: E402
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 # =============================================================================
 # PATH RESOLUTION
 # =============================================================================
 
-_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
+_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
 
 
 def _find_repo_root() -> Path:

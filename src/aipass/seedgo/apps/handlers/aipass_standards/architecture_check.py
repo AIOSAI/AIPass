@@ -29,6 +29,7 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 # with spawn's name in the traceback, not quietly score the fleet against a
 # guess. The mirror this replaces is retired (DPLAN-0319 wave 3, FPLAN-0454).
 from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
@@ -37,7 +38,7 @@ AUDIT_SCOPE = "all_files"
 # failed 439 of the fleet's 456 test files (96%, every branch) -- noise, not findings.
 APPLIES_TO = "production"
 
-PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> seedgo/
+PACK_ROOT = module_file(__file__).parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> seedgo/
 
 # Spawn templates root — live-scanned. The SUBDIRECTORY under it is never
 # guessed from citizen_class: passport 2.0 (DPLAN-0319) made the class a

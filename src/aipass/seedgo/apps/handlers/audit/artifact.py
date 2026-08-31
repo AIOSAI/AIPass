@@ -55,12 +55,13 @@ from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 # Bump when the doc SHAPE changes so consumers can gate on it.
 SCHEMA_VERSION = 1
 
 # audit/ -> handlers/ -> apps/ -> seedgo/  (never a hardcoded path)
-_SEEDGO_ROOT = Path(__file__).resolve().parents[3]
+_SEEDGO_ROOT = module_file(__file__).parents[3]
 
 ARTIFACT_DIR_NAME = ".seedgo"
 ARTIFACT_FILE_NAME = "last_audit.json"

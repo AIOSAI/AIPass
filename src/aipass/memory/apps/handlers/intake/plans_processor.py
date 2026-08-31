@@ -32,14 +32,15 @@ from aipass.memory.apps.handlers import repo_root
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Subprocess scripts
-_HANDLERS_DIR = Path(__file__).resolve().parent.parent
+_HANDLERS_DIR = module_file(__file__).parent.parent
 EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 
 # Memory venv python
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
 

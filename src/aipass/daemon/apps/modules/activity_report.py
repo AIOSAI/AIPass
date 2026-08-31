@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-01-30
-# Modified: 2026-08-16
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -206,7 +206,10 @@ def _render_entry_health(branch_name: str) -> str:
 
     try:
         from aipass.memory.apps.modules.health import get_branch_health
-    except ImportError as e:
+    # OSError as well: a cross-branch optional import can fail on the FILESYSTEM,
+    # not only on absence. @memory imports clean under a dead cwd today (measured
+    # 2026-08-31); this catches the condition rather than today's measurement.
+    except (ImportError, OSError) as e:
         logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
         lines.append(f"  {SYMBOL_WARNING} UNAVAILABLE - @memory health API not importable: {e}")
         return "\n".join(lines)

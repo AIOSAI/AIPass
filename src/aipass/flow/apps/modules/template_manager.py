@@ -32,12 +32,13 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from pathlib import Path
 from typing import List
 
 # ruff: noqa: E402
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 # External: Prax logger

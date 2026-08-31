@@ -23,9 +23,10 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 # Resolve prax root from this file's location
-_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
+_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
 
 
 def get_dashboard_path(branch_path: Path) -> Path:

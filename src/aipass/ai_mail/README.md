@@ -954,6 +954,42 @@ There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and 
 
 **Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins — the fleet ruling's own tie-break — and an error line names every losing claimant. This was a known gap for one day: `declared_roots()` returned `sorted(found)`, so the winner was alphabetical-by-resolved-path and the tie-break the ruling names could not reach this door. Re-reading the anchor here to recover it would have been a second reader of the file the gateway exists to own, so the collision was made loud and the disagreement raised with @memory instead — who dropped the sort (`registry_scope` 4.1.0, 2026-08-30). The error line stays: a tie-break being correct does not make a collision expected.
 
+## The Import Guard Needs No Filesystem
+
+`apps/handlers/__init__.py` runs a branch-access check at import time. It used to
+open with `inspect.stack()`, which builds a FrameInfo per frame and reaches
+`getsourcefile() -> getmodule() -> os.path.realpath()`. On Windows
+`ntpath.realpath` calls `os.getcwd()` unconditionally in its opening lines —
+before checking whether the path is even absolute — at a call site inside
+`getmodule` that is **not** wrapped in a try. So importing any handler in this
+package needed a readable cwd on Windows, and a disconnected share killed the
+import of a package whose only job at that moment was to compare a name.
+(@spawn's find, 2026-08-31; 16 branches carried it.)
+
+It walks frames with `sys._getframe` now — `co_filename` is already a string in
+memory — and uses `linecache` for the import line. Every `Path.resolve()` is
+guarded with a raw-spelling fallback.
+
+**Why it hid on Linux, and what the pins deny.** `posixpath.realpath` does not
+call `getcwd` for an absolute path, so the POSIX equivalent raises earlier inside
+`getabsfile()` where `inspect` catches it. Denying `os.getcwd` on Linux proves
+nothing here — measured both ways. `test_handlers_guard_import.py` denies
+`os.path.realpath`, the call the defect actually makes, and was red against the
+pre-fix guard on this machine.
+
+**A second `inspect.stack()` was deleted outright.** It looked for
+`<string>`/`<stdin>` and then returned either way — a second copy of the cwd
+dependency in service of a branch that could not change the answer. A discarded
+result does not stop being a crash site for being discarded.
+
+**Known, pre-existing, not fixed here.** `apps/__init__.py` does
+`from . import handlers`, so importing `aipass.ai_mail.apps.handlers` imports the
+parent package first, which imports handlers itself — the guard therefore sees an
+ai_mail file as the caller and allows, and the module is cached before any
+external importer is ever seen. Verified identical before and after this change,
+so it is not a regression from it. Reported rather than swept: closing it is a
+security-behaviour change that deserves its own round.
+
 ## Registry Globs Are Re-Checked in Python
 
 `pathlib` delegates glob matching to the filesystem, so on Windows and default

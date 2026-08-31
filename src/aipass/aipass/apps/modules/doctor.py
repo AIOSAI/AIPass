@@ -78,6 +78,7 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_ram,
     detect_shell,
 )
+from aipass.aipass.apps.handlers.module_root import module_file
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
     GLYPH_PASS,
@@ -88,7 +89,8 @@ from aipass.aipass.apps.handlers.ui.progress import (
 
 COMMAND = "doctor"
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[2]
+# module_file, not resolve(): import-time cwd read on Windows (module_root).
+_BRANCH_ROOT = module_file(__file__).parents[2]
 
 
 class CheckResult(NamedTuple):

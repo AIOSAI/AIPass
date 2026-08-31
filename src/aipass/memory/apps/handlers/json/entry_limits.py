@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-06-13
 # Modified: 2026-08-31
 # =============================================
@@ -95,15 +95,15 @@ Usage:
 """
 
 import copy
-from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Resolve paths relative to handler location (same pattern as memory_files.py)
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 
 # Containers no machine may PRUNE. Today: todos — open work is never archived,
 # so only the branch's own agent can cure a drifted one.
@@ -127,9 +127,43 @@ RESHAPE_ONLY_SECTIONS = ("todos",)
 
 
 # How close to the cap earns a line. 0.9 puts a 200-char cap's warning at 180,
-# which is roughly one more sentence of headroom — enough to act on, not so
-# early that most writes trip it. A ratio rather than a fixed margin so it
-# scales with caps that differ by an order of magnitude across entry types.
+# which is roughly one more sentence of headroom. A ratio rather than a fixed
+# margin so it scales with caps that differ by an order of magnitude across
+# entry types.
+#
+# "NOT SO EARLY THAT MOST WRITES TRIP IT" IS WHAT I FIRST WROTE HERE, AND IT IS
+# FALSE — measured 2026-08-31 across all 18 branches' .trinity files, 735
+# entries, at @ai_mail's request rather than on my own initiative. They saw it
+# fire on 13 of their own 15 key_learnings and asked for the fleet number
+# before accepting the threshold, which is the right order.
+#
+#   entry_type      n    fires    median length/cap
+#   sessions       294   65.0%          0.94
+#   key_learnings  258   60.5%          0.92
+#   todos           74   48.6%          0.90
+#   observations   109   35.8%          0.87
+#   TOTAL          735   57.4%
+#
+# And @ai_mail is not the outlier they assumed: at 46.4% they sit BELOW the
+# fleet's 57.4%, twelfth of eighteen. The band is everyone's.
+#
+# THE THRESHOLD SWEEP HAS NO KNEE, which is the finding rather than the number:
+#
+#   0.90 -> 57.7% of entries   (19 chars of headroom at a 200 cap)
+#   0.95 -> 35.7%              (10 chars)
+#   0.97 -> 24.2%              ( 6 chars)
+#   0.99 -> 11.6%              ( 2 chars)
+#
+# Every threshold quiet enough to read as signal leaves too little room to act
+# on, which is the one thing this line exists to give. So the distribution is
+# not telling us the warning is mistuned — it is telling us the CAP is tight,
+# and people write to the target they are given. That is a fleet-policy
+# question (whose caps these are is not mine to answer), and it is routed with
+# these numbers rather than settled by quietly retuning a constant here.
+#
+# 0.9 STAYS in the meantime, on measured value rather than taste: it has caught
+# @ai_mail three times and this branch four times in the two days it has
+# existed, and it is one line per authored entry, not per write.
 NEAR_CAP_RATIO = 0.9
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Shared JSON handler with injectable storage directory
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-08-18
+# Modified: 2026-08-31
 # =============================================
 
 """Shared JSON handler — auto-creating, self-healing JSON system.
@@ -13,15 +13,19 @@ Dependency-free: uses only stdlib. Importable before drone/prax exist.
 Each branch creates a JsonHandler instance with its own json_dir.
 Contract: save_json raises ValueError on validation failure.
 
-This module is the single write path behind the @spawn, @memory and @aipass
-json_handler shims, so its swap carries three branches at once — see
-_replace_with_retry.
+This module is the single write path behind five branch json_handler shims —
+@aipass, @canary, @memory, @spawn, plus spawn's citizen TEMPLATE, so every
+citizen minted from here on inherits whatever this file does. Measured
+2026-08-31 by grepping importers fleet-wide; the line above used to name three
+and predated @canary and the template. Any change here carries all five at
+once — see _replace_with_retry, and _get_caller_module_name, which four of the
+five reach without a local copy.
 """
 
-import inspect
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -337,11 +341,36 @@ class JsonHandler:
 
 
 def _get_caller_module_name() -> str:
-    """Auto-detect calling module name from call stack."""
-    stack = inspect.stack()
-    if len(stack) > 2:
-        caller_path = Path(stack[2].filename)
-        module_name = caller_path.stem
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    """Auto-detect calling module name from call stack.
+
+    Walks the frame chain with ``sys._getframe`` rather than
+    ``inspect.stack()``.  MEASURED 2026-08-31 (@canary's exposure report,
+    @devpulse's round-4 follow-up): ``inspect.stack()`` builds a FrameInfo per
+    frame, and for any frame whose filename is not on disk — ``<string>`` from
+    a ``-c`` command-line source, a ``compile()``d source, the frozen
+    importlib frames —
+    ``getsourcefile()`` falls through to ``getmodule()``, whose module-scanning
+    loop calls ``os.path.realpath`` OUTSIDE the ``try`` that wraps
+    ``getabsfile``.  ``ntpath.realpath`` then reads ``os.getcwd()``
+    unconditionally.
+
+    On this hot path that made LOGGING TAKE DOWN THE CALLER IT LOGS FOR:
+    ``log_operation`` resolves the module name BEFORE its own ``try``, so the
+    raise escaped every handler below it.  A frame's ``co_filename`` is already
+    a string in memory; reading it touches no filesystem.
+
+    Returns:
+        The calling module's filename stem, or ``"unknown"`` when the stack is
+        too shallow or the name is private. Behaviour is unchanged from the
+        ``inspect.stack()`` form — only the mechanism moved.
+    """
+    try:
+        frame = sys._getframe(2)
+    except ValueError:
+        # Stack shallower than the caller-of-log_operation depth; the
+        # inspect.stack() form spelled this as `len(stack) > 2`.
+        return "unknown"
+    module_name = Path(frame.f_code.co_filename).stem
+    if module_name and not module_name.startswith("_"):
+        return module_name
     return "unknown"

@@ -1,6 +1,7 @@
 """AI_Mail handlers package - Security protected."""
 
-import inspect
+import linecache
+import sys
 from pathlib import Path
 
 MY_BRANCH = "ai_mail"
@@ -15,18 +16,43 @@ def _find_real_caller():
     - Python's importlib internals
     - Frozen modules
 
+    Walks frames with sys._getframe rather than inspect.stack(). MEASURED on the
+    Windows CI gate 2026-08-31 (@spawn's find, 16 branches carried it):
+    inspect.stack() builds a FrameInfo per frame, which reaches
+    getsourcefile() -> getmodule() -> os.path.realpath(), and on Windows
+    ntpath.realpath calls os.getcwd() unconditionally in its opening lines —
+    before it checks whether the path is even absolute — at a call site inside
+    getmodule that is NOT wrapped in a try. So a branch-access guard that runs at
+    import time needed a readable cwd on Windows, and a disconnected share killed
+    every import of this package.
+
+    Invisible on Linux for as long as it existed, and the reason is worth keeping:
+    posixpath.realpath does not call getcwd for an absolute path, so the POSIX
+    equivalent raises earlier inside getabsfile() where inspect catches it.
+    Denying os.getcwd on Linux therefore proves NOTHING here — the pin denies
+    os.path.realpath, which is the call the defect actually makes.
+
+    A frame's co_filename is already a string in memory; reading it touches no
+    filesystem at all.
+
     Returns tuple: (file_path, import_line) or (None, None)
     """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
+    # Path.resolve() reaches the same realpath, so this is guarded too. __file__
+    # is already absolute here; the resolve only normalises it.
+    try:
+        this_file = str(Path(__file__).resolve())
+    except OSError:
+        this_file = __file__
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
 
         # Skip Python internals BEFORE touching the filesystem — resolve() on a
         # pseudo-filename like <string> needs a cwd, and a process whose cwd was
         # deleted dies here otherwise.
         if filename.startswith("<") or "importlib" in filename:
+            frame = frame.f_back
             continue
 
         # resolve() on a relative frame filename also needs a cwd; fall back to
@@ -36,14 +62,28 @@ def _find_real_caller():
         except OSError:
             resolved = filename
 
-        # Skip this file
-        if this_file in resolved:
+        # Skip this file. Both spellings, because a failed resolve above leaves
+        # `resolved` as the raw co_filename and the absolute this_file would
+        # then never match it.
+        if this_file in resolved or __file__ in filename:
+            frame = frame.f_back
             continue
 
-        # Found a real file - try to get the import line
+        # linecache is what inspect used for code_context; called directly it
+        # reads one named file and returns "" rather than raising when it cannot.
+        #
+        # The except below is therefore UNREACHABLE on CPython today — measured,
+        # not assumed: denying os.stat, tokenize.open, os.path.join and
+        # io.open_code each produced "" and no exception. Kept anyway, because
+        # that swallow is a property of one implementation and this runs at
+        # import time in a guard whose entire job is to not be the reason an
+        # import fails. The assumption is pinned rather than trusted — see
+        # test_handlers_guard_import.TestLinecacheSwallowsItsOwnErrors.
         import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
+        try:
+            import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        except OSError:
+            import_line = None
 
         return resolved, import_line
 
@@ -79,14 +119,14 @@ def _guard_branch_access():
         print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
 
     if caller_file is None:
-        # Can't determine caller from real files
-        # Check if we're being run from command line (external)
-        # by looking at the raw stack for <string> or <stdin>
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return  # Allow command-line Python through
-        return  # Allow if truly can't determine
+        # No caller outside this file: an interactive session, a -c script, or an
+        # importlib-only stack. All three are allowed, and always were.
+        #
+        # This used to walk inspect.stack() AGAIN looking for <string>/<stdin>,
+        # then return either way — a second copy of the cwd dependency above, in
+        # service of a branch that could not change the answer. A discarded
+        # result does not stop being a crash site for being discarded.
+        return
 
     # Check if caller is from our branch
     if f"/{MY_BRANCH}/" in caller_file.replace("\\", "/"):

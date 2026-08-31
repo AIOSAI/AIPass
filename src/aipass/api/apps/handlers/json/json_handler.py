@@ -36,11 +36,13 @@ if sys.platform == "win32":
 # Logging
 from aipass.prax import logger
 
+from aipass.api.apps.handlers.module_root import module_file
+
 # Infrastructure
 
 # Constants — package-relative paths
 # Navigate: json_handler.py -> json/ -> handlers/ -> apps/ -> api/
-API_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+API_ROOT = module_file(__file__).parent.parent.parent.parent
 API_JSON_DIR = API_ROOT / "api_json"
 
 # One lock per document, handed out on demand. Every module in this branch logs

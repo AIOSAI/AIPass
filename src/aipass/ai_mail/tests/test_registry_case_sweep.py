@@ -61,6 +61,41 @@ def case_insensitive_fs(monkeypatch):
     return _folded
 
 
+def _host_folds_case(directory: Path) -> bool:
+    """Does THIS filesystem match a glob case-insensitively? Measured, not guessed.
+
+    Writes ``aipass_case_probe`` and globs for the UPPERCASE spelling — the same
+    direction as the defect (an uppercase pattern reaching a lowercase file), not
+    a generic folding question. The first cut measured the other direction and
+    came back False even under the emulator, which folds patterns downward only;
+    a probe that does not travel the defect's direction reports on something
+    else. A probe
+    rather than ``sys.platform``, because case-folding is a property of the
+    FILESYSTEM and not of the OS — macOS is folding by default and
+    case-sensitive when formatted that way, and a mounted volume can disagree
+    with its own host. Never skipif: a skip retires the assertion on exactly the
+    platform whose CI found the defect.
+    """
+    marker = directory / "aipass_case_probe"
+    marker.write_text("", encoding="utf-8")
+    try:
+        return bool(list(directory.glob("AIPASS_CASE_PROBE")))
+    finally:
+        marker.unlink()
+
+
+def test_the_host_probe_is_consistent_with_itself(tmp_path):
+    """The probe's own control. It must agree with a direct existence check —
+    otherwise it is reporting a property of glob rather than of the filesystem,
+    and every branch it gates is chosen on noise."""
+    marker = tmp_path / "aipass_case_probe"
+    marker.write_text("", encoding="utf-8")
+    by_glob = bool(list(tmp_path.glob("AIPASS_CASE_PROBE")))
+    by_stat = (tmp_path / "AIPASS_CASE_PROBE").exists()
+    marker.unlink()
+    assert by_glob == by_stat
+
+
 def _decoy(directory: Path, name: str = "wrong_registry.json") -> Path:
     """A lowercase counter file that MAPS TO A WRONG IDENTITY.
 
@@ -108,13 +143,59 @@ class TestTheInstrumentIsHonest:
         )
 
     def test_negative_control_the_instrument_can_say_no(self, tmp_path):
-        """Same fixture tree, instrument NOT installed. If this also finds the
-        decoy then the emulator is not what is doing the work above, and every
-        widening pin in this file is measuring the real filesystem instead.
-        @spawn's CONTROL_LIVE probe could never say no until a mutant caught it
-        lying."""
-        _decoy(tmp_path)
-        assert list(tmp_path.glob("*_REGISTRY.json")) == []
+        """Same fixture tree, instrument NOT installed.
+
+        The claim is that the EMULATOR is what widens the listing above. On a
+        case-sensitive host that reads as "the raw glob finds nothing". On
+        Windows and default macOS the raw glob finds the decoy by itself — the
+        host folds, which is the entire defect these pins exist for — so the
+        original spelling of this control failed on the windows-setup leg of
+        ebb8075d asserting `== []` against a real WindowsPath.
+
+        So the host is PROBED, never assumed and never skipif'd (@memory's
+        ruling, applied fleet-wide 2026-08-31): write ``Foo``, glob ``foo``. On a
+        folding host the claim becomes the STRONGER one — the decoy is visible to
+        the raw glob and ``registries_in`` refuses it anyway, which is what the
+        production code has to do on the machine that actually folds. Either way
+        the control can still say no; @spawn's CONTROL_LIVE probe could not until
+        a mutant caught it lying.
+        """
+        from aipass.ai_mail.apps.handlers.paths import registries_in
+
+        decoy = _decoy(tmp_path)
+
+        if _host_folds_case(tmp_path):
+            assert decoy in list(tmp_path.glob("*_REGISTRY.json")), (
+                "host was probed as case-folding, so the raw glob must see the decoy"
+            )
+            assert registries_in(tmp_path) == [], (
+                "on a folding host the reader is the ONLY thing standing between "
+                "a counter file and the caller — and it must still refuse it"
+            )
+        else:
+            assert list(tmp_path.glob("*_REGISTRY.json")) == []
+
+    def test_the_probe_reports_folding_when_the_host_folds(self, tmp_path, case_insensitive_fs):
+        """The Windows branch of the control above never executes on Linux, so
+        it would ship unverified. Driven here through the emulator: with a
+        folding glob installed the probe must SAY so, and the production reader
+        must still refuse the decoy that the raw glob now hands it.
+
+        This is the assertion that actually ran red on the windows-setup leg —
+        reproduced on Linux rather than left to the next CI train to discover.
+        """
+        assert _host_folds_case(tmp_path) is True
+
+        from aipass.ai_mail.apps.handlers.paths import registries_in
+
+        decoy = _decoy(tmp_path)
+        assert decoy in list(tmp_path.glob("*_REGISTRY.json"))
+        assert registries_in(tmp_path) == []
+
+    def test_the_probe_reports_case_sensitive_on_this_host(self, tmp_path):
+        """Its twin, and the reason both are here: on the CI matrix these two
+        tests take opposite branches, and each is the other's control."""
+        assert _host_folds_case(tmp_path) is False
 
     def test_the_decoy_would_genuinely_seat_the_wrong_citizen(self, tmp_path):
         """The decoy is a real registry naming a real branch. Without this, a

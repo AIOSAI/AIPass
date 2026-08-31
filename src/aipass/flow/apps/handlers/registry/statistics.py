@@ -26,14 +26,15 @@ Usage:
     # stats contains: total_plans, open_plans, closed_plans, etc.
 """
 
-from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
 
 from aipass.flow.apps.handlers.json import json_handler
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # =============================================
 # HANDLER FUNCTION

@@ -2,10 +2,12 @@
 # META DATA HEADER
 # Name: handlers/__init__.py
 # Date: 2025-11-15
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: cli/handlers
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-08-31): Dead-cwd cure — sys._getframe walk over inspect.stack(),
+#       linecache over code_context, guarded resolve, dead second walk deleted
 #   - v1.0.0 (2025-11-15): Initial implementation - Public API
 # =============================================
 
@@ -18,10 +20,11 @@ Usage:
     from aipass.cli.apps.handlers import error_handler
 """
 
-import inspect
+import linecache
+import sys
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 MY_BRANCH = "cli"
 
@@ -36,17 +39,39 @@ def _find_real_caller():
     - Frozen modules
 
     Returns tuple: (file_path, import_line) or (None, None)
-    """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    Walks frames with sys._getframe rather than inspect.stack(). MEASURED here
+    2026-08-31 against the Windows shape (@trigger's report, @memory's finding on
+    the Windows CI gate): inspect.stack() needs a READABLE CWD, and it needs one
+    before any of this function's own code runs. It builds a FrameInfo per frame,
+    which reaches getsourcefile() -> getmodule() -> os.path.realpath(); ntpath's
+    realpath calls os.getcwd() UNCONDITIONALLY on its first lines, before it even
+    checks whether the path is absolute, and that call site in getmodule is not
+    inside a try. On POSIX the equivalent raise happens earlier, inside
+    getabsfile(), where inspect catches it — which is why this was invisible on
+    Linux for as long as it existed. A frame's co_filename is already a string in
+    memory; reading it touches the filesystem not at all.
+
+    This guard runs at IMPORT time (bottom of this file), and most of the fleet
+    imports aipass.cli, so the blast radius of the old spelling was every
+    consumer of this branch, not just this branch.
+    """
+    # Path.resolve() reaches the same ntpath.realpath, so this is guarded too —
+    # __file__ is already absolute; the resolve only normalises it.
+    try:
+        this_file = str(Path(__file__).resolve())
+    except OSError:
+        this_file = __file__
+
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
 
         # Skip Python internals BEFORE touching the filesystem — resolve() on a
         # pseudo-filename like <string> needs a cwd, and a process whose cwd was
         # deleted dies here otherwise.
         if filename.startswith("<") or "importlib" in filename:
+            frame = frame.f_back
             continue
 
         # resolve() on a relative frame filename also needs a cwd; fall back to
@@ -57,13 +82,18 @@ def _find_real_caller():
             resolved = filename
 
         # Skip this file
-        if this_file in resolved:
+        if this_file in resolved or __file__ in filename:
+            frame = frame.f_back
             continue
 
-        # Found a real file - try to get the import line
+        # Found a real file - try to get the import line. linecache is what
+        # inspect used for code_context; called directly it reads one named file
+        # and returns "" rather than raising when it cannot.
         import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
+        try:
+            import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        except OSError:
+            import_line = None
 
         return resolved, import_line
 
@@ -93,20 +123,19 @@ def _guard_branch_access():
     import os
 
     if os.environ.get("AIPASS_DEBUG_GUARD"):
-        import sys
-
         print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
         print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
 
     if caller_file is None:
-        # Can't determine caller from real files
-        # Check if we're being run from command line (external)
-        # by looking at the raw stack for <string> or <stdin>
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return  # Allow command-line Python through
-        return  # Allow if truly can't determine
+        # No caller outside this file: an interactive session, a -c script, or an
+        # importlib-only stack. All three are allowed. This used to walk
+        # inspect.stack() again looking for <string>/<stdin> and then return
+        # either way — a second copy of the cwd dependency above, in service of a
+        # branch that could not change the answer. @prax's ruling, and @trigger
+        # measured the same dead arm in their own copy: a call that needs a
+        # working directory to compute a value nobody reads is pure exposure.
+        # Delete rather than wrap.
+        return
 
     # Check if caller is from our branch
     if f"/{MY_BRANCH}/" in caller_file.replace("\\", "/"):

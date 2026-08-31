@@ -31,9 +31,10 @@ from typing import Dict, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 # Every checker in the pack lives under this package's parent.
-HANDLERS_ROOT = Path(__file__).resolve().parents[1]
+HANDLERS_ROOT = module_file(__file__).parents[1]
 PACK_ROOT = HANDLERS_ROOT / "aipass_standards"
 
 

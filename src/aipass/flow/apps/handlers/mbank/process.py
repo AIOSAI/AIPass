@@ -22,8 +22,6 @@ Key Functions:
 # ruff: noqa: E402
 from pathlib import Path
 
-_PKG_ROOT = Path(__file__).resolve().parents[4]
-
 # Standard imports
 import json
 import os
@@ -33,7 +31,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # AI summarization removed — OpenRouter API no longer needed here
 # from aipass.api.apps.modules.openrouter_client import get_response
@@ -76,12 +77,16 @@ def _release_lock(lock_path: Path) -> None:
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
+
+    Delegates to ``handlers/repo_root.find_repo_root`` — the one
+    implementation. This used to be a private copy ending
+    ``return Path.cwd()``; there were seven such copies in flow and six of
+    them are called at MODULE level, so on a registry-less checkout every
+    import guessed its root from the process directory, and with the cwd
+    deleted the import died outright. See that module's docstring.
+    """
+    return find_repo_root(caller="mbank_process")
 
 
 _REPO_ROOT = _find_repo_root()

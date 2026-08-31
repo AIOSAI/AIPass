@@ -25,10 +25,11 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.module_root import module_file
 
 CONSOLE = err_console
 
-_MODULE_DIR = Path(__file__).resolve().parent
+_MODULE_DIR = module_file(__file__).parent
 _SRT_RESOLVE = _MODULE_DIR / "_srt_resolve.mjs"
 
 _VAR_TMP = Path("/var/tmp")

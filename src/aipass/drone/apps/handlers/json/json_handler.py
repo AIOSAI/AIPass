@@ -14,7 +14,6 @@ ensure_json_file() for auto-creating branch-scoped JSON files.
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import sys
@@ -33,12 +32,14 @@ if sys.platform == "win32":
 
 from aipass.prax import logger
 
+from aipass.drone.apps.handlers.module_root import module_file
+
 # ---------------------------------------------------------------------------
 # Infrastructure — auto-detect branch root from file location
 # json_handler.py -> json/ -> handlers/ -> apps/ -> drone/
 # ---------------------------------------------------------------------------
 
-_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT: Path = module_file(__file__).parents[3]
 _BRANCH_NAME: str = _BRANCH_ROOT.name  # "drone"
 
 # The real tree, captured once so an explicit patch can be told apart from it.
@@ -140,16 +141,35 @@ def _get_caller_module_name() -> str:
     Walks past internal frames ([0] = this function, [1] = public function,
     [2] = actual caller) and returns the stem of the caller's filename.
 
+    Reads the frame directly rather than through ``inspect.stack()``. MEASURED
+    2026-08-31 in the hostile world that emulates a Windows box with no working
+    directory: ``inspect.stack()`` builds a ``FrameInfo`` per frame, and for any
+    frame whose filename is a PSEUDO-file — ``<string>``, which every interpreter
+    ``-c`` invocation and every exec'd hook puts on the stack — it reaches
+    ``getmodule()``, whose ``os.path.realpath`` sits outside that function's
+    every ``try``. The whole call then raises ``FileNotFoundError``, so
+    ``log_operation`` — the audit line drone writes on essentially every
+    operation — took the caller down from inside its own logging. On POSIX the
+    equivalent raise happens earlier, where ``inspect`` catches it, which is why
+    this stood on Linux for as long as it existed.
+
+    ``FrameInfo.filename`` is ``getsourcefile(frame) or getfile(frame)``, and
+    both fall back to ``co_filename`` for the frames this walk looks at, so the
+    stem is the same string by a route that touches no filesystem at all.
+
     Returns:
         Module name (e.g. ``"flight_controller"`` from ``flight_controller.py``).
     """
-    stack = inspect.stack()
     # Skip frames: [0]=this function, [1]=public wrapper, [2]=actual caller
-    if len(stack) > 2:
-        caller_path = Path(stack[2].filename)
-        module_name = caller_path.stem
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError:
+        # Fewer than three frames — the old form's `len(stack) > 2` guard.
+        return "unknown"
+
+    module_name = Path(caller_frame.f_code.co_filename).stem
+    if module_name and not module_name.startswith("_"):
+        return module_name
     return "unknown"
 
 

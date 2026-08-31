@@ -64,7 +64,7 @@ def _get_write_section() -> Optional[Callable[..., Any]]:
             from aipass.devpulse.apps.modules import dashboard as _dashboard  # type: ignore[import-not-found]
 
             _write_section_fn = _dashboard.write_section
-        except ImportError:
+        except (ImportError, OSError):
             logger.warning("[dashboard_writer] devpulse import fallback")
             _write_section_fn = None
     return _write_section_fn

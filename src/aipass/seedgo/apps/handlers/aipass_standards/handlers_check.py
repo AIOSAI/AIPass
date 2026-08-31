@@ -304,34 +304,184 @@ def _public_function_takes_module_name(content: str) -> bool:
     return False
 
 
+#: Every way a handler can ask "who called me". The point of the SET is that the
+#: standard's question is whether the caller is detected, never which library
+#: spells it — see :func:`_walks_the_caller_frame`.
+_FRAME_WALK_CALLS = frozenset(
+    {
+        "sys._getframe",
+        "inspect.currentframe",
+        "inspect.stack",
+        "inspect.getouterframes",
+        "traceback.extract_stack",
+        "traceback.walk_stack",
+    }
+)
+
+#: Helper names that ARE the auto-detection, whatever they use inside.
+_CALLER_HELPER_MARKERS = ("_get_caller_module_name", "get_caller")
+
+
+def _module_name_is_optional(content: str) -> bool:
+    """True when some public function lets ``module_name`` be omitted.
+
+    AUTO-DETECTION ONLY MEANS SOMETHING IF THE ARGUMENT CAN BE MISSING. A
+    required ``module_name`` is supplied by every caller at every call site;
+    there is nothing to detect, and demanding a frame walk there asks for code
+    that can never run.
+
+    Measured 2026-08-31 across the fleet's 19 handler files with a public
+    ``module_name``: 3 take it as REQUIRED and were red for a cure that would be
+    dead code (@prax's logging/lifecycle.py, logging/setup.py and
+    terminal/filtering.py). 16 take it optionally, which is the population this
+    standard is actually about.
+
+    Args:
+        content: File source.
+
+    Returns:
+        True if any public function accepts ``module_name`` with a default,
+        or absorbs it through ``*args`` / ``**kwargs``.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        # Unreadable is not evidence of absence — same rule as the scan above.
+        logger.info("handlers: unparseable, assuming module_name is optional: %s", exc)
+        return True
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name.startswith("_"):
+            continue
+        args = node.args
+        positional = [*args.posonlyargs, *args.args]
+        first_defaulted = len(positional) - len(args.defaults)
+        for index, arg in enumerate(positional):
+            if arg.arg == "module_name" and index >= first_defaulted:
+                return True
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+            if arg.arg == "module_name" and default is not None:
+                return True
+        if (args.vararg and args.vararg.arg == "module_name") or (args.kwarg and args.kwarg.arg == "module_name"):
+            return True
+    return False
+
+
+def _walks_the_caller_frame(content: str) -> bool:
+    """True when the file asks who called it, BY ANY MECHANISM.
+
+    THE CHECK USED TO MANDATE THE DEFECT. It accepted the literal string
+    ``inspect.stack()`` as its proof, and told every failing handler to "use
+    inspect.stack()". That call is the Windows dead-cwd defect the fleet spent
+    this week removing: it reaches an unguarded ``os.path.realpath`` inside
+    ``inspect.getmodule``, and ``ntpath.realpath`` reads ``os.getcwd()`` before
+    checking anything. @prax cured their own site and the audit dropped the file
+    to 66% and told them to put it back (reported 2026-08-31); they renamed a
+    helper rather than restore the call, which fixed prax and left the checker
+    pointed at the next branch to cure.
+
+    So the acceptance is on the QUESTION, not the spelling. ``sys._getframe`` is
+    the sound answer — seedgo's own json_handler has used it since the day
+    inspect.stack() made audits slow — and it is what the failure message now
+    names.
+
+    AST, never a substring, and that matters in BOTH directions: the old text
+    scan passed a file whose only ``inspect.stack()`` sat in a docstring or a
+    comment. @drone hit the mirror image the same morning — a text BAN convicting
+    the docstring that explained the cure. A string rule is too broad and too
+    narrow at once.
+
+    Args:
+        content: File source.
+
+    Returns:
+        True if a call to any known frame-walk API, or to a named caller
+        helper, appears anywhere in the file's parse tree.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("handlers: unparseable, cannot see a frame walk: %s", exc)
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+            marker in node.name for marker in _CALLER_HELPER_MARKERS
+        ):
+            return True
+        if not isinstance(node, ast.Call):
+            continue
+        dotted = _dotted_call_name(node.func)
+        if dotted in _FRAME_WALK_CALLS or any(marker in dotted for marker in _CALLER_HELPER_MARKERS):
+            return True
+    return False
+
+
+def _dotted_call_name(func: ast.expr) -> str:
+    """Dotted spelling of a call target, or "" when it is not a plain name.
+
+    Args:
+        func: The ``func`` of an ``ast.Call``.
+
+    Returns:
+        e.g. ``"sys._getframe"``, ``"inspect.stack"``, ``"log_operation"``.
+    """
+    parts = []
+    while isinstance(func, ast.Attribute):
+        parts.append(func.attr)
+        func = func.value
+    if isinstance(func, ast.Name):
+        parts.append(func.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
 def check_auto_detection(content: str) -> Optional[Dict]:
-    """
-    Check for auto-detection pattern if handler accepts module_name
+    """Check that a handler detects its caller when ``module_name`` is omissible.
 
-    If handler has module_name parameter, should use inspect.stack() auto-detection
-    """
-    has_module_name_param = _public_function_takes_module_name(content)
+    TWO CLAUSES, both AST and both measured before landing (2026-08-31):
+      1. some PUBLIC function takes ``module_name`` and lets it be omitted —
+         a required parameter has nothing to detect;
+      2. the file walks the caller frame by SOME mechanism, or carries a named
+         caller helper.
 
-    if not has_module_name_param:
+    WHAT THIS CHECK CANNOT SEE, named here rather than left for the next branch
+    to discover: it reads the parameter's NAME, so a ``module_name`` that is an
+    event PAYLOAD field rather than a caller identity looks identical to it.
+    @trigger's events/warning_logged.py is the live example — its
+    ``module_name`` is the module that logged a warning, carried in the event,
+    and its caller is the event bus. Auto-detecting there would be wrong. That
+    distinction is semantic and I have no structural measure for it, so it stays
+    a finding with its blind spot stated rather than a clause I cannot defend.
+
+    Args:
+        content: File source.
+
+    Returns:
+        A check dict, or None when the standard does not apply to this file.
+    """
+    if not _public_function_takes_module_name(content):
         return None  # No module_name parameter, auto-detection not needed
 
-    # Check for auto-detection implementation
-    has_inspect_import = "import inspect" in content
-    has_stack_usage = "inspect.stack()" in content
-    has_auto_detect_function = "_get_caller_module_name" in content or "get_caller" in content
+    if not _module_name_is_optional(content):
+        return None  # Callers always supply it — there is nothing to detect
 
-    if has_auto_detect_function or (has_inspect_import and has_stack_usage):
+    if _walks_the_caller_frame(content):
         return {
             "name": "Auto-detection pattern",
             "passed": True,
-            "message": "Auto-detection pattern implemented (inspect.stack())",
+            "message": "Auto-detection pattern implemented (caller frame is read)",
         }
 
-    # Has module_name param but no auto-detection
     return {
         "name": "Auto-detection pattern",
         "passed": False,
-        "message": "Has module_name parameter but missing auto-detection (use inspect.stack())",
+        "message": (
+            "Has an optional module_name but never reads the caller frame "
+            "(use sys._getframe — NOT inspect.stack(), which needs a readable cwd on Windows). "
+            "If this module_name is an event payload rather than a caller identity, say so — "
+            "the checker reads the name and cannot tell them apart."
+        ),
     }
 
 

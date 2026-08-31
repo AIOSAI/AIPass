@@ -45,7 +45,9 @@ from aipass.flow.apps.handlers.json import json_handler
 MODULE_NAME = "registry_ops"
 
 # registry_ops.py -> template/ -> handlers/ -> apps/ -> flow/
-FLOW_ROOT: Path = Path(__file__).resolve().parents[3]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+FLOW_ROOT: Path = module_file(__file__).parents[3]
 REGISTRY_PATH: Path = FLOW_ROOT / "flow_json" / "template_registry.json"
 
 # Default seed data -- ensures existing plan types work on fresh install

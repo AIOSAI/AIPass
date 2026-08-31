@@ -23,9 +23,10 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
+from aipass.hooks.apps.handlers.module_root import module_file
 
 CONSOLE = err_console
-BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
+BRANCH_ROOT = module_file(__file__).parent.parent.parent
 
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),

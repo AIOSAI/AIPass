@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -40,7 +41,7 @@ def _find_registry() -> Path:
 
 
 # Generator lives in the same handlers/readme/ directory as this file
-GENERATOR_PATH = Path(__file__).resolve().parent / "readme_generator.py"
+GENERATOR_PATH = module_file(__file__).parent / "readme_generator.py"
 
 # Section display names for output
 SECTION_NAMES = {

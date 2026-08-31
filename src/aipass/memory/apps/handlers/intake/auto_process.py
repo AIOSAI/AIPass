@@ -46,8 +46,9 @@ from typing import Any, Dict
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler, config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
 
 # Single-flight lock. Two sessions can start seconds apart, and two concurrent
 # rollovers would write the same .trinity files. Staleness is time-based rather
@@ -172,7 +173,7 @@ def spawn_background() -> Dict[str, Any]:
         kwargs["start_new_session"] = True
 
     try:
-        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve())], **kwargs)
+        child = subprocess.Popen([sys.executable, str(module_file(__file__))], **kwargs)
     except Exception as e:
         logger.error(f"[auto_process] Spawn failed: {e}")
         json_handler.log_operation("spawn_background", {"success": False, "error": str(e)})

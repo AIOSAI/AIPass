@@ -54,7 +54,49 @@ logger = logging.getLogger(__name__)
 REGISTRY_MARKER = "AIPASS_REGISTRY.json"
 SOURCE_DIR_NAME = "src"
 
-_THIS_FILE = Path(__file__).resolve()
+
+def resolved_file(path: Path) -> Path:
+    """``Path.resolve()`` that cannot need a working directory.
+
+    ``__file__`` is already absolute, so on POSIX resolving it only normalises
+    symlinks and never reads the process state. NOT SO ON WINDOWS:
+    ``ntpath.realpath`` calls ``os.getcwd()`` unconditionally on its first lines,
+    before it checks whether the path is even absolute. So every
+    ``Path(__file__).resolve()`` executed at IMPORT is a working-directory read
+    on Windows — in a branch whose modules are imported by the whole fleet.
+
+    Measured by @spawn on the Windows CI gate 2026-08-31 inside inspect's stack
+    walk; prax then found NINE more copies of the bare form at module level, one
+    of them in this very module. Falling back to the unresolved path is safe
+    because the input is already absolute; only the symlink normalisation is
+    lost, and a normalisation is worth less than an import.
+
+    Args:
+        path: An absolute path, normally ``Path(__file__)``.
+
+    Returns:
+        The resolved path, or the input unchanged when resolution needs state
+        the process cannot read.
+    """
+    try:
+        return path.resolve()
+    except OSError as exc:
+        # debug, not warning: on Windows this fires for every module-level
+        # constant in a process whose cwd is gone, and the unresolved path is a
+        # correct answer, not a degraded one. A warning per import would be noise
+        # about a handled condition — but a trail has to exist, because the day
+        # this fires is the day someone is reading logs asking why.
+        logger.debug("[repo_root] %s could not be resolved (%s); using it unresolved", path, exc)
+        return path
+
+
+# Guarded inline rather than through resolved_file(): this constant is built
+# before that function is defined, and the module must not reorder around it.
+try:
+    _THIS_FILE = Path(__file__).resolve()
+except OSError as _exc:
+    logger.debug("[repo_root] this module's own path could not be resolved (%s); using it unresolved", _exc)
+    _THIS_FILE = Path(__file__)
 
 # The fallback is announced once per process, not once per caller. Every module
 # in the branch reaches this during import; a per-call warning would bury CI

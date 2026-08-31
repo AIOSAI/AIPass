@@ -22,8 +22,9 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.module_root import module_file
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]  # json/ -> handlers/ -> apps/ -> {branch}/
+_BRANCH_ROOT = module_file(__file__).parents[3]  # json/ -> handlers/ -> apps/ -> {branch}/
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 

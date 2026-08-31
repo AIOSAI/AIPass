@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards import exception_handling
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
@@ -85,7 +86,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "ERROR_HANDLING"}
 
 
-def _silent_except_lines(content: str) -> Optional[List[int]]:
+def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[int]]:
     """Return the 1-indexed lines of every `except ...:` whose body is only `pass`.
 
     Returns None when the file cannot be parsed, so the caller can skip rather
@@ -106,11 +107,23 @@ def _silent_except_lines(content: str) -> Optional[List[int]]:
         logger.info("Skipping error-handling scan: SyntaxError during parse: %s", e)
         return None
 
-    return [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ExceptHandler) and node.body and all(isinstance(s, ast.Pass) for s in node.body)
-    ]
+    # Walked as Try nodes so the diagnostic-guard clause can read the BLOCK a
+    # handler protects; an ExceptHandler has no link back to its own try.
+    silent = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            if not handler.body or not all(isinstance(s, ast.Pass) for s in handler.body):
+                continue
+            # A `pass` guarding a block that does nothing but REPORT is catching
+            # the failure of the report, not the original error — the same
+            # clause silent_catch uses, shared so the two cannot drift
+            # (@canary and @daemon, 2026-08-31).
+            if exception_handling.guards_a_diagnostic(node, module_path, handler.lineno):
+                continue
+            silent.append(handler.lineno)
+    return sorted(silent)
 
 
 def check_error_handling(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
@@ -120,7 +133,7 @@ def check_error_handling(content: str, lines: List[str], module_path: str = "") 
     if try_count == 0:
         return None
 
-    silent_lines = _silent_except_lines(content)
+    silent_lines = _silent_except_lines(content, module_path)
     if silent_lines is None:
         return None
 

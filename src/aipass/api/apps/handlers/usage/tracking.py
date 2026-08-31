@@ -18,8 +18,6 @@ Business logic for tracking API usage from OpenRouter:
 Functions: track_usage(), get_generation_metrics(), store_usage_data()
 """
 
-from pathlib import Path
-
 # Standard library imports
 import json
 import requests
@@ -29,6 +27,8 @@ from typing import Dict, Any, Optional
 
 # Logging
 from aipass.prax import logger
+
+from aipass.api.apps.handlers.module_root import module_file
 
 # JSON handler
 from aipass.api.apps.handlers.json import json_handler
@@ -40,7 +40,7 @@ from aipass.api.apps.handlers.json import json_handler
 MODULE_NAME = "tracking"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
 # Navigate: tracking.py -> usage/ -> handlers/ -> apps/ -> api/
-API_JSON_DIR = Path(__file__).resolve().parent.parent.parent.parent / "api_json"
+API_JSON_DIR = module_file(__file__).parent.parent.parent.parent / "api_json"
 
 # OpenRouter API configuration
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"

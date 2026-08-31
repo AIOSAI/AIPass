@@ -249,7 +249,7 @@
       "path": "apps/handlers/README.md"
     },
     "f022": {
-      "content_hash": "6f6b7eb97944",
+      "content_hash": "081f1621005e",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "apps/handlers/__init__.py"
@@ -279,7 +279,7 @@
       "path": "__init__.py"
     },
     "f027": {
-      "content_hash": "e17341c51e86",
+      "content_hash": "3f94fa075d1f",
       "has_branch_placeholder": true,
       "name": "{{BRANCH}}.py",
       "path": "apps/{{BRANCH}}.py"
@@ -399,7 +399,7 @@
       "path": "apps/handlers/json/__init__.py"
     },
     "f047": {
-      "content_hash": "afed9ec00a56",
+      "content_hash": "699a7c1684a1",
       "has_branch_placeholder": false,
       "name": "json_handler.py",
       "path": "apps/handlers/json/json_handler.py"
@@ -411,7 +411,7 @@
       "path": "tests/test_cli_routing.py"
     },
     "f049": {
-      "content_hash": "4b01d4130807",
+      "content_hash": "8b5cac768340",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
@@ -425,7 +425,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-08-30",
+    "last_updated": "2026-08-31",
     "version": "1.0.0"
   }
 }

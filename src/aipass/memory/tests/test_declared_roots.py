@@ -494,6 +494,22 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
     the pattern matched a file the rule excludes. @devpulse routed the question
     to every walk owner. Both of mine were exposed.
 
+    THE DECOY'S STEM DIFFERS FROM THE REAL REGISTRY'S, and that is a
+    correctness requirement rather than a stylistic choice. A first version used
+    ``wren_registry.json`` beside ``WREN_REGISTRY.json`` — two names differing
+    only by case, which a folding filesystem CANNOT HOLD AT ONCE. On the Windows
+    CI leg the second write did not add a decoy, it OVERWROTE the real
+    registry's content under the original filename, and the test then measured
+    an overwrite while claiming to measure case-globbing. It failed for a reason
+    unrelated to the defect, which is the luckiest possible outcome; it could
+    just as easily have passed.
+
+    Distinct stems (``flow_json_registry.json``, exactly the real bait @drone
+    hit) coexist on every filesystem, so the SAME world is built on a folding
+    host and a case-sensitive one. The emulation is what widens the glob here;
+    on Windows the filesystem does it natively and the emulation is a harmless
+    no-op. Nothing is skipped by platform and nothing needs to probe the host.
+
     IT IS NOT A COSMETIC WIDENING HERE, which is why it earns pins rather than
     a note. Both walks read the match COUNT as meaning: zero registries at a
     declared root is an error, and more than one is a named refusal rather than
@@ -512,16 +528,16 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
         not an emulation that quietly does nothing.
         """
         wren = machine.parent / "wren"
-        _write(wren / "wren_registry.json", _registry(_branch("mirage", "src/mirage")))
+        _write(wren / "flow_json_registry.json", _registry(_branch("mirage", "src/mirage")))
 
         matched = sorted(path.name for path in wren.glob(rs.EXTERNAL_REGISTRY_GLOB))
 
-        assert matched == ["WREN_REGISTRY.json", "wren_registry.json"]
+        assert matched == ["WREN_REGISTRY.json", "flow_json_registry.json"]
 
     def test_a_lowercase_neighbour_does_not_make_a_root_ambiguous(self, machine, case_insensitive_filesystem):
         """The defect: one stray filename, and every citizen behind it is gone."""
         wren = machine.parent / "wren"
-        _write(wren / "wren_registry.json", _registry(_branch("mirage", "src/mirage")))
+        _write(wren / "flow_json_registry.json", _registry(_branch("mirage", "src/mirage")))
         _write(wren / "src/mirage/.trinity/passport.json", {"citizenship": {}})
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
 
@@ -539,7 +555,7 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
         than read the file.
         """
         lonely = machine.parent / "Lonely"
-        _write(lonely / "lonely_registry.json", _registry(_branch("nobody", "src/nobody")))
+        _write(lonely / "flow_json_registry.json", _registry(_branch("nobody", "src/nobody")))
         _write(lonely / "src/nobody/.trinity/passport.json", {"citizenship": {}})
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../Lonely")))
 
@@ -598,3 +614,40 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
 
         assert kept == [Path("/x/B_REGISTRY.json"), Path("/x/aa_REGISTRY.json")]
+
+
+class TestWhatTheHostCanActuallyHold:
+    """A probe, not an assumption — the shape @devpulse asked for.
+
+    The tests above are built on the claim that a decoy whose STEM differs
+    coexists with the real registry everywhere, while one differing only by CASE
+    does not. That claim decides how every case-glob pin in this branch is
+    written, so it is measured rather than asserted in a comment, on whatever
+    filesystem is running the suite.
+
+    Both outcomes are legal and both are pinned. What would not be legal is a
+    ``skipif`` here: the host can be asked, and a platform guess is what put an
+    overwrite behind a test that claimed to be about globbing.
+    """
+
+    def test_two_names_differing_only_by_case_may_be_one_file(self, tmp_path):
+        (tmp_path / "A_REGISTRY.json").write_text("first", encoding="utf-8")
+        (tmp_path / "a_registry.json").write_text("second", encoding="utf-8")
+
+        entries = sorted(path.name for path in tmp_path.iterdir())
+
+        if len(entries) == 1:
+            # Folding host: the directory entry keeps the ORIGINAL spelling and
+            # the CONTENT is replaced. That is why a case-only decoy silently
+            # became an overwrite of the real registry on the Windows CI leg.
+            assert entries == ["A_REGISTRY.json"], entries
+            assert (tmp_path / "A_REGISTRY.json").read_text(encoding="utf-8") == "second"
+        else:
+            assert entries == ["A_REGISTRY.json", "a_registry.json"]
+
+    def test_a_differing_stem_is_always_a_second_file(self, tmp_path):
+        """The property every case-glob pin in this branch relies on."""
+        (tmp_path / "A_REGISTRY.json").write_text("first", encoding="utf-8")
+        (tmp_path / "flow_json_registry.json").write_text("second", encoding="utf-8")
+
+        assert len(list(tmp_path.iterdir())) == 2

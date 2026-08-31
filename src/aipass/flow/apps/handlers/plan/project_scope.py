@@ -53,6 +53,7 @@ from typing import Dict, Optional
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.repo_root import exactly_named
 
 MODULE_NAME = "project_scope"
 
@@ -71,7 +72,14 @@ def _holds_register(directory: Path) -> bool:
     project and its rows fall out of the real project's scope.
     """
     try:
-        candidates = sorted(directory.glob(REGISTER_GLOB))
+        # exactly_named, not the glob alone: pathlib's glob is case-INSENSITIVE
+        # on Windows and default macOS, so REGISTER_GLOB also matches flow's own
+        # lowercase flow_json/*_registry.json plan registries there. Measured on
+        # the live tree 2026-08-31: 237 files match the folded pattern and 0 of
+        # them carry a "branches" key, so this was reachable-not-armed — the
+        # second clause was holding, not the glob. A register-shaped file under a
+        # lowercase name would make a subdirectory read as its own project.
+        candidates = exactly_named(sorted(directory.glob(REGISTER_GLOB)), "_REGISTRY.json")
     except OSError as e:
         logger.warning(f"[{MODULE_NAME}] Cannot list {directory}: {e}")
         return False

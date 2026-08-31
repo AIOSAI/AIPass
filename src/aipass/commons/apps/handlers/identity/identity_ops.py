@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-07
 # Modified: 2026-08-31
 # =============================================
@@ -28,6 +28,7 @@ from typing import Callable, Dict, Any, Optional, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
+from aipass.commons.apps.handlers.module_root import module_file
 
 
 # =============================================================================
@@ -49,8 +50,10 @@ def _find_branch_registry_path() -> Path:
         if candidate.exists():
             return candidate
 
-    # Walk up from this package to find project root
-    current = Path(__file__).resolve().parent
+    # Walk up from this package to find project root. module_file() rather
+    # than a bare .resolve(): BRANCH_REGISTRY_PATH calls this at module scope,
+    # so on Windows a bare resolve would read cwd at import time.
+    current = module_file(__file__).parent
     for _ in range(10):
         candidate = current / "AIPASS_REGISTRY.json"
         if candidate.exists():

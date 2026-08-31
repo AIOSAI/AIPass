@@ -60,6 +60,7 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
+from aipass.memory.tests.dead_cwd import DEAD_CWD_WORLD
 
 
 def _write(path: Path, data: dict) -> None:
@@ -691,12 +692,14 @@ class TestRepoRootNeverReadsTheProcessDirectory:
     # same call site on every platform. test_repo_root.py proves the two worlds
     # agree on POSIX, which is what licenses using this one where the other
     # cannot be built.
-    _PROBE = (
-        "import os, sys, pathlib\n"
-        "sys.path.insert(0, {src!r})\n"
-        "os.getcwd = lambda: (_ for _ in ()).throw(FileNotFoundError(2, 'No such file or directory'))\n"
-        "{body}\n"
-    )
+    # ONE definition of the world, in tests/dead_cwd.py. This file used to carry
+    # its own spelling of the denial and it drifted in two ways at once: a
+    # zero-argument lambda, which 3.10's pathlib accessor calls with one
+    # argument, and the denial installed AFTER `import pathlib`, which on 3.10
+    # means the accessor already captured the real getcwd and these pins were
+    # asserting nothing at all. CI could only see the first. The world goes
+    # first here now, and it is imported rather than retyped.
+    _PROBE = "{world}import sys, pathlib\nsys.path.insert(0, {src!r})\n{body}\n"
 
     @classmethod
     def _in_a_dead_cwd(cls, body):
@@ -709,7 +712,7 @@ class TestRepoRootNeverReadsTheProcessDirectory:
         """
         src = str(Path(rs.__file__).resolve().parents[6])
         return subprocess.run(
-            [sys.executable, "-c", cls._PROBE.format(src=src, body=body)],
+            [sys.executable, "-c", cls._PROBE.format(world=DEAD_CWD_WORLD, src=src, body=body)],
             capture_output=True,
             text=True,
         )
@@ -820,23 +823,23 @@ class TestTheResidentWalkReadsNamesNotSpellings:
 
     def test_the_injected_world_really_widens(self, fleet, case_insensitive_filesystem):
         """Positive control: a blinded emulation reports green exactly like a cure."""
-        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+        _write(fleet / "projects/live/flow_json_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
 
         matched = sorted(path.name for path in (fleet / "projects").glob(rs.RESIDENT_REGISTRY_GLOB))
 
-        assert "live_registry.json" in matched and "LIVE_REGISTRY.json" in matched
+        assert "flow_json_registry.json" in matched and "LIVE_REGISTRY.json" in matched
 
     def test_a_lowercase_registry_is_not_discovered(self, fleet, case_insensitive_filesystem):
-        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+        _write(fleet / "projects/live/flow_json_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
 
         found = [path.name for path in rs.resident_registry_paths(fleet)]
 
-        assert "live_registry.json" not in found
+        assert "flow_json_registry.json" not in found
         assert "LIVE_REGISTRY.json" in found
 
     def test_a_lowercase_registry_never_mints_a_resident(self, fleet, case_insensitive_filesystem):
         """The end-to-end shape: presence in the wrong file must not reach the fleet."""
-        _write(fleet / "projects/live/live_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
+        _write(fleet / "projects/live/flow_json_registry.json", _registry(_branch("mirage", "src/mirage/mirage")))
         _write(fleet / "projects/live/src/mirage/mirage/.trinity/passport.json", _passport("resident"))
 
         names = {Path(path).name for path in rs.accepted_resident_paths(fleet)}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-06-15
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -17,13 +17,13 @@ Part of the DPLAN-0204 decentralized scheduler redesign.
 
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
+_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
 RUNSTATE_FILE = _DAEMON_ROOT / "daemon_json" / "daemon_runstate.json"
 
 
@@ -310,8 +310,38 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
 
 
 def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
-    """Calculate the next run time given schedule and a last_run timestamp."""
-    now = datetime.now()
+    """Calculate the next run time given schedule and a last_run timestamp.
+
+    Every branch answers from LAST_RUN_TS, never from the wall clock. That is
+    the fix for a live defect, not a refactor: @vera's `daily @ 10:00` fired at
+    09:45:11 - the legitimate leading edge of the +/-15min window - and the old
+    daily branch, reading now(), advertised next_run = 10:00 THE SAME DAY. But
+    _already_ran_today consumes the whole calendar day, so is_job_due answered
+    False right through 10:14 and True only the next morning. The field named a
+    wake that could not happen.
+
+    The rule the windowed branches follow is the one is_job_due enforces: firing
+    consumes the PERIOD, not the instant. A daily fire consumes its calendar day
+    whenever in the window it landed, so the next one is the following day at
+    target; an hourly fire consumes its clock hour. Interval already did this
+    correctly - it was the only branch using the argument it was handed, which
+    is the whole tell.
+
+    KNOWN AND DELIBERATE SLACK: this returns the TARGET time, while the
+    scheduler will actually fire up to 15 minutes earlier, at the leading edge
+    of the window. Returning target-15min was considered and rejected - "daily @
+    10:00" is what the owner configured and what the queue should echo, and the
+    alternative puts window arithmetic into a field whose readers are humans.
+    The pin in test_next_run_agrees_with_due.py allows exactly that much
+    earliness and no more, so under-reporting by a whole PERIOD stays red.
+
+    Args:
+        schedule: The job's schedule block.
+        last_run_ts: ISO timestamp of the firing this next_run follows.
+
+    Returns:
+        ISO timestamp of the next run, or None if the schedule cannot be parsed.
+    """
     sched_type = schedule.get("type", "")
 
     if sched_type in ("daily", "rotation"):
@@ -321,9 +351,13 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, AttributeError) as e:
             logger.info("[runstate] calc_next_run daily time parse failed: %s", e)
             return None
-        next_dt = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-        if next_dt <= now:
-            next_dt += timedelta(days=1)
+        try:
+            last_dt = datetime.fromisoformat(last_run_ts)
+        except (ValueError, TypeError) as e:
+            logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
+            return None
+        # The day of last_run is spent, whenever in its window the fire landed.
+        next_dt = (last_dt + timedelta(days=1)).replace(hour=target_h, minute=target_m, second=0, microsecond=0)
         return next_dt.isoformat()
 
     if sched_type == "hourly":
@@ -333,9 +367,13 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, TypeError) as e:
             logger.info("[runstate] calc_next_run hourly time parse failed: %s", e)
             return None
-        next_dt = now.replace(minute=target_m, second=0, microsecond=0)
-        if next_dt <= now:
-            next_dt += timedelta(hours=1)
+        try:
+            last_dt = datetime.fromisoformat(last_run_ts)
+        except (ValueError, TypeError) as e:
+            logger.info("[runstate] calc_next_run hourly last_run parse failed: %s", e)
+            return None
+        # The clock hour of last_run is spent, same rule one unit down.
+        next_dt = (last_dt + timedelta(hours=1)).replace(minute=target_m, second=0, microsecond=0)
         return next_dt.isoformat()
 
     if sched_type == "interval":
@@ -344,8 +382,11 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()
         except (ValueError, TypeError) as e:
+            # None, like every other parse failure here. The old form returned
+            # now(), which advertises "due immediately" for a job whose schedule
+            # could not be read - the loudest possible wrong answer.
             logger.info("[runstate] calc_next_run interval parse failed: %s", e)
-            return now.isoformat()
+            return None
 
     if sched_type == "once":
         return schedule.get("due_date")

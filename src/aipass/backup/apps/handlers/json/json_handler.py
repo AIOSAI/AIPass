@@ -17,6 +17,8 @@ from pathlib import Path
 
 from aipass.prax import append_jsonl, logger
 
+from ..path.module_paths import branch_root
+
 
 # os.replace on Windows raises PermissionError while ANY reader holds the
 # target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
@@ -56,7 +58,7 @@ def log_operation(operation: str, data: dict) -> None:
         "operation": operation,
         **data,
     }
-    log_file = Path(__file__).resolve().parents[3] / "logs" / "operations.jsonl"
+    log_file = branch_root(__file__, 3) / "logs" / "operations.jsonl"
     try:
         append_jsonl(log_file, entry)
     except OSError as e:

@@ -271,3 +271,81 @@ class TestDescribeProject:
         from aipass.flow.apps.handlers.plan.project_scope import describe_project
 
         assert describe_project(None) == "no project"
+
+
+from aipass.flow.apps.handlers.plan import project_scope  # noqa: E402
+
+
+class TestTheRegisterGlobIsNotCaseFolded:
+    """The round-3 case-fold species, in the two flow lanes that carry it.
+
+    ``pathlib``'s glob is case-INSENSITIVE on Windows and default macOS, so
+    ``*_REGISTRY.json`` also matches ``*_registry.json`` there — and flow's own
+    ``flow_json/`` holds eight lowercase plan registries. Flow was not in
+    round 3's nine-branch sweep, so both sites below were still uncured.
+
+    MEASURED before fixing, on the live tree 2026-08-31: 237 files match the
+    folded pattern and are not exact-case, and **0 of 237** carry a top-level
+    ``branches`` key. So this was reachable-not-armed — the second clause of
+    the two-clause discriminator is what was holding, not the glob. That is a
+    property of today's disk, not of the code, which is why it is pinned rather
+    than left to luck: a register-shaped file arriving under a lowercase name
+    would make a subdirectory read as its own project and drop its rows out of
+    the real project's scope.
+
+    These run on every OS. The bait is emulated by widening the LISTING, which
+    is exactly what a folding filesystem does — so the pin is red on Linux
+    against the uncured code rather than only on the platform that finds it.
+    """
+
+    def _project_dir(self, tmp_path: Path) -> Path:
+        root = tmp_path / "proj"
+        root.mkdir()
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": [{"name": "flow"}]}), encoding="utf-8")
+        return root
+
+    def test_a_lowercase_register_shaped_decoy_does_not_make_a_directory_a_project(self, tmp_path, monkeypatch):
+        """The harm, if a decoy were ever armed: a subdirectory becomes a project."""
+        sub = tmp_path / "proj" / "sub"
+        self._project_dir(tmp_path)
+        sub.mkdir()
+        # The decoy: register-SHAPED, but named in lowercase.
+        (sub / "other_registry.json").write_text(json.dumps({"branches": [{"name": "nobody"}]}), encoding="utf-8")
+
+        real_glob = Path.glob
+
+        def folded_glob(self, pattern):
+            # What Windows/macOS actually do: the pattern matches case-blind.
+            if pattern == project_scope.REGISTER_GLOB:
+                return iter(sorted(p for p in real_glob(self, "*.json") if p.name.lower().endswith("_registry.json")))
+            return real_glob(self, pattern)
+
+        monkeypatch.setattr(Path, "glob", folded_glob)
+
+        assert project_scope._holds_register(sub) is False, (
+            "a lowercase *_registry.json was accepted as a project register — "
+            "on Windows this makes any directory holding one its own project root"
+        )
+
+    def test_the_exact_case_register_is_still_found(self, tmp_path):
+        """Negative control: the narrowing must not refuse the real thing."""
+        root = self._project_dir(tmp_path)
+        assert project_scope._holds_register(root) is True
+
+    def test_the_emulation_actually_widens_the_listing(self, tmp_path, monkeypatch):
+        """Control for the control: a folded glob that matches nothing proves nothing."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "other_registry.json").write_text("{}", encoding="utf-8")
+
+        real_glob = Path.glob
+
+        def folded_glob(self, pattern):
+            if pattern == project_scope.REGISTER_GLOB:
+                return iter(sorted(p for p in real_glob(self, "*.json") if p.name.lower().endswith("_registry.json")))
+            return real_glob(self, pattern)
+
+        monkeypatch.setattr(Path, "glob", folded_glob)
+        assert list(sub.glob(project_scope.REGISTER_GLOB)) == [sub / "other_registry.json"], (
+            "the bait is not reaching the code under test — every assertion above would be vacuous"
+        )

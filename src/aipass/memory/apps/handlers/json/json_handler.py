@@ -12,11 +12,10 @@ Creates a JsonHandler instance configured with memory's json_dir.
 All functions are re-exported for backward-compatible imports.
 """
 
-from pathlib import Path
-
 from aipass.aipass.shared.json_handler import JsonHandler
+from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _JSON_DIR = _MEMORY_ROOT / "memory_json"
 
 _handler = JsonHandler(json_dir=_JSON_DIR)

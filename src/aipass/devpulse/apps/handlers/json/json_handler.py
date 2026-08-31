@@ -24,8 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
+from aipass.devpulse.apps.handlers.module_root import module_file
 
-_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT: Path = module_file(__file__).parents[3]
 _BRANCH_NAME: str = _BRANCH_ROOT.name
 JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 

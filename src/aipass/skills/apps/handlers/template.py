@@ -11,10 +11,11 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
+from aipass.skills.apps.handlers.module_paths import module_file
 
 
 # Template directory lives at src/aipass/skills/templates/
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
+TEMPLATES_DIR = module_file(__file__).parent.parent.parent / "templates"
 
 VALID_TYPES = ("markdown_only", "with_handler", "full")
 

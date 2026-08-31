@@ -327,7 +327,12 @@ def test_auto_detection_missing():
     result = check_auto_detection(content)
     assert result is not None
     assert result["passed"] is False
-    assert "missing auto-detection" in result["message"]
+    assert "never reads the caller frame" in result["message"]
+    # The message used to PRESCRIBE inspect.stack(), which is the Windows
+    # dead-cwd defect the fleet is removing (@prax, 2026-08-31). Pinned as a
+    # refusal so nobody restores the old wording as a "clearer" instruction.
+    assert "use sys._getframe" in result["message"]
+    assert "NOT inspect.stack()" in result["message"]
 
 
 def test_auto_detection_with_get_caller():

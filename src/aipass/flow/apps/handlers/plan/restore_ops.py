@@ -37,17 +37,23 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
 # INFRASTRUCTURE
 # =============================================
 
-_PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
+from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 
 def _find_repo_root() -> Path:
-    """Walk up to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
+
+    Delegates to ``handlers/repo_root.find_repo_root`` — the one
+    implementation. This used to be a private copy ending
+    ``return Path.cwd()``; there were seven such copies in flow and six of
+    them are called at MODULE level, so on a registry-less checkout every
+    import guessed its root from the process directory, and with the cwd
+    deleted the import died outright. See that module's docstring.
+    """
+    return find_repo_root(caller="restore_ops")
 
 
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"

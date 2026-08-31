@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON Auto-Creating Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-21
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-import inspect
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -30,9 +29,10 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
+from aipass.daemon.apps.handlers.module_root import module_file
 
 # Constants
-_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
+_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
 
 # The real directory, kept under its own name so the resolver below can tell an
 # explicit test patch from the untouched default. Recomputed on a module
@@ -164,17 +164,37 @@ def _get_caller_module_name() -> str:
     """
     Auto-detect calling module name from call stack.
 
+    Walks past internal frames ([0] = this function, [1] = public function,
+    [2] = actual caller) and returns the stem of the caller's filename.
+
+    Reads the frame directly rather than through inspect.stack(). MEASURED
+    2026-08-31 in the hostile world that emulates a Windows box with no working
+    directory: inspect.stack() builds a FrameInfo per frame, and for any frame
+    whose filename is a PSEUDO-file - <string>, which every interpreter -c
+    invocation and every exec'd hook puts on the stack - it reaches getmodule(),
+    whose os.path.realpath sits outside that function's every try. The whole
+    call then raises FileNotFoundError, so log_operation - the audit line daemon
+    writes on essentially every scheduler tick - took the caller down from inside
+    its own logging. On POSIX the equivalent raise happens earlier, where inspect
+    catches it, which is why this stood on Linux for as long as it existed.
+
+    FrameInfo.filename is getsourcefile(frame) or getfile(frame), and both fall
+    back to co_filename for the frames this walk looks at, so the stem is the
+    same string by a route that touches no filesystem at all.
+
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
-    stack = inspect.stack()
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = Path(caller_frame.filename)
-        module_name = caller_path.stem
+    # Skip frames: [0]=this function, [1]=public wrapper, [2]=actual caller
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError:
+        # Fewer than three frames - the old form's `len(stack) > 2` guard.
+        return "unknown"
 
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    module_name = Path(caller_frame.f_code.co_filename).stem
+    if module_name and not module_name.startswith("_"):
+        return module_name
 
     return "unknown"
 

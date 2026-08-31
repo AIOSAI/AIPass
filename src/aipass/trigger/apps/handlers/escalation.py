@@ -55,6 +55,7 @@ from aipass.trigger.apps.config import (
     json_file_lock,
     trail_logger,
 )
+from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -115,15 +116,7 @@ def get_config() -> Dict[str, Any]:
     return cfg
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    for parent in [TRIGGER_ROOT] + list(TRIGGER_ROOT.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-BRANCH_REGISTRY_FILE = _find_repo_root() / "AIPASS_REGISTRY.json"
+BRANCH_REGISTRY_FILE = find_repo_root(TRIGGER_ROOT, caller="escalation") / "AIPASS_REGISTRY.json"
 
 # Citizen names read from the registry, cached on a short TTL exactly like
 # get_config() above and for the same reason: this runs once per watched log

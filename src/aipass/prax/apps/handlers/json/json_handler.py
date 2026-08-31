@@ -17,16 +17,17 @@ import json
 import logging
 import os
 import tempfile
+import sys
 import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 logger = logging.getLogger(__name__)
 
 # Resolve paths relative to this file (no hardcoded paths)
-_HANDLER_DIR = Path(__file__).resolve().parent  # .../handlers/json/
+_HANDLER_DIR = resolved_file(Path(__file__)).parent  # .../handlers/json/
 _HANDLERS_DIR = _HANDLER_DIR.parent  # .../handlers/
 _PRAX_ROOT = _HANDLERS_DIR.parent.parent  # .../prax/
 
@@ -189,23 +190,31 @@ def _get_caller_module_name() -> str:
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
+    # sys._getframe, never inspect.stack(). The old form was GUARDED and LOGGED
+    # and still wrong: inspect.stack() reaches an unguarded os.path.realpath
+    # inside getmodule, and on Windows ntpath.realpath calls os.getcwd() before
+    # it checks anything — so on a box with no readable working directory the
+    # except below caught a FileNotFoundError and recorded every operation as
+    # "unknown". @trigger saw it twice in a single import chain and @memory
+    # reported it the same morning. Degraded is not cured: the operations log
+    # stops naming anyone exactly when the machine is in the state that makes
+    # the log worth reading.
+    #
+    # Frame skipping is unchanged: [0] is this function, [1] is log_operation,
+    # [2] is the caller we want. _getframe raises ValueError when the stack is
+    # shallower than that, which is the honest "no caller" case.
     try:
-        stack = inspect.stack()
-        # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-        if len(stack) > 2:
-            caller_frame = stack[2]
-            caller_path = Path(caller_frame.filename)
-            module_name = caller_path.stem
-
-            # Validate module name
-            if module_name and not module_name.startswith("_"):
-                return module_name
-
-        # Fallback
+        caller_frame = sys._getframe(2)
+    except ValueError:
         return "unknown"
-    except Exception as e:
-        logger.warning("json_handler: failed to detect caller module name: %s", e)
-        return "unknown"
+
+    module_name = Path(caller_frame.f_code.co_filename).stem
+
+    # Validate module name
+    if module_name and not module_name.startswith("_"):
+        return module_name
+
+    return "unknown"
 
 
 def load_template(json_type: str, module_name: str) -> Any:

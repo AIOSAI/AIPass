@@ -41,6 +41,7 @@ from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 #: The adapter API version this core speaks.
 SUPPORTED_ADAPTER_API = 1
@@ -68,7 +69,7 @@ FORBIDDEN_FUNCTIONS: tuple = ("check_module", "check_branch")
 PAYLOAD_DIR = "payload"
 
 #: Where adapter packs live.
-HANDLERS_ROOT = Path(__file__).resolve().parents[1]
+HANDLERS_ROOT = module_file(__file__).parents[1]
 
 #: Pack directory suffix. Kept per Patrick's ruling 2026-08-29 19:23 —
 #: "don't change the command path, it already works".

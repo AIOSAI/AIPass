@@ -2194,3 +2194,819 @@ class TestSilentCatchAllowsClassifyingAnExceptionIntoAValue:
         )
         _message, passed = self._lines(tmp_path, source)
         assert passed is False
+
+
+class TestSilentCatchAllowsAHandlerThatReportsToAStream:
+    """@commons' report (2026-08-31): a handler that PRINTS the failure was
+    flagged as swallowing it.
+
+    "Silently" is this standard's own word. Their entry point repairs
+    sys.path[0] before any cross-branch import — @prax's logger is imported
+    after that block, and importing it earlier is exactly what the repair exists
+    to make safe — so the only instrument in that window is stderr, and the
+    handler used it. The cure the checker demanded could not be written while
+    the code already did what the standard asks.
+
+    This is a correction against the definition, not a window exemption: it
+    holds anywhere, and the CLI standard keeps asking separately whether the
+    stream was the RIGHT instrument. Measured before landing: 1 handler in the
+    fleet matches.
+    """
+
+    def _passed(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
+
+    def test_a_handler_writing_to_stderr_is_not_silent(self, tmp_path):
+        source = (
+            "import sys\n\n"
+            "try:\n    x = resolve()\n"
+            "except OSError as exc:\n    sys.stderr.write(f'cannot resolve: {exc}\\n')\n"
+        )
+        assert self._passed(tmp_path, source) is True
+
+    def test_a_handler_writing_to_stdout_is_not_silent_either(self, tmp_path):
+        """The standard's word is 'silently', not 'stderr'. A report on stdout
+        is a worse choice and a separate standard's argument, but it is still
+        not silence, and this checker must not decide that question."""
+        source = "import sys\n\ntry:\n    go()\nexcept OSError:\n    sys.stdout.write('failed\\n')\n"
+        assert self._passed(tmp_path, source) is True
+
+    def test_the_write_must_be_to_a_STREAM_not_any_write_method(self, tmp_path):
+        """Negative control on the clause: ``handle.write(...)`` puts the
+        failure in a file nobody is watching. Keying on the method name alone
+        would have exempted every handler that quietly writes to disk.
+
+        The handler deliberately does NOT bind the exception. A later clause
+        (hands_the_exception_on) clears ``handle.write(str(exc))`` on its own
+        and separately measured grounds — the object is not dropped — so binding
+        it here would test that clause instead of this one and this pin would
+        pass while the stream rule rotted underneath it.
+        """
+        source = "def f(handle):\n    try:\n        go()\n    except OSError:\n        handle.write('failed')\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_handler_that_reports_nothing_keeps_its_finding(self, tmp_path):
+        source = "try:\n    go()\nexcept OSError:\n    pass\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_the_real_reported_shape_clears(self, tmp_path):
+        """@commons' own block, transcribed. The pin the report actually earns."""
+        source = (
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "_script_dirs = [str(Path(__file__).parent)]\n"
+            "try:\n    _script_dirs.append(str(Path(__file__).resolve().parent))\n"
+            "except OSError as _exc:\n"
+            "    sys.stderr.write(f'[commons] Cannot resolve {__file__} ({type(_exc).__name__})\\n')\n"
+        )
+        assert self._passed(tmp_path, source) is True
+
+
+class TestCliAllowsARawWriteBeforeTheConsoleExists:
+    """@commons' second finding, the same block one line down: the CLI checker
+    demanded ``console.print()`` in the window BEFORE the module imports the
+    console.
+
+    Unsatisfiable, not merely wrong — and a checker that convicts on an
+    unsatisfiable clause teaches branches to take waivers. Two AST clauses, and
+    the PAIR is what keeps it narrow: the module must import the console at all,
+    and the write must lexically precede that import. Measured across the fleet
+    2026-08-31: the pair clears exactly one site; clause 1 alone (a module with
+    no console) clears 0 today in this checker's scope and an unbounded number
+    of future ones, so it was rejected on the measurement rather than on taste.
+    """
+
+    CONSOLE_IMPORT = "from aipass.cli.apps.modules import console\n"
+
+    def _passed(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+
+        target = tmp_path / "modules" / "probe.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        result = cli_check.check_print_usage(source, source.split("\n"), str(target))
+        return result is None or result["passed"]
+
+    def test_a_write_above_the_console_import_is_allowed(self, tmp_path):
+        source = "import sys\n\nsys.stderr.write('bootstrap trouble\\n')\n\n" + self.CONSOLE_IMPORT
+        assert self._passed(tmp_path, source) is True
+
+    def test_a_write_below_the_console_import_keeps_its_finding(self, tmp_path):
+        """The window closes at the import. Everything after it has Rich."""
+        source = "import sys\n\n" + self.CONSOLE_IMPORT + "\nsys.stderr.write('late\\n')\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_write_on_the_import_line_itself_keeps_its_finding(self, tmp_path):
+        """The boundary, pinned because a mutant walked through it.
+
+        ``<`` and ``<=`` differ on exactly one line and both read fine. The
+        console exists once that statement has run, so a write sharing the line
+        is after it, not before it — the window is STRICTLY prior. Found by a
+        surviving mutant, not by reading the code.
+        """
+        source = "import sys\n\n" + self.CONSOLE_IMPORT.rstrip("\n") + "; sys.stderr.write('same line\\n')\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_module_that_never_imports_the_console_keeps_its_finding(self, tmp_path):
+        """Clause 1, pinned as a REFUSAL. Dropping it looks like a
+        simplification — 'no console, nothing to use' — and it would hand every
+        console-less module a blanket pass for raw writes."""
+        source = "import sys\n\nsys.stderr.write('no console anywhere in this file\\n')\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_an_unparseable_file_gets_no_window(self, tmp_path):
+        """Ignorance is not evidence of a bootstrap: a file the checker cannot
+        parse keeps every finding rather than being exempted by the failure."""
+        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+
+        assert cli_check._console_import_line("def broken(:\n") is None
+
+    def test_the_real_reported_shape_clears(self, tmp_path):
+        """@commons' entry point, transcribed: the sys.path repair, its stderr
+        report, then the cross-branch imports the repair exists to make safe."""
+        source = (
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "_script_dirs = [str(Path(__file__).parent)]\n"
+            "try:\n    _script_dirs.append(str(Path(__file__).resolve().parent))\n"
+            "except OSError as _exc:\n"
+            "    sys.stderr.write('[commons] cannot resolve\\n')\n"
+            "for _d in _script_dirs:\n    if _d in sys.path:\n        sys.path.remove(_d)\n\n"
+            "from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402\n"
+            "from aipass.cli.apps.modules import console  # noqa: E402\n"
+        )
+        assert self._passed(tmp_path, source) is True
+
+
+class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
+    """@prax's report (2026-08-31): the checker's proof of auto-detection was
+    the literal string ``inspect.stack()``, and its failure message said "use
+    inspect.stack()".
+
+    That call is the Windows dead-cwd defect the fleet spent this week removing
+    — it reaches an unguarded ``os.path.realpath`` in ``inspect.getmodule``, and
+    ``ntpath.realpath`` reads ``os.getcwd()`` before checking anything. @prax
+    cured their own site and the audit dropped the file to 66% and told them to
+    put it back. They renamed a helper instead, which fixed prax and left the
+    checker aimed at the next branch to cure — @spawn counted 16 of 18 branches
+    still carrying the call.
+
+    Measured before landing: ZERO fleet files passed via the inspect.stack()
+    clause, so widening the acceptance changed nobody's score. The harm was
+    entirely prospective, which is exactly when a checker is cheapest to fix.
+    """
+
+    def _check(self, content):
+        from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+            check_auto_detection,
+        )
+
+        return check_auto_detection(content)
+
+    def test_the_cured_shape_passes_without_a_specially_named_helper(self):
+        """@prax's blocking case. sys._getframe answers the same question and
+        cannot die on a Windows box with no working directory."""
+        content = (
+            "import sys\n\n"
+            "def log_operation(op, module_name=None):\n"
+            "    if module_name is None:\n"
+            "        module_name = sys._getframe(1).f_code.co_name\n"
+            "    return module_name\n"
+        )
+        assert self._check(content)["passed"] is True
+
+    def test_inspect_stack_still_counts_as_an_answer(self):
+        """Widening, not a ban. Whether inspect.stack() is the RIGHT mechanism
+        is @drone's dead-cwd sweep, a different standard; this one only asks
+        whether the caller is detected at all. A checker that answered both
+        questions would convict a branch mid-migration for the wrong reason."""
+        content = (
+            "import inspect\n\n"
+            "def log_operation(op, module_name=None):\n"
+            "    if module_name is None:\n"
+            "        module_name = inspect.stack()[1]\n"
+            "    return module_name\n"
+        )
+        assert self._check(content)["passed"] is True
+
+    def test_the_mechanism_must_be_CALLED_not_merely_mentioned(self):
+        """The substring hole, closed. A file whose only ``inspect.stack()`` is
+        in a docstring was passing — and @drone hit the mirror image the same
+        morning, a text BAN convicting the docstring that explained the cure.
+        A string rule is too broad and too narrow at once."""
+        content = (
+            '"""We used to call inspect.stack() here — see the dead-cwd note."""\n'
+            "import inspect\n\n"
+            "def log_operation(op, module_name=None):\n    return module_name\n"
+        )
+        assert self._check(content)["passed"] is False
+
+    def test_a_required_module_name_is_not_applicable(self):
+        """Nothing to detect: every caller supplies it at every call site, so
+        the prescribed frame walk would be dead code. Three @prax files were red
+        for this."""
+        assert self._check("def run(module_name: str):\n    return module_name\n") is None
+
+    def test_an_optional_module_name_is_still_in_scope(self):
+        """Negative control on the clause above — the narrowing must not
+        exempt the population the standard is actually about."""
+        assert self._check("def run(module_name=None):\n    return module_name\n") is not None
+
+    def test_a_keyword_only_module_name_with_a_default_is_in_scope(self):
+        """Boundary: the default lives in kw_defaults, a different list. Reading
+        only positional defaults would silently exempt every keyword-only API."""
+        assert self._check("def run(*, module_name=None):\n    return module_name\n") is not None
+
+    def test_a_keyword_only_module_name_without_a_default_is_not(self):
+        content = "def run(*, module_name: str):\n    return module_name\n"
+        assert self._check(content) is None
+
+    def test_the_failure_message_names_the_blind_spot(self):
+        """@trigger's events/warning_logged.py carries a ``module_name`` that is
+        an event PAYLOAD field — the module that logged a warning — while its
+        caller is the event bus. Auto-detecting there would be wrong, and the
+        checker reads the NAME and cannot tell them apart. I have no structural
+        measure for that, so the finding states what it measured instead of
+        carrying a clause I cannot defend."""
+        result = self._check("def run(module_name=None):\n    return module_name\n")
+        assert "event payload" in result["message"]
+
+    def test_other_frame_walk_spellings_are_accepted_too(self):
+        """The standard's question is whether the caller is detected, never
+        which library spells it."""
+        for call in ("inspect.currentframe()", "traceback.extract_stack()", "inspect.getouterframes(None)"):
+            content = f"import inspect, traceback\n\ndef run(module_name=None):\n    x = {call}\n    return x\n"
+            assert self._check(content)["passed"] is True, call
+
+
+class TestAHandlerThatGuardsItsOwnDiagnosticIsNotSilent:
+    """@daemon and @canary, 2026-08-31, the same site from two sides.
+
+    The fleet's ratified dead-cwd cure wraps its own diagnostic:
+
+        try:
+            logger.debug(...)
+        except Exception as inner:
+            _retain("logger", inner)
+
+    @daemon's own pin caught their first cut logging from OUTSIDE that try, and
+    the world that reaches this code is a machine whose filesystem cannot answer
+    a basic question — @prax's logger construction reads the working directory,
+    so "the logger is also down" is the SAME world. The literal fix the checker
+    demanded was to add a logger call to the handler for a logger failure: the
+    defect their pin had just caught, put back to satisfy a score.
+
+    @canary MEASURED the prescription instead of arguing with it — applying it
+    verbatim made their branch unimportable.
+
+    Measured before landing: 6 handlers in the fleet match, in 6 branches, and
+    every one is this cure's diagnostic guard.
+    """
+
+    def _passed(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
+
+    def test_a_pass_guarding_a_logger_call_is_not_silent(self, tmp_path):
+        source = "def f(logger, exc):\n    try:\n        logger.debug('failed: %s', exc)\n    except Exception:\n        pass\n"
+        assert self._passed(tmp_path, source) is True
+
+    def test_a_pass_guarding_a_stream_report_is_not_silent(self, tmp_path):
+        """@canary's shape: the write composes its message with type(exc), and
+        counting THAT call as an effect is what made the first cut miss it."""
+        source = (
+            "import sys\n\n"
+            "def f(name, exc, reported):\n"
+            "    try:\n"
+            "        if name not in reported:\n"
+            "            reported.add(name)\n"
+            "            sys.stderr.write(f'{name}: {type(exc).__name__}: {exc}\\n')\n"
+            "    except OSError:\n        pass\n"
+        )
+        assert self._passed(tmp_path, source) is True
+
+    def test_a_pass_guarding_REAL_WORK_keeps_its_finding(self, tmp_path):
+        """The clause is on what the block DOES, not on the handler being empty.
+        A try that computes something and a bare pass is the original defect."""
+        source = "def f(path):\n    try:\n        path.unlink()\n    except OSError:\n        pass\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_report_STANDING_BESIDE_real_work_does_not_buy_the_exemption(self, tmp_path):
+        """The purity clause, pinned because a mutant walked through it.
+
+        Dropping ``all(...)`` and keeping only ``any(...)`` leaves a rule that a
+        single log line can buy: wrap anything at all, add a logger call, and
+        the handler goes quiet. The block has to be a diagnostic and NOTHING
+        else. Found by mutation, not by reading.
+        """
+        source = (
+            "def f(logger, path):\n    try:\n"
+            "        logger.debug('about to unlink')\n        path.unlink()\n"
+            "    except OSError:\n        pass\n"
+        )
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_file_handle_write_is_not_a_report(self, tmp_path):
+        """The stream qualification, pinned on THIS clause rather than on
+        silent_catch's own helper — a mutant that accepted any ``.write``
+        survived every other pin, because the sibling clause was tested
+        somewhere else and this one had no negative control of its own."""
+        source = "def f(handle):\n    try:\n        handle.write('note')\n    except OSError:\n        pass\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_a_block_of_pure_bookkeeping_is_not_a_diagnostic(self, tmp_path):
+        """Negative control: bookkeeping may sit BESIDE a report, never stand in
+        for one. Without the at-least-one-report clause, every `seen.add(x)`
+        wrapped in a try would buy the exemption."""
+        source = "def f(seen, x):\n    try:\n        seen.add(x)\n    except OSError:\n        pass\n"
+        assert self._passed(tmp_path, source) is False
+
+
+class TestAHandlerThatHandsTheExceptionOnIsNotSilent:
+    """@daemon's second shape, one level out from @spawn's classify-and-return:
+
+        except OSError as exc:
+            _record_unresolved(path, exc)
+            return path
+
+    Nothing is dropped — the exception becomes an argument to a named function
+    that owns reporting it. There the information became a return value, here it
+    becomes an argument; in both, the caller decides.
+
+    Measured before landing: 10 handlers match fleet-wide and all 10 were read
+    individually — six are this cure delegating to a named reporter, the rest a
+    Rich report before sys.exit (@cli), a subprocess writing its error as JSON
+    (@memory), a deliberately rate-limited queue warning (@prax) and a retained
+    list (@trigger). Zero looked like a swallow.
+    """
+
+    def _passed(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        return silent_catch_check.check_module(str(target))["checks"][0]["passed"]
+
+    def test_passing_the_exception_to_a_named_reporter_is_not_silent(self, tmp_path):
+        source = (
+            "def f(path, record):\n    try:\n        return path.resolve()\n"
+            "    except OSError as exc:\n        record(path, exc)\n        return path\n"
+        )
+        assert self._passed(tmp_path, source) is True
+
+    def test_retaining_the_exception_in_a_list_is_not_silent(self, tmp_path):
+        source = "def f(kept):\n    try:\n        go()\n    except OSError as exc:\n        kept.append(str(exc))\n"
+        assert self._passed(tmp_path, source) is True
+
+    def test_binding_the_exception_and_ignoring_it_keeps_its_finding(self, tmp_path):
+        """The clause is that the object LEAVES. Binding `as exc` and dropping it
+        is the defect wearing the exemption's syntax.
+
+        The body calls something unrelated on purpose. ``return None`` would
+        have been the obvious probe and it is cleared by a DIFFERENT, older
+        clause — a named exception returning a constant is @spawn's
+        classify-and-return, ratified before this one — so it would have proved
+        nothing about the clause under test. Found by this pin failing.
+        """
+        source = "def f(cleanup):\n    try:\n        go()\n    except OSError as exc:\n        cleanup()\n"
+        assert self._passed(tmp_path, source) is False
+
+    def test_an_unbound_handler_cannot_borrow_the_clause(self, tmp_path):
+        """No `as` means no exception object to hand on, however many calls the
+        body makes. Without this, `except OSError: cleanup(path)` would pass."""
+        source = "def f(path, cleanup):\n    try:\n        go()\n    except OSError:\n        cleanup(path)\n"
+        assert self._passed(tmp_path, source) is False
+
+
+class TestErrorHandlingSharesTheDiagnosticGuardClause:
+    """Two checkers, one question, one implementation — @canary's point that a
+    single discriminator clears both findings. Shared rather than copied so the
+    two cannot drift into disagreeing about the same handler.
+    """
+
+    def _passed(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.aipass_standards import error_handling_check
+
+        target = tmp_path / "probe.py"
+        target.write_text(source, encoding="utf-8")
+        return error_handling_check.check_module(str(target))["checks"][0]["passed"]
+
+    def test_a_pass_guarding_a_report_is_not_a_silent_failure(self, tmp_path):
+        source = "def f(logger, exc):\n    try:\n        logger.debug('x', exc)\n    except Exception:\n        pass\n"
+        assert self._passed(tmp_path, source) is True
+
+    def test_a_pass_over_real_work_is_still_a_silent_failure(self, tmp_path):
+        source = "def f(path):\n    try:\n        path.unlink()\n    except OSError:\n        pass\n"
+        assert self._passed(tmp_path, source) is False
+
+
+class TestTheBootstrapChainSeesRelativeImports:
+    """@canary's json_structure finding, and it was a hole in an exemption I
+    ratified the night before.
+
+    Clause 2 of the pre-logging bootstrap exemption asks whether the logging
+    substrate's own imports REACH a module. The walk only followed absolute
+    ``aipass.*`` imports, and @canary's json_handler reaches its stdlib-only
+    helper with ``from ..paths import module_file`` — so a module that IS
+    beneath the logging system was invisible to the walk and got told to import
+    it. A relative import is a STATIC fact, unlike the importlib hops the walk
+    deliberately cannot see, so resolving it moves the set toward correct in the
+    direction the walk's own docstring already asks for.
+    """
+
+    def _resolve(self, module, level, package):
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        return json_structure_check._resolve_relative(module, level, package)
+
+    def test_a_sibling_import_resolves(self):
+        assert self._resolve("paths", 2, "aipass.canary.apps.handlers.json") == "aipass.canary.apps.handlers.paths"
+
+    def test_a_same_package_import_resolves(self):
+        assert self._resolve("utils", 1, "aipass.canary.apps.handlers") == "aipass.canary.apps.handlers.utils"
+
+    def test_a_bare_from_dot_import_resolves_to_the_package(self):
+        assert self._resolve(None, 1, "aipass.canary.apps.handlers") == "aipass.canary.apps.handlers"
+
+    def test_no_package_means_no_resolution(self):
+        """Negative control: guessing an absolute name for a file we cannot
+        place would put fabricated members into the chain, and the chain hands
+        out exemptions. Coming up SHORT is the safe direction."""
+        assert self._resolve("paths", 2, None) is None
+
+    def test_climbing_past_the_root_answers_None(self):
+        assert self._resolve("x", 9, "aipass.canary") is None
+
+    def test_an_absolute_import_is_untouched_by_the_resolver(self):
+        assert self._resolve("aipass.prax", 0, "aipass.canary.apps") is None
+
+    def test_the_walk_reaches_a_relatively_imported_bootstrap_module(self, tmp_path):
+        """End to end on the real tree: @canary's helper is in the chain now."""
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+
+        # parents[2] is src/aipass — parents[3] is src, and the wrong one made
+        # this skip instead of run. A skip reports its own defeat as a pass,
+        # which is the whole reason the branch is asserted rather than guessed.
+        aipass_root = Path(__file__).resolve().parents[2]
+        assert aipass_root.name == "aipass", aipass_root
+        target = aipass_root / "canary" / "apps" / "handlers" / "paths.py"
+        if not target.exists():
+            import pytest
+
+            pytest.skip(f"canary's paths.py is not on this machine ({target})")
+        assert json_structure_check._is_prelogging_bootstrap(target, target.read_text(encoding="utf-8")) is True
+
+
+class TestEncapsulationDerivesItsInfrastructureAllowList:
+    """@daemon, 2026-08-31: two adjacent lines in their entry point, the
+    json_handler import passing and the module_root import scoring the file 66%.
+
+    Both are same-branch handler imports by the branch's own entry point, and
+    the handlers guard itself permits exactly this — it blocks CROSS-branch
+    imports. The checker exempted json_handler by NAME rather than by the
+    property that makes it fine.
+
+    The property: if json_handler may be imported anywhere, so may anything
+    json_handler itself imports, because that module is BENEATH json_handler in
+    the branch's own import order. Measured 2026-08-31: 8 of 9 branches carrying
+    the dead-cwd cure have their json_handler importing it, so the derived set
+    finds it without anyone naming a file.
+    """
+
+    def _names(self, branch_root):
+        from aipass.seedgo.apps.handlers.aipass_standards import encapsulation_check
+
+        encapsulation_check._infrastructure_handlers.cache_clear()
+        return encapsulation_check._infrastructure_handlers(str(branch_root))
+
+    def test_a_handler_the_branchs_json_handler_imports_is_infrastructure(self, tmp_path):
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        (handlers / "json").mkdir(parents=True)
+        (handlers / "module_root.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
+        (handlers / "json" / "json_handler.py").write_text(
+            "from aipass.mybranch.apps.handlers.module_root import module_file\n", encoding="utf-8"
+        )
+        assert "module_root" in self._names(branch)
+
+    def test_a_relatively_imported_one_counts_the_same(self, tmp_path):
+        """@canary spells theirs ``from ..paths import module_file``. A rule that
+        saw only absolute imports would exempt eight branches and not the ninth."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        (handlers / "json").mkdir(parents=True)
+        (handlers / "paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
+        (handlers / "json" / "json_handler.py").write_text("from ..paths import module_file\n", encoding="utf-8")
+        assert "paths" in self._names(branch)
+
+    def test_a_handler_json_handler_does_not_import_is_not_infrastructure(self, tmp_path):
+        """Negative control: the set is DERIVED, not a longer allow-list. A
+        domain handler stays behind its module entry point."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        (handlers / "json").mkdir(parents=True)
+        (handlers / "openrouter.py").write_text("def get_response():\n    return None\n", encoding="utf-8")
+        (handlers / "json" / "json_handler.py").write_text("import json\n", encoding="utf-8")
+        assert "openrouter" not in self._names(branch)
+
+    def test_a_name_that_is_not_a_file_is_not_admitted(self, tmp_path):
+        """The imported NAME must resolve to a real handler module. Without that,
+        `from ..paths import module_file` would admit `module_file` too — a
+        function name standing in for a module."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        (handlers / "json").mkdir(parents=True)
+        (handlers / "paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
+        (handlers / "json" / "json_handler.py").write_text("from ..paths import module_file\n", encoding="utf-8")
+        assert "module_file" not in self._names(branch)
+
+    def test_an_unreadable_json_handler_grants_nothing(self, tmp_path):
+        """Ignorance is not evidence: a branch whose json_handler cannot be
+        parsed keeps the ordinary rule rather than being exempted by the
+        failure."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        (handlers / "json").mkdir(parents=True)
+        (handlers / "json" / "json_handler.py").write_text("def broken(:\n", encoding="utf-8")
+        assert self._names(branch) == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# cli: handler separation reads the STREAM, not the spelling
+# ---------------------------------------------------------------------------
+
+
+class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
+    """@flow, 2026-08-31: the cross-branch import fence scored 0 for two
+    ``print(..., file=sys.stderr)`` lines behind an ``AIPASS_DEBUG_GUARD``
+    env var, with the message "use logger instead" — in the one file in the
+    branch that runs before any logger exists.
+
+    Their argument was about the bootstrap window. The measurement found
+    something plainer and worse: the checker ALREADY PASSES the identical
+    effect written the other way. ``sys.stderr.write(msg)`` in a handler scores
+    100 (@skills' module_paths.py, measured); ``print(msg, file=sys.stderr)``
+    scores 0. Same stream, same bytes, same window — 100 points of difference
+    decided by which spelling the author reached for.
+
+    Handler separation exists so a handler does not DISPLAY. Display is stdout,
+    the channel a router's output travels on; stderr is where a diagnostic goes
+    precisely so it does not pollute that channel. So the fix is not a new
+    exemption — it is the rule finally saying what it already meant on one of
+    its two spellings.
+
+    MEASURED before landing: 351 print lines across the fleet's handlers, 12 of
+    them stderr-directed. Exactly six files change verdict, and all six are the
+    same fence block (@ai_mail, @cli, @flow, @memory, @prax, @trigger).
+
+    The other two stderr-directed prints live in @ai_mail's wake.py and
+    @skills' telegram notifier, and BOTH files scored 100 before this clause
+    and after it — every print in them, stderr-directed or not, sits inside an
+    ``if __name__ == "__main__":`` block that handler separation has always
+    excluded. Corrected here because the first measurement called them
+    "partial" from the raw regex without asking the checker: a proxy count is
+    not a verdict count, which is the mistake this class exists to stop me
+    repeating.
+    """
+
+    def _sep(self, content):
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_handler_separation
+
+        return check_handler_separation(content)
+
+    def test_a_stderr_directed_print_is_a_diagnostic_not_display(self):
+        content = (
+            "import os\n"
+            "import sys\n"
+            "\n"
+            "def _guard(caller_file, import_line):\n"
+            "    if os.environ.get('AIPASS_DEBUG_GUARD'):\n"
+            "        print(f'[GUARD DEBUG] caller_file = {caller_file}', file=sys.stderr)\n"
+            "        print(f'[GUARD DEBUG] import_line = {import_line}', file=sys.stderr)\n"
+        )
+        assert self._sep(content)["passed"] is True
+
+    def test_a_bare_print_keeps_its_finding(self):
+        """Negative control. Without this the clause would read as "prints are
+        fine in handlers now", which is the opposite of the ruling."""
+        result = self._sep("def show(x):\n    print(x)\n")
+        assert result["passed"] is False
+        assert "[2]" in result["message"]
+
+    def test_an_explicitly_stdout_directed_print_keeps_its_finding(self):
+        """The discriminator is the STREAM. Naming stdout out loud is still
+        display — arguably more so, since the author chose it."""
+        assert self._sep("import sys\n\ndef show(x):\n    print(x, file=sys.stdout)\n")["passed"] is False
+
+    def test_a_print_to_some_other_file_handle_keeps_its_finding(self):
+        """A write to a handle nobody is watching is not a diagnostic. Same
+        clause @commons' silent_catch ruling needed this morning: ``.write``
+        reports only when the thing written to is a standard stream."""
+        assert self._sep("def dump(x, fh):\n    print(x, file=fh)\n")["passed"] is False
+
+    def test_only_the_file_keyword_directs_a_stream(self):
+        """Mutation control (M3, survived the first run). Loosening the keyword
+        check to accept ``sep`` exempted ``print(x, sep=sys.stderr)`` — a call
+        that still writes every byte to stdout. Contrived code, but the clause
+        must key on the argument that actually chooses the stream."""
+        assert self._sep("import sys\n\ndef show(x):\n    print(x, sep=sys.stderr)\n")["passed"] is False
+
+    def test_a_file_holding_both_keeps_the_finding_and_names_only_the_display_lines(self):
+        """The exempted line must not shift the reported line numbers, or the
+        finding sends its owner to the wrong place. Synthetic rather than
+        borrowed from the fleet: the two live files that hold both kinds put
+        every print inside a ``__main__`` block, so neither would exercise
+        this."""
+        content = (
+            "import sys\n"
+            "\n"
+            "def report(x):\n"
+            "    print('to the user', x)\n"
+            "    print('diagnostic', file=sys.stderr)\n"
+            "    print('also to the user', x)\n"
+        )
+        result = self._sep(content)
+        assert result["passed"] is False
+        assert "[4, 6]" in result["message"]
+
+    def test_an_unparseable_file_keeps_every_print_finding(self):
+        """Ignorance is not evidence. A file whose AST cannot be built has no
+        stderr-directed prints PROVEN, so none are exempted — the same
+        direction json_structure's bootstrap clause errs in."""
+        result = self._sep("import sys\ndef broken(:\n    print('x', file=sys.stderr)\n")
+        assert result["passed"] is False
+
+    def test_the_two_real_fleet_files_now_agree(self):
+        """End-to-end against the live tree, because the whole finding was that
+        two spellings of one effect disagreed by 100 points. Asserts the files
+        exist rather than skipping: a vacuous skip here would report the
+        agreement it never checked."""
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+
+        aipass_root = Path(__file__).resolve().parents[2]
+        assert aipass_root.name == "aipass", aipass_root
+        stream_write = aipass_root / "skills" / "apps" / "handlers" / "module_paths.py"
+        stream_print = aipass_root / "flow" / "apps" / "handlers" / "__init__.py"
+        assert stream_write.exists() and stream_print.exists()
+
+        written = cli_check.check_module(str(stream_write))
+        printed = cli_check.check_module(str(stream_print))
+        assert written["score"] == 100
+        assert printed["score"] == written["score"], [c["message"] for c in printed["checks"] if not c["passed"]]
+
+
+class TestTheCliRulingsAreQueryableNotJustEnforced:
+    """@commons, 2026-08-31: "it currently lives in a docstring nobody queries,
+    and I only found the wall by hitting it. A branch reading the standard first
+    would have saved this whole exchange."
+
+    A checker that enforces a rule the published standard does not state makes
+    every branch discover it by failing. These pins hold the two cli rulings in
+    the queryable content, and each asserts the CONCRETE spelling a reader needs
+    rather than a topic word, so trimming the example out fails here.
+    """
+
+    def _content(self):
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_content import get_cli_standards
+
+        return get_cli_standards()
+
+    def test_the_pre_console_window_is_published_with_its_boundary(self):
+        content = self._content()
+        assert "pre-console bootstrap window" in content
+        assert "STRICTLY prior" in content
+
+    def test_the_stream_ruling_is_published_with_both_spellings(self):
+        content = self._content()
+        assert "print(msg, file=sys.stderr)" in content
+        assert "sys.stderr.write(msg)" in content
+        assert "print(msg, file=sys.stdout)" in content
+
+    def test_the_published_rule_and_the_checker_agree(self):
+        """The point of publishing is that a branch reading it gets the same
+        answer the audit gives. Runs the checker over the exact snippets the
+        standard shows, so the two cannot drift apart silently."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import check_handler_separation
+
+        allowed = "import sys\n\ndef f(msg):\n    print(msg, file=sys.stderr)\n"
+        refused = "import sys\n\ndef f(msg):\n    print(msg, file=sys.stdout)\n"
+        assert check_handler_separation(allowed)["passed"] is True
+        assert check_handler_separation(refused)["passed"] is False
+
+
+class TestTheEmptyAnswerIsAConstantWhateverItsType:
+    """Caught by dogfooding: my own new cli_check helper scored 0 on
+    silent_catch for ``except SyntaxError: return set()``.
+
+    The classify-and-return clause reads ``ast.Constant``, which in Python
+    covers scalars and nothing else. So ``return ""`` was allowed and
+    ``return []`` was flagged — two spellings of one idea, "this function found
+    nothing", separated by which type the function happens to return. A
+    function whose contract is a list has no other way to say it, and
+    ``set()`` and ``frozenset()`` have no literal spelling at all.
+
+    Same species as the stream ruling three hours earlier in this file: the
+    verdict was being decided by the spelling rather than by what the code
+    does. EMPTY only — a handler returning ``[1, 2]`` is fabricating an answer,
+    not reporting an absence, and keeps its finding.
+
+    MEASURED before landing: 16 handlers across the fleet match, every one of
+    them ``return []``, ``return {}`` or ``return set()``.
+    """
+
+    def _judge(self, body):
+        import ast
+
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        source = f"def f(c):\n    try:\n        return parse(c)\n    except SyntaxError:\n        {body}\n"
+        tree = ast.parse(source)
+        flagged = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for handler in node.handlers:
+                    flagged += silent_catch_check._judge_handler(handler, node, "x.py")
+        return bool(flagged)
+
+    @pytest.mark.parametrize("body", ["return []", "return {}", "return ()", "return set()", "return frozenset()"])
+    def test_an_empty_container_is_the_same_answer_as_an_empty_string(self, body):
+        assert self._judge(body) is False, body
+
+    def test_the_scalar_spellings_still_pass(self):
+        """Control: the clause this widens must keep working."""
+        assert self._judge('return ""') is False
+        assert self._judge("return 0") is False
+
+    @pytest.mark.parametrize("body", ["return [1, 2]", "return {'a': 1}", "return {'x'}"])
+    def test_a_NON_empty_literal_keeps_its_finding(self, body):
+        """The boundary, and the reason the clause is not just "any literal": a
+        handler that invents content is not reporting an absence."""
+        assert self._judge(body) is True, body
+
+    @pytest.mark.parametrize("body", ["return list(c)", "return dict(a=1)", "return set(c)"])
+    def test_a_builtin_called_WITH_arguments_keeps_its_finding(self, body):
+        """Negative control for the call form. ``set()`` is the empty set;
+        ``set(c)`` is a computed answer wearing the same name."""
+        assert self._judge(body) is True, body
+
+    def test_a_computed_return_still_keeps_its_finding(self):
+        assert self._judge("return compute(c)") is True
+
+    @pytest.mark.parametrize("body", ["return compute()", "return build_default()", "return Path()"])
+    def test_a_zero_ARGUMENT_call_to_anything_else_keeps_its_finding(self, body):
+        """Mutation control (M4, survived the first run). Dropping the builtin
+        name check exempted every no-argument call — a computed fallback that
+        happens to take no arguments is still computed, and ``Path()`` is not an
+        absence. The clause is the NAME and the emptiness together."""
+        assert self._judge(body) is True, body
+
+    def test_a_broad_except_gains_nothing_from_this(self):
+        """The specific-exception clause is what makes the returned value
+        meaningful. ``except Exception`` learns the caller nothing, so an empty
+        list from it is still a swallow."""
+        import ast
+
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        source = "def f(c):\n    try:\n        return parse(c)\n    except Exception:\n        return []\n"
+        tree = ast.parse(source)
+        flagged = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for handler in node.handlers:
+                    flagged += silent_catch_check._judge_handler(handler, node, "x.py")
+        assert flagged
+
+    def test_my_own_helper_is_the_case_that_found_this(self):
+        """End-to-end on the live file, because dogfooding is what surfaced it
+        and a synthetic-only pin would not have."""
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
+        target = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "aipass_standards" / "cli_check.py"
+        assert target.exists(), target
+        assert "_stderr_directed_print_lines" in target.read_text(encoding="utf-8")
+        assert silent_catch_check.check_module(str(target))["score"] == 100
+
+    def test_the_empty_answer_ruling_is_published_too(self):
+        """@commons' point, applied to my own new clause the same day: a rule
+        that lives only in the checker makes every branch discover it by
+        failing."""
+        from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import get_silent_catch_standards
+
+        content = get_silent_catch_standards()
+        assert "EMPTY ANSWER" in content
+        assert "return set()" in content
+        assert "return set(c)" in content

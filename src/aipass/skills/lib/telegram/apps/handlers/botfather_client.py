@@ -50,7 +50,12 @@ try:
     TELETHON_AVAILABLE = True
     del _telethon_check
 except ImportError:
-    logger.warning("Telethon not installed — BotFather automation unavailable")
+    # NOT logged here. A WARNING emitted at module import fires once per
+    # import, and an absent optional dependency is one condition however many
+    # times it is observed: ten imports produced ten identical warnings and an
+    # escalation. The report moved to first USE, deduped, where it names
+    # something a caller actually tried to do.
+    pass
 
 # =============================================
 # CONSTANTS
@@ -114,6 +119,23 @@ def _load_telethon_config() -> dict:
 # =============================================
 
 
+_TELETHON_WARNED = False
+
+
+def _warn_telethon_missing_once() -> None:
+    """Report an absent Telethon once per process, at first use.
+
+    The condition is a property of the environment, not of the call, so
+    repeating it per caller tells a reader nothing new and escalates on volume
+    alone.
+    """
+    global _TELETHON_WARNED
+    if _TELETHON_WARNED:
+        return
+    _TELETHON_WARNED = True
+    logger.warning("Telethon not installed — BotFather automation unavailable")
+
+
 def check_telethon_setup() -> tuple[bool, str]:
     """
     Check whether Telethon is ready for BotFather automation.
@@ -128,6 +150,7 @@ def check_telethon_setup() -> tuple[bool, str]:
         (False, "reason") with a human-readable explanation of what is missing.
     """
     if not TELETHON_AVAILABLE:
+        _warn_telethon_missing_once()
         return (False, "Telethon library not installed. Run: pip install telethon")
 
     try:

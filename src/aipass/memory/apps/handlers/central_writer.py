@@ -25,6 +25,7 @@ from typing import Dict, Any
 from aipass.memory.apps.handlers import repo_root
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -35,7 +36,7 @@ logger = get_system_logger()
 # CONSTANTS
 # =============================================================================
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[2]
+_MEMORY_ROOT = module_file(__file__).parents[2]
 
 
 def _find_repo_root() -> Path:

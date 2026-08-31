@@ -43,7 +43,8 @@ def send_source_fix_email(entry: dict) -> bool:
     """
     try:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.info("[ERRORS] Could not import deliver_email_to_branch - ai_mail not available")
         return False
 

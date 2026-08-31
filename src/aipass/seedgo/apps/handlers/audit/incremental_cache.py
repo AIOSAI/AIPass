@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 # Bump when the fingerprint/stamp ALGORITHM changes (belt-and-braces bust).
 CACHE_VERSION = "1"
@@ -63,8 +64,8 @@ CACHE_FILE = json_handler.JSON_DIR / "audit_cache.json"
 # 17/17 cached green while CI, which has no cache, showed the real 99%. A stale
 # green is worse than a slow audit.
 MACHINERY_DIRS: Tuple[Path, ...] = (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parent.parent / "bypass",
+    module_file(__file__).parent,
+    module_file(__file__).parent.parent / "bypass",
 )
 
 

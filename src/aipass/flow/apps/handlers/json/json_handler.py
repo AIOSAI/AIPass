@@ -30,12 +30,13 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Infrastructure
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # Constants
 FLOW_ROOT = _PKG_ROOT / "flow"
@@ -48,20 +49,40 @@ def _get_caller_module_name() -> str:
 
     Returns:
         Module name (e.g., "create_plan" from create_plan.py)
+
+    Reads one frame with ``sys._getframe`` rather than building the whole stack
+    with ``inspect.stack()``. MEASURED on the Windows CI gate 2026-08-31
+    (@memory's finding, relayed by @devpulse and reproduced here): building a
+    ``FrameInfo`` per frame calls ``getsourcefile() -> getmodule() ->
+    os.path.realpath()``, and ``ntpath.realpath`` reads ``os.getcwd()``
+    unconditionally on its first lines. That call site inside ``getmodule`` is
+    not wrapped in a try. On POSIX the equivalent raise happens earlier, inside
+    ``getabsfile()``, where inspect catches it — which is why a call on flow's
+    every-write audit path carried this invisibly for as long as it existed.
+
+    No import probe reaches this line: ``log_operation`` is called at RUNTIME,
+    and the stack it walks is the CALLER'S. The shape that convicts it is a
+    ``<string>`` frame — a routed subprocess, a hook, anything exec'd — which is
+    exactly what drone's router produces when it invokes flow.
+
+    A frame's ``f_code.co_filename`` is already a string in memory; reading it
+    touches no filesystem at all.
     """
     try:
-        stack = inspect.stack()
         # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-        if len(stack) > 2:
-            caller_frame = stack[2]
-            caller_path = Path(caller_frame.filename)
-            module_name = caller_path.stem
+        caller_frame = sys._getframe(2)
+        caller_path = Path(caller_frame.f_code.co_filename)
+        module_name = caller_path.stem
 
-            # Validate module name
-            if module_name and not module_name.startswith("_"):
-                return module_name
+        # Validate module name
+        if module_name and not module_name.startswith("_"):
+            return module_name
 
         # Fallback
+        return "unknown"
+    except ValueError:
+        # sys._getframe raises when the stack is shallower than the requested
+        # depth — a direct call with no caller above log_operation.
         return "unknown"
     except Exception as exc:
         logger.warning("[json_handler] Failed to detect caller module name: %s", exc)

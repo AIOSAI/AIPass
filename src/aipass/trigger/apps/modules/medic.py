@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -57,13 +59,11 @@ if sys.platform == "win32":
 
 SERVICE_NAME = "trigger-log-watcher.service"
 _SERVICE_UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / SERVICE_NAME
-_TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "templates" / f"{SERVICE_NAME}.template"
+_TEMPLATE_PATH = TRIGGER_ROOT / "templates" / f"{SERVICE_NAME}.template"
 
 
 def _get_aipass_home() -> Path:
     """Resolve AIPASS_HOME from env var or git repo root."""
-    import os
-
     env = os.environ.get("AIPASS_HOME")
     if env:
         return Path(env)
@@ -78,7 +78,7 @@ def _get_aipass_home() -> Path:
             return Path(result.stdout.strip())
     except Exception as exc:
         logger.warning("[MEDIC] git repo root detection failed: %s", exc)
-    return Path(__file__).resolve().parent.parent.parent.parent.parent
+    return find_repo_root(caller="medic")
 
 
 def _ensure_service_installed() -> bool:
@@ -113,7 +113,8 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
 

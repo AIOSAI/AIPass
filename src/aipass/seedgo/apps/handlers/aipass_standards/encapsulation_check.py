@@ -16,8 +16,10 @@ Validates that handlers are properly encapsulated:
 - Handler security guards present in handlers/__init__.py (inspect.stack guard)
 """
 
+import ast
 import re
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -461,6 +463,80 @@ def check_cross_branch_imports(
     }
 
 
+#: Handlers every module may import by name, because a branch cannot function
+#: without them. Kept as NAMES only for the two that were always here; anything
+#: else must EARN the exemption structurally — see :func:`_infrastructure_handlers`.
+_DEFAULT_HANDLERS = frozenset({"json_handler", "file_handler"})
+
+
+@lru_cache(maxsize=32)
+def _infrastructure_handlers(branch_root_str: str) -> frozenset:
+    """Handler modules the branch's OWN json_handler depends on.
+
+    THE ARGUMENT, and it is why this is not just a longer allow-list: if
+    json_handler may be imported anywhere — which this checker has always said —
+    then so may anything json_handler itself imports, because that module is
+    BENEATH json_handler in the branch's own import order. Nothing can use
+    json_handler without already having loaded it.
+
+    WHERE IT CAME FROM. @daemon, 2026-08-31, two adjacent lines in their entry
+    point: the json_handler import passed and the module_root import scored the
+    file 66%. Both are same-branch handler imports by the branch's own entry
+    point, and the handlers guard itself permits exactly this — it blocks
+    CROSS-branch imports. The checker was exempting json_handler by NAME rather
+    than by the property that makes it fine.
+
+    module_root (spellings vary: paths.py, module_paths.py, repo_root.py) is the
+    fleet-ratified cure for the Windows dead-cwd defect, adopted by ten-plus
+    branches this round, and it is a handler BY CONSTRUCTION — it has to sit
+    under handlers/ to be the one guarded spelling. Measured 2026-08-31: 8 of 9
+    branches carrying the cure have their json_handler importing it, so the
+    derived set finds it without anyone naming a file.
+
+    Args:
+        branch_root_str: The branch directory, e.g. ``.../src/aipass/daemon``.
+
+    Returns:
+        Module basenames (no extension) importable anywhere in the branch.
+    """
+    branch_root = Path(branch_root_str)
+    handlers_root = branch_root / "apps" / "handlers"
+    sources = list(handlers_root.glob("*/json_handler.py"))
+    names: set = set()
+    for source in sources:
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as exc:
+            # Unreadable is not evidence: the branch keeps the ordinary rule.
+            logger.info("encapsulation: cannot read %s for the infrastructure set: %s", source, exc)
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                # Relative and absolute alike — @canary reaches theirs with
+                # ``from ..paths import module_file`` and it counts the same.
+                module = node.module or ""
+                candidates = [module.rsplit(".", 1)[-1]] if module else []
+                candidates += [alias.name for alias in node.names]
+                names.update(c for c in candidates if c and (handlers_root / f"{c}.py").is_file())
+    return frozenset(names)
+
+
+def _branch_root(module_path: str) -> Optional[Path]:
+    """The ``src/aipass/<branch>`` directory above a file, or None."""
+    for parent in Path(module_path).resolve().parents:
+        if parent.parent.name == "aipass" and (parent / "apps").is_dir():
+            return parent
+    return None
+
+
+def _allowed_handler_names(module_path: str) -> frozenset:
+    """Default handlers plus whatever this branch's json_handler stands on."""
+    branch_root = _branch_root(module_path)
+    if branch_root is None:
+        return _DEFAULT_HANDLERS
+    return _DEFAULT_HANDLERS | _infrastructure_handlers(str(branch_root))
+
+
 def check_cross_package_imports(
     lines: List[str], module_path: str, file_package: str, bypass_rules: list | None = None
 ) -> Dict:
@@ -477,7 +553,7 @@ def check_cross_package_imports(
     violations = []
 
     # Allowed default handlers that can be imported anywhere
-    allowed_handlers = {"json_handler", "file_handler"}
+    allowed_handlers = _allowed_handler_names(module_path)
 
     in_docstring = False
     for i, line in enumerate(lines, 1):
@@ -590,7 +666,7 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
     violations = []
 
     # Allowed default handlers
-    allowed_handlers = {"json_handler", "file_handler"}
+    allowed_handlers = _allowed_handler_names(module_path)
 
     in_docstring = False
     for i, line in enumerate(lines, 1):

@@ -21,6 +21,7 @@ from typing import Optional
 
 # Logging
 from aipass.prax import logger
+from aipass.skills.apps.handlers.module_paths import module_file
 
 # fcntl is POSIX-only (Linux/macOS); unavailable on Windows. Guard the import and
 # skip advisory locking when absent. Matches the codebase convention (hooks/cadence,
@@ -50,7 +51,7 @@ def _unlock(f) -> None:
 # CONSTANTS
 # =============================================
 
-SKILL_ROOT = Path(__file__).resolve().parents[2]
+SKILL_ROOT = module_file(__file__).parents[2]
 REGISTRY_DIR = SKILL_ROOT / ".local" / "state"
 REGISTRY_FILE = REGISTRY_DIR / "_registry.json"
 

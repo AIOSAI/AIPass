@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: The one answer to "which repo root is this" — never the process cwd, never a folded filename
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -76,7 +76,6 @@ happened to take.
 import os
 from pathlib import Path
 
-from aipass.memory.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
@@ -86,14 +85,53 @@ MODULE_NAME = "repo_root"
 # The marker that defines a repo root: the core registry file.
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
 
+
 # The repo root this FILE sits in, derived from the layout and nothing else.
 # ``src/`` is the marker because it is the one directory the package layout
 # guarantees.  The last-resort value is the filesystem root: defined, never
 # raises, and absurd enough to fail loudly downstream instead of quietly
 # resolving against somebody's home directory.
+def module_file(file: str) -> Path:
+    """A module's own path, absolute, resolved when the filesystem allows.
+
+    ``Path(__file__).resolve()`` at module level is a cwd read on Windows.
+    ``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — not only for
+    a relative path, the way POSIX does — so in a process whose working
+    directory is gone, importing the module raises ``FileNotFoundError`` from a
+    line that only wanted to know where its own file is. Found on the Windows CI
+    leg 2026-08-31, one frame at a time: the guard in ``handlers/__init__``
+    crashed first, and behind it sat thirty-two more module-level copies of the
+    same idiom.
+
+    ``.resolve()`` is still attempted, because normalising symlinks is why the
+    call is there and it succeeds on every healthy machine. The fallback is only
+    reached in the world where the alternative is a dead import, and it is
+    sound: ``__file__`` has been absolute since Python 3.9, so what is returned
+    is the right file either way — just spelled through the symlink rather than
+    past it.
+
+    Args:
+        file: A module's ``__file__``.
+
+    Returns:
+        The module's path, resolved if the filesystem could be asked.
+    """
+    path = Path(file)
+    try:
+        return path.resolve()
+    except OSError as exc:
+        # debug, not warning: in the world that reaches this line EVERY module
+        # import takes it, and thirty-two identical warnings describe one
+        # condition. The condition itself is reported once, loudly, by whatever
+        # lane actually fails on it.
+        logger.debug(f"[repo_root] Cannot resolve {path} ({type(exc).__name__}) — using its absolute spelling")
+        return path
+
+
+_THIS_FILE = module_file(__file__)
 SOURCE_ROOT = next(
-    (parent.parent for parent in Path(__file__).resolve().parents if parent.name == "src"),
-    Path(__file__).resolve().parents[-1],
+    (parent.parent for parent in _THIS_FILE.parents if parent.name == "src"),
+    _THIS_FILE.parents[-1],
 )
 
 
@@ -172,6 +210,8 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
         f"resolving to the source tree at {SOURCE_ROOT}, never the process directory"
     )
     try:
+        from aipass.memory.apps.handlers.json import json_handler
+
         json_handler.log_operation(
             "repo_root_fallback",
             {"caller": caller, "marker": marker, "searched_from": str(current), "resolved": str(SOURCE_ROOT)},
@@ -201,7 +241,12 @@ def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, ca
         The directory holding *marker*, or ``SOURCE_ROOT`` when no *marker*
         exists anywhere above *start*. Never reads the process cwd.
     """
-    current = Path(start) if start is not None else Path(__file__).resolve().parent
+    # module_file, not resolve(): four callers reach this line at IMPORT time,
+    # and on Windows resolve() reads the working directory. The first sweep of
+    # this species keyed on "module level" and skipped this line for sitting
+    # inside a function — the discriminator that matters is REACHED AT IMPORT,
+    # not written at module scope, and this was the last crash standing.
+    current = Path(start) if start is not None else module_file(__file__).parent
     for parent in [current] + list(current.parents):
         if exists_exactly(parent / marker):
             return parent

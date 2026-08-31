@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def get_caller_info() -> tuple:
     return (module_name, caller_path, branch)
 
 
-_AIPASS_PKG_ROOT = Path(__file__).resolve().parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
+_AIPASS_PKG_ROOT = resolved_file(Path(__file__)).parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
 _SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)
 _REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
 

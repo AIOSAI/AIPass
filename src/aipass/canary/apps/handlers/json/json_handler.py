@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Canary JSON handler — configured instance of aipass.aipass.shared
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-08-31
 # =============================================
 
 """Canary JSON handler — thin shim over aipass.aipass.shared.json_handler.
@@ -16,11 +16,14 @@ data by definition. It exists so the branch exercises the same JSON path
 the rest of the fleet does, not because canary has state worth keeping.
 """
 
-from pathlib import Path
-
 from aipass.aipass.shared.json_handler import JsonHandler
 
-_CANARY_ROOT = Path(__file__).resolve().parents[3]
+from ..paths import module_file
+
+# module_file, not Path(__file__).resolve(): this constant is built AT IMPORT,
+# and ntpath.realpath reads the cwd unconditionally, so the bare resolve makes
+# this module unimportable on Windows in a process whose cwd is gone.
+_CANARY_ROOT = module_file(__file__).parents[3]
 _JSON_DIR = _CANARY_ROOT / "canary_json"
 
 _handler = JsonHandler(json_dir=_JSON_DIR)

@@ -33,6 +33,7 @@ copy of ``try: Path.cwd() except OSError: None`` would be this file's own
 lesson repeated.
 """
 
+import ast
 import subprocess
 import sys
 import textwrap
@@ -284,7 +285,34 @@ class TestTheSweepIsComplete:
     short of the ten actually there (``broker/daemon.py`` and
     ``git/lock_handler.py`` were not on their list). A prose count is what keeps
     being wrong, so the count is a test.
+
+    THE INSTRUMENT CHANGED 2026-08-31, and the reason is worth keeping. This
+    was a line scan that stripped ``#`` comments and matched the text
+    ``Path.cwd()`` / ``os.getcwd()``. It went red on the Windows round-4 build
+    against two DOCSTRINGS — prose in ``handlers/__init__.py`` and
+    ``handlers/module_root.py`` explaining that ``ntpath.realpath`` reads
+    ``os.getcwd()`` unconditionally, which is why those files were cured. A
+    string ban convicts the explanation along with the defect, which is how a
+    cure ends up undocumented. It parses now, so the ban is on the CALL.
+
+    The parse also closed a hole the text match had: ``from os import getcwd``
+    followed by a bare ``getcwd()`` was invisible to it, and is not now.
     """
+
+    @staticmethod
+    def _bare_cwd_reads(tree: ast.Module) -> list[int]:
+        """Lines calling ``Path.cwd()``, ``os.getcwd()``, or a bare ``getcwd()``."""
+        found = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                if (func.value.id, func.attr) in {("Path", "cwd"), ("os", "getcwd")}:
+                    found.append(node.lineno)
+            elif isinstance(func, ast.Name) and func.id == "getcwd":
+                found.append(node.lineno)
+        return found
 
     def test_no_bare_cwd_read_survives_outside_caller_cwd(self):
         import aipass.drone.apps as drone_apps
@@ -294,12 +322,26 @@ class TestTheSweepIsComplete:
         for source in sorted(root.rglob("*.py")):
             if source.name == "router_handler.py":
                 continue  # caller_cwd() itself — the one sanctioned read
-            for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
-                code = line.split("#", 1)[0]
-                if "Path.cwd()" in code or "os.getcwd()" in code:
-                    offenders.append(f"{source.relative_to(root)}:{number}")
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for lineno in self._bare_cwd_reads(tree):
+                offenders.append(f"{source.relative_to(root)}:{lineno}")
 
         assert offenders == [], "bare working-directory reads outside caller_cwd(): " + ", ".join(offenders)
+
+    def test_the_detector_convicts_each_spelling_it_bans(self):
+        """Both directions, because a checker that convicts nothing reads green."""
+        assert self._bare_cwd_reads(ast.parse("from pathlib import Path\nhere = Path.cwd()\n"))
+        assert self._bare_cwd_reads(ast.parse("import os\nhere = os.getcwd()\n"))
+        assert self._bare_cwd_reads(ast.parse("from os import getcwd\nhere = getcwd()\n")), (
+            "the bare-import spelling was invisible to the line scan this replaced"
+        )
+
+    def test_the_detector_clears_prose_that_names_the_defect(self):
+        """The red that changed the instrument, kept as the pin for it."""
+        tree = ast.parse('"""ntpath.realpath reads os.getcwd() unconditionally — hence the guard."""\n')
+        assert self._bare_cwd_reads(tree) == [], (
+            "a docstring explaining the cure is not the defect; convicting it is how cures go unexplained"
+        )
 
 
 class TestTheWindowsSkipIsNarrow:

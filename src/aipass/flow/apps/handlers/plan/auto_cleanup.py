@@ -20,7 +20,9 @@ from typing import Dict, Any, Tuple
 from aipass.flow.apps.handlers.json import json_handler
 
 # Infrastructure
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 
 def auto_close_orphaned_plans(registry: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:

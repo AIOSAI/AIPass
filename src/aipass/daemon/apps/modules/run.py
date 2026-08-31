@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-15
-# Modified: 2026-08-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -15,7 +15,6 @@ Part of the DPLAN-0204 decentralized scheduler redesign.
 
 import sys
 import time
-from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -33,6 +32,7 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     job_key,
     prune_orphans,
 )
+from aipass.daemon.apps.handlers.module_root import module_file
 
 try:
     import fcntl
@@ -40,7 +40,7 @@ except ImportError:
     fcntl = None  # type: ignore[assignment]
     logger.info("[run] fcntl unavailable (Windows)")
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
+_DAEMON_ROOT = module_file(__file__).parents[2]  # src/aipass/daemon/
 LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}

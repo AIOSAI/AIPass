@@ -24,6 +24,7 @@ import subprocess
 import logging
 import hashlib
 from pathlib import Path
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,14 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # Default global chroma path: memory/.chroma
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
 
 # Sibling embedder script -- same venv, invoked by path. Encoding lives behind
 # this handler on purpose: a caller that picks its own embedding model can put
 # vectors from two models in one collection, which fails silently rather than
 # loudly (no error, just wrong neighbours). The store owns the model choice.
-_EMBED_SCRIPT = Path(__file__).resolve().parent.parent / "vector" / "embed_subprocess.py"
+_EMBED_SCRIPT = module_file(__file__).parent.parent / "vector" / "embed_subprocess.py"
 
 # Singleton clients per path
 _clients = {}

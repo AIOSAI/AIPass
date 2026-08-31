@@ -746,6 +746,47 @@ class TestPrintBranchSummary:
         result = self._make_audit_result()
         print_branch_summary(result)
 
+    def test_the_header_states_what_it_measured_not_only_how_much(self, monkeypatch):
+        """The count is scoped out loud, because the corpus is not the branch.
+
+        ``_collect_py_files`` walks ``apps/**/*.py`` and nothing else, so a bare
+        "N files checked" beside a 100 invites the reader to conclude the branch
+        is clean when a third of its Python was never opened. This asserts the
+        SCOPE WORDS, not the number: a header that keeps the count and drops the
+        qualifier is exactly the overclaim, and it would pass a count-only pin.
+        """
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            print_branch_summary,
+        )
+
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        monkeypatch.setattr(audit_display, "console", mock_con)
+        print_branch_summary(self._make_audit_result(files_checked=171))
+        rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
+        assert "171 production files measured" in rendered
+        assert "apps/ only" in rendered
+        assert "tests/ not in the corpus" in rendered
+
+    def test_the_scope_words_are_not_hardcoded_around_the_count(self, monkeypatch):
+        """Negative control on the pin above: the number still has to be real.
+
+        A header that printed the qualifier with a constant would satisfy every
+        assertion above while reporting the wrong corpus size.
+        """
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            print_branch_summary,
+        )
+
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        monkeypatch.setattr(audit_display, "console", mock_con)
+        print_branch_summary(self._make_audit_result(files_checked=3))
+        rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
+        assert "3 production files measured" in rendered
+
     def test_post_check_crash_prints_even_at_a_perfect_score(self):
         """A crashed post-check reaches the CONSOLE on a branch scoring 100.
 

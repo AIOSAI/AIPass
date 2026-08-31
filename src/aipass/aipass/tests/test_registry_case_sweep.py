@@ -1,8 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
+# Modified: 2026-08-31
 # =============================================
 
 """Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
@@ -21,6 +22,13 @@ question.
 
 These pins run RED ON LINUX by emulating the widened match, so no Windows box
 is needed to keep them honest.
+
+1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
+glob returns nothing, which is false on NTFS, so it failed on the Windows leg
+of ebb8075d: broken on the exact platform the defect lives on.  The host is
+PROBED now and both outcomes are pinned (see :func:`host_folds_case`).  A
+``skipif`` was refused for the same reason -- it would retire the control where
+it matters most.
 """
 
 from __future__ import annotations
@@ -65,6 +73,28 @@ def case_insensitive_fs(monkeypatch: pytest.MonkeyPatch):
     return widened
 
 
+def host_folds_case(tmp_path: Path) -> bool:
+    """Does THIS filesystem fold case? Asked in the DEFECT'S OWN DIRECTION.
+
+    Writes a LOWERCASE name and globs the UPPERCASE pattern: an uppercase
+    pattern reaching a lowercase file is exactly the direction the defect
+    travels.  The reverse direction is a different question and a filesystem is
+    entitled to answer it differently, so asking it backwards would measure
+    something this file does not care about (@ai_mail's direction lesson,
+    2026-08-31).
+
+    A PROBE, never a ``skipif``: the host answers and BOTH answers are pinned.
+    A skip would retire the control on the very platform the defect lives on.
+
+    The probe writes into its own subdirectory, so it can never join the decoy
+    set of the world under test.
+    """
+    probe = tmp_path / "_case_probe"
+    probe.mkdir(exist_ok=True)
+    (probe / "probe_registry.json").write_text("{}", encoding="utf-8")
+    return [path.name for path in probe.glob("*_REGISTRY.json")] == ["probe_registry.json"]
+
+
 def _project(tmp_path: Path) -> tuple[Path, Path]:
     """A project root with the real anchor, and a DECOY one level down.
 
@@ -72,6 +102,13 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     entry to a list -- it changes the ANSWER, because the walk meets ``sub``
     before it meets ``root``.  Every assertion below is about where discovery
     POINTS, never about set membership.
+
+    Every decoy carries a DISTINCT STEM (``flow``, ``.template``), never a case
+    twin of ``AIPASS``.  Two names differing only by case CANNOT COEXIST on a
+    folding filesystem: the second write lands in the first file while the
+    directory keeps the original spelling, so a case-twin decoy would silently
+    overwrite the real anchor's content and build a DIFFERENT WORLD on Windows
+    than on Linux (@memory's coexistence fact, 2026-08-31).
     """
     root = tmp_path / "root"
     deep = root / "sub" / "deep"
@@ -87,19 +124,58 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
 # ---------------------------------------------------------------------------
 
 
+#: The two lowercase baits ``_project`` plants one level below the real anchor.
+DECOY_NAMES = {"flow_registry.json", ".template_registry.json"}
+
+
 class TestTheEmulationIsNotBlind:
     """A blinded fixture reports green identically to a cure.  Prove it bites."""
 
-    def test_without_emulation_the_lowercase_decoy_is_invisible(self, tmp_path: Path) -> None:
+    def test_the_raw_glob_answers_exactly_as_the_host_folds(self, tmp_path: Path) -> None:
+        """The control, pinned in BOTH worlds rather than assuming one.
+
+        This assertion used to read ``== []`` unconditionally.  It failed on the
+        Windows CI leg of ebb8075d -- correctly: NTFS folds case, so the raw
+        glob really does return the decoys there, and a control that asserts
+        otherwise is broken on the exact host the defect lives on.
+
+        Where the host folds, the emulation is redundant rather than absent:
+        the real filesystem already supplies the widened match, so every pin
+        below is exercised against the genuine article.  Where it does not
+        fold, the emulation is the only thing that widens -- which is what the
+        companion test proves.
+        """
         root, _ = _project(tmp_path)
-        assert list((root / "sub").glob("*_REGISTRY.json")) == []
+        found = {path.name for path in (root / "sub").glob("*_REGISTRY.json")}
+        if host_folds_case(tmp_path):
+            assert found == DECOY_NAMES, (
+                f"host folds case, so the raw glob must reach the lowercase decoys -- got {found}"
+            )
+        else:
+            assert found == set(), f"host does NOT fold case, so the raw glob must reach nothing -- got {found}"
 
     def test_with_emulation_the_lowercase_decoy_IS_matched(self, tmp_path: Path, case_insensitive_fs) -> None:
         """If this goes green-by-accident the whole file proves nothing."""
         root, _ = _project(tmp_path)
         names = {p.name for p in (root / "sub").glob("*_REGISTRY.json")}
-        assert names == {"flow_registry.json", ".template_registry.json"}, (
-            f"emulation did not widen -- these pins would pass blind: {names}"
+        assert names == DECOY_NAMES, f"emulation did not widen -- these pins would pass blind: {names}"
+
+    def test_the_probe_reads_the_world_not_a_platform_string(self, tmp_path: Path, case_insensitive_fs) -> None:
+        """The probe must be an experiment, not ``sys.platform`` in disguise.
+
+        It is allowed to disagree with the platform -- a case-sensitive volume
+        can be mounted on Windows and a folding one on Linux -- so a probe that
+        answered from ``sys.platform`` would be wrong exactly where it matters
+        and no case-sensitive host could ever catch it.
+
+        Running it inside the folding EMULATION is what makes that catchable
+        here: a platform string still says False on this Linux runner, while a
+        probe that genuinely globs says True.  The opposite mutant (a probe
+        hardwired to True) is killed by the control above, which then demands
+        decoys the raw glob does not return.
+        """
+        assert host_folds_case(tmp_path) is True, (
+            "the probe did not see a folding world it was standing in -- it is not measuring the filesystem"
         )
 
 

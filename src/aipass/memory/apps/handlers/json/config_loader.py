@@ -39,8 +39,9 @@ from typing import Any
 
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.prax import logger
+from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _CONFIG_PATH = _MEMORY_ROOT / "memory_json" / "custom_config" / "memory.config.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {

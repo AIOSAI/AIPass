@@ -32,6 +32,7 @@ from aipass.memory.apps.handlers import repo_root
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -54,7 +55,7 @@ def _find_repo_root() -> Path:
 
 
 _REPO_ROOT = _find_repo_root()
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _KNOWN_REGISTRIES_PATH = _MEMORY_ROOT / "memory_json" / "known_registries.json"
 
 
@@ -292,7 +293,7 @@ def _count_file_lines(file_path: Path) -> int:
         return 0
 
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+_TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
 _TEMPLATE_MAP = {
     "local": _TEMPLATES_DIR / "LOCAL.template.json",
     "observations": _TEMPLATES_DIR / "OBSERVATIONS.template.json",

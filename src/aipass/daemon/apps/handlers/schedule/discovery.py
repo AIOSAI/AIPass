@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-06-15
-# Modified: 2026-08-28
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -81,8 +81,9 @@ from aipass.daemon.apps.handlers.json import json_handler
 # built on our dispatch 2a70bbcd): handlers/ is private implementation, and
 # importing it cross-branch failed encapsulation + handlers on the checklist.
 from aipass.memory.apps.modules import fleet
+from aipass.daemon.apps.handlers.module_root import module_file
 
-_REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
+_REPO_ROOT = module_file(__file__).parents[6]  # up to repo root
 _SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 _PROJECTS_DIR_NAME = "projects"

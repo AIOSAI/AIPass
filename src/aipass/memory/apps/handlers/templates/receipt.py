@@ -37,6 +37,7 @@ from typing import Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.repo_root import module_file
 
 RECEIPT_NAME = ".template_version.json"
 
@@ -46,7 +47,7 @@ STAMPED_BY_BIRTH = "spawn birth"
 STAMPED_BY_RESET = "reset"
 _SANCTIONED_LANES = (STAMPED_BY_PUSH, STAMPED_BY_BIRTH, STAMPED_BY_RESET)
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+_TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
 _GOLD_SOURCE = {
     "local": "LOCAL.template.json",
     "observations": "OBSERVATIONS.template.json",

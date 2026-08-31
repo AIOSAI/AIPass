@@ -22,6 +22,8 @@ fix cannot be mistaken for a weakened guard: it must still refuse an outside
 caller and still admit an inside one.
 """
 
+import ast
+import importlib
 import subprocess
 import sys
 import textwrap
@@ -151,6 +153,38 @@ _DELETE_CWD = (
     + _CONTROL_PROBE
 )
 
+_DENY_REALPATH = (
+    """
+    import errno, os, os.path
+    from pathlib import Path as _ProbePath
+
+    def _no_realpath(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    # os.path IS posixpath/ntpath, so this reaches pathlib's own resolve() too.
+    os.path.realpath = _no_realpath
+"""
+    + _CONTROL_PROBE
+)
+
+PORTABLE_WORLDS = {
+    # Denying os.getcwd is @memory's construction. On POSIX it reaches
+    # Path.resolve(); on Windows it reaches ntpath.realpath, which calls
+    # os.getcwd() unconditionally on its first lines, before it even checks
+    # whether the path is absolute.
+    "getcwd-denied": _INJECT_DEAD_CWD,
+    # Denying os.path.realpath is the call the Windows CI traceback actually
+    # died in: inspect.stack() -> getsourcefile() -> getmodule() -> an
+    # UNPROTECTED os.path.realpath(f). ADDED 2026-08-31 after the Windows gate
+    # found a defect one line ABOVE the code the first fix guarded. On POSIX the
+    # os.getcwd denial can never reach that call site — posixpath.abspath raises
+    # first, inside getabsfile(), where inspect catches it
+    # (`except (TypeError, FileNotFoundError): return None`) — which is exactly
+    # why this was invisible on Linux for as long as it existed. Denying the
+    # call the defect makes is the honest way to run CI's world from here.
+    "realpath-denied": _DENY_REALPATH,
+}
+
 _NO_WORLD_AT_ALL = (
     """
     from pathlib import Path as _ProbePath
@@ -192,8 +226,9 @@ def _require_live_world(result):
 # =============================================================================
 
 
+@pytest.mark.parametrize("world", sorted(PORTABLE_WORLDS))
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
-def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, tmp_path):
+def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, world, tmp_path):
     """Import the newborn's handlers where reading the cwd raises.
 
     `-c` gives the top frame the pseudo-filename `<string>`, and the defective
@@ -205,7 +240,7 @@ def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, tmp_path)
 
     result = _in_dead_cwd(
         root,
-        _INJECT_DEAD_CWD,
+        PORTABLE_WORLDS[world],
         """
         import aipass.newborn.apps.handlers
         print("IMPORTED")
@@ -215,13 +250,14 @@ def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, tmp_path)
 
     lines = _require_live_world(result)
     assert result.returncode == 0, (
-        f"a newborn of class '{class_name}' cannot be imported when the cwd cannot be read:\n{result.stderr}"
+        f"a newborn of class '{class_name}' cannot be imported in the '{world}' world:\n{result.stderr}"
     )
     assert lines[-1] == "IMPORTED"
 
 
+@pytest.mark.parametrize("world", sorted(PORTABLE_WORLDS))
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
-def test_resolve_is_never_reached_for_a_pseudo_filename(class_name, tmp_path):
+def test_resolve_is_never_reached_for_a_pseudo_filename(class_name, world, tmp_path):
     """Ordering pin: pseudo-files are skipped before anything touches the disk.
 
     Behaviourally identical to the pin above for today's code, but it fails on
@@ -233,7 +269,7 @@ def test_resolve_is_never_reached_for_a_pseudo_filename(class_name, tmp_path):
 
     result = _in_dead_cwd(
         root,
-        _INJECT_DEAD_CWD,
+        PORTABLE_WORLDS[world],
         """
         from aipass.newborn.apps.handlers import _find_real_caller
 
@@ -418,3 +454,598 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
 
     assert result.returncode == 0, f"the guard locked a newborn out of its own handlers:\n{result.stderr}"
     assert result.stdout.strip() == "ADMITTED"
+
+
+# =============================================================================
+# The wider species: import-time resolve() anywhere in the template
+# =============================================================================
+
+
+def _unguarded_module_level_resolves(source: str) -> list:
+    """Line numbers of resolve() calls that run at import and are not guarded.
+
+    Module level only, and outside any try — see the class docstring for why
+    function-level resolves are deliberately not flagged.
+    """
+    tree = ast.parse(source)
+
+    guarded = {
+        node.lineno
+        for block in ast.walk(tree)
+        if isinstance(block, ast.Try)
+        for node in ast.walk(block)
+        if hasattr(node, "lineno")
+    }
+
+    # Walk what RUNS at import, which is not the same as what is WRITTEN at
+    # module level — @memory's correction, 2026-08-31, after the last crash
+    # standing in their tree was a resolve() in a find_repo_root DEFAULT
+    # ARGUMENT: written inside a def, evaluated at import anyway. So a
+    # function's body is pruned (that resolve is a deliberate raise, see the
+    # class docstring) but its defaults and decorators are NOT.
+    #
+    # STATED LIMIT: a module-level call into a locally defined function also
+    # runs at import and is not followed here. That needs a call graph, and
+    # naming the gap beats a pin that reads like it covers more than it does.
+    found = []
+    pending = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            pending.extend(getattr(node, "decorator_list", []))
+            args = getattr(node, "args", None)
+            if args is not None:
+                pending.extend(args.defaults)
+                pending.extend(d for d in args.kw_defaults if d is not None)
+            continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "resolve"
+            and node.lineno not in guarded
+        ):
+            found.append(node.lineno)
+        pending.extend(ast.iter_child_nodes(node))
+
+    return sorted(found)
+
+
+class TestImportTimeRootDerivationSurvivesADeadCwd:
+    """A newborn must not inherit a cwd read that runs at import.
+
+    @memory raised this as the wider species after the guard fix (2026-08-31)
+    and left the template ruling to me: `Path(__file__).resolve()` is a cwd read
+    on Windows anywhere it appears, because ntpath.realpath computes os.getcwd()
+    unconditionally rather than only for relative paths.
+
+    MY RULING, and the sweep that backs it: severity splits on WHEN it runs.
+
+    * At MODULE level it is unrecoverable and it spreads — the template's
+      json_handler derives its branch root that way, and nearly every module in
+      a newborn imports json_handler, so one dead-cwd process loses the whole
+      branch with a traceback from inside the stdlib. These are guarded, falling
+      back to the unresolved absolute path (`__file__` has been absolute since
+      3.9, so only symlink normalisation is lost, and only in the world where
+      the alternative is a dead import).
+    * Inside a FUNCTION it stays exactly as written. It fails where a caller can
+      see it, and a root that is wrong-but-plausible is worse than a raise —
+      "fail to errors, never fall back silently" is the branch's own rule. The
+      pin below is scoped to module level for that reason, not by oversight.
+    """
+
+    def test_the_json_handler_root_derivation_survives_realpath_denial(self, tmp_path):
+        """Run the template's own module-level derivation in the denied world."""
+        source = (get_template_dir("specialist") / "apps" / "handlers" / "json" / "json_handler.py").read_text(
+            encoding="utf-8"
+        )
+        derivation = source[source.index("_BRANCH_ROOT = ") : source.index("_JSON_DIR")]
+
+        probe = tmp_path / "derive.py"
+        probe.write_text(
+            textwrap.dedent(
+                """
+                import errno, os, os.path
+                from pathlib import Path
+
+                def _no_realpath(*args, **kwargs):
+                    raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+                os.path.realpath = _no_realpath
+
+                """
+            ).lstrip()
+            + derivation
+            + '\nprint("DERIVED", "ABSOLUTE" if _BRANCH_ROOT.is_absolute() else "RELATIVE")\n',
+            encoding="utf-8",
+        )
+
+        result = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True, cwd=str(tmp_path))
+
+        assert result.returncode == 0, f"the template's import-time root derivation needs a cwd:\n{result.stderr}"
+        assert result.stdout.split()[0] == "DERIVED"
+        assert result.stdout.split()[1] == "ABSOLUTE", (
+            "the derivation produced a relative root — __file__ has been absolute "
+            "since 3.9 and dropping resolve() relies on exactly that"
+        )
+
+    def test_no_unguarded_module_level_resolve_anywhere_in_the_template(self):
+        """The species, not the site — so a newborn cannot re-inherit the idiom.
+
+        Scoped to module level: a resolve() inside a function is a deliberate
+        raise, and flagging it here would push future authors toward silently
+        wrong roots.
+        """
+        offenders = []
+        for path in sorted(get_template_dir("specialist").rglob("*.py")):
+            # Render first: the template carries {{BRANCH}} placeholders that
+            # are not valid Python. Skipping unparseable files instead would
+            # exempt exactly the files most likely to carry the idiom.
+            offenders += [
+                f"{path.name}:{line}"
+                for line in _unguarded_module_level_resolves(_render(path.read_text(encoding="utf-8")))
+            ]
+
+        assert offenders == [], (
+            "unguarded module-level resolve() in the template — this runs at "
+            "import on every newborn, and ntpath.realpath reads the cwd even for "
+            f"an absolute path: {offenders}"
+        )
+
+    @pytest.mark.parametrize(
+        "label,source,expected",
+        [
+            (
+                "module-level unguarded — the defect",
+                "from pathlib import Path\nROOT = Path(__file__).resolve().parents[3]\n",
+                [2],
+            ),
+            (
+                "module-level guarded — the cure",
+                "from pathlib import Path\ntry:\n    ROOT = Path(__file__).resolve().parents[3]\n"
+                "except OSError:\n    ROOT = Path(__file__).parents[3]\n",
+                [],
+            ),
+            (
+                "inside a function — deliberately out of scope",
+                "from pathlib import Path\ndef root():\n    return Path(__file__).resolve().parents[3]\n",
+                [],
+            ),
+            (
+                "default argument — written in a def, RUN at import",
+                "from pathlib import Path\ndef root(base=Path(__file__).resolve()):\n    return base\n",
+                [2],
+            ),
+            (
+                "keyword-only default — same, one syntax over",
+                "from pathlib import Path\ndef root(*, base=Path(__file__).resolve()):\n    return base\n",
+                [2],
+            ),
+            (
+                "decorator — also evaluated at import",
+                "from pathlib import Path\n@register(Path(__file__).resolve())\ndef root():\n    pass\n",
+                [2],
+            ),
+        ],
+    )
+    def test_the_detector_can_tell_the_three_cases_apart(self, label, source, expected):
+        """The detector's own control — it must be able to say yes AND no.
+
+        A structural pin that quietly stopped detecting would go green forever
+        and read as coverage. Same lesson as the control probe above: a check
+        that can only produce one answer has not been tested, it was assumed.
+        """
+        assert _unguarded_module_level_resolves(source) == expected, label
+
+
+# =============================================================================
+# Optional peer imports must survive a peer that is BROKEN, not just absent
+# =============================================================================
+
+
+class TestOptionalPeerImportsAreWideEnough:
+    """A peer branch being broken is allowed; dying of it is not.
+
+    Raised by @prax 2026-08-31 from their own watcher: they declared the
+    @trigger import optional and caught only ImportError, while trigger's
+    handler guard raises FileNotFoundError. An optional dependency's fallback
+    has to be at least as wide as the failures its import can produce — and a
+    peer's handlers package does real filesystem work at import time, so a dead
+    or unreadable cwd surfaces as OSError, not ImportError.
+
+    The width is deliberately OSError and not Exception: a peer that is
+    unavailable or broken at the filesystem level is weather, but a peer with a
+    genuine programming error should still take spawn down loudly rather than
+    be swallowed into an empty dict.
+    """
+
+    @staticmethod
+    def _deny(module_prefix, exc):
+        """A finder that raises `exc` for the named module and its children."""
+
+        class _Denier:
+            @staticmethod
+            def find_spec(name, path=None, target=None):
+                if name == module_prefix or name.startswith(module_prefix + "."):
+                    raise exc
+                return None
+
+        return _Denier
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            FileNotFoundError(2, "No such file or directory"),
+            PermissionError(13, "Permission denied"),
+            ImportError("@memory is not installed"),
+        ],
+        ids=["dead-cwd", "unreadable", "absent"],
+    )
+    def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch):
+        from aipass.spawn.apps.modules import core
+
+        denier = self._deny("aipass.memory", exc)
+        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
+        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+        assert core._load_meta_tabs() == {}, (
+            f"a peer raising {type(exc).__name__} took spawn's meta-tab lookup down instead of falling back"
+        )
+
+    def test_the_denier_actually_denies(self, monkeypatch):
+        """Negative control: an inert finder would make the pins above vacuous."""
+        denier = self._deny("aipass.memory", FileNotFoundError(2, "denied"))
+        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
+        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+        with pytest.raises(FileNotFoundError):
+            importlib.import_module("aipass.memory.apps.handlers.tracking.tab_renderer")
+
+    def test_a_real_programming_error_is_still_fatal(self, monkeypatch):
+        """The width is OSError, not Exception — a broken peer must stay loud."""
+        denier = self._deny("aipass.memory", ValueError("peer has a bug"))
+        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
+        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+        from aipass.spawn.apps.modules import core
+
+        with pytest.raises(ValueError):
+            core._load_meta_tabs()
+
+
+# =============================================================================
+# The deleted stack walk, pinned structurally
+# =============================================================================
+
+
+def _inspect_stack_calls(source: str) -> list:
+    """Line numbers of every ``inspect.stack()`` CALL in ``source``.
+
+    An AST matcher, never a string search. The guard's own docstring names
+    ``inspect.stack()`` while explaining the defect, so a spelling ban would
+    convict the explanation and force the cure to be undocumented — the pin
+    would be arguing against its own comment.
+
+    Handles the three ways the call can be spelled, because a ban that only
+    knows one is an invitation to the other two:
+
+    * ``inspect.stack()`` — attribute on the module name
+    * ``import inspect as i`` then ``i.stack()`` — module bound to an alias
+    * ``from inspect import stack`` then ``stack()`` — the function bound direct
+
+    Deliberately NOT convicted: ``inspect.currentframe()`` (that is
+    ``sys._getframe`` under another name and touches no filesystem), any
+    ``.stack`` attribute on something that is not the inspect module, and a bare
+    reference that is never called.
+    """
+    tree = ast.parse(source)
+
+    module_aliases = {"inspect"}
+    direct_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "inspect":
+                    module_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "inspect":
+            for alias in node.names:
+                if alias.name == "stack":
+                    direct_names.add(alias.asname or alias.name)
+
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "stack"
+            and isinstance(func.value, ast.Name)
+            and func.value.id in module_aliases
+        ):
+            found.append(node.lineno)
+        elif isinstance(func, ast.Name) and func.id in direct_names:
+            found.append(node.lineno)
+
+    return sorted(found)
+
+
+# Every .py under these roots, excluding the retired template archive.
+_BANNED_ROOTS = (Path(__file__).resolve().parents[1] / "apps", get_template_dir("specialist"))
+
+# Measured 2026-08-31: 48 files across apps/ and templates/citizen/. The floor
+# exists so a walk that silently stops finding files cannot read as "clean" —
+# a blinded sweep and a cured tree produce the same empty list otherwise.
+_MIN_FILES_SWEPT = 40
+
+
+class TestTheStackWalkCannotComeBack:
+    """The deleted second walk has no behavioural instrument — so pin the source.
+
+    MEASURED FLEET-WIDE and relayed by @devpulse 2026-08-31: the
+    ``caller_file is None`` branch in ``_guard_branch_access`` is unreachable
+    from any import-shaped test, because ``apps/__init__.py`` always supplies a
+    real-file frame. Nine branches reproduced it identically — restoring the
+    walk leaves the whole suite green. This branch is the copy every newborn
+    inherits, so an unpinned regression here would ship.
+
+    A structural pin is the honest instrument for a defect whose only symptom
+    is a call that must not exist.
+    """
+
+    def test_the_guard_has_no_stack_walk(self):
+        source = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
+
+        assert _inspect_stack_calls(source) == [], (
+            "inspect.stack() is back in the handler guard. It reads the cwd on "
+            "Windows before any of the guard's own code runs — walk frames with "
+            "sys._getframe instead"
+        )
+
+    def test_no_stack_walk_anywhere_in_apps_or_the_template(self):
+        """Tree-wide, because zero legitimate callers remain — CHECKED, not assumed.
+
+        @devpulse's warning was earned elsewhere: @commons applied this ban
+        without looking first and found a LIVE stack walk the dispatch had not
+        named. So this was measured before widening — spawn's json_handler is a
+        pure shim over aipass.aipass.shared.json_handler with no local walk, and
+        that shared implementation is itself already on sys._getframe(2).
+        """
+        offenders = []
+        swept = 0
+
+        for root in _BANNED_ROOTS:
+            for path in sorted(root.rglob("*.py")):
+                if ".archive" in path.parts:
+                    continue
+                swept += 1
+                offenders += [
+                    f"{path.name}:{line}" for line in _inspect_stack_calls(_render(path.read_text(encoding="utf-8")))
+                ]
+
+        assert swept >= _MIN_FILES_SWEPT, (
+            f"the sweep only reached {swept} files (expected at least "
+            f"{_MIN_FILES_SWEPT}) — an empty result from a blinded walk is not "
+            "evidence of a clean tree"
+        )
+        assert offenders == [], f"inspect.stack() at import-capable sites: {offenders}"
+
+
+class TestTheStackMatcherIsTheRealOne:
+    """Controls run through the SHIPPED matcher, never a copy of it.
+
+    A control that exercises a second implementation proves that copy correct
+    and says nothing about the pin above.
+    """
+
+    def test_a_planted_call_convicts_at_the_right_line(self):
+        source = "import inspect\n\n\ndef f():\n    return inspect.stack()\n"
+
+        assert _inspect_stack_calls(source) == [5]
+
+    def test_the_guards_own_docstring_is_not_a_violation(self):
+        """The cure explains itself by naming the defect — that must stay legal.
+
+        Takes the guard's REAL docstring and puts it in a stub, rather than
+        asserting the whole live file is clean. The first version did the
+        latter, and the mutant run exposed it: restoring the walk made this
+        "control" red too, which means it was a second copy of the ban wearing a
+        control's name. A control has to fail for the reason it exists — here,
+        only if prose starts convicting.
+        """
+        guard = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py"
+        tree = ast.parse(guard.read_text(encoding="utf-8"))
+
+        docstrings = [
+            ast.get_docstring(node)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        prose = "\n".join(d for d in docstrings if d)
+
+        assert "inspect.stack()" in prose, (
+            "the guard no longer explains what it replaced — this control is measuring nothing"
+        )
+        assert _inspect_stack_calls(f'def stub():\n    """{prose}"""\n') == []
+
+    @pytest.mark.parametrize(
+        "label,source,expected",
+        [
+            ("numpy.stack", "import numpy\nx = numpy.stack([1])\n", []),
+            ("traceback.stack", "import traceback\nx = traceback.stack()\n", []),
+            ("self.stack", "class C:\n    def f(self):\n        return self.stack()\n", []),
+            ("bare reference, never called", "import inspect\nf = inspect.stack\n", []),
+            ("inspect.currentframe is legal", "import inspect\nx = inspect.currentframe()\n", []),
+            ("module alias", "import inspect as i\nx = i.stack()\n", [2]),
+            ("direct import", "from inspect import stack\nx = stack()\n", [2]),
+            ("direct import aliased", "from inspect import stack as s\nx = s()\n", [2]),
+            ("a different from-import", "from inspect import currentframe\nx = currentframe()\n", []),
+        ],
+    )
+    def test_the_matcher_tells_the_cases_apart(self, label, source, expected):
+        assert _inspect_stack_calls(source) == expected, label
+
+
+class TestNewbornsAreBornPinned:
+    """The template ships the AST pin, and it works in the position it lands in.
+
+    TEMPLATE OWNER'S DECISION, stated rather than left implicit: YES, the pin
+    ships in ``templates/citizen/tests/test_scaffold.py``. A newborn inherits
+    the cured guard, but without a pin a future author regrows the walk and
+    every suite stays green — which is exactly the fleet-wide condition
+    @devpulse measured in nine branches. test_scaffold.py is the right home
+    because it is self-contained: unlike the fixture smoke test beside it, the
+    pin needs no conftest, so it survives a branch replacing the template
+    scaffolding with its own suite.
+
+    STATED LIMIT: ``spawn update`` never overwrites .py files, so this reaches
+    FUTURE citizens only. The 18 existing branches need their own owners to add
+    it — which is what @devpulse's relay is doing. Shipping it here is not a
+    claim that the fleet is covered.
+
+    These tests render the template into a throwaway newborn and run its own
+    scaffold pin against it, green AND red, because a shipped test nobody has
+    executed in its landing position is a guess.
+    """
+
+    @staticmethod
+    def _mint(root: Path, guard_source: str) -> Path:
+        branch = root / "newborn"
+        (branch / "apps" / "handlers").mkdir(parents=True)
+        (branch / "tests").mkdir()
+        (branch / "apps" / "handlers" / "__init__.py").write_text(guard_source, encoding="utf-8")
+
+        scaffold = get_template_dir("specialist") / "tests" / "test_scaffold.py"
+        (branch / "tests" / "test_scaffold.py").write_text(
+            _render(scaffold.read_text(encoding="utf-8")), encoding="utf-8"
+        )
+        return branch
+
+    @staticmethod
+    def _run_scaffold(branch: Path):
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(branch / "tests" / "test_scaffold.py"),
+                "-p",
+                "no:randomly",
+                "-q",
+                "--no-header",
+                "-k",
+                "stack",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(branch),
+        )
+
+    def test_a_newborn_with_the_cured_guard_passes_its_own_pin(self, tmp_path):
+        cured = _render(_template_guard("specialist").read_text(encoding="utf-8"))
+        branch = self._mint(tmp_path, cured)
+
+        result = self._run_scaffold(branch)
+
+        assert result.returncode == 0, f"a newborn fails the pin it is born with:\n{result.stdout}\n{result.stderr}"
+
+    def test_a_newborn_that_regrows_the_walk_fails_its_own_pin(self, tmp_path):
+        """The pin the newborn ships has to be able to convict, not just pass."""
+        regressed = _render(_template_guard("specialist").read_text(encoding="utf-8")).replace(
+            "    frame = sys._getframe(1)",
+            "    import inspect\n\n    stack = inspect.stack()\n    frame = sys._getframe(1)",
+        )
+        assert "inspect.stack()" in regressed
+        branch = self._mint(tmp_path, regressed)
+
+        result = self._run_scaffold(branch)
+
+        assert result.returncode != 0, (
+            "a newborn that regrew the stack walk still passed its own pin — the "
+            f"shipped pin cannot convict:\n{result.stdout}"
+        )
+        assert "handler guard" in result.stdout
+
+
+class TestTheCallerIsNoneBranchHasABehaviouralInstrumentAfterAll:
+    """A behavioural pin for the branch @devpulse's sweep called unreachable.
+
+    Their fleet measurement (nine branches, 2026-08-31) is correct as stated:
+    the ``caller_file is None`` branch is unreachable from any IMPORT-shaped
+    test, because ``apps/__init__.py`` eagerly imports handlers and so always
+    supplies a real-file frame. That is why restoring the walk leaves whole
+    suites green.
+
+    It is reachable from a DIRECT-CALL-shaped test. Called from a ``python -c``
+    child, the only frames are ``<string>`` and importlib — both skipped — so
+    ``_find_real_caller`` returns ``(None, None)`` and the branch runs. Deny
+    ``os.path.realpath`` in that child and the restored walk dies where the
+    cured guard returns cleanly.
+
+    MEASURED both ways before writing this, against spawn's live guard:
+        cured    -> GUARD_OK
+        walk back -> GUARD_RAISED FileNotFoundError
+
+    So the AST pin above is not the only thing standing between the fleet and a
+    silent regrowth — it is just the only one that needs no subprocess. Relayed
+    to @devpulse, because eight other branches were told no instrument exists.
+    """
+
+    PROBE = """
+        import errno, os, os.path
+        from pathlib import Path
+
+        from aipass.spawn.apps.handlers import _find_real_caller, _guard_branch_access
+
+        # Arming probe: the branch under test only runs when there is no caller
+        # frame outside the guard. If a real-file frame ever appears here, this
+        # test is exercising a different path and must say so rather than pass.
+        caller, _line = _find_real_caller()
+        print("CALLER_IS_NONE" if caller is None else f"CALLER_IS_{caller}")
+
+        def _no_realpath(*args, **kwargs):
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+        os.path.realpath = _no_realpath
+
+        # Second arming probe: prove the denial bites in this child before the
+        # result is trusted. @commons' rule — a world can be spelled too
+        # realistically and end up silently inert.
+        #
+        # Probed through Path.resolve(), NOT through a bare os.path.realpath(".")
+        # call. @seedgo's rule, relayed by @devpulse: a probe that calls the
+        # patched name directly only proves the patch took on THAT name, which
+        # is the one thing never in doubt. The guard reaches realpath through
+        # pathlib, so pathlib is what has to be shown denied — if pathlib ever
+        # bound realpath eagerly instead of looking it up on the module, the
+        # bare call would still print DENIAL_LIVE while the guard sailed through
+        # an undenied world.
+        try:
+            Path("<string>").resolve()
+        except OSError:
+            print("DENIAL_LIVE")
+        else:
+            print("DENIAL_DEAD")
+
+        _guard_branch_access()
+        print("GUARD_RETURNED")
+        """
+
+    def test_the_guard_returns_from_that_branch_without_touching_the_filesystem(self):
+        result = _run(self.PROBE, cwd=Path(__file__).resolve().parents[4])
+
+        lines = result.stdout.split()
+        assert lines and lines[0] == "CALLER_IS_NONE", (
+            "the probe did not reach the caller-is-None branch — it is measuring "
+            f"a different path: {result.stdout!r} {result.stderr[-400:]}"
+        )
+        assert "DENIAL_DEAD" not in lines, "os.path.realpath denial was inert in the child, so this run claims nothing"
+        assert "DENIAL_LIVE" in lines, f"the child never armed: {result.stdout!r}"
+
+        assert result.returncode == 0, (
+            "the caller-is-None branch needs the filesystem — a restored "
+            f"inspect.stack() walk is the usual cause:\n{result.stderr}"
+        )
+        assert lines[-1] == "GUARD_RETURNED"

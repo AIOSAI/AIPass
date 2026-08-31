@@ -264,7 +264,8 @@ api/
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   ├── registry.py               # Driver auto-discovery (load_drivers)
 │   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
-│   ├── handlers/                      # Business logic (8 packages, 34 files)
+│   ├── handlers/                      # Business logic (8 packages, 35 files)
+│   │   ├── module_root.py             # module_file() — the one guarded __file__ resolve (no import-time cwd read)
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
@@ -278,11 +279,52 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1483 test functions across 49 files (1579 collected, parametrised)
+└── tests/                             # 1634 collected across 50 files (parametrised)
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` is a SUB-router: `host_api.py` offers it every `host-api` call first and owns everything it declines, so an unknown subcommand still reaches an error rather than a silent success.
+
+
+### No module needs a working directory to be imported (2026-08-31)
+
+`ntpath.realpath` reads `os.getcwd()` **unconditionally** — not only for relative paths, the way
+`posixpath` does — and `Path.resolve()` routes through it. So on Windows every
+`Path(__file__).resolve()` *reached at import* is an import-time cwd dependency: a process whose
+working directory has been deleted cannot import the module at all. On POSIX the equivalent raise
+happens earlier, inside a `try` that `inspect` already owns, which is why this was invisible on
+Linux for as long as it existed.
+
+The discriminator is **reached at import**, not written at module scope, so it is measured by
+*running* the imports in a child interpreter, never by grepping for spellings.
+
+Measured here on 2026-08-31, two denial worlds (A: realpath reads cwd, then cwd is denied — convicts
+a raw `resolve()`; B: realpath denied directly, abspath left working — convicts `inspect.stack`):
+
+| stage | modules red (of 61) |
+|---|---|
+| before | 61 — the handlers guard masked everything |
+| after the guard cure | 49 — one line left: `json_handler.py`'s `API_ROOT` |
+| after routing three sites through `module_file()` | 0 |
+
+Two cures:
+
+- `apps/handlers/__init__.py` walks frames with `sys._getframe` instead of `inspect.stack()`,
+  skips pseudo-files and importlib frames *before* any resolve, guards the resolve with a
+  raw-spelling fallback, and reads the import line with `linecache`. The second `inspect.stack()`
+  walk in the caller-is-None branch is gone — it was a second copy of the same cwd dependency in
+  service of a branch that returned either way.
+- `apps/handlers/module_root.py` holds `module_file()`, the one guarded spelling. Three
+  module-level constants route through it (`json/json_handler.py`, `usage/aggregation.py`,
+  `usage/tracking.py`). Its diagnostics live inside their own protection: the world that reaches
+  the fallback is the world where prax's logger may be down too, so `sys.stderr` is the last
+  resort rather than a crash.
+
+Pinned in `tests/test_dead_cwd_imports.py`. The behavioural pins cannot see the deleted
+`inspect.stack()` walk — `apps/__init__` always supplies a real-file frame, so restoring the defect
+leaves them green — so an **AST ban** convicts any `inspect.stack` call in the guard file. It is an
+AST ban and not a string ban because the guard's own docstring names `inspect.stack` while
+explaining the defect, and a spelling ban would convict the explanation.
 
 ---
 

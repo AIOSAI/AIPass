@@ -4,9 +4,9 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.2.1
+**Version:** 2.3.0
 **Created:** 2025-11-15
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-31
 
 ---
 
@@ -113,6 +113,7 @@ flow/
 │   │   ├── post_close_runner.py # Background post-processing with lock management
 │   │   └── template_manager.py  # Template registry management
 │   └── handlers/                # Implementation details
+│       ├── repo_root.py         # module_file / find_repo_root / exists_exactly — the one location answer
 │       ├── plan/                # Lifecycle: create, close, list, restore, display, validation, project scope
 │       ├── cli/                 # Shared --help flag detection (help_flags.py)
 │       ├── registry/            # Load, save, auto-heal registries
@@ -134,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 950 tests across 27 files
+├── tests/                       # 974 tests across 29 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -226,6 +227,63 @@ Anything unattributable is **quarantined, never guessed and never dropped** —
 the row stays untouched and `drone @flow registry status` lists it with the
 reason, for a human ruling. Re-running the healer changes nothing the second
 time.
+
+---
+
+## Location Discovery — `handlers/repo_root.py`
+
+**Nothing in flow reads the process working directory to find itself.** One
+module answers both location questions, and every caller routes through it.
+
+| Function | Answers | Guard it carries |
+|----------|---------|------------------|
+| `module_file(__file__)` | where is *this module* | `.resolve()` attempted, falls back to the absolute spelling |
+| `find_repo_root(start=None)` | which repo root is this | falls back to `SOURCE_ROOT`, **never** `Path.cwd()` |
+| `exists_exactly(path)` | is this filename spelled exactly so | lists the parent; `exists()` alone folds case |
+| `exactly_named(paths, suffix)` | post-filter for a cased glob | a glob is case-blind on Windows/macOS |
+
+Built 2026-08-31 (Windows round 4, @memory's finding via @devpulse).
+`ntpath.realpath` reads `os.getcwd()` **unconditionally** — before it checks
+whether the path is even absolute, where `posixpath` only reads it for a
+relative one — and `Path.resolve()` routes through it. So on Windows every
+module-level `Path(__file__).resolve()` is an import-time working-directory
+dependency: a process whose cwd is gone cannot import the module. Guarding
+inside the module's functions changes nothing, because the import died before
+any of them existed.
+
+Measured red-first, in a subprocess, before any cure: **61 of 61 flow modules
+died on import** in both injected worlds. The count only became true as cures
+landed, because the first crash line masks everything under it — 61 → 43 after
+the guard, → 0 after the 29 module-level sites. Flow carried:
+
+- **29** `_PKG_ROOT = Path(__file__).resolve().parents[N]` sites — every module,
+  nearly every handler
+- **7** private `_find_repo_root` copies, each ending `return Path.cwd()`, **6
+  of them called at module level**
+- **2** `inspect.stack()` calls — the import guard, and `log_operation`'s
+  caller detection (which no import probe reaches; it runs at write time)
+
+The `Path.cwd()` fallback carried two defects, and only the loud one was a
+crash. The quiet one: cwd is a *guess*. Four of those seven callers are
+**writers** — `push_central`/`aggregate_central` build
+`.ai_central/PLANS.central.json`, `close_helpers` and `restore_ops` build the
+`.backup/processed_plans` path — and on a registry-less checkout (the core
+registry is gitignored, so every clean clone and CI runner qualifies) each one
+resolved against whatever directory the caller's shell happened to be in. A
+`try`/`except` would have fixed the traceback and kept the wrong answer.
+
+**Two `Path.cwd()` reads remain, and both are correct.**
+`project_scope.caller_cwd()` and `resolve_location._get_caller_cwd()` ask
+*where did the caller stand* — a location, observed — and fall back to the
+process directory only when `AIPASS_CALLER_CWD` is absent. They are named in
+`tests/test_import_dead_cwd.py` so the ban can never delete a right answer, and
+the exemption is keyed on **(file, function)**, not on the name alone.
+
+Enforced by `tests/test_import_dead_cwd.py`: two injected worlds with their own
+liveness controls, plus AST bans that behaviour cannot reach (@trigger restored
+the deleted `inspect.stack()` walk in their tree and 1058 tests stayed green —
+`apps/__init__.py` always supplies a real-file frame, so no import-shaped world
+enters that branch).
 
 ---
 
@@ -353,12 +411,13 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ## Quality
 
-- **Seedgo:** 100% (46 standards, 44 files, no type errors)
-- **Tests:** 950 tests in 27 files — 969 cases collected after parametrisation, 968 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
-- **Source files:** 44 tracked by seedgo (61 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
+- **Seedgo:** 100% (46 standards, no type errors)
+- **Tests:** 974 tests in 29 files — 993 cases collected after parametrisation, 992 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`). 100/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
-- **Registries:** 7 registered plan types + 1 orphan; **798 plans on disk, 23 open, 775 closed**
-- **Last audit:** 2026-08-25 (every figure on this list re-measured, not carried forward)
+- **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**
+- **Dead-cwd:** 0 of 62 modules die on import with no readable working directory, in both injected worlds (`tests/test_import_dead_cwd.py`)
+- **Last audit:** 2026-08-31 (every figure on this list re-measured, not carried forward)
 
 ### Known Issues
 - **315 of 775 closed plans have no archived copy and cannot be restored.**
@@ -385,7 +444,30 @@ aggregation untouched, plus anything auto-closed during the run.
   `get_status_impl` calls a bare `load_registry()`. Its quarantine list and
   `Ignored folders: 33` are branch-wide and correct; only the two totals are
   scoped to one type.
-- **`flow_json/PLAN_REGISTRY.json` is legacy but NOT unread.** No flow code
+- **The cross-branch handler fence never arms.** `apps/__init__.py` is
+  `from . import handlers`, so importing *anything* under `aipass.flow.apps`
+  loads the handlers package first, and at that moment the nearest real-file
+  frame is `apps/__init__.py` itself — which lives under `/flow/` and is
+  therefore allowed. An external branch reaching for a flow handler passes the
+  guard every time. Reported, deliberately NOT fixed: Patrick's fleet ruling
+  (2026-08-31) is that this is one change made everywhere at once, not
+  per-branch. Flow has exactly ONE such pre-import door — `flow/__init__.py` is
+  a bare docstring and there is no public API surface re-exporting handlers.
+- **The fence's branch check is a substring, not a path segment.** `MY_BRANCH`
+  is `"flow"` and the test is `"/flow/" in caller_file`, so any caller whose
+  path contains a directory named `flow` — in any repo, at any depth — reads as
+  local. @spawn's cured guard uses the full dotted package (`aipass.spawn` →
+  `/aipass/spawn/`). Out of scope for the round-4 dispatch (which is about the
+  cwd defect, not the matching rule) and reported rather than changed, because
+  narrowing it is a fence behaviour change that deserves its own red-first pin.
+- **`flow_json/PLAN_REGISTRY.json` is legacy and no longer read.** @trigger
+  retired their `plan_file.py` handler on 2026-08-31 after measuring it
+  themselves: their regex matched **1** of the 366 FPLAN files on disk, so it
+  had been inert for essentially every plan since the naming convention took a
+  slug. The handler and its 16 tests are archived and the three `trigger.on()`
+  registrations are removed, with a comment naming the events as deliberately
+  unwired. The paragraph below records the state that preceded that.
+- **`flow_json/PLAN_REGISTRY.json` was legacy but NOT unread.** No flow code
   touches it, but `@trigger`'s `apps/handlers/events/plan_file.py` both reads
   and writes it (`_load_registry`/`_save_registry`), and the file's own contents
   are the evidence — 1 plan row against `next_number: 402`, last written
@@ -393,7 +475,12 @@ aggregation untouched, plus anything auto-closed during the run.
   in the tree"; that was wrong. Whether @trigger's handler should be pointed at
   the typed registries is a question for @trigger, not a flow-side fix.
 - `flow_json/pbplan_registry.json` is an orphaned type registry (see Auto-healing)
-- Registry scan fires trigger events that are never handled (by design — foreground close handles everything)
+- Registry scan fires trigger events that are never handled — and as of
+  2026-08-31 that is a **decision, not an accident**. @trigger removed the three
+  registrations deliberately when they retired `plan_file.py`, and their
+  `registry.py` comment says so. An earlier edition of this README called it
+  "by design" while the handlers were in fact registered; the sentence is true
+  again, for a different reason.
 - Dashboard push warns on some closes
 - `mbank/process.py` at 718 lines (over the 700 limit)
 - **`CLOSED_PLANS.local.json` carries foreign keys on every branch that has
@@ -413,7 +500,7 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ---
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-08-31*
 
 ---
 [← Back to AIPass](../../../README.md)

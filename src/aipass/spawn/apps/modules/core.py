@@ -27,7 +27,11 @@ from aipass.prax import logger
 
 try:
     from aipass.cli.apps.modules.display import console
-except ImportError as e:
+# An optional dependency's fallback has to be at least as wide as the failures its import can produce.
+# A peer's handler package does real filesystem work at import time (its access guard), so a broken peer can raise OSError — FileNotFoundError from a dead cwd — not only ImportError.
+# Catching ImportError alone means 'the peer is unavailable' is handled and 'the peer is broken' is fatal, which is backwards.
+# Raised by @prax 2026-08-31 from their own watcher, measured against spawn the same hour.
+except (ImportError, OSError) as e:
     logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
     from rich.console import Console
 
@@ -95,8 +99,9 @@ def _load_meta_tabs():
     """
     try:
         from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
-    except ImportError:
-        logger.info("[spawn] @memory not available — meta-tab placeholders will be empty")
+    # Width, not politeness: see the module-level import above.
+    except (ImportError, OSError) as e:
+        logger.info("[spawn] @memory not available — meta-tab placeholders will be empty (%s)", e)
         return {}
 
     tabs = render_all_meta_tabs()

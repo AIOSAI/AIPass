@@ -44,6 +44,7 @@ from aipass.memory.apps.handlers.monitor.registry_scope import (
     find_repo_root,
     overlaps_home,
 )
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Imported, never re-spelled: the reader owns these and the write side must
 # refuse exactly what the read side refuses. `overlaps_home` is used under the
@@ -56,7 +57,7 @@ TEMPLATE_NAME = "AIPASS_ROOTS.template.json"
 CORRUPT_SUFFIX_NAME = f"{DECLARED_ROOTS}.corrupt"
 
 # Branch home is four parents up from apps/handlers/monitor/roots_file.py.
-_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
 
 # Best-effort salvage only. This finds path-shaped strings in a file that no
 # longer parses so a human can read what was lost; nothing here is ever written

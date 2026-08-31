@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -23,8 +23,9 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[2]
+_DAEMON_ROOT = module_file(__file__).parents[2]
 _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
 # The shared AIPass state directory. A MODULE CONSTANT rather than a

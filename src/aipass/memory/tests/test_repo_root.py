@@ -30,6 +30,12 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.handlers import repo_root as rr
+from aipass.memory.tests.dead_cwd import (
+    ACCESSOR_SHAPE,
+    DEAD_CWD_WORLD,
+    DELETE_CWD_WORLD,
+    REALPATH_DENIED_WORLD,
+)
 
 # Every .py in the branch's own source, minus archives (kept deliberately as
 # written) and caches. The sweep must read the tree, not a list someone
@@ -142,7 +148,21 @@ class TestTheFallbackIsDerivedFromTheSourceTree:
 
 
 class TestTheAuditLineCanNeverTakeAnImportDown:
-    """Four callers resolve at MODULE level, so this write happens during their import."""
+    """Four callers resolve at MODULE level, so this write happens during their import.
+
+    ``repo_root`` imports ``json_handler`` INSIDE ``_record_fallback`` — a
+    module-level edge would be a cycle now that ``json_handler`` imports
+    ``module_file`` from here — so the patch has to land on the object that
+    function-local import will actually find. That is whatever ``sys.modules``
+    holds at call time, which under this suite's infrastructure mock is not the
+    module a plain ``from ... import json_handler`` at the top of this file
+    binds. Patching a name the code under test never reads is the quietest way
+    to write a test that cannot fail.
+    """
+
+    @staticmethod
+    def _the_module_the_fallback_will_import():
+        return sys.modules["aipass.memory.apps.handlers.json.json_handler"]
 
     def test_a_failing_log_operation_does_not_propagate(self, tmp_path, monkeypatch):
         """A diagnostic write must not become the crash it was diagnosing."""
@@ -150,13 +170,15 @@ class TestTheAuditLineCanNeverTakeAnImportDown:
         def explode(*_args, **_kwargs):
             raise OSError("read-only filesystem")
 
-        monkeypatch.setattr(rr.json_handler, "log_operation", explode)
+        monkeypatch.setattr(self._the_module_the_fallback_will_import(), "log_operation", explode)
         assert rr.find_repo_root(tmp_path) == rr.SOURCE_ROOT
 
     def test_the_fallback_is_still_recorded_when_it_can_be(self, tmp_path, monkeypatch):
         """Defensive does not mean absent — the operation is logged on the happy path."""
         seen = []
-        monkeypatch.setattr(rr.json_handler, "log_operation", lambda *a, **k: seen.append((a, k)))
+        monkeypatch.setattr(
+            self._the_module_the_fallback_will_import(), "log_operation", lambda *a, **k: seen.append((a, k))
+        )
         rr.find_repo_root(tmp_path, caller="a_named_lane")
         assert seen, "the fallback was taken and nothing was recorded"
         assert seen[0][0][0] == "repo_root_fallback"
@@ -292,9 +314,9 @@ _IMPORT_TIME_LANES = [
 # ``TestBothConstructionsAgree`` runs BOTH recipes on POSIX and asserts they
 # produce the same outcome, which is what licenses using the injected one where
 # the real one cannot be built.
-_DENY_CWD = "import os\nos.getcwd = lambda: (_ for _ in ()).throw(FileNotFoundError(2, 'No such file or directory'))\n"
+_DENY_CWD = DEAD_CWD_WORLD
 
-_DELETE_CWD = "import os, tempfile\nd = tempfile.mkdtemp()\nos.chdir(d); os.rmdir(d)\n"
+_DELETE_CWD = DELETE_CWD_WORLD
 
 _WINDOWS_CANNOT_DELETE_ITS_OWN_CWD = pytest.mark.skipif(
     sys.platform == "win32",
@@ -373,11 +395,15 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_this_branch_imports_in_a_bare_world(self, module, world):
         probe = (
-            "import os, sys, pathlib\n"
+            # The world FIRST. It no longer has to be — DEAD_CWD_WORLD patches
+            # the 3.10 accessor too, so import order stops deciding whether the
+            # world is hostile — but a probe that reads in the order it takes
+            # effect cannot quietly regrow the dependency.
+            f"{world}"
+            "import sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
             "import aipass.prax.apps.handlers.config.load as prax_load\n"
             f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
-            f"{world}"
             f"import {module}\n"
             "print('OK')\n"
         )
@@ -407,7 +433,8 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
         report from an environment we do not run.
         """
         probe = (
-            "import os, sys, pathlib\n"
+            f"{_DENY_CWD}"
+            "import sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
             "import aipass.prax.apps.handlers.config.load as prax_load\n"
             f"prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
@@ -417,7 +444,6 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
             "pathlib.Path.exists = lambda self, *a, **k: (\n"
             "    False if self.name.endswith('_REGISTRY.json') else _real_exists(self, *a, **k)\n"
             ")\n"
-            f"{_DENY_CWD}"
             f"import {module} as target\n"
             "print('OK')\n"
         )
@@ -624,3 +650,355 @@ class TestTheFilterHasOneImplementationForFourWalks:
             if "glob(" not in line or "_REGISTRY.json" not in line:
                 continue
             assert "exactly_named(" in line, f"{module_name}:{number} globs registries with no exact-case filter"
+
+
+class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
+    """The 3.10 red, reproduced on whatever interpreter is running this.
+
+    CI found it and none of us runs 3.10 locally, so the honest question was
+    whether this could be pinned here at all or only reported. It can: the
+    mechanism is plain Python, not a 3.10 feature. ``_NormalAccessor.getcwd =
+    os.getcwd`` stores a FUNCTION on a class, and a function reached through an
+    instance is a bound method on every version — so ``Path.cwd()`` handed the
+    accessor as ``self`` to a zero-argument lambda and got ``TypeError`` where
+    the pin expected ``FileNotFoundError``.
+
+    ``ACCESSOR_SHAPE`` is those three lines and nothing else. Running the world
+    against it here is the same move as denying ``getcwd`` instead of deleting a
+    directory: pin the CONDITION (the call arrives bound) rather than the cause
+    (an interpreter that binds it).
+    """
+
+    _ASK = (
+        "try:\n"
+        "    _accessor.getcwd()\n"
+        "    print('NO_RAISE')\n"
+        "except FileNotFoundError:\n"
+        "    print('RAISED')\n"
+        "except TypeError as exc:\n"
+        "    print('TYPEERROR', exc)\n"
+    )
+
+    def test_the_denial_answers_when_pathlib_calls_it_as_a_bound_method(self):
+        """Red on this laptop with the old ``lambda:`` spelling. That is the point."""
+        result = subprocess.run(
+            [sys.executable, "-c", _DENY_CWD + ACCESSOR_SHAPE + self._ASK], capture_output=True, text=True
+        )
+
+        assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
+
+    def test_the_world_patches_an_accessor_that_already_captured_the_real_getcwd(self):
+        """The defect CI could NOT see, and the more dangerous of the two.
+
+        On 3.10 the accessor captures ``os.getcwd`` when ``pathlib`` is first
+        imported, so a probe importing pathlib BEFORE installing the denial gets
+        an accessor holding the REAL function — a world that is not hostile at
+        all. Four of this branch's probes were written that way. On 3.10 they
+        were passing while asserting nothing, and nothing in the output tells a
+        vacuous pin apart from a cured defect.
+
+        A first draft of this pin just reordered the imports and asserted the
+        world still bit. It SURVIVED the mutant that removes the accessor patch,
+        because on 3.11+ there is no accessor and order genuinely does not
+        matter — a green light wired to nothing, in the test written to stop
+        exactly that. So the accessor is BUILT here, having captured the real
+        ``os.getcwd`` first, which is 3.10's situation reproduced rather than
+        described.
+        """
+        pre_captured = (
+            "import os, pathlib\n"
+            "class _NormalAccessor:\n"
+            "    getcwd = os.getcwd\n"
+            "pathlib._NormalAccessor = _NormalAccessor\n"
+            "_accessor = _NormalAccessor()\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", pre_captured + _DENY_CWD + self._ASK], capture_output=True, text=True
+        )
+
+        assert "RAISED" in result.stdout, f"the world never reached the accessor: {result.stdout}{result.stderr}"
+
+    def test_the_world_is_defined_once_for_the_whole_branch(self):
+        """Two files carried two spellings of one world, and both were wrong.
+
+        The version bug was in both copies; only one of them was on the line CI
+        happened to run first. A world with two implementations is two worlds,
+        and the cheapest place to notice that is here.
+        """
+        import aipass.memory.tests.test_residency_scope as residency
+
+        assert residency.DEAD_CWD_WORLD is DEAD_CWD_WORLD
+        # Assembled rather than written out: a literal needle in the assertion
+        # makes this file its own first offender, which the first run proved by
+        # convicting this very line.
+        retyped = "getcwd" + " = " + "lambda"
+        for module in (residency, sys.modules[__name__]):
+            source = inspect.getsource(module)
+            assert retyped not in source, f"{module.__name__} retyped the world instead of importing it"
+
+
+_WINDOWS_REALPATH = (
+    "import os\n"
+    "_real_realpath = os.path.realpath\n"
+    "def _reads_the_cwd(p, *a, **k):\n"
+    "    os.getcwd()\n"
+    "    return _real_realpath(p, *a, **k)\n"
+    "os.path.realpath = _reads_the_cwd\n"
+)
+
+
+class TestResolvingOwnFileIsACwdReadOnWindows:
+    """The Windows CI reds, and they were NOT the world being unbuildable.
+
+    @devpulse's steer offered two honest outcomes — a guard in the code if the
+    frame is mine, or the deletion-recipe treatment if it is not. The frame was
+    mine, and then thirty-one more were.
+
+    THE MECHANISM. ``ntpath.realpath`` computes ``os.getcwd()``
+    UNCONDITIONALLY — not only for a relative path, the way ``posixpath`` does —
+    and ``Path.resolve()`` goes through it. So on Windows every
+    ``Path(__file__).resolve()`` is a working-directory read, and this branch
+    had thirty-two of them running at import time. CI showed the first
+    (``inspect.stack()`` in the handlers guard, which resolves every frame's
+    source file); behind it the traceback simply moved down.
+
+    So the condition to inject is "resolving a path reads the cwd", which is a
+    property of the STDLIB on that platform and reproducible here in six lines.
+    Pinning "we are on Windows" would have pinned nothing runnable.
+
+    WHAT THIS CLASS DOES NOT CLAIM. It holds the OTHER branches' copy of the
+    template-born guard constant, because ``prax/apps/handlers/__init__.py``
+    carries the identical ``inspect.stack()`` defect and would crash first. That
+    is memory's half proved, and the fleet's half named rather than assumed —
+    routed to @spawn, who owns the template all eighteen copies came from.
+    """
+
+    _HOLD_OTHER_BRANCHES = (
+        "import aipass.prax.apps.handlers as _prax_handlers\n"
+        "_prax_handlers._find_real_caller = lambda: (None, None)\n"
+        "import aipass.prax.apps.handlers.config.load as _prax_load\n"
+        f"_prax_load._find_repo_root = lambda: pathlib.Path({str(rr.SOURCE_ROOT)!r})\n"
+    )
+
+    def _probe(self, module):
+        return (
+            "import sys, pathlib\n"
+            f"sys.path.insert(0, {_src_root()!r})\n"
+            + self._HOLD_OTHER_BRANCHES
+            + _WINDOWS_REALPATH
+            + _DENY_CWD
+            + f"import {module}\n"
+            "print('OK')\n"
+        )
+
+    def test_the_injected_world_really_reads_the_cwd(self):
+        """Positive control: prove ``resolve()`` bites before trusting the pins."""
+        probe = (
+            "import pathlib\n" + _WINDOWS_REALPATH + _DENY_CWD + "try:\n"
+            "    pathlib.Path(__file__ if '__file__' in dir() else '/tmp').resolve()\n"
+            "    print('NO_RAISE')\n"
+            "except FileNotFoundError:\n"
+            "    print('RAISED')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+
+        assert "RAISED" in result.stdout, f"{result.stdout}{result.stderr}"
+
+    @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
+    def test_this_branch_imports_where_resolving_a_path_reads_the_cwd(self, module):
+        result = subprocess.run([sys.executable, "-c", self._probe(module)], capture_output=True, text=True)
+
+        assert result.returncode == 0, (
+            f"{module} died where Path.resolve() reads the cwd — this is the Windows CI red "
+            f"reproduced on POSIX:\n{result.stderr}"
+        )
+        assert "OK" in result.stdout
+
+    def test_no_import_time_line_in_this_branch_resolves_its_own_file(self):
+        """The structural half, because the behavioural half only covers what it imports.
+
+        The first sweep of this species keyed on "written at module scope" and
+        missed ``find_repo_root``'s own default argument — a line inside a
+        function that four lanes reach during import, and the last crash
+        standing. So this reads every module the import-time lanes pull in and
+        fails on the idiom itself, wherever it is written.
+        """
+        offenders = []
+        for path in _SOURCES:
+            text = path.read_text(encoding="utf-8")
+            prose = _prose_lines(text)
+            for number, line in enumerate(text.splitlines(), start=1):
+                stripped = line.strip()
+                if stripped.startswith("#") or number in prose:
+                    continue
+                if "Path(__file__).resolve()" not in stripped:
+                    continue
+                offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
+
+        assert not offenders, "use repo_root.module_file(__file__) — resolve() reads the cwd on Windows: " + ", ".join(
+            offenders
+        )
+
+
+class TestNothingReadsTheStackAtImportTime:
+    """``inspect.stack()`` is a cwd read on Windows, and I could not reproduce it here.
+
+    The Windows CI traceback is unambiguous: ``inspect.stack()`` builds a
+    FrameInfo per frame, ``getsourcefile`` -> ``getmodule`` -> ``os.path.realpath``,
+    and ``ntpath.realpath`` reads the working directory. It crashed the import
+    of every handler in this branch.
+
+    ON POSIX IT DOES NOT CRASH FROM A DEAD CWD, and the reason is exact rather
+    than the cache guess this docstring first carried. ``inspect.getmodule``
+    reaches the unprotected ``os.path.realpath`` only past this, at
+    ``inspect.py:991``::
+
+        try:
+            file = getabsfile(object, _filename)
+        except (TypeError, FileNotFoundError):
+            return None
+
+    On POSIX ``abspath`` raises inside ``getabsfile`` — and inspect SWALLOWS it,
+    returning None before the realpath loop is reached. On Windows
+    ``ntpath.abspath`` uses ``_getfullpathname`` and does not raise for an
+    absolute path, so execution continues INTO the loop and dies on the
+    unprotected ``realpath`` there. Same stdlib, opposite outcome, and the
+    difference is which of two calls fails first.
+
+    Credit where it is due: @spawn measured this on the Windows gate and read it
+    out of CPython rather than inferring it, correcting a platform claim I had
+    mailed them a few hours earlier. Verified here against
+    ``/usr/lib/python3.12/inspect.py`` before adopting it.
+
+    Restoring ``inspect.stack()`` therefore leaves the DEAD-CWD pins GREEN,
+    which I found by running the mutant rather than by assuming it died.
+
+    THIS DOCSTRING USED TO SAY "on POSIX it cannot crash" AND THAT WAS WRONG —
+    corrected 2026-08-31 after @spawn reproduced it on Linux and this branch
+    verified the recipe rather than taking their word. The dead-cwd world is
+    the wrong injection, not POSIX the wrong platform. See
+    ``TestTheStackReadIsReproducibleAfterAll`` below for the world that does
+    reach the crash and for the behavioural pins that now stand beside this one.
+
+    This pin stays anyway, and not as a leftover: it fails on the line the
+    construct is WRITTEN on, which is where the next copy will appear, and it
+    convicts a file that never runs in any test. The behavioural pin can only
+    judge the lanes it imports.
+    """
+
+    def test_no_module_reached_during_import_walks_the_stack_with_inspect(self):
+        offenders = []
+        for path in _SOURCES:
+            text = path.read_text(encoding="utf-8")
+            prose = _prose_lines(text)
+            for number, line in enumerate(text.splitlines(), start=1):
+                stripped = line.strip()
+                if stripped.startswith("#") or number in prose:
+                    continue
+                if "inspect.stack()" in stripped:
+                    offenders.append(f"{path.relative_to(_APPS.parent)}:{number}")
+
+        assert not offenders, (
+            "inspect.stack() resolves every frame's source file, which reads the working "
+            "directory on Windows — walk sys._getframe() instead: " + ", ".join(offenders)
+        )
+
+
+class TestTheStackReadIsReproducibleAfterAll:
+    """The behavioural half of the pin above, which this branch said was impossible.
+
+    THE CORRECTION, AND WHOSE IT IS. On 2026-08-31 I wrote "on POSIX it cannot
+    crash" into the class above and shipped a structural-only pin on the
+    strength of it. @spawn reproduced the crash on Linux the same night. I was
+    denying the wrong call: the dead-cwd world denies ``os.getcwd``, and on
+    POSIX ``posixpath.abspath`` raises FIRST — inside ``inspect.getabsfile()``,
+    where inspect catches it. The unprotected ``os.path.realpath`` in
+    ``getmodule``'s loop is never reached, so the world is hostile to a call the
+    defect does not make.
+
+    THE RECIPE HAS TWO INGREDIENTS, and missing either one produces a green:
+
+    1. deny ``os.path.realpath`` directly, and
+    2. give the top frame a PSEUDO-FILENAME, which means launching the child
+       with ``python -c`` rather than as a script.
+
+    Ingredient 2 is the one that is easy to drop as noise. ``getsourcefile()``
+    opens with a fast path — ``if os.path.exists(filename): return filename`` —
+    so a frame that came from a real file on disk returns before ``getmodule``
+    is ever called and no realpath happens at all. Only ``<string>`` and
+    ``<stdin>`` fall through. Read out of ``inspect.py`` here before adopting
+    it, on the same standard I asked @spawn to hold me to.
+
+    So the third test below is a NEGATIVE CONTROL FOR THE POSITIVE CONTROL: it
+    proves the crash needs the launcher, not just the denial. Without it, a
+    future simplification that runs the probe as a script would leave the
+    positive control passing while measuring nothing, and a vacuous control and
+    a cured defect produce the same green.
+
+    WHAT THIS PIN DOES NOT REACH, measured by mutating both sites rather than
+    reasoned about. ``handlers/__init__.py`` has TWO frame walks, and the import
+    probe below only executes one of them:
+
+    * ``_find_real_caller`` — load-bearing, taken on every import. Restoring
+      ``inspect.stack()`` here reddens the first test with CI's own traceback,
+      ``inspect.py:1009 getmodule -> os.path.realpath``.
+    * the ``caller_file is None`` diagnostic branch — reached only when NO
+      real-file frame exists above the guard, and a package import always has
+      one: ``apps/__init__.py`` does ``from . import handlers``, so it is
+      always the caller. Restoring ``inspect.stack()`` there leaves every
+      behavioural pin GREEN and only the structural sweep convicts it.
+
+    That second bullet is the argument for keeping the structural pin beside
+    this one. A behavioural pin can only judge the lines its probe executes,
+    and "unreachable from any import I can construct" is not the same as
+    "unreachable", especially in a file the whole fleet copies.
+    """
+
+    _WORLD = REALPATH_DENIED_WORLD
+
+    # What the guard used to call. The crash is inside ``inspect.stack()``
+    # itself — before any of the walking code runs — so the construct IS the
+    # reproduction; nothing about the surrounding loop changes the answer.
+    _PROBE = (
+        "import inspect\n"
+        "try:\n"
+        "    depth = len(inspect.stack())\n"
+        "except Exception as exc:\n"
+        "    print('RAISED', type(exc).__name__)\n"
+        "else:\n"
+        "    print('SURVIVED', depth)\n"
+    )
+
+    def test_the_shipped_guard_imports_clean_in_the_world_that_kills_the_old_one(self):
+        probe = f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}import aipass.memory.apps.handlers\nprint('OK')\n"
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+        assert result.returncode == 0, (
+            "handlers/__init__.py could not be imported with os.path.realpath denied — "
+            "this is the Windows CI crash, reproduced.\n" + result.stderr
+        )
+        assert "OK" in result.stdout
+
+    def test_the_construct_the_guard_used_to_call_dies_in_that_same_world(self):
+        """Positive control: the world is hostile, and hostile to THIS call."""
+        result = subprocess.run([sys.executable, "-c", self._WORLD + self._PROBE], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "RAISED FileNotFoundError" in result.stdout, (
+            "The realpath denial did not reach inspect.stack(), so the pin above is measuring nothing: " + result.stdout
+        )
+
+    def test_the_crash_needs_a_pseudo_filename_frame_not_just_the_denial(self, tmp_path):
+        """Negative control FOR the control: same world, real file, no crash.
+
+        If this ever starts reporting RAISED, the recipe has become
+        one-ingredient and the class docstring is out of date. If the test above
+        is ever rewritten to run from a file, it will silently join this one.
+        """
+        script = tmp_path / "from_a_real_file.py"
+        script.write_text(self._WORLD + self._PROBE, encoding="utf-8")
+        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.startswith("SURVIVED"), (
+            "A frame from a real file reached the unprotected realpath, which contradicts "
+            "getsourcefile()'s os.path.exists fast path: " + result.stdout
+        )

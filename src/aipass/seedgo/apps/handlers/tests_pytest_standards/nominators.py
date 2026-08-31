@@ -47,9 +47,10 @@ from typing import Dict, List, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 #: Where nominators live, and the filename shape that declares one.
-PACK_DIR = Path(__file__).resolve().parent
+PACK_DIR = module_file(__file__).parent
 NOMINATOR_GLOB = "*_check.py"
 
 #: What a nominator must expose.

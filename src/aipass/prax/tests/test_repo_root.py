@@ -84,6 +84,72 @@ except FileNotFoundError:
     pass
 """
 
+# CI's world, built on Linux. @spawn measured the mechanism on the Windows gate
+# 2026-08-31: ntpath.realpath calls os.getcwd() unconditionally on its first
+# lines — before it checks whether the path is even absolute — and inspect's
+# getmodule() calls os.path.realpath OUTSIDE a try. posixpath.realpath does not
+# take that path, and the equivalent POSIX raise happens inside getabsfile()
+# where inspect swallows it. That is the whole reason a denied working directory
+# was survivable on Linux and fatal on Windows.
+#
+# Denying os.path.realpath is therefore not a second world — it is the SAME
+# denial reaching the call Windows actually makes. Against the pre-cure guard
+# these pins go red on Linux; the getcwd-only world stays green, which is the
+# demonstration of why Linux missed it.
+#
+# CORRECTION 2026-08-31, and it matters for anyone reading these pins as
+# evidence: this world convicts an unguarded MODULE-LEVEL Path(__file__).
+# resolve(). It does NOT convict inspect.stack(), and I reported to @devpulse
+# that it did. What actually happens, measured three ways: getcwd-denied ->
+# stack SURVIVES; getcwd AND realpath denied -> stack SURVIVES; realpath denied
+# ALONE -> stack DIES. The reason is _NTPATH_SHAPED below. @trigger and @seedgo
+# both flagged it before I measured it; they were right.
+_DENY_REALPATH = (
+    _INJECT_DEAD_CWD
+    + """
+import os.path as _ospath
+
+
+def _no_realpath(*_args, **_kwargs):
+    raise FileNotFoundError(2, "No such file or directory")
+
+
+_ospath.realpath = _no_realpath
+"""
+)
+
+# THE WORLD THAT CONVICTS A STACK WALK. realpath raises, getcwd still answers.
+#
+# That combination looks artificial until you look at what Windows does.
+# `ntpath.abspath` does not call `os.getcwd()` at all — it calls the Win32
+# `_getfullpathname`, which reads the process directory from the OS and sails
+# straight past a patched (or broken) getcwd. `ntpath.realpath` DOES call
+# os.getcwd(), in Python, on its first lines. So on a Windows box with no usable
+# working directory, abspath works and realpath raises — which is exactly this
+# world, and exactly why inspect dies there.
+#
+# Follow it through inspect: getsourcefile() only calls getmodule() for a
+# filename that does not exist on disk (`<stdin>` qualifies, which is why these
+# probes are fed on stdin). getmodule() opens with getabsfile(), wrapped in
+# `except (TypeError, FileNotFoundError)` — so denying getcwd makes abspath
+# raise there and inspect SWALLOWS it, returning None before the dangerous line.
+# Let abspath succeed and the walk reaches `modulesbyfile[os.path.realpath(f)]`,
+# which is not in any try. That is the unguarded call, and reaching it requires
+# a working getcwd.
+#
+# So the getcwd denial is not merely insufficient here — it is what HIDES the
+# defect. A world can be too hostile to convict.
+_NTPATH_SHAPED = """
+import os.path as _ospath
+
+
+def _no_realpath(*_args, **_kwargs):
+    raise FileNotFoundError(2, "No such file or directory")
+
+
+_ospath.realpath = _no_realpath
+"""
+
 _DELETE_CWD = """
 import os as _os, shutil as _shutil, tempfile as _tempfile
 _d = _tempfile.mkdtemp()
@@ -276,21 +342,45 @@ class TestFindRepoRoot:
 # =============================================================================
 
 
-class TestDeadCwd:
-    """@memory's condition: the working directory is gone and something imports."""
+WORLDS = [
+    pytest.param(_INJECT_DEAD_CWD, id="getcwd-denied"),
+    pytest.param(_DENY_REALPATH, id="realpath-denied"),
+]
 
-    def test_the_resolver_answers_without_a_working_directory(self):
+# The import-crash pins above use WORLDS. The caller-attribution pins below need
+# a third, because the two above are both too hostile to reach the call that
+# breaks — see _NTPATH_SHAPED. Kept as a separate list rather than appended, so
+# that nobody widens the import pins onto a world where getcwd works and quietly
+# stops testing the thing those pins exist for.
+ATTRIBUTION_WORLDS = WORLDS + [pytest.param(_NTPATH_SHAPED, id="ntpath-shaped")]
+
+
+@pytest.mark.parametrize("world", WORLDS)
+class TestDeadCwd:
+    """@memory's condition: the working directory cannot be read and something imports.
+
+    Run in BOTH worlds, because one of them was invisible here. getcwd-denied is
+    the condition as stated. realpath-denied is the same denial reaching the call
+    Windows actually makes — ntpath.realpath asks for the working directory
+    unconditionally, and inspect's getmodule calls it outside a try. Against the
+    pre-cure guard the realpath world is red on Linux and the getcwd world is
+    green; that difference IS the reason the Windows gate found this and eleven
+    Linux runs did not.
+    """
+
+    def test_the_resolver_answers_without_a_working_directory(self, world):
         result = _run_without_a_working_directory(
-            """
+            world=world,
+            body="""
             from aipass.prax.apps.handlers import repo_root
             from pathlib import Path
             print("ANSWER", repo_root.find_repo_root(Path("/no/such/src/aipass/x/a.py")))
-            """
+            """,
         )
         assert result.returncode == 0, result.stderr
         assert "ANSWER" in result.stdout, result.stderr
 
-    def test_the_logger_can_be_built_without_a_working_directory(self):
+    def test_the_logger_can_be_built_without_a_working_directory(self, world):
         """The end-to-end case, and the one @memory's traceback could not reach.
 
         Their caller was a real absolute file, so resolution of the CALLER path
@@ -300,15 +390,16 @@ class TestDeadCwd:
         dies one frame earlier.
         """
         result = _run_without_a_working_directory(
-            """
+            world=world,
+            body="""
             from aipass.prax.apps.modules.logger import get_system_logger
             print("LOGGER", get_system_logger().name)
-            """
+            """,
         )
         assert result.returncode == 0, result.stderr
         assert "LOGGER" in result.stdout, result.stderr
 
-    def test_the_fallback_path_is_the_one_being_exercised(self):
+    def test_the_fallback_path_is_the_one_being_exercised(self, world):
         """Positive control on the WORLD, not the claim — and the honesty note.
 
         On this machine the marker walk succeeds, so without _MARKER_ABSENT these
@@ -324,21 +415,23 @@ class TestDeadCwd:
         cured, 2026-08-31.
         """
         result = _run_without_a_working_directory(
-            """
+            world=world,
+            body="""
             from aipass.prax.apps.handlers import repo_root
             from pathlib import Path
             print("ANSWER", repo_root.find_repo_root(Path(repo_root.__file__)))
-            """
+            """,
         )
         assert result.returncode == 0, result.stderr
         assert _answer(result).split(" ", 1)[1] == str(repo_root_mod.source_root())
 
-    def test_the_system_logs_dir_resolves_without_a_working_directory(self):
+    def test_the_system_logs_dir_resolves_without_a_working_directory(self, world):
         result = _run_without_a_working_directory(
-            """
+            world=world,
+            body="""
             from aipass.prax.apps.handlers.config.load import get_system_logs_dir
             print("LOGS", get_system_logs_dir())
-            """
+            """,
         )
         assert result.returncode == 0, result.stderr
         assert "LOGS" in result.stdout, result.stderr
@@ -484,10 +577,15 @@ def _modules_reading_the_cwd(root: Path) -> dict:
     for path in sorted(root.rglob("*.py")):
         if ".archive" in path.parts or "__pycache__" in path.parts:
             continue
+        # Deliberately NOT skipped. A module in prax's own tree that will not
+        # parse is a hole in this sweep, and a sweep that skips its holes reports
+        # the same green as a sweep that found nothing wrong. @canary made the
+        # same call this morning after a SyntaxError mutant scored as a SURVIVOR:
+        # an instrument that produced no reading must never be graded as a pass.
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - not our lane
-            continue
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            raise AssertionError(f"{path} could not be parsed, so this sweep cannot see it: {exc}") from exc
         lines = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -605,3 +703,364 @@ class TestEveryLaneUsesTheSharedResolver:
         assert load_mod._find_repo_root() == expected
         assert refresh_mod._find_repo_root() == expected
         assert status_mod._find_repo_root() == expected
+
+
+# =============================================================================
+# THE STACK WALK ITSELF — a structural instrument, because no import-shaped
+# pin can reach the branch the deleted walk lived in
+# =============================================================================
+
+
+def _inspect_stack_calls(tree: ast.AST) -> list:
+    """Every ``inspect.stack()`` CALL in a parsed module, by line number.
+
+    A call, never a spelling. The guard's own docstring names ``inspect.stack()``
+    three times while explaining why it must not be used, so a string ban would
+    convict the explanation and force the cure to be undocumented — the
+    instrument would be arguing against the record it depends on.
+    """
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "stack"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "inspect"
+    )
+
+
+def _docstrings(tree: ast.AST) -> list:
+    """Every docstring in a parsed module — module, class and function."""
+    return [
+        ast.get_docstring(node)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and ast.get_docstring(node)
+    ]
+
+
+def _tree_modules() -> list:
+    """Every live module under apps/, excluding archives and bytecode."""
+    return [
+        path
+        for path in sorted(APPS_DIR.rglob("*.py"))
+        if ".archive" not in path.parts and "__pycache__" not in path.parts
+    ]
+
+
+class TestNothingCallsInspectStack:
+    """`inspect.stack()` is banned across apps/, and the ban is a CALL match.
+
+    WHY A STRUCTURAL PIN AND NOT A BEHAVIOURAL ONE. @devpulse measured this
+    across six branches: the guard's `caller_file is None` branch — where the
+    deleted second walk lived — is UNREACHABLE from any import-shaped pin,
+    because apps/__init__ always supplies a real-file frame. @aipass ran the
+    experiment: restoring the walk left 1118 of 1120 tests green, and only the
+    AST assertions died. So every dead-cwd pin in this file could stay green
+    while somebody regrows the exact call that took Windows CI down.
+
+    WHY THE BAN IS TREE-WIDE rather than scoped to the guard. After this round's
+    two cures (config/load.py's log-dir resolver and json_handler's caller
+    attribution) prax has no legitimate caller left, so the wider ban costs
+    nothing and catches the next one wherever it lands. `inspect.currentframe()`
+    is deliberately NOT banned: it is `sys._getframe` under another name and
+    touches no filesystem.
+
+    THE MECHANISM, for whoever reads this after the next regression.
+    `inspect.stack()` builds a FrameInfo per frame -> getsourcefile() ->
+    getmodule() -> `modulesbyfile[os.path.realpath(f)]`, and that realpath is
+    not inside a try. On Windows `ntpath.realpath` calls `os.getcwd()`
+    unconditionally on its first lines, before it checks whether the path is
+    even absolute. So the whole call needs a readable working directory, on
+    Windows, before any of the caller's own code runs.
+    """
+
+    def test_no_module_under_apps_calls_inspect_stack(self):
+        offenders = {}
+        for path in _tree_modules():
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            lines = _inspect_stack_calls(tree)
+            if lines:
+                offenders[_module_key(path.relative_to(APPS_DIR.parent))] = lines
+        assert not offenders, (
+            "inspect.stack() needs a readable working directory on Windows and dies at import "
+            f"in a process that has none. Use sys._getframe(n).f_code.co_filename: {offenders}"
+        )
+
+    def test_the_walk_actually_parsed_something(self):
+        """Negative control for the sweep: a blinded walk reads clean too.
+
+        The pin above is a proof of absence, and a proof of absence from an
+        instrument that looked nowhere is worth nothing. This asserts the walk
+        found a real tree before its silence is allowed to mean anything.
+        """
+        modules = _tree_modules()
+        assert len(modules) > 50, (
+            f"the apps/ walk found only {len(modules)} modules — the sweep above is reading a "
+            "tree that is not there, so its green is vacuous"
+        )
+
+    def test_the_matcher_convicts_a_planted_call_at_the_right_line(self, tmp_path):
+        """Positive control, through the REAL matcher rather than a copy of it."""
+        planted = tmp_path / "planted.py"
+        planted.write_text("import inspect\n\n\ndef f():\n    return inspect.stack()[1]\n")
+        assert _inspect_stack_calls(ast.parse(planted.read_text())) == [5]
+
+    def test_the_matcher_does_not_convict_the_docstring_that_explains_the_ban(self):
+        """The guard's docstring says `inspect.stack()` and must stay legal.
+
+        This is the pin that makes the ban survivable. A spelling ban would make
+        the cure's own explanation illegal, and the next person would delete the
+        explanation rather than the defect.
+
+        REBUILT 2026-08-31 after @spawn caught the same shape in their tree and
+        @devpulse relayed it. The first version asserted the whole live guard
+        file was clean — which is a SECOND COPY OF THE BAN wearing a control's
+        name. It proved it in my own mutant run: regrowing the walk redded this
+        test too, and I reported that as a bonus kill when it was the control
+        failing for the ban's reason. A control that can fail for the reason it
+        is controlling for is not a control.
+
+        So the fixture is the guard's REAL docstrings and nothing else, lifted
+        by ast and re-emitted as string literals. That module contains no calls
+        by construction, so regrowing the walk cannot touch this test — and it
+        still uses live prose, so it expires the day the explanation is deleted.
+        """
+        guard = APPS_DIR / "handlers" / "__init__.py"
+        tree = ast.parse(guard.read_text(encoding="utf-8"))
+        mentions = [text for text in _docstrings(tree) if "inspect.stack()" in text]
+        assert mentions, (
+            "the guard no longer explains why it does not use inspect.stack() — if the "
+            "explanation was removed to satisfy a checker, the checker is the defect"
+        )
+        prose_only = "\n".join(repr(text) for text in mentions)
+        assert _inspect_stack_calls(ast.parse(prose_only)) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param("import numpy\n\nx = numpy.stack([1, 2])\n", id="numpy.stack"),
+            pytest.param("import traceback\n\nx = traceback.stack()\n", id="traceback.stack"),
+            pytest.param("x = self.stack()\n", id="self.stack"),
+            pytest.param("import inspect\n\nx = inspect.currentframe()\n", id="inspect.currentframe"),
+        ],
+    )
+    def test_the_matcher_clears_things_that_only_look_like_it(self, source):
+        """Somebody else's `.stack` is not this defect. Convicting it teaches
+        branches to route around the instrument, which is how a checker dies."""
+        assert _inspect_stack_calls(ast.parse(source)) == []
+
+
+class TestCallerAttributionWithoutAWorkingDirectory:
+    """The two `inspect.stack()` sites this round cured, pinned by BEHAVIOUR.
+
+    Both were found by peers running prax in their own denied worlds — @memory
+    and @trigger independently, on the same morning. Neither was fatal on Linux
+    and one was not fatal anywhere, which is exactly why they needed pins that
+    do not depend on a crash.
+    """
+
+    def test_the_ntpath_shaped_world_actually_kills_a_stack_walk(self):
+        """Negative control FOR the positive controls: is each world hostile?
+
+        Written after measuring, not before, and the measurement corrected me.
+        A bare inspect.stack() in each world:
+
+            getcwd-denied            -> SURVIVES
+            getcwd + realpath denied -> SURVIVES
+            realpath denied alone    -> DIES
+
+        So the two worlds this file already had could never have convicted a
+        stack walk, and the pins that went red against the pre-cure guard were
+        reading the module-level Path(__file__).resolve() next door. Without
+        this control the two pins below would pass in two of three worlds for a
+        reason unrelated to what they claim to measure.
+        """
+        verdicts = {}
+        for world, name in (
+            (_INJECT_DEAD_CWD, "getcwd-denied"),
+            (_DENY_REALPATH, "realpath-denied"),
+            (_NTPATH_SHAPED, "ntpath-shaped"),
+        ):
+            probe = subprocess.run(
+                [sys.executable, "-"],
+                input=world
+                + textwrap.dedent(
+                    """
+                    import inspect
+
+                    try:
+                        inspect.stack()
+                        print("SURVIVED")
+                    except BaseException:
+                        print("DIED")
+                    """
+                ),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            verdicts[name] = probe.stdout.strip()
+
+        assert verdicts["ntpath-shaped"] == "DIED", (
+            "the ntpath-shaped world no longer kills inspect.stack(), so the attribution pins "
+            f"below prove nothing about this defect: {verdicts}"
+        )
+        assert verdicts["getcwd-denied"] == "SURVIVED" and verdicts["realpath-denied"] == "SURVIVED", (
+            "a getcwd denial now kills inspect.stack() on this interpreter — if that is real, the "
+            f"comment on _NTPATH_SHAPED is out of date and should be rewritten from measurement: {verdicts}"
+        )
+
+    @pytest.mark.parametrize("world", ATTRIBUTION_WORLDS)
+    def test_the_log_dir_resolver_names_its_caller_without_a_cwd(self, world):
+        """config/load.py's `get_module_logs_dir()` with no module_name.
+
+        This one was NOT caught and NOT logged — a bare `inspect.stack()[1]` in
+        the primary local-log-directory resolver. On a Windows box whose cwd is
+        gone it raises, from the logging path, at the moment logging is the only
+        thing that could tell anyone what went wrong.
+        """
+        result = _run_without_a_working_directory(
+            """
+            import os
+            import tempfile
+
+            os.environ.setdefault("AIPASS_TEST_LOG_DIR", tempfile.mkdtemp(prefix="prax_probe_logs_"))
+            from aipass.prax.apps.handlers.config.load import get_module_logs_dir
+
+            print("LOGDIR", get_module_logs_dir().name)
+            """,
+            world=world,
+        )
+        assert result.returncode == 0, (
+            "get_module_logs_dir() could not name its caller without a working directory.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        # <stdin> is the caller here, so the stem is 'stdin' — the point is that a
+        # name was derived at all, from a frame rather than from the filesystem.
+        assert "LOGDIR " in result.stdout, f"no directory came back: {result.stdout}"
+
+    @pytest.mark.parametrize("world", ATTRIBUTION_WORLDS)
+    def test_the_operations_log_still_attributes_its_caller(self, world):
+        """json_handler's `_get_caller_module_name`.
+
+        Guarded and logged, so it survives — and records every operation as
+        "unknown". @trigger saw it twice in a single import chain. Degraded is
+        not cured: the audit log stops naming anyone exactly when a machine is
+        in the state that makes the log worth reading.
+        """
+        result = _run_without_a_working_directory(
+            """
+            from aipass.prax.apps.handlers.json import json_handler
+
+
+            def stands_in_for_log_operation():
+                return json_handler._get_caller_module_name()
+
+
+            def the_actual_caller():
+                # Two levels, because _get_caller_module_name skips
+                # [0]=itself and [1]=log_operation to reach [2]. Calling it
+                # directly from module level leaves a stack of two and it
+                # returns "unknown" for a reason that has nothing to do with
+                # the defect — a shape that would have made this pin pass
+                # against the cure and against the bug alike.
+                return stands_in_for_log_operation()
+
+
+            print("CALLER", the_actual_caller())
+            """,
+            world=world,
+        )
+        assert result.returncode == 0, (
+            f"importing json_handler died without a working directory.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "CALLER unknown" not in result.stdout, (
+            "the caller was attributed as 'unknown' — the stack read needed a working "
+            f"directory, was caught, and threw the answer away.\nstdout: {result.stdout}"
+        )
+        assert "CALLER " in result.stdout, f"nothing came back: {result.stdout}"
+
+
+class TestTheGuardsUndeterminableCallerBranch:
+    """The `caller_file is None` branch, pinned by BEHAVIOUR as well as by AST.
+
+    @devpulse's round-4 guidance said this branch is unreachable and only a
+    structural ban can watch it. @spawn measured the correction and it is worth
+    stating precisely, because I repeated the too-strong version: the branch is
+    unreachable from IMPORT-shaped pins — apps/__init__ always supplies a
+    real-file frame — but it IS reachable by calling `_guard_branch_access()`
+    from a child whose every frame is a string pseudo-file or importlib. All of
+    those are skipped, `_find_real_caller` returns None, and the branch runs.
+
+    So the true sentence is "import-shaped pins cannot reach it", not "nothing
+    can". The AST ban stays: it needs no subprocess and names the defect at its
+    line. This is its sibling, and the two die together.
+    """
+
+    def _child(self, body: str):
+        """Run `body` with realpath denied, in a `-c` child.
+
+        `-c`, not a script file, and that is @commons' lesson rather than a
+        style choice: run the probe as a real file on disk and EVERY frame
+        getsourcefile sees exists, so it early-returns before getmodule and the
+        denial is silently inert. The world would be spelled too realistically
+        to bite.
+        """
+        script = (
+            _NTPATH_SHAPED
+            + textwrap.dedent(
+                f"""
+                import sys
+                sys.path.insert(0, {REPO_SRC!r})
+                """
+            )
+            + textwrap.dedent(body)
+        )
+        return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+
+    def test_the_branch_is_reachable_and_the_guard_returns_from_it(self):
+        """Both arming probes, then the claim — in that order, in one child.
+
+        Probe 1 proves the denial bites in THIS process shape (a `-c` child, not
+        the stdin shape the rest of this file uses). Probe 2 proves
+        `_find_real_caller` actually returned None, so a future change cannot
+        quietly route the test down the ordinary caller path and still pass.
+        Only then is the guard called.
+        """
+        result = self._child(
+            """
+            import inspect
+
+            from aipass.prax.apps import handlers
+
+            # ARMING PROBE 1 — is the world hostile at all?
+            try:
+                inspect.stack()
+                print("ARM1 INERT")
+            except BaseException:
+                print("ARM1 BITES")
+
+            # ARMING PROBE 2 — does the branch under test actually run?
+            print("ARM2", handlers._find_real_caller())
+
+            # THE CLAIM.
+            handlers._guard_branch_access()
+            print("GUARD RETURNED")
+            """
+        )
+        assert "ARM1 BITES" in result.stdout, (
+            "the realpath denial is inert in a -c child, so this test proves nothing about a "
+            f"stack walk.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "ARM2 (None, None)" in result.stdout, (
+            "_find_real_caller found a caller, so the undeterminable-caller branch never ran and "
+            f"the claim below is about a different code path.\nstdout: {result.stdout}"
+        )
+        assert "GUARD RETURNED" in result.stdout, (
+            "the guard did not return from its undeterminable-caller branch in a process with no "
+            f"usable realpath.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert result.returncode == 0, f"child exited {result.returncode}: {result.stderr}"

@@ -14,9 +14,10 @@ backup project registry stored at backup_json/project_registry.json.
 
 from pathlib import Path
 
+from ..path.module_paths import branch_root
 from ..json import json_handler
 
-REGISTRY_PATH = Path(__file__).resolve().parents[3] / "backup_json" / "project_registry.json"
+REGISTRY_PATH = branch_root(__file__, 3) / "backup_json" / "project_registry.json"
 
 
 def load_project_registry() -> dict:

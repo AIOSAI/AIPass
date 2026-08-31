@@ -25,6 +25,8 @@ a temp already) say so rather than pretending.
 import ast
 import errno
 import json
+import os
+import sys
 import tempfile
 import threading
 import time
@@ -1430,15 +1432,42 @@ class TestTheFinalStateIsCheckedDirectly:
         assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
 
     def test_an_unreadable_target_is_not_convicted_as_torn(self):
-        """Share-mode / permission refusal is not evidence of tearing."""
+        """Share-mode / permission refusal is not evidence of tearing.
+
+        The world here is built by chmod, and chmod does not build it
+        everywhere: Windows ignores POSIX mode bits (it wants an ACL), and root
+        reads through them on POSIX. Both were guesses in the first version of
+        this test — it inferred "running as root" from a PASSED verdict, which
+        is a cause read off a symptom, and on the Windows gate the verdict was
+        SKIPPED for a different reason entirely and the assertion below failed
+        (@devpulse, ebb8075d windows-setup).
+
+        So the world is PROBED, not assumed: after the chmod, actually try to
+        read the file. If it still reads, this host cannot build the state and
+        the test says so with what it measured. @memory's ruling, applied —
+        probe the host, do not skipif what a probe can measure.
+        """
         with _target('{"whole": true}') as racer:
             racer.target.chmod(0o000)
             try:
+                try:
+                    racer.target.read_text(encoding="utf-8")
+                except OSError:
+                    unreadable = True
+                else:
+                    unreadable = False
+
                 verdict, message = _verdict(racer)
             finally:
                 racer.target.chmod(0o644)
 
-        if verdict == "PASSED":
-            pytest.skip("running as root — the chmod did not make the file unreadable")
+        if not unreadable:
+            pytest.skip(
+                "world not built: chmod(0o000) left the file readable on this "
+                f"host (platform={sys.platform}, euid={getattr(os, 'geteuid', lambda: 'n/a')()}) "
+                "— Windows ignores POSIX mode bits and root reads through them, "
+                "so the unreadable state cannot be constructed this way here"
+            )
+
         assert verdict == "SKIPPED", f"an unreadable target was reported {verdict}: {message}"
         assert "final=unreadable" in message

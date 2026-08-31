@@ -83,7 +83,21 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
 
     # Determine target directory
     if target_dir is None:
-        target_dir = Path.cwd() / ".aipass" / "skills"
+        # Unlike discovery, this one WRITES. A default that cannot be computed
+        # must refuse, never fall back to some other directory - creating a
+        # skill in the wrong tree is worse than not creating one.
+        try:
+            target_dir = Path.cwd() / ".aipass" / "skills"
+        except OSError as exc:
+            return {
+                "success": False,
+                "path": None,
+                "files": [],
+                "error": (
+                    f"No readable working directory ({exc}); cannot place a skill "
+                    f"in the current project. Pass an explicit target directory."
+                ),
+            }
 
     target_path = Path(target_dir) / name
 

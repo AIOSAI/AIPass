@@ -24,13 +24,13 @@ Independence:
 """
 
 import json
-from pathlib import Path
 from typing import Any, Dict
 
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -46,7 +46,7 @@ logger = get_system_logger()
 # disease the one-source rule exists to cure — the constants are retired and
 # the text is read from the template at render time.
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+_TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
 
 _TEMPLATE_FILES = {
     "local": "LOCAL.template.json",

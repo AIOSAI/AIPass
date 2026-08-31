@@ -705,6 +705,38 @@ def test_case_folded_registry_excluded_from_caller_registries(
     assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
 
 
+# The pattern production actually globs, and a probe file whose suffix is the
+# lowercase form of it. Named constants because the DIRECTION is the claim -
+# see test_the_host_probe_travels_the_defects_direction below.
+_PRODUCTION_GLOB = "*_REGISTRY.json"
+_PROBE_FILENAME = "hostprobe_registry.json"
+
+
+def _host_folds_glob_case(tmp_path: Path) -> bool:
+    """
+    Probe the host: does its glob fold case? Never assume, never skipif.
+
+    The probe travels the DEFECT'S OWN DIRECTION (@ai_mail's round-4 lesson):
+    a lowercase file, matched against the uppercase pattern — which is exactly
+    what production asks the filesystem. Probing the other way round measures
+    a different question and can answer it differently.
+
+    The probe lives in its own directory so it cannot collide with, or be
+    collided by, any registry a test planted. Its stem is deliberately
+    distinct: on a folding filesystem names differing only by case CANNOT
+    coexist (@memory), so a case-twin probe would overwrite a real file's
+    contents while the directory kept the original spelling.
+    """
+    probe_dir = tmp_path / "_case_probe"
+    probe_dir.mkdir(exist_ok=True)
+    probe = probe_dir / _PROBE_FILENAME
+    probe.write_text("{}", encoding="utf-8")
+    try:
+        return probe in set(probe_dir.glob(_PRODUCTION_GLOB))
+    finally:
+        probe.unlink()
+
+
 def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitive_glob):
     """
     POSITIVE CONTROL — the instrument, exercised through production's own call.
@@ -712,6 +744,10 @@ def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitiv
     This makes the exact call ``_find_caller_registries`` makes rather than
     re-stating its logic. If this fails, the pins above prove nothing and are
     green for the wrong reason.
+
+    On a folding host this control is satisfied by the filesystem itself
+    rather than by the instrument — which is not a defect but is worth
+    knowing. The negative control below names which world the run is in.
     """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
@@ -724,11 +760,26 @@ def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitiv
     assert project / "VERA-STUDIO_REGISTRY.json" in listed
 
 
-def test_without_the_instrument_the_decoy_is_invisible(tmp_path: Path):
+def test_raw_glob_matches_what_the_host_filesystem_actually_does(tmp_path: Path):
     """
-    NEGATIVE CONTROL — on a real case-sensitive Linux filesystem the decoy
-    does not appear at all. Proves the pins above measure the fix and not
-    the host's filesystem semantics.
+    NEGATIVE CONTROL — without the instrument, the host's own answer.
+
+    The earlier spelling of this test asserted the decoy is invisible, full
+    stop. That is true on Linux and FALSE on NTFS and default macOS — so the
+    control failed on the exact host the defect lives on, which is the one
+    place a control must not fail. Per @memory's ruling the host is PROBED,
+    never skipped, and both outcomes are pinned:
+
+      - case-sensitive host: the decoy is invisible, so the pins above are
+        measuring the fix and not the filesystem — the instrument is load-
+        bearing and the positive control proves it widens.
+      - case-folding host: the decoy is listed for real. The widening is
+        native, the emulation is redundant, and the pins above are measuring
+        the defect's actual home.
+
+    Either way the production filter is what must exclude it, and
+    ``test_case_folded_registry_excluded_from_caller_registries`` above
+    asserts that on both hosts.
     """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
@@ -736,9 +787,50 @@ def test_without_the_instrument_the_decoy_is_invisible(tmp_path: Path):
     decoy = _plant_case_folded_decoy(project, branch_dir)
 
     listed = list(project.glob("*_REGISTRY.json"))
+    real_registry = project / "VERA-STUDIO_REGISTRY.json"
 
-    assert decoy not in listed
-    assert listed == [project / "VERA-STUDIO_REGISTRY.json"]
+    if _host_folds_glob_case(tmp_path):
+        assert decoy in listed, (
+            "the host folds glob case for a lowercase probe but not for the "
+            "decoy — the probe and the decoy disagree about the same filesystem"
+        )
+        assert real_registry in listed
+    else:
+        assert decoy not in listed
+        assert listed == [real_registry]
+
+
+def test_the_host_probe_travels_the_defects_direction():
+    """
+    The probe's DIRECTION is the claim, and this host cannot measure it.
+
+    @ai_mail's round-4 lesson: the probe must ask the filesystem the same
+    question production asks — a lowercase file against the UPPERCASE
+    pattern. Reversed (an uppercase file against a lowercase pattern) it
+    measures a different question, and a host that folds only one way would
+    answer it differently.
+
+    On a case-sensitive host both directions return False, so reversing the
+    probe changes no behavioural outcome here and no behavioural pin can
+    catch it. Stated honestly: this is a SHAPE pin, deliberately weaker than
+    the rest of this block. It exists so the direction cannot be silently
+    reversed by someone who does not know why it was chosen.
+    """
+    assert _PRODUCTION_GLOB == "*_REGISTRY.json"
+    assert _PROBE_FILENAME.endswith("_registry.json"), (
+        "the probe file must carry the LOWERCASE suffix — it is the decoy's "
+        "spelling, and the glob pattern is production's"
+    )
+    assert _PRODUCTION_GLOB.lstrip("*") not in _PROBE_FILENAME, (
+        "probe and pattern must differ in case, or nothing is being probed"
+    )
+
+    # The pattern is production's own, read from the source rather than
+    # re-typed: a pin on a copy of a constant survives the constant changing.
+    source = Path(_ops.__file__).read_text(encoding="utf-8")
+    assert f'directory.glob("{_PRODUCTION_GLOB}")' in source, (
+        "production no longer globs this pattern — the host probe is asking a question nothing asks any more"
+    )
 
 
 def test_external_registries_with_lowercase_stems_still_resolve(

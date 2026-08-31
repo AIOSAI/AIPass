@@ -70,6 +70,7 @@ from aipass.flow.apps.handlers.plan.registry_routing import _load_template_regis
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.monitor_ops import IGNORE_FOLDERS, PLAN_PATTERN
 from aipass.flow.apps.handlers.registry.save_registry import save_registry
+from aipass.flow.apps.handlers.repo_root import exists_exactly, find_repo_root
 
 # =============================================
 # CONFIGURATION
@@ -452,11 +453,16 @@ def _heal_wrong_prefix_rows(
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
+
+    Delegates to ``handlers/repo_root.find_repo_root`` — the one
+    implementation. This used to be a private copy ending
+    ``return Path.cwd()``; there were seven such copies in flow and six of
+    them are called at MODULE level, so on a registry-less checkout every
+    import guessed its root from the process directory, and with the cwd
+    deleted the import died outright. See that module's docstring.
+    """
+    return find_repo_root(caller="heal_registry")
 
 
 def _is_citizen_seat(path: Path) -> bool:
@@ -487,8 +493,13 @@ def _citizen_seat_index() -> Dict[str, List[Path]]:
     repo_root = _find_repo_root()
     candidates: set[Path] = set()
 
+    # exists_exactly, not is_file(): on a folding filesystem is_file() answers
+    # True for a file actually named aipass_registry.json. find_repo_root already
+    # anchors on the exact spelling, so this only bites when it took the
+    # SOURCE_ROOT fallback — a tree with no registry, where a lowercase lookalike
+    # would then be read as the fleet anchor.
     registry_file = repo_root / "AIPASS_REGISTRY.json"
-    if registry_file.is_file():
+    if exists_exactly(registry_file) and registry_file.is_file():
         try:
             import json
 

@@ -223,12 +223,58 @@ def _declares_no_callable_code(content: str) -> bool:
 _BOOTSTRAP_WALK_CAP = 2000
 
 
-def _aipass_imports(content: str) -> list[str]:
+def _resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
+    """Absolute dotted name for a relative import, given the importer's package.
+
+    ``from ..paths import module_file`` inside
+    ``aipass.canary.apps.handlers.json.json_handler`` is
+    ``aipass.canary.apps.handlers.paths`` — a perfectly static fact the walk was
+    throwing away.
+
+    Args:
+        module_name: The ``module`` of an ImportFrom, or None for ``from . import x``.
+        level: Number of leading dots.
+        package: Dotted package the importing file lives in, or None if unknown.
+
+    Returns:
+        The absolute dotted name, or None when it cannot be resolved.
+    """
+    if not package or level <= 0:
+        return None
+    parts = package.split(".")
+    if level - 1 > len(parts):
+        return None
+    base = parts[: len(parts) - (level - 1)] if level > 1 else parts
+    if not base:
+        return None
+    return ".".join(base + ([module_name] if module_name else []))
+
+
+def _aipass_imports(content: str, package: str | None = None) -> list[str]:
     """Every ``aipass.*`` module name this source imports, at any nesting depth.
 
     Function-level imports count. A module that reaches aipass only from inside
     a function has still taken the dependency, and could take json_handler the
     same way.
+
+    RELATIVE IMPORTS COUNT TOO, when the caller supplies ``package``. They did
+    not until 2026-08-31, and the hole was exactly where it hurt: @canary's
+    json_handler reaches its stdlib-only bootstrap helper by
+    ``from ..paths import module_file``, so ``paths.py`` never entered the
+    bootstrap chain, clause 2 of the exemption failed, and a module that IS
+    beneath the logging system was told to import it. A relative import is a
+    STATIC fact — unlike the importlib hops this walk deliberately cannot see —
+    so resolving it moves the set toward correct in the direction the walk's own
+    docstring already asks for.
+
+    Args:
+        content: File source.
+        package: Dotted package of the importing file, for relative resolution.
+            None keeps the old absolute-only behaviour, which is what the
+            "holds no aipass import" clause wants for a file it cannot place.
+
+    Returns:
+        Dotted ``aipass.*`` names, absolute.
     """
     try:
         tree = ast.parse(content)
@@ -239,9 +285,15 @@ def _aipass_imports(content: str) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names.append(node.module)
-            names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                names.append(node.module)
+                names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+                continue
+            resolved = _resolve_relative(node.module, node.level, package)
+            if resolved:
+                names.append(resolved)
+                names.extend(f"{resolved}.{alias.name}" for alias in node.names)
     return [name for name in names if name.split(".")[0] == "aipass"]
 
 
@@ -288,6 +340,21 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
     they reach is BENEATH them in the import order and cannot import them back
     without a cycle.
 
+    ANCESTOR PACKAGES ARE DELIBERATELY ABSENT, and the reason is measured rather
+    than assumed. Importing aipass.flow.apps.handlers.json.json_handler runs
+    aipass/flow/apps/handlers/__init__.py first — Python imports every parent
+    package before the leaf, and no import statement says so, so the AST cannot
+    see it (@flow's fence, 2026-08-31). Adding them is therefore FACTUALLY
+    right about execution order and still wrong for this exemption: the wide
+    form (walking each ancestor's own imports) carried the exemption out across
+    every branch's public API via drone's re-exporting __init__ and exempted 4
+    stdlib-only helpers that have a working logger; the narrow form (record the
+    ancestor, do not walk it) changed 0 verdicts in 1040 files. A clause that
+    grants exemptions nobody needs today is a waiver waiting for a file to drift
+    into it. Execution order is not the property this exemption is for — being
+    unable to reach the logger is — and every fence in the fleet already passes
+    on its own.
+
     Statically walked, so a dynamic (importlib) hop inside the chain is invisible
     and the set comes out SHORT. That direction is deliberate: a missed member is
     measured by the ordinary rule and stays red, which is the state it is in
@@ -307,8 +374,12 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
         if module_file is None:
             continue
         seen.add(module_name)
+        # The importing module's PACKAGE, so its relative imports resolve. A
+        # package __init__ is its own package; a plain module's package is its
+        # parent.
+        package = module_name if module_file.name == "__init__.py" else module_name.rsplit(".", 1)[0]
         try:
-            queue.extend(_aipass_imports(module_file.read_text(encoding="utf-8", errors="ignore")))
+            queue.extend(_aipass_imports(module_file.read_text(encoding="utf-8", errors="ignore"), package))
         except OSError as exc:
             logger.info("json_structure: unreadable module in the bootstrap walk: %s", exc)
     return frozenset(seen)

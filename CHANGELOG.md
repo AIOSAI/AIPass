@@ -13,6 +13,47 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 4: the import-time dead-cwd defect cured in all 16 branches (~150
+  sites), and the instrument that watches the cure** (FPLAN-0461 continued).
+  `ntpath.realpath` reads `os.getcwd()` unconditionally and `Path.resolve()`
+  routes through it, so every module-level resolve *reached at import* is an
+  import-time crash on Windows — and every branch's `handlers/__init__.py`
+  guard called `inspect.stack()` first, masking its whole tree (the mask ran
+  two layers deep in daemon/api/backup via a json_handler root constant, three
+  in skills with two *parallel* second layers — counts only become true as
+  cures land; re-measure until the number stops moving). Each branch cured by
+  its owner, red-first in two subprocess worlds, mutants run not assumed:
+  guard walks on `sys._getframe` over `co_filename`, module-level resolves
+  routed through one guarded `module_file()` helper per branch (diagnostics
+  inside their own protection — daemon's rule, stderr deduped last resort),
+  the hot-path `_get_caller_module_name` stack walks cured to
+  `sys._getframe(2)` with pins asserting the audit trail still *answers*
+  (aipass's shared fix reaches five shims including spawn's citizen template —
+  newborns born cured AND born pinned). The deleted second stack walk proved
+  unreachable from import-shaped pins in nine independent reproductions
+  (restoring the defect left 1118/1120 green in aipass), so every tree carries
+  an AST ban — and spawn's capstone correction landed the behavioural sibling:
+  the branch IS reachable by calling the guard directly from a `-c` child,
+  adopted fleet-wide within 90 minutes of the relay. Five harness species now
+  named in the record: a mutant with no pytest output is invalid, never
+  survived (canary); the lookup frame must be the compiled one (aipass); a
+  world can be too hostile to convict — denying getcwd *hides* the stack
+  defect inside `getabsfile`'s own except (prax); a world spelled too
+  realistically is silently inert — script-run probes make every frame a real
+  file (commons); a negative control that can fail for the ban's own reason is
+  a second ban, not a control (spawn, confirmed retroactively by prax).
+  Report-only for Patrick's ruling, all measured: the handlers fence is
+  decorative in fact (backup/skills proved a foreign import ALLOWED, causally
+  — door closed = blocked), and one-word branch kinship tests admit any
+  same-named directory as kin (api: drone's own `api/` subdir admitted; skills:
+  14 same-named dirs on this machine). Rode along: daemon's `_calc_next_run`
+  read the wall clock instead of the timestamp it was handed — `next_run` had
+  advertised impossible fires on the human status surface daily (13 pins, 3
+  live records repaired); skills' `get_search_paths` raised on dead cwd taking
+  every list/info/run down — cured by asymmetry (discovery skips, creators
+  refuse); the medic warning-storm species (a WARNING logged at module import
+  escalates on volume alone) moved to first-use, deduped.
+
 - **The two-test-universes defect class, closed at root cause across 7 branches**
   (FPLAN-0461, night shift on Patrick's brief "every change we make it turns
   red — is it a norm?"; answer: no). The commit gate runs each branch's suite

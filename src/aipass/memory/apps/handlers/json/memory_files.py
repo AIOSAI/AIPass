@@ -36,11 +36,12 @@ from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
 # Resolve paths relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _CONFIG_DIR = _MEMORY_ROOT / "config"
 _TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 

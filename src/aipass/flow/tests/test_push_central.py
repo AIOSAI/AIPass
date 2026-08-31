@@ -9,6 +9,7 @@
 """Tests for push_central handler -- push Flow plan data to PLANS.central.json."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 _MOD = "aipass.flow.apps.handlers.dashboard.push_central"
@@ -26,44 +27,85 @@ def _import_mod():
 
 
 class TestFindRepoRoot:
-    """Tests for _find_repo_root."""
+    """``push_central._find_repo_root`` — now a delegation, not a private walk.
+
+    REWRITTEN 2026-08-31. Flow carried SEVEN near-identical private
+    ``_find_repo_root`` copies, each ending ``return Path.cwd()``, and six were
+    called at MODULE level. These tests patched ``push_central.__file__`` to
+    steer that private walk; the walk lives in ``handlers/repo_root`` now, so
+    the patch no longer reaches it and the cases had to move with the code.
+
+    ``test_falls_back_to_cwd_when_no_marker`` is REVERSED below rather than
+    deleted. It asserted ``result == Path.cwd()`` and was GREEN — a test
+    standing guard over the exact construct that takes CI down on a box whose
+    working directory is gone, and that silently resolves a WRITER against
+    whatever directory the caller's shell was pointing at when no registry
+    exists. @memory found the same reversed test in their own tree the same
+    week. The contract it pinned was wrong; the test now pins the correct one
+    and says why, so nobody restores the old assertion thinking they found a
+    regression.
+    """
+
+    def test_delegates_to_the_one_implementation(self):
+        """The private copy is gone: this must BE the shared answer."""
+        mod = _import_mod()
+        from aipass.flow.apps.handlers import repo_root
+
+        assert mod._find_repo_root() == repo_root.find_repo_root()
 
     def test_returns_dir_containing_registry(self, tmp_path):
         """Returns the directory containing AIPASS_REGISTRY.json."""
-        mod = _import_mod()
+        from aipass.flow.apps.handlers.repo_root import find_repo_root
+
         marker = tmp_path / "AIPASS_REGISTRY.json"
         marker.write_text("{}", encoding="utf-8")
         child = tmp_path / "a" / "b" / "c"
         child.mkdir(parents=True)
 
-        with patch(f"{_MOD}.__file__", str(child / "push_central.py")):
-            result = mod._find_repo_root()
-        assert result == tmp_path
-
-    def test_falls_back_to_cwd_when_no_marker(self, tmp_path):
-        """Returns Path.cwd() when no AIPASS_REGISTRY.json is found."""
-        mod = _import_mod()
-        sub = tmp_path / "sub"
-        sub.mkdir(exist_ok=True)
-
-        with patch(f"{_MOD}.__file__", str(sub / "push_central.py")):
-            with patch("pathlib.Path.cwd", return_value=tmp_path):
-                result = mod._find_repo_root()
-        # No AIPASS_REGISTRY.json in any parent, so cwd is returned
-        assert result == tmp_path
+        assert find_repo_root(child) == tmp_path
 
     def test_finds_marker_in_immediate_parent(self, tmp_path):
         """Finds AIPASS_REGISTRY.json in the immediate parent directory."""
-        mod = _import_mod()
+        from aipass.flow.apps.handlers.repo_root import find_repo_root
+
         parent_dir = tmp_path / "parent"
         parent_dir.mkdir()
         (parent_dir / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         child_dir = parent_dir / "child"
         child_dir.mkdir()
 
-        with patch(f"{_MOD}.__file__", str(child_dir / "push_central.py")):
-            result = mod._find_repo_root()
-        assert result == parent_dir
+        assert find_repo_root(child_dir) == parent_dir
+
+    def test_never_falls_back_to_cwd_when_no_marker(self, tmp_path, monkeypatch):
+        """THE REVERSED TEST. No marker anywhere → the SOURCE tree, never cwd.
+
+        The old assertion was ``result == Path.cwd()``. Both defects it blessed
+        are pinned here: the process directory is not consulted at all (so a
+        deleted cwd cannot kill a module-level caller), and the answer does not
+        move when the caller's shell moves (so a writer cannot be steered into a
+        tree nobody chose).
+        """
+        from aipass.flow.apps.handlers import repo_root
+
+        sub = tmp_path / "sub"
+        sub.mkdir()
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: elsewhere))
+
+        result = repo_root.find_repo_root(sub)
+
+        assert result == repo_root.SOURCE_ROOT
+        assert result != elsewhere, "the walk is still answering with the process directory"
+
+    def test_the_cwd_stand_in_is_live(self, tmp_path, monkeypatch):
+        """Control: a patch that never bites would make the test above vacuous."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: elsewhere))
+
+        assert Path.cwd() == elsewhere
 
 
 # =============================================

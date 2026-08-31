@@ -27,7 +27,6 @@ Usage:
     max_lines = system_logs['max_lines']
 """
 
-import inspect
 import json
 import logging
 import os
@@ -38,6 +37,7 @@ from typing import Dict, Any, Optional
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.repo_root import resolved_file
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 MODULE_NAME = "load"
 
 # Package path resolution (no hardcoded paths)
-PRAX_ROOT = Path(__file__).resolve().parents[3]  # config/load.py → handlers/ → apps/ → prax/
+PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # config/load.py → handlers/ → apps/ → prax/
 ECOSYSTEM_ROOT = PRAX_ROOT.parent  # prax/ → aipass/ (contains all sibling modules)
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 
@@ -118,6 +118,38 @@ def _warn_routing(module_name: str, destination: object) -> None:
         )
 
 
+def _get_caller_module_name(depth: int = 1) -> str:
+    """Name the module `depth` frames above this one, without touching the disk.
+
+    sys._getframe, never inspect.stack(). This question needs ONE filename;
+    inspect.stack() builds a FrameInfo for every frame on the stack to answer
+    it, and that path runs getsourcefile -> getmodule ->
+    `modulesbyfile[os.path.realpath(f)]`, where the realpath is not inside a
+    try. On Windows ntpath.realpath calls os.getcwd() on its first lines,
+    before it checks whether the path is even absolute — so the old
+    `inspect.stack()[1]` here NEEDED A READABLE WORKING DIRECTORY, unguarded,
+    in the primary local-log-directory resolver, on the logging path. A box
+    with a disconnected share or a deleted cwd raised from here at exactly the
+    moment logging was the only thing that could say what went wrong.
+
+    Reported by @memory and @trigger independently on 2026-08-31, each running
+    prax inside their own denied world. A frame's co_filename is already a
+    string in memory: reading it touches nothing, gives the same answer, and is
+    cheaper on a hot path besides.
+
+    Args:
+        depth: Frames above THIS function. 1 is the direct caller.
+
+    Returns:
+        The caller's module name, or "unknown" when the stack is too shallow.
+    """
+    try:
+        frame = sys._getframe(depth)
+    except ValueError:
+        return "unknown"
+    return Path(frame.f_code.co_filename).stem
+
+
 def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
     """Get the branch-root logs directory for a module.
 
@@ -141,8 +173,7 @@ def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
     """
     # Auto-detect caller module name when not provided
     if module_name is None:
-        frame = inspect.stack()[1]
-        module_name = Path(frame.filename).stem
+        module_name = _get_caller_module_name(depth=2)
 
     test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
     if test_log_dir:

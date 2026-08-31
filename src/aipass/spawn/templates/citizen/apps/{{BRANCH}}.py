@@ -61,9 +61,13 @@ def _module_import_path(stem: str) -> str:
     try:
         importlib.import_module(f"aipass.{{BRANCH}}.apps.modules.{stem}")
         return f"aipass.{{BRANCH}}.apps.modules.{stem}"
-    except ImportError as e:
+    except (ImportError, OSError) as e:
         # Not silent: the fallback path is a real branch in behaviour, so the
         # reason it was taken has to stay readable afterwards.
+        # OSError as well as ImportError: the package import runs the handler
+        # access guard, which touches the filesystem, so an unreadable cwd
+        # raises FileNotFoundError here — and the local layout is exactly the
+        # right answer in that world too.
         logger.info("[{{BRANCHNAME}}] Package import failed for %s (%s) - using local layout", stem, e)
         return f"apps.modules.{stem}"
 

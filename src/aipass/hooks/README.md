@@ -141,11 +141,12 @@ src/aipass/hooks/
 │   │   └── diagnostics.py       #   JSONL logging for hook execution
 │   ├── handlers/cli/            # CLI utilities (not hooks — no handle())
 │   │   └── help_flags.py        #   Help-flag detection — did the caller ask, or instruct?
-│   └── handlers/json/           # JSON utilities (not hooks — no handle())
-│       └── json_handler.py      #   Auto-creating JSON handler for hooks data files
+│   ├── handlers/json/           # JSON utilities (not hooks — no handle())
+│   │   └── json_handler.py      #   Auto-creating JSON handler for hooks data files
+│   └── handlers/module_root.py  # Guarded __file__ resolution — the one import-time-safe spelling
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1763 tests across 51 test files (1761 pass, 2 env-skipped)
+└── tests/                       # 1798 tests across 52 test files (1796 pass, 2 env-skipped)
 ```
 
 ## How It Works
@@ -157,6 +158,42 @@ src/aipass/hooks/
 5. First hook returning `{"decision": "block"}` with exit code 2 = bail (block the action)
 6. Exit code 2 without JSON = crash (log error, continue to next hook)
 7. All hook stdout concatenated and returned to platform
+
+## Importing Without a Working Directory
+
+Every hooks module must import in a process whose working directory is gone.
+`ntpath.realpath` reads `os.getcwd()` UNCONDITIONALLY — not only for relative
+paths, the way `posixpath` does — and `Path.resolve()` routes through it. So on
+Windows every `Path(__file__).resolve()` *reached at import time* is an
+import-time working-directory dependency, and a process whose cwd was deleted
+cannot import the module at all. (Measured on the Windows CI gate 2026-08-31,
+@memory's finding, routed here by @devpulse.)
+
+**The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
+It still attempts `.resolve()` — normalising symlinks is why the call exists —
+and falls back to the absolute spelling only in the world where the alternative
+is a dead import. New module-level `__file__` resolution goes through it.
+
+**The count was wrong until the guard was cured.** `apps/handlers/__init__.py`
+runs a cross-branch import guard on *every* hooks import, and it died first, so
+all 68 modules reported that one line and no other site was visible. Curing the
+guard is what made the remaining sites measurable — the honest sequence was
+1 → 5 → 6, each cure unmasking the next. `tests/test_import_dead_cwd.py` pins
+the whole tree, discovered by walk rather than listed.
+
+**Two worlds, because one proves half.** World A emulates ntpath (`realpath`
+reads cwd, `getcwd` denied) and convicts an unguarded `resolve()`; on Linux it
+does NOT convict `inspect.stack()`, because there the raise happens inside
+`getabsfile()` where inspect catches it. World B denies `os.path.realpath`
+outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard now
+walks frames with `sys._getframe` and reads the import line with `linecache`.
+
+The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
+caller-is-None branch is unreachable from any import probe, so a regrown call
+there is invisible to the world tests — a mutant proved exactly that, killed
+only by the AST pin. AST and not a string ban because this guard's own
+docstrings name the defect, and a spelling ban convicts prose while acquitting
+code.
 
 ## Two Log Streams
 

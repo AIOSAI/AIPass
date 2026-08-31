@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon_wakeup.py
 # Description: DAEMON Wake-Up Cron Trigger
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-15
-# Modified: 2026-03-10
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -25,7 +25,6 @@ Flow:
 import os
 import sys
 import json
-from pathlib import Path
 from datetime import datetime
 
 if sys.platform == "win32":
@@ -38,6 +37,7 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
 
 try:
     import fcntl
@@ -49,7 +49,7 @@ except ImportError:
 # CONSTANTS
 # =============================================
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[1]  # src/aipass/daemon/
+_DAEMON_ROOT = module_file(__file__).parents[1]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 
 LOCK_FILE = JSON_DIR / "wakeup.lock"

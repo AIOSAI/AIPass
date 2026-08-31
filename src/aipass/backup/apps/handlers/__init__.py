@@ -1,31 +1,57 @@
-"""BACKUP handlers package - Security protected."""
+"""BACKUP handlers package - Security protected.
 
-import inspect
+The branch's ONE safe path helper lives in ``path/module_paths.py``; this
+package's own module-level paths go through it for the same reason every other
+module does -- ``Path.resolve()`` reached at import time is an import-time crash
+on Windows for a process whose cwd was deleted.
+"""
+
+import linecache
+import sys
 from pathlib import Path
 
+from .path.module_paths import branch_root, module_file  # noqa: F401  (re-exported)
+
 MY_BRANCH = "backup"
-_HANDLER_DIR = str(Path(__file__).resolve().parent)
+
+#: Frames that are not real files on disk. Resolving one needs a cwd, so they
+#: are skipped BEFORE anything touches the filesystem.
+_PSEUDO_FRAME_PREFIX = "<"
+_IMPORT_MACHINERY = "importlib"
+
+_HANDLER_DIR = str(module_file(__file__).parent)
+_BRANCH_ROOT = str(branch_root(__file__, 2))
 
 
 def _find_real_caller():
     """Walk the stack to find the actual file that triggered this import.
 
-    Skips this file, importlib internals, and frozen modules.
+    Uses ``sys._getframe`` rather than ``inspect.stack()``. ``inspect.stack()``
+    calls ``getmodule`` -> ``getabsfile`` -> ``os.path.realpath`` on EVERY frame
+    with no guard (inspect.py:1009), so it dies on a dead cwd before this
+    function's own skip logic is ever consulted. Reading ``f_code.co_filename``
+    off the frame touches no filesystem at all.
+
     Returns tuple: (file_path, import_line) or (None, None).
     """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
+    this_file = str(module_file(__file__))
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    try:
+        frame = sys._getframe(1)
+    except ValueError:
+        return None, None
 
-        # Skip Python internals BEFORE touching the filesystem — resolve() on a
-        # pseudo-filename like <string> needs a cwd, and a process whose cwd was
-        # deleted dies here otherwise.
-        if filename.startswith("<") or "importlib" in filename:
+    while frame is not None:
+        filename = frame.f_code.co_filename
+
+        # Skip Python internals BEFORE touching the filesystem — resolving a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd
+        # was deleted dies here otherwise.
+        if filename.startswith(_PSEUDO_FRAME_PREFIX) or _IMPORT_MACHINERY in filename:
+            frame = frame.f_back
             continue
 
-        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # A relative frame filename also needs a cwd to resolve; fall back to
         # the raw spelling rather than crashing the import.
         try:
             resolved = str(Path(filename).resolve())
@@ -33,12 +59,10 @@ def _find_real_caller():
             resolved = filename
 
         if this_file in resolved:
+            frame = frame.f_back
             continue
 
-        import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
-
+        import_line = linecache.getline(filename, frame.f_lineno).strip() or None
         return resolved, import_line
 
     return None, None
@@ -63,14 +87,9 @@ def _guard_branch_access():
     caller_file, import_line = _find_real_caller()
 
     if caller_file is None:
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return
         return
 
-    branch_root = str(Path(_HANDLER_DIR).parents[1])
-    if branch_root in caller_file.replace("\\", "/"):
+    if _BRANCH_ROOT in caller_file.replace("\\", "/"):
         return
 
     caller_branch = _extract_branch_name(caller_file)

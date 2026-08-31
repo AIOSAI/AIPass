@@ -29,7 +29,12 @@ if sys.platform == "win32":
 
 from pathlib import Path
 
-_PKG_ROOT = Path(__file__).resolve().parents[2]  # flow.py → apps/ → flow/ → aipass/
+# NOTE: this file has no module-level path resolution. _PKG_ROOT used to sit
+# here as Path(__file__).resolve().parents[2] — a cwd read on Windows at import
+# time — and it was assigned once and never read. Removed 2026-08-31 rather than
+# routed through handlers/repo_root: the entry point should not reach into
+# handlers, and the value was dead. MODULES_DIR below uses Path(__file__).parent
+# with no resolve(), which touches no filesystem at all.
 
 # Standard library imports
 import importlib

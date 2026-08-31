@@ -13,11 +13,11 @@ Routes drone @skills run telegram <action> to the multi-bot framework.
 """
 
 import sys
-from pathlib import Path
 
 from aipass.prax import logger
+from aipass.skills.apps.handlers.module_paths import module_file
 
-_skill_root = Path(__file__).resolve().parent
+_skill_root = module_file(__file__).parent
 if str(_skill_root) not in sys.path:
     sys.path.insert(0, str(_skill_root))
 

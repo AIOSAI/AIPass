@@ -27,15 +27,16 @@ from aipass.devpulse.apps.handlers.feedback.storage import (
 
 from aipass.cli.apps.modules import err_console, error, success, warning
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.module_root import module_file
 
 console = err_console
 
 # AIPass src/aipass/ directory (four levels up from compose.py)
-_AIPASS_ROOT = Path(__file__).resolve().parents[4]
+_AIPASS_ROOT = module_file(__file__).parents[4]
 
 # Devpulse's own ai_mail inbox — stamped as reply_path on delivered replies so
 # external recipients can reply cross-project via ai_mail's stored-path route.
-_DEVPULSE_INBOX = Path(__file__).resolve().parents[3] / ".ai_mail.local" / "inbox.json"
+_DEVPULSE_INBOX = module_file(__file__).parents[3] / ".ai_mail.local" / "inbox.json"
 
 
 def _resolve_sender() -> tuple[str, str]:

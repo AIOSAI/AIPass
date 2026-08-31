@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
+from aipass.skills.apps.handlers.module_paths import module_file
 
 # Try yaml, fall back to simple parser
 yaml = None
@@ -47,15 +48,25 @@ def get_search_paths():
     paths = []
 
     # 1. Current project
-    project_path = Path.cwd() / ".aipass" / "skills"
-    paths.append((project_path, "project"))
+    # Skill units run in host processes this branch did not choose — the
+    # telegram relay, cron-fired lanes, hook subprocesses — and those can hold
+    # a working directory that has been deleted or whose share has dropped.
+    # "the current project" then has no answer, so this path is SKIPPED rather
+    # than guessed at: global and builtin skills still resolve, and discovery
+    # keeps working instead of raising FileNotFoundError at every caller.
+    try:
+        project_path = Path.cwd() / ".aipass" / "skills"
+    except OSError as exc:
+        logger.warning("No readable working directory (%s) - skipping the project search path", exc)
+    else:
+        paths.append((project_path, "project"))
 
     # 2. Global user
     global_path = Path.home() / ".aipass" / "skills"
     paths.append((global_path, "global"))
 
     # 3. Built-in lib
-    builtin_path = Path(__file__).resolve().parent.parent.parent / "lib"
+    builtin_path = module_file(__file__).parent.parent.parent / "lib"
     paths.append((builtin_path, "builtin"))
 
     return paths

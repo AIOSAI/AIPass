@@ -58,6 +58,32 @@ def widened_glob(monkeypatch):
     return folded_glob
 
 
+def host_folds_glob(directory: Path) -> bool:
+    """Does THIS filesystem fold case inside a glob PATTERN?
+
+    Travels the DEFECT'S OWN DIRECTION (@ai_mail's lesson): write a lowercase
+    name, glob the UPPERCASE pattern — which is exactly what the nine deleted
+    sites did. Probing the other way round answers a different question and can
+    answer it differently.
+
+    DISTINCT STEMS, always (@memory's coexistence fact): two names differing
+    only by case CANNOT coexist on a folding filesystem — the second write
+    overwrites the FIRST'S CONTENT while the directory keeps the first's
+    spelling, so a case-twin probe would be measuring a world it created.
+
+    Args:
+        directory: A writable directory; the probe gets its own subdirectory.
+
+    Returns:
+        True if the host's glob matched a name the pattern only matches when
+        case is folded.
+    """
+    probe_dir = directory / "casefold_probe"
+    probe_dir.mkdir(exist_ok=True)
+    (probe_dir / "probe_registry.json").write_text("{}", encoding="utf-8")
+    return [p.name for p in probe_dir.glob("*_REGISTRY.json")] != []
+
+
 def _project(tmp_path):
     """A real anchor at the project root and a lowercase counter one level down.
 
@@ -84,9 +110,33 @@ class TestTheEmulationGenuinelyWidens:
         found = [p.name for p in lane.glob("*_REGISTRY.json")]
         assert COUNTER_DECOY in found, "emulation is not widening — every red below would be vacuous"
 
-    def test_pathlib_glob_finds_nothing_there_without_emulation(self, tmp_path):
+    def test_the_raw_glob_matches_the_host_it_is_running_on(self, tmp_path):
+        """The negative control, PROBED rather than assumed.
+
+        Its first spelling asserted the raw glob finds nothing — true on this
+        Linux runner and FALSE on real Windows, where NTFS folds and the decoy
+        comes straight back. A control that fails on the exact host the defect
+        lives on is worse than none: it turns the CI leg that found the bug red
+        for the instrument's own reason. Both outcomes are pinned; nothing is
+        skipped (@memory's ruling: never skipif what a probe can measure).
+        """
         _root, lane = _project(tmp_path)
-        assert [p.name for p in lane.glob("*_REGISTRY.json")] == []
+        found = [p.name for p in lane.glob("*_REGISTRY.json")]
+        if host_folds_glob(tmp_path):
+            assert COUNTER_DECOY in found, "host folds case but the raw glob missed the decoy"
+        else:
+            assert found == [], "host is case-sensitive but the raw glob matched anyway"
+
+    def test_the_probe_answers_from_the_filesystem_not_from_sys_platform(self, tmp_path, widened_glob):
+        """Probe integrity (@aipass's trick), and it is killable HERE.
+
+        Under the emulation this Linux runner behaves like a folding host, so a
+        probe that read ``sys.platform`` would still answer False and this line
+        goes red. The opposite mutant — a probe hardwired to True — dies in the
+        test above, which on this case-sensitive host demands an empty listing.
+        Both directions have a killer on whichever host is running.
+        """
+        assert host_folds_glob(tmp_path) is True
 
 
 class TestDiscoveryPointsAtTheRealAnchorOnACaseFoldingFilesystem:
