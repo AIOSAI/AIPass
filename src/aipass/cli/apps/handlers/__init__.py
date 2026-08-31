@@ -43,12 +43,21 @@ def _find_real_caller():
     for frame_info in stack:
         filename = frame_info.filename
 
-        # Skip this file
-        if this_file in str(Path(filename).resolve()):
+        # Skip Python internals BEFORE touching the filesystem — resolve() on a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd was
+        # deleted dies here otherwise.
+        if filename.startswith("<") or "importlib" in filename:
             continue
 
-        # Skip Python internals
-        if filename.startswith("<") or "importlib" in filename:
+        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # the raw spelling rather than crashing the import.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
+
+        # Skip this file
+        if this_file in resolved:
             continue
 
         # Found a real file - try to get the import line
@@ -56,7 +65,7 @@ def _find_real_caller():
         if frame_info.code_context:
             import_line = frame_info.code_context[0].strip()
 
-        return str(Path(filename).resolve()), import_line
+        return resolved, import_line
 
     return None, None
 

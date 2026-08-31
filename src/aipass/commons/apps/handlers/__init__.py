@@ -21,14 +21,22 @@ def _find_real_caller():
 
     for frame_info in stack:
         filename = frame_info.filename
-        if this_file in str(Path(filename).resolve()):
-            continue
+        # Internals first — resolve() on a pseudo-filename like <string> needs a
+        # cwd, and a process whose cwd was deleted dies here otherwise.
         if filename.startswith("<") or "importlib" in filename:
+            continue
+        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # the raw spelling rather than crashing every consumer's import.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
+        if this_file in resolved:
             continue
         import_line = None
         if frame_info.code_context:
             import_line = frame_info.code_context[0].strip()
-        return str(Path(filename).resolve()), import_line
+        return resolved, import_line
     return None, None
 
 

@@ -268,3 +268,43 @@ class TestRoutingFromADeletedDirectory:
 
         assert identity.name == "commons"
         assert identity.source == "assigned"
+
+    def test_the_handlers_package_imports_at_all_without_a_cwd(self, tmp_path):
+        """Every guard above is unreachable if the IMPORT raises first.
+
+        ``handlers/__init__.py`` runs a stack walk at import to block
+        cross-branch imports, and it called ``Path(filename).resolve()`` on each
+        frame BEFORE the line that skips Python's internals. ``resolve()`` on a
+        relative name — ``<frozen importlib._bootstrap>`` is in every import
+        stack — goes through ``abspath``, which reads the current directory, so
+        importing drone's handlers from a deleted directory raised ENOENT
+        before any of this branch's cwd guards existed to run.
+
+        A subprocess with a deleted cwd, not a mock: ``Path.resolve()`` reaches
+        ``os.getcwd`` inside C, so patching ``Path.cwd`` reproduces nothing.
+        """
+        import subprocess
+        import sys
+        import textwrap
+
+        doomed = tmp_path / "scratch"
+        doomed.mkdir()
+        probe = textwrap.dedent(
+            """
+            import os, shutil, sys
+            here = sys.argv[1]
+            os.chdir(here)
+            shutil.rmtree(here)
+            from aipass.drone.apps.handlers import registry_handler
+            print("imported", registry_handler.__name__.rsplit(".", 1)[-1])
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(doomed)],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "imported registry_handler" in result.stdout

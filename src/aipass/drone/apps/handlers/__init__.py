@@ -23,12 +23,25 @@ def _find_real_caller():
     for frame_info in stack:
         filename = frame_info.filename
 
-        # Skip this file
-        if this_file in str(Path(filename).resolve()):
+        # Skip Python internals FIRST. These names are not paths — every import
+        # stack carries <frozen importlib._bootstrap> — and resolving one goes
+        # through abspath, which READS THE CURRENT DIRECTORY. A process whose
+        # cwd was deleted (an ordinary state since `drone rm` learned to delete
+        # the directory you stand in) then raised ENOENT here, at import of the
+        # handlers package, before any command could run.
+        if filename.startswith("<") or "importlib" in filename:
             continue
 
-        # Skip Python internals
-        if filename.startswith("<") or "importlib" in filename:
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            # A relative frame filename with no cwd to resolve it against. The
+            # guard cannot attribute this frame, so it moves on rather than
+            # taking the whole process down with it.
+            continue
+
+        # Skip this file
+        if this_file in resolved:
             continue
 
         # Found a real file - try to get the import line
@@ -36,7 +49,7 @@ def _find_real_caller():
         if frame_info.code_context:
             import_line = frame_info.code_context[0].strip()
 
-        return str(Path(filename).resolve()), import_line
+        return resolved, import_line
 
     return None, None
 

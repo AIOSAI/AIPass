@@ -51,6 +51,7 @@ strength of another still standing.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -367,9 +368,26 @@ class TestTheLiveFleetStillCountsTwentyTwo:
         assert found == {"baud", "earmark", "finch", "aipass-site"}
 
     def test_the_live_fleet_is_eighteen_core_and_four_residents(self, live_residents):
+        """Counted BY TIER now, not by total — and the change is the point.
+
+        This asserted a flat 22 until the external tier landed, and it went red
+        on the first run afterwards because the fleet legitimately grew. Pinning
+        a total made the guard a tripwire for its own feature: the two numbers it
+        was written to protect (18 core, 4 residents) were never what it read.
+
+        So it counts what it means, and the external tier is asserted against
+        the DECLARATION rather than a number — this machine happens to declare
+        four roots today and that is Patrick's to change without breaking a test
+        in my branch.
+        """
         branches = rs.fleet_branches(live_residents)
-        residents = [item for item in branches if f"/{rs.RESIDENT_PROJECTS_DIR}/" in str(item["path"])]
-        assert (len(branches), len(residents)) == (22, 4), [item["name"] for item in branches]
+        tiers = Counter(item["residency"] for item in branches)
+        assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 4), [item["name"] for item in branches]
+        externals = [item for item in branches if item["residency"] == rs.RESIDENCY_EXTERNAL]
+        assert len(externals) == tiers[rs.RESIDENCY_EXTERNAL]
+        assert bool(externals) == bool(rs.declared_roots(live_residents)), (
+            "external citizens appeared without a declared root, or a declared root produced none"
+        )
 
     def test_every_live_resident_declares_itself_one(self, live_residents):
         """The declaration is the classifier now — so it had better be there.

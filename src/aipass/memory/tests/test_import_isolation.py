@@ -233,6 +233,69 @@ class TestNobodyEvictsThePackageOneWay:
                     offenders.append(f"{path.name}: {variable} is installed at {_PACKAGE} with no __path__")
         assert not offenders, "package stand-ins that are not packages:\n  " + "\n  ".join(offenders)
 
+    # Measured 2026-08-30. Every stand-in installed at a name this suite ALSO
+    # installs children under — i.e. impersonating a package — while carrying no
+    # __path__. Sixteen of them. They are listed rather than fixed because the
+    # mechanical fix (assign __path__) broke 41 tests in one pass: several of
+    # these shadow their whole subtree ON PURPOSE, and telling them apart is a
+    # per-file reading, not a sed. Named so a SEVENTEENTH cannot arrive quietly.
+    KNOWN_BARE_PACKAGE_STAND_INS = {
+        "conftest.py::aipass.prax.apps.modules",
+        "test_orchestrator_exec.py::aipass.memory.apps.handlers.monitor",
+        "test_orchestrator_exec.py::aipass.memory.apps.handlers.tracking",
+        "test_rollover.py::aipass.memory.apps.handlers",
+        "test_rollover.py::aipass.memory.apps.handlers.cli",
+        "test_rollover.py::aipass.memory.apps.handlers.intake",
+        "test_rollover.py::aipass.memory.apps.handlers.monitor",
+        "test_rollover.py::aipass.memory.apps.handlers.rollover",
+        "test_rollover_pipeline.py::aipass.memory.apps.handlers",
+        "test_rollover_pipeline.py::aipass.memory.apps.handlers.monitor",
+        "test_rollover_pipeline.py::aipass.memory.apps.handlers.rollover",
+        "test_rollover_pipeline.py::aipass.memory.apps.handlers.tracking",
+        "test_symbolic.py::aipass.memory.apps.handlers.symbolic",
+        "test_symbolic_cli.py::aipass.memory.apps.handlers.symbolic",
+        "test_symbolic_extras.py::aipass.memory.apps.handlers.vector",
+        "test_symbolic_module.py::aipass.memory.apps.handlers.symbolic",
+    }
+
+    def _bare_package_stand_ins(self):
+        installs = re.compile(r"setitem\(sys\.modules,\s*\"([\w.]+)\"\s*,\s*([\w.]+)\s*\)")
+        found_all = set()
+        for path in sorted(_TESTS.glob("test_*.py")) + [_TESTS / "conftest.py"]:
+            source = path.read_text(encoding="utf-8")
+            found = installs.findall(source)
+            names = {name for name, _ in found}
+            for name, variable in found:
+                impersonates_package = any(o != name and o.startswith(name + ".") for o in names)
+                if impersonates_package and f"{variable}.__path__" not in source:
+                    found_all.add(f"{path.name}::{name}")
+        return found_all
+
+    def test_no_NEW_package_stand_in_arrives_without_a_path(self):
+        """The rule above was written for one package. The defect had seventeen.
+
+        `aipass.prax` was a bare MagicMock in conftest, six lines above the json
+        stand-in that carries `__path__` and a paragraph explaining why it must.
+        One package learned the lesson; the other sat beside it, because the pin
+        named a CONSTANT instead of a SHAPE. Widening the shape found fourteen
+        more in six other files.
+
+        `aipass.prax` is fixed. The rest are inventoried above, not swept: they
+        are a real backlog and this test says so out loud rather than passing as
+        if the suite were clean. What it defends is the edge — a new one cannot
+        be added without either fixing it or consciously adding a line here.
+
+        A name counts as a PACKAGE when the same file also installs something
+        beneath it, so a package added tomorrow is covered without editing this.
+        """
+        new = self._bare_package_stand_ins() - self.KNOWN_BARE_PACKAGE_STAND_INS
+        assert not new, "new package stand-in with no __path__:\n  " + "\n  ".join(sorted(new))
+
+    def test_the_inventory_does_not_outlive_what_it_inventories(self):
+        """A stale allow-list is how a fixed thing stays 'known broken' forever."""
+        stale = self.KNOWN_BARE_PACKAGE_STAND_INS - self._bare_package_stand_ins()
+        assert not stale, "fixed — remove from KNOWN_BARE_PACKAGE_STAND_INS:\n  " + "\n  ".join(sorted(stale))
+
     @pytest.mark.parametrize("name", ["test_json_handler", "test_tab_renderer", "test_config_loader"])
     def test_the_three_converted_fixtures_still_use_delitem(self, name):
         """Named one by one: a fixture reverting to a bare pop is a silent relapse."""

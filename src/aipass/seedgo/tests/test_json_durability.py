@@ -197,8 +197,12 @@ class TestContractPreserved:
         assert reloaded is not None
         assert reloaded["last_updated"] != "1999-01-01"
 
-    def test_ensure_json_exists_still_returns_true(self, json_dir: Path):
-        assert json_handler.ensure_json_exists("m", "config") is True
+    def test_ensure_json_exists_still_creates_the_file(self, json_dir: Path):
+        """Was pinning an unconditional `is True`. The durability contract this
+        class exists to protect is that the FILE lands, not that a constant is
+        returned; failure is reported by exception, not by a value."""
+        json_handler.ensure_json_exists("m", "config")
+        assert (json_dir / "m_config.json").exists()
 
     def test_round_trip_still_works(self, json_dir: Path):
         json_handler.save_json("m", "log", [{"entry": "one"}])

@@ -116,6 +116,128 @@ class TestOneFleetOneDefinition:
         registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
 
+    def test_the_push_never_reaches_into_another_repository(self, live_fleet):
+        """The template push WRITES. So its scope stops at this repo's edge.
+
+        `fleet_branches` grew an external tier in 3.0.0 and this lane consumes
+        it, which briefly put six citizens in four sibling repositories into the
+        scope of a lane whose whole job is writing files into branches. Nothing
+        in the external tier build writes to another repo, and the push must not
+        become the exception.
+
+        The reader is not wrong and the consumer is not wrong about which
+        function to call — the scope is the thing that needed narrowing, at the
+        one lane that acts on it rather than reads it.
+        """
+        scoped = trinity_push.resolve_scope()["branches"]
+        assert scoped, "empty scope proves nothing about what it excludes"
+        outsiders = [item for item in scoped if item.get("residency") == registry_scope.RESIDENCY_EXTERNAL]
+        assert not outsiders, f"the push would write into another repository: {[i['name'] for i in outsiders]}"
+        assert all(str(item["path"]).startswith(str(registry_scope.REPO_ROOT)) for item in scoped)
+
+    def test_every_fleet_record_carries_exactly_the_five_agreed_keys(self, live_fleet):
+        """The whole record shape, across ALL THREE TIERS, not just externals.
+
+        The `scheduler` field was withdrawn from the record on 2026-08-30 at the
+        request of the only branch that ever wanted it, and the replacement pin
+        was written against `external_branches` alone. So core and resident rows
+        were unpinned: a mutant re-adding `item["scheduler"]` to the core loop
+        passed the entire suite. A record nobody consumes should have to come
+        past a test on the way in — which only works if the test covers the
+        tiers a new field would actually be added to.
+        """
+        rows = registry_scope.fleet_branches(live_fleet)
+        assert rows, "an empty fleet proves nothing about record shape"
+        tiers = {row["residency"] for row in rows}
+        assert tiers == {
+            registry_scope.RESIDENCY_CORE,
+            registry_scope.RESIDENCY_RESIDENT,
+            registry_scope.RESIDENCY_EXTERNAL,
+        }, f"all three tiers must be exercised, got {tiers}"
+        for row in rows:
+            assert set(row) == {"name", "path", "registry", "email", "residency"}, row
+
+    def test_the_normalize_lane_never_reaches_into_another_repository(self, monkeypatch):
+        """The third writing lane, found by @trigger's escalation not by design.
+
+        `_normalize_rolled` resolved `fleet_branches()` — the whole fleet,
+        externals included — and then matched rolled branches BY NAME. It
+        writes: `normalize_branch` re-renders the machine frame in place. So the
+        day any external project names a branch `api` or `flow`, rolling our own
+        @api would silently rewrite a file in a sibling repository.
+
+        There is no collision today; that is luck, not a guard. Six external
+        names against twenty-two of ours, and nothing stops the twenty-third.
+        """
+        from aipass.memory.apps.handlers.rollover import normalizer
+        from aipass.memory.apps.modules import rollover as rollover_module
+
+        seen = []
+        monkeypatch.setattr(
+            normalizer,
+            "normalize_branch",
+            lambda name, path, config: seen.append((name, Path(path))) or {"success": True},
+        )
+        # Every citizen in the fleet claims to have rolled, external ones included.
+        every_name = [item["name"] for item in registry_scope.fleet_branches()]
+        rollover_module._normalize_rolled(every_name)
+
+        assert seen, "nothing was normalized, so the scope was never exercised"
+        home = registry_scope.REPO_ROOT.resolve()
+        outside = [p for _, p in seen if home not in p.resolve().parents and p.resolve() != home]
+        assert not outside, f"normalize would write outside this repo: {outside}"
+
+    def test_a_branch_whose_frame_could_not_be_written_is_named(self, monkeypatch, caplog):
+        """The normalizer reports failure by return value; the caller dropped it.
+
+        `if normalize_branch(...)["success"]:` — a False just failed to
+        increment a counter. The `except` below it catches exceptions the
+        normalizer explicitly promises never to raise, so it was decorative.
+        Meanwhile the out-of-scope case IS named. One failure mode announced,
+        the other invisible, in the same function.
+        """
+        from aipass.memory.apps.handlers.rollover import normalizer
+        from aipass.memory.apps.modules import rollover as rollover_module
+
+        monkeypatch.setattr(
+            normalizer,
+            "normalize_branch",
+            lambda name, path, config: {"success": False, "error": f"{name}: local.json write failed"},
+        )
+        # Captured at the logger, not via caplog: prax's logger does not
+        # necessarily propagate to the root under every suite ordering, and a
+        # pin that only holds when it runs first is not a pin.
+        said = []
+        monkeypatch.setattr(rollover_module.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
+
+        rollover_module._normalize_rolled(["memory"])
+
+        joined = " ".join(said)
+        assert "memory" in joined, joined
+        assert "write failed" in joined, joined
+
+    def test_the_rollover_lane_never_reaches_into_another_repository(self, live_fleet):
+        """Rollover WRITES too — it trims memory files. Same edge as the push.
+
+        The detector resolves through `accepted_resident_paths`, not
+        `fleet_branches`, so it never inherited the external tier. That is the
+        correct scope and this pins it, because repointing the detector at the
+        richer function is an obvious-looking one-line "simplification" and it
+        would put four sibling repositories inside the write scope of a lane
+        that edits other citizens' memories.
+
+        Measured while writing it: three external citizens (@verify, @vera,
+        @research) carry 49 over-cap entries between them. Rollover reaching
+        them would be a lane writing into repos nobody declared it for.
+        """
+        from aipass.memory.apps.handlers.monitor import detector
+
+        rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
+        assert rolled, "an empty scope proves nothing about what it excludes"
+        home = registry_scope.REPO_ROOT.resolve()
+        outside = [p for p in rolled if home not in p.parents and p != home]
+        assert not outside, f"rollover would write outside this repo: {outside}"
+
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
         """Repointed 2026-08-28: the shared constant is gone, the agreement is not.
 
@@ -123,10 +245,19 @@ class TestOneFleetOneDefinition:
         claim worth holding is that the two LANES answer the same question the
         same way, which survives the constant and would have caught the split
         this module was built to end.
+
+        Narrowed 2026-08-30: the push answers the same question, over the tiers
+        that live in this repository. The external tier is subtracted HERE, in
+        the expectation, so the difference between the two lanes stays one named
+        line of test rather than a drift nobody wrote down.
         """
-        assert {item["name"] for item in trinity_push.resolve_scope()["branches"]} == {
-            item["name"] for item in registry_scope.fleet_branches(live_fleet)
+        in_repo = {
+            item["name"]
+            for item in registry_scope.fleet_branches(live_fleet)
+            if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
         }
+        assert in_repo, "an empty expectation would pass against an empty scope"
+        assert {item["name"] for item in trinity_push.resolve_scope()["branches"]} == in_repo
 
     def test_a_missing_resident_registry_is_skipped_not_raised(self, tmp_path):
         """A checkout with no projects/ must not take out every fleet lane."""

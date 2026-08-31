@@ -1587,3 +1587,106 @@ class TestCheckThinOrchestration:
         result = check_thin_orchestration(content, "/module.py")
         assert result is not None
         assert result["passed"] is True
+
+
+class TestAipassRootIsMatchedAsATokenNotASubstring:
+    """`AIPASS_ROOTS.json` is a FILENAME, not the AIPASS_ROOT env var.
+
+    Reported by @memory 2026-08-30: their audit dropped to 99% on
+    `DECLARED_ROOTS = "AIPASS_ROOTS.json"` — a machine-managed file that sits
+    beside AIPASS_REGISTRY.json because it is the same species. Nothing in that
+    tree reads an env var of any name.
+
+    They declined to rename the file to satisfy the grep, and they were right
+    to: renaming a thing so a checker stops shouting is drift-by-linting, and
+    the name would then have been chosen for a tool rather than a reader. The
+    check means a TOKEN and was written as a SUBSTRING, so every present and
+    future `AIPASS_ROOT*` collides.
+    """
+
+    def _check(self, line):
+        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import check_no_aipass_root
+
+        return check_no_aipass_root([line + "\n"], "mod.py", [])
+
+    def test_the_env_var_is_still_caught(self):
+        assert not self._check('root = os.environ["AIPASS_ROOT"]')["passed"]
+
+    def test_the_env_var_via_getenv_is_still_caught(self):
+        assert not self._check('root = os.getenv("AIPASS_ROOT")')["passed"]
+
+    def test_a_bare_reference_is_still_caught(self):
+        assert not self._check("path = AIPASS_ROOT / 'x'")["passed"]
+
+    def test_the_declared_roots_filename_is_NOT_a_violation(self):
+        """@memory's exact line."""
+        assert self._check('DECLARED_ROOTS = "AIPASS_ROOTS.json"')["passed"]
+
+    def test_a_future_AIPASS_ROOT_MAP_is_not_a_violation_either(self):
+        """The report named this one specifically as the next collision."""
+        assert self._check('NAME = "AIPASS_ROOT_MAP.json"')["passed"]
+
+    def test_AIPASS_ROOTS_REGISTRY_is_not_a_violation(self):
+        assert self._check('NAME = "AIPASS_ROOTS_REGISTRY.json"')["passed"]
+
+    def test_a_LONGER_name_ENDING_in_the_token_is_not_a_violation(self):
+        """Prefix-only matching would still convict this one."""
+        assert self._check('NAME = "MY_AIPASS_ROOT"')["passed"]
+
+    def test_the_env_var_inside_an_fstring_is_still_caught(self):
+        assert not self._check('msg = f"{AIPASS_ROOT}/x"')["passed"]
+
+
+class TestImportsCheckLineNumbersSurviveDocstringFiltering:
+    """A reported line number must name the line in the FILE.
+
+    @memory reported the violation at line 40 when the only occurrence is at
+    line 106 — off by 66, which is more than a docstring's worth of slack and
+    sends a reader to the wrong place.
+
+    THE CAUSE, and it is bigger than the check they reported: `filter_docstrings`
+    `continue`s past docstring lines, COMPACTING the list. Every check that runs
+    on `import_lines` then enumerates a shorter list and reports an index into
+    it — so `check_no_sys_path`, `check_prax_logger`, `check_import_order` and
+    `check_no_bare_imports` all carry the same defect. Blanking the lines
+    instead of dropping them keeps every index aligned with the file.
+    """
+
+    def test_filter_docstrings_preserves_the_line_count(self):
+        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import filter_docstrings
+
+        source = ['"""doc\n', "more doc\n", '"""\n', "import os\n"]
+        assert len(filter_docstrings(source)) == len(source)
+
+    def test_the_docstring_body_is_still_neutralised(self):
+        """Preserving the line must not un-filter its content."""
+        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import filter_docstrings
+
+        out = filter_docstrings(['"""\n', "AIPASS_ROOT lives here\n", '"""\n', "import os\n"])
+        assert "AIPASS_ROOT" not in "".join(out)
+
+    def test_a_violation_after_a_docstring_reports_its_REAL_line(self):
+        from aipass.seedgo.apps.handlers.aipass_standards.imports_check import (
+            check_no_aipass_root,
+            filter_docstrings,
+        )
+
+        source = ['"""\n', "a\n", "b\n", "c\n", '"""\n', 'x = os.environ["AIPASS_ROOT"]\n']
+        result = check_no_aipass_root(filter_docstrings(source), "mod.py", [])
+        assert not result["passed"]
+        assert "line 6" in result["message"], result["message"]
+
+    def test_the_real_reported_file_now_passes_end_to_end(self):
+        """@memory's actual file, through the real entry point."""
+        from pathlib import Path
+
+        from aipass.seedgo.apps.handlers.aipass_standards import imports_check
+
+        target = Path(__file__).resolve().parents[2] / "memory" / "apps" / "handlers" / "monitor" / "registry_scope.py"
+        if not target.exists():
+            import pytest
+
+            pytest.skip("registry_scope.py not on disk")
+        rows = imports_check.check_module(str(target))["checks"]
+        root_rows = [r for r in rows if r["name"] == "No AIPASS_ROOT"]
+        assert root_rows and root_rows[0]["passed"], root_rows

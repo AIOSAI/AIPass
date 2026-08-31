@@ -359,8 +359,19 @@ class TestLogLocation:
         assert deletion_log.deletion_log_path() == elsewhere
 
     def test_override_cannot_silence_the_prax_line(self, project, monkeypatch):
-        """Relocating the store must not become a way to erase the event."""
-        monkeypatch.setenv("AIPASS_DELETION_LOG", "/proc/nonexistent/d.jsonl")
+        """Relocating the store must not become a way to erase the event.
+
+        The unwritable target is a FILE standing where the parent directory has
+        to be, so ``_append_record``'s ``mkdir(parents=True)`` raises inside the
+        tmp project. It used to be ``/proc/nonexistent``, which raised the same
+        OSError family but reached OUTSIDE the tree under test: the two os.mkdir
+        attempts were this suite's last outside-copy records in @seedgo's
+        hygiene gate. An unwritable path does not have to be someone else's
+        filesystem to be unwritable.
+        """
+        blocked = project / "not_a_directory"
+        blocked.write_text("a file where a directory would have to be")
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
         target = project / "x.txt"
         target.write_text("x")
 

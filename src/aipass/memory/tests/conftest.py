@@ -32,7 +32,12 @@ def _mock_infrastructure(monkeypatch):
 
     # Mock prax logger
     mock_logger = MagicMock()
-    prax_mod = MagicMock()
+    # A stand-in at a PACKAGE name must answer __path__, exactly as the json
+    # stand-in below does and for the same reason. This one sat six lines above
+    # that paragraph, unfixed, because the pin naming the rule named a constant
+    # instead of a shape — see test_import_isolation.py.
+    prax_mod = ModuleType("aipass.prax")
+    prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
     prax_mod.logger = mock_logger
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()

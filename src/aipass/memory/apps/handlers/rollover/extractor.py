@@ -125,8 +125,30 @@ def _read_memory_file(file_path: Path) -> Dict[str, Any] | None:
 
 
 def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
-    """Write memory JSON file using json_handler"""
-    write_memory_file_simple(file_path, data)
+    """Write memory JSON file, RAISING when the write is refused.
+
+    `write_memory_file_simple` reports failure by returning False — it does not
+    raise. This function used to discard that boolean, which made every caller's
+    try/except decorative and turned a refusal into a silent no-op.
+
+    That is the worst possible failure mode for an archiver, and it was live:
+    the trinity cap validator refuses a whole document when any entry is over
+    its limit, so ONE 343-character session summary in @seedgo's file refused
+    every rollover write to it. The extraction still reported the 12
+    key_learnings it had removed in memory, the orchestrator saw success with
+    old_lines == new_lines, vectorized them, stored them — and the file kept all
+    27. The next run extracted the same 12 and stored them again. The archive
+    was accepting, permanently and in duplicate, what the source never gave up.
+
+    Fail to errors, never fall back silently: a False here becomes an OSError so
+    the caller's existing restore-from-backup path can do its job.
+    """
+    if not write_memory_file_simple(file_path, data):
+        raise OSError(
+            f"write refused for {file_path} — the memory-file writer returned False "
+            f"(entry caps are validated whole-file, so one over-limit entry anywhere "
+            f"refuses the entire document)"
+        )
 
 
 def _count_file_lines(file_path: Path) -> int:
@@ -171,7 +193,9 @@ def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
 # =============================================================================
 
 
-def _is_misplaced_entry(entry: Any, head_number: int | None, date_guard: bool = True) -> bool:
+def _is_misplaced_entry(
+    entry: Any, head_number: int | None, date_guard: bool = True, head_date: str | None = None
+) -> bool:
     """
     An entry in the tail (about to be archived as "oldest") that is dated
     today or numbered above the array's head is not oldest history — it's a
@@ -182,18 +206,47 @@ def _is_misplaced_entry(entry: Any, head_number: int | None, date_guard: bool = 
     an entry is fresh (see the auto-compact lane in _extract_items_v2). Ordering
     still decides, and when ordering CANNOT decide — no usable number on the
     entry or the head — the date rule stays on, whatever the caller asked for.
+
+    "DATED TODAY" IS ONLY EVIDENCE IF THE HEAD IS NOT (2026-08-30). The date
+    rule catches a fresh write that landed at the wrong end, and it works by
+    contrast: the tail is dated today while the entries above it are not. In an
+    array whose NEWEST entry is also dated today, "dated today" separates
+    nothing — every entry in it could be, and on 2026-08-30 every entry in
+    @memory's key_learnings was, because they were all written on that one very
+    long day. All 12 archivable candidates were refused as fresh writes, the
+    file sat at 27/15, and the detector re-fired on it every run. Three branches
+    were in that state at once.
+
+    So the rule now needs both halves to be uninformative before it steps
+    aside: the candidate must be numbered strictly BELOW `head_date`'s entry
+    (ordering says it is at the correct end) AND the head must itself be dated
+    today (the date says nothing about which end anything is at). Either signal
+    alone still refuses.
+
+    Deliberately unchanged: numbered ABOVE the head is refused, because that is
+    the real convention-loss shape — a prepend became an append, so numbers
+    ascend into the tail. A candidate with no usable number is refused on its
+    date, because ordering genuinely cannot decide there. And an unknown
+    `head_date` is treated as "not today", the conservative reading.
     """
     if not isinstance(entry, dict):
         return False
 
     number = entry.get("number")
+    ordering_says_correct_end = False
     if isinstance(number, int) and isinstance(head_number, int):
         if number > head_number:
             return True
         if not date_guard:
             return False
+        ordering_says_correct_end = number < head_number
 
-    return entry.get("date") == datetime.now().strftime("%Y-%m-%d")
+    if entry.get("date") != datetime.now().strftime("%Y-%m-%d"):
+        return False
+
+    # Dated today. That is evidence of a misplaced fresh write only when it
+    # DISTINGUISHES this entry from the array's newest one.
+    return not (ordering_says_correct_end and head_date == datetime.now().strftime("%Y-%m-%d"))
 
 
 def _ensure_newest_first(entries: list, array_name: str, branch_key: str) -> tuple[list, bool]:
@@ -234,6 +287,7 @@ def _extract_tail_excess(
     array_name: str,
     branch_key: str,
     date_guard: bool = True,
+    head_date: str | None = None,
 ) -> list:
     """
     Select the oldest entries beyond `limit` for archival, holding back any
@@ -260,7 +314,7 @@ def _extract_tail_excess(
     archivable = []
     refused: list = []
     for entry in candidate_tail:
-        if _is_misplaced_entry(entry, head_number, date_guard=date_guard):
+        if _is_misplaced_entry(entry, head_number, date_guard=date_guard, head_date=head_date):
             refused.append(entry)
             # Per-entry detail at DEBUG: recoverable when someone is actually
             # debugging, without a wall of it on every routine run.
@@ -345,7 +399,13 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             data["sessions"] = sessions
             order_repaired = True
         session_limits = file_limits.get("sessions", {})
-        head_number = sessions[0].get("number") if isinstance(sessions[0], dict) else None
+        # Each LANE gets its own head, taken from its own entries. `sessions` is
+        # a mixed array and a snapshot usually outranks every regular entry after
+        # the newest-first re-sort, so sharing one head handed the regular lane a
+        # machine-written snapshot as its reference point — dated today several
+        # times a day, which is precisely the noise date_guard=False exists to
+        # keep out of the other lane. The head must come from the population the
+        # candidates come from.
 
         auto_compact_cap = session_limits.get("auto_compact_cap")
         if auto_compact_cap is not None:
@@ -354,13 +414,15 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             # one is nearly always dated today. Keeping the date rule here refused every
             # candidate and the detector re-fired on the same file forever (DPLAN-0290
             # item 3): the lane's order is what says which snapshot is oldest, not its date.
+            auto_head = auto_entries[0] if auto_entries and isinstance(auto_entries[0], dict) else {}
             archived_auto = _extract_tail_excess(
                 auto_entries,
                 auto_compact_cap,
-                head_number,
+                auto_head.get("number"),
                 "sessions(auto-compact)",
                 branch_key,
                 date_guard=False,
+                head_date=auto_head.get("date"),
             )
             if archived_auto:
                 archived_ids = {id(e) for e in archived_auto}
@@ -370,7 +432,15 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         max_sessions = session_limits.get("count")
         if max_sessions is not None:
             regular_entries = [e for e in sessions if not (isinstance(e, dict) and e.get("status") == "auto-compact")]
-            archived_regular = _extract_tail_excess(regular_entries, max_sessions, head_number, "sessions", branch_key)
+            regular_head = regular_entries[0] if regular_entries and isinstance(regular_entries[0], dict) else {}
+            archived_regular = _extract_tail_excess(
+                regular_entries,
+                max_sessions,
+                regular_head.get("number"),
+                "sessions",
+                branch_key,
+                head_date=regular_head.get("date"),
+            )
             if archived_regular:
                 archived_ids = {id(e) for e in archived_regular}
                 sessions = [e for e in sessions if id(e) not in archived_ids]
@@ -387,9 +457,14 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             order_repaired = True
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None and isinstance(key_learnings, list) and key_learnings:
-        kl_head_number = key_learnings[0].get("number") if isinstance(key_learnings[0], dict) else None
+        kl_head = key_learnings[0] if isinstance(key_learnings[0], dict) else {}
         archived_kl = _extract_tail_excess(
-            key_learnings, max_key_learnings, kl_head_number, "key_learnings", branch_key
+            key_learnings,
+            max_key_learnings,
+            kl_head.get("number"),
+            "key_learnings",
+            branch_key,
+            head_date=kl_head.get("date"),
         )
         if archived_kl:
             archived_ids = {id(e) for e in archived_kl}
@@ -405,8 +480,15 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             order_repaired = True
     max_observations = file_limits.get("observations", {}).get("count")
     if max_observations is not None and isinstance(observations, list) and observations:
-        obs_head_number = observations[0].get("number") if isinstance(observations[0], dict) else None
-        archived_obs = _extract_tail_excess(observations, max_observations, obs_head_number, "observations", branch_key)
+        obs_head = observations[0] if isinstance(observations[0], dict) else {}
+        archived_obs = _extract_tail_excess(
+            observations,
+            max_observations,
+            obs_head.get("number"),
+            "observations",
+            branch_key,
+            head_date=obs_head.get("date"),
+        )
         if archived_obs:
             archived_ids = {id(e) for e in archived_obs}
             data["observations"] = [e for e in observations if id(e) not in archived_ids]

@@ -65,10 +65,20 @@ def _prepare_rollover_mocks(monkeypatch):
     mock_memory_watcher.check_and_rollover = MagicMock()
 
     monitor_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     monitor_pkg.detector = mock_detector
     monitor_pkg.memory_watcher = mock_memory_watcher
 
     rollover_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     rollover_pkg.orchestrator = mock_orchestrator
 
     # help_flags and json_flag are pure argument inspection with no
@@ -91,6 +101,11 @@ def _prepare_rollover_mocks(monkeypatch):
     cli_pkg.json_flag = real_json_flag
 
     handlers_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     handlers_pkg.monitor = monitor_pkg
     handlers_pkg.rollover = rollover_pkg
     handlers_pkg.cli = cli_pkg

@@ -302,7 +302,18 @@ def resolve_scope(branch: str | None = None) -> dict:
     # copy did no residency classification at all, so the push would have kept
     # sweeping projects by the retired rules while every other lane read the
     # passport. Same list, same order, one place.
-    branches = registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
+    # ...and narrowed again 2026-08-30 (FPLAN-0460 phase 4). registry_scope
+    # 3.0.0 added the external tier, so `fleet_branches` now answers with
+    # citizens living in OTHER repositories. Every other consumer of that list
+    # reads; this lane WRITES template files into each branch it resolves. The
+    # external tier build never writes outside this repo and the push does not
+    # get to be the exception, so the scope stops at the repo edge here — at the
+    # one consumer that acts on the list, not in the reader that serves them all.
+    branches = [
+        item
+        for item in registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
+        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
+    ]
 
     if branch is None:
         return {"branches": branches, "error": None}

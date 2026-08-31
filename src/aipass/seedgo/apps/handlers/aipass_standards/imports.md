@@ -197,6 +197,44 @@ pytest branch. Measured on one `logger.info()` under `PYTEST_CURRENT_TEST`:
 **4 writes redirected, 24 writes into the real `prax_json/`.** `@prax` owns the fix
 (APLAN-0009) and it needs no cooperation from callers.
 
+**A module-level env-var seam has to win an import race — and it usually loses.**
+The same "captured at import" defect that freezes a logger binding also freezes a *path*.
+This shape is wrong:
+
+```python
+# ✗ resolved ONCE, at import time
+DIR = Path(os.environ.get("AIPASS_TEST_LOG_DIR") or _DEFAULT)
+```
+
+It measures **green in isolation** — set the variable before anything imports the
+module and it redirects correctly — and changes nothing in a real run, because a
+`conftest.py` that sets the variable still loses to anything that imported the module
+first. Reproduced here, same module, both orders:
+
+| when the env var is set | module-level constant | resolved at call time |
+|---|---|---|
+| before any import | `/tmp/redirected/x` | `/tmp/redirected/x` |
+| **after something imported it** | `/real/live/tree/x` ❌ | `/tmp/redirected/x` ✅ |
+
+Resolve at **call** time instead:
+
+```python
+# ✓ resolved per call — no import race to lose
+def _dir() -> Path:
+    return Path(os.environ.get("AIPASS_TEST_LOG_DIR") or _DEFAULT)
+```
+
+Found by `@prax` 2026-08-30 while shipping the `PRAX_JSON_DIR` redirect (json_handler
+1.2.0): their conftest set the variable before any import and the constant *still*
+resolved to the live tree, because something imported `json_handler` first. Moving
+resolution to call time took one `logger.info()` under pytest from **24 real writes to
+0**, and prax's own collection from **107 atomic renames to 0**.
+
+`@prax` also reports the test-side half, which is the same lesson twice: a mutation
+reverting the path builder to read the import-time constant **survived every test**
+until the **use site** was pinned rather than the pure resolver. Testing a predicate is
+not testing that anything calls it.
+
 **Output location:** Prax manages log files, branches don't need to worry about where logs go
 
 ---

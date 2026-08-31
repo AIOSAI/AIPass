@@ -73,6 +73,12 @@ drone @memory lint run                     # Audit .trinity entries for over-lim
 drone @memory lint @devpulse               # Lint a specific branch
 drone @memory lint                         # Bare = introspection banner, NOT a scan
 
+drone @memory roots list                    # The declared repository roots + whether each is reachable
+drone @memory roots init                    # Create AIPASS_ROOTS.json from the template — refuses to overwrite
+drone @memory roots add ../wren "label"     # Declare a root (relative to AIPass home when it is a sibling)
+drone @memory roots remove ../wren          # Retire a root — the fleet stops reaching it
+drone @memory roots heal                    # DELIBERATE repair of a corrupt anchor — never automatic
+
 drone @memory verify FPLAN-XXXX            # Check if plan is vectorized in ChromaDB
 drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+C to stop)
 ```
@@ -158,21 +164,43 @@ It is **scoped to the branches this run actually rolled**, like the tab refresh 
 that handler on purpose. A rolled branch the fleet scope cannot see is logged by name, never silently
 skipped.
 
-### One definition of the fleet (2026-08-27)
+### One definition of the fleet (2026-08-27 → 2026-08-30)
 
-`handlers/monitor/registry_scope.py` answers "which branches are ours" once: `CORE_REGISTRY` plus
-four named `RESIDENT_REGISTRIES` (`baud`, `earmark`, `finch`, `aipass-site`).
-`detector._read_registry()` reads the residents from that constant, so rollover, lint and health now
-reach the same **22** branches the trinity push always did. Measured live: `_read_registry()` returns
-22 branches, and `rollover report-lines` measures **44** files (22 × 2).
+`handlers/monitor/registry_scope.py` answers "which branches are ours" once, for three tiers:
 
-Before it, a resident arrived only if some caller's cwd had once persisted its registry into
-`known_registries.json` — `baud` was in there by accident of where somebody happened to stand;
-`earmark`, `finch` and `aipass_site` were not, so three citizens' memory files could overflow with no
-rollover ever running on them. The list is a **named constant, never a glob** over `projects/`, which
-also holds `marketstand(on _hold)` — a project whose registry says `active` inside a directory whose
-name says otherwise. Caller discovery (`detector._find_caller_registries`) is a separate mechanism and
-is unchanged.
+| tier | where it is found | what makes it a member |
+|---|---|---|
+| `core` | `AIPASS_REGISTRY.json` at the repo root | listed and `active` |
+| `resident` | `projects/*/*_REGISTRY.json` | its passport declares `citizenship.residency: "resident"` |
+| `external` | a registry at the top level of a **declared** root | a passport EXISTS — presence, not declaration |
+
+`modules/fleet.py` is the public door; cross-branch callers import from there, never from the handler.
+Measured live: **28** citizens — 18 core, 4 resident, 6 external across 4 declared roots.
+
+The residents used to be a named four-tuple, and before that a glob over `projects/`. Both were
+replaced by the passport rule: a project joins by saying so in its own `.trinity/passport.json`, which
+is why `marketstand(on _hold)` — `active` in a registry inside a directory whose name says otherwise —
+needs no special case. Before any of it, a resident arrived only if some caller's cwd had once
+persisted its registry into `known_registries.json`, so three citizens' memory files could overflow
+with no rollover ever running on them.
+
+**The walk law:** one shallow glob at a declared root's top level for `*_REGISTRY.json`, then that
+registry's own branches. Never a passport walk — `projects/` holds 8 passports for 4 residents,
+because `@baud` carries `.backup/` copies. A root that overlaps AIPass home is refused in either
+direction; a root holding several registries is a named refusal, not a `sorted()[0]` pick.
+
+### The external tier declares itself (2026-08-30)
+
+`AIPASS_ROOTS.json` sits beside `AIPASS_REGISTRY.json` and is the same species: blessed, the trust
+anchor of a tier. Paths are relative to AIPass home so `/home/<someone>` stays out of a public repo.
+`handlers/monitor/roots_file.py` is the write half behind `drone @memory roots` — it refuses to
+overwrite an existing anchor (unreadable is not absent), and `heal` is a verb you type, never
+something that happens to you: it preserves the original bytes to `AIPASS_ROOTS.json.corrupt`,
+reports the path-shaped strings it can see, and writes none of them back.
+
+**One consumer subtracts a tier on purpose.** `trinity_push.resolve_scope()` drops `external`, because
+every other consumer of `fleet_branches()` reads and the push WRITES. Nothing in the external tier
+build writes into another repository, and the push is not the exception.
 
 ### Safety valve and the two session lanes
 

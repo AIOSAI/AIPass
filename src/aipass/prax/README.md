@@ -456,6 +456,75 @@ so the escape-hatch pattern is settled too.
 Callers need do nothing and should change nothing. Reported shares — @drone 7650,
 @memory 1552, @daemon 1096, @backup 778 — are prax's to fix, not theirs.
 
+**Closed 2026-08-30 — `AIPASS_TEST_LOG_DIR` is the fleet contract.**
+`json_handler.PRAX_JSON_DIR` now honours it, in @trigger's form
+(`trigger/apps/handlers/json/json_handler.py`) rather than a sixth spelling
+invented here. Measured on a real suite:
+
+| | before | after |
+|---|---|---|
+| one `logger.info()` under pytest | 24 writes into real `prax_json/` | **0** |
+| prax's own suite, collection alone | 107 atomic renames + 535 mkdirs | **0** |
+
+**Resolution happens at call time, not import time**, and that is load-bearing.
+The env-var branch alone was not enough: prax's own conftest sets the variable at
+module scope and the constant *still* resolved to the live tree, because
+something imports this module before the conftest runs. That is the same defect
+as the unmockable logger one section up — a value captured at import cannot be
+redirected by anything that runs later. A seam that depends on winning an import
+race is not a seam.
+
+Precedence: an explicit `monkeypatch.setattr(mod, "PRAX_JSON_DIR", …)` wins (≈20
+tests in this suite rely on it), then `AIPASS_TEST_LOG_DIR`, then the real
+directory. An **empty** env value is absence, not a redirect — `Path("") / "prax"`
+is relative and would scatter state wherever the process happens to stand.
+
+**Corrected 2026-08-30 — do not detect the override against a captured value.**
+prax's first cut compared the attribute by *identity* against the import-time
+value. @daemon adopted that from prax's own contract mail and 9 of their pins went
+green alone and red in the full suite: a test calling `importlib.reload` while a
+monkeypatch is live has its teardown write the **pre-reload** Path back onto the
+**post-reload** module, so the attribute is no longer the object the module holds
+and every later call reads it as a deliberate override — the redirect dies
+silently for the rest of the session, in a branch that looks adopted. **All 18
+branches use `importlib.reload` somewhere**, so this is everyone's problem;
+prax was shielded only by a conftest that drops the module from `sys.modules`.
+
+@daemon's fix — compare by value — rescues their ordering but not the one that
+made call-time resolution necessary: import first, env set afterwards. There the
+written-back value is the **real** directory while the post-reload default is the
+**redirect**, so the two differ and a value comparison *also* reads "explicitly
+patched". Reproduced against prax's own module:
+
+```
+IDENTITY: False   EQUAL: False
+before = /tmp/prax_rl_b/prax/prax_json
+after  = /home/…/src/aipass/prax/prax_json   *** redirect silently died ***
+```
+
+The fix is to compare against **both fixed points** and hold nothing stale — an
+override counts only when it differs from the real directory *and* from the
+current redirect target:
+
+```python
+default = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
+real    = _resolve_prax_json_dir(None, _PRAX_ROOT)
+if PRAX_JSON_DIR != real and PRAX_JSON_DIR != default:
+    return PRAX_JSON_DIR
+return default
+```
+
+Cost, stated rather than hidden: a test that patches this to the real directory,
+or to exactly the redirect target, is indistinguishable from one that never
+patched — but both resolve to the same path anyway, so no answer changes. Both
+reload orderings verified to survive.
+
+Each branch adopts the same variable in its **own** `json_handler`; prax cannot
+redirect another branch's state directory. And the per-module logger patch stays
+**opt-in per module, never blanket autouse** — @daemon proved a blanket mock
+silenced their refused-and-named `caplog` pin, and a suite that cannot show its
+refusals are loud has traded evidence for a number.
+
 ### Log levels
 
 `debug()` is silent by default. Nothing it logs reaches a file until the level is
@@ -586,7 +655,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1371 tests across 36 files
+└── tests/                             # 1380 tests across 36 files
 ```
 
 ### Design Pattern
@@ -615,7 +684,7 @@ drone @prax monitor run
 
 ## Tests
 
-1371 tests across 36 files (1370 pass, 1 skipped), covering all major components:
+1380 tests across 36 files (1379 pass, 1 skipped), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|

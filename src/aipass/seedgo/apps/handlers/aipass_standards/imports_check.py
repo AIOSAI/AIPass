@@ -153,7 +153,19 @@ def _process_docstring_marker(stripped, in_docstring, docstring_marker):
 
 
 def filter_docstrings(lines: List[str]) -> List[str]:
-    """Filter out docstrings from lines to prevent false positives."""
+    """Blank out docstring lines, PRESERVING every line's position.
+
+    The blanking is not cosmetic. This function used to `continue` past
+    docstring lines, which COMPACTED the list — so every check that runs on the
+    result enumerated a shorter list and reported an index into it rather than a
+    line in the file. @memory was sent to line 40 for a violation at line 106
+    (2026-08-30), and the defect was never this one check's: check_no_sys_path,
+    check_prax_logger, check_import_order and check_no_bare_imports all read the
+    same list and all carried the same off-by-however-many-docstring-lines.
+
+    Every one of those checks already skips an empty line, so neutralising the
+    content while keeping the position costs nothing and fixes all five.
+    """
     filtered_lines = []
     in_docstring = False
     docstring_marker = None
@@ -164,9 +176,11 @@ def filter_docstrings(lines: List[str]) -> List[str]:
         if '"""' in stripped or "'''" in stripped:
             skip, in_docstring, docstring_marker = _process_docstring_marker(stripped, in_docstring, docstring_marker)
             if skip:
+                filtered_lines.append("\n")
                 continue
 
         if in_docstring:
+            filtered_lines.append("\n")
             continue
 
         filtered_lines.append(line)
@@ -183,6 +197,16 @@ def find_import_section_end(lines: List[str]) -> int:
     return len(lines)
 
 
+#: AIPASS_ROOT as a WHOLE TOKEN. A substring match convicted
+#: `DECLARED_ROOTS = "AIPASS_ROOTS.json"` — a machine-managed filename that sits
+#: beside AIPASS_REGISTRY.json and reads no environment variable of any name
+#: (@memory, 2026-08-30). Every present and future `AIPASS_ROOT*` collided the
+#: same way, so the fix is not a longer exception list. `_` is a word character,
+#: so this also declines to match `MY_AIPASS_ROOT` and `AIPASS_ROOT_MAP`: the
+#: check means the env var, and the env var is the only thing it may claim.
+_AIPASS_ROOT_TOKEN = re.compile(r"\bAIPASS_ROOT\b")
+
+
 def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Dict:
     """
     Check that file does NOT use AIPASS_ROOT.
@@ -196,11 +220,13 @@ def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: li
         if not stripped or stripped.startswith("#"):
             continue
         code_part = line.split("#")[0] if "#" in line else line
-        if "AIPASS_ROOT" in code_part:
+        if _AIPASS_ROOT_TOKEN.search(code_part):
             return {
                 "name": "No AIPASS_ROOT",
                 "passed": False,
-                "message": f"AIPASS_ROOT found on line {i} (pip packages must not use AIPASS_ROOT)",
+                "message": (
+                    f"AIPASS_ROOT found on line {i} (pip packages must not read the AIPASS_ROOT environment variable)"
+                ),
             }
 
     return {"name": "No AIPASS_ROOT", "passed": True, "message": "No AIPASS_ROOT usage (correct for pip packages)"}

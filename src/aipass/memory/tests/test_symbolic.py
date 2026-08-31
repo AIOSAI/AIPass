@@ -93,6 +93,11 @@ def _mock_symbolic_infrastructure(monkeypatch):
     mock_deduplicator = MagicMock()
 
     symbolic_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     symbolic_pkg.extractor = mock_extractor
     symbolic_pkg.storage = mock_storage
     symbolic_pkg.retriever = mock_retriever

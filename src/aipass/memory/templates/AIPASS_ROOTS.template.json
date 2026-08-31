@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "document_type": "declared_roots",
+    "document_name": "AIPASS_ROOTS",
+    "version": "1.0.0",
+    "description": "Repo roots participating in this AIPass installation. Machine-managed.",
+    "last_updated": "{{DATE}}",
+    "managed_by": "memory",
+    "_usage": "The anchor for the external tier: AIPass home DECLARES which repo roots on this machine take part. Never a filesystem walk - a root nobody wrote down is not a root, and Patrick blessing this file is the authority a walk could never attach. Write through the verbs (drone @memory roots init|add|remove|list|heal), never by hand: the verbs refuse at WRITE time exactly what the reader refuses at READ time, so this file cannot carry a declaration that will be silently dropped. Rows: path (relative to this file's directory, absolute accepted) - label (decoration, nothing resolves by it) - status (anything but 'active' is skipped and named)."
+  },
+  "roots": []
+}

@@ -40,7 +40,67 @@ from aipass.prax import logger
 
 _BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
 _BRANCH_NAME: str = _BRANCH_ROOT.name  # "drone"
-JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+
+# The real tree, captured once so an explicit patch can be told apart from it.
+_IMPORT_TIME_JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+
+# Kept as a module attribute because ~20 tests across this suite redirect state
+# with monkeypatch.setattr(json_handler, "JSON_DIR", ...). Reading it directly
+# is what put 4189 write records in this branch's hygiene artifact, so the path
+# builders go through _current_json_dir() instead.
+JSON_DIR: Path = _IMPORT_TIME_JSON_DIR
+
+# @prax's contract (2026-08-30), in @trigger's form. Adopted per branch in its
+# OWN json_handler: five mocking techniques already existed and every one of
+# them reaches nothing, so a sixth would be the problem rather than the fix.
+_TEST_DIR_ENV_VAR = "AIPASS_TEST_LOG_DIR"
+
+
+def _current_json_dir() -> Path:
+    """Where JSON state belongs RIGHT NOW — resolved per call, never at import.
+
+    Measured on this tree before this existed: under pytest the env var held a
+    temp directory and the module constant STILL pointed at the live
+    ``drone_json``. Something imports this module before the conftest that sets
+    the variable runs, and a value captured at import cannot be redirected by
+    anything afterwards. It is the same defect as the unmockable logger, and a
+    seam that has to win an import race is not a seam.
+
+    THE OVERRIDE TEST COMPARES AGAINST BOTH FIXED POINTS and holds nothing
+    stale, which is @prax's corrected contract after @daemon's 9 pins went green
+    alone and red in the full suite. A test that calls ``importlib.reload``
+    while a monkeypatch is live has its teardown write the PRE-reload Path back
+    onto the POST-reload module: same value, different object. An identity check
+    then reports "explicitly patched" for the rest of the session and the
+    redirect dies in a branch that looks adopted — measured here at 3757
+    resolutions per suite run before this was fixed.
+
+    Comparing by value against the real directory ALONE is not sufficient in
+    general either: where a branch's import-time constant can itself be the
+    redirect target, the written-back value and the post-reload default differ
+    and value comparison reads "patched" too. Drone survives both orderings
+    because ``_IMPORT_TIME_JSON_DIR`` is env-INDEPENDENT — it is always the real
+    directory, never the redirect — and that precondition is load-bearing, so it
+    is stated here rather than left to be rediscovered.
+
+    An override therefore counts only when it differs from the real directory
+    AND from the current redirect target. The cost, stated not hidden: patching
+    the dir to either of those two is indistinguishable from not patching at
+    all. Both resolve to the same path, so no answer changes.
+
+    An EMPTY env value is absence, not a redirect. ``Path("") / "x"`` is
+    relative, so honouring it would scatter state wherever the process happens
+    to be standing.
+    """
+    real = _IMPORT_TIME_JSON_DIR
+    test_dir = os.environ.get(_TEST_DIR_ENV_VAR)
+    default = Path(test_dir) / _BRANCH_NAME / f"{_BRANCH_NAME}_json" if test_dir else real
+
+    current = Path(JSON_DIR)
+    if current != real and current != default:
+        return current
+    return default
+
 
 _JSON_TYPES: tuple[str, ...] = ("config", "data", "log")
 
@@ -212,7 +272,7 @@ def get_json_path(module_name: str, json_type: str) -> Path:
     Returns:
         Absolute :class:`~pathlib.Path` to the JSON file.
     """
-    return JSON_DIR / f"{module_name}_{json_type}.json"
+    return _current_json_dir() / f"{module_name}_{json_type}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +292,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
     Returns:
         ``True`` after the file is confirmed present and valid.
     """
-    JSON_DIR.mkdir(parents=True, exist_ok=True)
+    _current_json_dir().mkdir(parents=True, exist_ok=True)
     json_path = get_json_path(module_name, json_type)
 
     if json_path.exists():
@@ -478,7 +538,7 @@ if __name__ == "__main__":
     )
     console.print()
     console.print(f"[dim]Branch root:[/dim]  {_BRANCH_ROOT}")
-    console.print(f"[dim]JSON dir:[/dim]     {JSON_DIR}")
+    console.print(f"[dim]JSON dir:[/dim]     {_current_json_dir()}")
     console.print()
 
     console.print("[yellow]TESTING:[/yellow] Creating drone JSONs...")

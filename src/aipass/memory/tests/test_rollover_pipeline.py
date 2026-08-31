@@ -25,10 +25,12 @@ All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 """
 
 import json
+import logging
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -47,12 +49,27 @@ def _import_orchestrator(monkeypatch):
     mock_line_counter = MagicMock()
 
     monitor_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     monitor_pkg.detector = mock_detector
 
     rollover_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     rollover_pkg.extractor = mock_extractor
 
     tracking_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     tracking_pkg.line_counter = mock_line_counter
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
@@ -160,6 +177,11 @@ def _import_rollover_module(monkeypatch):
     rollover_pkg.orchestrator = mock_orchestrator
 
     handlers_pkg = MagicMock()
+
+    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
+
+    # submodule import under it then dies with "is not a package".
+
     handlers_pkg.monitor = monitor_pkg
     handlers_pkg.rollover = rollover_pkg
 
@@ -602,7 +624,11 @@ class TestExtractWithMetadata:
         file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
         mocks["memory_files"].read_memory_file_data.return_value = data
-        mocks["memory_files"].write_memory_file_simple.return_value = None
+        # True, not None: the real writer returns a success boolean, and a
+        # stand-in more generous than the thing it stands in for is how a guard
+        # stops being observable. `None` read as "don't care" only while the
+        # return value was being discarded — which was the defect.
+        mocks["memory_files"].write_memory_file_simple.return_value = True
 
         result = ext.extract_with_metadata(file_path)
 
@@ -1028,16 +1054,217 @@ class TestAutoCompactSameDaySnapshots:
         above_head = {"number": 99, "date": "2020-01-01"}
         numberless = {"date": today}
 
-        # Date guard on (regular lanes) — unchanged behaviour
+        # Date guard on (regular lanes) — unchanged behaviour. An unknown
+        # head_date reads as "not today", the conservative default.
         assert ext._is_misplaced_entry(fresh_today, 10) is True
         assert ext._is_misplaced_entry(above_head, 10) is True
         assert ext._is_misplaced_entry(numberless, 10) is True
+
+        # ...and a head that is ITSELF dated today makes "dated today" stop
+        # separating anything, so ordering decides for entries below it.
+        assert ext._is_misplaced_entry(fresh_today, 10, head_date=today) is False
+        assert ext._is_misplaced_entry(above_head, 10, head_date=today) is True
+        assert ext._is_misplaced_entry(numberless, 10, head_date=today) is True
 
         # Date guard off (snapshot lane) — ordering decides, date does not
         assert ext._is_misplaced_entry(fresh_today, 10, date_guard=False) is False
         assert ext._is_misplaced_entry(above_head, 10, date_guard=False) is True
         # ...unless ordering cannot decide, then the date rule still protects
         assert ext._is_misplaced_entry(numberless, 10, date_guard=False) is True
+
+
+class TestARefusedWriteMustNotReadAsASuccessfulRollover:
+    """Found live 2026-08-30 against @seedgo's real memory file.
+
+    `write_memory_file` enforces the trinity entry caps and REFUSES the whole
+    file when any entry is over — correct behaviour. `_write_memory_file`
+    called it and threw the boolean away, so the refusal reached nobody:
+
+      1. rollover extracts 12 key_learnings (in memory)
+      2. the write-back is refused, because an UNRELATED array — sessions[0],
+         a 343-char summary against a 300 cap — puts the document over
+      3. the discarded False means no exception, so the caller's except cannot fire
+      4. the orchestrator reads success, old_lines == new_lines, and proceeds
+      5. it vectorizes and stores those 12 entries in ChromaDB
+      6. the file is untouched, so the next run extracts the SAME 12 and stores
+         them AGAIN
+
+    That is not a skip loop, it is a duplicate-vector loop: @seedgo's global
+    count climbed every run while their file never moved. A silent write
+    failure in an archiver is the one failure mode that must never be silent,
+    because the archive keeps accepting what the source never gave up.
+    """
+
+    def test_a_refused_write_raises_instead_of_returning_quietly(self, monkeypatch, tmp_path):
+        ext, _ = _import_extractor(monkeypatch)
+        target = tmp_path / "local.json"
+        target.write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: False)
+
+        with pytest.raises(OSError):
+            ext._write_memory_file(target, {"sessions": []})
+
+    def test_a_successful_write_still_returns_quietly(self, monkeypatch, tmp_path):
+        ext, _ = _import_extractor(monkeypatch)
+        target = tmp_path / "local.json"
+        target.write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: True)
+
+        assert ext._write_memory_file(target, {"sessions": []}) is None
+
+    def test_the_refusal_reaches_the_caller_as_a_failed_extraction(self, monkeypatch, tmp_path):
+        """The whole point: a refused write must NOT be reported as archived.
+
+        Without this the orchestrator vectorizes entries the file still holds.
+        """
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": n, "date": "2026-01-0%d" % (n % 9 + 1), "summary": f"s{n}", "status": "completed"}
+                for n in range(6, 0, -1)
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 2}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: False)
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is False
+        assert "extracted" not in result or not result.get("extracted")
+
+
+class TestTodayIsNotEvidenceAgainstANumberedEntry:
+    """The skip loop the valve's own alarm predicted, met in the wild 2026-08-30.
+
+    @memory wrote 27 key_learnings in one very long day across three sessions.
+    Every entry was correctly prepended, strictly newest-first, monotonically
+    numbered 135 down to 109 — and every entry was dated today, because it WAS
+    today. So all 12 archivable candidates were refused as "fresh writes", the
+    file stayed at 27/15, and the detector re-fired on it every single run.
+    Three branches were in that state at once (memory, seedgo, daemon).
+
+    The valve's job is catching a fresh write that landed at the WRONG END. The
+    number is what says which end an entry is at; the date was only ever a proxy
+    for lanes where the number cannot answer. When both numbers are usable and
+    the candidate is strictly below the head, ordering has already decided, and
+    a proxy that overrules the thing it stands in for is not a safety valve.
+
+    What is deliberately NOT weakened: an entry numbered ABOVE the head is still
+    refused (that is the real convention-loss shape — prepend became append, so
+    numbers ascend into the tail), and an entry with no usable number on either
+    side is still refused on its date, because there ordering genuinely cannot
+    decide.
+    """
+
+    def test_a_days_worth_of_correctly_ordered_entries_can_drain(self, monkeypatch, caplog):
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        entries = [{"number": n, "date": today} for n in range(135, 108, -1)]
+        assert len(entries) == 27
+
+        with caplog.at_level(logging.WARNING):
+            archivable = ext._extract_tail_excess(
+                entries, 15, entries[0]["number"], "key_learnings", "memory", head_date=today
+            )
+
+        assert [e["number"] for e in archivable] == list(range(120, 108, -1))
+        assert "NOTHING DRAINED" not in caplog.text
+
+    def test_an_entry_numbered_above_the_head_is_still_refused(self, monkeypatch):
+        """The real convention-loss shape survives the narrowing."""
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        entries = [{"number": n, "date": today} for n in range(20, 10, -1)]
+        entries.append({"number": 99, "date": today, "why": "prepend became append"})
+
+        archivable = ext._extract_tail_excess(
+            entries, 5, entries[0]["number"], "key_learnings", "victim", head_date=today
+        )
+
+        assert 99 not in [e["number"] for e in archivable]
+
+    def test_a_tail_entry_numbered_EQUAL_to_the_head_is_still_refused(self, monkeypatch):
+        """The `<` in `number < head_number` is load-bearing and nothing pinned it.
+
+        A duplicate of the head sitting at the tail is the one shape ordering
+        genuinely cannot separate: it is not above the head, so the
+        convention-loss rule misses it, and it is not below the head either, so
+        it has no claim to being older. The date rule has to decide, even when
+        the head is dated today.
+
+        Caught by a mutant that forced the ordering flag to True — which passed
+        the whole suite until this existed.
+        """
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        entries = [{"number": n, "date": today} for n in range(20, 10, -1)]
+        entries.append({"number": 20, "date": today, "why": "duplicate of the head, at the tail"})
+
+        archivable = ext._extract_tail_excess(
+            entries, 5, entries[0]["number"], "key_learnings", "victim", head_date=today
+        )
+
+        assert all("why" not in e for e in archivable), archivable
+
+    def test_key_learnings_drain_end_to_end_when_the_whole_array_is_todays(self, monkeypatch, tmp_path):
+        """The head_date WIRING, not just the predicate.
+
+        The predicate tests call `_extract_tail_excess` directly and pass
+        head_date themselves, so they cannot see whether `_extract_items_v2`
+        actually threads it. A mutant passing head_date=None for key_learnings
+        survived the entire suite. This drives the real path: @memory's live
+        shape on 2026-08-30 — every key_learning correctly ordered, every one
+        dated today.
+        """
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+        today = datetime.now().strftime("%Y-%m-%d")
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "key_learnings": [{"number": n, "date": today, "key": f"k{n}", "value": f"v{n}"} for n in range(27, 0, -1)],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"key_learnings": {"count": 15}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+        mocks["memory_files"].write_memory_file_simple.return_value = True
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True, "the whole point is that it does NOT skip"
+        assert result["extracted_count"] == 12, result.get("extracted_count")
+        assert [e["number"] for e in result["extracted"]] == list(range(12, 0, -1))
+
+    def test_a_numberless_entry_dated_today_is_still_refused(self, monkeypatch):
+        """Where ordering cannot decide, the date rule is all there is."""
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        entries = [{"number": n, "date": "2020-01-01"} for n in range(20, 10, -1)]
+        entries.append({"date": today, "summary": "no number at all"})
+
+        archivable = ext._extract_tail_excess(
+            entries, 5, entries[0]["number"], "key_learnings", "victim", head_date=today
+        )
+
+        assert all("summary" not in e for e in archivable)
 
 
 class TestNewestFirstOrderingGuard:
@@ -1259,6 +1486,29 @@ class TestRunRollover:
         }
         rollover.run_rollover()
         mocks["error"].assert_called()
+
+    def test_a_run_where_everything_failed_still_states_its_score(self, monkeypatch):
+        """0/1 is a result. Printing nothing lets a total failure read as a quiet run.
+
+        The completion line was gated on `success_count > 0`, so a rollover in
+        which every trigger failed ended on a blank line under "Found 1 files
+        ready for rollover". The per-failure detail was there, but the run never
+        said what it had achieved overall — and "no summary" is the same shape
+        on screen as "nothing needed doing".
+        """
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": False,
+            "triggers_count": 3,
+            "success_count": 0,
+            "failed": [{"trigger": "BAD.local.json", "stage": "extraction", "error": "write refused"}],
+            "results": [],
+        }
+
+        rollover.run_rollover()
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        assert "0/3" in printed, printed
 
 
 # ===========================================================================

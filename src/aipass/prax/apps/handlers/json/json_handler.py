@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Auto-Creating & Self-Healing JSON System
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2025-11-15
-# Modified: 2026-08-18
+# Modified: 2026-08-30
 # =============================================
 
 """
@@ -29,7 +29,92 @@ logger = logging.getLogger(__name__)
 _HANDLER_DIR = Path(__file__).resolve().parent  # .../handlers/json/
 _HANDLERS_DIR = _HANDLER_DIR.parent  # .../handlers/
 _PRAX_ROOT = _HANDLERS_DIR.parent.parent  # .../prax/
-PRAX_JSON_DIR = _PRAX_ROOT / "prax_json"
+
+
+def _resolve_prax_json_dir(test_log_dir: Optional[str], prax_root: Path) -> Path:
+    """Resolve the prax_json directory, honouring the fleet's test-redirect seam.
+
+    prax redirected its log FILES under pytest for a long time
+    (``config/load.py::get_system_logs_dir``) and this constant never got the
+    same branch, so one ``logger.info()`` under pytest wrote 4 redirected files
+    and 24 real ones into the live ``prax_json/``. Every branch's suite paid it.
+
+    ``AIPASS_TEST_LOG_DIR`` is the fleet contract, in @trigger's form
+    (``trigger/apps/handlers/json/json_handler.py``) rather than a spelling
+    invented here — five techniques already existed and a sixth would be the
+    problem, not the fix.
+
+    An EMPTY value is absence, not a redirect: ``Path("") / "prax"`` is a
+    relative path that would scatter state wherever the process happens to
+    stand, and an unset-looking env var must not do that.
+
+    Args:
+        test_log_dir: the raw ``AIPASS_TEST_LOG_DIR`` value, or None
+        prax_root: the real prax branch root
+
+    Returns:
+        The directory prax JSON state should be written to.
+    """
+    if test_log_dir:
+        return Path(test_log_dir) / "prax" / "prax_json"
+    return prax_root / "prax_json"
+
+
+_IMPORT_TIME_JSON_DIR = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
+
+# Kept as a module attribute because ~20 tests across this suite redirect state
+# with ``monkeypatch.setattr(mod, "PRAX_JSON_DIR", tmp_path)``. That remains the
+# supported override and it still wins — see _current_json_dir().
+PRAX_JSON_DIR = _IMPORT_TIME_JSON_DIR
+
+
+def _current_json_dir() -> Path:
+    """Resolve the state directory at CALL time, not import time.
+
+    Import-time resolution was not enough, and the reason is the same one that
+    made the logger unmockable: a value captured when the module loads cannot be
+    redirected by anything that runs afterwards. Measured here — prax's own
+    conftest sets ``AIPASS_TEST_LOG_DIR`` at module scope and the constant STILL
+    resolved to the live tree, because something imports this module before the
+    conftest runs. A seam that depends on winning an import race is not a seam.
+
+    Precedence, in order:
+      1. An explicit ``PRAX_JSON_DIR`` override (a test patched the attribute),
+         recognised as one only when it differs from BOTH the real directory and
+         the current redirect target.
+      2. ``AIPASS_TEST_LOG_DIR``, re-read every call so it works whenever it is set.
+      3. The real ``prax_json/``.
+
+    Why not compare against a captured import-time value — either by identity or
+    by value. @daemon adopted the identity form from prax's own contract mail and
+    9 of their pins went green alone and red in the full suite: a test that calls
+    ``importlib.reload`` while a monkeypatch is live has its teardown write the
+    PRE-reload Path back onto the POST-reload module, so the attribute is no
+    longer the object the module now holds and every later call reads it as an
+    explicit override. Reproduced here against this module, and prax is not
+    immune — only shielded by a conftest that drops it from ``sys.modules``.
+
+    @daemon's fix (compare by value) rescues their ordering but not the one that
+    made call-time resolution necessary in the first place: import first, env set
+    afterwards. There the written-back value is the REAL directory while the
+    post-reload default is the REDIRECT, so the two differ and a value comparison
+    also reads "explicitly patched" — and the writes go back to the live tree,
+    silently, for the rest of the session.
+
+    Comparing against both fixed points has no such stale reference. The cost is
+    one lost distinction, stated rather than hidden: a test that patches this to
+    the real directory, or to exactly the redirect target, is indistinguishable
+    from one that never patched. Both resolve to the same path either way, so the
+    answer is unchanged — which is why this is cheaper than @daemon's loss and far
+    cheaper than a seam that dies to a reload.
+    """
+    default = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
+    real = _resolve_prax_json_dir(None, _PRAX_ROOT)
+    if PRAX_JSON_DIR != real and PRAX_JSON_DIR != default:
+        return PRAX_JSON_DIR
+    return default
+
+
 JSON_TEMPLATES_DIR = _HANDLERS_DIR / "json_templates"
 
 
@@ -135,12 +220,12 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Get path for module JSON file"""
     filename = f"{module_name}_{json_type}.json"
-    return PRAX_JSON_DIR / filename
+    return _current_json_dir() / filename
 
 
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
     """Ensure JSON file exists, create from template if missing"""
-    PRAX_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    _current_json_dir().mkdir(parents=True, exist_ok=True)
 
     json_path = get_json_path(module_name, json_type)
 

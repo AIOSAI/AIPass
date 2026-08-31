@@ -208,11 +208,27 @@ class TestMembershipIsPresenceNotDeclaration:
         assert found, "nothing was discovered, so the label was never exercised"
         assert {item["residency"] for item in found} == {rs.RESIDENCY_EXTERNAL}
 
-    def test_the_scheduler_flag_reports_a_file_and_never_interprets_it(self, machine):
-        """A fact handed on, not a decision. @daemon rules on what it means."""
+    def test_the_record_carries_no_scheduler_flag(self, machine):
+        """Withdrawn 2026-08-30 at the request of the only branch that asked for it.
+
+        The field reported ONE FILENAME -- whether `.daemon/schedule.json`
+        exists. @daemon reads `.daemon/*.json`, every file in there. So a
+        consumer using this as a pre-filter would silently drop every job
+        living in a differently-named file, and it would read as "this citizen
+        has no jobs" rather than as a bug. @daemon's words: a field that is
+        nearly right is worse than no field.
+
+        It bought nothing either -- their discovery opens what it globs
+        regardless, so a bool cannot save a stat they have to do anyway.
+
+        This pin is the shape, not the absence of one key: a record that grows
+        a field nobody consumes should have to come past a test.
+        """
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
-        flags = {item["name"]: item["scheduler"] for item in rs.external_branches(machine)}
-        assert flags == {"wren": True, "quiet": False}
+        found = rs.external_branches(machine)
+        assert found, "nothing was discovered, so the record shape was never exercised"
+        for item in found:
+            assert set(item) == {"name", "path", "registry", "email", "residency"}, item
 
     def test_roots_are_independent_of_each_other(self, machine):
         """A broken root must cost its own citizens and nobody else's."""
@@ -353,7 +369,6 @@ class TestTheLiveMachineIsReachable:
         found = {item["name"]: item for item in rs.external_branches(stand_in)}
         assert "wren" in found, f"@wren is the fence citizen and must be reachable; got {sorted(found)}"
         assert "vera" in found, f"@vera must be reachable; got {sorted(found)}"
-        assert found["vera"]["scheduler"] is True, "@vera ships a .daemon/schedule.json and must be flagged"
         assert all(item["residency"] == rs.RESIDENCY_EXTERNAL for item in found.values())
         assert all(item["email"] for item in found.values()), "external citizens must be addressable"
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_scope.py
-# Description: The one definition of "the fleet" — core citizens plus passport-declared residents
-# Version: 3.0.0
+# Description: The one definition of "the fleet" — core, passport-declared residents, declared-root externals
+# Version: 4.0.0
 # Created: 2026-08-27
 # Modified: 2026-08-30
 # =============================================
@@ -105,7 +105,6 @@ RESIDENCY_EXTERNAL = "external"
 # managed, blessed by Patrick, the anchor of trust for a whole tier.
 DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
-SCHEDULE_RELATIVE = Path(".daemon") / "schedule.json"
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -298,6 +297,25 @@ def read_registry_branches(registry_path: Path, name_from: str = "path") -> list
     return found
 
 
+def overlaps_home(candidate: Path, home: Path) -> bool:
+    """Does *candidate* sit inside AIPass home, contain it, or equal it?
+
+    THE DOUBLE-COUNT GUARD, and it is not hypothetical. Declaring our own tree
+    as an external root would return every core citizen and every resident a
+    second time under a different tier; @baud would appear three times, because
+    the backup copy the walk law already refuses is a third path to the same
+    branch. A root that CONTAINS home is refused for the same reason from the
+    other side -- declaring ``..`` would sweep this repo in as somebody's
+    sibling.
+
+    Public because the anchor's WRITE lane refuses the same thing at write time,
+    against this exact function. Two enforcement points, one predicate.
+
+    Both paths must already be resolved; this compares, it does not normalise.
+    """
+    return candidate == home or home in candidate.parents or candidate in home.parents
+
+
 def declared_roots(repo_root: Path | None = None) -> list[Path]:
     """Repo roots this installation has DECLARED as participating, resolved.
 
@@ -370,11 +388,10 @@ def declared_roots(repo_root: Path | None = None) -> list[Path]:
         if not candidate.is_dir():
             logger.error(f"[registry_scope] Declared root {raw!r} is not a directory on this machine ({candidate})")
             continue
-        # The double-count guard, and it is not hypothetical: declaring our own
-        # tree would return every core citizen and every resident a second time
-        # under a different tier, and @baud would appear three times. A root
-        # that CONTAINS home is refused for the same reason from the other side.
-        if candidate == home or home in candidate.parents or candidate in home.parents:
+        # The double-count guard. Extracted as a public predicate so the WRITE
+        # side refuses the same thing at the same place in the same words: a
+        # rule enforced by two functions is a rule that agrees by coincidence.
+        if overlaps_home(candidate, home):
             logger.error(
                 f"[registry_scope] REFUSED declared root {raw!r} ({candidate}): it overlaps AIPass home "
                 f"{home} — core and resident citizens would be counted twice"
@@ -404,16 +421,18 @@ def external_branches(repo_root: Path | None = None, name_from: str = "path") ->
     exists; it does not have to say anything.  That is Patrick's ruling and the
     reason phase 2 shipped without a schema migration in front of it.
 
-    ``scheduler`` reports a FILE, never a decision: whether the branch carries
-    ``.daemon/schedule.json``.  What that means is @daemon's ruling to make, and
-    encoding their policy here would be a second implementation of it.
+    The record carried a ``scheduler`` bool for three hours on 2026-08-30 and
+    no longer does.  @daemon asked for it, then asked for it back: it reported
+    one filename while they read ``.daemon/*.json``, so as a pre-filter it would
+    have silently dropped jobs living in any other file -- reading as "no jobs"
+    rather than as a bug.  Withdrawn on their word, by the branch that wanted it.
 
     Args:
         repo_root: AIPass home; defaults to this checkout's.
         name_from: See :func:`read_registry_branches`.
 
     Returns:
-        ``[{"name", "path", "registry", "email", "residency", "scheduler"}]``.
+        ``[{"name", "path", "registry", "email", "residency"}]``.
     """
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -453,7 +472,6 @@ def external_branches(repo_root: Path | None = None, name_from: str = "path") ->
                     continue
                 seen.add(key)
                 item["residency"] = RESIDENCY_EXTERNAL
-                item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
                 found.append(item)
     return found
 
@@ -538,7 +556,7 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
         name_from: See :func:`read_registry_branches`.
 
     Returns:
-        ``[{"name", "path", "registry", "email", "residency", "scheduler"}]``.
+        ``[{"name", "path", "registry", "email", "residency"}]``.
     """
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     branches = read_registry_branches(root / CORE_REGISTRY, name_from=name_from)
@@ -558,14 +576,12 @@ def fleet_branches(repo_root: Path | None = None, name_from: str = "path") -> li
     # these labels by name so 'external' never silently reads as 'core'.
     for item in branches:
         item["residency"] = RESIDENCY_CORE
-        item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
 
     seen = {str(item["path"]) for item in branches}
     for registry_path in resident_registry_paths(root):
         for item in _accepted_residents(registry_path, name_from):
             if str(item["path"]) not in seen:
                 item["residency"] = RESIDENCY_RESIDENT
-                item["scheduler"] = (item["path"] / SCHEDULE_RELATIVE).is_file()
                 branches.append(item)
                 seen.add(str(item["path"]))
     resident_count = len(branches) - core_count

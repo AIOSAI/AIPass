@@ -20,6 +20,7 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
     declared_residency,
     _validate_job,
     _load_schedule_file,
+    _PROJECTS_DIR_NAME,
     REQUIRED_JOB_KEYS,
     RESIDENCY_CORE,
     RESIDENCY_RESIDENT,
@@ -817,15 +818,44 @@ class TestParkedProjectPolicyChange:
 class TestLiveFleet:
     """Assertions about THIS machine's tree. Skipped loudly where it is absent."""
 
+    def test_the_live_fleet_is_not_empty(self):
+        # The floor under every loop below: an empty fleet would let each of
+        # them pass by iterating nothing.
+        assert len(active_citizens()) >= 18
+
     def test_every_project_citizen_declares_resident(self):
-        for citizen in active_citizens():
-            if citizen["source"] != "aipass":
-                assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+        # Narrowed to projects/ deliberately, when the external tier went live
+        # (AIPASS_ROOTS.json blessed 2026-08-30). Externals declare NOTHING and
+        # must not: membership out there is PRESENCE - a passport exists in a
+        # declared root - and the tier label is applied by the reader, never
+        # claimed by the passport. Six live external citizens across four repos
+        # carry no residency field, and requiring one would have made a
+        # six-owner schema campaign the price of the feature.
+        citizens = [c for c in active_citizens() if c["source"].startswith(_PROJECTS_DIR_NAME + "/")]
+        assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
+        for citizen in citizens:
+            assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+
+    def test_an_external_citizen_is_labelled_external_never_core(self):
+        # The fence. A citizen outside AIPass home may never read as core: the
+        # source label is what tells a downstream lane which repo to stand in.
+        citizens = active_citizens()
+        assert citizens
+        for citizen in citizens:
+            outside = not citizen["path"].is_relative_to(REAL_REPO_ROOT)
+            assert outside == citizen["source"].startswith("external"), citizen
 
     def test_no_citizen_resolves_under_a_dot_prefixed_component(self):
-        for citizen in active_citizens():
-            relative = citizen["path"].relative_to(REAL_REPO_ROOT)
-            assert not any(part.startswith(".") for part in relative.parts), citizen
+        # Compared against the citizen's OWN root, not AIPass home - an
+        # external path is not relative to REAL_REPO_ROOT at all, and the
+        # invariant being held here was never about which repo it lives in.
+        # The .backup/ copies this exists to keep out are equally forbidden
+        # in a declared root.
+        citizens = active_citizens()
+        assert citizens
+        for citizen in citizens:
+            parts = citizen["path"].parts
+            assert not any(part.startswith(".") for part in parts), citizen
 
     def test_parked_projects_are_absent_by_name(self):
         emails = {c["email"] for c in active_citizens()}
