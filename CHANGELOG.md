@@ -13,6 +13,43 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 12: the hybrid row, the wrong attribute, and the coverage landmine —
+  under the one-fix-at-a-time ruling** (FPLAN-0461 continued). Patrick's ruling
+  landed mid-round and governs everything after: fix one thing at a time, no new
+  test instrumentation on this PR — future reds get the minimal cure or a named
+  skip; never add a test without a defect it pins (the audit-tests lane is the
+  instrument for test bloat, not more tests). This train is the last pre-ruling
+  pair, both cures of round-11-authored test code, zero production changes.
+  Seedgo: the 3.11 hybrid row measured instead of predicted (accessor removed,
+  flavour still an object — the route is a call-time module read), and the
+  stand-down guard read `PurePath._flavour` where 3.10/3.11 define it on the
+  CONCRETE class — a guard reading the wrong attribute is indistinguishable
+  from no guard and looks more careful in review; now reads the concrete class
+  with three measured arms. The Windows no-op break cured by breaking the
+  routing identity TOWARD the dialect the host is not — and their sweep then
+  caught the cure itself asserting this box's dialect as a literal, so what
+  ships is all measurement: the child announces where it started, a two-row
+  direction table decides where it must go, the both-sides pin asserts
+  movement rather than a destination, and hosts where the reading cannot move
+  report instead of convicting. Per the ruling, two extra pins were taken
+  back out; three surviving mutants are named on the record instead of
+  pinned — all one species, an arm that only fires on a host this box is
+  not. Backup: the coverage
+  report landmine reproduced to the line — a test compiled code under a fake
+  filename inside the source tree, so coverage recorded a measured file absent
+  from disk and the REPORT step failed with zero test failures; the two sites
+  called likely-inert were NOT (drive-lettered PureWindowsPath literals are
+  RELATIVE on POSIX, resolved against cwd at trace time — they fire from the
+  branch cwd). Cure: one guarded mint point every future site inherits by
+  construction, fabrications moved under tmp_path, both cwds pinned. Rule
+  banked: whether a fabricated filename mints depends on the cwd, because
+  abspath does. Also this round: the test-quality audit lane ran for the first
+  time in the campaign (harness 12/13; its one fail correctly named real
+  unattributed tree writes) and joins the standing verification bar alongside
+  the standards audit; @aipass dispatched on round-2 research — a ranked
+  per-test inventory for a 20k-test fleet, culling precedent, and AI test
+  bloat as a named industry problem.
+
 - **Round 11: the fixture's first catch, the captured accessor, and the end of
   arms** (FPLAN-0461 continued). Round 10's board (c5b6e173): six red legs and
   every red ONE FILE — while spawn's import guard went green on every leg for

@@ -60,9 +60,10 @@ def _find_real_caller():
     """Walk the stack to find the actual file that triggered this import.
 
     Uses ``sys._getframe`` rather than ``inspect.stack()``. ``inspect.stack()``
-    calls ``getmodule`` -> ``getabsfile`` -> ``os.path.realpath`` on EVERY frame
-    with no guard (inspect.py:1009), so it dies on a dead cwd before this
-    function's own skip logic is ever consulted. Reading ``f_code.co_filename``
+    reaches ``os.path.realpath`` unguarded through ``getsourcefile`` ->
+    ``getmodule`` (3.12: inspect.py:1009 -- ``getabsfile`` uses ``abspath``, so
+    the route is getmodule's), so it dies on a dead cwd before this function's
+    own skip logic is ever consulted. Reading ``f_code.co_filename``
     off the frame touches no filesystem at all.
 
     Returns tuple: (file_path, import_line) or (None, None).

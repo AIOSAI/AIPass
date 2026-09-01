@@ -222,6 +222,24 @@ Removing a now-ignored tree from a store is currently a manual `rm -rf` of the c
 
 ---
 
+### Fabricated filenames never name the real tree (round 12)
+
+The fence pins drive the guard by compiling `check()` under a made-up caller
+filename. coverage.py records every executed code object BY FILENAME, existing
+file or not -- so a fabrication that looks like a real tree file makes the
+coverage *report* step exit 1 with `No source for code` while every test passes.
+That is what reddened the coverage CI leg on `5bfd5b63`.
+
+Two rules, both pinned:
+
+- Every fabricated filename lives under `tmp_path`, outside coverage's `source`
+  filter. Real-tree adjacency (is `src/aipass/memory` foreign? is a real backup
+  file kin?) is asserted on `_is_kin`, which is pure and compiles nothing.
+- There is exactly ONE `compile()` in the test file, and it refuses a filename
+  that `abspath`s inside the source tree. `abspath`, not the literal: coverage
+  resolves a relative name against the cwd at trace time, so a Windows-spelled
+  literal is inert from the repo root and a minter from the branch directory.
+
 ### Kinship is spelled, not compared raw (round 5)
 
 The handlers fence asks one question -- is this caller inside my branch? -- and
