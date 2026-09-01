@@ -6,6 +6,13 @@
 # Modified: 2026-06-29
 # =============================================
 
+"""Per-branch Telegram bot: BaseBot with the branch stamped on every message.
+
+Overrides BaseBot's hooks so incoming messages carry sender attribution and
+outgoing ones carry the branch name. The point is that a human reading one
+Telegram thread can always tell WHICH citizen is speaking.
+"""
+
 # Standard library
 import argparse
 import sys

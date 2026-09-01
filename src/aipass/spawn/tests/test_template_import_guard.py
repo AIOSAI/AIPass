@@ -330,12 +330,96 @@ def _require_live_world(result, world: str = "getcwd-denied"):
 # interpreter HAS the accessor natively (real <=3.10), it emulates nothing and
 # the native one is measured instead: emulating over the real thing would grade
 # my stand-in on the only interpreters that carry the defect for real.
+# ROUND 8 — THE SAME SPECIES, ONE LEVEL UP: the HARNESS was 3.12-shaped.
+#
+# The emulation above stopped assuming an interpreter; the machinery that
+# INSTALLS it did not. CI on 68ab5132 convicted it on five legs at once, and
+# every failure was a stand-in that could only run where it was written:
+#
+#   * 3.10 and 3.11 hosts — the shape preludes reached
+#     `pathlib.PurePath._parse_path`, which is 3.12+ (those versions spell it
+#     `_parse_args`). The child died at line 16 before printing anything, so 37
+#     tests failed saying "the child never reported whether its route armed" —
+#     a harness crash wearing the arming probe's message.
+#   * a 3.10 host also failed the 3.12-as-it-is row of the accessor pin,
+#     because the EXPECTATION was keyed on the SHAPE'S NAME rather than on what
+#     the host actually is. On 3.10 every row is ACCESSOR_NATIVE and that is
+#     correct.
+#   * 3.13 (and the coverage leg, which also runs 3.13 — ci.yml:101) — the
+#     nt-absolute getcwd row. The probe built its own input with
+#     os.path.abspath AFTER the world denied os.getcwd; 3.13's ntpath.isabs
+#     stopped accepting a rooted-driveless path, so abspath reached the cwd
+#     where 3.12 short-circuited. The probe died constructing its argument.
+#   * windows — the posix rows of the getcwd table ran BARE, so on an nt host
+#     they measured nt under a posix label (@memory's rule, exactly), and the
+#     drive row asserted a posix answer for a "here" hard-coded to Linux.
+#
+# THE RULE THIS FILE NOW FOLLOWS, and it is one rule: every stand-in states
+# what it needs from the host, reports whether it took, and stands down where
+# the host already IS the thing it stands in for. Nothing is keyed on a version
+# number or on a shape's name; everything is keyed on a fact the child measures
+# and prints. A test whose stand-in cannot be built here SKIPS with the child's
+# own reason instead of failing on someone else's interpreter.
+
+# The probe path, built ONCE and before any world is installed.
+#
+# Round 8's 3.13 red was the probe dying while constructing its own input. A
+# probe whose argument is computed inside the world it measures cannot report
+# on that world — and it fails in the most misleading way available, by
+# printing nothing at all.
+_BUILD_PROBE_PATH = """
+    import ntpath, os
+
+    _ARM_ABS = {probe_literal}
+
+    if not os.path.isabs(_ARM_ABS):
+        print("PROBE_NOT_ABS", _ARM_ABS)
+    if os.path.sep == ntpath.sep and not os.path.splitdrive(_ARM_ABS)[0]:
+        # Keyed on the ACTIVE path module, not on os.name, so it fires under
+        # the windows emulation as well as on the real runner.
+        print("PROBE_NO_DRIVE", _ARM_ABS)
+
+    # Published, not just checked: on 3.12 ntpath.isabs still accepted a
+    # rooted-driveless path ("LEGACY BUG", ntpath.py:101), so a missing drive
+    # changed nothing here and only showed up on 3.13. A value the test can
+    # read is falsifiable on every version.
+    print("PROBE_PATH", _ARM_ABS)
+"""
+
+# The emulation decides by MEASUREMENT, not by hasattr.
+#
+# hasattr(pathlib, "_NormalAccessor") answers "does an accessor exist", which
+# is not the question. The question is "does Path.resolve actually travel
+# through one", and a host shape can make those two disagree — a 3.10 host with
+# the 3.13 shape installed HAS an accessor that resolve no longer consults.
+# Measuring it also gives the pin its second, independent line: the child
+# reports what it FOUND (ROUTE_WAS_NATIVE / ROUTE_WAS_DARK) separately from
+# what it DID (ACCESSOR_NATIVE / ACCESSOR_EMULATED), and the two must agree.
 _EMULATE_310 = """
     import os, os.path, pathlib
 
+    _route_seen = []
     if hasattr(pathlib, "_NormalAccessor"):
-        # Real <=3.10. The property is native here; do not build a stand-in
-        # over it. Reported so a reader of the output knows which was measured.
+        _orig_accessor_realpath = pathlib._NormalAccessor.realpath
+
+        def _route_probe(*a, **k):
+            _route_seen.append(True)
+            return _orig_accessor_realpath(*a, **k)
+
+        pathlib._NormalAccessor.realpath = staticmethod(_route_probe)
+        try:
+            pathlib.Path(_ARM_ABS).resolve()
+        except OSError:
+            pass
+        finally:
+            pathlib._NormalAccessor.realpath = staticmethod(_orig_accessor_realpath)
+
+    print("ROUTE_WAS_NATIVE" if _route_seen else "ROUTE_WAS_DARK")
+
+    if _route_seen:
+        # Real <=3.10, or a shape that supplied the property. Emulating over it
+        # would grade my stand-in on the only interpreter that carries the
+        # defect for real.
         print("ACCESSOR_NATIVE")
     else:
         class _NormalAccessor310:
@@ -346,9 +430,6 @@ _EMULATE_310 = """
             realpath = staticmethod(os.path.realpath)
 
         pathlib._NormalAccessor = _NormalAccessor310
-        # 3.10 held an INSTANCE (Path._accessor = _normal_accessor), not the
-        # class. Routing through the instance is what makes the binding
-        # question below a real one rather than a hypothetical.
         pathlib._normal_accessor = _NormalAccessor310()
 
         def _resolve_310(self, strict=False):
@@ -365,33 +446,15 @@ _EMULATE_310 = """
         print("ACCESSOR_EMULATED")
 """
 
-# The emulation now PROVES it took before anything downstream claims anything.
+# The emulation PROVES it took before anything downstream claims anything.
 #
 # This is the round-6 arming lesson applied one level up. On 3.13 and on
 # windows the old emulation was silently inert: the pins failed for a reason
 # that took a CI log and a traceback to name, when the child could simply have
 # said so. A world that cannot report ROUTE_DARK is a world that reports every
 # inert run as a measurement.
-#
-# It also settles @devpulse's trap (b) in the child rather than in my head: the
-# probe literal is built with abspath and checked with isabs ON THE RUNNER,
-# because os.sep + "tmp" is DRIVE-RELATIVE on nt (drone's sibling failure
-# printed "RESOLVED: D:\\tmp") and ntpath.realpath reads os.getcwd
-# unconditionally. An absolute path is whatever the host says is absolute.
 _ARM_THE_ROUTE = """
-    import os, pathlib
-
-    _ARM_ABS = {probe_literal}
-    if not os.path.isabs(_ARM_ABS):
-        print("PROBE_NOT_ABS")
-    if os.name == "nt" and not os.path.splitdrive(_ARM_ABS)[0]:
-        # Measured BY THE RUNNER, because no Linux box can answer it: a
-        # rooted-driveless path carries no drive on nt, and ntpath.realpath
-        # resolves it against the current one — reading the cwd for a literal
-        # that looks absolute. This machine cannot falsify the row (ntpath on
-        # posix has no drive to add), so the child reports it instead of me
-        # asserting it from here.
-        print("PROBE_NO_DRIVE")
+    import pathlib
 
     _seen = []
     _captured = pathlib._NormalAccessor.realpath
@@ -400,9 +463,9 @@ _ARM_THE_ROUTE = """
         _seen.append(a[0] if a else None)
         return _captured(*a, **k)
 
-    # CLASS only, here too: an instance attribute left behind by the arming
-    # probe would shadow the class patch the shipped world installs later, and
-    # the world would go inert with nothing to show for it.
+    # CLASS only: an instance attribute left behind by the arming probe would
+    # shadow the class patch the shipped world installs later, and the world
+    # would go inert with nothing to show for it.
     pathlib._NormalAccessor.realpath = staticmethod(_recording)
     pathlib.Path(_ARM_ABS).resolve()
     pathlib._NormalAccessor.realpath = staticmethod(_captured)
@@ -412,9 +475,9 @@ _ARM_THE_ROUTE = """
 
 # The version CI convicted, kept verbatim and PUBLISHED as a negative control.
 #
-# Deleting it would leave the host shapes below unfalsifiable: three preludes
-# that nothing fails against are three preludes nobody can tell are working.
-# This one fails against each of them, in the exact shape its CI leg reported.
+# Deleting it would leave the host shapes below unfalsifiable: preludes that
+# nothing fails against are preludes nobody can tell are working. This one
+# fails against each of them, in the exact shape its CI leg reported.
 _EMULATION_THAT_ASSUMED_ONE_INTERPRETER = """
     import os.path, pathlib, posixpath
 
@@ -437,27 +500,37 @@ _EMULATION_THAT_ASSUMED_ONE_INTERPRETER = """
     _flav = _EagerFlavour(posixpath)
     pathlib.PurePosixPath._flavour = _flav
     pathlib.PosixPath._flavour = _flav
+    print("ROUTE_WAS_DARK")
     print("ACCESSOR_EMULATED")
 """
 
-# The interpreters this machine cannot run, rebuilt as HOST SHAPES.
+# =============================================================================
+# Host shapes, built from HALVES that each answer for themselves
+# =============================================================================
 #
-# Each one installs the single property of a real interpreter that the old
-# emulation assumed away, BEFORE the emulation runs. They are stand-ins, not
-# interpreters — what they buy is that every CI red above is now falsifiable
-# from a 3.12 laptop, and stays falsifiable after the cure.
-_HOST_SHAPES = {
-    # 3.12 as it really is here: the baseline, so a shape can be compared
-    # against the interpreter the file actually runs on.
-    "3.12-as-it-is": "",
-    # 3.10: the accessor exists NATIVELY (so the emulation must stand down and
-    # measure the interpreter), and _flavour is an OBJECT reached during
-    # PARSING. Replace it with something lacking parse_parts and Path(...)
-    # itself dies — CI's traceback, verbatim, on this machine.
-    "3.10-native-accessor-and-flavour-object": """
-        import os, os.path, pathlib, posixpath
+# Each half installs one property of a real interpreter, and each reports one
+# of three verdicts:
+#
+#   HALF:<name>:NATIVE       the host already has it — install nothing
+#   HALF:<name>:INSTALLED    the stand-in is in place
+#   HALF:<name>:UNAVAILABLE:<reason>   this host cannot carry the stand-in
+#
+# UNAVAILABLE is a SKIP, not a failure, and it carries the child's own reason —
+# because "3.13 has no _flavour to stand in for" and "the stand-in is broken"
+# look identical from a red test and are not the same thing at all.
 
-        class _Flavour310:
+_HALF_FLAVOUR_OBJECT = """
+    import pathlib, posixpath
+
+    _host_flavour = getattr(pathlib.PurePosixPath, "_flavour", None)
+    if _host_flavour is None:
+        print("HALF:flavour-object:UNAVAILABLE:this host has no _flavour at all (3.13+)")
+    elif hasattr(_host_flavour, "parse_parts"):
+        print("HALF:flavour-object:NATIVE")
+    elif not hasattr(pathlib.PurePath, "_parse_path"):
+        print("HALF:flavour-object:UNAVAILABLE:no _parse_path to route parsing through")
+    else:
+        class _FlavourObject:
             sep = posixpath.sep
             altsep = ""
 
@@ -467,88 +540,96 @@ _HOST_SHAPES = {
             def parse_parts(self, parts):
                 return ("", posixpath.sep, list(parts))
 
-        pathlib.PurePosixPath._flavour = _Flavour310()
+        pathlib.PurePosixPath._flavour = _FlavourObject()
         pathlib.PosixPath._flavour = pathlib.PurePosixPath._flavour
 
         _real_parse = pathlib.PurePath._parse_path.__func__
 
-        def _parse_path_310(cls, path):
+        def _parse_path_via_flavour(cls, path):
             cls._flavour.parse_parts([path])
             return _real_parse(cls, path)
 
-        pathlib.PurePath._parse_path = classmethod(_parse_path_310)
+        pathlib.PurePath._parse_path = classmethod(_parse_path_via_flavour)
+        print("HALF:flavour-object:INSTALLED")
+"""
 
-        class _NormalAccessor:
+_HALF_ACCESSOR_ROUTE = """
+    import os, os.path, pathlib
+
+    if hasattr(pathlib, "_NormalAccessor"):
+        print("HALF:accessor-route:NATIVE")
+    else:
+        class _NormalAccessorShape:
             realpath = staticmethod(os.path.realpath)
 
-        pathlib._NormalAccessor = _NormalAccessor
-        pathlib._normal_accessor = _NormalAccessor()
+        pathlib._NormalAccessor = _NormalAccessorShape
+        pathlib._normal_accessor = _NormalAccessorShape()
 
-        def _resolve_310(self, strict=False):
+        def _resolve_via_accessor(self, strict=False):
             return type(self)(self._accessor.realpath(self, strict=strict))
 
         pathlib.Path._accessor = pathlib._normal_accessor
-        pathlib.Path.resolve = _resolve_310
-    """,
+        pathlib.Path.resolve = _resolve_via_accessor
+        print("HALF:accessor-route:INSTALLED")
+"""
+
+_HALF_DIRECT_RESOLVE = """
+    import os, pathlib
+
+    def _resolve_direct(self, strict=False):
+        return type(self)(os.path.realpath(self, strict=strict))
+
+    pathlib.Path.resolve = _resolve_direct
+    print("HALF:direct-resolve:INSTALLED")
+"""
+
+_HALF_FOREIGN_CONCRETE_CLASS = """
+    import os.path, pathlib
+
+    # MEASURED, so the copy below is not tidied away: deleting it kills the
+    # shape (the class becomes unconstructible), while changing the BASE class
+    # or routing resolve through os.path directly changes nothing on 3.12 —
+    # both are equivalents here, because the copy is what makes this class
+    # foreign and on 3.12 the copied flavour IS os.path.
+    _base_flavour = getattr(pathlib.PurePosixPath, "_flavour", None)
+
+    class _ForeignPath(pathlib.PurePath):
+        # Deliberately OUTSIDE the PosixPath hierarchy, the way WindowsPath is,
+        # and carrying the host's own flavour so it is constructible on every
+        # version. The flavour is copied at class creation, so a later patch of
+        # PurePosixPath._flavour cannot reach it — which is the whole point.
+        if _base_flavour is not None:
+            _flavour = _base_flavour
+
+        def resolve(self, strict=False):
+            # Through the flavour, the way WindowsPath does on 3.12 — NOT
+            # through os.path directly. That is what makes the copied flavour
+            # load-bearing: inherit the posix one instead of copying it and the
+            # emulation's patch reaches this class, which is precisely the
+            # foreignness the shape exists to reproduce.
+            _mod = getattr(type(self), "_flavour", os.path)
+            return type(self)(_mod.realpath(self, strict=strict))
+
+    pathlib.Path = _ForeignPath
+    print("HALF:foreign-concrete-class:INSTALLED")
+"""
+
+_HOST_SHAPES = {
+    # 3.12 as it really is here: no halves at all, so a shape can be compared
+    # against whatever interpreter the file is actually running on.
+    "3.12-as-it-is": (),
+    # 3.10: resolve travels through an eagerly-captured accessor, and _flavour
+    # is an OBJECT reached during PARSING.
+    "3.10-native-accessor-and-flavour-object": (_HALF_FLAVOUR_OBJECT, _HALF_ACCESSOR_ROUTE),
     # 3.11: flavour is still an OBJECT, but resolve calls os.path.realpath at
     # MODULE level and there is no accessor. Its CI red was the parsing half,
-    # not the route — which is why both halves are carried here separately.
-    "3.11-flavour-object-and-direct-resolve": """
-        import os, pathlib, posixpath
-
-        class _Flavour311:
-            sep = posixpath.sep
-            altsep = ""
-
-            def __getattr__(self, name):
-                return getattr(posixpath, name)
-
-            def parse_parts(self, parts):
-                return ("", posixpath.sep, list(parts))
-
-        pathlib.PurePosixPath._flavour = _Flavour311()
-        pathlib.PosixPath._flavour = pathlib.PurePosixPath._flavour
-
-        _real_parse = pathlib.PurePath._parse_path.__func__
-
-        def _parse_path_311(cls, path):
-            cls._flavour.parse_parts([path])
-            return _real_parse(cls, path)
-
-        pathlib.PurePath._parse_path = classmethod(_parse_path_311)
-
-        def _resolve_311(self, strict=False):
-            return type(self)(os.path.realpath(self, strict=strict))
-
-        pathlib.Path.resolve = _resolve_311
-    """,
-    # 3.13: no accessor, no _flavour on the resolve path — resolve calls
-    # os.path.realpath directly, so a write to _flavour is a write nothing
-    # reads. (_flavour is left in place here because 3.12's own parser still
-    # needs it; the reproduction is that RESOLVE no longer consults it.)
-    "3.13-no-accessor-direct-resolve": """
-        import os, pathlib
-
-        def _resolve_313(self, strict=False):
-            return type(self)(os.path.realpath(self, strict=strict))
-
-        pathlib.Path.resolve = _resolve_313
-    """,
+    # not the route — which is why both halves are named separately.
+    "3.11-flavour-object-and-direct-resolve": (_HALF_FLAVOUR_OBJECT, _HALF_DIRECT_RESOLVE),
+    # 3.13: no accessor, no _flavour on the resolve path.
+    "3.13-no-accessor-direct-resolve": (_HALF_DIRECT_RESOLVE,),
     # windows: the class the host instantiates is not in the PosixPath
-    # hierarchy, and its flavour IS the live os.path module — which is why the
-    # bare rebinding armed there while the emulation sat inert on classes
-    # nothing constructed.
-    "nt-concrete-class-is-not-posix": """
-        import os.path, pathlib
-
-        class _OtherFlavourPath(pathlib.PurePath):
-            _flavour = os.path
-
-            def resolve(self, strict=False):
-                return type(self)(self._flavour.realpath(self, strict=strict))
-
-        pathlib.Path = _OtherFlavourPath
-    """,
+    # hierarchy, and its realpath is the live os.path one.
+    "nt-concrete-class-is-not-posix": (_HALF_FOREIGN_CONCRETE_CLASS,),
 }
 
 # The shapes the OLD emulation must die against, each keyed to the SYMPTOM its
@@ -566,7 +647,7 @@ _OLD_EMULATION_SYMPTOM = {
     "3.10-native-accessor-and-flavour-object": "parse_parts",
     "3.11-flavour-object-and-direct-resolve": "parse_parts",
     # CI's 3.13 and windows verdicts: the emulation sat inert and a bare
-    # os.path.realbinding reached the real thing.
+    # os.path.realpath rebinding reached the real thing.
     "3.13-no-accessor-direct-resolve": "PATHLIB_ARMED",
     "nt-concrete-class-is-not-posix": "PATHLIB_ARMED",
 }
@@ -588,12 +669,10 @@ _BARE_REBINDING_ONLY = """
 """
 
 _PATHLIB_ROUTE_PROBE = """
-    import os
     from pathlib import Path as _RoutePath
 
-    _abs = {probe_literal}
     try:
-        _RoutePath(_abs).resolve()
+        _RoutePath(_ARM_ABS).resolve()
     except OSError:
         print("PATHLIB_ARMED")
     else:
@@ -615,8 +694,9 @@ _PATHLIB_ROUTE_PROBE_RELATIVE = """
 """
 
 
-# ONE spelling of the probe path, substituted into every child fragment that
-# needs it, so no two fragments can disagree about what "absolute" means.
+# ONE spelling of the probe path, substituted into the fragment that builds it,
+# so no two fragments can disagree about what "absolute" means — everything
+# downstream reuses the value, never the expression.
 #
 # Built from the host's own anchor rather than from os.sep alone: os.sep +
 # "definitely" is DRIVE-RELATIVE on nt (@drone's sibling failure printed
@@ -631,6 +711,19 @@ def _compose(*chunks: str) -> str:
     return "\n".join(
         textwrap.dedent(chunk).strip().replace("{probe_literal}", _PROBE_LITERAL) for chunk in chunks if chunk.strip()
     )
+
+
+def _shape_prelude(shape: str) -> str:
+    """The halves of a host shape, composed in order."""
+    return _compose(*_HOST_SHAPES[shape])
+
+
+def _unavailable_half(result) -> str:
+    """The child's own reason, when a stand-in cannot be built on this host."""
+    for line in result.stdout.splitlines():
+        if line.startswith("HALF:") and ":UNAVAILABLE:" in line:
+            return line
+    return ""
 
 
 class TestTheRealpathDenialArmsOnEveryInterpreter:
@@ -658,12 +751,30 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
 
     def _child(self, shape: str, world: str, probe: str = _PATHLIB_ROUTE_PROBE):
         return _run(
-            _compose(_HOST_SHAPES[shape], _EMULATE_310, _ARM_THE_ROUTE, world, probe),
+            _compose(
+                _shape_prelude(shape),
+                _BUILD_PROBE_PATH,
+                _EMULATE_310,
+                _ARM_THE_ROUTE,
+                world,
+                probe,
+            ),
             cwd=Path(__file__).parent,
         )
 
     def _armed(self, result, shape: str) -> list:
-        """Refuse to read a verdict out of a child whose route never armed."""
+        """Refuse to read a verdict out of a child whose route never armed.
+
+        A stand-in the host cannot carry is a SKIP carrying the child's own
+        reason. Round 8's 3.10 and 3.11 legs failed 37 tests under the arming
+        probe's message when what had actually happened was a shape prelude
+        crashing on plumbing those versions do not have — the message named the
+        instrument that never ran instead of the one that broke.
+        """
+        missing = _unavailable_half(result)
+        if missing:
+            pytest.skip(f"host shape {shape!r} cannot be built here: {missing}")
+
         lines = result.stdout.split()
         assert "PROBE_NOT_ABS" not in lines, (
             f"the probe literal is not absolute on this runner ({shape}) — an "
@@ -690,8 +801,20 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         lines = self._armed(self._child(shape, _BARE_REBINDING_ONLY), shape)
 
-        expected = "ACCESSOR_NATIVE" if shape.startswith("3.10-") else "ACCESSOR_EMULATED"
-        assert expected in lines, f"expected {expected} under {shape!r}:\n{lines}"
+        # NOT keyed on the shape's name, and not on a version: keyed on what
+        # the child FOUND. On a 3.10 host every row is ACCESSOR_NATIVE and that
+        # is correct — the round-8 red here was an expectation that only knew
+        # how to be right on 3.12.
+        found_native = "ROUTE_WAS_NATIVE" in lines
+        decided_native = "ACCESSOR_NATIVE" in lines
+        decided_emulated = "ACCESSOR_EMULATED" in lines
+
+        assert decided_native != decided_emulated, f"the child reported neither decision, or both:\n{lines}"
+        assert decided_native == found_native, (
+            f"the child found the accessor route {'live' if found_native else 'dark'} "
+            f"and then did the opposite ({shape!r}): emulating over a live accessor "
+            f"grades the stand-in instead of the interpreter.\n{lines}"
+        )
 
     @pytest.mark.parametrize("shape", sorted(_HOST_SHAPES))
     def test_the_bare_rebinding_is_inert_under_the_emulation(self, shape):
@@ -736,7 +859,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         result = _run(
             _compose(
-                _HOST_SHAPES[shape],
+                _shape_prelude(shape),
+                _BUILD_PROBE_PATH,
                 _EMULATION_THAT_ASSUMED_ONE_INTERPRETER,
                 _ARM_THE_ROUTE,
                 _BARE_REBINDING_ONLY,
@@ -775,8 +899,7 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
     _READ_THE_FIRST_ARG = """
         import pathlib as _pathlib
 
-        _abs = {probe_literal}
-        _pathlib.Path(_abs).resolve()
+        _pathlib.Path(_ARM_ABS).resolve()
         print("FIRST_ARG", _seen_here[0])
     """
 
@@ -796,7 +919,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         result = _run(
             _compose(
-                _HOST_SHAPES[shape],
+                _shape_prelude(shape),
+                _BUILD_PROBE_PATH,
                 _EMULATE_310,
                 _ARM_THE_ROUTE,
                 self._RECORDING_DENIAL,
@@ -828,6 +952,7 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         result = _run(
             _compose(
+                _BUILD_PROBE_PATH,
                 _EMULATE_310,
                 _ARM_THE_ROUTE,
                 """
@@ -845,9 +970,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
                 # attribute that does NOT deny.
                 _pathlib._normal_accessor.realpath = _untouched
 
-                _abs = {probe_literal}
                 try:
-                    _pathlib.Path(_abs).resolve()
+                    _pathlib.Path(_ARM_ABS).resolve()
                 except OSError:
                     print("CLASS_PATCH_ANSWERED")
                 else:
@@ -905,6 +1029,7 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         result = _run(
             _compose(
+                _BUILD_PROBE_PATH,
                 _EMULATE_310,
                 """
                 import os, pathlib
@@ -933,6 +1058,7 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         """
         result = _run(
             _compose(
+                _BUILD_PROBE_PATH,
                 _DENY_REALPATH,
                 """
                 import pathlib
@@ -949,6 +1075,208 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         assert "PATHLIB_ARMED" in lines, (
             f"the world stopped arming on an interpreter with no accessor:\n{result.stdout}\n{result.stderr}"
         )
+
+
+# =============================================================================
+# The harness itself, run on a host that is not the one it was written on
+# =============================================================================
+#
+# Round 8's reds were not in the emulation — they were in the machinery that
+# installs it. These simulations make this 3.12 interpreter present the plumbing
+# of the hosts that convicted it, so "the harness survives a host that is not
+# 3.12" is a measurement here rather than a promise checked by CI.
+# name -> (prelude, the shapes it is meaningful for)
+#
+# The scope is part of the simulation, not an afterthought: shadowing a pathlib
+# class is a blunt instrument, and pointing it at a shape whose halves do not
+# read that class produces a failure about the simulation rather than about the
+# harness. Saying which shapes a simulation speaks for is cheaper than a
+# cleverer simulation, and it is honest about what is being claimed.
+_HOST_SIMULATIONS = {
+    # 3.10 and 3.11 present a flavour that is already an OBJECT. The shape's
+    # half must recognise that and install nothing — and it must reach that
+    # decision BEFORE touching _parse_path, which those versions spell
+    # _parse_args and which is what the child actually died on.
+    "flavour-is-already-an-object": (_HALF_FLAVOUR_OBJECT, sorted(_HOST_SHAPES)),
+    # 3.10 also presents the accessor natively.
+    "accessor-route-is-already-native": (_HALF_ACCESSOR_ROUTE, sorted(_HOST_SHAPES)),
+    # 3.13 has no _flavour at all. Shadowing the class is crude, but the
+    # condition the half reads is exactly the real one, and the child's own
+    # parsing is left alone so the run gets far enough to report.
+    "purposixpath-has-no-flavour": (
+        """
+        import pathlib
+
+        class _FlavourlessPurePosixPath:
+            pass
+
+        pathlib.PurePosixPath = _FlavourlessPurePosixPath
+        """,
+        [name for name in sorted(_HOST_SHAPES) if _HALF_FLAVOUR_OBJECT in _HOST_SHAPES[name]],
+    ),
+    # The backstop lane: a host whose flavour is a module AND which does not
+    # spell parsing the 3.12 way. No released interpreter is both, which is
+    # why it is simulated rather than waited for.
+    "purepath-has-no-parse-path": (
+        """
+        import pathlib
+
+        class _PurePathWithoutParsePath:
+            pass
+
+        pathlib.PurePath = _PurePathWithoutParsePath
+        """,
+        [name for name in sorted(_HOST_SHAPES) if _HALF_FLAVOUR_OBJECT in _HOST_SHAPES[name]],
+    ),
+}
+
+_SIMULATION_PAIRS = sorted(
+    (simulation, shape) for simulation, (_, shapes) in _HOST_SIMULATIONS.items() for shape in shapes
+)
+
+# The simulation may itself be built out of halves, and their verdicts are not
+# the ones under test — the marker separates the two.
+_SIMULATION_DONE = 'print("SIMULATION_INSTALLED")'
+
+_LEGAL_HALF_VERDICTS = ("NATIVE", "INSTALLED", "UNAVAILABLE")
+
+
+class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
+    """Round 8's actual subject: the stand-ins, not the thing they stand in for.
+
+    68ab5132 failed 37 tests on the 3.10 and 3.11 legs, every one of them
+    saying "the child never reported whether its route armed". Not one was
+    about arming: the shape prelude reached pathlib.PurePath._parse_path, which
+    is 3.12+, and the child died before printing anything. A harness crash
+    arrived wearing the arming probe's message, which is the worst way to fail
+    — the instrument that never ran got the blame.
+    """
+
+    def _child(self, simulation: str, shape: str):
+        return _run(
+            _compose(
+                _HOST_SIMULATIONS[simulation][0],
+                _SIMULATION_DONE,
+                _shape_prelude(shape),
+                _BUILD_PROBE_PATH,
+                _EMULATE_310,
+                _ARM_THE_ROUTE,
+                _DENY_REALPATH,
+                _PATHLIB_ROUTE_PROBE,
+            ),
+            cwd=Path(__file__).parent,
+        )
+
+    @staticmethod
+    def _shape_halves(result) -> list:
+        """Only the halves the SHAPE reported — not the simulation's own."""
+        lines = result.stdout.splitlines()
+        if "SIMULATION_INSTALLED" in lines:
+            lines = lines[lines.index("SIMULATION_INSTALLED") + 1 :]
+        return [line for line in lines if line.startswith("HALF:")]
+
+    @pytest.mark.parametrize(("simulation", "shape"), _SIMULATION_PAIRS)
+    def test_every_half_reports_a_verdict_instead_of_crashing(self, simulation, shape):
+        """The whole round-8 species, in one assertion per pair.
+
+        Whatever the host looks like, each half either takes, stands down, or
+        says it cannot be built — and the child says which. What it must never
+        do is die on plumbing it assumed.
+        """
+        result = self._child(simulation, shape)
+
+        halves = self._shape_halves(result)
+        assert len(halves) == len(_HOST_SHAPES[shape]), (
+            f"{len(_HOST_SHAPES[shape])} halves were composed for {shape!r} under "
+            f"{simulation!r} but {len(halves)} reported — one of them died:"
+            f"\n{result.stdout}\n{result.stderr}"
+        )
+        for line in halves:
+            assert line.split(":")[2] in _LEGAL_HALF_VERDICTS, f"illegal half verdict: {line!r}"
+
+        if _unavailable_half(result):
+            return
+
+        assert "ROUTE_ARMED" in result.stdout.split(), (
+            f"every half took under {simulation!r}/{shape!r} and the route still "
+            f"never armed:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_a_shape_stands_down_where_the_host_already_has_its_property(self):
+        """The 3.10-host row: nothing to install, and the child says so."""
+        result = self._child("accessor-route-is-already-native", "3.10-native-accessor-and-flavour-object")
+
+        assert "HALF:accessor-route:NATIVE" in result.stdout, result.stdout
+        assert "ACCESSOR_NATIVE" in result.stdout.split(), (
+            "the emulation built a stand-in over a live accessor route — on a "
+            f"real 3.10 that grades my copy instead of the interpreter:\n{result.stdout}"
+        )
+
+    def test_the_flavour_half_decides_before_it_reaches_3_12_only_plumbing(self):
+        """CI's exact crash, inverted into a pin.
+
+        On 3.10 and 3.11 the flavour is already an object, so the half must
+        answer NATIVE without ever asking for _parse_path. Reorder those two
+        checks and this goes red on the simulation below, which is the only
+        place a 3.12 box can see it.
+        """
+        result = self._child("flavour-is-already-an-object", "3.11-flavour-object-and-direct-resolve")
+
+        assert "HALF:flavour-object:NATIVE" in result.stdout, result.stdout
+        assert "Traceback" not in result.stderr, result.stderr
+
+    def test_an_unavailable_half_skips_rather_than_failing(self):
+        """The gate itself, which no shape on this host can reach.
+
+        Every half takes on 3.12, so the UNAVAILABLE lane is only reachable
+        through a simulation — and the DECISION it feeds (skip, not fail) is
+        reachable only by calling the gate. A skip that can silently become a
+        failure is how round 8's 3.10 leg reported a harness crash as an arming
+        defect.
+        """
+
+        class _Unavailable:
+            stdout = "HALF:flavour-object:UNAVAILABLE:this host has no _flavour at all\n"
+            stderr = ""
+
+        class _Fine:
+            stdout = "HALF:flavour-object:NATIVE\nROUTE_WAS_DARK\nACCESSOR_EMULATED\nROUTE_ARMED\n"
+            stderr = ""
+
+        instrument = TestTheRealpathDenialArmsOnEveryInterpreter()
+
+        with pytest.raises(Skipped) as skipped:
+            instrument._armed(_Unavailable(), "some-shape")
+        assert "UNAVAILABLE" in str(skipped.value), skipped.value
+
+        assert "ROUTE_ARMED" in instrument._armed(_Fine(), "some-shape"), (
+            "the gate skipped a child that reported perfectly well"
+        )
+
+    @pytest.mark.parametrize("simulation", ["purposixpath-has-no-flavour", "purepath-has-no-parse-path"])
+    def test_a_host_that_cannot_carry_the_stand_in_says_so_by_name(self, simulation):
+        """UNAVAILABLE is a skip with a reason, not a red on someone else's box."""
+        result = self._child(simulation, "3.10-native-accessor-and-flavour-object")
+
+        missing = _unavailable_half(result)
+        assert missing.startswith("HALF:flavour-object:UNAVAILABLE:"), (
+            f"the half neither installed nor explained itself under {simulation!r}:\n{result.stdout}\n{result.stderr}"
+        )
+        assert missing.split(":", 3)[3].strip(), f"UNAVAILABLE with no reason: {missing!r}"
+
+
+def _drive_row_is_satisfied(os_name: str, anchor_drive: str) -> bool:
+    """Does this host's ntpath.abspath answer the way its own row says it must?
+
+    A plain function of two values, so every row is reachable from any machine
+    — including the ones this box will never be. The world that supplies those
+    values is one test below; the decision is here.
+    """
+    if os_name == "nt":
+        return bool(anchor_drive)
+    if os_name == "posix":
+        return anchor_drive == ""
+    return False
 
 
 class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
@@ -978,16 +1306,40 @@ class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
         """The cure, pinned where it is spelled — there is exactly one spelling."""
         assert "abspath(os.sep)" in _PROBE_LITERAL, _PROBE_LITERAL
 
-    def test_the_drive_row_is_unfalsifiable_here_and_that_is_measured(self):
-        """Why the runner has to answer, rather than a hand-written expectation.
+    @pytest.mark.parametrize(
+        ("os_name", "anchor_drive", "expected"),
+        [
+            ("posix", "", True),
+            ("posix", "D:", False),
+            ("nt", "D:", True),
+            ("nt", "", False),
+            # No machine produces this, which is exactly why it is here:
+            # @commons' rule, that the judgement must be reachable for inputs
+            # the host cannot manufacture.
+            ("plan9", "", False),
+        ],
+    )
+    def test_the_drive_judgement_answers_for_hosts_this_one_is_not(self, os_name, anchor_drive, expected):
+        """The judgement, separated from the world that feeds it.
 
-        If this ever fails, posix ntpath grew a drive and the PROBE_NO_DRIVE
-        gate could be exercised locally after all — which would be better news
-        than the pin it replaces.
+        Round 8 red: the live version of this pin asserted "ntpath.abspath
+        produces no drive" with `here` hard-coded to a posix runner. On the
+        Windows host it produced D:, the assertion fired, and its message said
+        the row had "just become falsifiable" — true, and the pin's own
+        conclusion arriving as a failure. Split this way, the nt row is
+        reachable from Linux and the plan9 row is reachable from anywhere.
         """
-        assert ntpath.splitdrive(ntpath.abspath(ntpath.sep))[0] == "", (
-            "ntpath.abspath produced a drive on this platform — the row this "
-            "file declares unfalsifiable here just became falsifiable"
+        assert _drive_row_is_satisfied(os_name, anchor_drive) is expected
+
+    def test_the_live_host_satisfies_its_own_drive_row(self):
+        """And the world, fed to the judgement above."""
+        anchor_drive = ntpath.splitdrive(ntpath.abspath(ntpath.sep))[0]
+
+        assert _drive_row_is_satisfied(os.name, anchor_drive), (
+            f"host {os.name!r} produced anchor drive {anchor_drive!r}, which its "
+            "own row does not allow — on posix that means ntpath grew a drive "
+            "and the PROBE_NO_DRIVE gate is exercisable locally after all; on nt "
+            "it means the cured probe literal cannot carry one"
         )
 
 
@@ -998,24 +1350,61 @@ class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
 # module's realpath is just abspath, which reads the cwd only for a relative
 # path — so the two platforms genuinely disagree, and a pin that asserts the
 # posix answer everywhere is red on the runner.
+#
+# The abspath half is emulated too, and round 8 is why. win32 resolves a
+# rooted-driveless path against the CURRENT DRIVE via _getfullpathname; posix
+# ntpath has no drive to find, so it falls back to reading os.getcwd — and on
+# 3.13 it reaches that fallback for a rooted path where 3.12 short-circuited
+# (ntpath.isabs dropped the "LEGACY BUG" rooted-is-absolute case, 3.12:102 vs
+# 3.13:95). That is what killed the nt-absolute row on the 3.13 and coverage
+# legs: the probe was building its own argument through this function, inside
+# the world that had already denied the cwd. Supplying a drive makes the
+# emulated platform answer the way the real one does, on every version.
 _WINDOWS_EMULATED = """
     import ntpath, os, sys
 
+    _FAKE_DRIVE = "C:"
+
+    def _win32_abspath(path):
+        path = ntpath.normpath(os.fspath(path))
+        if not ntpath.splitdrive(path)[0]:
+            if path.startswith(ntpath.sep):
+                path = _FAKE_DRIVE + path
+            else:
+                path = ntpath.join(_FAKE_DRIVE + ntpath.sep, path)
+        return path
+
     def _win32_realpath(path, *, strict=False):
-        path = ntpath.normpath(path)
+        path = ntpath.normpath(os.fspath(path))
         cwd = os.getcwd()
         if not ntpath.isabs(path):
             path = ntpath.join(cwd, path)
         return path
 
+    ntpath.abspath = _win32_abspath
     ntpath.realpath = _win32_realpath
     os.path = ntpath
+    os.sep = ntpath.sep
     sys.modules["os.path"] = ntpath
 """
 
+# The other half of @memory's rule, and round 8's windows red: emulate BOTH
+# platforms or neither. A "posix" row that installs nothing is not a posix row
+# — it is the HOST, wearing a posix label, and on the Windows runner it
+# measured nt and disagreed with its own table.
+_POSIX_EMULATED = """
+    import os, posixpath, sys
+
+    os.path = posixpath
+    os.sep = posixpath.sep
+    sys.modules["os.path"] = posixpath
+"""
+
+_PLATFORM_EMULATIONS = {"posix": _POSIX_EMULATED, "nt": _WINDOWS_EMULATED}
+
 # route -> {absolute probe verdict, relative probe verdict} under a getcwd
-# denial. EVERY row is measured on this machine: the nt rows through the
-# emulation above, the posix rows live.
+# denial. EVERY row is measured through an explicit platform emulation, on
+# whatever host runs the file.
 _GETCWD_TABLE = {
     ("posix", "absolute"): "PATHLIB_INERT",
     ("posix", "relative"): "PATHLIB_ARMED",
@@ -1043,16 +1432,19 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     AND THE ROW @memory'S LITMUS CAUGHT BEFORE CI DID: run the probe under the
     OPPOSITE platform's emulation and require the verdict not to move. It
     moved. The absolute-path row is a POSIXPATH fact; on nt, realpath reads the
-    cwd before it looks at the path at all, so the same denial arms there. The
-    first cut of this class asserted the posix answer unconditionally and would
-    have gone red on the windows runner — the exact species it was written to
-    close, one platform over.
+    cwd before it looks at the path at all, so the same denial arms there.
+
+    ROUND 8 finished the same thought in the other direction: the posix rows
+    were running BARE, so on an nt host they measured nt under a posix label.
+    Both rows go through an explicit emulation now — emulate both platforms or
+    neither, which is the rule that produced this class in the first place.
     """
 
     def _verdict(self, route: str, probe: str) -> str:
         result = _run(
             _compose(
-                _WINDOWS_EMULATED if route == "nt" else "",
+                _PLATFORM_EMULATIONS[route],
+                _BUILD_PROBE_PATH,
                 _EMULATE_310,
                 _ARM_THE_ROUTE,
                 _INJECT_DEAD_CWD,
@@ -1061,7 +1453,23 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
             cwd=Path(__file__).parent,
         )
         lines = result.stdout.split()
+        assert "PROBE_NOT_ABS" not in lines, (
+            f"the probe literal is not absolute under the {route} emulation — an "
+            f"absolute path is whatever that platform says it is:\n{result.stdout}"
+        )
         assert "ROUTE_ARMED" in lines, f"the route never armed ({route}/{probe}):\n{result.stdout}\n{result.stderr}"
+
+        built = result.stdout.split("PROBE_PATH ", 1)[1].splitlines()[0]
+        if route == "nt":
+            assert ntpath.splitdrive(built)[0], (
+                "the windows emulation built a drive-less literal. On 3.12 that "
+                "changes nothing (ntpath.isabs still accepted rooted paths); on "
+                "3.13 abspath falls through to os.getcwd and the probe dies "
+                f"building its own argument: {built!r}"
+            )
+        else:
+            assert not ntpath.splitdrive(built)[0], f"a posix row produced a drive: {built!r}"
+
         armed = [line for line in lines if line.startswith("PATHLIB_")]
         assert armed, f"the probe reported nothing ({route}/{probe}):\n{result.stdout}\n{result.stderr}"
         return armed[0]
@@ -1078,26 +1486,26 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
         )
 
     def test_the_live_platform_agrees_with_its_own_row(self):
-        """The emulation is a stand-in; this is the host answering for itself."""
+        """The emulations are stand-ins; this is the host answering for itself."""
         route = "nt" if os.name == "nt" else "posix"
-        probe = "absolute"
 
         result = _run(
-            _compose(_EMULATE_310, _ARM_THE_ROUTE, _INJECT_DEAD_CWD, _PATHLIB_ROUTE_PROBE),
+            _compose(_BUILD_PROBE_PATH, _EMULATE_310, _ARM_THE_ROUTE, _INJECT_DEAD_CWD, _PATHLIB_ROUTE_PROBE),
             cwd=Path(__file__).parent,
         )
         lines = result.stdout.split()
         assert "ROUTE_ARMED" in lines, result.stdout
         live = [line for line in lines if line.startswith("PATHLIB_")][0]
 
-        assert live == _GETCWD_TABLE[(route, probe)], (
-            f"this host is {os.name!r} and answered {live} where its own table row says {_GETCWD_TABLE[(route, probe)]}"
+        assert live == _GETCWD_TABLE[(route, "absolute")], (
+            f"this host is {os.name!r} and answered {live} where its own table "
+            f"row says {_GETCWD_TABLE[(route, 'absolute')]}"
         )
 
     def test_the_relative_probe_is_inert_with_no_world_at_all(self):
         """The control for the control: no denial, no arming."""
         result = _run(
-            _compose(_EMULATE_310, _ARM_THE_ROUTE, _PATHLIB_ROUTE_PROBE_RELATIVE),
+            _compose(_BUILD_PROBE_PATH, _EMULATE_310, _ARM_THE_ROUTE, _PATHLIB_ROUTE_PROBE_RELATIVE),
             cwd=Path(__file__).parent,
         )
 
@@ -1106,21 +1514,72 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
             f"convicting for its own shape, not for the denial:\n{result.stdout}\n{result.stderr}"
         )
 
-    def test_the_windows_emulation_is_inert_without_the_denial(self):
-        """And the same for the platform stand-in itself.
+    def test_no_row_of_the_table_runs_bare(self):
+        """@memory's rule, pinned where it can rot: emulate BOTH or neither.
 
-        An emulation that raises on its own would make every nt row above
+        Round 8's windows red was a posix row with no prelude — which reads as
+        "posix" only while the host is posix. This host cannot tell a bare row
+        from an emulated one behaviourally (they are the same here), so the
+        claim is pinned on the table itself, which is where the mistake was.
+        """
+        for route, prelude in _PLATFORM_EMULATIONS.items():
+            assert prelude.strip(), (
+                f"the {route!r} row installs nothing, so it measures whatever "
+                "host runs it under a label that says otherwise"
+            )
+        assert set(_PLATFORM_EMULATIONS) == {row for row, _ in _GETCWD_TABLE}, (
+            "a table row has no platform emulation, or an emulation has no rows"
+        )
+
+    @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
+    def test_an_emulation_stacked_on_its_own_platform_is_one_layer(self, route):
+        """@seedgo's round-8 find, relayed by @devpulse, checked here.
+
+        They stacked an nt emulation on an nt-shaped world and recursed to the
+        stack limit: host == emulated is one layer, and an emulation whose
+        replacement calls the name it replaced eats itself. On the Windows
+        runner my nt emulation IS applied to a host where ntpath is already
+        os.path, so that is not a hypothetical for this file — it is just
+        invisible from Linux unless the emulation is applied twice.
+        """
+        result = _run(
+            _compose(
+                _PLATFORM_EMULATIONS[route],
+                _PLATFORM_EMULATIONS[route],
+                _BUILD_PROBE_PATH,
+                _EMULATE_310,
+                _ARM_THE_ROUTE,
+                _PATHLIB_ROUTE_PROBE,
+            ),
+            cwd=Path(__file__).parent,
+        )
+
+        assert "RecursionError" not in result.stderr, (
+            f"the {route} emulation calls the name it replaced — stacking it on "
+            f"its own platform recurses:\n{result.stderr[-400:]}"
+        )
+        assert "ROUTE_ARMED" in result.stdout.split(), (
+            f"the {route} emulation stopped working when applied twice:\n{result.stdout}\n{result.stderr}"
+        )
+
+    @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
+    def test_each_platform_emulation_is_inert_without_the_denial(self, route):
+        """And the same for the platform stand-ins themselves.
+
+        An emulation that raises on its own would make every row above
         vacuously ARMED — @canary's round-4 species, applied to a platform
         instead of a world.
         """
         result = _run(
-            _compose(_WINDOWS_EMULATED, _EMULATE_310, _ARM_THE_ROUTE, _PATHLIB_ROUTE_PROBE),
+            _compose(
+                _PLATFORM_EMULATIONS[route], _BUILD_PROBE_PATH, _EMULATE_310, _ARM_THE_ROUTE, _PATHLIB_ROUTE_PROBE
+            ),
             cwd=Path(__file__).parent,
         )
 
         assert "PATHLIB_INERT" in result.stdout.split(), (
-            "the windows emulation arms the probe with no denial installed — "
-            f"every nt row above is measuring the stand-in:\n{result.stdout}\n{result.stderr}"
+            f"the {route} emulation arms the probe with no denial installed — "
+            f"every {route} row above is measuring the stand-in:\n{result.stdout}\n{result.stderr}"
         )
 
 

@@ -1,3 +1,12 @@
+"""Telegram bot configuration, read from the @api secrets store.
+
+Every bot's token, username and allowed-user list lives in secrets and is
+fetched in-process through ``aipass.api.apps.modules.secrets`` - no
+subprocess, no stdout parsing, so a token never crosses a pipe. Also
+validates a config before a bot is started, because a half-configured bot
+that starts is worse than one that refuses.
+"""
+
 # Standard library
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Optional, List

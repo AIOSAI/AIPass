@@ -6,6 +6,14 @@
 # Modified: 2026-03-07
 # =============================================
 
+"""Skill scaffolding templates: resolve a tier, copy it, fill placeholders.
+
+Backs ``drone @skills create``. Three tiers ship - markdown_only,
+with_handler, full - and each is a real directory under ``templates/``
+copied wholesale, then rewritten in place so the new skill carries its own
+name. Refuses an unknown tier rather than guessing one.
+"""
+
 import shutil
 from pathlib import Path
 

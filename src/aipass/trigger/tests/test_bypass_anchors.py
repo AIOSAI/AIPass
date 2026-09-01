@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_bypass_anchors.py - line-scoped waivers must still point at their reason
 # Date: 2026-08-31
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: trigger/tests
 # =============================================
 
@@ -53,6 +53,20 @@ def test_there_is_something_to_anchor():
     stays full of file-scoped rules while the line-scoped subset goes to zero.
     """
     assert _ALL_RULES, f"no bypass rules parsed at all from {BYPASS_FILE}"
+
+    # Recount from the RAW file rather than from the collector under judgement
+    # (@drone's cure, relayed by @seedgo). Asserting LINE_SCOPED is non-empty
+    # only catches a collector blinded ENTIRELY; a filter that quietly drops one
+    # rule leaves a non-empty list and every remaining anchor still passing, so
+    # the dropped waiver goes unwatched with a green board above it.
+    raw = json.loads(BYPASS_FILE.read_text(encoding="utf-8"))["bypass"]
+    expected = sum(1 for rule in raw if rule.get("lines"))
+    assert len(LINE_SCOPED) == expected, (
+        f"the collector found {len(LINE_SCOPED)} line-scoped rules but the file "
+        f"holds {expected} - some waiver is being skipped, and its anchor is "
+        "not being checked by anything"
+    )
+
     assert LINE_SCOPED, (
         "no line-scoped waivers found - if the last one was genuinely retired, "
         "delete this file; if the parse broke, every anchor check below is "

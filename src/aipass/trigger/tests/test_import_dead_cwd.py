@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - trigger imports without a readable cwd
 # Date: 2026-08-31
-# Version: 1.2.0
+# Version: 1.3.0
 # Category: trigger/tests
 # =============================================
 
@@ -381,6 +381,13 @@ def _sentinel_moved(path, *, strict=False):
 
 
 _source_realpath = _sentinel_captured
+
+# The control FOR the eagerness control (@flow's shape, 2026-08-31). The
+# discriminator below is "did the answer follow the moved source name" - and it
+# can only discriminate while the two sentinels give DIFFERENT answers. Collapse
+# them to one string and the eagerness pin reports EAGER forever with nothing
+# saying so; measured as a surviving mutant here before this line existed.
+print("SENTINELS_DIFFER", _sentinel_captured(_ABS) != _sentinel_moved(_ABS))
 """
 
 # The win32 branch of ntpath.realpath, built BY NAME from ntpath's own helpers.
@@ -408,13 +415,46 @@ def _nt_shaped_realpath(path, *, strict=False):
 """
 
 _CAPTURE_HEAD = r"""
+import ntpath
 import os
 import posixpath
 import sys
 
-# ABSOLUTE on purpose: a relative path dies in abspath for its own shape and
-# would report ARMED whatever the patch did or failed to do.
-_ABS = sys.executable
+# ABSOLUTE on purpose - a relative path dies in abspath for its own shape and
+# would report ARMED whatever the patch did or failed to do - and absolute IN
+# BOTH DIALECTS, which is the round-8 correction.
+#
+# This was sys.executable, which is absolute in the HOST's dialect and nobody
+# else's. On the Windows runner that is D:\a\...\python.exe, and
+# posixpath.isabs() of it is FALSE - so the posix capture treated it as relative,
+# joined the denied cwd, and reported ARMED where the row demanded INERT. The
+# arming row had silently keyed on here-equals-a-posix-host.
+#
+# A rooted literal is absolute to posixpath AND to ntpath (drive-relative there,
+# which costs nothing since nothing resolves it), and exists on no machine, so
+# no filesystem can answer for the probe either. @spawn's sentence: the
+# platform-shaped assumption moves up a level each time it is cured - round 6
+# the world, round 7 the emulation, round 8 the thing that INSTALLS the probe.
+_ABS = "/AIPASS_NO_SUCH_PROBE_PATH"
+"""
+
+# Said out loud rather than assumed, and printed before any verdict: a row whose
+# probe is not absolute in the captured dialect is measuring the host's notion of
+# absoluteness, not the patch.
+#
+# posixpath ONLY, and that is a measurement rather than an oversight. The two
+# dialects are asymmetric (@flow's note, confirmed here): posixpath REFUSES an nt
+# literal, ntpath ACCEPTS a posix one and treats it as drive-relative. So there
+# is no path that is posix-absolute and not nt-absolute -
+#   '/x'    posix True  nt True
+#   'D:\x'  posix False nt True
+#   r'\\srv\s' posix False nt True
+# - and an `and ntpath.isabs(_ABS)` clause can never fire. It was here and a
+# mutant proved it: dropping it changed nothing. Named rather than kept looking
+# load-bearing. posixpath is the strict dialect, so it is the one that has to
+# agree, and every row shares one literal.
+_PROBE_CONTROL = r"""
+print("PROBE_IS_ABS", posixpath.isabs(_ABS))
 """
 
 # @spawn's ROUTE_ARMED/ROUTE_DARK: the emulation proves it TOOK the route before
@@ -504,6 +544,8 @@ def _capture_world(
     host: str = "posix",
     apply_patch: bool = False,
     bare_rebind: bool = False,
+    probe: str | None = None,
+    spoof_executable: str | None = None,
 ) -> str:
     """Assemble one capture world.
 
@@ -513,7 +555,15 @@ def _capture_world(
     host=    which dialect the SURROUNDING os.path.realpath speaks. Varying this
     while holding the capture fixed is the litmus.
     """
-    world = _CAPTURE_HEAD + _SENTINELS + _NT_SHAPED
+    world = ""
+    if spoof_executable is not None:
+        # Stand where the other platform stands, before the world computes
+        # anything from it.
+        world += f"import sys\n\nsys.executable = {spoof_executable!r}\n"
+    world += _CAPTURE_HEAD
+    if probe is not None:
+        world += f"_ABS = {probe!r}\n"
+    world += _PROBE_CONTROL + _SENTINELS + _NT_SHAPED
     world += f"\n_CAPTURED = {_CAPTURE_EXPR[capture]}\n"
     world += f"_HOST_REALPATH = {_HOST_EXPR[host]}\n"
     world += _ROUTE_CONTROL + _BUILD_ACCESSOR + _EAGER_CONTROL + _DENIAL_HEAD
@@ -526,6 +576,14 @@ def _capture_world(
 
 def _assert_emulation_sound(out: str, capture: str, host: str = "posix") -> None:
     """Nothing downstream may be believed until the emulation says it is real."""
+    assert "SENTINELS_DIFFER True" in out, (
+        "the two sentinels answer alike, so the eagerness discriminator below "
+        f"cannot report anything but EAGER - it is dark, not passing:\n{out}"
+    )
+    assert "PROBE_IS_ABS True" in out, (
+        "the probe path is not absolute to posixpath, the strict dialect, so this row is "
+        f"measuring the host's notion of absoluteness rather than the patch:\n{out}"
+    )
     assert "EMULATION_EAGER" in out, f"the emulation is not an eager capture - it describes another shape:\n{out}"
     if "nt" in (capture, host):
         assert "ROUTE_ARMED" in out, (
@@ -616,6 +674,80 @@ def test_the_litmus_is_armed_by_a_shape_whose_verdict_does_move(dialect: str, ex
         f"the pre-cure {dialect} capture no longer reads {expected} - the failure "
         f"this file was rebuilt around has stopped reproducing:\n{out}"
     )
+
+
+# A stand-in for each host's sys.executable, which is what the probe path used to
+# be. Absolute to its own dialect and to nothing else - which is the entire bug.
+_HOST_SHAPED_EXECUTABLE = {
+    "posix": "/usr/bin/python3",
+    "nt": "D:\\a\\AIPass\\AIPass\\.venv\\Scripts\\python.exe",
+}
+
+
+@pytest.mark.parametrize("host_shape", ["posix", "nt"])
+def test_a_host_shaped_probe_path_is_refused_rather_than_silently_answered(host_shape: str):
+    """The round-8 regression pin, and it convicts the INSTALLER not the world.
+
+    Round 7's probe path was sys.executable: absolute in the running host's
+    dialect and nobody else's. On the Windows runner posixpath.isabs() of it is
+    False, so the posix capture treated it as relative, joined the denied cwd,
+    and reported ARMED - and the row announced "the failure this file was rebuilt
+    around has stopped reproducing", which was a statement about the probe
+    wearing the words of a statement about the subject.
+
+    So the world now REFUSES a probe that is not absolute in both dialects and
+    says which thing is wrong, rather than answering a question it can no longer
+    read (@spawn's UNAVAILABLE-with-a-reason). This pin runs both host shapes on
+    this machine, so neither leg of the matrix has to discover it.
+    """
+    result = _run(_capture_world("posix", probe=_HOST_SHAPED_EXECUTABLE[host_shape]))
+    out = result.stdout
+
+    if host_shape == "posix":
+        # Absolute to posixpath here, so the row can still answer - and must.
+        assert "PROBE_IS_ABS True" in out, out
+        assert "CAPTURE_INERT" in out, f"a posix-absolute probe stopped being inert against the posix capture:\n{out}"
+        return
+
+    assert "PROBE_IS_ABS False" in out, (
+        "an nt-shaped executable path was accepted as absolute - "
+        f"posixpath.isabs() must reject it, or round 8 can happen again:\n{out}"
+    )
+    with pytest.raises(AssertionError, match="not absolute to posixpath"):
+        _assert_emulation_sound(out, "posix")
+
+
+@pytest.mark.parametrize("host_shape", ["posix", "nt"])
+def test_the_probe_path_does_not_follow_the_hosts_executable(host_shape: str):
+    """Convicts the round-8 defect ITSELF on this machine, not just its symptom.
+
+    The pin above proves the world refuses a bad probe when one is handed to it.
+    This one proves the world does not GO AND FETCH a bad one: sys.executable is
+    spoofed to each platform's shape before the world computes _ABS, and the
+    verdict must not move. A literal is immune; anything derived from the host -
+    sys.executable, os.getcwd(), __file__ - is convicted here rather than on the
+    runner that happens to have the other shape.
+    """
+    result = _run(_capture_world("posix", spoof_executable=_HOST_SHAPED_EXECUTABLE[host_shape]))
+    out = result.stdout
+
+    _assert_emulation_sound(out, "posix")
+    assert "CAPTURE_INERT" in out, (
+        f"the posix arming row moved when sys.executable took its {host_shape} shape - "
+        f"the probe path is following the host again:\n{out}"
+    )
+
+
+def test_the_shipped_probe_path_is_absolute_to_the_strict_dialect():
+    """The positive half: the literal actually shipped satisfies the rule.
+
+    Without this the pin above passes on a world that refuses EVERYTHING, which
+    would be a refusal wearing a control's name.
+    """
+    result = _run(_capture_world("posix"))
+
+    assert "PROBE_IS_ABS True" in result.stdout, result.stdout
+    _assert_emulation_sound(result.stdout, "posix")
 
 
 def test_repo_root_fallback_is_the_source_tree_never_the_process_directory():

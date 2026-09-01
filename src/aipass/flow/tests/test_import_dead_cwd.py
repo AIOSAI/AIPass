@@ -470,9 +470,17 @@ def _posix_realpath(path, *a, **k):
 
 
 os.path.realpath = _posix_realpath
+
+# The probe path, IN THIS EMULATION'S DIALECT. Round 8: it used to be built from
+# ``os.sep`` and ``pathlib.__file__`` — the HOST's dialect — and on the Windows
+# runner that is ``\\definitely\\not\\here``, which posixpath reads as RELATIVE.
+# posixpath.realpath reads the cwd for a relative path on every platform, so the
+# posix row convicted for the path's SHAPE and reported it as "the emulation is
+# not posix-shaped". The emulation was fine. Its INPUT was the host's.
+ABSOLUTE = "/definitely/not/here"
 """
 
-    NT_HOST = """
+    NT_HOST = r"""
 import os
 import ntpath
 
@@ -481,19 +489,67 @@ def _nt_realpath(path, *a, **k):
     # CPython's ntpath.realpath takes ``cwd = os.getcwd()`` while picking its
     # str/bytes prefixes — on the first lines, before it asks whether the path
     # is even absolute. Spelled out rather than aliased to ``ntpath.realpath``,
-    # because on a posix host that name IS ``ntpath.abspath``, which reads the
-    # cwd only for a relative path: aliasing it would emulate this host wearing
-    # an nt label, which is the exact defect this constant exists to prevent.
+    # because off Windows that name is a WRAPPER that returns ``abspath(path)``,
+    # which reads the cwd only for a relative path: aliasing it would emulate
+    # this host wearing an nt label, the exact defect this constant prevents.
+    #
+    # WRAPPER, not alias, and @skills paid for the distinction by source read:
+    # ntpath.py defines ``realpath`` twice and picks at import on whether
+    # ``nt._getfinalpathname`` exists, so off Windows you get a fallback ``def``
+    # rather than a rebinding. Measured here on 3.12.3 —
+    # ``ntpath.realpath is ntpath.abspath`` is FALSE. The consequence is what
+    # matters: anyone checking this edge with an ``is`` test gets a green that
+    # means nothing. Behaviour-equality is the claim; identity is not.
     os.getcwd()
     return ntpath.normpath(path)
 
 
 os.path.realpath = _nt_realpath
+
+# Drive-qualified, because that is what "absolute" means in this dialect. A
+# posix-shaped literal passes ``ntpath.isabs`` but is DRIVE-RELATIVE — @memory
+# measured ``ntpath.realpath('/tmp')`` returning ``D:\tmp`` on the runner — so
+# ``isabs`` alone is not enough to call a literal absolute here.
+#
+# THE ENCLOSING CONSTANT IS RAW, and it has to be: a non-raw triple-quote eats
+# the escapes before the child ever sees them, so ``\not\here`` arrived as a
+# NEWLINE and the emitted source was an unterminated string. The instrument's
+# INPUT was corrupted by the language the instrument is written in — the same
+# shape as the round-8 defect itself, one layer down.
+ABSOLUTE = r"C:\definitely\not\here"
 """
 
     # Both hosts, for the litmus. Named so a failing parametrisation says which
     # platform moved.
     HOSTS = {"posix": POSIX_HOST, "nt": NT_HOST}
+
+    # The RUNNER, as opposed to the emulated host: the platform the test process
+    # itself is executing on. Round 7's litmus varied the emulated host and held;
+    # round 8 reddened anyway, because three probes read the RUNNER — ``os.sep``
+    # and ``pathlib.__file__`` — to build their input. Varying the emulated world
+    # cannot see that. This constant makes the runner a variable too.
+    #
+    # It fakes only what a probe can read to build a path. It is NOT a world and
+    # must never be used as one.
+    WINDOWS_RUNNER = r"""
+import ntpath
+import os
+import pathlib
+
+os.path = ntpath
+os.sep = "\\"
+pathlib.__file__ = r"D:\a\AIPass\AIPass\.venv\Lib\pathlib.py"
+"""
+
+    # For compositions that install no host at all. The literal is deliberately
+    # built in the HOST's dialect here: with no emulation in play, "absolute"
+    # means whatever this interpreter means by it, and saying so beats a
+    # posix literal that would be drive-relative on Windows.
+    NO_HOST = """
+import os
+
+ABSOLUTE = os.path.join(os.sep, "definitely", "not", "here")
+"""
 
     # ------------------------------------------------------------------
     # The 3.10 construction, with a SENTINEL where the live function was
@@ -513,16 +569,32 @@ import os
 import pathlib
 
 
-def _captured_sentinel(path, *a, **k):
-    return path
+def _sentinel_captured(path, *a, **k):
+    return "CAPTURED"
+
+
+def _sentinel_moved(path, *a, **k):
+    return "MOVED"
+
+
+_source_realpath = _sentinel_captured
 
 
 class _Accessor:
-    realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does
+    realpath = staticmethod(_source_realpath)   # captured EAGERLY, as 3.10 does
+
+
+# The source name MOVES after the class body has run. An eager capture kept the
+# value and still answers CAPTURED; a lazy one follows the name and answers
+# MOVED. @trigger's escape, and it closes a hole their correction found in my
+# round-7 shape: a sentinel is stale-proof, so a LAZY wrapper AROUND a sentinel
+# returns exactly what an eager capture of it returns, and the eagerness pin goes
+# quietly dark while looking healthy. The durable form of an identity check is a
+# difference you CONSTRUCT. No platform behaviour appears anywhere in this.
+_source_realpath = _sentinel_moved
 
 
 _accessor = _Accessor()
-ABSOLUTE = str(pathlib.Path(pathlib.__file__))
 """
 
     # Called through the instance, with an absolute path, exactly as 3.10's
@@ -543,17 +615,33 @@ import os
 import pathlib
 
 
-def _captured_sentinel(path, *a, **k):
-    return path
+def _sentinel_captured(path, *a, **k):
+    return "CAPTURED"
+
+
+def _sentinel_moved(path, *a, **k):
+    return "MOVED"
+
+
+_source_realpath = _sentinel_captured
 
 
 class _NormalAccessor:
-    realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does
+    realpath = staticmethod(_source_realpath)   # captured EAGERLY, as 3.10 does
+
+
+# The source name MOVES after the class body has run. An eager capture kept the
+# value and still answers CAPTURED; a lazy one follows the name and answers
+# MOVED. @trigger's escape, and it closes a hole their correction found in my
+# round-7 shape: a sentinel is stale-proof, so a LAZY wrapper AROUND a sentinel
+# returns exactly what an eager capture of it returns, and the eagerness pin goes
+# quietly dark while looking healthy. The durable form of an identity check is a
+# difference you CONSTRUCT. No platform behaviour appears anywhere in this.
+_source_realpath = _sentinel_moved
 
 
 pathlib._NormalAccessor = _NormalAccessor
 _accessor = _NormalAccessor()
-ABSOLUTE = str(pathlib.Path(pathlib.__file__))
 """
 
     BARE_MODULE_PATCH_ONLY = """
@@ -581,6 +669,13 @@ os.getcwd = _dead_getcwd
 _Accessor.realpath = staticmethod(_denied_realpath)
 """
 
+    # Eagerness, measured as a value rather than as a consequence. Takes a bare
+    # string, not a path: there is no filesystem, no cwd and no dialect in this
+    # question, so none should be able to answer it.
+    EAGERNESS_PROBE = """
+print("EAGERNESS:", _accessor.realpath("probe"))
+"""
+
     # The real route: no emulated accessor anywhere, just this interpreter's own
     # pathlib. ``import pathlib`` comes FIRST so a 3.10 accessor takes its copy
     # BEFORE the world is installed — which is the only ordering under which the
@@ -603,6 +698,17 @@ except OSError:
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
+
+    @staticmethod
+    def _literal_from(host: str) -> str:
+        """The probe path a host publishes, read out of the constant itself.
+
+        Parsed rather than restated: a pin that hard-codes the literal it is
+        checking stops noticing when the constant changes, which is the failure
+        mode of every table written twice.
+        """
+        line = next(entry for entry in host.splitlines() if entry.startswith("ABSOLUTE = "))
+        return ast.literal_eval(line.split("=", 1)[1].strip())
 
     @staticmethod
     def _world_without_cure() -> str:
@@ -741,6 +847,70 @@ except OSError:
             f"measuring the host rather than the patch: {disagreed}"
         )
 
+    def test_no_verdict_moves_when_the_runner_itself_is_windows_shaped(self):
+        """ROUND 8's missing instrument, and the reason the round happened.
+
+        Round 7's litmus varied the emulated HOST and every verdict held — then
+        three pins reddened on the real Windows runner anyway. The litmus could
+        not see it, because the thing that differed was not the world under test
+        but the platform the PROCESS runs on: ``os.sep`` and ``pathlib.__file__``
+        are the runner's, and two probes built their input out of them.
+
+        So the runner is a variable now. Each direction runs twice — as-is, and
+        with the runner faked Windows-shaped — and no verdict may move. Reverting
+        the dialect-absolute probe literals reds this immediately, on Linux,
+        which is the whole point: the failure was only observable on hardware
+        nobody here has.
+
+        The fake covers exactly what a probe can read to construct a path. It is
+        deliberately not a world: emulating a platform's BEHAVIOUR is what
+        ``POSIX_HOST``/``NT_HOST`` do, and conflating the two is how a probe ends
+        up measuring its own scaffolding.
+        """
+        live_shape = self.SHAPE.replace("staticmethod(_source_realpath)", "staticmethod(os.path.realpath)")
+        directions = {
+            f"{host}:{name}": self.HOSTS[host] + body
+            for host in sorted(self.HOSTS)
+            for name, body in {
+                "bare-patch": self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.PROBE,
+                "published-cured": self.PUBLISHED_SHAPE + _WORLD_A + self.PROBE,
+                "published-no-cure": self.PUBLISHED_SHAPE + self._world_without_cure() + self.PROBE,
+                "live-capture": live_shape + self.BARE_MODULE_PATCH_ONLY + self.PROBE,
+            }.items()
+        }
+        moved = {
+            name: (self._run(body).strip(), self._run(self.WINDOWS_RUNNER + body).strip())
+            for name, body in directions.items()
+        }
+        disagreed = {name: pair for name, pair in moved.items() if pair[0] != pair[1]}
+
+        assert disagreed == {}, (
+            "a verdict changed when only the RUNNER changed. The world under test was "
+            "identical in both runs, so something in the probe is reading the host to "
+            "build its input — most likely a path spelled with os.sep or derived from a "
+            f"module's __file__, which posixpath reads as relative on Windows: {disagreed}"
+        )
+
+    def test_the_windows_runner_fake_actually_changes_what_a_probe_reads(self):
+        """Control: a fake that changes nothing passes the litmus above for free."""
+        probe = """
+import os
+import pathlib
+
+print("SEP:", repr(os.sep))
+print("HOST_BUILT:", repr(os.path.join(os.sep, "x")))
+print("PATHLIB_FILE_ABS_TO_POSIX:", __import__("posixpath").isabs(str(pathlib.__file__)))
+"""
+        plain = self._run(probe)
+        faked = self._run(self.WINDOWS_RUNNER + probe)
+
+        assert plain != faked, "the runner fake changed nothing a probe can read — the litmus above is vacuous"
+        assert "SEP: '\\\\'" in faked, f"the faked runner does not report a backslash separator: {faked}"
+        assert "PATHLIB_FILE_ABS_TO_POSIX: False" in faked, (
+            "under the faked runner posixpath still calls pathlib.__file__ absolute — then "
+            f"the round-8 mechanism is not reproduced and this control is not controlling: {faked}"
+        )
+
     def test_the_two_hosts_are_genuinely_different_worlds(self):
         """Control for the litmus: two identical hosts would pass it for free.
 
@@ -750,6 +920,11 @@ except OSError:
         ``NT_HOST`` posix-shaped reds here instead of silently disarming the
         litmus above.
         """
+        # ABSOLUTE comes from the host prefix, so each row is probed with a path
+        # its own dialect calls absolute. Building it here from ``os.sep`` is the
+        # round-8 defect: on the Windows runner that produced a backslash literal,
+        # posixpath read it as relative, and this pin reported "the posix
+        # emulation is not posix-shaped" about a perfectly good emulation.
         probe = """
 import os
 
@@ -760,7 +935,7 @@ def _dead_getcwd():
 
 os.getcwd = _dead_getcwd
 try:
-    os.path.realpath(os.path.join(os.sep, "definitely", "not", "here"))
+    os.path.realpath(ABSOLUTE)
     print("ABSOLUTE_READS_CWD: NO")
 except OSError:
     print("ABSOLUTE_READS_CWD: YES")
@@ -854,7 +1029,7 @@ except OSError:
         asserted structurally too, in both shapes.
         """
         for name, shape in (("SHAPE", self.SHAPE), ("PUBLISHED_SHAPE", self.PUBLISHED_SHAPE)):
-            assert "staticmethod(_captured_sentinel)" in shape, (
+            assert "_sentinel_captured" in shape and "staticmethod(_source_realpath)" in shape, (
                 f"{name} no longer captures a sentinel. If it captures the live "
                 "os.path.realpath, then on nt it captures ntpath.realpath, which reads "
                 "os.getcwd unconditionally — the ORIGINAL raises and 'it raised' stops "
@@ -865,6 +1040,56 @@ except OSError:
                 "import behaviour it is not testing (@memory, round 7)"
             )
 
+    @pytest.mark.parametrize("shape_name", ["SHAPE", "PUBLISHED_SHAPE"])
+    def test_the_capture_is_eager_measured_by_its_return_value(self, shape_name):
+        """@trigger's escape, adopted after their correction found the hole.
+
+        I told them an identity check beats a behavioural one because
+        "consequences can be satisfied by accident; identities cannot". They
+        showed the missing clause: identities cannot be satisfied by accident,
+        but they CAN GO DARK when the thing whose identity you are checking stops
+        being able to differ. A sentinel is stale-proof by construction, so a lazy
+        wrapper AROUND the sentinel returns exactly what an eager capture of it
+        returns — and every behavioural eagerness pin in this class answered the
+        same either way. Measured, not conceded: mutating ``PUBLISHED_SHAPE`` to a
+        lambda around the sentinel left ``test_the_published_shape_captures_eagerly``
+        GREEN. The pins that did catch it caught it on a string guard, which is
+        an accident of how the mutation was spelled.
+
+        So eagerness is a constructed difference now. The source name is rebound
+        AFTER the class body runs: an eager capture kept the value and answers
+        CAPTURED, a lazy one follows the name and answers MOVED. Return-value, and
+        no filesystem, cwd or path dialect anywhere in the question.
+        """
+        shape = getattr(self, shape_name)
+        out = self._run(shape + self.EAGERNESS_PROBE)
+
+        assert "EAGERNESS: CAPTURED" in out, (
+            f"{shape_name} did not keep the value bound at class creation — it is following "
+            "the source name, so it captures LAZILY and stops emulating 3.10, where the "
+            "accessor holds a copy taken at pathlib's first import: " + out
+        )
+
+    def test_the_eagerness_probe_can_report_the_other_answer(self):
+        """Control: a probe that can only print CAPTURED proves nothing.
+
+        Builds the lazy shape explicitly and requires MOVED, so the pin above is
+        known to be reading a two-valued question rather than a constant.
+        """
+        lazy = self.PUBLISHED_SHAPE.replace(
+            "realpath = staticmethod(_source_realpath)",
+            "realpath = staticmethod(lambda p, *a, **k: _source_realpath(p, *a, **k))",
+        )
+        assert lazy != self.PUBLISHED_SHAPE, "the lazy variant is not replacing anything"
+
+        out = self._run(lazy + self.EAGERNESS_PROBE)
+
+        assert "EAGERNESS: MOVED" in out, (
+            "a deliberately LAZY capture still answered CAPTURED — the source-name move is "
+            "not happening after the class body, so the pin above cannot distinguish "
+            "eager from lazy and is green by construction: " + out
+        )
+
     def test_a_lazy_capture_would_prove_nothing(self):
         """@seedgo's M9, pinned as a control on the emulation itself.
 
@@ -873,16 +1098,87 @@ except OSError:
         construction would silently stop reproducing 3.10.
         """
         lazy_shape = self.SHAPE.replace(
-            "realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does",
+            "realpath = staticmethod(_source_realpath)   # captured EAGERLY, as 3.10 does",
             "realpath = staticmethod(lambda p, *a, **k: os.path.realpath(p, *a, **k))",
         )
         assert lazy_shape != self.SHAPE, "the lazy variant is not replacing anything"
 
-        out = self._run(lazy_shape + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
+        out = self._run(self.NO_HOST + lazy_shape + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
 
         assert "ACCESSOR_DIES: YES" in out, (
             "a lazy capture did NOT follow the patched module attribute, so it is "
             "not the no-op M9 describes and this control is not controlling: " + out
+        )
+
+    def test_each_host_probes_with_a_path_its_own_dialect_calls_absolute(self):
+        """ROUND 8's red, and the rule it generalises to.
+
+        An instrument must not import behaviour it is not testing — and its
+        INPUTS are behaviour. Round 7 fixed the captured FUNCTION and left the
+        probe PATH built from ``os.sep`` and ``pathlib.__file__``, which are the
+        host's. On the Windows runner that yields ``\\definitely\\not\\here``;
+        posixpath reads it as RELATIVE, reads the cwd, and raises — so the posix
+        row convicted for the path's shape and announced "the posix emulation is
+        not posix-shaped" about an emulation that was doing its job.
+
+        Measured on every platform, because both dialect modules import
+        everywhere. Asserted with ``isabs`` from the dialect module BY NAME, for
+        the same reason the emulations are built that way.
+
+        THE TABLE IS NOT SYMMETRIC and pretending otherwise would hide the more
+        dangerous half:
+
+        * posixpath REFUSES an nt literal — ``isabs`` is False, and that refusal
+          is the whole round-8 defect;
+        * ntpath ACCEPTS a posix literal — ``isabs`` is True — but treats it as
+          DRIVE-RELATIVE, which is @memory's ``ntpath.realpath('/tmp') ->
+          D:\\tmp`` on the runner. So an nt probe path must carry a DRIVE, and
+          ``isabs`` alone is not enough to call it absolute.
+        """
+        import ntpath
+        import posixpath
+
+        posix_literal = self._literal_from(self.POSIX_HOST)
+        nt_literal = self._literal_from(self.NT_HOST)
+
+        assert posixpath.isabs(posix_literal), (
+            f"the posix host probes with {posix_literal!r}, which posixpath does not call "
+            "absolute — posixpath.realpath reads the cwd for a relative path on EVERY "
+            "platform, so this row would convict for the path's shape"
+        )
+        assert ntpath.isabs(nt_literal) and ntpath.splitdrive(nt_literal)[0], (
+            f"the nt host probes with {nt_literal!r}, which carries no drive — ntpath "
+            "resolves a driveless path against the current drive, so the row measures the "
+            "runner's volume rather than the emulation"
+        )
+
+        # The negative half: this is what went wrong, stated as a fact rather
+        # than as history, so it reds if anyone reintroduces a host-built path.
+        assert not posixpath.isabs(nt_literal), (
+            "an nt-shaped literal is absolute to posixpath — then the round-8 defect had "
+            "no mechanism and this pin is not guarding what it claims"
+        )
+        assert not ntpath.splitdrive(posix_literal)[0], (
+            "a posix literal carries a drive — the drive-relative asymmetry above is not real"
+        )
+
+    def test_the_real_route_probe_deliberately_uses_the_host_dialect(self):
+        """The one exception, pinned so it is not "fixed" into a bug.
+
+        ``REAL_ROUTE_PROBE`` exercises THIS interpreter's own ``pathlib`` with no
+        emulation anywhere, so the host's dialect is the correct one and
+        ``os.sep`` is the right way to build its path. Replacing it with a posix
+        literal would make the probe drive-relative on Windows and quietly change
+        what the 3.10 row measures.
+        """
+        assert "os.sep" in self.REAL_ROUTE_PROBE, (
+            "the real-route probe stopped building its path from os.sep. It has no "
+            "emulation installed, so a fixed literal would be the WRONG dialect on one "
+            "platform — this is the one probe that should read the host"
+        )
+        assert "ABSOLUTE" not in self.REAL_ROUTE_PROBE, (
+            "the real-route probe now reads a host constant's ABSOLUTE — it installs no "
+            "host, so that name is either undefined or leaking in from a composition"
         )
 
     def test_each_host_is_built_from_its_own_dialect_module(self):
@@ -938,9 +1234,7 @@ except OSError:
         # sentinel shape reports NO in both directions and proves nothing, which
         # is how the first version of this pin failed. Run under POSIX_HOST so the
         # absolute probe convicts only when the patch landed.
-        live_capture = self.PUBLISHED_SHAPE.replace(
-            "staticmethod(_captured_sentinel)", "staticmethod(os.path.realpath)"
-        )
+        live_capture = self.PUBLISHED_SHAPE.replace("staticmethod(_source_realpath)", "staticmethod(os.path.realpath)")
         assert live_capture != self.PUBLISHED_SHAPE
 
         before = self._run(self.POSIX_HOST + live_capture + world + self.PROBE)
@@ -982,7 +1276,7 @@ except OSError:
         green the sentinel has stopped being necessary and somebody should find
         out why before deleting it.
         """
-        live_capture = self.SHAPE.replace("staticmethod(_captured_sentinel)", "staticmethod(os.path.realpath)")
+        live_capture = self.SHAPE.replace("staticmethod(_source_realpath)", "staticmethod(os.path.realpath)")
         assert live_capture != self.SHAPE
 
         relative = self.PROBE.replace("_accessor.realpath(ABSOLUTE)", '_accessor.realpath("./somewhere")')

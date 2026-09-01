@@ -13,6 +13,73 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 8: the assumption moves up a level every time it is cured — round 7's
+  instruments were sound, and the machinery that installs them was not**
+  (FPLAN-0461 continued). Round 7's board (commit 68ab5132) came back 20/20
+  checks with six non-green and **zero production defects** — the first board
+  where Windows ran the fleet's own litmus for real: an nt host, and every
+  expectation still keyed on "here = posix host" moved. Six owners, every red an
+  instrument, every cure red-first on Linux. **Spawn** (930×2, 14/16 mutants + 2
+  named equivalents) owned the largest share and the round's sentence: *the
+  version-shaped assumption moves up a level every time it is cured* — round 6
+  the world, round 7 the emulation, round 8 the installer. Their shape preludes
+  reached `PurePath._parse_path` (3.12+; older interpreters spell it
+  `_parse_args`), so the child died before printing and all 37 failures on
+  3.10/3.11 wore the arming probe's message — *a harness crash wears the message
+  of the instrument it never reached*. Their 3.13 red was the probe building its
+  own input **inside** the world it measures, meeting 3.13's ntpath dropping the
+  legacy clause that kept rooted-driveless paths absolute; the cure vocabulary —
+  halves with three verdicts (NATIVE / INSTALLED / UNAVAILABLE-with-the-child's-
+  own-reason), decisions by measurement not `hasattr`, the probe literal built
+  once and its VALUE reused — is the round's export. They also corrected the
+  dispatcher's brief by measurement: the coverage leg runs **3.13, not 3.12**
+  (ci.yml:101), so the "dies under the coverage tracer" hypothesis is refuted —
+  one mechanism had been counted twice. **Flow** (1029×2 + bare-checkout, 13/13)
+  extended the verdict: *an instrument's inputs are behaviour too* — round 7
+  cured the captured function and left the probe path built from `os.sep` and
+  `pathlib.__file__`, the runner's spelling, which posixpath rightly reads as
+  relative; and they named the litmus's missing dimension — it varied the
+  emulated host, but what convicted CI was the platform the **process** runs on,
+  so WINDOWS_RUNNER now fakes exactly what a probe can read to build a path and
+  is deliberately *not* a world. Their confession pair: a structural check that
+  reddened on its own documentation, and an nt literal mangled by its enclosing
+  triple-quote (`\not` became a newline — the instrument's input corrupted by
+  the language it is written in). **Trigger** (1092×2, 0 skips) refuted the
+  dispatcher's mechanism while confirming the conclusion — the probe path was
+  `sys.executable`, drive-lettered on the runner, and the fix a one-line
+  dialect-neutral literal; their addendum deleted a control clause a mutant
+  proved could never fire ("it looked more careful than what replaced it") and
+  found their own round-7 two-sentinel discriminator gone dark one round later
+  by the mechanism it guarded against. Their round-9 line rides ahead: *a mutant
+  report should say which assertion fired, not only how many — false kills are
+  worse than false survivors, because nobody re-examines a kill.* **Seedgo**
+  (2869×2, 8/8) named the verdict's mirror — *an instrument must not REMOVE
+  behaviour it is not testing* — after their 3.10 emulation stubbed the accessor
+  a real 3.10 routes its whole API through, decapitating the interpreter before
+  the measured defect was reached; and their windows red was their own round-7
+  sentence ("absolute never reads the cwd is a posixpath fact") shipped as a
+  constant one file over — the nt alias row is now *reported* as unfalsifiable
+  there rather than asserted away. Their stacking find (host == emulated is one
+  layer) was acted on by spawn the same hour: applied each emulation twice,
+  pinned no-recursion, and killed the mutant that proves the property is
+  measured, with seedgo's name on the pin. **Skills** cured **six** docstring
+  files, not the three CI flagged nor the five seedgo's mail named — the sixth
+  was invisible to both lists because its verdict never *moved*, and seedgo's
+  list was correctly a diff of moved verdicts: *a handed list is a lower bound
+  whenever the thing that produced it is a diff — re-measure until the number
+  stops moving.* They also caught spawn's `ntpath.py:678` citation reading `:673`
+  on 3.12.3 — the ordering travels, the line number doesn't. **Ai_mail** (1446×2)
+  reproduced their discarded string-after-import before fixing it (`__doc__` was
+  None on the live module), worked the tree not the list, and named an unarmed
+  species for seedgo to confirm: an f-string opening a module body reads as a
+  docstring to a human and is refused by `ast.get_docstring`. The seedgo-audit
+  leg itself was the dispatcher's own train collision — `--all` swept the new
+  ast-based checker onto CI before the flagged owners had fixed their files.
+  Composed verify before this commit: full universe from the repo root under
+  exact CI mode, plus per-branch both-rootdirs by every owner; the train
+  deliberately carries seedgo's held work (the posix-literal checker pack, the
+  docstring rule, the settle-recheck, and the round-7 litmus pins).
+
 - **Round 7: an instrument must not import behaviour it is not testing — the
   round-6 instruments met the interpreters and platforms they were built to
   emulate, and lost everywhere except home** (FPLAN-0461 continued). Round 6's

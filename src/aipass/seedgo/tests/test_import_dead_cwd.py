@@ -313,6 +313,64 @@ os.getcwd = _dead_getcwd_bare
 # runs, so the mutation has no behaviour to change. Run round 7, M5.
 
 
+# A HOST THAT IS ALREADY 3.10-SHAPED, so the round-8 red is falsifiable HERE.
+#
+# The emulation below exists to give a 3.11+ host the pre-3.11 shape. On CI's
+# real 3.10 leg the host ALREADY had it - and the emulation replaced a
+# fully-featured accessor with a two-method stand-in, so pathlib's own API lost
+# the methods it routes through and every module import died on
+# `AttributeError: '_NormalAccessor' object has no attribute 'mkdir'`.
+#
+# Emulated BY PROPERTY, exactly as the nt world is: the discriminating fact is
+# that a pre-3.11 pathlib ROUTES THROUGH the accessor (mkdir at pathlib.py:1175
+# is `self._accessor.mkdir(self, mode)`), not merely that the attribute exists.
+# A host that only carries the attribute is not the shape - the first version of
+# this reproduction did exactly that and both arms came back green, which is the
+# alias trap one dimension over: an emulation that quietly agrees with its host
+# is indistinguishable from a cure.
+EMULATE_NATIVE_ACCESSOR_HOST = """
+import os
+import pathlib
+
+
+class _NativeAccessor:
+    # Stands in for CPython 3.10's real _NormalAccessor. MANY methods, not two -
+    # which is the whole point of the reproduction.
+    realpath = staticmethod(os.path.realpath)
+    getcwd = staticmethod(os.getcwd)
+    mkdir = staticmethod(os.mkdir)
+
+
+def _pre_311_mkdir(self, mode=0o777, parents=False, exist_ok=False):
+    # CPython 3.10 pathlib.py:1175, INCLUDING the parents/exist_ok handling
+    # around it. The first version of this stand-in called the accessor and
+    # stopped there - so mkdir(parents=True, exist_ok=True) raised
+    # FileExistsError the moment the directory already existed, and the pin
+    # riding this world went red in a FULL SUITE RUN while passing alone,
+    # because a fresh temp log dir exists by then and did not before.
+    #
+    # An instrument must not remove behaviour it is not testing - the same rule
+    # this whole world exists to enforce, broken inside the reproduction of the
+    # break. Order-dependence is what exposed it: a single-test run said green.
+    try:
+        self._accessor.mkdir(str(self), mode)
+    except FileNotFoundError:
+        if not parents or self.parent == self:
+            raise
+        self.parent.mkdir(parents=True, exist_ok=True)
+        self.mkdir(mode, parents=False, exist_ok=exist_ok)
+    except OSError:
+        if not exist_ok or not self.is_dir():
+            raise
+
+
+pathlib._NormalAccessor = _NativeAccessor
+pathlib._normal_accessor = _NativeAccessor()
+pathlib.Path._accessor = pathlib._normal_accessor
+pathlib.Path.mkdir = _pre_311_mkdir
+"""
+
+
 # A 3.10-SHAPED pathlib, so the accessor claim is falsifiable HERE.
 #
 # @ai_mail's round-5 finding, one dimension over: a table row no local platform
@@ -374,24 +432,45 @@ class _NormalAccessor:
 
 
 _normal_accessor = _NormalAccessor()
-pathlib._NormalAccessor = _NormalAccessor
-pathlib._normal_accessor = _normal_accessor
 
+# THE HOST MAY ALREADY BE THIS SHAPE, and if it is, emulating DESTROYS it.
+#
+# Measured on the round-8 3.10 leg of 68ab5132: a real 3.10 pathlib routes its
+# whole API through the accessor (mkdir at pathlib.py:1175 is
+# `self._accessor.mkdir(self, mode)`), so replacing a fully-featured accessor
+# with this two-method stand-in decapitated the interpreter and every module
+# import died on `AttributeError: '_NormalAccessor' object has no attribute
+# 'mkdir'`. The pin was red for the emulation, not for the defect.
+#
+# The general rule this file had already learned once and did not apply here: an
+# instrument must not import behaviour it is not testing - and the mirror image
+# is that it must not REMOVE behaviour it is not testing either. On a host that
+# already has the pre-3.11 shape there is nothing to emulate; the host IS the
+# subject, and the emulation's whole job is to give a 3.11+ host that shape.
+#
+# Which arm ran is PRINTED rather than assumed, because a silent no-op and a
+# silent replacement look identical from downstream (@spawn's ROUTE_ARMED /
+# ROUTE_DARK vocabulary, arrived at independently on the same CI board).
+if getattr(pathlib, "_NormalAccessor", None) is not _NormalAccessor and hasattr(pathlib, "_NormalAccessor"):
+    print("ACCESSOR_NATIVE")
+else:
+    pathlib._NormalAccessor = _NormalAccessor
+    pathlib._normal_accessor = _normal_accessor
 
-def _pre_311_resolve(self, strict=False):
-    # CPython 3.10 pathlib.py:1077 — called through the INSTANCE, which is why
-    # a world must patch the class attribute the instance falls through to.
-    return pathlib.Path(_normal_accessor.realpath(str(self), strict=strict))
+    def _pre_311_resolve(self, strict=False):
+        # CPython 3.10 pathlib.py:1077 - called through the INSTANCE, which is
+        # why a world must patch the class attribute the instance falls
+        # through to.
+        return pathlib.Path(_normal_accessor.realpath(str(self), strict=strict))
 
+    def _pre_311_cwd(cls):
+        # CPython 3.10 pathlib.py:1088 - cls(cls._accessor.getcwd()).
+        return cls(cls._accessor.getcwd())
 
-def _pre_311_cwd(cls):
-    # CPython 3.10 pathlib.py:1088 — cls(cls._accessor.getcwd()).
-    return cls(cls._accessor.getcwd())
-
-
-pathlib.Path.resolve = _pre_311_resolve
-pathlib.Path._accessor = _normal_accessor
-pathlib.Path.cwd = classmethod(_pre_311_cwd)
+    pathlib.Path.resolve = _pre_311_resolve
+    pathlib.Path._accessor = _normal_accessor
+    pathlib.Path.cwd = classmethod(_pre_311_cwd)
+    print("ACCESSOR_EMULATED")
 """
 
 
@@ -479,6 +558,44 @@ def world_b_result():
     return _run(PRELOAD + ARM_WORLD_B + _import_every_module_body())
 
 
+#: The three answers the nt arming probe can honestly give, kept as a plain
+#: judgement over measured values so every row is reachable on any host
+#: (@commons' judgement/world separation, round 5).
+ALIAS_DISCRIMINATION_LIVE = "ARMED_AND_DISCRIMINATING"
+ALIAS_DISCRIMINATION_UNFALSIFIABLE = "ARMED_BUT_INDISTINGUISHABLE_FROM_AN_ALIAS"
+EMULATION_NOT_ARMED = "NOT_ARMED"
+
+
+def _alias_discrimination_verdict(host_reads_cwd: bool, emulated_reads_cwd: bool) -> str:
+    """What the nt arming probe can claim, given what it measured.
+
+    THE ROUND-8 RED IS THE SECOND ROW. The probe asserted the HOST does not read
+    the cwd for an absolute path — a posixpath fact, written as a portable
+    baseline, inside the pin built to catch exactly that species. Windows ran it
+    for real and answered True: on nt, ``os.path.realpath`` IS ntpath's, which
+    reads ``os.getcwd()`` unconditionally (ntpath.py:678).
+
+    On such a host the emulation cannot be told apart from @flow's M3 alias trap,
+    because an alias and the by-property emulation produce the same answer there.
+    That row is genuinely unfalsifiable on nt, so it is REPORTED as unfalsifiable
+    rather than asserted away — @ai_mail's round-5 rule, one platform over: a row
+    no local host can contradict enters silently, so pin the decision instead of
+    a guess.
+
+    Args:
+        host_reads_cwd: Whether the bare host reads the cwd for an ABSOLUTE path.
+        emulated_reads_cwd: The same measurement under the nt emulation.
+
+    Returns:
+        One of the three module constants above.
+    """
+    if not emulated_reads_cwd:
+        return EMULATION_NOT_ARMED
+    if host_reads_cwd:
+        return ALIAS_DISCRIMINATION_UNFALSIFIABLE
+    return ALIAS_DISCRIMINATION_LIVE
+
+
 class TestTheInstrumentsCanFire:
     """Positive controls: each world must still kill the code the cure deleted."""
 
@@ -532,6 +649,94 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A + body)
         assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
+    def test_the_emulation_is_INERT_on_a_host_that_already_has_an_accessor(self, tmp_path):
+        """The round-8 3.10 red, held closed on this interpreter forever.
+
+        On CI's real 3.10 the host already had the pre-3.11 shape, and the
+        emulation replaced a fully-featured accessor with a two-method stub -
+        so pathlib lost the methods it routes its own API through and every
+        seedgo module import died on `AttributeError: '_NormalAccessor' object
+        has no attribute 'mkdir'`. Red for the instrument, not the defect.
+        """
+        probe = (
+            "import pathlib, tempfile\n"
+            "target = pathlib.Path(tempfile.mkdtemp()) / 'sub'\n"
+            "target.mkdir()\n"
+            "print('MKDIR_WORKED')\n"
+        )
+        result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + EMULATE_PY310_PATHLIB + probe)
+        assert "ACCESSOR_NATIVE" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "MKDIR_WORKED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_emulation_still_TAKES_on_a_host_without_one(self, tmp_path):
+        """The other half. An emulation that had learned to do nothing would
+        satisfy the pin above and quietly take every 3.10 claim in this file
+        dark - which is the arming-probe defect wearing a fix's clothes."""
+        probe = "print('BODY_RAN')\n"
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + probe)
+        assert "ACCESSOR_EMULATED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "BODY_RAN" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_native_host_emulation_ROUTES_and_does_not_merely_declare(self, tmp_path):
+        """Arming probe for the reproduction itself.
+
+        My first version of this world only SET pathlib._NormalAccessor. Both
+        arms came back green, because on 3.12 nothing reads it - the world
+        declared the shape without having it. A host that carries the attribute
+        and does not route through it cannot reproduce the red, and an emulation
+        that quietly agrees with its host is indistinguishable from a cure.
+        """
+        probe = (
+            "import pathlib, tempfile\n"
+            "seen = []\n"
+            "_real = pathlib.Path._accessor.mkdir\n"
+            "pathlib.Path._accessor.mkdir = lambda *a, **k: (seen.append(1), _real(*a, **k))[1]\n"
+            "(pathlib.Path(tempfile.mkdtemp()) / 'sub').mkdir()\n"
+            "print('MKDIR_WENT_THROUGH_ACCESSOR:', bool(seen))\n"
+        )
+        result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + probe)
+        assert "MKDIR_WENT_THROUGH_ACCESSOR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_native_host_mkdir_honours_parents_and_exist_ok(self, tmp_path):
+        """The fidelity of the stand-in, pinned rather than left to run order.
+
+        Without this the gap is only visible when a directory already exists -
+        which in a full suite it does and in a single-test run it does not. The
+        pin above went red in the suite and green alone, and a mutant deleting
+        the exist_ok arm still survived a two-file selection. An emulation is
+        only as honest as the behaviour it keeps.
+        """
+        probe = (
+            "import pathlib, tempfile\n"
+            "root = pathlib.Path(tempfile.mkdtemp()) / 'a' / 'b'\n"
+            "root.mkdir(parents=True, exist_ok=True)\n"
+            "root.mkdir(parents=True, exist_ok=True)\n"
+            "print('PARENTS_AND_EXIST_OK_HONOURED')\n"
+        )
+        result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + probe)
+        assert "PARENTS_AND_EXIST_OK_HONOURED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_every_module_imports_on_a_NATIVE_accessor_host_too(self, tmp_path):
+        """The failing CI pin's own shape, run under the host that failed it.
+
+        This is the pin the round-8 red actually killed - restated so that the
+        3.10 leg's world is reachable from here. If the emulation ever goes back
+        to replacing a native accessor, this reds on 3.12 rather than waiting
+        for a CI leg nobody runs locally.
+        """
+        modules = _seedgo_modules()
+        assert modules, "no seedgo modules enumerated - this pin would be vacuous"
+        body = (
+            "import importlib\n"
+            f"for name in {modules[:40]!r}:\n"
+            "    importlib.import_module(name)\n"
+            "print('ALL_IMPORTED')\n"
+        )
+        world = EMULATE_NATIVE_ACCESSOR_HOST + EMULATE_PY310_PATHLIB + ARM_WORLD_A
+        result = _run(PRELOAD + world + body)
+        assert "ACCESSOR_NATIVE" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "ALL_IMPORTED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
     def test_the_bare_patch_control_holds_on_an_NT_SHAPED_HOST_TOO(self, tmp_path):
         """THE LITMUS, and the pin that would have caught the round-6 red here.
 
@@ -560,29 +765,102 @@ class TestTheInstrumentsCanFire:
         result = _run(PRELOAD + world + body)
         assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_nt_emulation_is_armed_and_is_not_an_ntpath_alias(self, tmp_path):
-        """Arming probe for the litmus itself, plus @flow's M3 trap named.
+    ABSOLUTE_CWD_PROBE = (
+        "import os\n"
+        "_abs = os.path.abspath(os.sep)\n"
+        "print('PROBE_IS_ABS:', os.path.isabs(_abs))\n"
+        "_seen = []\n"
+        "_real_getcwd = os.getcwd\n"
+        "os.getcwd = lambda: (_seen.append(1), _real_getcwd())[1]\n"
+        "os.path.realpath(_abs)\n"
+        "print('ABSOLUTE_PATH_READ_CWD:', bool(_seen))\n"
+    )
 
-        Asserts the emulation actually CHANGED the cwd-reading behaviour for an
-        ABSOLUTE path — which is the whole difference — rather than being an
-        alias of ntpath that on this host is just abspath again and reproduces
-        nothing.
+    def _reads_cwd_for_an_absolute_path(self, host: str = "") -> bool:
+        """Measure it, on whatever host `host` makes this child into."""
+        result = _run(PRELOAD + host + self.ABSOLUTE_CWD_PROBE)
+        assert "PROBE_IS_ABS: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "ABSOLUTE_PATH_READ_CWD:" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        return "ABSOLUTE_PATH_READ_CWD: True" in result.stdout
+
+    def test_the_nt_emulation_is_armed_and_says_what_it_can_discriminate(self, tmp_path):
+        """Arming probe for the litmus, keyed on what it MEASURED.
+
+        The version this replaces asserted `ABSOLUTE_PATH_READ_CWD: False` for
+        the bare host - a posixpath fact written as a portable baseline, in the
+        pin whose job is to catch that species. Windows ran it for real on the
+        round-8 board and answered True, because on nt os.path.realpath IS
+        ntpath's and reads the cwd unconditionally (ntpath.py:678).
+
+        So the baseline is measured rather than assumed, and the probe reports
+        WHICH claim it can support: on a posix-shaped host the emulation is
+        distinguishable from @flow's M3 alias trap; on an nt-shaped host it is
+        not, and saying so is the honest answer rather than a row filled in with
+        a guess.
         """
-        probe = (
-            "import os\n"
-            "_abs = os.path.abspath(os.sep)\n"
-            "print('PROBE_IS_ABS:', os.path.isabs(_abs))\n"
-            "_seen = []\n"
-            "_real_getcwd = os.getcwd\n"
-            "os.getcwd = lambda: (_seen.append(1), _real_getcwd())[1]\n"
-            "os.path.realpath(_abs)\n"
-            "print('ABSOLUTE_PATH_READ_CWD:', bool(_seen))\n"
+        host_reads = self._reads_cwd_for_an_absolute_path()
+        emulated_reads = self._reads_cwd_for_an_absolute_path(EMULATE_NT_REALPATH)
+
+        verdict = _alias_discrimination_verdict(host_reads, emulated_reads)
+        assert verdict != EMULATION_NOT_ARMED, (
+            "the nt emulation did not change an absolute path's cwd-reading behaviour, "
+            "so every pin riding it measures nothing"
         )
-        plain = _run(PRELOAD + probe)
-        emulated = _run(PRELOAD + EMULATE_NT_REALPATH + probe)
-        assert "PROBE_IS_ABS: True" in emulated.stdout, emulated.stdout
-        assert "ABSOLUTE_PATH_READ_CWD: False" in plain.stdout, plain.stdout
-        assert "ABSOLUTE_PATH_READ_CWD: True" in emulated.stdout, emulated.stdout
+        if verdict == ALIAS_DISCRIMINATION_LIVE:
+            assert host_reads is False
+        else:
+            # Recorded, not skipped. The emulated half is still asserted above;
+            # what cannot be measured here is only whether an ALIAS would have
+            # produced the same answer - which on this host it would.
+            assert host_reads is True
+
+    @pytest.mark.parametrize(
+        "host_reads,emulated_reads,expected",
+        [
+            (False, True, ALIAS_DISCRIMINATION_LIVE),
+            (True, True, ALIAS_DISCRIMINATION_UNFALSIFIABLE),
+            (False, False, EMULATION_NOT_ARMED),
+            (True, False, EMULATION_NOT_ARMED),
+        ],
+    )
+    def test_the_verdict_table_is_reachable_on_any_host(self, host_reads, emulated_reads, expected):
+        """Every row runnable here, including the nt one no Linux box can
+        produce live. A literal table, so it cannot vanish."""
+        assert _alias_discrimination_verdict(host_reads, emulated_reads) == expected
+
+    def test_the_probe_answers_TRUE_on_an_nt_SHAPED_HOST_and_the_pin_survives_it(self, tmp_path):
+        """The round-8 red reproduced on Linux, and held closed.
+
+        Running the bare-host measurement under the nt property is what CI did
+        for real. The old pin asserted False here and died; this one measures
+        True, routes to the unfalsifiable verdict, and still asserts the half it
+        can support.
+        """
+        # ONE application, read twice. Stacking the emulation on itself is not
+        # "an nt host with the emulation applied" - it is a wrapper capturing a
+        # module name it then rebinds, which recurses until the stack ends. That
+        # is @flow's round-7 self-eating emulation in miniature, and it is the
+        # reason the nt host is modelled as host == emulated rather than as two
+        # layers: on nt the emulation IS the host's own behaviour, which is
+        # exactly why the alias row goes unfalsifiable there.
+        host_reads = self._reads_cwd_for_an_absolute_path(EMULATE_NT_REALPATH)
+        emulated_reads = host_reads
+        assert host_reads is True
+        assert _alias_discrimination_verdict(host_reads, emulated_reads) == (ALIAS_DISCRIMINATION_UNFALSIFIABLE)
+
+    def test_an_ALIAS_emulation_is_caught_where_it_can_be_caught(self, tmp_path):
+        """@flow's M3 trap, still pinned on the host that can see it.
+
+        On posix, aliasing ntpath.realpath is just abspath again and reproduces
+        nothing - the emulation would report NOT_ARMED. This is the pin that
+        makes the by-property emulation load-bearing rather than stylistic, and
+        it is why the unfalsifiable row above is a loss worth naming: on nt this
+        check cannot run at all.
+        """
+        alias_world = "import ntpath, os\nos.path.realpath = ntpath.realpath\n"
+        if self._reads_cwd_for_an_absolute_path():
+            pytest.skip("nt-shaped host: an alias IS the host here, so this cannot discriminate")
+        assert self._reads_cwd_for_an_absolute_path(alias_world) is False
 
     def test_world_a_ARMS_against_a_310_shaped_pathlib(self, tmp_path):
         """The cure, measured on the interpreter shape this machine does not

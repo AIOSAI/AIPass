@@ -6,6 +6,14 @@
 # Modified: 2026-03-07
 # =============================================
 
+"""Skill registry: one deduplicated catalogue built from the search paths.
+
+Walks project, global and built-in paths in priority order and keeps the
+FIRST skill of any given name, so a project skill shadows a built-in of the
+same name rather than colliding with it. Also serves single-skill and
+name-only lookups off that same list.
+"""
+
 from pathlib import Path
 
 from aipass.skills.apps.handlers.json import json_handler

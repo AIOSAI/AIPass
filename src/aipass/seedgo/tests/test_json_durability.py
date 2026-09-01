@@ -316,6 +316,67 @@ class TestConcurrentReadersSeeAWholeDocument:
         assert sorted(p.name for p in json_dir.iterdir()) == ["race_data.json"]
 
 
+#: How long to let a suspected orphan settle before convicting it. A
+#: mid-rename staging file is gone in milliseconds; a real orphan is there
+#: until someone deletes it. Only paid when the first look found something,
+#: so a clean run costs nothing.
+ORPHAN_SETTLE_SECONDS: float = 0.75
+
+
+def _staging_files_now(live_dir: Path) -> set:
+    """Staging temps in `live_dir` that carry THIS handler's prefix.
+
+    Args:
+        live_dir: The directory the live documents are written to.
+
+    Returns:
+        Bare filenames.
+    """
+    document_stems = {p.stem for p in live_dir.glob("*.json")}
+    return {p.name for p in live_dir.glob("*.tmp") if any(p.name.startswith(s) for s in document_stems)}
+
+
+def _orphans_that_survive_a_settle(live_dir: Path, preexisting: set, *, settle=None, sleep=None) -> tuple:
+    """Look twice, and convict only what is there both times.
+
+    THE RACE THIS CLOSES, caught by @devpulse on the round-7 commit gate: the
+    detector convicted `utils_logc9s1tpcu.tmp` and the file was GONE under a
+    minute later. It was a concurrent citizen's write through the shared handler,
+    caught mid-``os.replace``. The detector found exactly what it looks for - the
+    file simply was not an ORPHAN yet.
+
+    That is unavoidable in a single look: a staging file and an orphan are the
+    same bytes in the same place, and the only thing separating them is TIME. On
+    a machine with live citizens (this one, always - daemon, watchers, agents
+    answering mail) a busy gate run will keep hitting it.
+
+    So the discriminator is persistence, not appearance. A mid-rename temp is
+    gone in milliseconds; a real orphan is there until somebody deletes it.
+
+    Args:
+        live_dir: The directory the live documents are written to.
+        preexisting: Staging files present at session start.
+        settle: Seconds to wait before the second look. Injected for the pins.
+        sleep: The sleep callable. Injected so a pin can prove the settle is
+            SKIPPED on a clean first look rather than merely fast.
+
+    Returns:
+        `(all_ours_now, convicted)` - everything with our prefix, and the new
+        orphans that survived both looks.
+    """
+    settle = ORPHAN_SETTLE_SECONDS if settle is None else settle
+    sleep = time.sleep if sleep is None else sleep
+
+    ours = _staging_files_now(live_dir)
+    suspects = ours - preexisting
+    if not suspects:
+        return ours, set()
+
+    sleep(settle)
+    ours_after = _staging_files_now(live_dir)
+    return ours_after, suspects & (ours_after - preexisting)
+
+
 class TestLiveDocumentsStillParse:
     """A fix that lands on a real branch must not orphan what is already there."""
 
@@ -348,15 +409,18 @@ class TestLiveDocumentsStillParse:
 
         Pre-existing orphans are warned about, never silently accepted — a
         baseline nobody is told about is how a leak becomes permanent.
+
+        SCOPE BY PERSISTENCE: a staging file and an orphan are the same bytes in
+        the same place, separated only by time, so a single look convicts a
+        healthy write caught mid-rename. See `_orphans_that_survive_a_settle`.
         """
         live_dir = json_handler.JSON_DIR
         if not live_dir.exists():
             pytest.skip("no live json dir on this checkout")
-        document_stems = {p.stem for p in live_dir.glob("*.json")}
-        ours = {p.name for p in live_dir.glob("*.tmp") if any(p.name.startswith(s) for s in document_stems)}
+        ours, convicted = _orphans_that_survive_a_settle(live_dir, preexisting_live_tmp_files)
         for stale in sorted(ours & preexisting_live_tmp_files):
             warnings.warn(f"pre-existing orphan staging file in {live_dir}: {stale}", stacklevel=2)
-        assert sorted(ours - preexisting_live_tmp_files) == []
+        assert sorted(convicted) == []
 
 
 class TestHelperUsesTheAtomicPrimitives:
@@ -375,3 +439,98 @@ class TestHelperUsesTheAtomicPrimitives:
         json_handler._atomic_write_json(target, {"a": 1})
         assert len(calls) == 1
         assert calls[0][1] == str(target)
+
+
+class TestTheOrphanDetectorConvictsPersistenceNotAppearance:
+    """@devpulse's round-7 gate weather, made falsifiable on any machine.
+
+    The gate convicted `utils_logc9s1tpcu.tmp` and the file was gone under a
+    minute later - a concurrent citizen's write caught mid-``os.replace``. These
+    pins reproduce both sides of that race by CONSTRUCTION rather than by
+    waiting for a busy machine, because a race reproduced only under load is a
+    race that will be re-litigated every time the gate is quiet.
+    """
+
+    def _dir_with(self, tmp_path: Path, tmp_names) -> Path:
+        (tmp_path / "utils_log.json").write_text("{}", encoding="utf-8")
+        for name in tmp_names:
+            (tmp_path / name).write_text("partial", encoding="utf-8")
+        return tmp_path
+
+    def test_a_staging_file_that_VANISHES_is_acquitted(self, tmp_path):
+        """The convicted-healthy case. The sleep is where the rename lands."""
+        live = self._dir_with(tmp_path, ["utils_logc9s1tpcu.tmp"])
+
+        def rename_during_the_settle(_seconds):
+            (live / "utils_logc9s1tpcu.tmp").unlink()
+
+        _, convicted = _orphans_that_survive_a_settle(live, set(), settle=0, sleep=rename_during_the_settle)
+        assert convicted == set()
+
+    def test_a_staging_file_that_PERSISTS_is_still_convicted(self, tmp_path):
+        """The positive control, and the reason the cure is a re-check rather
+        than a skip. A detector that stopped convicting would pass every pin
+        above it and find nothing forever."""
+        live = self._dir_with(tmp_path, ["utils_logc9s1tpcu.tmp"])
+        _, convicted = _orphans_that_survive_a_settle(live, set(), settle=0, sleep=lambda _s: None)
+        assert convicted == {"utils_logc9s1tpcu.tmp"}
+
+    def test_a_clean_first_look_does_NOT_pay_the_settle(self, tmp_path):
+        """Not a performance note - a correctness one. If the settle ran
+        unconditionally, every clean run in the fleet would wait for it, and a
+        cure that taxes the 99.9%% of runs it does nothing for gets deleted by
+        whoever is next in a hurry."""
+        live = self._dir_with(tmp_path, [])
+        slept = []
+        _, convicted = _orphans_that_survive_a_settle(live, set(), settle=99, sleep=lambda s: slept.append(s))
+        assert convicted == set()
+        assert slept == []
+
+    def test_a_suspect_that_is_pre_existing_does_not_trigger_a_settle(self, tmp_path):
+        """The session-diff narrowing still comes FIRST. A machine carrying an
+        old orphan would otherwise pay the settle on every run forever."""
+        live = self._dir_with(tmp_path, ["utils_logold.tmp"])
+        slept = []
+        ours, convicted = _orphans_that_survive_a_settle(
+            live, {"utils_logold.tmp"}, settle=99, sleep=lambda s: slept.append(s)
+        )
+        assert convicted == set()
+        assert slept == []
+        assert "utils_logold.tmp" in ours
+
+    def test_a_foreign_prefix_is_still_out_of_scope_after_the_settle(self, tmp_path):
+        """The prefix narrowing survives the change. incremental_cache writes
+        `tmp<random>.tmp` into the same directory and is not this handler's."""
+        live = self._dir_with(tmp_path, ["tmp2ay2d070.tmp"])
+        ours, convicted = _orphans_that_survive_a_settle(live, set(), settle=0, sleep=lambda _s: None)
+        assert convicted == set()
+        assert ours == set()
+
+    def test_a_second_orphan_appearing_DURING_the_settle_is_not_convicted(self, tmp_path):
+        """The claim stays exactly as narrow as it was: a file that shows up
+        after the first look was not caught by the first look either, and
+        convicting it would re-open the flake from the other end - a healthy
+        write started DURING the settle would be convicted by its own arrival.
+
+        MY FIRST VERSION OF THIS PIN WAS VACUOUS and a mutant said so. It seeded
+        an empty directory, so the first look found no suspects, the function
+        returned before the settle, and the late file was never even created.
+        The mutant that drops the intersection survived the whole file. A pin
+        that exercises an early return while claiming to test what comes after
+        it is the arming-probe defect one level down: it measured nothing and
+        reported the same green as a working pin. Run round 7, M17.
+        """
+        live = self._dir_with(tmp_path, ["utils_logreal.tmp"])
+
+        def arrives_late(_seconds):
+            (live / "utils_lognew.tmp").write_text("partial", encoding="utf-8")
+
+        _, convicted = _orphans_that_survive_a_settle(live, set(), settle=0, sleep=arrives_late)
+        assert convicted == {"utils_logreal.tmp"}
+
+    def test_the_settle_is_long_enough_to_outlast_a_rename(self):
+        """The premise this cure rests on, stated as a number rather than left
+        implicit: os.replace on a local filesystem is orders of magnitude faster
+        than the settle. If that stops being true the cure stops working, and
+        this pin is where it would be noticed."""
+        assert ORPHAN_SETTLE_SECONDS >= 0.5

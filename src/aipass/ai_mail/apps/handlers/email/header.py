@@ -1,13 +1,10 @@
 # =================== AIPass ====================
 # Name: header.py
 # Description: Email Header Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-04
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
-
-
-from aipass.ai_mail.apps.handlers.json import json_handler
 
 """
 Email Header Handler
@@ -15,7 +12,16 @@ Email Header Handler
 Generates and prepends headers to outgoing emails.
 Critical dispatch header ensures agents see memory update reminder FIRST.
 Independent handler - no module dependencies.
+
+This string OPENS the module body, before the import. It sat after the import
+until 2026-08-31, where Python evaluates it, discards it, and leaves __doc__
+None — the file read as documented to every human and to nothing that reads
+__doc__ (help(), pydoc, @seedgo's old line-scan checker). Found by @seedgo's
+rewrite onto ast.get_docstring; the position is the whole point, so keep any
+new import BELOW this string.
 """
+
+from aipass.ai_mail.apps.handlers.json import json_handler
 
 # Header for dispatch emails - agents see this FIRST before the task
 DISPATCH_HEADER = """⚡ DISPATCH TASK - READ THIS FIRST ⚡

@@ -6,6 +6,15 @@
 # Modified: 2026-03-07
 # =============================================
 
+"""Skill requirement checking: can this skill actually run here?
+
+Reads the ``requires`` block of a SKILL.md - pip packages, CLI binaries,
+config keys - and reports each missing piece by name. Backs
+``drone @skills validate``. Answers about the CURRENT machine only: a skill
+that validates here may still be unrunnable elsewhere, so the result is a
+measurement and never a promise.
+"""
+
 import importlib.util
 import os
 import shutil
