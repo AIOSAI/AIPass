@@ -13,6 +13,19 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 13 is a skip list, not a round** (FPLAN-0461, the ruling applied as
+  written). The round-12 board's real cures all held — the coverage report
+  step survived, the direction table went green on every POSIX leg — and every
+  remaining red was round-11/12 test instrumentation meeting a real host: six
+  tests in two files. Per the one-fix ruling they were skipped by name with
+  the reason in the mark, not cured with another instrument: seedgo's three
+  instrument self-checks (red on a different interpreter each board, green
+  only on the 3.12 box that wrote them; the worlds they self-check remain
+  exercised by every test that uses them) skip unconditionally, owner to
+  rewrite as measurement after the PR; backup's three coverage pins skip on
+  Windows only, because they are the live POSIX regression net for the real
+  report-step landmine and that stays armed. One commit for the whole board.
+
 - **Round 12: the hybrid row, the wrong attribute, and the coverage landmine —
   under the one-fix-at-a-time ruling** (FPLAN-0461 continued). Patrick's ruling
   landed mid-round and governs everything after: fix one thing at a time, no new

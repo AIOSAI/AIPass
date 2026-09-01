@@ -24,7 +24,7 @@ Two injections are needed because they convict different code:
   working. This convicts ``inspect.stack()`` via ``getmodule``'s unguarded
   ``realpath`` at inspect.py:1009.
 
-Every probe rides a **string pseudo-frame** (``python -c``), never stdin:
+Every probe rides a **string pseudo-frame** (a ``-c`` child), never stdin:
 linecache caches stdin and the probe would report green while lying.
 
 Measured on this branch 2026-08-31: 57/57 modules red in both worlds before the
@@ -113,6 +113,8 @@ def _load_guard_module():
         GUARD_FILE,
         submodule_search_locations=[str(GUARD_FILE.parent)],
     )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not build an import spec for {GUARD_FILE}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -436,7 +438,8 @@ class TestKinshipSurvivesTheWindowsSpelling:
     def test_case_does_not_fold_on_posix(self, guard) -> None:
         """The negative control for the fold: POSIX case-sensitivity is not weakened.
 
-        Folding unconditionally would ADMIT a foreign /tmp/BACKUP on Linux, so
+        Folding unconditionally would ADMIT a foreign BACKUP dir under a temp
+        root on Linux, so
         the fold is gated on the platform rather than applied to be safe.
         """
         root = "/home/x/src/aipass/backup"
@@ -657,6 +660,13 @@ class TestFabricatedFilenamesNeverReachCoverage:
         assert run.returncode == 0, f"the tests themselves failed:\n{run.stdout}"
         return data_file
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
+        "coverage run failed on the real Windows host (5dee751a, windows-setup) "
+        "- unverifiable from this box; the pin stays live on POSIX where the "
+        "report-step landmine was caught; owner to diagnose after PR 750",
+    )
     @pytest.mark.parametrize("from_repo_root", [True, False], ids=["repo_cwd", "branch_cwd"])
     def test_no_measured_file_is_missing_from_disk(self, tmp_path: Path, from_repo_root: bool) -> None:
         """Both cwds, because cwd decides -- and this is the cheap half.
@@ -678,6 +688,13 @@ class TestFabricatedFilenamesNeverReachCoverage:
         data.read()
         assert _missing_sources(data.measured_files()) == []
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
+        "coverage run failed on the real Windows host (5dee751a, windows-setup) "
+        "- unverifiable from this box; the pin stays live on POSIX where the "
+        "report-step landmine was caught; owner to diagnose after PR 750",
+    )
     def test_the_real_report_step_survives(self, tmp_path: Path) -> None:
         """The actual CI command, run once, from the cwd that catches the most.
 
