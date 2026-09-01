@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -453,3 +454,49 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
 
     # Even though wake_in raised, the finally block must have deregistered.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# default storage path — where the store lands when nobody passes one
+
+
+class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
+    """The 2026-08-31 CI red: on a fresh checkout (no AIPASS_REGISTRY.json
+    anywhere — the marker is machine-local runtime state, exactly like the
+    hermetic_mail_doors story one fixture up) the old walk found nothing and
+    fell back to Path.cwd(). The composed runner hands every child cwd = repo
+    root, so an unrelated test exercising agent.watch planted .watchdog/ in
+    the tree — convicted by seedgo's left-nothing-behind fixture on its first
+    live catch. The store is package state: it belongs where the package
+    lives, derived from __file__, the same answer on a dev machine, a fresh
+    checkout, and a dead cwd.
+    """
+
+    def test_the_default_path_ignores_cwd_entirely(self, tmp_path, monkeypatch):
+        """From a marker-less cwd the default must NOT be under that cwd.
+
+        Red against the old code: the walk fails (no marker above tmp_path,
+        no parent named devpulse) and the fallback answers tmp_path/.watchdog.
+        """
+        from aipass.devpulse.apps.handlers.watchdog import registry as reg
+        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
+
+        monkeypatch.chdir(tmp_path)
+        for mod in (reg, tmr):
+            default = mod._default_storage_path()
+            assert not default.is_relative_to(tmp_path), (
+                f"the default store landed at the caller's feet — the cwd fallback is back: {default}"
+            )
+
+    def test_the_default_path_lives_inside_the_package(self, tmp_path, monkeypatch):
+        """The store resolves next to the code that owns it, from anywhere."""
+        from aipass.devpulse.apps.handlers.watchdog import registry as reg
+        from aipass.devpulse.apps.handlers.watchdog import timer as tmr
+
+        monkeypatch.chdir(tmp_path)
+        package_root = Path(reg.__file__).resolve().parents[3]
+        assert package_root.name == "devpulse", (
+            f"the layout assumption this test rests on moved — re-derive parents[N]: {package_root}"
+        )
+        assert reg._default_storage_path() == (package_root / ".watchdog" / "watchdog_active.json")
+        assert tmr._default_storage_path() == (package_root / ".watchdog" / "watchdog_timers.json")

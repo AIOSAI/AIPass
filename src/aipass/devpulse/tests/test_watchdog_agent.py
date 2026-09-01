@@ -28,6 +28,24 @@ from pathlib import Path
 import pytest
 
 from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_watch_store(tmp_path, monkeypatch):
+    """Every watch_agent call registers a handle via the DEFAULT store path.
+
+    Unpatched, these tests wrote the live .watchdog/watchdog_active.json —
+    and before the __file__-derived root (2026-08-31) they wrote wherever the
+    process stood, which on CI's composed runner was the repo root. Module-
+    local autouse, per this branch's conftest philosophy: the registry pin
+    tests measure _default_storage_path itself and must not inherit a patch.
+    """
+    monkeypatch.setattr(
+        watch_registry,
+        "_default_storage_path",
+        lambda: tmp_path / "watchdog_active.json",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

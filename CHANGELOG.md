@@ -13,6 +13,47 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 11: the fixture's first catch, the captured accessor, and the end of
+  arms** (FPLAN-0461 continued). Round 10's board (c5b6e173): six red legs and
+  every red ONE FILE — while spawn's import guard went green on every leg for
+  the first time in six boards and seedgo's alias cures held everywhere. Three
+  tests. The first was seedgo's day-old left-nothing-behind fixture CONVICTING
+  A REAL FLEET DEFECT on its first live catch — and the defect was devpulse's
+  own: the watchdog storage resolver walked up from Path.cwd() looking for
+  AIPASS_REGISTRY.json (machine-local, absent on every fresh checkout) and
+  fell back to Path.cwd()/.watchdog, so a parallel devpulse test planted
+  .watchdog/ at the repo root on CI — invisible on every dev machine because
+  the marker exists there, and the timer copy carried a comment defending the
+  fallback as production-only, refuted by CI within a day. Cured by devpulse:
+  root derived from __file__, both walks and both fallbacks deleted, red-first
+  pins reproducing the exact fallback answer before the fix, agent tests
+  hermetic via module-local autouse. The other two were seedgo's own round-10
+  pins carrying the species one level up — the assumption in the assertion of
+  the very pin that documents the assumption. ROUTES_THROUGH pinned "Path's
+  routing module IS os.path" — the 3.12 spelling; the fact that DECIDES the
+  route is the pre-3.11 CAPTURED ACCESSOR (pathlib holds a private copy of
+  realpath a module patch can never reach), measured by a spy and pinned as a
+  four-row literal table falsifiable from 3.12 twice over. DISARMS_world_a's
+  negative control asserted a 3.11+ fact on every interpreter — and devpulse's
+  machine-shaped diagnosis was REFUTED WITH RECEIPTS (child run from a
+  marker-less cwd: still survives), while devpulse's OWN overclaim (red on
+  all six including 3.12) was corrected on seedgo's challenge: the 3.12 leg
+  carried only the watchdog conviction, and the correction relocated the one
+  unexplained leg to 3.13 — where a targeted addendum found THE THIRD
+  MECHANISM: 3.13's resolve reads os.path at call time, so the chimera does
+  not sever the route, it MOVES it — world A's own patch rides along on
+  ntpath and the defect dies. The cure is the end of arms: after three rounds
+  of predict-from-version-and-platform tables each refuted by a real host,
+  the control now ASKS THE CHILD which routes survive the chimera — right on
+  3.13, nt, pre-3.11, and interpreters nobody has shipped yet, without naming
+  any of them. The sweep pre-killed three more 3.13 reds and caught seedgo's
+  own hour-old pin carrying the species it was written to cure. Fleet lines
+  banked: an arm that only fires on a host you do not have needs a table,
+  not a branch (the mutant that deletes it is invisible on the only machine
+  you can run); a new world needs its stand-down and its host-already-has-one
+  pin on day one. Devpulse 607x2, seedgo 2916x2 across the two passes, audits
+  100.
+
 - **Round 10: the assumption moves into the assertion next** (FPLAN-0461
   continued). Round 9's board (84175b82): production clean a FOURTH consecutive
   board, red owners down to two, five unique failing tests — and spawn's

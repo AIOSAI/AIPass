@@ -509,6 +509,75 @@ sys.modules["os.path"] = ntpath
 
 EMULATE_NT_HOST_IDENTITY = _NT_HOST_UNCONDITIONAL_CWD + _NT_HOST_MODULE_IDENTITY
 
+#: A FLAVOUR THAT IS AN OBJECT, which is what 3.10 and 3.11 actually carry and
+#: what made round 10's routing pin red on three legs. Meant to be stacked on
+#: EMULATE_PY310_PATHLIB, which redirects resolve through the accessor first -
+#: without that, a 3.12 pathlib would ask this object for realpath and the
+#: emulation would decapitate the interpreter instead of shaping it.
+#:
+#: It REFUSES realpath by name. CPython 3.10's _PosixFlavour carries parsing
+#: and nothing else, so a stand-in that answered would be friendlier than the
+#: thing it stands in for - @spawn's round-10 lesson, applied where it bites.
+EMULATE_OBJECT_FLAVOUR_HOST = """
+import pathlib
+import posixpath
+
+
+class _ObjectFlavour:
+    sep = posixpath.sep
+    altsep = ""
+    has_drv = False
+    pathmod = posixpath
+
+    def __getattr__(self, name):
+        if name == "realpath":
+            raise AttributeError("a 3.10 flavour has no realpath; resolve goes through the accessor")
+        return getattr(posixpath, name)
+
+
+# THE HOST MAY ALREADY BE THIS SHAPE - 3.10 and 3.11 are - and installing over
+# a real _PosixFlavour would REMOVE behaviour this world is not testing: the
+# real one answers parse_parts, casefold and make_uri, none of which posixpath
+# has, so the delegation below would decapitate the very interpreter it is
+# imitating. Round 8 taught me that with a two-method accessor; the same rule,
+# one namespace over.
+_existing = getattr(pathlib.PurePath, "_flavour", None)
+if _existing is not None and not isinstance(_existing, type(posixpath)):
+    print("OBJECT_FLAVOUR_NATIVE")
+else:
+    pathlib.Path._flavour = _ObjectFlavour()
+    pathlib.PurePath._flavour = pathlib.Path._flavour
+    print("OBJECT_FLAVOUR_INSTALLED")
+"""
+
+#: A 3.13-SHAPED RESOLVE, built from the round-11 CI evidence rather than from a
+#: source line I can read on this box (this machine has only 3.12).
+#:
+#: WHAT THE EVIDENCE SAYS: on the real 3.13 runner the chimera fails to disarm
+#: world A - DEFECT_DIED: FileNotFoundError, verbatim identical to the 3.10 leg
+#: (@devpulse, round-11 addendum) - even though 3.13 has no _NormalAccessor and
+#: no _flavour, so the captured-accessor mechanism cannot be the reason.
+#:
+#: The shape that produces that answer is a resolve which reads ``os.path`` AT
+#: CALL TIME instead of through a class attribute: pointing os.path at ntpath
+#: then MOVES the route rather than breaking it, and the patch rides along. This
+#: world installs exactly that and nothing else, so the arm below is a
+#: measurement here instead of a prediction about an interpreter I cannot run.
+EMULATE_313_RESOLVE_READS_OS_PATH = """
+import os
+import pathlib
+
+
+def _resolve_313(self, strict=False):
+    # The distinguishing property: os.path is looked up NOW, so whatever it
+    # points at is the route.
+    return pathlib.Path(os.path.realpath(str(self), strict=strict))
+
+
+pathlib.Path.resolve = _resolve_313
+print("RESOLVE_READS_OS_PATH_AT_CALL_TIME")
+"""
+
 #: Make this child a host with NO accessor, whatever interpreter it is running
 #: on. Round 9's second red: `test_the_emulation_still_TAKES_on_a_host_without
 #: _one` asserted ACCESSOR_EMULATED unconditionally, which is only true where
@@ -759,6 +828,74 @@ ALIAS_CATCHABLE = "ALIAS_IS_CATCHABLE_HERE"
 ALIAS_LOST_TO_PLATFORM = "ALIAS_INDISTINGUISHABLE:the alias IS this host"
 ALIAS_LOST_TO_VERSION = "ALIAS_INDISTINGUISHABLE:ntpath no longer calls a rooted literal absolute"
 ALIAS_LOST_TO_BEHAVIOUR = "ALIAS_INDISTINGUISHABLE:a foreign ntpath read the cwd anyway"
+
+
+CONTROL_EXPECTS_DEATH = "WORLD_A_STILL_CONVICTS"
+CONTROL_EXPECTS_SURVIVAL = "WORLD_A_IS_DISARMED"
+
+
+def _chimera_control_expectation(reaches_under_chimera: bool, has_captured_accessor: bool) -> str:
+    """What breaking the ``os.path`` identity should do to world A here.
+
+    Three interpreters answered this differently and each one taught the same
+    lesson later than the last. Pre-3.11 the captured accessor is a second
+    route the break cannot touch. On 3.13 the break MOVES the route instead of
+    severing it, because resolve reads ``os.path`` at call time - so the
+    world's own patch rides along. Only where neither holds does the control
+    actually disarm anything.
+
+    Both facts are measured in the same child that runs the control, so this
+    is a judgement over readings rather than a table keyed on a version or an
+    operating system - the shape that has been wrong three rounds running.
+
+    Args:
+        reaches_under_chimera: Whether a patch on ``os.path.realpath`` still
+            reaches ``resolve`` once ``os.path`` points at ntpath.
+        has_captured_accessor: Whether pathlib holds a pre-3.11 accessor.
+
+    Returns:
+        One of the two module constants above.
+    """
+    if reaches_under_chimera or has_captured_accessor:
+        return CONTROL_EXPECTS_DEATH
+    return CONTROL_EXPECTS_SURVIVAL
+
+
+ROUTE_VIA_MODULE = "A_MODULE_PATCH_REACHES_RESOLVE"
+ROUTE_VIA_ACCESSOR = "A_MODULE_PATCH_IS_NOT_READ_AGAIN:pathlib captured its own copy"
+ROUTE_UNEXPLAINED = "NO_ROUTE_EXPLAINS_THIS_HOST"
+
+
+def _module_patch_route(has_captured_accessor: bool, flavour_is_os_path: bool) -> str:
+    """Whether rebinding ``os.path.realpath`` can reach ``Path.resolve`` here.
+
+    Every arming world in this file rests on this and round 10 wrote the
+    3.12-shaped SPELLING of it down as a pin: "Path's routing module IS
+    os.path". CI answered honestly on 3.10 and 3.11 - there ``_flavour`` is a
+    ``_PosixFlavour`` OBJECT and the probe reported False - and the pin that
+    existed to document the assumption had the assumption in its assertion.
+
+    The fact that decides the route is not the flavour's spelling but whether
+    pathlib holds a CAPTURED COPY. Before 3.11 ``_NormalAccessor`` took
+    ``realpath = staticmethod(os.path.realpath)`` at class creation and
+    ``resolve`` called ``self._accessor.realpath`` (pathlib.py:358 and 1077),
+    so rebinding the module attribute rebinds a name nothing reads again -
+    which is why ARM_WORLD_A patches the accessor TOO, and why measuring it
+    here is measuring the thing the worlds actually depend on.
+
+    Args:
+        has_captured_accessor: Whether ``pathlib._NormalAccessor`` exists.
+        flavour_is_os_path: Whether pathlib's routing attribute IS the
+            ``os.path`` module - true on 3.11+, false where it is an object.
+
+    Returns:
+        One of the three module constants above.
+    """
+    if has_captured_accessor:
+        return ROUTE_VIA_ACCESSOR
+    if flavour_is_os_path:
+        return ROUTE_VIA_MODULE
+    return ROUTE_UNEXPLAINED
 
 
 def _alias_catchability(
@@ -1327,7 +1464,7 @@ class TestTheInstrumentsCanFire:
                 f"thing that can make it read the cwd - measured {verdict}"
             )
 
-    FLAVOUR_PROBE = (
+    ROUTE_PROBE = (
         "import os, pathlib\n"
         "_p = pathlib.Path('x')\n"
         # 3.13 renamed _flavour to parser (pathlib._local). Both names asked
@@ -1342,7 +1479,201 @@ class TestTheInstrumentsCanFire:
         "        break\n"
         "print('FLAVOUR_ATTR:', _name)\n"
         "print('FLAVOUR_IS_OS_PATH:', _mod is os.path)\n"
+        "print('HAS_ACCESSOR:', hasattr(pathlib, '_NormalAccessor'))\n"
+        # THE ROUTE ITSELF, measured rather than inferred from either name
+        # above. A spy on the module attribute, then one resolve of a literal
+        # absolute path: if the spy is reached, a module patch is a route here.
+        "_seen = []\n"
+        "_real_for_route = os.path.realpath\n"
+        "def _route_spy(path, *a, **kw):\n"
+        "    _seen.append(1)\n"
+        "    return _real_for_route(path, *a, **kw)\n"
+        "os.path.realpath = _route_spy\n"
+        "try:\n"
+        "    pathlib.Path('//x').resolve()\n"
+        "except OSError as _exc:\n"
+        # The measurement is whether the spy FIRED, not whether the call
+        # succeeded - a host that refuses to resolve the literal still answers
+        # the routing question, and a bare probe would print nothing at all.
+        "    print('ROUTE_RESOLVE_RAISED:', type(_exc).__name__)\n"
+        "os.path.realpath = _real_for_route\n"
+        "print('MODULE_PATCH_REACHES_RESOLVE:', bool(_seen))\n"
     )
+
+    def _measure_route(self, host: str = "") -> tuple:
+        """`(has_accessor, flavour_is_os_path, module_patch_reaches_resolve)`."""
+        result = _run(PRELOAD + host + self.ROUTE_PROBE)
+        for line in ("HAS_ACCESSOR:", "FLAVOUR_IS_OS_PATH:", "MODULE_PATCH_REACHES_RESOLVE:"):
+            assert line in result.stdout, f"{result.stdout}\n{result.stderr}"
+        return (
+            "HAS_ACCESSOR: True" in result.stdout,
+            "FLAVOUR_IS_OS_PATH: True" in result.stdout,
+            "MODULE_PATCH_REACHES_RESOLVE: True" in result.stdout,
+        )
+
+    def test_the_arming_worlds_patch_the_module_pathlib_ROUTES_THROUGH(self, tmp_path):
+        """The invariant every ``os.path.realpath`` world here rests on, keyed
+        on the fact that decides it instead of on a 3.12 spelling.
+
+        THE ROUND-10 VERSION ASSERTED `FLAVOUR_IS_OS_PATH: True` ON EVERY HOST
+        and CI answered honestly on 3.10, 3.11 and windows: there ``_flavour``
+        is a ``_PosixFlavour`` OBJECT, so the probe said False and the pin
+        written to document the assumption had the assumption inside its own
+        assertion. @devpulse read it off the board and named it.
+
+        What the worlds actually depend on is whether pathlib holds a CAPTURED
+        COPY of realpath. Where it does, a module patch is not a route at all
+        and the accessor patch is - which is exactly why ARM_WORLD_A carries
+        both. So the route is MEASURED here (spy on the module attribute, one
+        resolve, did the spy fire) and compared against what the host's shape
+        predicts. Both arms run on this interpreter: the bare host answers one,
+        EMULATE_PY310_PATHLIB answers the other.
+        """
+        has_accessor, flavour_is_os_path, reaches = self._measure_route()
+        expected = _module_patch_route(has_accessor, flavour_is_os_path)
+        assert expected != ROUTE_UNEXPLAINED, (
+            "this host has no captured accessor and its routing attribute is not "
+            "os.path, so nothing here explains how any world in this file arms"
+        )
+        assert reaches is (expected == ROUTE_VIA_MODULE), (
+            f"the host predicts {expected} but the measured route says MODULE_PATCH_REACHES_RESOLVE={reaches}"
+        )
+        # THE CONTROL FOR THE CONTROL. Without it every value above can be
+        # hardcoded to its own expected answer and nothing notices - measured
+        # in round 10: a probe printing a literal True survived every pin here.
+        # Breaking the identity deliberately must move BOTH readings.
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        broken_accessor, broken_is_os_path, _ = self._measure_route(chimera)
+        assert broken_is_os_path is False, (
+            "the probe reports the routing identity intact on a host where it was "
+            "deliberately broken, so it is not reading anything"
+        )
+        # THE REACH HALF IS NOT ASSERTED HERE, and that is a measured decision.
+        # It reads False on this interpreter and TRUE on 3.13, whose resolve
+        # follows os.path at call time - the chimera moves that route instead of
+        # severing it. Demanding False was a 3.12 fact and a sweep under a
+        # 3.13-shaped resolve convicted it. The reading is still pinned
+        # host-independently one row down, where the pre-3.11 shape must drive
+        # it False on any interpreter.
+        assert broken_accessor is has_accessor, (
+            "the chimera changed whether this host has a captured accessor, which it has no business touching"
+        )
+
+    def test_the_pre_311_shape_answers_the_OTHER_arm_from_here(self, tmp_path):
+        """The arm CI runs and this interpreter cannot reach on its own.
+
+        Under the pre-3.11 shape the module patch must STOP reaching resolve -
+        that is the whole reason ARM_WORLD_A patches the accessor as well, and
+        it is the answer 3.10 and 3.11 gave the round-10 pin. Measured here so
+        the judgement above is exercised on both of its arms from 3.12, the
+        same way the nt-identity world made the platform arm reachable from
+        Linux.
+        """
+        has_accessor, flavour_is_os_path, reaches = self._measure_route(EMULATE_PY310_PATHLIB)
+        assert has_accessor is True, "the pre-3.11 emulation did not install an accessor"
+        assert _module_patch_route(has_accessor, flavour_is_os_path) == ROUTE_VIA_ACCESSOR
+        assert reaches is False, (
+            "a module patch still reaches resolve under the pre-3.11 shape, so the "
+            "captured-accessor half of every world here is measuring nothing"
+        )
+
+    def test_the_object_flavour_host_reproduces_the_3_10_ANSWER_from_here(self, tmp_path):
+        """Round 11's red 1, reproduced on this interpreter.
+
+        CI answered `FLAVOUR_ATTR: _flavour / FLAVOUR_IS_OS_PATH: False` on
+        3.10, 3.11 and windows-setup, and the round-10 pin called that a
+        failure. This builds the shape that gives that answer - a flavour
+        OBJECT over a captured accessor, which is what those interpreters have
+        - and requires the routing judgement to read it as the accessor route
+        rather than as a broken host.
+
+        This is the row the literal table calls (True, False): a host no
+        machine in this fleet runs, now measurable on all of them.
+        """
+        host = EMULATE_PY310_PATHLIB + EMULATE_OBJECT_FLAVOUR_HOST
+        has_accessor, flavour_is_os_path, reaches = self._measure_route(host)
+        assert has_accessor is True, (
+            "no captured accessor here, so this host is not the pre-3.11 shape whichever arm the emulation took"
+        )
+        assert flavour_is_os_path is False, (
+            "the flavour is still the os.path module here, so this host is not the "
+            "shape 3.10 and 3.11 present and the row proves nothing"
+        )
+        assert _module_patch_route(has_accessor, flavour_is_os_path) == ROUTE_VIA_ACCESSOR
+        assert reaches is False
+
+    def test_the_object_flavour_world_STANDS_DOWN_on_a_host_that_has_one(self, tmp_path):
+        """Host == emulated is one layer, checked for the newest world.
+
+        On 3.10 and 3.11 the flavour already IS an object, and installing over
+        it would remove parse_parts, casefold and make_uri - behaviour this
+        world is not testing and the interpreter cannot run without. A mutant
+        deleting the stand-down branch survives every other pin here, because
+        this interpreter has no object flavour to protect. So one is installed
+        first, and the world must recognise it and leave it alone.
+        """
+        marker = (
+            "import pathlib, posixpath\n"
+            "class _AlreadyAnObject:\n"
+            "    sep = posixpath.sep\n"
+            "    marked = True\n"
+            "    def __getattr__(self, name):\n"
+            "        return getattr(posixpath, name)\n"
+            "pathlib.PurePath._flavour = _AlreadyAnObject()\n"
+            "pathlib.Path._flavour = pathlib.PurePath._flavour\n"
+        )
+        probe = "import pathlib\nprint('MARKER_SURVIVED:', getattr(pathlib.Path._flavour, 'marked', False))\n"
+        result = _run(PRELOAD + marker + EMULATE_OBJECT_FLAVOUR_HOST + probe)
+        assert "OBJECT_FLAVOUR_NATIVE" in result.stdout, (
+            "the world installed over a flavour that was already an object, which is "
+            f"what decapitates a real 3.10: {result.stdout}\n{result.stderr}"
+        )
+        assert "MARKER_SURVIVED: True" in result.stdout, (
+            f"the host's own flavour was replaced anyway: {result.stdout}\n{result.stderr}"
+        )
+
+    def test_the_object_flavour_REFUSES_realpath_like_the_real_one(self, tmp_path):
+        """The stand-in must not be friendlier than the thing it stands in for.
+
+        3.10's _PosixFlavour carries parsing and no realpath - resolve reaches
+        the accessor instead. A stand-in that answered realpath would let a
+        3.12 pathlib route around the accessor entirely, and the host would
+        quietly stop being the shape it claims to be.
+        """
+        probe = (
+            "import pathlib\n"
+            "_f = pathlib.Path('x')._flavour\n"
+            "try:\n"
+            "    _f.realpath\n"
+            "    print('FLAVOUR_ANSWERS_REALPATH: True')\n"
+            "except AttributeError:\n"
+            "    print('FLAVOUR_ANSWERS_REALPATH: False')\n"
+            "print('FLAVOUR_STILL_PARSES:', _f.sep)\n"
+        )
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + EMULATE_OBJECT_FLAVOUR_HOST + probe)
+        assert "FLAVOUR_ANSWERS_REALPATH: False" in result.stdout, (
+            f"the stand-in answers a question the original refuses: {result.stdout}\n{result.stderr}"
+        )
+        assert "FLAVOUR_STILL_PARSES: /" in result.stdout, (
+            "the stand-in stopped parsing, so it is not a flavour at all - a stand-in "
+            f"for a namespace must still answer what it is not being tested on: {result.stdout}"
+        )
+
+    @pytest.mark.parametrize(
+        "has_accessor,flavour_is_os_path,expected",
+        [
+            (True, True, ROUTE_VIA_ACCESSOR),
+            (True, False, ROUTE_VIA_ACCESSOR),
+            (False, True, ROUTE_VIA_MODULE),
+            (False, False, ROUTE_UNEXPLAINED),
+        ],
+    )
+    def test_the_route_table_is_reachable_on_any_host(self, has_accessor, flavour_is_os_path, expected):
+        """All four combinations over a plain function. The (True, False) row
+        is the real 3.10 host - object flavour AND captured accessor - and it
+        is a literal here rather than a host nobody in this fleet runs
+        locally."""
+        assert _module_patch_route(has_accessor, flavour_is_os_path) == expected
 
     def test_no_probe_DERIVES_its_path_from_the_host_it_measures(self, tmp_path):
         """The round-10 species as a property of the source, because on this
@@ -1448,65 +1779,178 @@ class TestTheInstrumentsCanFire:
         assert "NEUTRAL True True" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "VERSIONED True False" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-    def test_the_arming_worlds_patch_the_module_pathlib_ROUTES_THROUGH(self, tmp_path):
-        """The invariant every ``os.path.realpath`` world in this file rests on,
-        pinned instead of assumed.
+    def test_breaking_the_route_DISARMS_world_a_where_the_route_is_the_only_one(self, tmp_path):
+        """The negative control, keyed on the route the host actually has.
 
-        World A arms by rebinding ``os.path.realpath``. That reaches pathlib
-        only because the module ``os.path`` IS the module pathlib resolves
-        through - posixpath on posix, ntpath on nt - so the same one line works
-        on both real platforms without knowing which it is on.
+        THE ROUND-10 VERSION DEMANDED `DEFECT_SURVIVED` EVERYWHERE and CI
+        answered `DEFECT_DIED: FileNotFoundError` on every leg. @devpulse read
+        universal-on-CI plus green-locally as machine-shaped and asked me to
+        find what the child reads that a fresh checkout lacks. MEASURED, AND
+        THAT IS NOT IT: the child reads nothing machine-local (reproduced with
+        the registry marker out of reach - still SURVIVED), and the pre-3.11
+        shape reproduces the CI answer here exactly. It is VERSION-shaped, with
+        a platform term riding along.
 
-        It is written down here because a round-10 sweep of this whole file
-        under a partial nt host broke exactly that identity (``os.path`` moved
-        to ntpath while ``Path`` kept resolving through posixpath) and three
-        worlds silently stopped arming. No real operating system produces that
-        shape - but a future emulation in this file could, and an emulation
-        that quietly disarms a world looks identical to a cure.
-        """
-        result = _run(PRELOAD + self.FLAVOUR_PROBE)
-        assert "FLAVOUR_ATTR:" in result.stdout, f"{result.stdout}\n{result.stderr}"
-        if "FLAVOUR_ATTR: NONE" in result.stdout:
-            # UNAVAILABLE, with the reason. A pathlib that spells the routing
-            # module under a third name is not a failure of this invariant -
-            # it is a fact this probe cannot read, and the worlds themselves
-            # are asserted armed by their own tests either way.
-            assert "FLAVOUR_IS_OS_PATH: False" in result.stdout
-        else:
-            assert "FLAVOUR_IS_OS_PATH: True" in result.stdout, (
-                "pathlib does not resolve through os.path on this host, so every "
-                f"world here that patches os.path.realpath is inert: {result.stdout}"
-            )
-        # THE CONTROL FOR THE CONTROL. Without it the probe can be hardcoded to
-        # its own expected answer and nothing here notices - measured: a mutant
-        # printing a literal True survived every pin in this file.
-        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
-        broken = _run(PRELOAD + chimera + self.FLAVOUR_PROBE)
-        assert "FLAVOUR_IS_OS_PATH: False" in broken.stdout, (
-            "the probe reports the identity intact on a host where it was "
-            f"deliberately broken, so it is not reading anything: {broken.stdout}"
-        )
-
-    def test_breaking_that_identity_DISARMS_world_a(self, tmp_path):
-        """The negative control, and the sweep's three residual failures
-        reproduced on purpose in one place.
-
-        Point ``os.path`` at ntpath while leaving ``Path`` routing through
-        posixpath and world A stops convicting - not because the defect is
-        cured but because the patch landed on a module nothing reads. This is
-        the shape of every false green this file exists to refuse, and it is
-        cheaper to keep one demonstration of it than to rediscover it from a
-        red board.
+        The chimera only disarms world A where the module patch is the ONLY
+        route. Where pathlib holds a captured accessor, ARM_WORLD_A's second
+        patch keeps convicting and the control is measuring the wrong world;
+        where os.path IS ntpath already, the chimera is a no-op. Three arms,
+        each asserted, each reachable from this interpreter.
         """
         body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
         chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        has_accessor, _, _ = self._measure_route()
+        # THE FACT THAT DECIDES IT, MEASURED IN THE SAME WORLD THE CONTROL RUNS.
+        # The first version of this row predicted the answer from a version and
+        # a platform - accessor present, os.path already ntpath - and 3.13
+        # refuted it: no accessor, not nt, and world A still convicted. So ask
+        # the child instead of the table: with the chimera installed, does a
+        # patch on os.path.realpath STILL reach resolve? Where it does, the
+        # break moved the route rather than severing it, and world A must still
+        # convict on every such host - including ones nobody here can run.
+        _, _, reaches_under_chimera = self._measure_route(chimera)
+
         armed = _run(PRELOAD + ARM_WORLD_A + body)
         disarmed = _run(PRELOAD + chimera + ARM_WORLD_A + body)
         assert "DEFECT_DIED" in armed.stdout, f"{armed.stdout}\n{armed.stderr}"
-        assert "DEFECT_SURVIVED" in disarmed.stdout, (
-            "breaking the os.path/flavour identity no longer disarms world A, so "
-            f"the invariant above has stopped being the reason it works: {disarmed.stdout}"
+
+        expectation = _chimera_control_expectation(reaches_under_chimera, has_accessor)
+        if expectation == CONTROL_EXPECTS_DEATH:
+            # THE ROUTE MOVED OR THERE ARE TWO OF THEM. Either resolve reads
+            # os.path at call time (3.13, and nt seen from nt), or a captured
+            # accessor carries a second route the break cannot touch (pre-3.11).
+            assert "DEFECT_DIED" in disarmed.stdout, (
+                "a route to realpath survived the chimera, so world A should still "
+                f"convict and it did not: {disarmed.stdout}"
+            )
+        else:
+            assert "DEFECT_SURVIVED" in disarmed.stdout, (
+                "breaking the os.path route no longer disarms world A on a host where "
+                f"it is the only route, so the invariant has stopped being why it works: {disarmed.stdout}"
+            )
+
+    @pytest.mark.parametrize(
+        "reaches,has_accessor,expected",
+        [
+            (False, False, CONTROL_EXPECTS_SURVIVAL),
+            (True, False, CONTROL_EXPECTS_DEATH),
+            (False, True, CONTROL_EXPECTS_DEATH),
+            (True, True, CONTROL_EXPECTS_DEATH),
+        ],
+    )
+    def test_the_chimera_control_table_is_reachable_on_any_host(self, reaches, has_accessor, expected):
+        """All four combinations over a plain function.
+
+        The row that pays for itself is (True, False): no accessor and the
+        route still reachable, which is 3.13 and which no interpreter on this
+        machine can produce. A mutant deleting that arm from the control
+        SURVIVED every behavioural pin here before this table existed - the
+        branch was simply unreachable on 3.12.
+        """
+        assert _chimera_control_expectation(reaches, has_accessor) == expected
+
+    def test_the_313_shape_reproduces_the_UNEXPLAINED_leg_from_here(self, tmp_path):
+        """Round 11's leftover: the leg the captured-accessor mechanism did not
+        explain, reproduced on this interpreter.
+
+        THE EVIDENCE (@devpulse, addendum): the real 3.13 runner answered
+        DEFECT_DIED: FileNotFoundError, verbatim identical to the 3.10 leg -
+        and 3.13 has no _NormalAccessor and no _flavour, so nothing this file
+        had named could be the reason. My round-11 control predicted SURVIVED
+        there from a version-and-platform table and would have gone red again.
+
+        The shape that produces that answer is a resolve reading ``os.path`` AT
+        CALL TIME: the chimera then MOVES the route instead of severing it, and
+        the world's own patch rides along. Built and measured here rather than
+        quoted from a source line this machine cannot read - what is asserted
+        is that the shape reproduces the reported answer, and that the route
+        measurement explains it in the same child.
+        """
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        world = EMULATE_313_RESOLVE_READS_OS_PATH + chimera
+        disarmed = _run(PRELOAD + world + ARM_WORLD_A + body)
+        _, _, reaches_under_chimera = self._measure_route(world)
+
+        assert "RESOLVE_READS_OS_PATH_AT_CALL_TIME" in disarmed.stdout, (
+            f"the 3.13 shape did not install, so this row measured nothing: {disarmed.stdout}"
         )
+        assert reaches_under_chimera is True, (
+            "the 3.13 shape did not move the route, so it is not the shape that explains the reported answer"
+        )
+        assert "DEFECT_DIED: FileNotFoundError" in disarmed.stdout, (
+            f"the 3.13 shape no longer reproduces the leg it was built from: {disarmed.stdout}\n{disarmed.stderr}"
+        )
+
+    def test_the_313_shape_is_what_MOVES_the_route_and_not_the_chimera(self, tmp_path):
+        """The control that separates the two halves of the row above.
+
+        Without it, a world that broke nothing and a chimera that severed
+        nothing would look the same from downstream: both end in DEFECT_DIED.
+        So the same chimera is measured with and without the 3.13 shape, and
+        the route reading must MOVE - False on this interpreter's own resolve,
+        True once resolve reads os.path at call time.
+        """
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        _, _, without = self._measure_route(chimera)
+        _, _, with_313 = self._measure_route(EMULATE_313_RESOLVE_READS_OS_PATH + chimera)
+        assert with_313 is True
+        if without:
+            # NATIVE. This interpreter's own resolve already follows os.path -
+            # a real 3.13 does - so the world adds nothing here and cannot be
+            # shown to be what moves the route. Reported rather than asserted
+            # away: the row above still holds, it just is not this host that
+            # proves the world caused it.
+            assert with_313 is without
+        else:
+            assert without is False, "the 3.13 shape adds nothing on this host, so the row above proves nothing"
+
+    def test_the_pre_311_shape_reproduces_the_CI_answer_from_here(self, tmp_path):
+        """Red 2 of round 11, reproduced on this interpreter and held closed.
+
+        The board said `DEFECT_DIED: FileNotFoundError` where the pin demanded
+        SURVIVED. Under EMULATE_PY310_PATHLIB the same child gives the same
+        answer here, which is what turns a CI red into a local measurement -
+        and it is asserted the other way round on the bare host in the same
+        row, so a change that makes both arms agree is a red rather than a
+        quieter green.
+        """
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        pre_311 = _run(PRELOAD + EMULATE_PY310_PATHLIB + chimera + ARM_WORLD_A + body)
+        # THE OTHER ARM MUST BE HOST-INDEPENDENT TOO. Reading it off the bare
+        # host would assert the 3.12 answer on a 3.10 runner - the round-11 red
+        # itself, rewritten into its own cure. Removing the accessor leaves the
+        # module route as the only route on EVERY interpreter, so both arms are
+        # constructed rather than inherited.
+        no_accessor = _run(PRELOAD + REMOVE_ANY_NATIVE_ACCESSOR + chimera + ARM_WORLD_A + body)
+        # WHICH ARM RAN IS REPORTED, NOT DEMANDED. On a real 3.10 the emulation
+        # stands down and prints ACCESSOR_NATIVE; demanding the EMULATED word
+        # would make this row red on the exact interpreter it was written for -
+        # round 8's lesson, and my own new pin had it until a sweep said so.
+        assert any(word in pre_311.stdout for word in ("ACCESSOR_EMULATED", "ACCESSOR_NATIVE")), (
+            f"the pre-3.11 world said nothing about which arm it took: {pre_311.stdout}"
+        )
+        assert "DEFECT_DIED: FileNotFoundError" in pre_311.stdout, (
+            f"the pre-3.11 shape no longer reproduces the CI answer: {pre_311.stdout}"
+        )
+        _, _, no_accessor_reaches = self._measure_route(REMOVE_ANY_NATIVE_ACCESSOR + chimera)
+        if no_accessor_reaches:
+            # 3.13-SHAPED. Removing the accessor leaves a resolve that still
+            # follows os.path, so the chimera moves the route rather than
+            # severing it and world A keeps convicting. Asserted at the value
+            # such a host gives, which is how this row stopped being a 3.12
+            # fact wearing a portable name.
+            assert "DEFECT_DIED" in no_accessor.stdout, (
+                "a module patch still reaches resolve with no accessor anywhere, so "
+                f"world A should still convict and it did not: {no_accessor.stdout}"
+            )
+        else:
+            assert "DEFECT_SURVIVED" in no_accessor.stdout, (
+                "with no captured accessor and no route left, the chimera still fails "
+                "to disarm world A, so the two arms no longer distinguish the routes: "
+                f"{no_accessor.stdout}"
+            )
 
     def test_the_platform_arm_is_reachable_HERE_on_an_nt_identity_host(self, tmp_path):
         """Windows red 1, reproduced on Linux and held closed forever.
