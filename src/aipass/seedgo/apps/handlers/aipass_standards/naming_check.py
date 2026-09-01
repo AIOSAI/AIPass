@@ -228,6 +228,28 @@ def check_function_naming(content: str) -> Optional[Dict]:
     }
 
 
+#: MODULE GLOBALS PYTEST READS BY NAME. Each of these is API, not style:
+#: pytest looks them up at collection time by this exact lowercase spelling, so
+#: an UPPER_CASE rename does not fail - it silently stops working while looking
+#: tidier. @devpulse met this live, refused the auto-fix on
+#: src/aipass/conftest.py, and reported it as a counterexample rather than
+#: taking the rename; the rule learns it here because it is structurally
+#: detectable, which is what a waiver would have been standing in for.
+#:
+#: Exempted BY NAME, not by file: this checker is handed content and never a
+#: path, so a module outside a conftest that happens to use one of these
+#: spellings is acquitted too. Stated rather than worked around - the names are
+#: distinctive enough that the trade is worth one sentence.
+PYTEST_CONTRACT_GLOBALS = frozenset(
+    {
+        "collect_ignore",
+        "collect_ignore_glob",
+        "pytest_plugins",
+        "pytestmark",
+    }
+)
+
+
 def check_constant_naming(content: str) -> Optional[Dict]:
     """
     Check constant naming conventions
@@ -237,6 +259,9 @@ def check_constant_naming(content: str) -> Optional[Dict]:
     - Assigned outside of functions/classes (column 0 only)
     - Excludes module imports (from X import Y as Z)
     - Excludes __dunder__ variables (PEP 8 convention: always lowercase)
+    - Excludes the pytest contract globals (see PYTEST_CONTRACT_GLOBALS): those
+      spellings are read by pytest itself, so renaming them disables a
+      mechanism rather than tidying a name
     """
     # First pass: collect imported names to exclude from constant checking
     imported_names = set()
@@ -296,6 +321,10 @@ def check_constant_naming(content: str) -> Optional[Dict]:
 
         # Skip __dunder__ variables (__all__, __version__, etc.)
         if const_name.startswith("__") and const_name.endswith("__"):
+            continue
+
+        # Skip names pytest reads by their exact lowercase spelling.
+        if const_name in PYTEST_CONTRACT_GLOBALS:
             continue
 
         # Skip if this is an imported name (like logger, console)

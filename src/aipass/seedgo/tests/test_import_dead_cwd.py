@@ -83,6 +83,57 @@ SEEDGO_ROOT = Path(__file__).resolve().parents[1]
 # TEMPORARY — delete each line as its branch is cured, and the pin gets stricter
 # for free. These ten are exactly the foreign entry points seedgo's own source
 # names; the rest of each chain rides in behind them.
+# THE CHILDREN OF THIS FILE RUN WITH THEIR CWD AT THE REPO ROOT (see _run), so
+# anything any world here writes to a RELATIVE path lands in the working tree.
+# That is not hypothetical: a round-10 sweep instrument installed an nt-shaped
+# os.path before the preload, every absolute path in the child came back
+# spelled with backslashes, and posix - where a backslash is an ordinary
+# filename character - created 45 entries named "\\tmp\\..." at the repo root.
+# @spawn and @devpulse both measured them from the outside before I saw them.
+#
+# The shipped worlds mint nothing (measured: zero new entries across a full
+# run). The detector exists because the next world might, and a directory
+# quietly appearing in the working tree is exactly the class of thing an
+# indiscriminate stage-everything turns into a commit.
+CHILD_CWD = SEEDGO_ROOT.parents[2]
+
+
+def _working_tree_entries(root: Path) -> set:
+    """Names directly under `root`, or an empty set if it is not readable.
+
+    Names, not paths: the point is what APPEARED, and a name carrying a
+    backslash is the whole reason this exists.
+    """
+    try:
+        return {entry.name for entry in root.iterdir()}
+    except OSError:
+        return set()
+
+
+def _litter(before: set, after: set) -> set:
+    """What this file's children added to the working tree. A plain function
+    over two sets, so both the empty and the convicting case are reachable
+    without minting anything."""
+    return after - before
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _no_working_tree_litter():
+    """Fail the module if its children left anything in the repo root.
+
+    Deliberately does NOT delete what it finds: `drone rm` is the sanctioned
+    way to remove anything here, and a detector that tidies up after itself
+    destroys the evidence of the world that produced it.
+    """
+    before = _working_tree_entries(CHILD_CWD)
+    yield
+    new = _litter(before, _working_tree_entries(CHILD_CWD))
+    assert not new, (
+        "a world in this file wrote into the working tree - the children run with "
+        f"cwd at the repo root, so a relative path lands there: {sorted(new)}"
+    )
+
+
 PRELOAD = """
 import aipass.prax  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
@@ -415,6 +466,49 @@ pathlib.Path._accessor = pathlib._normal_accessor
 pathlib.Path.stat = _pre_311_stat
 """
 
+#: An nt-shaped host for the ONE question the alias check turns on: on Windows
+#: ``os.path`` IS ``ntpath`` - one module, not two - so aliasing ntpath over
+#: os.path changes nothing and no probe can tell the alias from the real thing.
+#:
+#: Both halves are needed and each was measured: the module IDENTITY (without
+#: it the alias is still foreign here) and the unconditional cwd read that a
+#: real nt realpath performs (without it the aliased call returns early for an
+#: absolute path and the row reads CATCHABLE, which is the Linux answer).
+#:
+#: The replacement is a SENTINEL that returns its argument - the round-7 rule,
+#: because anything it borrowed from posixpath would be behaviour this row does
+#: not test, and an emulation friendlier than the thing it stands in for hides
+#: the defect.
+#: The two halves are named separately because the control below measures each
+#: one alone, and because WHICH object each patches is the whole reason this
+#: world works where ``EMULATE_NT_REALPATH`` cannot: the alias world's last act
+#: is ``os.path.realpath = ntpath.realpath``, so a host that patched
+#: ``os.path.realpath`` is overwritten before the probe runs. Patching
+#: ``ntpath.realpath`` is what survives being aliased over.
+_NT_HOST_UNCONDITIONAL_CWD = """
+import ntpath
+import os
+
+
+def _nt_shaped_realpath_sentinel(path, *a, **kw):
+    os.getcwd()  # ntpath.py:678 - unconditional, absolute paths included
+    return path
+
+
+ntpath.realpath = _nt_shaped_realpath_sentinel
+"""
+
+_NT_HOST_MODULE_IDENTITY = """
+import ntpath
+import os
+import sys
+
+os.path = ntpath
+sys.modules["os.path"] = ntpath
+"""
+
+EMULATE_NT_HOST_IDENTITY = _NT_HOST_UNCONDITIONAL_CWD + _NT_HOST_MODULE_IDENTITY
+
 #: Make this child a host with NO accessor, whatever interpreter it is running
 #: on. Round 9's second red: `test_the_emulation_still_TAKES_on_a_host_without
 #: _one` asserted ACCESSOR_EMULATED unconditionally, which is only true where
@@ -664,9 +758,14 @@ def _alias_discrimination_verdict(host_reads_cwd: bool, emulated_reads_cwd: bool
 ALIAS_CATCHABLE = "ALIAS_IS_CATCHABLE_HERE"
 ALIAS_LOST_TO_PLATFORM = "ALIAS_INDISTINGUISHABLE:the alias IS this host"
 ALIAS_LOST_TO_VERSION = "ALIAS_INDISTINGUISHABLE:ntpath no longer calls a rooted literal absolute"
+ALIAS_LOST_TO_BEHAVIOUR = "ALIAS_INDISTINGUISHABLE:a foreign ntpath read the cwd anyway"
 
 
-def _alias_catchability(alias_reads_cwd: bool, ntpath_calls_probe_absolute: bool) -> str:
+def _alias_catchability(
+    alias_reads_cwd: bool,
+    ntpath_calls_probe_absolute: bool,
+    alias_is_the_host: bool,
+) -> str:
     """Whether @flow's M3 alias trap is detectable here, and if not, why not.
 
     THE TRAP: emulating nt by ``os.path.realpath = ntpath.realpath`` reproduces
@@ -686,20 +785,38 @@ def _alias_catchability(alias_reads_cwd: bool, ntpath_calls_probe_absolute: bool
     leg of the matrix could contradict, and the leg that contradicted it was an
     interpreter, not an operating system.
 
+    ROUND 10 SPLIT THE PLATFORM ARM FROM WHAT IT WAS INFERRED FROM. The two
+    argument version read the platform off ``ntpath_calls_probe_absolute``,
+    which is a proxy and not the thing: a verdict that SAYS "the alias IS this
+    host" while never having measured identity claims a fact it does not hold.
+    A sweep of this file under a 3.13-shaped ntpath convicted it - on a real
+    3.13 leg the two dimensions collide and the message names the wrong one.
+
+    So the platform arm now rests on ``os.path is ntpath``, measured, and the
+    fourth verdict exists for the case the old ordering swallowed: a FOREIGN
+    ntpath that reads the cwd anyway. That is what an nt realpath does and what
+    this file's own nt emulation installs, and calling it "the alias IS this
+    host" would have been an emulation reported as a platform.
+
     Args:
         alias_reads_cwd: Whether an ntpath-aliased realpath reads the cwd for
             the probe path on this host.
         ntpath_calls_probe_absolute: What ``ntpath.isabs`` says about that same
-            path - the mechanism, so the verdict names a cause and not a mood.
+            path - the version dimension, so the verdict names a cause.
+        alias_is_the_host: Whether ``os.path`` already IS ``ntpath`` - the
+            platform dimension, and the only fact that supports the word
+            "host" in a verdict.
 
     Returns:
-        One of the three module constants above.
+        One of the four module constants above.
     """
     if not alias_reads_cwd:
         return ALIAS_CATCHABLE
-    if ntpath_calls_probe_absolute:
+    if alias_is_the_host:
         return ALIAS_LOST_TO_PLATFORM
-    return ALIAS_LOST_TO_VERSION
+    if not ntpath_calls_probe_absolute:
+        return ALIAS_LOST_TO_VERSION
+    return ALIAS_LOST_TO_BEHAVIOUR
 
 
 class TestTheInstrumentsCanFire:
@@ -948,7 +1065,19 @@ class TestTheInstrumentsCanFire:
 
     ABSOLUTE_CWD_PROBE = (
         "import os\n"
-        "_abs = os.path.abspath(os.sep)\n"
+        # THE SECOND SITE OF THE ROUND-10 SPECIES, found by sweeping this file
+        # rather than by reading it. `os.path.abspath(os.sep)` builds the
+        # argument out of the host being measured, so the row asks a different
+        # question per platform - the exact defect that took the alias probe
+        # down on the round-10 board, still living one probe over.
+        #
+        # '//x' is absolute under EVERY rule this file can meet: posixpath,
+        # 3.12 ntpath, and 3.13 ntpath (which reads it as the UNC form). It is
+        # DELIBERATELY not the alias probe's '/x' - that one has to be the
+        # rooted driveless shape whose absoluteness 3.13 changed, because
+        # measuring the version dimension is its whole job. Two literals, two
+        # jobs; making them agree would take one of the rows dark.
+        "_abs = '//x'\n"
         "print('PROBE_IS_ABS:', os.path.isabs(_abs))\n"
         "_seen = []\n"
         "_real_getcwd = os.getcwd\n"
@@ -1047,7 +1176,16 @@ class TestTheInstrumentsCanFire:
 
     ALIAS_PROBE = (
         "import ntpath, os\n"
-        "_abs = os.path.abspath(os.sep)\n"
+        # A DIALECT-NEUTRAL LITERAL, written once and never derived from the
+        # host. `os.path.abspath(os.sep)` was the round-9 spelling and it is a
+        # different SHAPE per platform: '/' on posix (rooted, driveless - the
+        # exact shape 3.13's isabs change is about) and 'D:\\' on nt, which is
+        # DRIVE-rooted and absolute under both isabs rules. So the row asked a
+        # different question on Windows and answered it correctly. An
+        # instrument's inputs are behaviour too (@flow, round 8), and a probe
+        # must not build its argument out of the host it is measuring.
+        "_abs = '/x'\n"
+        "print('ALIAS_IS_THE_HOST:', os.path is ntpath)\n"
         "print('NTPATH_CALLS_IT_ABSOLUTE:', ntpath.isabs(_abs))\n"
         "_seen = []\n"
         "_real_getcwd = os.getcwd\n"
@@ -1057,29 +1195,32 @@ class TestTheInstrumentsCanFire:
     )
 
     def _measure_alias(self, host: str = "") -> tuple:
-        """`(alias_reads_cwd, ntpath_calls_probe_absolute)` on this host."""
+        """`(alias_reads_cwd, ntpath_calls_probe_absolute, alias_is_the_host)`.
+
+        The third value is the variable that actually DECIDES whether this
+        check can discriminate at all: where ``os.path`` already IS ``ntpath``,
+        the alias world is a no-op and no probe can tell an alias from the
+        real thing. Measured rather than inferred from ``os.name``, because the
+        question is about module identity and not about a platform label
+        (@ai_mail's round-5 rule: key the table on what decides).
+        """
         result = _run(PRELOAD + host + self.ALIAS_WORLD + self.ALIAS_PROBE)
         assert "ALIAS_READ_CWD:" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "ALIAS_IS_THE_HOST:" in result.stdout, f"{result.stdout}\n{result.stderr}"
         return (
             "ALIAS_READ_CWD: True" in result.stdout,
             "NTPATH_CALLS_IT_ABSOLUTE: True" in result.stdout,
+            "ALIAS_IS_THE_HOST: True" in result.stdout,
         )
 
     def test_the_alias_trap_is_caught_or_the_reason_is_named(self, tmp_path):
         """@flow's M3 trap, and what this interpreter can actually say about it.
 
-        The version this replaces asserted the alias does NOT read the cwd -
-        true on 3.12 posix and false on two other legs for two different
-        reasons. On nt the alias IS the host. On 3.13 ntpath stopped calling a
-        rooted driveless path absolute (the LEGACY BUG clause at ntpath.py:99
-        is gone), so `_abspath_fallback` consults the cwd for the probe path
-        and the alias answers exactly as the real emulation does.
-
         Measured, then reported. Where the trap is catchable this still catches
         it; where it is not, the verdict names WHICH dimension took it away.
         """
-        alias_reads, ntpath_absolute = self._measure_alias()
-        verdict = _alias_catchability(alias_reads, ntpath_absolute)
+        alias_reads, ntpath_absolute, alias_is_the_host = self._measure_alias()
+        verdict = _alias_catchability(alias_reads, ntpath_absolute, alias_is_the_host)
         if verdict == ALIAS_CATCHABLE:
             assert alias_reads is False
         else:
@@ -1087,40 +1228,422 @@ class TestTheInstrumentsCanFire:
             # a future reader sees a measured boundary rather than a gap.
             assert alias_reads is True
 
-    def test_the_alias_IS_catchable_on_a_312_shaped_ntpath(self, tmp_path):
-        """The row this file was built on, pinned as a row rather than assumed
-        as the world. Green here today; the day the local interpreter drops the
-        legacy clause this reds instead of the boundary moving in silence."""
-        alias_reads, ntpath_absolute = self._measure_alias()
-        if not ntpath_absolute:
-            pytest.skip("this interpreter's ntpath already dropped the legacy clause (3.13+)")
-        assert _alias_catchability(alias_reads, ntpath_absolute) == ALIAS_CATCHABLE
+    def test_the_catchability_matches_WHAT_THE_HOST_IS(self, tmp_path):
+        """BOTH ARMS ASSERTED, so this row measures on every operating system.
+
+        The round-9 version asserted ALIAS_CATCHABLE unconditionally and met a
+        real nt host on the round-10 board. The machinery answered honestly -
+        ALIAS_INDISTINGUISHABLE: the alias IS this host, the third verdict
+        firing exactly as designed - and the ASSERTION refused the honest
+        answer. Written on Linux, where a 3.12-shaped ntpath is foreign and
+        therefore catchable; shaped like the host it was written on.
+
+        @flow's one-dimension law in its assertion form: a host that already IS
+        the faked dimension cannot distinguish it. So the expectation is now
+        derived from the measured identity - is os.path already ntpath - and
+        both arms are live measurements rather than one arm and one skip.
+
+        WHICH DIMENSION EACH ARM RESTS ON, because the runner is nt AND 3.12
+        and only one of those decides this row: the arm below rests on module
+        IDENTITY (platform), not on the isabs rule (version). The version
+        dimension is the subject of the next test, and on a host where the
+        alias is the host it cannot be isolated at all.
+        """
+        alias_reads, ntpath_absolute, alias_is_the_host = self._measure_alias()
+        verdict = _alias_catchability(alias_reads, ntpath_absolute, alias_is_the_host)
+        if alias_is_the_host:
+            assert verdict == ALIAS_LOST_TO_PLATFORM, (
+                "os.path IS ntpath here, so aliasing changes nothing and the trap "
+                f"cannot be caught - expected the platform verdict, measured {verdict}"
+            )
+        elif ntpath_absolute:
+            assert verdict == ALIAS_CATCHABLE, (
+                "os.path is not ntpath here and ntpath calls the probe absolute, so "
+                "the alias is a foreign shape whose failure to read the cwd is exactly "
+                f"what catches it - measured {verdict}"
+            )
+        else:
+            # THE THIRD HOST, and the reason this row has three arms instead of
+            # two. A 3.13 interpreter on posix is neither of the above: the
+            # alias is foreign AND it reads the cwd, because ntpath stopped
+            # calling a rooted driveless literal absolute. Written with two
+            # arms this test was red on CI's own 3.13 leg - found by sweeping
+            # the file under a 3.13-shaped ntpath, not by reading it.
+            assert verdict == ALIAS_LOST_TO_VERSION, (
+                "ntpath does not call the probe absolute here, so a foreign alias "
+                f"reads the cwd for the version reason - measured {verdict}"
+            )
 
     def test_the_alias_is_LOST_TO_VERSION_on_a_313_shaped_ntpath(self, tmp_path):
-        """The 3.13 red, reproduced here and held closed.
+        """The 3.13 row, emulated by property and stated with its dimension.
 
-        Emulated BY PROPERTY - ntpath.isabs rewritten to 3.13's rule - not by
-        asserting a version number, so the row is falsifiable on this
-        interpreter rather than only on the leg that reported it.
+        THE ROUND-9 VERSION HAD TWO DEFECTS and the Windows leg found both.
+        It asserted `ntpath_absolute is False`, and it built its probe path as
+        `os.path.abspath(os.sep)` - which is '/' on posix and 'D:\\' on nt. A
+        drive-rooted path is absolute under BOTH isabs rules, so on Windows the
+        emulation was armed and the probe simply asked a different question.
+        The input, not the world, was host-shaped.
+
+        The literal is dialect-neutral now. What remains genuinely
+        unmeasurable on an nt host is the ISOLATION: where os.path IS ntpath,
+        the platform has already made the alias indistinguishable, so no
+        version emulation can produce a version-only loss. That is stated
+        rather than skipped past - the cross term devpulse warned about, and
+        the asymmetry is real: the version row needs a host where the alias is
+        foreign; the platform row above needs no such thing.
         """
-        alias_reads, ntpath_absolute = self._measure_alias(self.NTPATH_313_ISABS)
-        assert alias_reads is True, "the 3.13 isabs emulation did not change the answer"
-        assert ntpath_absolute is False
-        assert _alias_catchability(alias_reads, ntpath_absolute) == ALIAS_LOST_TO_VERSION
+        _, bare_ntpath_absolute, _ = self._measure_alias()
+        alias_reads, ntpath_absolute, alias_is_the_host = self._measure_alias(self.NTPATH_313_ISABS)
+        if bare_ntpath_absolute:
+            print("ISABS_313: INSTALLED")
+        else:
+            # NATIVE. The interpreter beneath is already 3.13-shaped, so the
+            # emulation replaced one rule with the same rule and the row below
+            # is a measurement of the host, not of the emulation. It still
+            # holds; what it cannot say is that the emulation caused it.
+            print("ISABS_313: NATIVE")
+        assert ntpath_absolute is False, (
+            "the 3.13 isabs emulation did not take: a rooted driveless literal is still "
+            "reported absolute, so this row would pass for the wrong reason"
+        )
+        assert alias_reads is True, "the alias did not read the cwd under the 3.13 shape"
+        verdict = _alias_catchability(alias_reads, ntpath_absolute, alias_is_the_host)
+        if alias_is_the_host:
+            # UNVERIFIABLE HERE, BY NAME - and the verdict says so itself now.
+            # Where os.path IS ntpath the platform has already made the alias
+            # indistinguishable, so no version emulation can produce a
+            # version-only loss and the judgement reports the deeper reason.
+            # The round-10 version asserted LOST_TO_VERSION on both arms, which
+            # was the same species one turn later: an expectation written on
+            # the host it was written on. Found by sweeping the file under an
+            # nt-identity host rather than by reading it.
+            assert verdict == ALIAS_LOST_TO_PLATFORM, (
+                "os.path IS ntpath here, so the version dimension cannot be isolated "
+                f"and the platform reason outranks it - measured {verdict}"
+            )
+        else:
+            assert verdict == ALIAS_LOST_TO_VERSION, (
+                "on a host where the alias is foreign, a 3.13-shaped isabs is the only "
+                f"thing that can make it read the cwd - measured {verdict}"
+            )
+
+    FLAVOUR_PROBE = (
+        "import os, pathlib\n"
+        "_p = pathlib.Path('x')\n"
+        # 3.13 renamed _flavour to parser (pathlib._local). Both names asked
+        # for, and which one answered is printed, because a probe that finds
+        # neither must say so rather than report a comfortable False.
+        "_name = 'NONE'\n"
+        "_mod = None\n"
+        "for _attr in ('_flavour', 'parser'):\n"
+        "    _found = getattr(type(_p), _attr, None)\n"
+        "    if _found is not None:\n"
+        "        _name, _mod = _attr, _found\n"
+        "        break\n"
+        "print('FLAVOUR_ATTR:', _name)\n"
+        "print('FLAVOUR_IS_OS_PATH:', _mod is os.path)\n"
+    )
+
+    def test_no_probe_DERIVES_its_path_from_the_host_it_measures(self, tmp_path):
+        """The round-10 species as a property of the source, because on this
+        host the defect is invisible in behaviour.
+
+        Reverting either probe to `os.path.abspath(os.sep)` changes NOTHING a
+        posix 3.12 run can see - abspath('/') is '/' and it is absolute - so
+        the mutant survives every behavioural pin in this file and reappears as
+        a red on an operating system nobody here runs. It is structurally
+        detectable, so it is checked structurally: the argument must be a
+        literal written down once, never computed from the module under
+        measurement.
+        """
+        for name, probe in (
+            ("ABSOLUTE_CWD_PROBE", self.ABSOLUTE_CWD_PROBE),
+            ("ALIAS_PROBE", self.ALIAS_PROBE),
+        ):
+            # The constant IS the child's source text, so this reads the line the
+            # child will actually run rather than this file's spelling of it.
+            assignment = [line for line in probe.splitlines() if line.strip().startswith("_abs =")]
+            assert len(assignment) == 1, f"{name} no longer assigns its probe path once"
+            assert "os.sep" not in assignment[0], (
+                f"{name} builds its path out of the host's separator, so the row asks a different question per platform"
+            )
+            assert "abspath" not in assignment[0], f"{name} builds its path with the path module it is measuring"
+
+    def test_the_sys_modules_half_survives_a_from_import(self, tmp_path):
+        """What the second line of the identity half is FOR.
+
+        `os.path = ntpath` satisfies every `os.path is ntpath` probe on its
+        own - a mutant deleting the sys.modules line survived the whole file.
+        It is not decoration: a child that says `from os.path import isabs`
+        goes through sys.modules, not through the attribute, and without the
+        second line it silently gets posixpath back while every identity check
+        still reads True. Pinned rather than deleted, because the emulation is
+        for arbitrary child code and not only for this file's probes.
+        """
+        probe = "import ntpath\nfrom os.path import isabs\nprint('FROM_IMPORT_IS_NTPATH:', isabs is ntpath.isabs)\n"
+        result = _run(PRELOAD + _NT_HOST_MODULE_IDENTITY + probe)
+        assert "FROM_IMPORT_IS_NTPATH: True" in result.stdout, (
+            f"the sys.modules half is not taking: {result.stdout}\n{result.stderr}"
+        )
+
+    def test_the_litter_detector_convicts_and_acquits(self, tmp_path):
+        """Both verdicts of the working-tree detector, reachable without
+        minting anything - the judgement is a plain function over two sets, so
+        the convicting row does not need a world that misbehaves."""
+        before = {"README.md", "src"}
+        littered = chr(92) + "tmp" + chr(92) + "tmpx"
+        assert _litter(before, set(before)) == set()
+        assert _litter(before, before | {littered}) == {littered}
+        assert _litter(before, before - {"src"}) == set(), (
+            "the detector must not convict on a REMOVED entry - a concurrent "
+            "citizen tidying its own file is not this file's litter"
+        )
+
+    def test_the_detector_reads_the_directory_the_children_actually_use(self, tmp_path):
+        """The pairing that makes the fixture mean anything: the directory it
+        watches must be the one `_run` hands the children as their cwd. Pinned
+        because the two are written down in different places, and a detector
+        watching an empty room is green forever."""
+        probe = "import os\nprint('CHILD_CWD:', os.getcwd())\n"
+        result = _run(PRELOAD + probe)
+        assert f"CHILD_CWD: {CHILD_CWD}" in result.stdout, (
+            f"the detector watches {CHILD_CWD} but the children run elsewhere: {result.stdout}\n{result.stderr}"
+        )
+
+    def test_the_detector_reads_a_real_directory_and_survives_a_missing_one(self, tmp_path):
+        """The reader half, both branches. An unreadable root answers empty
+        rather than raising, because a detector that dies on its own snapshot
+        takes every test in the module with it - and it must not answer empty
+        for a directory that IS there, which is the failure that would make the
+        fixture green forever."""
+        (tmp_path / "here").mkdir()
+        assert _working_tree_entries(tmp_path) == {"here"}
+        assert _working_tree_entries(tmp_path / "absent") == set()
+
+    def test_the_two_probe_literals_answer_DIFFERENT_questions(self, tmp_path):
+        """Why this file carries two absolute literals instead of one.
+
+        A later reader will see '/x' and '//x' a few hundred lines apart and be
+        tempted to make them agree. They must not: '//x' is absolute under
+        every rule here, which is what the cwd-reading probe needs so its
+        arming assertion means the same thing everywhere; '/x' is absolute
+        under 3.12's ntpath and NOT under 3.13's, which is the only reason the
+        version dimension is measurable at all.
+
+        Pinned as a property of the strings, so unifying them is a red.
+        """
+        neutral = self._probe_literal(self.ABSOLUTE_CWD_PROBE)
+        versioned = self._probe_literal(self.ALIAS_PROBE)
+        probe = (
+            "import ntpath, os, posixpath\n"
+            "def _isabs_313(s):\n"
+            "    s = os.fspath(s)\n"
+            "    sep, altsep, colon_sep = chr(92), '/', ':' + chr(92)\n"
+            "    s = s[:3].replace(altsep, sep)\n"
+            "    return s.startswith(colon_sep, 1) or s.startswith(sep * 2)\n"
+            f"for _name, _lit in (('NEUTRAL', {neutral!r}), ('VERSIONED', {versioned!r})):\n"
+            "    print(_name, posixpath.isabs(_lit), _isabs_313(_lit))\n"
+        )
+        result = _run(PRELOAD + probe)
+        assert "NEUTRAL True True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "VERSIONED True False" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_arming_worlds_patch_the_module_pathlib_ROUTES_THROUGH(self, tmp_path):
+        """The invariant every ``os.path.realpath`` world in this file rests on,
+        pinned instead of assumed.
+
+        World A arms by rebinding ``os.path.realpath``. That reaches pathlib
+        only because the module ``os.path`` IS the module pathlib resolves
+        through - posixpath on posix, ntpath on nt - so the same one line works
+        on both real platforms without knowing which it is on.
+
+        It is written down here because a round-10 sweep of this whole file
+        under a partial nt host broke exactly that identity (``os.path`` moved
+        to ntpath while ``Path`` kept resolving through posixpath) and three
+        worlds silently stopped arming. No real operating system produces that
+        shape - but a future emulation in this file could, and an emulation
+        that quietly disarms a world looks identical to a cure.
+        """
+        result = _run(PRELOAD + self.FLAVOUR_PROBE)
+        assert "FLAVOUR_ATTR:" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        if "FLAVOUR_ATTR: NONE" in result.stdout:
+            # UNAVAILABLE, with the reason. A pathlib that spells the routing
+            # module under a third name is not a failure of this invariant -
+            # it is a fact this probe cannot read, and the worlds themselves
+            # are asserted armed by their own tests either way.
+            assert "FLAVOUR_IS_OS_PATH: False" in result.stdout
+        else:
+            assert "FLAVOUR_IS_OS_PATH: True" in result.stdout, (
+                "pathlib does not resolve through os.path on this host, so every "
+                f"world here that patches os.path.realpath is inert: {result.stdout}"
+            )
+        # THE CONTROL FOR THE CONTROL. Without it the probe can be hardcoded to
+        # its own expected answer and nothing here notices - measured: a mutant
+        # printing a literal True survived every pin in this file.
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        broken = _run(PRELOAD + chimera + self.FLAVOUR_PROBE)
+        assert "FLAVOUR_IS_OS_PATH: False" in broken.stdout, (
+            "the probe reports the identity intact on a host where it was "
+            f"deliberately broken, so it is not reading anything: {broken.stdout}"
+        )
+
+    def test_breaking_that_identity_DISARMS_world_a(self, tmp_path):
+        """The negative control, and the sweep's three residual failures
+        reproduced on purpose in one place.
+
+        Point ``os.path`` at ntpath while leaving ``Path`` routing through
+        posixpath and world A stops convicting - not because the defect is
+        cured but because the patch landed on a module nothing reads. This is
+        the shape of every false green this file exists to refuse, and it is
+        cheaper to keep one demonstration of it than to rediscover it from a
+        red board.
+        """
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        chimera = "import ntpath, os, sys\nos.path = ntpath\nsys.modules['os.path'] = ntpath\n"
+        armed = _run(PRELOAD + ARM_WORLD_A + body)
+        disarmed = _run(PRELOAD + chimera + ARM_WORLD_A + body)
+        assert "DEFECT_DIED" in armed.stdout, f"{armed.stdout}\n{armed.stderr}"
+        assert "DEFECT_SURVIVED" in disarmed.stdout, (
+            "breaking the os.path/flavour identity no longer disarms world A, so "
+            f"the invariant above has stopped being the reason it works: {disarmed.stdout}"
+        )
+
+    def test_the_platform_arm_is_reachable_HERE_on_an_nt_identity_host(self, tmp_path):
+        """Windows red 1, reproduced on Linux and held closed forever.
+
+        The round-9 assertion demanded ALIAS_CATCHABLE on every host. This
+        builds the host that answers otherwise - os.path IS ntpath, and the
+        realpath it reaches reads the cwd unconditionally - and checks the
+        judgement lands on the platform arm rather than the assertion refusing
+        it. Without this the nt arm above is unreachable here and the pin only
+        ever exercises the branch its own host produces.
+        """
+        alias_reads, ntpath_absolute, alias_is_the_host = self._measure_alias(EMULATE_NT_HOST_IDENTITY)
+        assert alias_is_the_host is True, "the nt identity emulation did not take"
+        assert alias_reads is True, (
+            "the emulated nt realpath did not read the cwd for an absolute path, so "
+            "this host is nt in name only and the arm below proves nothing"
+        )
+        assert _alias_catchability(alias_reads, ntpath_absolute, alias_is_the_host) == ALIAS_LOST_TO_PLATFORM
+
+    def test_the_nt_identity_emulation_needs_BOTH_halves(self, tmp_path):
+        """Control for the control, and the reason the world is two constants.
+
+        Each half was measured alone before this pin was written. The identity
+        half alone leaves the aliased realpath NOT reading the cwd - the Linux
+        answer wearing an nt label, which is the alias trap one level up: an
+        emulation friendlier than the thing it stands in for. The cwd half
+        alone leaves ``os.path`` and ``ntpath`` distinct, so the alias is still
+        a foreign object and the identity claim above would be false.
+
+        Both rows run on every host, so an edit that drops either half is a red
+        rather than a quieter green.
+        """
+        _, bare_ntpath_absolute, bare_is_the_host = self._measure_alias()
+        reads_cwd_only, _, host_cwd_only = self._measure_alias(_NT_HOST_UNCONDITIONAL_CWD)
+        reads_id_only, _, host_id_only = self._measure_alias(_NT_HOST_MODULE_IDENTITY)
+        assert reads_cwd_only is True, "the cwd half did not take"
+        assert host_id_only is True, "the identity half did not take"
+        if bare_is_the_host:
+            # ALREADY NT, so neither half can discriminate: the identity half
+            # is a no-op and the cwd half is standing in for behaviour the host
+            # performs anyway. Both rows are still asserted - at their nt
+            # values, which are the ones an nt runner can contradict.
+            assert host_cwd_only is True
+            assert reads_id_only is True
+        elif bare_ntpath_absolute:
+            assert host_cwd_only is False, "the cwd half must not change module identity"
+            assert reads_id_only is False, (
+                "the identity half alone made the alias read the cwd, so this host "
+                "no longer shows why the other half is needed"
+            )
+        else:
+            # A 3.13-SHAPED NTPATH REACHES getcwd BY ITSELF, so the identity
+            # half alone already produces the reading behaviour and this host
+            # cannot show that the cwd half adds anything. Reported with the
+            # dimension attached; the cwd half is still asserted above.
+            assert host_cwd_only is False, "the cwd half must not change module identity"
+            assert reads_id_only is True
+
+    @staticmethod
+    def _probe_literal(probe: str) -> str:
+        """The path a probe will actually use, read out of the probe itself.
+
+        The pins below used to carry their own COPY of the literal, which made
+        them green whatever the probe said - a mutant changing ALIAS_PROBE's
+        path could not even be aimed, because the string it targets appeared
+        twice and only one of them was live. A pin that restates its subject
+        instead of reading it is pinning itself.
+        """
+        assigned = [line for line in probe.splitlines() if line.strip().startswith("_abs =")]
+        assert len(assigned) == 1, "the probe no longer assigns its path exactly once"
+        value = assigned[0].split("=", 1)[1].strip()
+        assert value[:1] == "'" and value[-1:] == "'", f"the probe path is not a plain literal: {value}"
+        return value[1:-1]
+
+    def test_the_probe_literal_is_the_SAME_SHAPE_on_every_dialect(self, tmp_path):
+        """Windows red 2's real mechanism, pinned as a property of the input.
+
+        The round-9 probe built its path as `os.path.abspath(os.sep)`: '/' on
+        posix - rooted and driveless, the exact shape 3.13's isabs change is
+        about - and 'D:\\' on nt, which is DRIVE-rooted and absolute under BOTH
+        rules. The emulation was armed on Windows; the argument had changed
+        shape underneath it, so the row measured a different question and
+        answered it correctly.
+
+        This pins what the literal must BE rather than trusting it to stay
+        written down: rooted, driveless, and read the same way by both path
+        modules.
+        """
+        literal = self._probe_literal(self.ALIAS_PROBE)
+        probe = (
+            "import ntpath, posixpath\n"
+            f"_abs = {literal!r}\n"
+            "print('NT_DRIVE:', repr(ntpath.splitdrive(_abs)[0]))\n"
+            "print('POSIX_ABSOLUTE:', posixpath.isabs(_abs))\n"
+        )
+        result = _run(PRELOAD + probe)
+        assert "NT_DRIVE: ''" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "POSIX_ABSOLUTE: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_round_9_probe_spelling_would_still_be_host_shaped(self, tmp_path):
+        """The negative control for the pin above, and the CI red's mechanism
+        made falsifiable here: `os.path.abspath(os.sep)` under an nt-shaped
+        path module yields a DRIVE-rooted string, which every isabs rule calls
+        absolute. Reproduced by asking ntpath directly rather than by owning a
+        Windows box."""
+        probe = (
+            "import ntpath\n"
+            "_old_spelling = ntpath.abspath(ntpath.sep)\n"
+            "print('OLD_SPELLING_HAS_DRIVE:', bool(ntpath.splitdrive(_old_spelling)[0]))\n"
+            "print('NEW_SPELLING_HAS_DRIVE:', bool(ntpath.splitdrive('/x')[0]))\n"
+        )
+        result = _run(PRELOAD + probe)
+        assert "NEW_SPELLING_HAS_DRIVE: False" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
     @pytest.mark.parametrize(
-        "alias_reads,ntpath_absolute,expected",
+        "alias_reads,ntpath_absolute,is_host,expected",
         [
-            (False, True, ALIAS_CATCHABLE),
-            (False, False, ALIAS_CATCHABLE),
-            (True, True, ALIAS_LOST_TO_PLATFORM),
-            (True, False, ALIAS_LOST_TO_VERSION),
+            (False, True, False, ALIAS_CATCHABLE),
+            (False, False, False, ALIAS_CATCHABLE),
+            (False, True, True, ALIAS_CATCHABLE),
+            (False, False, True, ALIAS_CATCHABLE),
+            (True, True, True, ALIAS_LOST_TO_PLATFORM),
+            (True, False, True, ALIAS_LOST_TO_PLATFORM),
+            (True, False, False, ALIAS_LOST_TO_VERSION),
+            (True, True, False, ALIAS_LOST_TO_BEHAVIOUR),
         ],
     )
-    def test_the_catchability_table_is_reachable_on_any_host(self, alias_reads, ntpath_absolute, expected):
-        """Every row runnable anywhere, including the nt one. A literal table,
-        so it cannot vanish."""
-        assert _alias_catchability(alias_reads, ntpath_absolute) == expected
+    def test_the_catchability_table_is_reachable_on_any_host(self, alias_reads, ntpath_absolute, is_host, expected):
+        """All eight combinations runnable anywhere - a literal table over a
+        plain function, so no row waits on an operating system to be reached.
+
+        The two rows that pay for themselves are the last two: same
+        alias_reads, same identity absent, and the verdict turns on the version
+        alone. The eight are written out rather than generated because a
+        generated table hides which combination is missing.
+        """
+        assert _alias_catchability(alias_reads, ntpath_absolute, is_host) == expected
 
     def test_the_313_emulation_changes_only_isabs(self, tmp_path):
         """Arming probe for the reproduction. If the emulation ever stops

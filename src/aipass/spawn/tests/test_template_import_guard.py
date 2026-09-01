@@ -1280,6 +1280,66 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
 # for there. Both scopes are declared per simulation now, and both are gates.
 
 
+# Round 10: the host's own PARSING DIALECT, measured rather than versioned.
+#
+# CI's 3.10 and 3.11 legs died inside the OLD emulation's flavour stand-in, and
+# not because the stand-in was wrong: it forwards to the posixpath module, which
+# is the thing a 3.12 flavour IS. What differs is the CONSUMER. On 3.10/3.11
+# pathlib's own _parse_args calls `cls._flavour.parse_parts(parts)` — an API
+# only the old _Flavour OBJECTS ever had, which no path module has ever
+# carried. So a module-shaped flavour cannot serve those hosts no matter what it
+# delegates to, and growing it a parse_parts of its own would be a simulation of
+# a simulation (@devpulse's call, and I agree — that is a lap, not a cure).
+#
+# This probe asks the host directly instead of keying on a version: install a
+# module-shaped flavour, build a path, and report what the host's pathlib
+# reached for. Any row whose world contains a module-shaped flavour declares
+# `parsing: module-tolerant` and SKIPS BY NAME with this answer elsewhere.
+_REPORT_PARSING_DIALECT = """
+    import pathlib, posixpath
+
+    class _ModuleShapedFlavour:
+        sep = posixpath.sep
+        altsep = ""
+
+        def __getattr__(self, name):
+            return getattr(posixpath, name)
+
+    try:
+        pathlib.PurePosixPath._flavour = _ModuleShapedFlavour()
+    except (AttributeError, TypeError) as _exc:
+        print("PARSING", "unknown:" + type(_exc).__name__)
+    else:
+        try:
+            pathlib.PurePosixPath("/parsing/probe/only")
+        except AttributeError as _exc:
+            _text = str(_exc)
+            _asked = _text.rsplit("'", 2)[-2] if _text.count("'") >= 2 else "something"
+            print("PARSING", "demands:" + _asked)
+        else:
+            print("PARSING", "module-tolerant")
+"""
+
+
+# 3.10's parsing consumer, reduced to the one call that matters, so the dialect
+# probe above has something to say NO against on a 3.12 box. Round 6's rule
+# applied to round 10's new instrument: a probe that cannot report the bad news
+# turns every gate keyed on it vacuously open.
+_A_HOST_WHOSE_PATHLIB_SPEAKS_THE_OBJECT_DIALECT = """
+    import pathlib
+
+    class _OldDialectPurePosixPath:
+        _flavour = getattr(pathlib.PurePosixPath, "_flavour", None)
+
+        def __init__(self, *parts):
+            # 3.10 pathlib.py:587, in one line: _parse_args asks the FLAVOUR.
+            type(self)._flavour.parse_parts(list(parts))
+
+    pathlib.PurePosixPath = _OldDialectPurePosixPath
+    print("OLD_DIALECT_CONSUMER_INSTALLED")
+"""
+
+
 def _measure_host() -> dict:
     """Run the child's OWN fingerprint chunk once, and read the answer back.
 
@@ -1295,7 +1355,54 @@ def _measure_host() -> dict:
     return {"flavour": host[0], "concrete": host[1], "accessor": host[2]}
 
 
+def _rows_missing_a_dialect_declaration(source: str, allowed: dict) -> list:
+    """Which test rows compose the old emulation without declaring their hosts.
+
+    A judgement over source text, so it can be fed a file this one is not —
+    @commons' rule applied to a structural check. The check that only ever runs
+    against its own file cannot be shown to fire at all, and a scan that never
+    reports is indistinguishable from a scan that cannot.
+    """
+    offenders = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test"):
+            continue
+        names = {inner.id for inner in ast.walk(node) if isinstance(inner, ast.Name)}
+        if "_EMULATION_THAT_ASSUMED_ONE_INTERPRETER" not in names:
+            continue
+        if node.name in allowed:
+            continue
+        if "_A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST" not in names:
+            offenders.append(f"{node.name} (line {node.lineno})")
+    return offenders
+
+
+def _parsing_answer(result) -> str:
+    """The child's dialect answer, or "unknown".
+
+    Fails CLOSED, deliberately: a child that said nothing has not told me the
+    host is tolerant, and defaulting to the convenient word would open every
+    row this fact gates while looking exactly like a measurement.
+    """
+    for line in result.stdout.splitlines():
+        if line.startswith("PARSING "):
+            return line.split(None, 1)[1]
+    return "unknown"
+
+
+def _measure_parsing_dialect() -> str:
+    """What this host's pathlib asks a flavour for while parsing. One child, once."""
+    return _parsing_answer(_run(_child_script(_REPORT_PARSING_DIALECT), cwd=Path(__file__).parent))
+
+
 _HOST_FACTS = _measure_host()
+_HOST_FACTS["parsing"] = _measure_parsing_dialect()
+
+# The requirement a WORLD carries, not a simulation: any row that installs a
+# module-shaped flavour needs a host whose pathlib is content with one. Written
+# as a fact-keyed dict so it goes through the same judgement as every other
+# speakable-hosts declaration in this file.
+_A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST = {"parsing": ("module-tolerant",)}
 
 
 def _simulation_unavailable(requires: dict, host: dict) -> str:
@@ -1498,7 +1605,21 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
         """
         result = self._child("flavour-is-already-an-object", "3.11-flavour-object-and-direct-resolve")
 
-        assert "HALF:flavour-object:NATIVE" in result.stdout, result.stdout
+        # ROUND 10 SWEEP: read the SHAPE's half, not the whole of stdout. The
+        # simulation is built out of this same half, and on a host that already
+        # has an object flavour the simulation ALSO prints NATIVE — so the raw
+        # substring form was satisfiable by the simulation's own line while the
+        # row under test said anything at all. Round 8's separation existed one
+        # test over and had not travelled here.
+        #
+        # PUBLISHED AS EQUIVALENT: restoring the raw form passes on every host
+        # reachable from here, because nothing between the two lines can move
+        # the flavour — they agree by construction today. Kept anyway, because
+        # an assertion satisfiable by a line other than the one under test reads
+        # as a measurement of the shape when it is not necessarily one.
+        assert "HALF:flavour-object:NATIVE" in self._shape_halves(result), (
+            f"the SHAPE's flavour half did not stand down:\n{result.stdout}\n{result.stderr}"
+        )
         assert "Traceback" not in result.stderr, result.stderr
 
     def test_an_unavailable_half_skips_rather_than_failing(self):
@@ -1543,7 +1664,20 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
         probe reports ROUTE_DARK and nothing ever reaches a parse. A table keyed
         on the shape's NAME called that "reproducing some other half of that
         interpreter" and went red on a leg where everything was working.
+
+        ROUND 10 — WHICH HOSTS THIS ROW CAN SPEAK FROM. The world below contains
+        the old emulation, and the old emulation installs a MODULE-SHAPED
+        flavour. On 3.10 and 3.11 pathlib's own _parse_args asks that flavour
+        for parse_parts, an API no path module ever had, and the child dies at
+        the first Path(...) before any of this can be measured — which is
+        exactly the parse_parts symptom this row exists to distinguish itself
+        from, arriving before the row can run. The premise cannot hold there, so
+        the row says so and skips, with the answer the host itself gave.
         """
+        why = _simulation_unavailable(_A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, _HOST_FACTS)
+        if why:
+            pytest.skip(f"the old emulation installs a module-shaped flavour and {why}")
+
         result = _run(
             self._simulated(
                 "purposixpath-has-no-flavour",
@@ -1628,6 +1762,14 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
         )
         assert "_CONCRETE_KIND = " in _REPORT_HOST and '"nt" if' in _REPORT_HOST, _REPORT_HOST
 
+    @staticmethod
+    def _flavour_half_verdict(*chunks: str) -> str:
+        """The half's own last word, from a child composed exactly as given."""
+        result = _run(_child_script(*chunks, _HALF_FLAVOUR_OBJECT), cwd=Path(__file__).parent)
+        lines = [line for line in result.stdout.splitlines() if line.startswith("HALF:")]
+        assert lines, f"the half reported nothing at all:\n{result.stdout}\n{result.stderr}"
+        return lines[-1]
+
     def test_the_flavour_half_refuses_a_host_that_builds_windows_paths(self):
         """CI's windows red, reproduced by faking the FINGERPRINT — not a world.
 
@@ -1636,20 +1778,88 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
         This substitutes that name and nothing else, deliberately — building a
         whole WindowsPath world here would measure my scaffolding, while the
         thing under test is which branch the half takes when the host says nt.
-        """
-        verdicts = {}
-        for concrete in ("nt", "posix"):
-            result = _run(
-                _child_script(f'_CONCRETE_KIND = "{concrete}"', _HALF_FLAVOUR_OBJECT),
-                cwd=Path(__file__).parent,
-            )
-            verdicts[concrete] = result.stdout.strip().splitlines()[-1]
 
-        assert verdicts["nt"].startswith("HALF:flavour-object:UNAVAILABLE:"), verdicts
-        assert "WindowsPath" in verdicts["nt"], f"the refusal does not name what it is refusing for: {verdicts['nt']!r}"
-        assert verdicts["posix"] == "HALF:flavour-object:INSTALLED", (
-            f"the posix control moved too — then the nt refusal above is not about the platform: {verdicts}"
+        Speakable from every host, and that is not luck: the nt branch is the
+        half's FIRST question, so it is reached before anything version-shaped.
+        """
+        refusal = self._flavour_half_verdict('_CONCRETE_KIND = "nt"')
+
+        assert refusal.startswith("HALF:flavour-object:UNAVAILABLE:"), refusal
+        assert "WindowsPath" in refusal, f"the refusal does not name what it is refusing for: {refusal!r}"
+
+    # The second row is round 10's red, reproduced on a 3.12 box: a host whose
+    # flavour is ALREADY an object answers NATIVE, which is what 3.10 and 3.11
+    # said on CI while this test demanded the literal INSTALLED.
+    _CONTROL_HOSTS = {
+        "as-this-host-is": (),
+        "with-an-object-flavour-already-installed": (_HALF_FLAVOUR_OBJECT,),
+    }
+
+    @pytest.mark.parametrize("control_host", sorted(_CONTROL_HOSTS))
+    def test_forcing_the_posix_branch_leaves_the_row_where_the_host_put_it(self, control_host):
+        """The control for the refusal above, and round 10's first red.
+
+        This asserted the literal HALF:flavour-object:INSTALLED — the 3.12
+        answer, spelled. Three legs disagreed HONESTLY: 3.10 and 3.11 have an
+        object flavour natively and say NATIVE, 3.13 has none and says
+        UNAVAILABLE. The verdict machinery was right on every one of them and
+        the assertion was still 3.12-shaped, which is the round-9 species moved
+        up one level, into the assertion OVER the verdict.
+
+        The control's real question needs no literal at all: does forcing the
+        posix branch leave the row where the untouched host put it, while
+        forcing nt moves it? Both sides measured, nothing spelled — and run
+        twice, once against a host presenting the answer CI's 3.10 and 3.11
+        legs gave, so the cure is falsifiable here instead of on the board.
+        """
+        if _HOST_FACTS["concrete"] != "posix":
+            pytest.skip(
+                "this row forces the POSIX branch, which installs the very "
+                "stand-in the nt branch exists to refuse; from an nt host that "
+                f"is not a control, it is the defect (host: {_HOST_FACTS['concrete']})"
+            )
+
+        prelude = self._CONTROL_HOSTS[control_host]
+        control = self._flavour_half_verdict(*prelude)
+        forced_posix = self._flavour_half_verdict(*prelude, '_CONCRETE_KIND = "posix"')
+        forced_nt = self._flavour_half_verdict(*prelude, '_CONCRETE_KIND = "nt"')
+
+        assert forced_posix == control, (
+            "forcing the branch the host is already on MOVED the verdict — then "
+            f"the fingerprint substitution is doing more than it claims: {forced_posix!r} vs {control!r}"
         )
+        assert forced_nt != control, (
+            "the nt refusal is what this host says anyway, so the row above is "
+            f"not measuring the platform branch at all: {forced_nt!r} vs {control!r}"
+        )
+
+    def test_the_parsing_dialect_probe_can_report_the_answer_that_shuts_a_row(self):
+        """The negative control for round 10's new instrument.
+
+        Every skip added this round is keyed on one measured word. If the probe
+        could only ever say "module-tolerant", those rows would run everywhere
+        and the 3.10/3.11 crash would come back wearing a different message. So
+        this box grows 3.10's parsing consumer for one child and the probe has
+        to notice — and to NAME what was asked, because "this host is different"
+        and "this host wants parse_parts" are not the same report.
+        """
+        result = _run(
+            _child_script(_A_HOST_WHOSE_PATHLIB_SPEAKS_THE_OBJECT_DIALECT, _REPORT_PARSING_DIALECT),
+            cwd=Path(__file__).parent,
+        )
+
+        assert "OLD_DIALECT_CONSUMER_INSTALLED" in result.stdout.split(), (
+            f"the old-dialect consumer never took:\n{result.stdout}\n{result.stderr}"
+        )
+        answers = [line for line in result.stdout.splitlines() if line.startswith("PARSING ")]
+        assert answers == ["PARSING demands:parse_parts"], (
+            "the dialect probe cannot tell a host that speaks the object dialect "
+            f"from one that does not — every round-10 skip is vacuous:\n{result.stdout}\n{result.stderr}"
+        )
+
+        assert _simulation_unavailable(
+            _A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, {"parsing": "demands:parse_parts"}
+        ), "and the judgement over that answer must close the row"
 
     def test_a_simulation_this_host_cannot_carry_skips_rather_than_failing(self, monkeypatch):
         """The gate's DECISION, reachable from a host that is none of those.
@@ -1771,6 +1981,106 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
         if not speaks:
             assert "this host reports" in why, f"a refusal with no measurement in it: {why!r}"
 
+    @pytest.mark.parametrize(
+        ("parsing", "speaks"),
+        [
+            ("module-tolerant", True),
+            # 3.10 and 3.11: pathlib's own _parse_args asks the flavour for
+            # parse_parts, which no path module has ever had.
+            ("demands:parse_parts", False),
+            # A host that asks for something nobody has named yet is still a
+            # host a module-shaped flavour cannot serve.
+            ("demands:something", False),
+            # And an unmeasurable one fails CLOSED: an instrument that cannot
+            # tell what the host speaks must not assume the convenient answer.
+            ("unknown:TypeError", False),
+            ("unknown", False),
+        ],
+    )
+    def test_a_module_shaped_flavour_declares_which_hosts_it_can_serve(self, parsing, speaks):
+        """Round 10's judgement, with every host this box is not.
+
+        The rule is not about versions: it is about whether the host's pathlib
+        speaks to a flavour in a dialect a path MODULE knows. Delegation cannot
+        cure a consumer that calls methods the delegate never had — which is why
+        the cure is a declaration and a skip, not a shim.
+        """
+        why = _simulation_unavailable(_A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, {"parsing": parsing})
+
+        assert (why == "") is speaks, f"{parsing}: {why!r}"
+        if not speaks:
+            assert parsing in why, f"the refusal does not carry the host's own answer: {why!r}"
+
+    # The one row that may meet a host whose pathlib speaks the object dialect,
+    # and why — published rather than silently exempted. Any other test that
+    # composes the old emulation must DECLARE its speakable hosts.
+    _ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST = {
+        "test_the_previous_emulation_dies_against_the_shape_it_assumed_away": (
+            "its expectation IS the crash: the symptom judgement predicts "
+            "parse_parts on exactly the hosts whose pathlib asks for it, and the "
+            "expectation is derived from the flavour the CHILD measured"
+        ),
+    }
+
+    def test_every_world_with_a_module_shaped_flavour_declares_or_derives(self):
+        """The sweep, kept from rotting — @skills' lower-bound rule as a pin.
+
+        Two tests were flagged by CI. A flagged list is a diff and therefore a
+        LOWER BOUND, so the rule is stated structurally instead: any test that
+        composes the old emulation DECLARES which hosts it can speak from, and
+        the single exception is named below with its reason. A third such test
+        written next month gets caught here rather than on a board.
+
+        The first cut of this check accepted "mentions the symptom judgement"
+        as equivalent to declaring — and a mutant that deleted the cross-term
+        row's declaration SURVIVED it, because that row calls the judgement with
+        a literal argument. Mentioning a measurement is not making one.
+        """
+        offenders = _rows_missing_a_dialect_declaration(
+            Path(__file__).read_text(encoding="utf-8"), self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST
+        )
+
+        assert not offenders, (
+            "these tests install a module-shaped flavour without saying which "
+            "hosts can carry one and without deriving the symptom: " + ", ".join(offenders)
+        )
+
+    def test_the_dialect_sweep_reports_a_row_that_does_not_declare(self):
+        """The negative control for the sweep — it has to be able to say YES.
+
+        A structural check run only against a file that already passes is the
+        vacuous-green species in a new costume. This feeds it a source it has
+        never seen, containing one row that declares and one that does not.
+        """
+        source = textwrap.dedent(
+            """
+            def test_it_declares():
+                _run(_child_script(_EMULATION_THAT_ASSUMED_ONE_INTERPRETER))
+                _simulation_unavailable(_A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, _HOST_FACTS)
+
+            def test_it_does_not():
+                _run(_child_script(_EMULATION_THAT_ASSUMED_ONE_INTERPRETER))
+
+            def test_it_never_touches_the_old_emulation():
+                _run(_child_script(_DENY_REALPATH))
+            """
+        )
+
+        offenders = _rows_missing_a_dialect_declaration(source, {})
+
+        assert [name.split(" (")[0] for name in offenders] == ["test_it_does_not"], offenders
+        assert _rows_missing_a_dialect_declaration(source, {"test_it_does_not": "published reason"}) == [], (
+            "the allow-list is not being consulted"
+        )
+
+    def test_the_published_exception_carries_its_reason(self):
+        """An exemption with no reason is an exemption nobody will re-examine."""
+        for name, reason in self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST.items():
+            assert reason.strip(), f"{name} is exempt with no reason given"
+            assert name in Path(__file__).read_text(encoding="utf-8"), (
+                f"{name} is exempt and no longer exists — a stale exemption is a hole"
+            )
+
     def test_the_platform_emulations_declare_an_asymmetry_and_not_an_oversight(self):
         """Why one platform stand-in has a precondition and the other does not.
 
@@ -1810,6 +2120,15 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
         assert _flavour_in_force(refused) == "absent"
         assert _flavour_in_force(windows) == "module"
 
+    def test_a_child_that_never_reported_its_dialect_is_unknown_not_tolerant(self):
+        """Round 10's fact reads the same way its neighbours do: closed on silence."""
+        assert _parsing_answer(self._Result("PARSING module-tolerant\n")) == "module-tolerant"
+        assert _parsing_answer(self._Result("PARSING demands:parse_parts\n")) == "demands:parse_parts"
+        assert _parsing_answer(self._Result("HOST module posix no-accessor\n")) == "unknown"
+        assert _simulation_unavailable(
+            _A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, {"parsing": _parsing_answer(self._Result(""))}
+        ), "silence must close the rows this fact gates, not open them"
+
     def test_a_child_that_never_reported_its_host_is_unknown_not_guessed(self):
         """The fingerprint is load-bearing now, so its absence must be loud."""
         assert _flavour_in_force(self._Result("HALF:direct-resolve:INSTALLED\n")) == "unknown"
@@ -1824,9 +2143,15 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
 
     def test_this_host_measured_itself_before_any_world_touched_it(self):
         """The parent's own fingerprint, and the gate that reads it."""
-        assert set(_HOST_FACTS) == {"flavour", "concrete", "accessor"}
+        assert set(_HOST_FACTS) == {"flavour", "concrete", "accessor", "parsing"}
         assert _HOST_FACTS["concrete"] in ("posix", "nt"), _HOST_FACTS
         assert _HOST_FACTS["flavour"] in ("object", "module", "absent"), _HOST_FACTS
+        # Round 10's fact. Either the host is content with a module-shaped
+        # flavour, or it NAMES what it asked for — "unknown" would mean the
+        # probe could not even install one, which is a fifth state nobody has
+        # seen and would take every world built on it dark without saying why.
+        parsing = _HOST_FACTS["parsing"]
+        assert parsing == "module-tolerant" or parsing.startswith("demands:"), parsing
 
 
 def _drive_row_is_satisfied(os_name: str, anchor_drive: str) -> bool:

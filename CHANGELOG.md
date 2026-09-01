@@ -13,6 +13,49 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 10: the assumption moves into the assertion next** (FPLAN-0461
+  continued). Round 9's board (84175b82): production clean a FOURTH consecutive
+  board, red owners down to two, five unique failing tests — and spawn's
+  windows-leg skip-by-name cure HELD on the real Windows runner. Every red was
+  one species, seen twice in one round: round 9 made the verdicts honest
+  three-state, and the reds were the ASSERTIONS over those verdicts, still
+  spelling the answer of the host they were written on. Devpulse diagnosed all
+  four mechanisms from the CI evidence before dispatching; two survived contact,
+  two were corrected with receipts and the conclusions stood. Spawn: the posix
+  control now measures a control (untouched-host run first, forcing posix must
+  LEAVE the row, forcing nt must MOVE it — no literal anywhere, and the row
+  runs again against an object-flavour host so the restored-literal mutant dies
+  on the exact CI red reproduced locally); the parse_parts dialect mismatch is
+  gated by a MEASUREMENT, not a version table — a probe asks the host's own
+  pathlib what it reaches for, rows carrying a module-shaped flavour skip by
+  name with the host's own answer, and the probe carries a negative control
+  that grows 3.10's consumer to prove it can fire (a silent child reads as
+  unknown and CLOSES the rows). Seedgo: the alias judgement keys on measured
+  module identity with both arms asserted and an nt-identity world reachable
+  from Linux forever — the world's two halves pinned alone, because identity
+  without the cwd-reading realpath is the Linux answer wearing an nt label;
+  and the refuted mechanism's cure was one dialect-neutral literal — the probe
+  had built its input as abspath(os.sep), which is rooted-driveless on posix
+  but DRIVE-rooted on nt: the input changed shape underneath the row. Seedgo's
+  property sweep then caught THREE literals true only where ntpath carries the
+  3.12 legacy clause — next board's 3.13 reds, killed tonight — and grew a
+  fourth verdict for a foreign ntpath that reads the cwd anyway (an emulation
+  reported as a platform). The night's found-object: backslash-named files
+  minting at the repo root, spawn measured them without naming an author,
+  devpulse attributed them to seedgo's window, and seedgo corrected the
+  attribution with receipts — their throwaway sweep instrument, not shipped
+  code — while writing down the harness property that made it a commit risk at
+  all: the composed runner hands every child cwd = repo root, so any relative
+  write anywhere lands in the tree. Pinned one level stronger than asked: a
+  fixture that fails the module if children leave ANYTHING behind, deliberately
+  non-deleting, acquitting removed entries, its watched directory pinned to the
+  real child cwd. Fleet lessons banked: a mutant that deletes a COUPLING is
+  invisible to a single-mutant run (the pair is the mutant); an assertion that
+  holds cannot be killed by deleting it (mutate the source); and the naming
+  checker learned PYTEST_CONTRACT_GLOBALS from devpulse's refused auto-fix —
+  2074 files, 7 verdicts change, all FAIL to no-verdict. Spawn 977x2 with 12/13
+  mutants named, seedgo 2901x2 with 8/8 named, both audits 100.
+
 - **Round 9: the instruments learned to say where they cannot speak — cross
   terms, one-dimension litmuses, and the wrong question** (FPLAN-0461
   continued). Round 8's board (9bd2618b) was five red legs, zero production
