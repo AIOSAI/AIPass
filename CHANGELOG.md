@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-31] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461)
+## [2026-09-01] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461) · v2.8.1
 
 ### Fixed
 
