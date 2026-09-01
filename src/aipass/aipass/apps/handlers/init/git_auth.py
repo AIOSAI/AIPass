@@ -56,6 +56,7 @@ from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.shared.registry_discovery import registries_in
 
 MANAGER_CLASS = "manager"
 
@@ -124,7 +125,7 @@ def find_registry(target: Path) -> Optional[Path]:
     """
     current = target.resolve()
     for candidate in [current, *current.parents]:
-        matches = sorted(candidate.glob("*_REGISTRY.json"))
+        matches = registries_in(candidate)
         if matches:
             return matches[0]
     return None

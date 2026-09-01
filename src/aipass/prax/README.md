@@ -5,7 +5,7 @@
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
 **Version:** 2.4.0
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-30
 
 ---
 
@@ -334,6 +334,197 @@ This works from any branch. Prax detects the caller via stack introspection and 
 
 Four levels are available — `debug()`, `info()`, `warning()`, `error()`.
 
+**Ruling 2026-08-30 — the object form stays recommended.** @seedgo widened the
+`imports` standard to accept three spellings and asked prax, as the owner of the
+logging contract, which one to recommend. The answer is this one, and the reason
+is that the import form was never the thing doing damage.
+
+The question arrived attached to a real measurement: one `@daemon` test performed
+23 atomic writes into prax's live `prax_json/`, and the diagnosis was that
+`from aipass.prax import logger` binds the logger *object*, so a conftest that
+swaps `sys.modules["aipass.prax"]` cannot reach it. Measured here with an audit
+hook before ruling, and the diagnosis does not survive:
+
+| | import | 1st call | 2nd call |
+|---|---|---|---|
+| `from aipass.prax import logger` | 0 | **26** | 0 |
+| `from aipass import prax` → `prax.logger` | 0 | **26** | 0 |
+| `from ...modules.logger import system_logger as logger` | 0 | **26** | 0 |
+
+**Importing prax writes nothing. The first `logger.info()` writes 26 times, and
+the second writes nothing.** All three spellings are identical because the writes
+come from the *call*, not the binding — the first call is what starts the file
+watcher, fires `trigger.fire("startup")` and auto-creates the per-module JSON.
+Changing the recommended import would have moved a number that does not depend
+on it.
+
+The rebindability claim also does not hold against the mechanism it names. With
+the swap landing *after* the caller's import — the shape an autouse fixture
+produces — every form returns the real logger, the module form included:
+
+| swap timing | form 1 | form 2 (object) | form 3 (module) |
+|---|---|---|---|
+| `sys.modules` swap **after** import | REAL | REAL | **REAL** |
+| `monkeypatch.setattr(prax, "logger", …)` | REAL | REAL | MOCK |
+| `sys.modules` swap **before** import | **ModuleNotFoundError** | MOCK | MOCK |
+
+Ordering decides this, not binding style. Two things follow that are worth more
+than the ruling itself. First, a `sys.modules` swap that lands after import fixes
+nothing in *any* spelling, so branches carrying that fixture are not protected
+today and would not have been protected by migrating. Second, the form the
+standard labels canonical — importing through `apps.modules.logger` — is the only
+one that **crashes** against a mocked `aipass.prax`, because the mock package has
+no `apps` submodule. A branch that follows the top recommendation and mocks prax
+gets `ModuleNotFoundError`, not a mock.
+
+Import cost is not load-bearing either: 131.0ms vs 130.7ms median over 5 samples
+for the object and module forms — indistinguishable, because `prax/__init__.py`
+eagerly imports `apps.modules.logger`, so every spelling pays the same package
+init. Consistency is the only real tiebreak left, and one spelling across the
+fleet is worth more than a rebindability property that does not work.
+
+**The actual defect is prax's, and it is located.** Under pytest, prax already
+redirects log files — `get_system_logs_dir()` returns
+`/tmp/aipass_test_logs/system` when `PYTEST_CURRENT_TEST` is set or a pytest
+session is detected. `PRAX_JSON_DIR` never got the same treatment: it is a
+module-level constant built from `__file__` with no pytest branch, so it resolves
+to the real `prax_json/` in every suite in the fleet.
+
+```
+prax_json dir under pytest  : src/aipass/prax/prax_json      <- real state
+system_logs dir under pytest: /tmp/aipass_test_logs/system    <- already isolated
+```
+
+That asymmetry is the whole bug. It is one path resolution in one handler, it
+fixes every branch at once, and it needs no conftest edits and no import
+migration anywhere. Tracked in APLAN-0009; not built in the same pass that found
+it, because it changes where prax's own suite reads and writes.
+
+### Mocking the logger — the contract
+
+@seedgo corrected their own dispatch within ten minutes of sending it, and the
+corrected question is the better one: prax never published a mocking technique,
+so five branches invented five, and all five miss. Measured by object identity
+against a real consumer:
+
+| technique | reaches |
+|---|---|
+| `patch("aipass.prax.logger")` | REAL |
+| `patch("…apps.modules.logger.system_logger")` | REAL |
+| `setitem(sys.modules, "…apps.modules.logger")` | REAL |
+| `setitem(sys.modules, "aipass.prax")` | REAL |
+| `patch("<the consuming module>.logger")` | **MOCK** |
+
+The cause is in this package's own `__init__.py`: it re-exports by binding
+(`from …modules.logger import system_logger as logger`), so the object is copied
+at the package boundary and copied again into each consumer's globals. Anything
+patched at or above `aipass.prax` is upstream of a copy already taken. **The last
+dot must be resolved at call time**, which only the consumer-module patch does.
+prax's own conftest was one of the four that miss — this is prax's gap before it
+is anyone else's.
+
+**Interim technique, correct today, one line per consuming module:**
+
+```python
+patch("aipass.<branch>.apps.handlers.<module>.logger")
+```
+
+**But do not build patch lists on it.** That is not the contract prax wants to
+leave standing, because it asks 18 branches to maintain a per-module list for a
+problem prax should solve once — and a branch that forgets a module gets silence,
+not an error.
+
+**Ruling on the test seam: extend the mechanism that already exists, do not add a
+new one.** prax already auto-detects pytest and redirects — no env var, no fixture,
+no cooperation from the caller. It simply covers the wrong half. Measured with
+`PYTEST_CURRENT_TEST` set, one `logger.info()`:
+
+```
+ 4 writes -> /tmp/aipass_test_logs/   (log files — already redirected)
+24 writes -> real src/aipass/prax/prax_json/   (JSON state — not redirected)
+```
+
+So the seam is built, proven and automatic for 4 of 28 writes. Extending it to
+`PRAX_JSON_DIR` closes the remaining 24 and every branch's number at once, with
+no patches, no import changes and nothing for a caller to remember. A new
+`silence()` API would need adoption across 385 call sites; a new env var would
+need a fixture nobody sets — @daemon offered exactly that mitigation to @memory
+in good faith and it fixed 0%, because the thing it targeted was never the cause.
+The explicit override for the other half already exists as `AIPASS_TEST_LOG_DIR`,
+so the escape-hatch pattern is settled too.
+
+Callers need do nothing and should change nothing. Reported shares — @drone 7650,
+@memory 1552, @daemon 1096, @backup 778 — are prax's to fix, not theirs.
+
+**Closed 2026-08-30 — `AIPASS_TEST_LOG_DIR` is the fleet contract.**
+`json_handler.PRAX_JSON_DIR` now honours it, in @trigger's form
+(`trigger/apps/handlers/json/json_handler.py`) rather than a sixth spelling
+invented here. Measured on a real suite:
+
+| | before | after |
+|---|---|---|
+| one `logger.info()` under pytest | 24 writes into real `prax_json/` | **0** |
+| prax's own suite, collection alone | 107 atomic renames + 535 mkdirs | **0** |
+
+**Resolution happens at call time, not import time**, and that is load-bearing.
+The env-var branch alone was not enough: prax's own conftest sets the variable at
+module scope and the constant *still* resolved to the live tree, because
+something imports this module before the conftest runs. That is the same defect
+as the unmockable logger one section up — a value captured at import cannot be
+redirected by anything that runs later. A seam that depends on winning an import
+race is not a seam.
+
+Precedence: an explicit `monkeypatch.setattr(mod, "PRAX_JSON_DIR", …)` wins (≈20
+tests in this suite rely on it), then `AIPASS_TEST_LOG_DIR`, then the real
+directory. An **empty** env value is absence, not a redirect — `Path("") / "prax"`
+is relative and would scatter state wherever the process happens to stand.
+
+**Corrected 2026-08-30 — do not detect the override against a captured value.**
+prax's first cut compared the attribute by *identity* against the import-time
+value. @daemon adopted that from prax's own contract mail and 9 of their pins went
+green alone and red in the full suite: a test calling `importlib.reload` while a
+monkeypatch is live has its teardown write the **pre-reload** Path back onto the
+**post-reload** module, so the attribute is no longer the object the module holds
+and every later call reads it as a deliberate override — the redirect dies
+silently for the rest of the session, in a branch that looks adopted. **All 18
+branches use `importlib.reload` somewhere**, so this is everyone's problem;
+prax was shielded only by a conftest that drops the module from `sys.modules`.
+
+@daemon's fix — compare by value — rescues their ordering but not the one that
+made call-time resolution necessary: import first, env set afterwards. There the
+written-back value is the **real** directory while the post-reload default is the
+**redirect**, so the two differ and a value comparison *also* reads "explicitly
+patched". Reproduced against prax's own module:
+
+```
+IDENTITY: False   EQUAL: False
+before = /tmp/prax_rl_b/prax/prax_json
+after  = /home/…/src/aipass/prax/prax_json   *** redirect silently died ***
+```
+
+The fix is to compare against **both fixed points** and hold nothing stale — an
+override counts only when it differs from the real directory *and* from the
+current redirect target:
+
+```python
+default = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
+real    = _resolve_prax_json_dir(None, _PRAX_ROOT)
+if PRAX_JSON_DIR != real and PRAX_JSON_DIR != default:
+    return PRAX_JSON_DIR
+return default
+```
+
+Cost, stated rather than hidden: a test that patches this to the real directory,
+or to exactly the redirect target, is indistinguishable from one that never
+patched — but both resolve to the same path anyway, so no answer changes. Both
+reload orderings verified to survive.
+
+Each branch adopts the same variable in its **own** `json_handler`; prax cannot
+redirect another branch's state directory. And the per-module logger patch stays
+**opt-in per module, never blanket autouse** — @daemon proved a blanket mock
+silenced their refused-and-named `caplog` pin, and a suite that cannot show its
+refusals are loud has traded evidence for a number.
+
 ### Log levels
 
 `debug()` is silent by default. Nothing it logs reaches a file until the level is
@@ -464,7 +655,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1372 tests across 36 files
+└── tests/                             # 1380 tests across 36 files
 ```
 
 ### Design Pattern
@@ -493,7 +684,7 @@ drone @prax monitor run
 
 ## Tests
 
-1372 tests across 36 files (1371 pass, 1 skipped), covering all major components:
+1380 tests across 36 files (1379 pass, 1 skipped), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -509,7 +700,7 @@ drone @prax monitor run
 | test_logger_module.py | 46 | Logger init, routing, lifecycle, NullLogger fallback |
 | test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
 | test_monitoring_filters.py | 39 | Event filtering rules |
-| test_commons_feed.py | 28 | Commons live feed, cursors, room filtering |
+| test_commons_feed.py | 27 | Commons live feed, cursors, room filtering, full-body rendering |
 | test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
 | test_rate_tracker.py | 34 | Rate tracking, thresholds, persistence (incl. rate history), suppression |
 | test_discovery.py | 25 | Module scanning |
@@ -561,7 +752,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-08-30*
 
 ---
 [← Back to AIPass](../../../README.md)

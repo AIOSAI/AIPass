@@ -258,9 +258,16 @@ class TestHandlerGuard:
     changed rather than leaving a silently-stale claim behind.
     """
 
-    def test_guard_refuses_an_outside_caller_when_it_runs(self):
-        """Called directly with an outside caller frame, the guard says no."""
-        probe = REPO_ROOT / "probe_guard_direct.py"
+    def test_guard_refuses_an_outside_caller_when_it_runs(self, tmp_path):
+        """Called directly with an outside caller frame, the guard says no.
+
+        The probe lives in tmp_path, not REPO_ROOT. It used to be written beside
+        the repo root and unlinked in a finally — which still counts as two
+        writes into a tree the suite does not own, and @seedgo's audit-tests
+        write gate named them (2026-08-30). Only the CWD needs to be REPO_ROOT,
+        so that aipass resolves on the import path; the file does not.
+        """
+        probe = tmp_path / "probe_guard_direct.py"
         probe.write_text(
             textwrap.dedent(
                 """
@@ -276,15 +283,12 @@ class TestHandlerGuard:
             ).strip(),
             encoding="utf-8",
         )
-        try:
-            result = subprocess.run(
-                [sys.executable, str(probe)],
-                capture_output=True,
-                text=True,
-                cwd=str(REPO_ROOT),
-            )
-        finally:
-            probe.unlink()
+        result = subprocess.run(
+            [sys.executable, str(probe)],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "BLOCKED"

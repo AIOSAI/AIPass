@@ -37,12 +37,13 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit_tests import laws, refusal, spine, target as target_module
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 ARTIFACT_VERSION = "audit-tests/1"
 LANE_VERSION = "1.0.0"
 
 #: Where artifacts live. Seedgo's own state directory, never the target's.
-SEEDGO_ROOT = Path(__file__).resolve().parents[3]
+SEEDGO_ROOT = module_file(__file__).parents[3]
 ARTIFACT_DIR = SEEDGO_ROOT / ".seedgo"
 
 #: Baseline marker for a pair the lane has never measured before.

@@ -365,17 +365,24 @@ class TestDiscovery:
         assert baud.relative_path == "src/baud/baud"
 
     def test_live_fleet_matches_the_measured_baseline(self):
-        if os.environ.get("GITHUB_ACTIONS"):
-            # Windows CI runs setup.sh, which mints a fresh core-only fleet
-            # (18, 18, 0) — a real fleet, but not the machine this baseline
-            # measured. The pin guards the live fleet, not any installed one.
-            pytest.skip("CI-installed fleet is not the measured live machine")
-        targets = discover_passports(repo_root())
-        if not targets:
-            pytest.skip("No live fleet on this machine (gitignored — expected in CI)")
-        core = sum(1 for t in targets if t.residency == "core")
-        resident = sum(1 for t in targets if t.residency == "resident")
-        assert (len(targets), core, resident) == (
+        """Pins THIS machine's fleet — and skips honestly on any world that is not it.
+
+        The guard used to ask ``GITHUB_ACTIONS`` and "is the result empty".
+        Both are the wrong question: the first asks where the PROCESS is rather
+        than what the WORLD contains, and the second only catches the fully-bare
+        case. MEASURED against a core-only stand-in (@memory, 2026-08-31), and
+        reproduced here before the fix: 18 targets, neither skip fires, and the
+        (22, 18, 4) baseline reds on a machine that has done nothing wrong.
+
+        ``_fleet_baseline_verdict`` reads the rows and says what it needs. Its
+        own behaviour is pinned in TestLiveBaselineGuardsOnTheWorld, including
+        the anti-vacuity case — a two-tier world must still be measured.
+        """
+        shape, reason = _fleet_baseline_verdict(repo_root())
+        if reason:
+            pytest.skip(reason)
+
+        assert shape == (
             EXPECTED_FLEET["total"],
             EXPECTED_FLEET["core"],
             EXPECTED_FLEET["resident"],
@@ -903,3 +910,237 @@ class TestSyncRegistryBacksUpBeforeItsWrite:
         assert backup.exists(), "sync-registry --fix rewrote a passport with no pre_v2 backup"
         assert backup.read_text(encoding="utf-8") == original
         assert _read(path)["identity"]["citizen_class"] == "specialist"
+
+
+def _unwrapped(text: str) -> str:
+    """Strip ALL whitespace so an assertion cannot depend on terminal width.
+
+    Rich hard-wraps at the console width and inserts a bare newline mid-token,
+    so a tmp_path long enough to cross the boundary arrives as
+    "..._other_rep\no". The first version of the pin below asserted on the raw
+    text and passed only because that run's tmp_path happened to be short —
+    a test that passes by luck about its own fixture is worse than no test.
+    """
+    return "".join(text.split())
+
+
+class TestEmptyScanIsNotAnAllClear:
+    """A root with nothing findable must not read as a clean bill of health.
+
+    MEASURED 2026-08-30 against a real sibling repository:
+
+        drone @spawn migrate-passports --dry-run --root /home/patrick/Projects/wren
+        Scanned: 0  (core 0 / resident 0)
+        Nothing to migrate — every scanned passport is already 2.0.
+
+    @wren's passport is schema 1.0 and was never touched. The sentence is
+    technically true of the empty set and false about the world: discover_passports
+    globs `src/aipass/*/` and `projects/*/src/*/*/`, both shaped like THIS
+    repository, so any external repo yields zero targets and the report calls that
+    success. @memory's fleet ruling depends on this command reaching six external
+    citizens, and a green summary is exactly what would have hidden that it cannot.
+    """
+
+    def test_zero_scanned_says_zero_scanned(self, tmp_path, capsys):
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        empty_root = tmp_path / "some_other_repo"
+        (empty_root / "src").mkdir(parents=True)
+
+        assert handle_migrate_passports(["--root", str(empty_root)]) == 0
+
+        captured = capsys.readouterr()
+        # The zero-scan line is a warning() — stderr by seedgo's routing rule —
+        # while the layout hint stays on stdout, so read both streams.
+        both = _unwrapped(captured.out + captured.err)
+        assert _unwrapped("already 2.0") not in both, "an empty scan must not report the fleet as migrated"
+        assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
+
+    def test_zero_scanned_names_the_root_it_searched(self, tmp_path, capsys):
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        empty_root = tmp_path / "some_other_repo"
+        empty_root.mkdir()
+
+        handle_migrate_passports(["--root", str(empty_root)])
+
+        captured = capsys.readouterr()
+        assert _unwrapped(str(empty_root)) in _unwrapped(captured.out + captured.err)
+
+    def test_a_populated_root_still_reports_the_all_clear(self, synthetic_fleet, capsys):
+        """The fix must not silence the real all-clear — migrate, then re-run."""
+        from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+
+        handle_migrate_passports(["--root", str(synthetic_fleet), "--confirm"])
+        capsys.readouterr()
+
+        handle_migrate_passports(["--root", str(synthetic_fleet)])
+
+        captured = capsys.readouterr()
+        assert _unwrapped("already 2.0") in _unwrapped(captured.out)
+        assert _unwrapped("No passports found") not in _unwrapped(captured.out + captured.err)
+
+
+class TestRetiredAndHiddenDirectoriesAreNeverScanned:
+    """The docstring's promise, made true by rule instead of by luck.
+
+    discover_passports has always claimed "backups, archives and the template
+    never match either glob". MEASURED 2026-08-31, that was true by accident of
+    layout, not by construction — pathlib's ``*`` matches dotted names, so a
+    passport at ``src/aipass/.archive/.trinity/passport.json`` IS returned by
+    CORE_GLOB. It has simply never existed here.
+
+    The hazard is not hypothetical elsewhere: Vera-Studio holds five archived
+    passports under ``src/.archive/`` (architect, creative, growth, quality,
+    strategy), and @memory measured the same five from the other direction — a
+    passport walk finds 9 branches there where the registry knows 4. If this
+    tool ever learns to scan a declared external root, an unruled glob offers to
+    write to five directories somebody deliberately retired.
+
+    The rule: a citizen directory never begins with a dot. Retiring is a
+    registry act, and a passport walk cannot tell a retired citizen from a live
+    one — so the walk must at minimum refuse the hidden directories that
+    retirement puts things in.
+    """
+
+    def _plant(self, root, relative):
+        passport = root / relative / ".trinity" / "passport.json"
+        passport.parent.mkdir(parents=True)
+        passport.write_text(json.dumps({"document_metadata": {"schema_version": "1.0.0"}}), encoding="utf-8")
+        return passport
+
+    def test_an_archived_core_passport_is_not_discovered(self, tmp_path):
+        self._plant(tmp_path, Path("src/aipass/.archive"))
+        live = self._plant(tmp_path, Path("src/aipass/realbranch"))
+
+        found = [t.path for t in discover_passports(tmp_path)]
+
+        assert found == [live], "an archived passport was swept into the migration set"
+
+    def test_a_backup_directory_is_not_discovered(self, tmp_path):
+        self._plant(tmp_path, Path("src/aipass/.backup"))
+        live = self._plant(tmp_path, Path("src/aipass/realbranch"))
+
+        assert [t.path for t in discover_passports(tmp_path)] == [live]
+
+    def test_an_archived_resident_passport_is_not_discovered(self, tmp_path):
+        self._plant(tmp_path, Path("projects/demo/src/demo/.archive"))
+        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"))
+
+        found = [t.path for t in discover_passports(tmp_path)]
+
+        assert found == [live]
+
+    def test_a_hidden_project_directory_is_not_discovered(self, tmp_path):
+        """The dot can sit at any level of the resident path, not just the last."""
+        self._plant(tmp_path, Path("projects/.archive/src/demo/oldbranch"))
+        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"))
+
+        assert [t.path for t in discover_passports(tmp_path)] == [live]
+
+    def test_a_normal_fleet_is_untouched_by_the_rule(self, synthetic_fleet):
+        """The rule must not cost a single real citizen."""
+        assert len(discover_passports(synthetic_fleet)) > 0
+
+
+# =============================================================================
+# THE LIVE BASELINE — guard on the WORLD, never on where you happen to be
+# =============================================================================
+
+
+def _fleet_baseline_verdict(root):
+    """Return ``(shape, skip_reason)`` for the live-baseline pin.
+
+    ``shape`` is ``(total, core, resident)``. ``skip_reason`` is None when the
+    world under ``root`` genuinely IS the machine the baseline measured, and a
+    sentence explaining why not otherwise.
+
+    Extracted from the test so the guard itself can be pinned against synthetic
+    worlds. A guard that only ever runs against this one machine is a guard
+    nobody can prove, which is how the previous one shipped a hole.
+    """
+    targets = discover_passports(root)
+    core = sum(1 for t in targets if t.residency == "core")
+    resident = sum(1 for t in targets if t.residency == "resident")
+    shape = (len(targets), core, resident)
+
+    if not targets:
+        return shape, (
+            "no fleet under this root — .trinity/ and AIPASS_REGISTRY.json are both "
+            "gitignored, so a bare checkout carries none; nothing is claimed either way"
+        )
+    if resident == 0:
+        return shape, (
+            f"world is core-only ({core} core, 0 resident) — a real fleet, but not the "
+            "machine this baseline measured; setup.sh mints exactly this shape"
+        )
+    return shape, None
+
+
+class TestLiveBaselineGuardsOnTheWorld:
+    """EXISTENCE IS NOT SUFFICIENCY — the hole that would have redded the train.
+
+    The previous guard skipped on ``GITHUB_ACTIONS`` and on a completely empty
+    result. Both are the wrong question. The first asks WHERE THE PROCESS IS
+    rather than what the world contains, so it protects one CI provider and
+    nobody else; the second only catches the fully-bare case. @memory ran this
+    pin against a CI-shaped stand-in and got (18, 18, 0) — a real fleet with no
+    residents, non-empty, env var unset, so both guards passed and the hardcoded
+    (22, 18, 4) assertion failed on a machine that had done nothing wrong.
+
+    A baseline that measures the live machine must READ THE ROWS and say what it
+    needs. These pins feed the guard synthetic worlds so the rule is proven
+    rather than asserted — including the one that matters most: on a world that
+    DOES carry both tiers, the guard must still engage, or the fix would have
+    silently switched the pin off everywhere.
+    """
+
+    def _plant(self, root, relative):
+        passport = root / relative / ".trinity" / "passport.json"
+        passport.parent.mkdir(parents=True)
+        passport.write_text(json.dumps({"document_metadata": {"schema_version": "1.0.0"}}), encoding="utf-8")
+
+    def test_a_bare_checkout_skips_and_says_why(self, tmp_path):
+        shape, reason = _fleet_baseline_verdict(tmp_path)
+
+        assert shape == (0, 0, 0)
+        assert reason is not None
+        assert "gitignored" in reason
+
+    def test_a_core_only_world_skips_instead_of_failing(self, tmp_path):
+        """The exact shape @memory measured: 18 core, 0 resident, non-empty."""
+        for i in range(18):
+            self._plant(tmp_path, Path(f"src/aipass/branch{i:02d}"))
+
+        shape, reason = _fleet_baseline_verdict(tmp_path)
+
+        assert shape == (18, 18, 0)
+        assert reason is not None, "a core-only fleet must not be measured against this machine's baseline"
+        assert "core-only" in reason
+
+    def test_the_skip_reason_reports_the_counts_it_saw(self, tmp_path):
+        for i in range(3):
+            self._plant(tmp_path, Path(f"src/aipass/branch{i}"))
+
+        _, reason = _fleet_baseline_verdict(tmp_path)
+
+        assert reason is not None
+        assert "3 core" in reason
+        assert "0 resident" in reason
+
+    def test_a_world_with_both_tiers_still_engages_the_guard(self, tmp_path):
+        """ANTI-VACUITY PIN — the fix must not switch the baseline off everywhere."""
+        self._plant(tmp_path, Path("src/aipass/spawn"))
+        self._plant(tmp_path, Path("projects/baud/src/baud/baud"))
+
+        shape, reason = _fleet_baseline_verdict(tmp_path)
+
+        assert shape == (2, 1, 1)
+        assert reason is None, "a two-tier world IS measurable — the guard must not skip it"
+
+    def test_the_live_machine_is_measured_or_says_why(self):
+        """Whatever this machine is, the verdict must be self-describing."""
+        shape, reason = _fleet_baseline_verdict(repo_root())
+
+        assert len(shape) == 3
+        assert reason is None or isinstance(reason, str)

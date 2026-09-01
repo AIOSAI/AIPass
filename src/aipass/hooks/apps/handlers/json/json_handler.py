@@ -19,6 +19,7 @@ from typing import Any
 import inspect
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.module_root import module_file
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -27,7 +28,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT = module_file(__file__).parents[3]
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 

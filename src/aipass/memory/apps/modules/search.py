@@ -21,7 +21,6 @@ Purpose:
 
 import os
 import sys
-from pathlib import Path
 from typing import List
 
 if sys.platform == "win32":
@@ -47,6 +46,7 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.search.query_executor import (
     execute_search as _handler_execute_search,
 )
+from aipass.memory.apps.handlers.repo_root import module_file
 
 
 # =============================================================================
@@ -297,7 +297,7 @@ def _discover_handlers() -> dict[str, list[str]]:
         Dict mapping handler directory name to list of .py filenames
         (excluding __init__.py and __pycache__).
     """
-    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
+    handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

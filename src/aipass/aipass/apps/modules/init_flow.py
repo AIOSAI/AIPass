@@ -52,6 +52,8 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_tmux,
     detect_wt,
 )
+from aipass.aipass.apps.handlers.module_root import module_file
+from aipass.aipass.shared.registry_discovery import registries_in
 
 try:
     import questionary as _questionary  # type: ignore[import-untyped]
@@ -65,7 +67,8 @@ except ImportError as _qe:
 COMMAND = "init"
 TOTAL_STAGES = 10
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[2]
+# module_file, not resolve(): import-time cwd read on Windows (module_root).
+_BRANCH_ROOT = module_file(__file__).parents[2]
 
 
 def _get_local_json_path() -> Path:
@@ -819,7 +822,7 @@ def run_init(
 
     # Ensure scaffold exists — only for aipass_framework
     cwd = Path.cwd()
-    if template == TEMPLATE_AIPASS and not list(cwd.glob("*_REGISTRY.json")):
+    if template == TEMPLATE_AIPASS and not registries_in(cwd):
         from aipass.aipass.apps.handlers.init.bootstrap import init_project
 
         if not dry_run:

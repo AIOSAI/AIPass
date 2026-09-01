@@ -6,52 +6,29 @@
   },
   "bypass": [
     {
-      "file": "apps/drone.py",
-      "standard": "cli",
-      "lines": [
-        287,
-        289,
-        407,
-        409,
-        566,
-        568,
-        685,
-        687
-      ],
-      "reason": "Raw passthrough of routed command stdout/stderr \u2014 console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
-    },
-    {
-      "file": "apps/modules/router.py",
-      "standard": "cli",
-      "lines": [
-        62
-      ],
-      "reason": "Raw passthrough of routed command stdout \u2014 console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
-    },
-    {
       "file": "apps/handlers/scanning/formatters.py",
       "standard": "cli",
-      "reason": "Formatter handler \u2014 purpose is to format and print Rich output. console.print() is the core function, not a violation."
+      "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."
     },
     {
       "file": "apps/handlers/command_registry/formatters.py",
       "standard": "cli",
-      "reason": "Formatter handler \u2014 purpose is to format and print Rich output. console.print() is the core function, not a violation."
+      "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."
     },
     {
       "file": "apps/modules/git_module.py",
       "standard": "modules",
-      "reason": "handle_command returns dict (not bool) \u2014 module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
+      "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
     },
     {
       "file": "apps/handlers/module_registry_handler.py",
       "standard": "naming",
-      "reason": "_ExternalModuleConfig is PascalCase \u2014 leading underscore is Python private convention, not a naming violation"
+      "reason": "_ExternalModuleConfig is PascalCase — leading underscore is Python private convention, not a naming violation"
     },
     {
       "file": "apps/plugins/devpulse_ops/auth.py",
       "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ by design \u2014 separate from 3-layer structure. Plugins are an intentional extension point."
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure. Plugins are an intentional extension point."
     },
     {
       "file": "apps/handlers/git/pr_handler.py",
@@ -61,32 +38,32 @@
     {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",
       "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ by design \u2014 separate from 3-layer structure."
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
     },
     {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",
       "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() \u2014 drone-internal plugin, same branch."
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     },
     {
       "file": "apps/plugins/devpulse_ops/sync_plugin.py",
       "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ by design \u2014 separate from 3-layer structure."
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
     },
     {
       "file": "apps/plugins/devpulse_ops/sync_plugin.py",
       "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() \u2014 drone-internal plugin, same branch."
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     },
     {
       "file": "apps/plugins/devpulse_ops/fix_plugin.py",
       "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ by design \u2014 separate from 3-layer structure."
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
     },
     {
       "file": "apps/plugins/devpulse_ops/fix_plugin.py",
       "standard": "encapsulation",
-      "reason": "Plugin imports lock_handler.find_repo_root() \u2014 drone-internal plugin, same branch."
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     },
     {
       "file": "tests/test_devpulse_plugins.py",
@@ -96,7 +73,7 @@
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "architecture",
-      "reason": "Acceptance test artifact \u2014 standalone demo script, not part of 3-layer production structure."
+      "reason": "Acceptance test artifact — standalone demo script, not part of 3-layer production structure."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
@@ -106,7 +83,7 @@
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "documentation",
-      "reason": "Acceptance test script \u2014 main() is self-documenting via module docstring and inline comments."
+      "reason": "Acceptance test script — main() is self-documenting via module docstring and inline comments."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
@@ -116,22 +93,22 @@
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "help_text",
-      "reason": "Docstring run instruction shows how to invoke the script \u2014 not a production help text."
+      "reason": "Docstring run instruction shows how to invoke the script — not a production help text."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "meta",
-      "reason": "Acceptance test artifact \u2014 META blocks are for production source files."
+      "reason": "Acceptance test artifact — META blocks are for production source files."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "trigger",
-      "reason": "Acceptance test exercises .unlink() to clean up test symlinks \u2014 not production file operations."
+      "reason": "Acceptance test exercises .unlink() to clean up test symlinks — not production file operations."
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "unused_function",
-      "reason": "Standalone acceptance demo runner \u2014 helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
+      "reason": "Standalone acceptance demo runner — helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
     },
     {
       "file": "apps/handlers/command_registry/ops.py",
@@ -140,7 +117,7 @@
         "update_command",
         "command_exists"
       ],
-      "reason": "Public CRUD API surface (update_command, command_exists) \u2014 tested, available for programmatic use. No CLI subcommand wired yet."
+      "reason": "Public CRUD API surface (update_command, command_exists) — tested, available for programmatic use. No CLI subcommand wired yet."
     },
     {
       "file": "apps/handlers/git/pr_handler.py",
@@ -148,7 +125,7 @@
       "functions": [
         "create_pr"
       ],
-      "reason": "create_pr() has no production caller \u2014 the `pr` command is owner-tier and live, but _handle_pr() in git_module.py dispatches to dev_pr_handler.create_branch_pr(), not here. Its only callers are 7 sites in tests/test_git_module.py. Kept pending a removal decision (APLAN-0003); this bypass documents orphaned code, it does not defend it."
+      "reason": "create_pr() has no production caller — the `pr` command is owner-tier and live, but _handle_pr() in git_module.py dispatches to dev_pr_handler.create_branch_pr(), not here. Its only callers are 7 sites in tests/test_git_module.py. Kept pending a removal decision (APLAN-0003); this bypass documents orphaned code, it does not defend it."
     },
     {
       "file": "apps/modules/git_module.py",
@@ -172,22 +149,23 @@
       "lines": [
         27
       ],
-      "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py \u2014 drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose \u2014 auth.py is the git authority gate and any OTHER direct handler import in it must still be reported."
+      "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py — drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose — auth.py is the git authority gate and any OTHER direct handler import in it must still be reported. ANCHORED 2026-08-31: the 'anchor' key states what line 27 must CONTAIN, and TestLineScopedBypassesAreOnTarget fails the day it does not. A line number is a pointer that edits invalidate silently — @trigger had four shift in round 5 and @seedgo measured drone's other nine adrift — so a waiver that cannot say what it points at cannot be trusted to still point there.",
+      "anchor": "from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME"
     },
     {
       "file": "apps/handlers/git/repo_context.py",
       "standard": "json_structure",
-      "reason": "Pure predicate \u2014 one constant and one boolean over the filesystem, no operation to log. A log_operation() call here would fire on every git command to record 'a question was asked'; the callers that ACT on the answer (tag_handler, auth) log their own outcomes. Wiring json_handler in to satisfy the checker would be scaffolding, not logging."
+      "reason": "Pure predicate — one constant and one boolean over the filesystem, no operation to log. A log_operation() call here would fire on every git command to record 'a question was asked'; the callers that ACT on the answer (tag_handler, auth) log their own outcomes. Wiring json_handler in to satisfy the checker would be scaffolding, not logging."
     },
     {
       "file": "apps/handlers/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate \u2014 one question over a token list, no I/O and no state. It is called before every command in ten modules, so a log_operation() here would record 'a help flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer already log what they did. Same shape and same reasoning as the repo_context.py rule."
+      "reason": "Pure predicate — one question over a token list, no I/O and no state. It is called before every command in ten modules, so a log_operation() here would record 'a help flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer already log what they did. Same shape and same reasoning as the repo_context.py rule."
     },
     {
       "file": "apps/handlers/json_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate \u2014 one question over a token list, no I/O and no state. The literal twin of help_flags.py, which carries this same rule for the same reason: it runs before every git read command, so a log_operation() here would record 'a --json flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer (status, log, show, remote) already log their own outcomes. Adding json_handler to satisfy a checker that keys on the directory, not on whether the file touches JSON data, would be scaffolding rather than logging."
+      "reason": "Pure predicate — one question over a token list, no I/O and no state. The literal twin of help_flags.py, which carries this same rule for the same reason: it runs before every git read command, so a log_operation() here would record 'a --json flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer (status, log, show, remote) already log their own outcomes. Adding json_handler to satisfy a checker that keys on the directory, not on whether the file touches JSON data, would be scaffolding rather than logging."
     }
   ],
   "notes": {
@@ -204,7 +182,8 @@
       "pattern": "Optional - pattern to match (e.g. 'if __name__')",
       "reason": "Required - why this bypass exists"
     },
-    "scoped_rules_trued_2026-08-09": "FPLAN-0382 wave 1: all 12 scope-qualified rules re-verified against the tree before seedgo's is_bypassed() scoping fix lands. Every line-scoped rule had DRIFTED \u2014 the 3 kept were refreshed, and 5 were DELETED as dead (3 handlers rules whose imports are same-branch aipass.drone, dead since dc07cc01; test_git_module encapsulation; test_broker windows_compat, already covered by an inline noqa). Deletion was proven, not assumed: removing each rule and re-auditing produced no violation. The 3 survivors were checked the other way \u2014 with the rule removed, the checker reports violations at exactly the bypassed lines and nowhere else, so line-scoped enforcement will not expose anything the current whole-file behaviour is hiding. All 4 function-scoped rules still name existing functions; reasons hold. Line numbers are a claim about the tree \u2014 re-verify whenever the file moves.",
-    "removed_s61": "13 naming bypasses removed (9 __all__ + 4 local variable false positives). Seedgo dispatched to fix naming_check.py. If audit fails on naming after this, the checker fix didn't land."
+    "scoped_rules_trued_2026-08-09": "FPLAN-0382 wave 1: all 12 scope-qualified rules re-verified against the tree before seedgo's is_bypassed() scoping fix lands. Every line-scoped rule had DRIFTED — the 3 kept were refreshed, and 5 were DELETED as dead (3 handlers rules whose imports are same-branch aipass.drone, dead since dc07cc01; test_git_module encapsulation; test_broker windows_compat, already covered by an inline noqa). Deletion was proven, not assumed: removing each rule and re-auditing produced no violation. The 3 survivors were checked the other way — with the rule removed, the checker reports violations at exactly the bypassed lines and nowhere else, so line-scoped enforcement will not expose anything the current whole-file behaviour is hiding. All 4 function-scoped rules still name existing functions; reasons hold. Line numbers are a claim about the tree — re-verify whenever the file moves.",
+    "removed_s61": "13 naming bypasses removed (9 __all__ + 4 local variable false positives). Seedgo dispatched to fix naming_check.py. If audit fails on naming after this, the checker fix didn't land.",
+    "line_scoped_anchored_2026-08-31": "The two cli line-scoped entries (apps/drone.py 8 numbers, apps/modules/router.py 1) were DELETED, not re-derived. @seedgo measured all nine adrift (+8/+13 in drone.py, +4 in router.py) and, more to the point, redundant: cli_check learned the relayed-stream exemption in round two, so both files score 100 on their own merits. Verified by A/B here before deleting — removing both entries left cli at 100 and violations at 0. Under the fleet rule (if the exemption is structurally detectable, the checker learns it; a waiver is only for what cannot be measured) they were dead weight, and nine numbers that would suppress the WRONG lines if they ever matched again, in the file that routes every command in the system. auth.py:27 was on target and stays, now with a content anchor and a test."
   }
 }

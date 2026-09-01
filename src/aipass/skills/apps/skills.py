@@ -6,22 +6,35 @@
 # Modified: 2026-08-11
 # =============================================
 
-import sys
-from pathlib import Path
-
-# Prevent this script's parent dir from shadowing the 'skills' package
-_script_dir = str(Path(__file__).resolve().parent)
-if _script_dir in sys.path:
-    sys.path.remove(_script_dir)
-
-from aipass.prax import logger  # noqa: E402
-from aipass.cli.apps.modules import console, error  # noqa: E402
-
 """Skills system entry point.
 
 Provides handle_command(command, args) for drone routing.
 Commands: list, info, run, create, validate, --help.
 """
+
+import os
+import sys
+from pathlib import Path
+
+# Prevent this script's parent dir from shadowing the 'skills' package.
+# Guarded inline rather than through handlers.module_paths: this block runs
+# BEFORE any aipass import by design, and importing the helper would resolve
+# 'aipass' through the very shadowed path this is here to remove.
+# resolve() reads the cwd on Windows (ntpath.realpath, unconditionally), so a
+# process with a dead cwd could not start the CLI at all.
+try:
+    _script_dir = str(Path(__file__).resolve().parent)
+except OSError as _resolve_error:
+    # prax is not importable yet — this block runs before it on purpose — so
+    # the report goes to stderr, which is the accepted last resort for a
+    # diagnostic that cannot afford a logger.
+    sys.stderr.write(f"[skills] resolve() unavailable ({_resolve_error}); using the unresolved absolute spelling\n")
+    _script_dir = str(Path(os.path.abspath(__file__)).parent)
+if _script_dir in sys.path:
+    sys.path.remove(_script_dir)
+
+from aipass.prax import logger  # noqa: E402
+from aipass.cli.apps.modules import console, error  # noqa: E402
 
 
 def print_introspection():

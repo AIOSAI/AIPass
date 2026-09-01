@@ -3,7 +3,7 @@
 **Purpose:** Permanent test citizen. Exists to be spawned, dispatched, resumed, broken and re-scaffolded so the working fleet never is. All mail, logs and memories here are TEST DATA by definition — never production work. Sibling of @finch (projects tier) and @wren (external tier): three homes covering three different fence contexts.
 **Module:** `aipass.canary`
 **Created:** 2026-08-20
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-31
 
 ---
 
@@ -24,10 +24,17 @@ Run the branch's own suite from the repo root, which is how CI runs it:
 pytest src/aipass/canary/tests -v
 ```
 
-Three of those functions are parametrized, so pytest collects and passes more
-cases than there are `def test_` lines. Both counts are true of different
-things; the tree below states the function count, which is what the standards
-audit measures.
+Several of those functions are parametrized, so pytest collects and passes
+more cases than there are `def test_` lines — 52 functions collect as 82 cases
+today. Both counts are true of different things; the tree below states the
+function count, which is what the standards audit measures.
+
+The suite must also pass from the repo root, which is the shape CI actually
+runs and a different universe from the branch rootdir:
+
+```bash
+pytest src/aipass/canary/tests -c pyproject.toml --rootdir=.
+```
 
 ---
 
@@ -57,12 +64,13 @@ CANARY/
 │   ├── canary.py           # Entry point
 │   ├── modules/            # Business logic — no .py here by design, added per test
 │   ├── handlers/
+│   │   ├── paths.py        # Dead-cwd-safe resolve for module-level constants
 │   │   └── json/           # JSON handler shim over aipass.aipass.shared
 │   ├── integrations/       # Scaffold, empty
 │   └── plugins/            # Scaffold, empty
 ├── artifacts/              # Test artifacts written during dispatches
 ├── canary_json/            # Where the json shim writes — test data, nothing depends on it
-├── tests/                  # 38 test functions, all passing as of 2026-08-25
+├── tests/                  # 52 test functions, all passing as of 2026-08-31
 ├── docs/
 └── README.md
 ```

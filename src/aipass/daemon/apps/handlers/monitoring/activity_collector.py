@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_collector.py
 # Description: Branch Activity Data Collector
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-01-30
-# Modified: 2026-01-30
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -22,10 +22,11 @@ from typing import Dict, List, Any, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
 
 
 # Constants — find registry: env var > repo root > ~/.aipass/
-_REPO_ROOT = Path(__file__).resolve().parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
+_REPO_ROOT = module_file(__file__).parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
 _REGISTRY_CANDIDATES = [
     Path(os.environ.get("AIPASS_REGISTRY", "")),
     _REPO_ROOT / "AIPASS_REGISTRY.json",

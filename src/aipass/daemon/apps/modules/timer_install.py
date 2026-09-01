@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer_install.py
 # Description: Idempotent systemd user timer installer for daemon scheduler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -23,9 +23,17 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[2]
+_DAEMON_ROOT = module_file(__file__).parents[2]
 _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
+
+# The shared AIPass state directory. A MODULE CONSTANT rather than a
+# Path.home() call inside _install(), because a path computed at call time
+# has no seam: the test could patch _DAEMON_ROOT and _UNIT_DIR and still
+# watch the suite mkdir the real ~/.aipass, which holds admin_grant.key and
+# commons.db. Found by the audit-tests lane, red-first before this line moved.
+_STATE_DIR = Path.home() / ".aipass"
 _SERVICE_NAME = "daemon-tick.service"
 _TIMER_NAME = "daemon-tick.timer"
 
@@ -124,7 +132,7 @@ def _install() -> int:
     console.print("[dim]Verify: systemctl --user list-timers | grep daemon[/dim]")
     console.print()
 
-    Path.home().joinpath(".aipass").mkdir(parents=True, exist_ok=True)
+    _STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("[timer_install] daemon-tick timer installed and started")
     return 0

@@ -106,7 +106,8 @@ class TestMain:
         mod.start_system_watcher = MagicMock(return_value=True)
 
         captured: list[str] = []
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: captured.append(str(a)))
 
         mod.main()
 
@@ -127,7 +128,8 @@ class TestMain:
         mod.start_system_watcher = MagicMock(return_value=None)
 
         captured: list[str] = []
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: captured.append(str(a)))
 
         mod.main()
 
@@ -147,7 +149,8 @@ class TestMain:
         mod.start_system_watcher = MagicMock(return_value=True)
 
         captured: list[str] = []
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: captured.append(str(a)))
 
         mod.main()
 
@@ -272,8 +275,15 @@ class TestMain:
         assert signal.SIGTERM in installed_signals
         assert signal.SIGINT in installed_signals
 
-    def test_both_fail_prints_stderr(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-        """When both watchers fail, error message goes to stderr."""
+    def test_both_fail_is_reported_at_error_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When both watchers fail, the reason is reported at ERROR level.
+
+        This used to assert on stderr. The five lifecycle print() calls became
+        prax logger calls on 2026-08-31 (unstructured output invisible to the
+        monitoring surface this process feeds), so the claim moved with the
+        transport — and the LEVEL is now part of it, which stderr could not
+        express: a failed startup is the one message here that is not INFO.
+        """
         mod = _import_module()
 
         pre_set = threading.Event()
@@ -283,11 +293,20 @@ class TestMain:
         mod.start_branch_watcher = MagicMock(return_value=False)
         mod.start_system_watcher = MagicMock(return_value=False)
 
+        errors: list[str] = []
+        infos: list[str] = []
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: errors.append(str(a)))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: infos.append(str(a)))
+
         with pytest.raises(SystemExit):
             mod.main()
 
-        captured = capsys.readouterr()
-        assert "Both watchers failed" in captured.err
+        assert any("Both watchers failed" in e for e in errors), (
+            f"the startup failure was not reported at ERROR level: errors={errors} infos={infos}"
+        )
+        assert not any("Both watchers failed" in i for i in infos), (
+            "the startup failure was downgraded to INFO, where the log watchers do not see it"
+        )
 
 
 class TestReloadExit:
@@ -328,7 +347,8 @@ class TestReloadExit:
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
         captured: list[str] = []
-        monkeypatch.setattr("builtins.print", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: captured.append(str(a)))
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: captured.append(str(a)))
 
         mod.main()  # must not raise SystemExit
 

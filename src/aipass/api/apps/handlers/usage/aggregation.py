@@ -18,8 +18,6 @@ Business logic for aggregating usage statistics:
 Functions: get_caller_usage(), get_session_summary()
 """
 
-from pathlib import Path
-
 # Standard library imports
 from typing import Dict, Any, Optional
 
@@ -28,6 +26,8 @@ import json
 
 # Logging
 from aipass.prax import logger
+
+from aipass.api.apps.handlers.module_root import module_file
 
 # JSON handler
 from aipass.api.apps.handlers.json import json_handler
@@ -40,7 +40,7 @@ from aipass.api.apps.handlers.json import json_handler
 MODULE_NAME = "aggregation"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
 # Navigate: aggregation.py -> usage/ -> handlers/ -> apps/ -> api/
-API_JSON_DIR = Path(__file__).resolve().parent.parent.parent.parent / "api_json"
+API_JSON_DIR = module_file(__file__).parent.parent.parent.parent / "api_json"
 
 
 # =============================================

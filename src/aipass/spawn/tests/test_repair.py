@@ -770,3 +770,122 @@ class TestTemplateFiles:
             pytest.skip("templates/.archive/ absent — clean checkout; the archive half is a live-machine fact")
         for retired in ("aipass_framework", "project_agent"):
             assert (archive / retired).is_dir(), f"templates/{retired}/ was deleted, not archived"
+
+
+# ---------------------------------------------------------------------------
+# Case-insensitive volumes: the glob is not a filter everywhere it runs
+# ---------------------------------------------------------------------------
+
+
+def _case_insensitive_listing(monkeypatch):
+    """Make pathlib's glob behave the way a Windows volume does.
+
+    The defect is not in the reader — it is in what the FILESYSTEM hands the
+    reader back, so this supplies that listing rather than patching the code
+    under test. Matching the pattern with ``re.IGNORECASE`` is exactly what a
+    case-insensitive volume does, and it means these pins run RED on the Linux
+    dev box instead of only on the Windows gate (@drone's construction, adopted
+    here on @devpulse's relay, 2026-08-31).
+    """
+    import fnmatch
+    import pathlib
+    import re
+
+    real_glob = pathlib.Path.glob
+
+    def insensitive_glob(self, pattern, *args, **kwargs):
+        if "/" in pattern or "**" in pattern:
+            return real_glob(self, pattern, *args, **kwargs)
+        rx = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
+        return iter(sorted(p for p in self.iterdir() if rx.match(p.name)))
+
+    monkeypatch.setattr(pathlib.Path, "glob", insensitive_glob)
+
+
+class TestRegistryLookupIsCaseSensitive:
+    """A repair lane must never read a template counter as the registry.
+
+    ``.template_registry.json`` (every branch has one) and the ten ``flow_json``
+    plan counters are lowercase, and ``pathlib``'s ``*`` matches dotted names
+    unlike a shell glob. On a case-insensitive volume the glob returns them, and
+    a dotted name sorts FIRST — so the unfiltered lookup handed
+    ``.template_registry.json`` to the code that repairs registries.
+
+    Both pins below are red without the suffix filter and green with it.
+    """
+
+    def test_a_lowercase_lookalike_is_not_served_as_the_registry(self, tmp_path, monkeypatch):
+        from aipass.spawn.apps.handlers.repair_ops import _registry_in
+
+        real = tmp_path / "AIPASS_REGISTRY.json"
+        real.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        decoy = tmp_path / ".template_registry.json"
+        decoy.write_text(json.dumps({"files": {}}), encoding="utf-8")
+
+        _case_insensitive_listing(monkeypatch)
+
+        # The decoy sorts first, so an unfiltered first-match returns it.
+        assert sorted(p.name for p in tmp_path.glob("*_REGISTRY.json"))[0] == decoy.name
+
+        assert _registry_in(tmp_path) == real
+
+    def test_repair_project_reports_the_real_registry(self, tmp_path, monkeypatch):
+        """End-to-end through the call site, not just the helper."""
+        from aipass.spawn.apps.handlers.repair_ops import repair_project
+
+        project = tmp_path / "someproj"
+        project.mkdir()
+        (project / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        (project / ".template_registry.json").write_text(json.dumps({"files": {}}), encoding="utf-8")
+        (project / "flow_plans_registry.json").write_text("{}", encoding="utf-8")
+
+        _case_insensitive_listing(monkeypatch)
+
+        result = repair_project(project, dry_run=True)
+
+        assert result["success"] is True
+        assert result["registry"] == "AIPASS_REGISTRY.json"
+
+    def test_an_external_lowercase_stem_is_still_a_registry(self, tmp_path, monkeypatch):
+        """Suffix only, never the stem — external projects name their own."""
+        from aipass.spawn.apps.handlers.repair_ops import _registry_in
+
+        theirs = tmp_path / "vera_studio_REGISTRY.json"
+        theirs.write_text(json.dumps({"branches": []}), encoding="utf-8")
+
+        _case_insensitive_listing(monkeypatch)
+
+        assert _registry_in(tmp_path) == theirs
+
+    def test_absence_is_reported_as_absence(self, tmp_path, monkeypatch):
+        from aipass.spawn.apps.handlers.repair_ops import _registry_in
+
+        (tmp_path / ".template_registry.json").write_text("{}", encoding="utf-8")
+
+        _case_insensitive_listing(monkeypatch)
+
+        assert _registry_in(tmp_path) is None
+
+    def test_both_call_sites_go_through_the_one_lookup(self):
+        """The extraction is the fix — a second inline glob would undo it."""
+        import ast
+        import inspect
+
+        from aipass.spawn.apps.handlers import repair_ops
+
+        tree = ast.parse(inspect.getsource(repair_ops))
+        inline = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"glob", "rglob"}
+            and any(
+                isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.upper().endswith("_REGISTRY.JSON")
+                for a in node.args
+            )
+        ]
+        assert inline == [], (
+            "an unfiltered registry glob is back at line(s) "
+            f"{inline} — route it through _registry_in, which case-checks the name"
+        )

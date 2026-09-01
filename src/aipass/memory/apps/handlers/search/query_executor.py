@@ -28,14 +28,15 @@ from typing import Dict, Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Subprocess scripts for ML operations (run in memory venv)
-_HANDLERS_DIR = Path(__file__).resolve().parent.parent
+_HANDLERS_DIR = module_file(__file__).parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
 # Memory venv python — auto-detect from memory/.venv/ or use env var override
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
 

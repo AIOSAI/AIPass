@@ -15,18 +15,20 @@ Never manually create JSONs - they build themselves.
 
 import json
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
 
 from aipass.prax import logger
 
+from aipass.skills.apps.handlers.module_paths import module_file
+
 
 # Infrastructure
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT = module_file(__file__).parents[3]
 
 # Constants
 SKILLS_JSON_DIR = _BRANCH_ROOT / "skills_json"
@@ -131,17 +133,24 @@ def _get_caller_module_name() -> str:
         Module name (e.g., "discovery" from discovery.py)
     """
     try:
-        stack = inspect.stack()
-        # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-        if len(stack) > 2:
-            caller_frame = stack[2]
-            caller_path = Path(caller_frame.filename)
-            module_name = caller_path.stem
+        # sys._getframe rather than inspect.stack(): inspect materialises a
+        # FrameInfo for EVERY frame, and getsourcefile() -> getmodule() calls
+        # os.path.realpath at inspect.py:1009 outside any try. ntpath.realpath
+        # reads os.getcwd() unconditionally, so on Windows a caller with a dead
+        # or disconnected working directory turned every log_operation into a
+        # crash. This is the audit trail's hot path — one frame read answers
+        # the same question the whole-stack walk did.
+        # Frames: [0]=this function, [1]=log_operation, [2]=actual caller.
+        caller_frame = sys._getframe(2)
+        module_name = Path(caller_frame.f_code.co_filename).stem
 
-            # Validate module name
-            if module_name and not module_name.startswith("_"):
-                return module_name
+        # Validate module name
+        if module_name and not module_name.startswith("_"):
+            return module_name
 
+        return "unknown"
+    except ValueError:
+        # Stack shallower than three frames: nobody to name.
         return "unknown"
     except Exception:
         logger.warning("Failed to detect caller module name from stack")

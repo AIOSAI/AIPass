@@ -28,13 +28,14 @@ from rich.console import Console
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_audit_ignore_patterns
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 console = Console()
 
 AUDIT_SCOPE = "branch_level"
 
 # Diagnostics handler directory (where this file lives)
-DIAGNOSTICS_DIR = Path(__file__).resolve().parent
+DIAGNOSTICS_DIR = module_file(__file__).parent
 
 # Handlers root (parent of diagnostics/)
 HANDLERS_DIR = DIAGNOSTICS_DIR.parent

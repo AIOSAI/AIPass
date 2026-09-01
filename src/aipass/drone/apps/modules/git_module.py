@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-08-12
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -39,6 +39,7 @@ from aipass.drone.apps.handlers.git import (
     remote_handler,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
 DRONE_MODULE = {
@@ -107,8 +108,15 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Walks up from CWD looking for ``.trinity/passport.json`` and extracts
     the branch name + directory.  Works for any registered branch regardless
     of where it lives on disk (commons, skills, aipass sub-dirs, etc.).
+
+    Returns None when the process has no CWD — this detects the branch from
+    LOCATION, and there is nothing to detect from. Identity assigned at spawn
+    is a different question, answered elsewhere and unaffected.
     """
-    current = Path.cwd().resolve()
+    cwd = caller_cwd()
+    if cwd is None:
+        return None
+    current = cwd.resolve()
     for _ in range(10):
         passport = current / ".trinity" / "passport.json"
         if passport.exists():

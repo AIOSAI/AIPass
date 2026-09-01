@@ -178,6 +178,22 @@ def sync_registry(fix: bool = False) -> dict:
     """
     # 1. Load registry — CWD-aware discovery
     registry_path = find_registry()
+    if registry_path is None:
+        # find_registry answers absence with None now (@aipass, 2026-08-31) —
+        # a path for an absence was a lie with a type signature. There is
+        # nothing to synchronise against, and inventing a project root here is
+        # how a registry gets written somewhere nobody asked for.
+        logger.error("[sync-registry] No *_REGISTRY.json found above the current directory — nothing to sync")
+        return {
+            "error": "no registry found above the current directory",
+            "stale": [],
+            "unregistered": [],
+            "healthy": [],
+            "fixed": [],
+            "spawn_rebuilt": [],
+            "ids_fixed": [],
+            "descriptions_backfilled": [],
+        }
     project_root = registry_path.parent
     registry = load_registry(registry_path)
     branches = branches_as_list(registry.get("branches", []))
@@ -410,6 +426,10 @@ def check_owner_identity(registry_path=None):
     """
     if registry_path is None:
         registry_path = find_registry()
+    if registry_path is None:
+        reason = "no *_REGISTRY.json found above the current directory"
+        logger.error("[registry-check] %s", reason)
+        return {"clean": False, "owner": None, "owner_uid": "", "issues": [{"flag": "no_registry", "detail": reason}]}
     registry_path = Path(registry_path)
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))
@@ -554,6 +574,10 @@ def fix_owner_identity(registry_path=None, dry_run=False):
     """
     if registry_path is None:
         registry_path = find_registry()
+    if registry_path is None:
+        reason = "no *_REGISTRY.json found above the current directory"
+        logger.error("[registry-check] %s", reason)
+        return {"clean": False, "owner": None, "owner_uid": "", "issues": [{"flag": "no_registry", "detail": reason}]}
     registry_path = Path(registry_path)
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))

@@ -34,9 +34,11 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.module_root import module_file
 
 COMMAND = "profile"
-_BRANCH_ROOT = Path(__file__).resolve().parents[2]
+# module_file, not resolve(): import-time cwd read on Windows (module_root).
+_BRANCH_ROOT = module_file(__file__).parents[2]
 # NOT profile_data.json: <module>_{config,data,log}.json is json_handler's OWN
 # managed triplet, and ensure_module_jsons REGENERATES any of the three that
 # fails its shape check. save_profile's own log_operation call auto-detects

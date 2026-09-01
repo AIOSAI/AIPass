@@ -12,6 +12,7 @@ import importlib
 import sys
 import tempfile
 import types
+from contextlib import ExitStack, contextmanager
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -194,6 +195,27 @@ STANDALONE_ENTRY_MODULES = [
     ("versioned", "run_versioned", []),
 ]
 
+#: Real work that runs AFTER the sentinel and must be neutralised too.
+#:
+#: Patching the sentinel alone is not enough for 'all': handle_command calls
+#: run_snapshot, then run_versioned, then a LIVE run_drive_sync. With only
+#: run_snapshot spied, the rest of the production pipeline really executed --
+#: the Drive step authenticated through @api and refreshed the machine's real
+#: ~/.secrets/aipass/google_creds.json (mkdir + chmod 0700 + open('w') +
+#: chmod 0600 in api/apps/handlers/google/auth.py:261-265). An open(..., 'w')
+#: truncates on open, so a failure mid-write could corrupt live credentials on
+#: any machine that ran this suite. Found 2026-08-30 by @seedgo's audit-tests
+#: lane -- the only write any branch made outside the audit copy.
+#:
+#: run_drive_sync is imported INSIDE handle_command, so it has to be patched at
+#: its source module, not as an attribute of 'all'.
+DOWNSTREAM_AFTER_SENTINEL: dict[str, tuple[str, ...]] = {
+    "all": (
+        "aipass.backup.apps.modules.all.run_versioned",
+        "aipass.backup.apps.modules.drive_sync.run_drive_sync",
+    ),
+}
+
 
 class TestHelpGateInsideHandleCommand:
     """handle_command itself must screen help flags, not just the router.
@@ -230,10 +252,87 @@ class TestHelpGateInsideHandleCommand:
         mod = self._load(name)
         args = [str(tmp_path), *extra, "some_file.py"] if extra else [str(tmp_path)]
 
-        with patch.object(mod, sentinel) as spy:
+        with ExitStack() as stack:
+            spy = stack.enter_context(patch.object(mod, sentinel))
+            for target in DOWNSTREAM_AFTER_SENTINEL.get(name, ()):
+                stack.enter_context(patch(target))
             mod.handle_command(mod.PRIMARY_COMMAND, args)
 
         spy.assert_called()
+
+
+#: sys.addaudithook can never be uninstalled, so the hook goes in once at module
+#: scope and stays inert unless _secrets_watch() has armed it.
+_SECRETS_ROOT = str(Path.home() / ".secrets")
+_SECRETS_TOUCHED: list[str] | None = None
+_WATCHED_EVENTS = ("open", "os.mkdir", "os.chmod", "os.rename", "os.replace")
+
+
+def _secrets_audit_hook(event: str, args: tuple) -> None:
+    """Record any touch of real secret storage while the watch is armed."""
+    if _SECRETS_TOUCHED is None or event not in _WATCHED_EVENTS:
+        return
+    target = str(args[0]) if args else ""
+    if target.startswith(_SECRETS_ROOT):
+        _SECRETS_TOUCHED.append(f"{event} {target}")
+
+
+sys.addaudithook(_secrets_audit_hook)
+
+
+@contextmanager
+def _secrets_watch():
+    """Arm the audit hook and yield the list it records into."""
+    global _SECRETS_TOUCHED
+    _SECRETS_TOUCHED = []
+    try:
+        yield _SECRETS_TOUCHED
+    finally:
+        _SECRETS_TOUCHED = None
+
+
+class TestNoWriteEscapesToRealSecrets:
+    """The 'all' cycle must never reach live credential storage from a test.
+
+    Regression, found 2026-08-30 by @seedgo's audit-tests lane -- the only write
+    any branch made outside the audit copy. test_real_invocation_still_dispatches
+    patched run_snapshot only, so handle_command fell straight through to a REAL
+    run_drive_sync, which authenticated through @api and rewrote
+    ~/.secrets/aipass/google_creds.json (auth.py:261-265: mkdir, chmod 0700,
+    open('w'), chmod 0600). open(..., 'w') truncates on open, so a failure
+    mid-write could corrupt the machine's live Google credentials.
+
+    The audit hook here RECORDS and does not block. Blocking mid-auth pushes the
+    Google client into its interactive browser flow, which hangs forever -- a pin
+    that hangs teaches nobody anything. The cost of recording is that a genuine
+    regression writes the real file once before this test goes red; that is the
+    status quo it exists to end, not a new risk it introduces.
+    """
+
+    def test_all_stops_at_the_patched_doubles(self, tmp_path: Path) -> None:
+        """Every step after the sentinel is a double, so no real work runs."""
+        mod = importlib.import_module("aipass.backup.apps.modules.all")
+
+        with ExitStack() as stack:
+            snap = stack.enter_context(patch.object(mod, "run_snapshot"))
+            doubles = [stack.enter_context(patch(target)) for target in DOWNSTREAM_AFTER_SENTINEL["all"]]
+            mod.handle_command(mod.PRIMARY_COMMAND, [str(tmp_path)])
+
+        snap.assert_called()
+        for double in doubles:
+            double.assert_called()
+
+    def test_no_write_reaches_real_secret_storage(self, tmp_path: Path) -> None:
+        """Running 'all' touches nothing under ~/.secrets."""
+        mod = importlib.import_module("aipass.backup.apps.modules.all")
+
+        with _secrets_watch() as touched, ExitStack() as stack:
+            stack.enter_context(patch.object(mod, "run_snapshot"))
+            for target in DOWNSTREAM_AFTER_SENTINEL["all"]:
+                stack.enter_context(patch(target))
+            mod.handle_command(mod.PRIMARY_COMMAND, [str(tmp_path)])
+
+        assert touched == [], f"test reached real secret storage: {touched}"
 
 
 class TestStubFailsHonestly:

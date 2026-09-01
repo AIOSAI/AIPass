@@ -28,9 +28,10 @@ from typing import List, Dict, Any
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Paths
-_MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # handlers/intake/ → handlers/ → apps/ → memory/
+_MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent  # handlers/intake/ → handlers/ → apps/ → memory/
 MEMORY_POOL_PATH = _MEMORY_ROOT / "memory_pool"
 CHROMA_PATH = _MEMORY_ROOT / ".chroma"
 

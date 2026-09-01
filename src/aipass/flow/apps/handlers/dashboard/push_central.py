@@ -35,7 +35,9 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 # Handler imports (aggregate_ops is a sibling handler — avoids handler→module layer violation)
@@ -51,12 +53,16 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
+
+    Delegates to ``handlers/repo_root.find_repo_root`` — the one
+    implementation. This used to be a private copy ending
+    ``return Path.cwd()``; there were seven such copies in flow and six of
+    them are called at MODULE level, so on a registry-less checkout every
+    import guessed its root from the process directory, and with the cwd
+    deleted the import died outright. See that module's docstring.
+    """
+    return find_repo_root(caller="push_central")
 
 
 _REPO_ROOT = _find_repo_root()

@@ -41,6 +41,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, gatelog, nominators
+from aipass.seedgo.apps.handlers.module_root import module_file
 
 ADAPTER_API = 1
 ECOSYSTEM = "pytest"
@@ -58,9 +59,11 @@ STATIC_GROUPS: tuple = (
     "static_assertion_shape",
     "static_capture_never_read",
     "static_coverage_slot",
+    "static_empty_parametrize",
     "static_entry_point_diff",
     "static_mock_drift",
     "static_no_oracle",
+    "static_posix_literal",
     "static_ruff_pt",
     "static_self_skip",
     "static_unentered_assert",
@@ -105,7 +108,7 @@ RETIRED_GROUPS: tuple = (
 )
 
 #: The injected plugin, by path. Copied into the env, never imported here.
-PAYLOAD_DIR = Path(__file__).resolve().parent / "payload"
+PAYLOAD_DIR = module_file(__file__).parent / "payload"
 PLUGIN_FILE = PAYLOAD_DIR / "audit_hygiene_plugin.py"
 
 #: Directory names that mean "this project has pytest units".

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.module_root import module_file
 
 try:
     import fcntl
@@ -33,7 +34,7 @@ except ImportError:
 CONSOLE = err_console
 
 _GUARD_DIR = Path(tempfile.gettempdir())
-_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
+_BRANCH_ROOT = module_file(__file__).parent.parent.parent
 _CONFIG_PATH = _BRANCH_ROOT / "hooks_json" / "custom_config" / "cadence_config.json"
 _DEBOUNCE_S = 2.0
 

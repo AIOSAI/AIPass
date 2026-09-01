@@ -32,7 +32,6 @@ Usage:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Dict
 
 from aipass.flow.apps.handlers.json import json_handler
@@ -46,7 +45,9 @@ MODULE_NAME = "plan_type_loader"
 
 # Resolve flow root: this file lives at flow/apps/handlers/template/
 # so parents[3] walks up to flow/
-FLOW_ROOT = Path(__file__).resolve().parents[3]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+FLOW_ROOT = module_file(__file__).parents[3]
 PLAN_TYPES_DIR = FLOW_ROOT / "templates"
 
 # Prefix map loaded from persistent registry (template_registry.json)

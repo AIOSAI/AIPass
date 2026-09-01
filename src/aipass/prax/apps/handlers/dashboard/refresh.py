@@ -31,18 +31,23 @@ from ..central.reader import read_all_centrals  # noqa: E402
 
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
 from .template_pusher import DEPRECATED_SECTIONS  # noqa: E402
+from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 # Sections managed by the refresh path — everything else is write-through only
 REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory"}
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Walk up from this file to find the repo root, never reading the cwd.
+
+    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
+    this walk, every one ending ``return Path.cwd()`` — @memory reported the
+    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
+    most of the fleet, so a deleted working directory crashed the import, and a
+    registry-less checkout (every clean CI clone) resolved against wherever the
+    shell stood.
+    """
+    return find_repo_root(Path(__file__))
 
 
 # Infrastructure

@@ -93,7 +93,7 @@
     "pre_edit_gate": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.edit_gate.handle",
-      "matcher": "Edit|MultiEdit|Write|NotebookEdit"
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
     },
     "git_gate": {
       "enabled": true,

@@ -512,7 +512,7 @@
     },
     {
       "standard": "test_quality",
-      "reason": "Hooks branch does not use json_handler — has its own JSONL diagnostic logging (diagnostics.py) and stdlib json for hook protocol I/O. json_handler coverage, mock_json_handler fixture, and exception_contracts (create_default_raises, save_invalid_raises, invalid_mode_raises) are all N/A for a hook dispatch engine architecture."
+      "reason": "Hooks branch does not use json_handler — has its own JSONL diagnostic logging (diagnostics.py) and stdlib json for hook protocol I/O. json_handler coverage, mock_json_handler fixture, and exception_contracts (create_default_raises, save_invalid_raises, invalid_mode_raises) are all N/A for a hook dispatch engine architecture. | RETIREMENT-BOUND (@seedgo fcb16f01, 2026-08-29): test_quality is scheduled for retirement under DPLAN-0320/0321. Verified STILL LIVE and still scoring on 2026-08-30, so the rule is load-bearing today and stays. DELETE IT in the same window as the retirement merge — @seedgo mails the fleet when the date is set. Written into the rule itself because a rule that stops suppressing anything is unreadable from the outside."
     },
     {
       "file": "tests/conftest.py",
@@ -1318,6 +1318,16 @@
       "file": "apps/modules/cc_transcripts.py",
       "standard": "modules",
       "reason": "Direct file ops on ~/.claude/projects/*.jsonl — external CC-native transcript files, not branch data. The module IS the CC transcript reader service; json_handler is for branch-managed JSON, not external platform files. Mirrors the cc_sessions.py ruling."
+    },
+    {
+      "file": "apps/modules/bash_writes.py",
+      "standard": "json_structure",
+      "reason": "Pure string parser for edit_gate's scripted lane — reads a Bash command and returns resolved paths. Touches no JSON file at all, so there is nothing for json_handler to open and nothing to log_operation about. Same profile as grounding_content.py, which is bypassed here for the same reason."
+    },
+    {
+      "file": "apps/modules/bash_writes.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
     }
   ],
   "notes": {

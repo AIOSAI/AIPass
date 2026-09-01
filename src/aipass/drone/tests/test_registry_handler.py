@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.drone.apps.handlers import registry_handler
 from aipass.drone.apps.handlers.registry_handler import (
     _first_registry_in,
     _registry_matches_credential,
@@ -459,6 +460,81 @@ class TestRegistryMatchesCredential:
         path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
         monkeypatch.chdir(registry_dir)
         assert _registry_matches_credential(path) is True
+
+
+class TestCredentialCheckWithNoCurrentDirectory:
+    """A process whose cwd was deleted has no location, and that is not an error.
+
+    The passport walk starts at the cwd, so ``Path.cwd()`` raising ENOENT used
+    to land in the broad ``except`` — which logs "Credential pre-check FAILED"
+    at WARNING and returns True. The answer was right by accident and the
+    account of it was wrong: nothing failed, there is simply no location to
+    infer from, which is the documented no-passport case. @daemon named this
+    one as the member of the cwd family where the cwd is not the interesting
+    part — a check that reports failure while passing is the fail-open shape
+    even when the value it returns is correct.
+    """
+
+    @staticmethod
+    def _no_cwd(monkeypatch):
+        def _raise():
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(_raise))
+
+    def test_a_deleted_cwd_is_not_reported_as_a_failed_check(self, registry_dir: Path, monkeypatch):
+        path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
+        self._no_cwd(monkeypatch)
+
+        with patch.object(registry_handler, "logger") as log:
+            result = _registry_matches_credential(path)
+
+        assert result is True
+        failures = [c for c in log.warning.call_args_list if "pre-check failed" in str(c).lower()]
+        assert not failures, f"an absent location was reported as a failed check: {failures}"
+
+    def test_the_absent_location_is_said_out_loud(self, registry_dir: Path, monkeypatch):
+        """Silence would make it indistinguishable from a walk that found nothing."""
+        path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
+        self._no_cwd(monkeypatch)
+
+        with patch.object(registry_handler, "logger") as log:
+            _registry_matches_credential(path)
+
+        assert log.info.called, "no line records that the check had no location to stand in"
+
+    def test_an_unreadable_registry_is_still_a_warning(self, registry_dir: Path, monkeypatch):
+        """The broad except keeps its job — only the cwd left through it."""
+        monkeypatch.chdir(registry_dir)
+
+        with patch.object(registry_handler, "logger") as log:
+            result = _registry_matches_credential(registry_dir)
+
+        assert result is True
+        assert log.warning.called, "an unreadable registry must still be reported"
+
+    def test_the_walk_that_calls_it_reaches_it_at_all(self, monkeypatch):
+        """The credential fix is worthless if its CALLER raises first.
+
+        ``find_registry`` opens with its own bare ``Path.cwd()``. Guarding only
+        the check below it would move the ENOENT up one frame and call the lane
+        fixed — the same shape as a flagged list that undercounts. With no
+        location the cwd walk is skipped, not attempted: resolution falls
+        through to AIPASS_HOME and the package walk, which never needed a cwd.
+        """
+        self._no_cwd(monkeypatch)
+
+        assert find_registry().name.endswith("_REGISTRY.json")
+
+    def test_verification_does_not_report_a_failure_it_did_not_have(self, monkeypatch):
+        """Third site, same species: ``_verify_registry_credential``."""
+        self._no_cwd(monkeypatch)
+
+        with patch.object(registry_handler, "logger") as log:
+            _verify_registry_credential(Path("/nowhere/AIPASS_REGISTRY.json"), {"metadata": {"id": "some-id"}})
+
+        failures = [c for c in log.warning.call_args_list if "verification failed" in str(c).lower()]
+        assert not failures, f"an absent location was reported as a failed verification: {failures}"
 
 
 # ===================================================================

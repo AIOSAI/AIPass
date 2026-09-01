@@ -17,6 +17,13 @@ from pathlib import Path
 from typing import Generator
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Registered here, not pytest.ini: the composed run (rootdir=repo,
+    # -c pyproject.toml) never reads this branch's ini, and its
+    # --strict-markers would turn an unknown marker into an error.
+    config.addinivalue_line("markers", "integration: live-dispatch integration tests (WATCHDOG_INTEGRATION=1)")
+
+
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after"""

@@ -209,6 +209,18 @@ def _print_receipt(receipt: dict) -> None:
     console.print()
     if not receipt["confirm"] and receipt["changed"]:
         console.print("  [dim]No files were written. Add --confirm to execute.[/dim]")
+    elif not receipt["scanned"]:
+        # Zero scanned is not an all-clear. discover_passports globs
+        # src/aipass/*/ and projects/*/src/*/*/ — both shaped like THIS
+        # repository — so any root that is not an AIPass checkout yields no
+        # targets, and the green line below would call that success. Measured
+        # against a real sibling repo (@wren, schema 1.0, untouched): the
+        # command reported "every scanned passport is already 2.0".
+        warning(f"No passports found under {receipt['root']} — nothing was scanned.")
+        console.print(
+            "  [dim]Discovery matches this repository's layout "
+            "(src/aipass/<branch>/ and projects/<project>/src/<pkg>/<branch>/).[/dim]"
+        )
     elif not receipt["changed"]:
         console.print("  [green]Nothing to migrate — every scanned passport is already 2.0.[/green]")
     console.print()

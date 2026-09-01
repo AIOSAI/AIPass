@@ -1,35 +1,107 @@
-"""BACKUP handlers package - Security protected."""
+"""BACKUP handlers package - Security protected.
 
-import inspect
+The branch's ONE safe path helper lives in ``path/module_paths.py``; this
+package's own module-level paths go through it for the same reason every other
+module does -- ``Path.resolve()`` reached at import time is an import-time crash
+on Windows for a process whose cwd was deleted.
+"""
+
+import linecache
+import os
+import sys
 from pathlib import Path
 
+from .path.module_paths import branch_root, module_file  # noqa: F401  (re-exported)
+
 MY_BRANCH = "backup"
-_HANDLER_DIR = str(Path(__file__).resolve().parent)
+
+#: Frames that are not real files on disk. Resolving one needs a cwd, so they
+#: are skipped BEFORE anything touches the filesystem.
+_PSEUDO_FRAME_PREFIX = "<"
+_IMPORT_MACHINERY = "importlib"
+
+#: Windows spells paths with backslashes and folds case; POSIX does neither.
+_IS_WINDOWS = os.name == "nt"
+
+_HANDLER_DIR = str(module_file(__file__).parent)
+_BRANCH_ROOT = str(branch_root(__file__, 2))
+
+
+def _spell_for_kinship(path: str, *, windows: bool) -> str:
+    """Spell a path for the kinship test. BOTH sides must go through this.
+
+    Round 5, measured on the windows-setup runner: this guard used to normalise
+    only the CALLER (``caller_file.replace("\\", "/")``) and compare it against
+    a ``_BRANCH_ROOT`` that came straight from ``Path`` -- backslashed on
+    Windows. A forward-slashed caller can never contain a backslashed root, so
+    every file in the branch read as FOREIGN, the door import raised, and the
+    whole tree died at the fence with backup's own ACCESS DENIED message.
+
+    Case is folded only on Windows. Folding everywhere would ADMIT a foreign
+    ``/tmp/BACKUP`` on a case-sensitive filesystem, which is a wider fence, not
+    a safer one.
+    """
+    spelled = path.replace("\\", "/")
+    return spelled.lower() if windows else spelled
+
+
+def _is_kin(caller_file: str, branch_root: str, *, windows: bool | None = None) -> bool:
+    """Is ``caller_file`` inside ``branch_root``?
+
+    Pure, and parametrised on the dialect, so the Windows reading is testable
+    from Linux -- the defect needs a backslash, not a Windows box.
+    """
+    if windows is None:
+        windows = _IS_WINDOWS
+    return _spell_for_kinship(branch_root, windows=windows) in _spell_for_kinship(caller_file, windows=windows)
 
 
 def _find_real_caller():
     """Walk the stack to find the actual file that triggered this import.
 
-    Skips this file, importlib internals, and frozen modules.
+    Uses ``sys._getframe`` rather than ``inspect.stack()``. ``inspect.stack()``
+    reaches ``os.path.realpath`` unguarded through ``getsourcefile`` ->
+    ``getmodule`` (3.12: inspect.py:1009 -- ``getabsfile`` uses ``abspath``, so
+    the route is getmodule's), so it dies on a dead cwd before this function's
+    own skip logic is ever consulted. Reading ``f_code.co_filename``
+    off the frame touches no filesystem at all.
+
     Returns tuple: (file_path, import_line) or (None, None).
     """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
+    this_file = str(module_file(__file__))
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    try:
+        frame = sys._getframe(1)
+    except ValueError:
+        return None, None
 
-        if this_file in str(Path(filename).resolve()):
+    while frame is not None:
+        filename = frame.f_code.co_filename
+
+        # Skip Python internals BEFORE touching the filesystem — resolving a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd
+        # was deleted dies here otherwise.
+        if filename.startswith(_PSEUDO_FRAME_PREFIX) or _IMPORT_MACHINERY in filename:
+            frame = frame.f_back
             continue
 
-        if filename.startswith("<") or "importlib" in filename:
+        # A relative frame filename also needs a cwd to resolve; fall back to
+        # the raw spelling rather than crashing the import.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
+
+        # Same spelling rule as the kinship test, and for a sharper reason:
+        # if the self-skip MISSES, this file becomes the reported caller, it is
+        # trivially kin, and the real foreign caller below it is never examined
+        # -- a case difference would open the fence, not just close it.
+        if _spell_for_kinship(this_file, windows=_IS_WINDOWS) in _spell_for_kinship(resolved, windows=_IS_WINDOWS):
+            frame = frame.f_back
             continue
 
-        import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
-
-        return str(Path(filename).resolve()), import_line
+        import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        return resolved, import_line
 
     return None, None
 
@@ -53,14 +125,9 @@ def _guard_branch_access():
     caller_file, import_line = _find_real_caller()
 
     if caller_file is None:
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return
         return
 
-    branch_root = str(Path(_HANDLER_DIR).parents[1])
-    if branch_root in caller_file.replace("\\", "/"):
+    if _is_kin(caller_file, _BRANCH_ROOT):
         return
 
     caller_branch = _extract_branch_name(caller_file)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -101,7 +101,10 @@ def _apply_wake_policy(entries: List[dict]) -> None:
     """
     try:
         from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-    except ImportError as e:
+    # OSError, not only ImportError: MEASURED 2026-08-31 - this import raises
+    # FileNotFoundError under a dead working directory, and the sweep must degrade
+    # rather than crash on an optional consult.
+    except (ImportError, OSError) as e:
         logger.warning("[inbox_sweep] Wake blocklist unavailable, skipping policy check: %s", e)
         return
 

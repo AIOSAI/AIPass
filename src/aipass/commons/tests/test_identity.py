@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_identity.py
 # Description: Unit tests for identity module and identity_ops handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-06-15
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -603,3 +603,258 @@ def test_branches_from_registry_malformed_json(tmp_path: Path):
 def test_branches_from_registry_missing_file(tmp_path: Path):
     """A registry path that doesn't exist yields no branches."""
     assert _ops._branches_from_registry(tmp_path / "nope.json") == []
+
+
+# ===========================================================================
+# Case-insensitive filesystem widening — *_REGISTRY.json glob (fleet defect)
+# ===========================================================================
+#
+# On Windows and default macOS the filesystem is case-insensitive, so
+# ``directory.glob("*_REGISTRY.json")`` also returns ``*_registry.json``.
+# The repo is full of bait: plan counters under flow_json/ and
+# ``.spawn/.template_registry.json`` — and pathlib's ``*`` matches dotfiles,
+# unlike the stdlib glob module, so the dotted one is reachable too.
+#
+# These pins were red on Linux before the fix. They stay meaningful on Linux
+# because the widening is emulated rather than assumed: the instrument wraps
+# Path.glob to also yield the case-folded pattern's matches, and a negative
+# control proves the decoy is invisible without it.
+
+
+@pytest.fixture
+def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
+    """
+    Emulate a case-insensitive filesystem for Path.glob.
+
+    Yields the union of the pattern's matches and the case-folded
+    pattern's matches — which is what Windows hands back for a single
+    call. Wraps the real Path.glob rather than re-implementing listing,
+    so production's own call site is what gets widened.
+    """
+    real_glob = Path.glob
+
+    def widened(self, pattern, *args, **kwargs):
+        seen = {}
+        for found in real_glob(self, pattern, *args, **kwargs):
+            seen[str(found)] = found
+        folded = pattern.lower()
+        if folded != pattern:
+            for found in real_glob(self, folded, *args, **kwargs):
+                seen[str(found)] = found
+        return iter(sorted(seen.values()))
+
+    monkeypatch.setattr(Path, "glob", widened)
+
+
+def _plant_case_folded_decoy(project: Path, branch_dir: Path) -> Path:
+    """
+    Plant a lowercase registry that maps branch_dir to the WRONG citizen.
+
+    Named .template_registry.json for two reasons: it is real bait from
+    the fleet (@spawn writes one), and it sorts ahead of an uppercase
+    project registry — so if the filter fails, the decoy is what answers,
+    not merely what appears in a list.
+    """
+    decoy = project / ".template_registry.json"
+    _write_registry(
+        decoy,
+        [{"name": "GHOST", "path": str(branch_dir), "email": "@ghost", "description": "should never resolve"}],
+    )
+    return decoy
+
+
+def test_case_folded_registry_cannot_answer_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path, case_insensitive_glob
+):
+    """
+    On a case-insensitive filesystem the decoy is listed — it must not ANSWER.
+
+    The assertion is about what identity resolution returns, not about set
+    membership, because the failure that matters is a citizen resolving to
+    the wrong name.
+    """
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    _plant_case_folded_decoy(project, branch_dir)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is not None, "external citizen stopped resolving entirely"
+    assert result["name"] == "VERA", (
+        f"case-folded decoy answered identity: got {result['name']!r} — "
+        "the *_REGISTRY.json glob widened on a case-insensitive filesystem"
+    )
+    assert result["email"] == "@vera"
+
+
+def test_case_folded_registry_excluded_from_caller_registries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_insensitive_glob
+):
+    """The decoy is filtered at the source, so no later matcher can reach it."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    decoy = _plant_case_folded_decoy(project, branch_dir)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    found = _ops._find_caller_registries()
+
+    assert decoy not in found, "case-folded registry survived the suffix filter"
+    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
+
+
+# The pattern production actually globs, and a probe file whose suffix is the
+# lowercase form of it. Named constants because the DIRECTION is the claim -
+# see test_the_host_probe_travels_the_defects_direction below.
+_PRODUCTION_GLOB = "*_REGISTRY.json"
+_PROBE_FILENAME = "hostprobe_registry.json"
+
+
+def _host_folds_glob_case(tmp_path: Path) -> bool:
+    """
+    Probe the host: does its glob fold case? Never assume, never skipif.
+
+    The probe travels the DEFECT'S OWN DIRECTION (@ai_mail's round-4 lesson):
+    a lowercase file, matched against the uppercase pattern — which is exactly
+    what production asks the filesystem. Probing the other way round measures
+    a different question and can answer it differently.
+
+    The probe lives in its own directory so it cannot collide with, or be
+    collided by, any registry a test planted. Its stem is deliberately
+    distinct: on a folding filesystem names differing only by case CANNOT
+    coexist (@memory), so a case-twin probe would overwrite a real file's
+    contents while the directory kept the original spelling.
+    """
+    probe_dir = tmp_path / "_case_probe"
+    probe_dir.mkdir(exist_ok=True)
+    probe = probe_dir / _PROBE_FILENAME
+    probe.write_text("{}", encoding="utf-8")
+    try:
+        return probe in set(probe_dir.glob(_PRODUCTION_GLOB))
+    finally:
+        probe.unlink()
+
+
+def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitive_glob):
+    """
+    POSITIVE CONTROL — the instrument, exercised through production's own call.
+
+    This makes the exact call ``_find_caller_registries`` makes rather than
+    re-stating its logic. If this fails, the pins above prove nothing and are
+    green for the wrong reason.
+
+    On a folding host this control is satisfied by the filesystem itself
+    rather than by the instrument — which is not a defect but is worth
+    knowing. The negative control below names which world the run is in.
+    """
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    decoy = _plant_case_folded_decoy(project, branch_dir)
+
+    listed = list(project.glob("*_REGISTRY.json"))
+
+    assert decoy in listed, "instrument did not widen — the case-insensitive emulation is broken"
+    assert project / "VERA-STUDIO_REGISTRY.json" in listed
+
+
+def test_raw_glob_matches_what_the_host_filesystem_actually_does(tmp_path: Path):
+    """
+    NEGATIVE CONTROL — without the instrument, the host's own answer.
+
+    The earlier spelling of this test asserted the decoy is invisible, full
+    stop. That is true on Linux and FALSE on NTFS and default macOS — so the
+    control failed on the exact host the defect lives on, which is the one
+    place a control must not fail. Per @memory's ruling the host is PROBED,
+    never skipped, and both outcomes are pinned:
+
+      - case-sensitive host: the decoy is invisible, so the pins above are
+        measuring the fix and not the filesystem — the instrument is load-
+        bearing and the positive control proves it widens.
+      - case-folding host: the decoy is listed for real. The widening is
+        native, the emulation is redundant, and the pins above are measuring
+        the defect's actual home.
+
+    Either way the production filter is what must exclude it, and
+    ``test_case_folded_registry_excluded_from_caller_registries`` above
+    asserts that on both hosts.
+    """
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    decoy = _plant_case_folded_decoy(project, branch_dir)
+
+    listed = list(project.glob("*_REGISTRY.json"))
+    real_registry = project / "VERA-STUDIO_REGISTRY.json"
+
+    if _host_folds_glob_case(tmp_path):
+        assert decoy in listed, (
+            "the host folds glob case for a lowercase probe but not for the "
+            "decoy — the probe and the decoy disagree about the same filesystem"
+        )
+        assert real_registry in listed
+    else:
+        assert decoy not in listed
+        assert listed == [real_registry]
+
+
+def test_the_host_probe_travels_the_defects_direction():
+    """
+    The probe's DIRECTION is the claim, and this host cannot measure it.
+
+    @ai_mail's round-4 lesson: the probe must ask the filesystem the same
+    question production asks — a lowercase file against the UPPERCASE
+    pattern. Reversed (an uppercase file against a lowercase pattern) it
+    measures a different question, and a host that folds only one way would
+    answer it differently.
+
+    On a case-sensitive host both directions return False, so reversing the
+    probe changes no behavioural outcome here and no behavioural pin can
+    catch it. Stated honestly: this is a SHAPE pin, deliberately weaker than
+    the rest of this block. It exists so the direction cannot be silently
+    reversed by someone who does not know why it was chosen.
+    """
+    assert _PRODUCTION_GLOB == "*_REGISTRY.json"
+    assert _PROBE_FILENAME.endswith("_registry.json"), (
+        "the probe file must carry the LOWERCASE suffix — it is the decoy's "
+        "spelling, and the glob pattern is production's"
+    )
+    assert _PRODUCTION_GLOB.lstrip("*") not in _PROBE_FILENAME, (
+        "probe and pattern must differ in case, or nothing is being probed"
+    )
+
+    # The pattern is production's own, read from the source rather than
+    # re-typed: a pin on a copy of a constant survives the constant changing.
+    source = Path(_ops.__file__).read_text(encoding="utf-8")
+    assert f'directory.glob("{_PRODUCTION_GLOB}")' in source, (
+        "production no longer globs this pattern — the host probe is asking a question nothing asks any more"
+    )
+
+
+def test_external_registries_with_lowercase_stems_still_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path, case_insensitive_glob
+):
+    """
+    The filter is on the SUFFIX, never the stem.
+
+    External projects name registries after themselves, so a lowercase or
+    mixed-case stem is legitimate — only the _REGISTRY.json suffix carries
+    the meaning. A stem-based filter would delete a real citizen.
+    """
+    project = tmp_path / "vera_studio"
+    project.mkdir()
+    branch_dir = project / "src" / "app"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    _write_registry(
+        project / "vera_studio_REGISTRY.json",
+        [{"name": "APP", "path": "src/app", "email": "@app"}],
+    )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is not None, "a lowercase-stem registry was wrongly filtered out"
+    assert result["email"] == "@app"

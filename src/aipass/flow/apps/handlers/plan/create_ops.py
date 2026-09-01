@@ -32,7 +32,9 @@ from aipass.flow.apps.handlers.json import json_handler
 # INFRASTRUCTURE
 # =============================================
 
-_PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 
 MODULE_NAME = "create_plan"
 

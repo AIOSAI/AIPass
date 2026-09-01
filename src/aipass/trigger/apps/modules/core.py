@@ -32,7 +32,8 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         from rich.console import Console
 
         console = Console()

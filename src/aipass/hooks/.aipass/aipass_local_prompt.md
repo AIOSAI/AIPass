@@ -76,13 +76,14 @@ apps/
       stop_sound.py        #   Sound on session stop
       tool_sound.py        #   Sound on tool use
       telegram_response.py #   Telegram reply delivery on Stop
+    module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve (dead-cwd cure)
     config/                # NOTE: under handlers/, not apps/ -- apps/config/ is an empty package
       loader.py            #   hooks.json discovery + validation, config-independent trust checks
       trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
       diagnostics.py       #   JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 50 test files, 1711 tests
+tests/                     # 52 test files, 1798 tests
 ```
 
 ## Handler Categories
@@ -126,6 +127,8 @@ EVERY reply that adds/renames/moves a handler MUST state either "provider settin
 - Config walks up. `.aipass/hooks.json` is discovered by walking CWD upward, not hardcoded paths.
 
 ## Known Gotchas
+
+- Never write a bare `Path(__file__).resolve()` at module scope -- on Windows `ntpath.realpath` reads cwd unconditionally, so it is an import-time cwd dependency. Use `handlers/module_root.module_file()`. The guard in `handlers/__init__.py` runs on EVERY hooks import, so a defect there masks every other site: cure it first, then re-measure.
 
 - Exit code 2 has dual meaning: intentional block (with JSON) vs crash (without JSON). Engine distinguishes by checking stdout.
 - JSONL log lives at `logs/engine.jsonl` -- not in prax. Prax gets a copy via system_logger, but JSONL is the source of truth for hook diagnostics.

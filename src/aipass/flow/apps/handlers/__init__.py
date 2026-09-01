@@ -1,6 +1,7 @@
 """Flow handlers package - Security protected."""
 
-import inspect
+import linecache
+import sys
 from pathlib import Path
 
 MY_BRANCH = "flow"
@@ -16,27 +17,57 @@ def _find_real_caller():
     - Frozen modules
 
     Returns tuple: (file_path, import_line) or (None, None)
-    """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    Walks frames with sys._getframe rather than inspect.stack(). MEASURED on the
+    Windows CI gate 2026-08-31 (@memory's finding, relayed by @devpulse):
+    inspect.stack() needs a READABLE CWD, and it needs one before any of this
+    function's own code runs. It builds a FrameInfo per frame, which calls
+    getsourcefile() -> getmodule() -> os.path.realpath(); ntpath.realpath calls
+    os.getcwd() unconditionally on its first lines, before it even checks
+    whether the path is absolute, and that call site in getmodule is not inside
+    a try. On POSIX the equivalent raise happens earlier, inside getabsfile(),
+    where inspect catches it — which is why this was invisible on Linux for as
+    long as it existed. A frame's co_filename is already a string in memory;
+    reading it touches nothing.
+    """
+    # Path.resolve() reaches the same ntpath.realpath, so this is guarded too —
+    # __file__ is already absolute; the resolve only normalises it.
+    try:
+        this_file = str(Path(__file__).resolve())
+    except OSError:
+        this_file = __file__
+
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
+
+        # Skip Python internals BEFORE touching the filesystem — resolve() on a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd was
+        # deleted dies here otherwise.
+        if filename.startswith("<") or "importlib" in filename:
+            frame = frame.f_back
+            continue
+
+        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # the raw spelling rather than crashing the import.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
 
         # Skip this file
-        if this_file in str(Path(filename).resolve()):
+        if this_file in resolved or __file__ in filename:
+            frame = frame.f_back
             continue
 
-        # Skip Python internals
-        if filename.startswith("<") or "importlib" in filename:
-            continue
+        # linecache is what inspect used for code_context; called directly it
+        # reads one named file and returns "" rather than raising when it cannot.
+        try:
+            import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        except OSError:
+            import_line = None
 
-        # Found a real file - try to get the import line
-        import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
-
-        return str(Path(filename).resolve()), import_line
+        return resolved, import_line
 
     return None, None
 
@@ -64,20 +95,16 @@ def _guard_branch_access():
     import os
 
     if os.environ.get("AIPASS_DEBUG_GUARD"):
-        import sys
-
         print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
         print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
 
     if caller_file is None:
-        # Can't determine caller from real files
-        # Check if we're being run from command line (external)
-        # by looking at the raw stack for <string> or <stdin>
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return  # Allow command-line Python through
-        return  # Allow if truly can't determine
+        # No caller outside this file: an interactive session, a -c script, or an
+        # importlib-only stack. All three are allowed. This used to walk
+        # inspect.stack() a SECOND time looking for <string>/<stdin> and then
+        # return either way — a second copy of the cwd dependency above, in
+        # service of a branch that could not change the answer.
+        return
 
     # Check if caller is from our branch
     if f"/{MY_BRANCH}/" in caller_file.replace("\\", "/"):

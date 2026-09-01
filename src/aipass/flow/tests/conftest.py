@@ -13,7 +13,8 @@ import json
 import shutil
 from pathlib import Path
 from typing import Generator
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 # Pre-import modules so patch() path resolution works.
 # Without these imports, the intermediate packages lack the sub-module
@@ -22,12 +23,104 @@ import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 
+# Pre-import every module that calls find_repo_root() at MODULE level, for a
+# different reason: to move an IMPORT-TIME diagnostic out of every test window.
+#
+# find_repo_root logs repo_root_fallback through json_handler.log_operation when
+# the marker walk finds nothing. AIPASS_REGISTRY.json is gitignored and
+# machine-local, so on a dev box the fallback never runs and on a bare CI
+# checkout it runs on EVERY import. These six modules take that walk while
+# LOADING, so on CI the diagnostic lands in whichever test window happens to
+# trigger the first import — and mock_json_handler (autouse) counts it.
+#
+# That is what reddened test_push_central on all four Python versions of commit
+# 28ee90d5 (round 5, @devpulse). The count it broke was not wrong; it was
+# measuring the host. A per-test fix would have left the other sites one
+# xdist worker-split away: measured in a bare world, running each
+# count-asserting test in FULL isolation, TWO of the ten fail — CI had only
+# found one. Importing here settles the walk before any test window exists, on
+# every machine, and the counts go back to meaning what they say.
+#
+# TestThePreImportListIsComplete (tests/test_conftest_fixtures.py) fails if a
+# new module-level caller appears and is not added here.
+import aipass.flow.apps.handlers.dashboard.push_central  # noqa: F401
+import aipass.flow.apps.handlers.mbank.process  # noqa: F401
+import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
+import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
+import aipass.flow.apps.modules.aggregate_central  # noqa: F401
+import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+
+
+def pytest_configure(config):
+    """Register flow's markers where BOTH test universes can see them.
+
+    The commit gate runs this suite with rootdir pinned to the branch by
+    ``pytest.ini``; CI composes every conftest in one process from the repo root
+    under ``-c pyproject.toml``, where ``pytest.ini`` is never read. A marker
+    registered only in ``pytest.ini`` is therefore unknown in CI — two
+    PytestUnknownMarkWarning per run, and under a stricter config a hard error.
+    ``conftest.py`` is loaded in both universes, so this is the one place a
+    branch-local marker can be declared once and mean the same thing twice.
+
+    Same species as FPLAN-0461: green per-branch says nothing about the composed
+    world. Caught here by running both rootdirs, which is why that is the rule.
+
+    Args:
+        config: The pytest config being built.
+    """
+    config.addinivalue_line(
+        "markers",
+        "real_logger: opt out of the autouse mock_logger fixture — for tests whose "
+        "SUBJECT is the log line (caplog reads the real logging module)",
+    )
+
 
 @pytest.fixture(autouse=True)
-def mock_logger():
-    """Mock prax logger to prevent real log writes."""
-    with patch("aipass.prax.apps.modules.logger.system_logger") as mock:
-        yield mock
+def mock_logger(request, monkeypatch):
+    """Mock the prax logger every flow module actually calls.
+
+    FIXED 2026-08-31. This used to patch
+    ``aipass.prax.apps.modules.logger.system_logger`` — the SOURCE attribute —
+    while every flow module does ``from ... import system_logger as logger`` at
+    import time and therefore holds its OWN binding. Patching upstream of a
+    binding that was already taken reaches nothing, and it was measured
+    reaching nothing: with the old patch active, a consumer's ``logger`` was
+    still the real object. @seedgo published the technique alongside the
+    standard after @prax ruled (``drone @seedgo standard imports``); the sibling
+    fixture ten lines down, ``mock_json_handler``, had it right all along
+    because it patches an attribute the consumer resolves at CALL time.
+
+    No test lost or gained an assertion: three tests take this fixture as a
+    parameter and none of them assert on it, so there was no assertion surface
+    to break — which is also why the broken version never showed up as a
+    failure.
+
+    Nothing leaked in the meantime. Containment comes from
+    ``AIPASS_TEST_LOG_DIR``, set at the top of this file ahead of every import;
+    a broken fixture sitting behind a working mechanism is a different thing
+    from a leak, and reporting it as one would have sent the wrong fix.
+
+    OPT OUT with ``@pytest.mark.real_logger`` when the test's SUBJECT is the log
+    line — ``caplog`` reads the real logging module, and a mock that swallows
+    the call makes such a test vacuous. Found the honest way: turning this
+    fixture on reddened exactly one test, and that test was right. The first
+    measurement ("three tests take this fixture and none assert on it") counted
+    the wrong population; caplog users take no fixture parameter at all.
+    """
+    if request.node.get_closest_marker("real_logger"):
+        yield None
+        return
+
+    mock = MagicMock()
+    for name, module in list(sys.modules.items()):
+        if not name.startswith("aipass.flow.apps"):
+            continue
+        for attribute in ("logger", "system_logger"):
+            if getattr(module, attribute, None) is not None:
+                monkeypatch.setattr(module, attribute, mock, raising=False)
+    # The source too, so a module imported LATER in the test binds the mock.
+    monkeypatch.setattr("aipass.prax.apps.modules.logger.system_logger", mock)
+    yield mock
 
 
 @pytest.fixture(autouse=True)

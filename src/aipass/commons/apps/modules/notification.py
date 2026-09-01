@@ -22,7 +22,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 try:
     from aipass.cli.apps.modules import console, error
-except ImportError:
+except (ImportError, OSError):
     logger.warning("[notification] CLI console unavailable, using fallback")
     from rich.console import Console
 

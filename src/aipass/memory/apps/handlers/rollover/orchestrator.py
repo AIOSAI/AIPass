@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+from aipass.memory.apps.handlers import repo_root
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -34,14 +35,15 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import extractor
 from aipass.memory.apps.handlers.tracking import line_counter
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # Subprocess scripts for ML operations (run in memory venv)
-_HANDLERS_DIR = Path(__file__).resolve().parent.parent
+_HANDLERS_DIR = module_file(__file__).parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
 # Memory venv python — auto-detect from memory/.venv/ or use env var override
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
 
@@ -64,12 +66,17 @@ MEMORY_PYTHON = _get_memory_python()
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="orchestrator")
 
 
 _REPO_ROOT = _find_repo_root()
@@ -294,6 +301,7 @@ def execute_rollover() -> Dict[str, Any]:
             "triggers_count": 0,
             "success_count": 0,
             "failed": [],
+            "skipped": [],
         }
 
     triggers = triggers_result.get("triggers", [])
@@ -304,6 +312,7 @@ def execute_rollover() -> Dict[str, Any]:
             "triggers_count": 0,
             "success_count": 0,
             "failed": [],
+            "skipped": [],
             "results": [],
         }
 
@@ -312,6 +321,7 @@ def execute_rollover() -> Dict[str, Any]:
     # Process each trigger
     success_count = 0
     failed = []
+    skipped = []
     results = []
 
     for trigger in triggers:
@@ -342,7 +352,14 @@ def execute_rollover() -> Dict[str, Any]:
             continue
 
         if extract_result.get("skipped"):
-            logger.info(f"[rollover] Extraction skipped for {trigger}: {extract_result.get('message', 'no excess')}")
+            # Reported, never dropped. A trigger that increments neither tally
+            # produced "0/1 successful" beside an empty failure list — a count
+            # saying something broke and a list saying nothing did. The skip is
+            # also not reliably a no-op: the extractor persists a newest-first
+            # order repair on its way out of this same branch.
+            reason = extract_result.get("message", "no excess")
+            logger.info(f"[rollover] Extraction skipped for {trigger}: {reason}")
+            skipped.append({"trigger": str(trigger), "reason": reason})
             continue
 
         memories = extract_result.get("entries", [])
@@ -524,21 +541,30 @@ def execute_rollover() -> Dict[str, Any]:
         except Exception as e:
             logger.info(f"[rollover] Memory pool check: {e}")
 
+    # Gated on success_count alone, a run whose every trigger was legitimately
+    # SKIPPED reported failure while nothing had gone wrong -- "nothing needed
+    # archiving" is an outcome, not a fault. The existing contract that a mixed
+    # run still succeeds is deliberately preserved: partial progress with the
+    # failures printed by name is not the same as a broken run.
+    run_ok = not failed or success_count > 0
+
     json_handler.log_operation(
         "rollover_execute",
         {
             "triggers": len(triggers),
             "success_count": success_count,
             "failed_count": len(failed),
-            "success": success_count > 0 or len(triggers) == 0,
+            "skipped_count": len(skipped),
+            "success": run_ok,
         },
     )
 
     return {
-        "success": success_count > 0 or len(triggers) == 0,
+        "success": run_ok,
         "triggers_count": len(triggers),
         "success_count": success_count,
         "failed": failed,
+        "skipped": skipped,
         "results": results,
     }
 

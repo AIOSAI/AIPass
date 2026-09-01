@@ -26,6 +26,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.generic_adapter import capture_main
+from aipass.drone.apps.handlers.module_root import module_file
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +40,7 @@ _INTERNAL_MODULES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # External modules — loaded from routing_config.json
 # ---------------------------------------------------------------------------
-_ROUTING_CONFIG_PATH: Path = Path(__file__).resolve().parent / "routing_config.json"
+_ROUTING_CONFIG_PATH: Path = module_file(__file__).parent / "routing_config.json"
 
 
 @dataclass

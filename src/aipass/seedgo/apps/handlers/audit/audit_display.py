@@ -230,12 +230,23 @@ def print_branch_summary(
     avg = audit_result["average"]
     files_checked = audit_result.get("files_checked", 0)
 
-    # Branch header - always show files checked
+    # Branch header - always says WHAT was measured, never just how much.
+    #
+    # It read "N files checked" until 2026-08-31. The audit's corpus is
+    # apps/**/*.py and nothing else: tests/ is never walked, so on a branch
+    # that is a third test code by file count, a 100 stood for a number the
+    # reader had no way to compute. @devpulse's ruling the same morning, on
+    # this branch's own report of it: the honest sentence ships now; aligning
+    # the walk to each checker's APPLIES_TO (+136 findings across 12 branches)
+    # is a separate, scheduled fleet change needing Patrick's GO. A score that
+    # stops overclaiming is a fix, not a change.
     cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
     no_bypass_tag = " [bold yellow][BYPASSES DISABLED][/bold yellow]" if no_bypass else ""
     console.print()
     console.print(
-        f"[bold cyan]{branch['name']}[/bold cyan] [dim]({files_checked} files checked)[/dim]{cached_tag}{no_bypass_tag}"
+        f"[bold cyan]{branch['name']}[/bold cyan] "
+        f"[dim]({files_checked} production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+        f"{cached_tag}{no_bypass_tag}"
     )
 
     # Scores in a grid

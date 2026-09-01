@@ -1028,3 +1028,27 @@ This isn't about making things harder by building two interfaces. It's about mak
 **Service Provider Pattern:** CLI transforms all CLI activities through single import. Import console, use it throughout. Consistency across the system, maintained in one place.
 
 Build both. Serve both audiences.
+
+## Exemption — relaying a captured subprocess stream
+
+`sys.stdout.write(...)` / `sys.stderr.write(...)` is **allowed** when the argument is a
+completed subprocess's captured stream and the streams **correspond**:
+
+```python
+sys.stdout.write(result.stdout)      # ✓ relay
+sys.stderr.write(result["stderr"])   # ✓ relay
+sys.stdout.write("hello")            # ✗ your own output — use Rich
+sys.stdout.write(f"{n} done")        # ✗
+sys.stdout.write(rendered_table)     # ✗
+sys.stdout.write(result.stderr)      # ✗ crossed streams — a routing bug
+```
+
+**Why.** This rule means *route your own output through Rich*. `@drone` is a router: it
+relays a child process's bytes verbatim, and `console.print` would interpret markup in,
+wrap, and re-style output drone never authored — precisely what a router must not do.
+The checker was grepping a **verb** where the rule asks an **authorship** question
+(raised via `@devpulse`, 2026-08-31).
+
+The exemption keys on the **argument**, so it cannot be borrowed by writing your own
+string; and it requires the stream names to match, so a captured `stderr` written to
+`stdout` stays a violation — that is a real bug this check should keep catching.

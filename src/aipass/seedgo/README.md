@@ -123,7 +123,9 @@ seedgo/
 │   │   ├── permissions.py           # TRUSTED_CROSS_WRITERS list for hook + drone auth
 │   │   ├── readme_update.py         # README generation module
 │   │   └── test_map.py              # Custom function test coverage mapping
-│   └── handlers/                    # 10 handler directories
+│   └── handlers/                    # 12 handler directories + 2 shared modules
+│       ├── module_root.py           # Guarded module_file() — the one import-time __file__ resolve
+│       ├── registry_scan.py         # Case-EXACT registry discovery — the one reader every lane uses
 │       ├── aipass_standards/        # 45 checker standards (132 files: 45 check + 45 content
 │       │   │                        #   + 38 md + applicability.py, skip_dirs.py,
 │       │   │                        #   diagnostics.json, __init__.py)
@@ -153,8 +155,10 @@ seedgo/
 │       ├── diagnostics/             # Pyright integration + branch discovery
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
+│       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
+│       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 57 test files, 2362 tests
+├── tests/                           # 59 test files, 2691 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts

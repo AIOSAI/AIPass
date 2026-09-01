@@ -76,6 +76,14 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
 
     try:
         rp = Path(registry_path) if registry_path else find_registry()
+        if rp is None:
+            # No registry anywhere above us. The hardcoded floor above has
+            # already had its say, so the honest answer is "this layer cannot
+            # protect it" — not a crash. AttributeError would escape the except
+            # below (OSError/ValueError/KeyError only) and turn "no registry
+            # here" into a traceback inside a SAFETY check.
+            logger.info("[is_protected] No registry found — registry layer cannot answer for %s", branch_name)
+            return False, "no registry found — not protected by the registry layer"
         reg_data = load_registry(rp)
         for entry in branches_as_list(reg_data.get("branches", [])):
             if entry.get("name", "").lower() == name_lower:
@@ -157,30 +165,44 @@ def _default_registry_schema(credential=""):
 
 def load_registry(registry_path):
     """
-    Load registry from JSON file. Returns empty schema if missing.
+    Load registry from JSON file. Returns an empty schema if missing — never a
+    minted identity.
 
-    A registry that does not exist yet is a NEW PROJECT, and it is born with a
-    freshly minted ``metadata.id`` — the project credential every passport in
-    that project carries as ``citizenship.registry_id`` (rendered as
-    "Branch reg no."). Without it the project's first citizen falls back to
-    whatever registry discovery finds next, which is AIPass's own id: a
-    brand-new agent displaying a number from a project it was never part of.
+    LOADING IS A READ. This function used to mint a fresh ``metadata.id`` for a
+    file that did not exist, on the reasoning that a missing registry IS a new
+    project. That reasoning was right about the defect and wrong about the
+    place. The shared resolver ``registry_discovery.find_registry`` returns
+    ``Path.cwd() / AIPASS_REGISTRY.json`` when nothing exists — a PATH for an
+    ABSENCE — so ``save_registry(p, load_registry(p))`` wrote a registry
+    carrying a brand-new project credential into whatever directory the caller
+    happened to be standing in (@memory, measured 2026-08-31). Nobody composed
+    it that way, but a load that invents a trust-anchor identity for a file that
+    is not there is a mint, and minting is a decision, not a fallback.
 
-    The unreadable case deliberately does NOT mint one. A file that exists but
-    cannot be parsed is not a new project — it is a project whose credential we
-    failed to read, and inventing a replacement would re-credential a live
-    project and orphan every passport already carrying the real id. Missing
-    means regenerate; unreadable means do not clobber.
+    The decision now lives in ``resolve_project_credential``, which the two real
+    create sites call by name. The asymmetry the credential tests pin survives
+    intact, one layer over: absent means mint (when a creator asks for it),
+    unreadable never does — a file that exists but cannot be parsed is a project
+    whose credential we failed to read, and inventing a replacement would
+    re-credential a live project and orphan every passport carrying the real id.
 
     Args:
         registry_path: Path to AIPASS_REGISTRY.json
 
     Returns:
-        Dict with metadata and branches list
+        Dict with metadata and branches list. No ``metadata.id`` unless the file
+        itself carried one.
     """
     registry_path = Path(registry_path)
     if not registry_path.exists():
-        return _default_registry_schema(credential=str(uuid.uuid4()))
+        # Said out loud. A silent empty document is exactly how the mint stayed
+        # invisible for as long as it did.
+        logger.info(
+            "[registry] %s does not exist — returning an empty document with NO credential. "
+            "A project credential is minted only by resolve_project_credential(), never by a load.",
+            registry_path,
+        )
+        return _default_registry_schema()
 
     data = json_handler.read_json(registry_path)
     if data is not None:
@@ -192,6 +214,42 @@ def load_registry(registry_path):
         registry_path.name,
     )
     return _default_registry_schema()
+
+
+def resolve_project_credential(registry_path) -> str:
+    """Return the project credential to stamp on a citizen being created here.
+
+    This is the explicit mint — the counterpart to ``load_registry`` no longer
+    doing it. Only a caller that KNOWS it is creating a citizen should call it,
+    because for a registry that does not exist yet the honest answer is "this is
+    a new project, here is its identity", and that sentence is only true when
+    somebody is actually founding one.
+
+    Three cases, and the middle one is the whole point of the split:
+
+      * registry ABSENT     -> mint a fresh UUID. Without it the project's first
+        citizen falls back to whatever registry discovery finds next, which is
+        AIPass's own id: a brand-new agent displaying a number from a project it
+        was never part of.
+      * registry PRESENT     -> hand back its own ``metadata.id``, untouched.
+        The project's lock is never re-issued.
+      * registry UNREADABLE  -> return "". Not absent, so not a new project;
+        inventing one here would orphan every passport already carrying the real
+        id.
+
+    Mints a value; writes nothing. Creating the file is the create step's job.
+
+    Args:
+        registry_path: Path to the project's ``*_REGISTRY.json``.
+
+    Returns:
+        The credential string, or "" when it cannot be established.
+    """
+    registry_path = Path(registry_path)
+    if not registry_path.exists():
+        return str(uuid.uuid4())
+
+    return load_registry(registry_path).get("metadata", {}).get("id", "") or ""
 
 
 def save_registry(registry_path, data):
@@ -506,6 +564,11 @@ def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
         return "refused", reason
 
     registry_path = Path(registry_path) if registry_path else find_registry()
+    if registry_path is None:
+        reason = "REFUSED: no registry found — admin is granted in a registry, and there is none to grant it in"
+        logger.warning("[registry] %s", reason)
+        return "refused", reason
+
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))
 
@@ -571,7 +634,10 @@ def get_owner(start_path=None):
     Walks up from start_path (default CWD) to find *_REGISTRY.json.
     """
     registry_path = find_registry(start_path=start_path)
-    if not registry_path.exists():
+    if registry_path is None or not registry_path.exists():
+        # find_registry answers absence with None now (@aipass, 2026-08-31).
+        # No registry and an unwritten registry are the same answer here: nobody
+        # owns a project that does not exist.
         return None
     reg_data = load_registry(registry_path)
     for branch in branches_as_list(reg_data.get("branches", [])):

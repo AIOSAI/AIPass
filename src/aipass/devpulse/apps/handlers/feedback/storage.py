@@ -19,9 +19,10 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.module_root import module_file
 
 # devpulse/ root (three levels up from this file: handlers/feedback/storage.py -> apps/ -> devpulse/)
-_DEVPULSE_ROOT = Path(__file__).resolve().parents[3]
+_DEVPULSE_ROOT = module_file(__file__).parents[3]
 
 FEEDBACK_DIR = _DEVPULSE_ROOT / ".feedback.local"
 

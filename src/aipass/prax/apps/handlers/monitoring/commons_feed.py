@@ -33,6 +33,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent
+from aipass.prax.apps.handlers.repo_root import resolved_file
 from aipass.prax.apps.handlers.monitoring.telegram_relay import (
     init_relay,
     relay_event,
@@ -47,7 +48,7 @@ from aipass.prax.apps.handlers.monitoring.telegram_relay import (
 POLL_INTERVAL = 1.5
 BACKFILL_LIMIT = 10
 
-_PRAX_ROOT = Path(__file__).resolve().parents[3]  # monitoring/ -> handlers/ -> apps/ -> prax/
+_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # monitoring/ -> handlers/ -> apps/ -> prax/
 _ECOSYSTEM_ROOT = _PRAX_ROOT.parent
 
 CURSOR_TABLES = ("posts", "comments", "votes", "reactions")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for trigger data files
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-13
-# Modified: 2026-08-09
+# Modified: 2026-08-31
 # =============================================
 
 """JSON auto-creating handler for trigger data files."""
@@ -14,12 +14,12 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
 
 from aipass.trigger.apps.config import (
     atomic_create_json,
     atomic_write_json,
     json_file_lock,
+    module_file,
     read_text_with_retry,
     trail_logger,
 )
@@ -45,7 +45,8 @@ logger = trail_logger(_LOG_FILE)
 
 
 # Constants
-TRIGGER_ROOT = Path(__file__).resolve().parents[3]
+# module_file, not resolve(): import-time cwd read on Windows (repo_root.py).
+TRIGGER_ROOT = module_file(__file__).parents[3]
 TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
 
 
@@ -56,12 +57,22 @@ def _get_caller_module_name() -> str:
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
-    stack = inspect.stack()
+    # sys._getframe, not inspect.stack(): inspect.stack() builds a FrameInfo for
+    # EVERY frame, and each one reaches getmodule() -> os.path.realpath(), which
+    # on Windows reads os.getcwd() unconditionally and outside any try. This runs
+    # on the log_operation hot path, so the old spelling was both a cwd
+    # dependency and a full-stack walk to read one filename. Same measurement as
+    # handlers/repo_root.py; a frame's co_filename is already a string in memory.
     # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = Path(caller_frame.filename)
-        module_name = caller_path.stem
+    try:
+        frame = sys._getframe(2)
+    except ValueError as exc:
+        # Stack shallower than the documented shape — the caller is unknown, and
+        # saying so is the answer. inspect.stack() expressed this as len() > 2.
+        logger.info(f"caller module name unavailable ({exc}) — recording as unknown")
+        frame = None
+    if frame is not None:
+        module_name = Path(frame.f_code.co_filename).stem
 
         # Validate module name
         if module_name and not module_name.startswith("_"):

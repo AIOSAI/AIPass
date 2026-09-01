@@ -304,7 +304,9 @@ class TestFailSoft:
             }
         ]
 
-        with patch("aipass.daemon.apps.modules.run._fire_job", return_value=(True, "")):
+        from aipass.daemon.apps.modules.run import OUTCOME_FIRED
+
+        with patch("aipass.daemon.apps.modules.run._fire_job", return_value=(OUTCOME_FIRED, "")):
             results = run_tick()
             assert results["fired"] == 1
 

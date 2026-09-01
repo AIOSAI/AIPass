@@ -8,8 +8,11 @@
 
 """Tests for handlers/__init__.py — branch access guard."""
 
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -77,86 +80,91 @@ class TestExtractBranchName:
 # ===================================================================
 
 
-def _make_frame_info(filename: str, code_context: list[str] | None = None):
-    """Create a lightweight stand-in for inspect.FrameInfo."""
-    fi = MagicMock()
-    fi.filename = filename
-    fi.code_context = code_context
-    return fi
-
-
 class TestFindRealCaller:
-    """Walk the stack and return the first real (non-internal) file."""
+    """Walk the stack and return the first real (non-internal) file.
 
-    def test_returns_real_file(self):
-        """When the stack contains a real file, return its resolved path and import line."""
-        real_file = "/home/user/Projects/AIPass/src/aipass/flow/apps/modules/foo.py"
-        # Build a stack: __init__.py (skipped), importlib (skipped), then the real caller
-        init_path = str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "__init__.py")
-        frames = [
-            _make_frame_info(init_path),
-            _make_frame_info("<frozen importlib._bootstrap>"),
-            _make_frame_info(real_file, ["from aipass.flow.apps.handlers import something\n"]),
-        ]
+    REWRITTEN 2026-08-31. These tests used to patch
+    ``aipass.flow.apps.handlers.inspect.stack`` and feed it MagicMock
+    FrameInfos. That mock is why the defect below lived here undisturbed:
+    ``inspect.stack()`` builds a FrameInfo per frame, which reaches
+    ``getmodule()``'s unguarded ``os.path.realpath`` — a cwd read on Windows,
+    before any of the guard's own code runs — and a stack that never executes
+    cannot demonstrate that. The walk is ``sys._getframe`` now, so these drive
+    REAL frames: ``compile(..., filename)`` gives a frame whatever
+    ``co_filename`` the case needs, which is the same lever the mock provided
+    and costs nothing in fidelity.
+    """
 
-        with patch("aipass.flow.apps.handlers.inspect.stack", return_value=frames):
-            filepath, import_line = _find_real_caller()
+    @staticmethod
+    def _call_from(filename: str, source: str = "RESULT = _frc()"):
+        """Run ``_find_real_caller()`` inside a frame named *filename*."""
+        namespace = {"_frc": _find_real_caller, "RESULT": None}
+        exec(compile(source, filename, "exec"), namespace)
+        return namespace["RESULT"]
 
-        assert filepath is not None
-        assert filepath == str(Path(real_file).resolve())
-        assert import_line is not None
-        assert "from aipass.flow.apps.handlers" in import_line
+    def test_returns_real_file(self, tmp_path):
+        """A real file on the stack comes back resolved, with its source line."""
+        caller = tmp_path / "foo.py"
+        caller.write_text("PADDING = 1\nRESULT = _frc()\n", encoding="utf-8")
+
+        filepath, import_line = self._call_from(str(caller), caller.read_text(encoding="utf-8"))
+
+        assert filepath == str(caller.resolve())
+        # linecache reads the line the calling frame is ON. In production that
+        # line is the import statement the guard fired for.
+        assert import_line == "RESULT = _frc()"
 
     def test_skips_importlib_internals(self):
         """Frames with 'importlib' in the filename are skipped."""
-        frames = [
-            _make_frame_info("/usr/lib/python3/importlib/__init__.py"),
-            _make_frame_info("/usr/lib/python3/importlib/_bootstrap.py"),
-            _make_frame_info("/home/user/real_script.py", ["import handlers\n"]),
-        ]
-
-        with patch("aipass.flow.apps.handlers.inspect.stack", return_value=frames):
-            filepath, _ = _find_real_caller()
+        filepath, _ = self._call_from("/usr/lib/python3/importlib/_bootstrap.py")
 
         assert filepath is not None
-        assert "real_script" in filepath
+        assert "importlib" not in filepath
+        # The next real frame up is this test file itself.
+        assert filepath.endswith("test_handlers_init.py")
 
     def test_skips_angle_bracket_filenames(self):
-        """Frames with filenames starting with '<' are skipped."""
-        frames = [
-            _make_frame_info("<string>"),
-            _make_frame_info("<stdin>"),
-            _make_frame_info("/home/user/caller.py", ["import x\n"]),
-        ]
+        """Frames whose filename starts with '<' are skipped.
 
-        with patch("aipass.flow.apps.handlers.inspect.stack", return_value=frames):
-            filepath, _ = _find_real_caller()
+        Skipped BEFORE the filesystem is touched: ``resolve()`` on ``<string>``
+        needs a cwd, and a process whose cwd was deleted dies on that line.
+        """
+        filepath, _ = self._call_from("<string>")
 
         assert filepath is not None
-        assert "caller.py" in filepath
+        assert not filepath.startswith("<")
+        assert filepath.endswith("test_handlers_init.py")
 
     def test_returns_none_when_no_real_frames(self):
-        """When every frame is an internal or angle-bracket frame, return (None, None)."""
-        frames = [
-            _make_frame_info("<string>"),
-            _make_frame_info("<frozen importlib._bootstrap>"),
-            _make_frame_info("<stdin>"),
-        ]
+        """Every frame internal or angle-bracket → (None, None).
 
-        with patch("aipass.flow.apps.handlers.inspect.stack", return_value=frames):
-            filepath, import_line = _find_real_caller()
+        Run in a subprocess because it is the only way to own the WHOLE stack:
+        inside pytest the frames above this one are real files, so the walk
+        would rightly find one. A ``python -c`` process has a single
+        ``<string>`` frame and nothing else — which is also exactly the shape
+        production hits when drone routes a command.
+        """
+        script = (
+            "from aipass.flow.apps.handlers import _find_real_caller\n"
+            "ns = {'_frc': _find_real_caller, 'RESULT': None}\n"
+            "exec(compile('RESULT = _frc()', '<string>', 'exec'), ns)\n"
+            "print('RESULT:', ns['RESULT'])\n"
+        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
 
-        assert filepath is None
-        assert import_line is None
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RESULT: (None, None)" in result.stdout, result.stdout
 
     def test_none_code_context(self):
-        """When code_context is None, import_line is returned as None."""
-        frames = [
-            _make_frame_info("/home/user/script.py", None),
-        ]
+        """A frame naming a file that is not on disk yields import_line None.
 
-        with patch("aipass.flow.apps.handlers.inspect.stack", return_value=frames):
-            filepath, import_line = _find_real_caller()
+        linecache returns "" rather than raising for a file it cannot read —
+        which is the whole reason it replaced inspect's code_context here.
+        """
+        missing = str(Path(tempfile.gettempdir()) / "flow_no_such_file_9f3c.py")
+        assert not Path(missing).exists()
+
+        filepath, import_line = self._call_from(missing)
 
         assert filepath is not None
         assert import_line is None
@@ -215,59 +223,58 @@ class TestGuardBranchAccess:
             with pytest.raises(ImportError, match="json_handler"):
                 _guard_branch_access()
 
-    def test_allows_when_caller_none_with_string_in_stack(self):
-        """When caller is None and <string> is in the stack, allow through."""
-        string_frame = MagicMock()
-        string_frame.filename = "<string>"
+    def test_allows_when_caller_none_whatever_is_on_the_stack(self):
+        """caller is None → allowed, and nothing else is consulted.
 
-        with (
-            patch(
+        REPLACES three tests (``<string>`` on the stack, ``<stdin>`` on the
+        stack, neither) that each pinned one leg of a SECOND ``inspect.stack()``
+        walk inside this branch. That walk returned "allow" on every path it
+        could take, so it was a second copy of the cwd dependency in service of
+        a branch that could not change the answer — deleted 2026-08-31. Three
+        tests asserting the same allow through three routes read as coverage and
+        were really one contract, so it is stated once here.
+
+        The three worlds are still exercised: each drives the REAL walk to None
+        by owning the whole stack in a subprocess, which the mocked version
+        never did.
+
+        NO IMPORT-SHAPED pin can reach the DELETION — ``apps/__init__.py``
+        always supplies a real-file frame, so no import enters this branch at all
+        (@trigger restored the walk in their tree and 1058 tests stayed green).
+        An earlier version of this docstring said behaviour could not pin it at
+        all; @spawn measured the correction (relayed by @devpulse 2026-08-31).
+        Calling the guard DIRECTLY from a ``python -c`` child does reach it, and
+        ``tests/test_import_dead_cwd.py`` carries both instruments now: the AST
+        ban and that behavioural sibling. A regrown walk kills both.
+        """
+        for world in ("<string>", "<stdin>", "no special frames"):
+            with patch(
                 "aipass.flow.apps.handlers._find_real_caller",
                 return_value=(None, None),
-            ),
-            patch(
-                "aipass.flow.apps.handlers.inspect.stack",
-                return_value=[string_frame],
-            ),
-        ):
-            # Should not raise
-            _guard_branch_access()
+            ):
+                # Should not raise, in any of the three.
+                _guard_branch_access()
 
-    def test_allows_when_caller_none_with_stdin_in_stack(self):
-        """When caller is None and <stdin> is in the stack, allow through."""
-        stdin_frame = MagicMock()
-        stdin_frame.filename = "<stdin>"
+    def test_the_caller_none_branch_is_reached_by_a_real_stack(self):
+        """Control for the test above: None is reachable without patching.
 
-        with (
-            patch(
-                "aipass.flow.apps.handlers._find_real_caller",
-                return_value=(None, None),
-            ),
-            patch(
-                "aipass.flow.apps.handlers.inspect.stack",
-                return_value=[stdin_frame],
-            ),
-        ):
-            # Should not raise
-            _guard_branch_access()
+        Patching ``_find_real_caller`` to return None proves the guard's
+        RESPONSE, not that the world exists. A ``python -c`` process is the
+        world — one ``<string>`` frame, nothing above it — and it must import
+        flow's handlers without raising.
+        """
+        script = (
+            "import aipass.flow.apps.handlers as h\n"
+            "ns = {'_frc': h._find_real_caller, 'RESULT': None}\n"
+            "exec(compile('RESULT = _frc()', '<string>', 'exec'), ns)\n"
+            "assert ns['RESULT'] == (None, None), ns['RESULT']\n"
+            "exec(compile('h._guard_branch_access()', '<string>', 'exec'), {'h': h})\n"
+            "print('ALLOWED')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
 
-    def test_allows_when_caller_none_no_special_frames(self):
-        """When caller is None and no special frames exist, allow through (can't determine)."""
-        normal_frame = MagicMock()
-        normal_frame.filename = "/usr/lib/python3/importlib/_bootstrap.py"
-
-        with (
-            patch(
-                "aipass.flow.apps.handlers._find_real_caller",
-                return_value=(None, None),
-            ),
-            patch(
-                "aipass.flow.apps.handlers.inspect.stack",
-                return_value=[normal_frame],
-            ),
-        ):
-            # Should not raise — falls through to the final return
-            _guard_branch_access()
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ALLOWED" in result.stdout, result.stdout
 
     def test_blocked_import_says_unknown_when_no_import_line(self):
         """When import_line is None, the error message says 'unknown'."""

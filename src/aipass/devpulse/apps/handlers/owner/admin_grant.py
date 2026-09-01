@@ -49,9 +49,10 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.module_root import module_file
 
 # Branch root: .../src/aipass/devpulse (this file sits at apps/handlers/owner/)
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT = module_file(__file__).parents[3]
 
 DEFAULT_KEY_PATH = Path.home() / ".aipass" / "admin_grant.key"
 DEFAULT_CERT_PATH = _BRANCH_ROOT / "artifacts" / "birth_certificate.json"

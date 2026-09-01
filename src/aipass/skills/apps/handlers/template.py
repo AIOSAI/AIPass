@@ -6,15 +6,24 @@
 # Modified: 2026-03-07
 # =============================================
 
+"""Skill scaffolding templates: resolve a tier, copy it, fill placeholders.
+
+Backs ``drone @skills create``. Three tiers ship - markdown_only,
+with_handler, full - and each is a real directory under ``templates/``
+copied wholesale, then rewritten in place so the new skill carries its own
+name. Refuses an unknown tier rather than guessing one.
+"""
+
 import shutil
 from pathlib import Path
 
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
+from aipass.skills.apps.handlers.module_paths import module_file
 
 
 # Template directory lives at src/aipass/skills/templates/
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
+TEMPLATES_DIR = module_file(__file__).parent.parent.parent / "templates"
 
 VALID_TYPES = ("markdown_only", "with_handler", "full")
 

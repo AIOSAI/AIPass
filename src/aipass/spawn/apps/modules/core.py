@@ -27,7 +27,11 @@ from aipass.prax import logger
 
 try:
     from aipass.cli.apps.modules.display import console
-except ImportError as e:
+# An optional dependency's fallback has to be at least as wide as the failures its import can produce.
+# A peer's handler package does real filesystem work at import time (its access guard), so a broken peer can raise OSError — FileNotFoundError from a dead cwd — not only ImportError.
+# Catching ImportError alone means 'the peer is unavailable' is handled and 'the peer is broken' is fatal, which is backwards.
+# Raised by @prax 2026-08-31 from their own watcher, measured against spawn the same hour.
+except (ImportError, OSError) as e:
     logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
     from rich.console import Console
 
@@ -45,7 +49,7 @@ from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate
 from aipass.spawn.apps.handlers.mint_verify import verify_mint
 from aipass.spawn.apps.handlers.receipt_ops import write_birth_receipt
 from aipass.spawn.apps.handlers.registry import (
-    load_registry,
+    resolve_project_credential,
     find_registry,
     add_to_registry,
     get_next_citizen_number,
@@ -95,8 +99,9 @@ def _load_meta_tabs():
     """
     try:
         from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
-    except ImportError:
-        logger.info("[spawn] @memory not available — meta-tab placeholders will be empty")
+    # Width, not politeness: see the module-level import above.
+    except (ImportError, OSError) as e:
+        logger.info("[spawn] @memory not available — meta-tab placeholders will be empty (%s)", e)
         return {}
 
     tabs = render_all_meta_tabs()
@@ -310,6 +315,13 @@ def _spawn_agent(
 
     # Determine registry — per-project, never borrow another project's
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
+    if reg_path is None:
+        # No registry above the target. That is exactly the "outside any known
+        # registry" case the ValueError arm below already resolves, so take the
+        # same road rather than crashing on None (@aipass changed find_registry
+        # to answer absence with None on 2026-08-31).
+        logger.info("[spawn] No registry above %s — resolving project-local registry", target)
+        reg_path = _find_project_registry(target)
     try:
         target.relative_to(reg_path.parent)
     except ValueError:
@@ -318,15 +330,19 @@ def _spawn_agent(
     citizen_number = get_next_citizen_number(reg_path)
 
     # Resolve the PROJECT credential (the registry's own metadata.id) for the
-    # passport's citizenship.registry_id. load_registry mints one when the
-    # registry does not exist yet, which is what a brand-new external project
-    # is — resolving it HERE rather than at registration time is the whole
-    # point: the passport is written at step 1 and the registry at step 4, so
-    # reading it later would stamp the passport with a credential that had not
-    # been minted yet and fall back to AIPass's own id. Same mint-once ordering
-    # as citizen_id below; the value is handed to add_to_registry so the file
-    # that eventually lands carries the id the passport already claims.
-    resolved_registry_id = load_registry(reg_path).get("metadata", {}).get("id", "")
+    # passport's citizenship.registry_id. resolve_project_credential mints one
+    # when the registry does not exist yet, which is what a brand-new external
+    # project is — resolving it HERE rather than at registration time is the
+    # whole point: the passport is written at step 1 and the registry at step 4,
+    # so reading it later would stamp the passport with a credential that had
+    # not been minted yet and fall back to AIPass's own id. Same mint-once
+    # ordering as citizen_id below; the value is handed to add_to_registry so
+    # the file that eventually lands carries the id the passport already claims.
+    #
+    # The mint is asked for BY NAME. It used to be a side effect of loading a
+    # path that did not exist, which meant every reader of a missing registry
+    # minted one too (@memory, 2026-08-31). This site is a creator and says so.
+    resolved_registry_id = resolve_project_credential(reg_path)
 
     # Mint the citizen's own unique id ONCE, here, so the passport and the
     # registry entry carry the same value. Minting it inside add_to_registry

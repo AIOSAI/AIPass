@@ -33,7 +33,9 @@ from datetime import datetime
 from aipass.flow.apps.handlers.json import json_handler
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # =============================================
 # CONFIGURATION

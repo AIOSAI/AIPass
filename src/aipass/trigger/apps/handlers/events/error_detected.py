@@ -47,6 +47,7 @@ from aipass.trigger.apps.config import (
     migrate_json_file,
     trail_logger,
 )
+from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation
 
@@ -56,16 +57,7 @@ from aipass.trigger.apps.handlers import escalation
 logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-_REPO_ROOT = _find_repo_root()
+_REPO_ROOT = find_repo_root(caller="error_detected")
 
 BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 

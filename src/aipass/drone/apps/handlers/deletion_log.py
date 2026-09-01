@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-08-31
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -43,7 +43,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import resolve_caller_identity
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in, resolve_caller_identity
 
 _LOG_DIR_NAME = ".ai_central"
 _LOG_NAME = "deletions.jsonl"
@@ -74,17 +74,30 @@ LANE_BROKER = "broker"
 
 UNKNOWN_CALLER = "unknown"
 
+# What the cwd field records when the process has no working directory left.
+# Deleting the directory you are standing in is an ordinary thing to do with a
+# scratch dir, and every os.getcwd() after it raises ENOENT. A defined value
+# for "there is none" is not a substitute answer — inventing "/" or reusing the
+# deleted path would be, and both would read as a real location months later.
+NO_CURRENT_DIRECTORY = "<none: deleted during this operation>"
+
 
 def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if list(parent.glob("*_REGISTRY.json")):
+    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
+
+    No cwd means no walk — and the ENOENT used to raise here, past the two
+    homes that could still have answered. AIPASS_HOME and the tempdir below
+    do not need a cwd, so a delete that removes its own directory keeps the
+    durable half of its record instead of surviving as a prax line alone.
+    """
+    cwd = caller_cwd()
+    for parent in [cwd, *cwd.parents] if cwd is not None else []:
+        if registries_in(parent):
             return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
 
@@ -243,7 +256,8 @@ def record_deletion(
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
     """
-    caller = caller or resolve_caller_identity(Path.cwd()) or UNKNOWN_CALLER
+    cwd = caller_cwd()
+    caller = caller or resolve_caller_identity(cwd) or UNKNOWN_CALLER
     shape = measurement or {"kind": "unknown", "size_bytes": None, "entry_count": None, "measured": "none"}
 
     record = {
@@ -251,7 +265,7 @@ def record_deletion(
         "lane": lane,
         "outcome": outcome,
         "caller": caller,
-        "cwd": str(Path.cwd()),
+        "cwd": str(cwd) if cwd is not None else NO_CURRENT_DIRECTORY,
         "requested": requested,
         "path": str(resolved),
         "reason": reason,

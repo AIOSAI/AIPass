@@ -23,12 +23,16 @@ Architecture: Module orchestrates, medic_state handler manages persistence
 """
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+from aipass.trigger.apps.handlers.service_control import (
+    _ensure_service_installed,
+    _is_service_active,
+    _systemctl,
+)
 from aipass.trigger.apps.handlers.json import json_handler
 
 from aipass.trigger.apps.handlers.medic_state import (
@@ -55,65 +59,13 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-SERVICE_NAME = "trigger-log-watcher.service"
-_SERVICE_UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / SERVICE_NAME
-_TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "templates" / f"{SERVICE_NAME}.template"
-
-
-def _get_aipass_home() -> Path:
-    """Resolve AIPASS_HOME from env var or git repo root."""
-    import os
-
-    env = os.environ.get("AIPASS_HOME")
-    if env:
-        return Path(env)
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return Path(result.stdout.strip())
-    except Exception as exc:
-        logger.warning("[MEDIC] git repo root detection failed: %s", exc)
-    return Path(__file__).resolve().parent.parent.parent.parent.parent
-
-
-def _ensure_service_installed() -> bool:
-    """Install systemd unit from template if missing. Returns True if ready."""
-    if _SERVICE_UNIT_PATH.exists():
-        return True
-
-    if not _TEMPLATE_PATH.exists():
-        logger.warning("[MEDIC] Service template not found: %s", _TEMPLATE_PATH)
-        return False
-
-    aipass_home = _get_aipass_home()
-    from aipass.trigger.apps.config import read_text_file, write_text_file
-
-    template = read_text_file(_TEMPLATE_PATH)
-    rendered = template.replace("{{AIPASS_HOME}}", str(aipass_home))
-
-    write_text_file(_SERVICE_UNIT_PATH, rendered)
-    logger.info("[MEDIC] Installed systemd unit to %s", _SERVICE_UNIT_PATH)
-
-    _systemctl("daemon-reload")
-    subprocess.run(
-        ["systemctl", "--user", "enable", SERVICE_NAME],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    return True
-
 
 def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
 
@@ -135,33 +87,6 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_suppression_stats — suppression statistics)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_rate_limit_stats — rate limit statistics)[/dim]")
     console.print()
-
-
-def _systemctl(action: str) -> bool:
-    """Run systemctl --user action on the log watcher service.
-
-    Args:
-        action: systemctl action (start, stop, restart, is-active)
-
-    Returns:
-        True if command succeeded (exit code 0)
-    """
-    try:
-        result = subprocess.run(
-            ["systemctl", "--user", action, SERVICE_NAME],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except Exception as exc:
-        logger.warning(f"[MEDIC] systemctl {action} failed: {exc}")
-        return False
-
-
-def _is_service_active() -> bool:
-    """Check if the log watcher systemd service is running."""
-    return _systemctl("is-active")
 
 
 def _extract_branch_name(raw: str) -> str:

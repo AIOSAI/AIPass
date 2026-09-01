@@ -23,7 +23,10 @@ those reds reflect AIPass bugs, not harness bugs.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -342,50 +345,90 @@ def test_t2a_rm_gate_allows_echo(clean_venv: CleanVenv, hook_workspace: Path) ->
 
 
 @pytest.fixture(scope="module")
-def routing_root(clean_venv: CleanVenv) -> Iterator[Path]:
-    """Generate a minimal registry at the repo root pointing at real branches.
+def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A throwaway project root with a minimal registry. The repo tree is never written.
 
-    The repo's own AIPASS_REGISTRY.json is mode 0600 / host-absolute and won't
-    relocate (its paths are the developer's home, absent in CI), so we GENERATE
-    a minimal registry — faithful to what setup.sh produces — pointing at REAL
-    branch dirs under this checkout.
+    drone validates branch-path containment against the registry's PARENT dir
+    (``registry_handler._validate_branch_path``), and that parent has never had
+    to be the repo root -- only the dir the branch paths sit under. So the whole
+    stand-in lives in a tmp dir and the live ``AIPASS_REGISTRY.json`` is not
+    touched at all.
 
-    drone validates path containment against the registry's PARENT dir, so the
-    registry must sit at the repo root for the ``src/aipass/*`` branch paths to
-    validate. We back up any existing registry and restore it on teardown so a
-    local run never mutates the working tree permanently.
+    The previous version overwrote the repo's own registry for the duration of
+    this module, holding the only copy of the real one in a Python variable.
+    Two things were wrong with that, both measured before this rewrite:
 
-    We target ``ai_mail`` — a real BRANCH (not an in-process drone module) — so
-    ``drone @ai_mail --help`` exercises the full resolve -> subprocess ->
-    execute path, the proof we never previously got green.
+    * a killed interpreter (timeout, INTERNALERROR, power loss) left the real
+      22-branch fleet existing NOWHERE -- a ``kill -9`` mid-window was
+      reproduced against a stand-in and left a 3-row file and no backup on
+      disk.  A backup that lives only in the process that can die is not a
+      backup;
+    * under ``-n auto --dist loadscope`` (``macos-test.yml``, and
+      ``windows-test.yml`` -- only ``ci.yml`` passes ``--ignore=tests/e2e``)
+      the sibling xdist workers read the synthetic registry for the whole
+      window.  Measured: 40 of 60 polled reads by a parallel process saw the
+      3-branch file.  A teardown that runs in one process is not a rollback
+      for the other seven.
+
+    A SYMLINKED stand-in cannot work and should not be reattempted:
+    ``_validate_branch_path`` calls ``.resolve()``, which follows the link back
+    into the repo, so containment then fails and the branch is silently dropped.
+    (It would also need Developer Mode or admin on Windows.)
+
+    The branch dir holds exactly one file.  ``apps/ai_mail.py`` imports only
+    ``aipass.*`` (prax, cli) from the INSTALLED wheel, and ``--help`` returns
+    before module discovery and before the identity fence -- so no ``modules/``,
+    no handlers, no passport.  Verified: that single file answers
+    ``drone @ai_mail --help`` with full help text and exit 0.
+
+    ``seedgo`` and ``drone`` are registry rows only; their dirs are created
+    empty because a nonexistent path currently passes containment by accident
+    (``Path.resolve()`` is non-strict), and this fixture should not silently
+    depend on that.
     """
-    src = REPO_ROOT / "src" / "aipass"
+    root = tmp_path_factory.mktemp("routing_root")
+    src = root / "src" / "aipass"
+    for name in ("ai_mail", "seedgo", "drone"):
+        (src / name).mkdir(parents=True)
+
+    entry_dir = src / "ai_mail" / "apps"
+    entry_dir.mkdir()
+    shutil.copy2(
+        REPO_ROOT / "src" / "aipass" / "ai_mail" / "apps" / "ai_mail.py",
+        entry_dir / "ai_mail.py",
+    )
+
+    # Relative paths, resolved by drone against the registry's own dir -- so no
+    # absolute paths, and therefore no separator or drive-letter question on
+    # Windows.
     registry = {
         "metadata": {"name": "AIPASS", "version": "1.0.0", "total_branches": 3},
         "branches": [
-            {"name": "ai_mail", "path": str(src / "ai_mail"), "status": "active"},
-            {"name": "seedgo", "path": str(src / "seedgo"), "status": "active"},
-            {"name": "drone", "path": str(src / "drone"), "status": "active"},
+            {"name": "ai_mail", "path": "src/aipass/ai_mail", "status": "active"},
+            {"name": "seedgo", "path": "src/aipass/seedgo", "status": "active"},
+            {"name": "drone", "path": "src/aipass/drone", "status": "active"},
         ],
     }
-
-    registry_path = REPO_ROOT / "AIPASS_REGISTRY.json"
-    backup = registry_path.read_bytes() if registry_path.exists() else None
-    try:
-        registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-        yield REPO_ROOT
-    finally:
-        if backup is not None:
-            registry_path.write_bytes(backup)
-        elif registry_path.exists():
-            registry_path.unlink()
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(registry, indent=2), encoding="utf-8")
+    return root
 
 
-def _drone_env() -> dict:
-    """Env for drone subprocesses (inherits PATH etc.)."""
-    import os
+def _drone_env(root: Path) -> dict:
+    """Env for drone subprocesses, pinned to the throwaway root.
 
-    return dict(os.environ)
+    ``AIPASS_REGISTRY`` is priority 2 in ``registry_handler.get_registry_path``,
+    above the cwd walk, so the registry is NAMED rather than left to be found.
+
+    ``AIPASS_HOME`` is dropped because ``get_all_branches()`` merges the
+    AIPASS_HOME registry on top of the primary one -- on a developer machine
+    that is the live 22-branch fleet, leaking into a test whose entire premise
+    is a known 3-branch registry.  The tests pass either way; dropping it is a
+    hermeticity fix, not a load-bearing requirement.
+    """
+    env = dict(os.environ)
+    env["AIPASS_REGISTRY"] = str(root / "AIPASS_REGISTRY.json")
+    env.pop("AIPASS_HOME", None)
+    return env
 
 
 def test_t3_drone_systems_lists_branch(clean_venv: CleanVenv, routing_root: Path) -> None:
@@ -393,11 +436,37 @@ def test_t3_drone_systems_lists_branch(clean_venv: CleanVenv, routing_root: Path
     proc = _run(
         [str(clean_venv.drone), "systems"],
         cwd=str(routing_root),
-        env=_drone_env(),
+        env=_drone_env(routing_root),
     )
     assert proc.returncode == 0, f"drone systems failed:\n{proc.stdout}\n{proc.stderr}"
     out = proc.stdout.lower()
     assert "seedgo" in out or "ai_mail" in out, f"no known branch listed:\n{proc.stdout}"
+
+
+def test_t3_routing_root_never_writes_the_live_registry(routing_root: Path) -> None:
+    """The fixture must leave the repo's own AIPASS_REGISTRY.json byte-identical.
+
+    Red-first history: ``routing_root`` used to OVERWRITE this file for the whole
+    Tier-3 module, holding the only copy of the real one in a Python variable.
+    That is the live fleet anchor -- a killed interpreter left the real registry
+    existing nowhere, and parallel xdist workers read the synthetic one mid-window
+    (measured 40 of 60 reads).  This pin fails the moment anyone points the
+    fixture back at the repo tree.
+    """
+    live = REPO_ROOT / "AIPASS_REGISTRY.json"
+    if not live.exists():
+        pytest.skip("no repo registry on this machine (CI checkout) -- nothing to protect")
+
+    before = hashlib.sha256(live.read_bytes()).hexdigest()
+
+    # Exercise the fixture's product exactly as the other T3 tests do.
+    assert (routing_root / "AIPASS_REGISTRY.json").is_file()
+    assert routing_root != REPO_ROOT
+    assert not routing_root.is_relative_to(REPO_ROOT), f"stand-in root is inside the repo tree: {routing_root}"
+
+    assert hashlib.sha256(live.read_bytes()).hexdigest() == before, (
+        "routing_root modified the live AIPASS_REGISTRY.json"
+    )
 
 
 def test_t3_drone_routes_to_real_branch(clean_venv: CleanVenv, routing_root: Path) -> None:
@@ -411,7 +480,7 @@ def test_t3_drone_routes_to_real_branch(clean_venv: CleanVenv, routing_root: Pat
     proc = _run(
         [str(clean_venv.drone), "@ai_mail", "--help"],
         cwd=str(routing_root),
-        env=_drone_env(),
+        env=_drone_env(routing_root),
     )
     combined = (proc.stdout + proc.stderr).lower()
     assert proc.returncode == 0, f"drone @ai_mail --help failed:\n{proc.stdout}\n{proc.stderr}"

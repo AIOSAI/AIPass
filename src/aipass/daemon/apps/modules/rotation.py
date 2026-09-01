@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Steward rotation firing + status surface (drone @daemon rotation)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -108,7 +108,13 @@ def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
     """
     try:
         from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
-    except ImportError as e:
+    # OSError, not only ImportError: MEASURED 2026-08-31 - importing ai_mail's wake
+    # module under a dead working directory raises FileNotFoundError today, and an
+    # uncaught one here takes the whole rotation down from inside an OPTIONAL
+    # consult. The fallback is unchanged and still fail-open by design (an
+    # unfiltered roster, logged); what changes is that the world reaching it no
+    # longer arrives as a traceback.
+    except (ImportError, OSError) as e:
         logger.warning("[rotation] Wake blocklist unavailable, roster unfiltered: %s", e)
         return roster
 

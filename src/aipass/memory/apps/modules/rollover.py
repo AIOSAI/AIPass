@@ -23,7 +23,6 @@ Purpose:
 import json
 import os
 import sys
-from pathlib import Path
 from typing import List, NamedTuple
 
 if sys.platform == "win32":
@@ -52,6 +51,7 @@ from aipass.memory.apps.handlers.rollover.orchestrator import (
     execute_rollover as _handler_execute_rollover,
     sync_line_counts as _handler_sync_line_counts,
 )
+from aipass.memory.apps.handlers.repo_root import module_file
 
 
 # =============================================================================
@@ -933,8 +933,19 @@ def run_rollover() -> bool:
     failed = result.get("failed", [])
 
     console.print()
-    if success_count > 0:
-        console.print(f"[green]>[/green] Rollover complete: {success_count}/{triggers_count} successful")
+    # 0/N is a result, not a reason to say nothing. Gated on success_count > 0,
+    # a run where every trigger failed ended on a blank line under "Found N
+    # files ready for rollover" — the same shape on screen as a run with
+    # nothing to do. The per-failure detail below says what broke; this says
+    # what the run achieved.
+    marker = "[green]>[/green]" if success_count else "[yellow]>[/yellow]"
+    console.print(f"{marker} Rollover complete: {success_count}/{triggers_count} successful")
+
+    # A trigger the extractor declined is neither a win nor a break, and printing
+    # neither left "0/1 successful" above an empty failure list — a count saying
+    # something went wrong beside a list saying nothing did.
+    for item in result.get("skipped", []):
+        console.print(f"  [yellow]-[/yellow] {item['trigger']} skipped: {item['reason']}")
 
     if failed:
         console.print()
@@ -980,7 +991,18 @@ def _normalize_rolled(rolled: List[str]) -> None:
     wanted = {name.lower() for name in rolled}
     try:
         config = config_loader.load()
-        targets = [item for item in registry_scope.fleet_branches() if item["name"].lower() in wanted]
+        # STOPS AT THE REPO EDGE, like the push and the rollover detector.
+        # normalize_branch WRITES — it re-renders the machine frame in place —
+        # and this lane matches rolled branches BY NAME across whatever scope it
+        # is given. Handed the whole fleet it would, the day any external
+        # project names a branch `api` or `flow`, rewrite a file in a sibling
+        # repository because one of ours happened to roll. There is no collision
+        # today; that is luck, and luck is not a scope.
+        targets = [
+            item
+            for item in registry_scope.fleet_branches()
+            if item["name"].lower() in wanted and item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
+        ]
     except Exception as e:
         logger.warning(f"[rollover] Frame normalize skipped — cannot resolve scope: {e}")
         return
@@ -988,8 +1010,19 @@ def _normalize_rolled(rolled: List[str]) -> None:
     healed = 0
     for item in targets:
         try:
-            if normalizer.normalize_branch(item["name"], item["path"], config)["success"]:
+            # The normalizer reports failure by RETURN VALUE and promises never
+            # to raise, so this `except` cannot be the thing that catches a
+            # failed write — reading only ["success"] dropped the error string
+            # it hands back. A branch whose frame could not be written was
+            # invisible, while an out-of-scope branch below is named by name.
+            outcome = normalizer.normalize_branch(item["name"], item["path"], config)
+            if outcome["success"]:
                 healed += 1
+            else:
+                logger.warning(
+                    f"[rollover] Frame NOT re-rendered for {item['name']}: "
+                    f"{outcome.get('error') or 'nothing could be written'}"
+                )
         except Exception as e:
             logger.warning(f"[rollover] Frame normalize failed for {item['name']}: {e}")
 
@@ -1251,7 +1284,7 @@ def _discover_handlers() -> dict[str, list[str]]:
         Dict mapping handler directory name to list of .py filenames
         (excluding __init__.py and __pycache__).
     """
-    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
+    handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

@@ -28,9 +28,11 @@ from pathlib import Path
 from typing import List, Dict, Any
 from dataclasses import dataclass
 
+from aipass.memory.apps.handlers import repo_root
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -39,16 +41,21 @@ logger = get_system_logger()
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="detector")
 
 
 _REPO_ROOT = _find_repo_root()
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _KNOWN_REGISTRIES_PATH = _MEMORY_ROOT / "memory_json" / "known_registries.json"
 
 
@@ -107,7 +114,16 @@ def _find_caller_registries() -> List[Path]:
 
     cwd_found: List[Path] = []
     for parent in [caller_cwd] + list(caller_cwd.parents):
-        for reg in parent.glob("*_REGISTRY.json"):
+        # EXACT CASE, and this walk is the one that had most to lose by it.
+        # It runs from the CALLER'S directory -- an arbitrary repo -- and a
+        # folding filesystem serves any lowercase *_registry.json there:
+        # flow's plan counters, .spawn/.template_registry.json, bait in every
+        # branch. A match here is not merely read, it is persist_registry()'d
+        # into known_registries.json permanently, and the `break` below means a
+        # spurious nearer hit STOPS the walk before the real registry above it
+        # is ever seen. Refusing, admitting, and forgetting -- this one does all
+        # three. See repo_root.exactly_named.
+        for reg in repo_root.exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
         if cwd_found:
@@ -277,7 +293,7 @@ def _count_file_lines(file_path: Path) -> int:
         return 0
 
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[3] / "templates"
+_TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
 _TEMPLATE_MAP = {
     "local": _TEMPLATES_DIR / "LOCAL.template.json",
     "observations": _TEMPLATES_DIR / "OBSERVATIONS.template.json",

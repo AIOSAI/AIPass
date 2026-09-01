@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2026-08-12
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -28,7 +28,7 @@ from typing import List, Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -198,6 +198,7 @@ def _branches_from_registry(reg_file: Path) -> Dict[str, str]:
 # refused. The rule is named so it can be read, not buried in a glob string.
 RESIDENT_PROJECTS_DIR = "projects"
 RESIDENT_REGISTRY_GLOB = "*/*_REGISTRY.json"
+PROJECT_TREE_REGISTRY_GLOB = f"{RESIDENT_PROJECTS_DIR}/{RESIDENT_REGISTRY_GLOB}"
 PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 
 # The two values passport 2.0 defines for citizenship.residency.
@@ -263,7 +264,7 @@ def resident_registry_paths(repo_root: Path) -> List[Path]:
         return []
 
     found: List[Path] = []
-    for path in sorted(projects.glob(RESIDENT_REGISTRY_GLOB)):
+    for path in registries_in(projects, RESIDENT_REGISTRY_GLOB):
         if any(part.startswith(".") for part in path.relative_to(projects).parts):
             continue
         found.append(path)
@@ -392,7 +393,7 @@ def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
         Empty dict when there is no projects/ tree.
     """
     result: Dict[str, str] = {}
-    for reg_file in sorted(Path(repo_root).glob("projects/*/*_REGISTRY.json")):
+    for reg_file in registries_in(Path(repo_root), PROJECT_TREE_REGISTRY_GLOB):
         result.update(_branches_from_registry(reg_file))
     return result
 
@@ -415,7 +416,7 @@ def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
     """
     current = Path(caller_cwd).resolve()
     for _ in range(10):
-        for reg_file in current.glob("*_REGISTRY.json"):
+        for reg_file in registries_in(current):
             result = _branches_from_registry(reg_file)
             if result:
                 return result

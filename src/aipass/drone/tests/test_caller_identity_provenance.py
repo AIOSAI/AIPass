@@ -25,6 +25,7 @@ refuse "project" everywhere.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -184,3 +185,197 @@ class TestProvenanceIsStampedIntoTheEnvironment:
         env = captured["env"]
         assert "AIPASS_CALLER_BRANCH" not in env
         assert "AIPASS_CALLER_IDENTITY_SOURCE" not in env
+
+
+# ---------------------------------------------------------------------------
+# Routing must survive a caller whose directory no longer exists
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.deletable_cwd
+class TestRoutingFromADeletedDirectory:
+    """``drone rm`` on your own cwd now succeeds — so the NEXT command runs here.
+
+    Every routed invocation reads the caller's cwd twice: once to ship
+    AIPASS_CALLER_CWD to the target, once to resolve who is calling. Both reads
+    were bare, and a process whose directory was deleted raises ENOENT on each.
+
+    The delete lane was fixed first, which is what made this reachable rather
+    than theoretical: before that fix the delete itself crashed, so nobody ever
+    got to type a second command from a directory that was gone. @trigger found
+    the count was three reads, not the two this branch first reported.
+    """
+
+    def test_routing_does_not_crash_when_the_cwd_was_deleted(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock, patch
+
+        from aipass.drone.apps.handlers import router_handler
+
+        doomed = tmp_path / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+        shutil.rmtree(doomed)
+
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return MagicMock(stdout="", stderr="", exit_code=0)
+
+        with (
+            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "execute_command", side_effect=_capture),
+        ):
+            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+
+        assert captured, "routing died on a cwd that no longer exists"
+
+    def test_the_absent_cwd_is_not_forwarded_as_a_real_path(self, tmp_path, monkeypatch):
+        """The target reads AIPASS_CALLER_CWD as a location. It must not get a lie."""
+        from unittest.mock import MagicMock, patch
+
+        from aipass.drone.apps.handlers import router_handler
+
+        doomed = tmp_path / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+        shutil.rmtree(doomed)
+
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return MagicMock(stdout="", stderr="", exit_code=0)
+
+        with (
+            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "execute_command", side_effect=_capture),
+        ):
+            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+
+        assert captured["env"].get("AIPASS_CALLER_CWD") != str(doomed)
+
+    def test_assigned_identity_still_answers_without_a_cwd(self, tmp_path, monkeypatch):
+        """Who this process IS never depended on where it was standing (S102)."""
+        from aipass.drone.apps.handlers import router_handler
+
+        doomed = tmp_path / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+        shutil.rmtree(doomed)
+
+        identity = router_handler.resolve_caller_identity_signal(router_handler.caller_cwd())
+
+        assert identity.name == "commons"
+        assert identity.source == "assigned"
+
+    def test_the_handlers_package_imports_at_all_without_a_cwd(self, tmp_path):
+        """Every guard above is unreachable if the IMPORT raises first.
+
+        ``handlers/__init__.py`` runs a stack walk at import to block
+        cross-branch imports, and it called ``Path(filename).resolve()`` on each
+        frame BEFORE the line that skips Python's internals. ``resolve()`` on a
+        relative name — ``<frozen importlib._bootstrap>`` is in every import
+        stack — goes through ``abspath``, which reads the current directory, so
+        importing drone's handlers from a deleted directory raised ENOENT
+        before any of this branch's cwd guards existed to run.
+
+        A subprocess with a deleted cwd, not a mock: ``Path.resolve()`` reaches
+        ``os.getcwd`` inside C, so patching ``Path.cwd`` reproduces nothing.
+        """
+        import subprocess
+        import sys
+        import textwrap
+
+        doomed = tmp_path / "scratch"
+        doomed.mkdir()
+        probe = textwrap.dedent(
+            """
+            import os, shutil, sys
+            here = sys.argv[1]
+            os.chdir(here)
+            shutil.rmtree(here)
+            from aipass.drone.apps.handlers import registry_handler
+            print("imported", registry_handler.__name__.rsplit(".", 1)[-1])
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(doomed)],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "imported registry_handler" in result.stdout
+
+
+class TestRoutingWithoutACwdOnEveryOS:
+    """The same three claims as the class above, built portably.
+
+    Those tests delete the directory they stand in, which Windows refuses (see
+    WINDOWS_CWD_REASON in conftest), so on Windows they are skipped and this is
+    the only cover routing's cwd guards have there.
+
+    Supplied state, not produced: ``Path.cwd`` raises the ENOENT it raises for
+    real. The fourth claim of that class — that the handlers package IMPORTS at
+    all from a dead directory — has no portable sibling and is not given a fake
+    one. Its own docstring says why: the import-time walk reaches ``os.getcwd``
+    inside C via ``Path.resolve()``, where patching ``Path.cwd`` reproduces
+    nothing. On Windows that claim is genuinely untested, and saying so is
+    better than a test that would pass without exercising it.
+    """
+
+    @pytest.fixture()
+    def no_cwd(self, monkeypatch):
+        def gone():
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        yield
+
+    @staticmethod
+    def _route(tmp_path):
+        """Route one command with execution stubbed; return the captured kwargs."""
+        from unittest.mock import MagicMock, patch
+
+        from aipass.drone.apps.handlers import router_handler
+
+        branch = tmp_path / "branch"
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return MagicMock(stdout="", stderr="", exit_code=0)
+
+        with (
+            patch.object(router_handler, "find_entry_point", return_value=branch / "apps" / "x.py"),
+            patch.object(router_handler, "execute_command", side_effect=_capture),
+        ):
+            router_handler.execute_branch_command(branch_path=str(branch), branch_name="x", command="ping")
+        return captured
+
+    def test_routing_does_not_crash(self, no_cwd, tmp_path):
+        assert self._route(tmp_path), "routing died with no current directory"
+
+    def test_the_absent_cwd_is_omitted_rather_than_faked(self, no_cwd, tmp_path):
+        """The target reads AIPASS_CALLER_CWD as a location. It must not get a lie.
+
+        Omitted, not blanked: an empty string is a value the target would try to
+        resolve, and a sentinel is a path somebody eventually treats as one.
+        """
+        captured = self._route(tmp_path)
+
+        assert "AIPASS_CALLER_CWD" not in captured["env"]
+
+    def test_assigned_identity_still_answers(self, no_cwd, monkeypatch):
+        """Who this process IS never depended on where it was standing (S102)."""
+        from aipass.drone.apps.handlers import router_handler
+
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+
+        identity = router_handler.resolve_caller_identity_signal(router_handler.caller_cwd())
+
+        assert identity.name == "commons"
+        assert identity.source == "assigned"

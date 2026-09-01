@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-08-12
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -46,7 +46,8 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
 
@@ -58,13 +59,36 @@ def print_introspection():
     console.print()
 
 
+# LIFECYCLE OUTPUT GOES TO PRAX, NOT THE JOURNAL (2026-08-31)
+#
+# Five bare print() calls used to write this service's lifecycle to stdout and
+# stderr, where systemd captured them into the journal. They are prax logger
+# calls below. The standard's complaint was exact rather than stylistic: those
+# lines were unstructured and invisible to monitoring, and prax IS this system's
+# monitoring surface — so `drone @prax monitor` could not see the state of the
+# process that feeds it.
+#
+# THE TRADE, stated rather than glossed: `journalctl --user -u
+# trigger-log-watcher.service` no longer carries "Running (... watchers active)",
+# "Received signal N", or "Stopped". systemd's own Started / Stopping / Stopped
+# and exit-status lines remain, so the journal still answers "is the process up".
+# It no longer answers "did the watchers actually come up" — that is
+# `drone @trigger medic status`, which reads the service, and the prax log.
+#
+# The startup failure is the one message here that is NOT info: it is logged at
+# ERROR so it reaches the registry, and the level is pinned by
+# test_both_fail_is_reported_at_error_level.
+#
+# The `--version` print at the bottom stays: it sits inside
+# `if __name__ == "__main__"`, which the standard excludes, and a version query
+# answering on stdout is what a caller parsing it expects.
 def main() -> None:
     """Start watchers and block until signaled."""
     stop_event = threading.Event()
 
     def shutdown(signum: int, _frame: object) -> None:
         """Handle SIGTERM/SIGINT gracefully."""
-        print(f"[trigger-log-watcher] Received signal {signum}, shutting down...")
+        logger.info(f"[trigger-log-watcher] Received signal {signum}, shutting down...")
         stop_event.set()
 
     signal.signal(signal.SIGTERM, shutdown)
@@ -75,7 +99,7 @@ def main() -> None:
     system_ok = start_system_watcher()
 
     if not branch_ok and not system_ok:
-        print("[trigger-log-watcher] Both watchers failed to start", file=sys.stderr)
+        logger.error("[trigger-log-watcher] Both watchers failed to start")
         sys.exit(1)
 
     started = []
@@ -83,7 +107,7 @@ def main() -> None:
         started.append("branch")
     if system_ok:
         started.append("system")
-    print(f"[trigger-log-watcher] Running ({', '.join(started)} watchers active)")
+    logger.info(f"[trigger-log-watcher] Running ({', '.join(started)} watchers active)")
 
     # Watch our OWN handler code for changes. This process holds those modules
     # in memory for its whole life, so a fix shipped to disk does nothing until
@@ -102,10 +126,12 @@ def main() -> None:
     if reload_requested():
         # NOT a clean exit on purpose: the unit ships Restart=on-failure, which
         # would read 0 as "job done" and leave the watcher down.
-        print(f"[trigger-log-watcher] Handler code changed — exiting {reload_sentinel.RELOAD_EXIT_CODE} to reload")
+        logger.info(
+            f"[trigger-log-watcher] Handler code changed — exiting {reload_sentinel.RELOAD_EXIT_CODE} to reload"
+        )
         sys.exit(reload_sentinel.RELOAD_EXIT_CODE)
 
-    print("[trigger-log-watcher] Stopped")
+    logger.info("[trigger-log-watcher] Stopped")
 
 
 if __name__ == "__main__":

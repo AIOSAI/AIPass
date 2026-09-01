@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.0.0
+# Version: 2.1.1
 # Created: 2026-06-09
-# Modified: 2026-06-10
+# Modified: 2026-08-31
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -40,6 +40,7 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
 from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 
 _DEFAULT_SOCKET_DIR = ".ai_central"
 _SOCKET_NAME = "drone_broker.sock"
@@ -52,15 +53,24 @@ _TMP_BASES = (Path(tempfile.gettempdir()),)
 
 
 def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if list(parent.glob("*_REGISTRY.json")):
-            return parent.resolve()
+    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
+
+    A byte-for-byte twin of ``rm_handler._find_project_root`` and it carried the
+    identical unguarded read. Left as two functions rather than merged: the
+    broker is a long-lived daemon and the rm lane is a one-shot command, so a
+    shared root-finder would couple their lifetimes for the sake of six lines.
+    They are pinned together by ``TestTheSweepIsComplete`` instead, which is
+    what actually keeps them from drifting apart again.
+    """
+    cwd = caller_cwd()
+    if cwd is not None:
+        for parent in [cwd, *cwd.parents]:
+            if registries_in(parent):
+                return parent.resolve()
     aipass_home = os.environ.get("AIPASS_HOME")
     if aipass_home:
         home = Path(aipass_home)
-        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+        if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
 

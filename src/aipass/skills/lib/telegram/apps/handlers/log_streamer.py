@@ -31,6 +31,7 @@ from urllib.request import Request, urlopen
 
 # Logging
 from aipass.prax import logger
+from aipass.skills.apps.handlers.module_paths import module_file
 from aipass.skills.apps.handlers.json import json_handler
 
 # =============================================
@@ -54,7 +55,7 @@ def _get_system_logs_dir():
         p = Path(test_dir) / "system"
         p.mkdir(parents=True, exist_ok=True)
         return p
-    here = Path(__file__).resolve()
+    here = module_file(__file__)
     for parent in here.parents:
         if (parent / "pyproject.toml").exists():
             d = parent / "system_logs"

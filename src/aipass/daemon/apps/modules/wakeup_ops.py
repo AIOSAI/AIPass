@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wakeup_ops.py
 # Description: Wake-Up Cron Operations Module
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-10
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -19,7 +19,10 @@ from aipass.daemon.apps.handlers.json import json_handler
 
 try:
     from aipass.cli.apps.modules.display import console
-except ImportError:
+# OSError as well: an optional cross-branch import can fail on the filesystem,
+# not only on absence. @cli imports clean under a dead cwd today (measured
+# 2026-08-31); the guard catches the condition rather than today's measurement.
+except (ImportError, OSError):
     from rich.console import Console
 
     console = Console()

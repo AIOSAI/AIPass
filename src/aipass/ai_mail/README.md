@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-27
+**Last Updated:** 2026-08-31
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1350 pass across 46 files (1332 + 4 live-hygiene skips on a fresh checkout — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1446 pass across 49 files, 0 skipped, both rootdirs (on a fresh checkout 4 live-hygiene tests skip instead — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -558,6 +558,63 @@ status, ok = wake_branch("@devpulse", custom_message=prompt, sender="@daemon", s
 - **Reading the outcome** — `status.find_step("scheduled")` is present only for the
   headless lane; the interactive spawn names its tmux session in the `spawn` step.
 
+### Unattended Wakes: Permissions, Model, and Marking
+
+Three rulings from Patrick on 2026-08-30, all after @vera's first external daemon
+wake. The fire itself worked; the **lane** failed three ways around it.
+
+**1 — Always bypass permissions.** *"always bypass permissions always, claude alone
+will nvr work."* @vera launched as a bare `claude`, sat in default permission mode,
+and had Bash **denied** mid-playbook with nobody present to approve it — she
+improvised around it with WebFetch, which is not a thing an unattended agent should
+ever have to do. The headless lane had carried `--permission-mode bypassPermissions`
+for months; the interactive manager lane had not. It does now, unconditionally:
+every route into that spawn comes from `@daemon`, so *attachable* was never the same
+thing as *attended*.
+
+**2 — Fable is managers-only.** *"managers are fable thats it, only manager run
+fable."* `resolve_wake_model(citizen_class, requested)` is the one site that decides:
+
+| Target | Requested model | Runs on |
+|---|---|---|
+| `citizen_class: manager` | anything, or nothing | **`fable`** — overridden, and the override is logged |
+| anyone else | `fable` / `claude-fable-5` / `FABLE` | `DEFAULT_MODEL`, with a warning — the wake still happens |
+| anyone else | anything else, or nothing | unchanged: the `wake.model` field, else `DEFAULT_MODEL` |
+
+- **One read, one source.** `citizen_class` comes from the passport the manager gate
+  already opens. An unreadable passport arrives as `""` — not a manager — the same
+  direction `is_manager()` refuses to fail in; inventing a manager would silently
+  move an ordinary branch onto Fable.
+- **Substring, not equality.** The CLI takes both `fable` and `claude-fable-5`, so a
+  check comparing to the bare alias would let the full id walk straight past the
+  non-manager half of the rule.
+- **The lane names its model.** @vera reached Fable by *CLI default* — the right
+  answer with no decision behind it. Both spawn lanes now state the model they mean.
+
+**3 — Daemon sessions are marked.** Patrick killed @vera's live session mid-run: it
+was not in the dispatch register (the manager-interactive lane bypasses it) and
+`daemon-vera-192848` read as his own leftover tmux. Two markings:
+
+- **The session name**, `AIPASS-DAEMON-WAKE-<branch>-<HHMMSS>` — guaranteed, because
+  tmux either creates the session under that name or `new-session` already failed.
+  Loud on purpose: it is read by a person deciding whether to kill a window.
+- **A tmux user option**, `@aipass_daemon_wake`, carrying branch/sender/start time —
+  the queryable half (`tmux show-options -v -t <session> @aipass_daemon_wake`), so a
+  tool need not string-match a prefix. Set **before** the agent starts, because a
+  window is killable from the moment it exists. Best-effort: a failure is a `warn`
+  step on the `mark` label and the wake proceeds — refusing to start real work over
+  a cosmetic label is the worse trade, but the thin marking is said out loud.
+
+**Not the dispatch register, and the reason is the register's own contract.**
+`open_dispatch()` takes `expected_seconds` from the lane's real timeout, and the
+interactive lane has no monitor and no timeout. Every entry it wrote would stay
+outstanding forever and go overdue against a number invented here — turning crash
+detection into a wall of false alarms. Marking a window and tracking a promised
+dispatch are two questions; only one of them has a monitor to close it. The
+**headless** lane registers and is closed by `dispatch_monitor`, which is why
+routing scheduled manager wakes through it (`scheduled=True`) answers marking and
+supervision together.
+
 ### Admin Lane (`admin=True`)
 
 Patrick's ruling (DPLAN-0288): @devpulse — and only @devpulse — holds an admin
@@ -879,6 +936,109 @@ name contains a space, dot or hyphen.**
 External projects (outside the AIPass repo) can send to AIPass branches. On delivery, `delivery.py` stores a `reply_path` on the message (the sender's `inbox.json` path, resolved from `AIPASS_CALLER_CWD`). Replies use `_deliver_via_reply_path()` to write directly to the external inbox without needing registry lookup.
 
 The contacts system (`contacts.py`) maintains an address book at `.ai_mail.local/contacts.json`, auto-registering branches on every send/receive. This enables fast sender detection for known branches without CWD walking or registry lookups.
+
+### Waking a citizen outside this repo — the external tier
+
+`wake.resolve_branch()` checks four sources, in strict precedence. **Local always wins:** the first three all resolve inside AIPass home, and only the fourth leaves it.
+
+| # | Source | Gated by |
+|---|---|---|
+| 1 | `AIPASS_REGISTRY.json` — core branches | — |
+| 2 | The caller's project registry, via `AIPASS_CALLER_CWD` | — |
+| 3 | The `projects/*` sweep — the cross-project bridge | verified admin only |
+| 4 | The declared-roots **external tier** | — (declaration is the credential) |
+
+Step 4 consumes @memory's public gateway, `aipass.memory.apps.modules.fleet.external_branches()`, which reads the machine anchor `AIPASS_ROOTS.json` at AIPass home. Nothing here re-reads that file — one anchor, one reader. No anchor means no external roots, which is the ordinary state of a fresh clone, and resolution is then byte-identical to what it was before the tier existed.
+
+There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and the anchor is a machine-managed file Patrick blessed, so an external root is already an authorised destination. The admin sweep keeps its position *above* the tier — moving it below would let a sibling repo shadow a citizen living in our own `projects/`.
+
+**Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins — the fleet ruling's own tie-break — and an error line names every losing claimant. This was a known gap for one day: `declared_roots()` returned `sorted(found)`, so the winner was alphabetical-by-resolved-path and the tie-break the ruling names could not reach this door. Re-reading the anchor here to recover it would have been a second reader of the file the gateway exists to own, so the collision was made loud and the disagreement raised with @memory instead — who dropped the sort (`registry_scope` 4.1.0, 2026-08-30). The error line stays: a tie-break being correct does not make a collision expected.
+
+## The Import Guard Needs No Filesystem
+
+`apps/handlers/__init__.py` runs a branch-access check at import time. It used to
+open with `inspect.stack()`, which builds a FrameInfo per frame and reaches
+`getsourcefile() -> getmodule() -> os.path.realpath()`. On Windows
+`ntpath.realpath` calls `os.getcwd()` unconditionally in its opening lines —
+before checking whether the path is even absolute — at a call site inside
+`getmodule` that is **not** wrapped in a try. So importing any handler in this
+package needed a readable cwd on Windows, and a disconnected share killed the
+import of a package whose only job at that moment was to compare a name.
+(@spawn's find, 2026-08-31; 16 branches carried it.)
+
+It walks frames with `sys._getframe` now — `co_filename` is already a string in
+memory — and uses `linecache` for the import line. Every `Path.resolve()` is
+guarded with a raw-spelling fallback.
+
+**Why it hid on Linux, and what the pins deny.** `posixpath.realpath` does not
+call `getcwd` for an absolute path, so the POSIX equivalent raises earlier inside
+`getabsfile()` where `inspect` catches it. Denying `os.getcwd` on Linux proves
+nothing here — measured both ways. `test_handlers_guard_import.py` denies
+`os.path.realpath`, the call the defect actually makes, and was red against the
+pre-fix guard on this machine.
+
+**A second `inspect.stack()` was deleted outright.** It looked for
+`<string>`/`<stdin>` and then returned either way — a second copy of the cwd
+dependency in service of a branch that could not change the answer. A discarded
+result does not stop being a crash site for being discarded.
+
+**Known, pre-existing, not fixed here.** `apps/__init__.py` does
+`from . import handlers`, so importing `aipass.ai_mail.apps.handlers` imports the
+parent package first, which imports handlers itself — the guard therefore sees an
+ai_mail file as the caller and allows, and the module is cached before any
+external importer is ever seen. Verified identical before and after this change,
+so it is not a regression from it. Reported rather than swept: closing it is a
+security-behaviour change that deserves its own round.
+
+## Registry Globs Are Re-Checked in Python
+
+`pathlib` delegates glob matching to the filesystem, so on Windows and default
+macOS `*_REGISTRY.json` **also matches** `*_registry.json`. This repo is full of
+bait — 237 lowercase files on this machine when the sweep ran:
+`drone_command_registry.json` sits directly beside drone's tree, every branch
+carries `.spawn/.template_registry.json` (pathlib `*` matches dotfiles, unlike the
+`glob` module), and @flow keeps ten `flow_json/*_registry.json` plan counters.
+Found on `ef029782`'s windows-setup leg, root-caused by @drone, swept fleet-wide.
+
+**Every registry walk in this branch goes through `paths.registries_in()`.** The
+glob still does the walking — only the filesystem knows where files are — but it
+is not trusted with the *answer*: the name is compared again in Python with
+`str.endswith(REGISTRY_SUFFIX)`, where case means what it says. Refusals are
+logged, so on Windows there is a record that the filesystem returned something the
+pattern never asked for.
+
+**Suffix, never the stem.** External projects name registries after themselves —
+`Vera-Studio_REGISTRY.json`, `vera_studio_REGISTRY.json`, `feel_good_app_REGISTRY.json`.
+A filter keyed on the stem would delete real citizens in order to fix this bug, so
+all three spellings are pinned as must-survive.
+
+| Site | What it decides | Reached via |
+|---|---|---|
+| `paths.find_project_root` | which project this is, for the delivery fence | walk up |
+| `users/branch_detection._find_caller_registry` | which registry names the caller | walk up |
+| `email/reply._validate_reply_path` | may a reply leave toward this inbox | ancestors |
+| `registry/read.resident_registry_paths` | the resident roster | `projects/*/` |
+| `registry/read.get_project_tree_branches` | the verified-admin bridge roster | `projects/*/` |
+| `registry/read.get_caller_project_branches` | the caller's citizens | walk up |
+
+The last three were **not** on the sweep's list of four — found by sweeping the
+tree rather than working the list, and all three decide *which citizens exist*.
+
+**What the defect actually did here, measured rather than assumed.** The brief
+said mail would land as the wrong citizen. That needs a decoy carrying a
+`branches` key, and **zero of the 237 lowercase files on this machine have one** —
+so the identity swap is reachable but not currently armed. What *was* live: the
+walk-up sites return the **first** registry they meet and stop, so a counter file
+ends the walk and a genuine external caller resolves to nothing; and
+`find_project_root` returned `src/aipass/drone` as a "project root", which changes
+the cross-project fence's answer with no `branches` key needed at all. Both
+reproduced against the real tree before the fix and dead after it.
+
+**The ban is structural.** `test_registry_case_sweep.py` AST-walks `apps/` and
+fails on any `.glob()`/`.rglob()` reaching for a registry pattern outside the one
+reader — catching a **named constant** as well as a literal, because the
+literal-only version reported my own `resident_registry_paths` site clean while it
+still held the defect.
 
 ## Architecture
 

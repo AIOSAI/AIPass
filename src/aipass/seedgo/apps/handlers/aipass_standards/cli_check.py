@@ -30,6 +30,108 @@ AUDIT_SCOPE = "all_files"
 APPLIES_TO = "production"
 
 
+#: `sys.stdout.write(x.stdout)`, `sys.stderr.write(x["stderr"])` and friends —
+#: a router handing a completed subprocess's captured output straight through.
+#: The stream names must CORRESPOND: writing a captured stderr to stdout is a
+#: routing bug this check should keep catching, so it is not matched here.
+_RELAYED_STREAM = re.compile(
+    r"sys\.(?P<sink>stdout|stderr)\.write\(\s*[A-Za-z_][\w.]*"
+    r"(?:\.(?P=sink)\b|\[\s*[\"'](?P=sink)[\"']\s*\]|\.get\(\s*[\"'](?P=sink)[\"'])"
+)
+
+
+def _is_raw_write_violation(line: str) -> bool:
+    """Is this line a raw stream write the CLI standard should object to?
+
+    The rule means "route YOUR OWN output through Rich". @drone's router relays
+    a child process's captured bytes verbatim — `sys.stdout.write(result.stdout)`
+    — and Rich would interpret markup in, wrap and re-style output drone never
+    authored, which is exactly what a router must not do (@devpulse, 2026-08-31).
+    The checker was grepping a VERB where the rule asks an AUTHORSHIP question.
+
+    The exemption is keyed on the ARGUMENT so it cannot be borrowed: a literal,
+    an f-string or a value you built is still a violation. It also requires the
+    streams to correspond, so a captured stderr written to stdout stays red.
+    """
+    code_part = line.split("#")[0] if "#" in line else line
+    if "sys.stdout.write(" not in code_part and "sys.stderr.write(" not in code_part:
+        return False
+    return not _RELAYED_STREAM.search(code_part)
+
+
+def _console_import_line(content: str) -> Optional[int]:
+    """Line number of the module's OWN module-level import of the cli console.
+
+    Returns None when the module never imports it — which is deliberately NOT
+    an exemption on its own. A module that has no console has nothing this
+    standard would recognise as the right instrument, and exempting all of them
+    would hand every future modules/ file a blanket pass for raw writes. In the
+    checker's current scope (modules/ and apps/ entry points) that clause alone
+    exempts 0 sites today and an unbounded number tomorrow, which is exactly the
+    kind of hole a single clause hides. Measured, then rejected.
+
+    Args:
+        content: Full file source.
+
+    Returns:
+        The 1-based line of the earliest module-level ``aipass.cli`` import, or
+        None if the module never imports one.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        # A file this checker cannot parse gets no window and keeps every
+        # finding. Ignorance is not evidence of a bootstrap.
+        logger.info("cli: no console-import window, unparseable: %s", exc)
+        return None
+    best = None
+    for node in tree.body:
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        module = getattr(node, "module", None) or (node.names[0].name if node.names else "")
+        if module and module.startswith("aipass.cli"):
+            best = node.lineno if best is None else min(best, node.lineno)
+    return best
+
+
+def _is_pre_console_bootstrap(line_number: int, console_line: Optional[int]) -> bool:
+    """True for a raw write in the window before the console exists.
+
+    THE WINDOW IS REAL, not a preference. @commons' entry point removes apps/
+    from sys.path[0] so commons.py cannot shadow the commons package, and that
+    repair must run BEFORE any cross-branch import — importing @cli up there is
+    the very thing the repair exists to make safe. So in those few lines the
+    console this standard demands does not exist yet, and the rule is not
+    "wrong", it is UNSATISFIABLE. A checker that convicts on an unsatisfiable
+    clause teaches branches to take waivers.
+
+    TWO CLAUSES, and the pair is what makes it narrow (measured 2026-08-31):
+      1. the module imports the cli console AT ALL — so the exemption is only
+         ever available to code that does use Rich, twenty lines further down;
+      2. the write LEXICALLY PRECEDES that import — the window, and nothing
+         after it.
+    Clause 2 alone is meaningless without an import to precede. Clause 1 alone
+    exempts every console-less module. Together they clear exactly ONE site in
+    the fleet, the one reported.
+
+    Lexical order is the right test rather than a stricter "before any
+    cross-branch import", because the write's only alternative instrument is
+    the console, and the console's availability is decided by that one import
+    line. @commons proved the point by MEASURING the alternative — moving the
+    prax import above their repair works today — and reverting it anyway,
+    because "no leak" is a fact about another branch's import hygiene that
+    their entry point would then silently depend on forever.
+
+    Args:
+        line_number: 1-based line of the raw write.
+        console_line: Result of :func:`_console_import_line`.
+
+    Returns:
+        True if the write sits in the pre-console window.
+    """
+    return console_line is not None and line_number < console_line
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check if module follows CLI standards
@@ -170,6 +272,62 @@ def _console_print_in_string(line: str, stripped: str) -> bool:
     return False
 
 
+def _stderr_directed_print_lines(content: str) -> set:
+    r"""Lines holding a ``print(..., file=sys.stderr)`` call.
+
+    THE RULE ALREADY AGREED, on one of its two spellings. ``check_module``
+    scores a handler 100 for ``sys.stderr.write(msg)`` and 0 for
+    ``print(msg, file=sys.stderr)`` — measured on @skills' module_paths.py and
+    @flow's import fence, 2026-08-31. Same stream, same bytes, 100 points apart
+    on nothing but which call the author reached for.
+
+    Handler separation exists so a handler does not DISPLAY, and display is
+    stdout: the channel a router's output travels on. stderr is where a
+    diagnostic goes precisely so it does not pollute that channel, which is why
+    the raw-write form was never flagged. @flow reported it from the hardest
+    case — the cross-branch import fence, which runs before any logger in the
+    branch exists, being told to "use logger instead".
+
+    The stream must be NAMED. A bare ``print()`` is display, ``file=sys.stdout``
+    is display said out loud, and a print into some other file handle is a write
+    nobody is watching — the same qualification ``exception_handling``'s report
+    clause needs for ``.write``.
+
+    Args:
+        content: Module source.
+
+    Returns:
+        1-indexed line numbers of stderr-directed print calls. Empty when the
+        source will not parse: an exemption bought with a SyntaxError is an
+        exemption granted on ignorance.
+
+    Note:
+        The ``ast.Name`` test on the callee is an EQUIVALENT MUTANT — widening
+        it to match ``obj.print(...)`` changes no answer, because the caller
+        only ever subtracts from lines the ``^\s*print\s*\(`` regex already
+        matched, and a dotted call never starts a line that way. Recorded here
+        (mutation run 2026-08-31, survived) so nobody hunts for the pin that
+        does not exist. It stays because the function claims to find print
+        calls and should mean the builtin.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return set()
+
+    lines = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg != "file":
+                continue
+            target = keyword.value
+            if isinstance(target, ast.Attribute) and target.attr == "stderr":
+                lines.add(node.lineno)
+    return lines
+
+
 def check_handler_separation(content: str) -> Dict:
     """
     Check that handlers don't have console output
@@ -179,6 +337,7 @@ def check_handler_separation(content: str) -> Dict:
     Excludes: if __name__ == '__main__': blocks (test/debug code is OK)
     """
     lines = content.split("\n")
+    stderr_prints = _stderr_directed_print_lines(content)
 
     # Find code section boundaries (skip docstrings and comments)
     in_docstring = False
@@ -243,8 +402,9 @@ def check_handler_separation(content: str) -> Dict:
             # This is likely an actual import
             cli_import_lines.append(i)
 
-        # Look for print() calls
-        if re.search(r"^\s*print\s*\(", line):
+        # Look for print() calls. A print DIRECTED AT stderr is a diagnostic,
+        # not display, and the raw-write spelling of it has always passed.
+        if re.search(r"^\s*print\s*\(", line) and i not in stderr_prints:
             # This is an actual print call at start of line (not in string)
             print_lines.append(i)
 
@@ -336,6 +496,7 @@ def check_print_usage(
         bypass_rules: Optional bypass rules from .seedgo/bypass.json
     """
     # Find print() statements and raw stdout/stderr writes
+    console_line = _console_import_line(content)
     print_lines = []
     parser_print_help_lines = []
     format_help_lines = []
@@ -391,14 +552,11 @@ def check_print_usage(
             else:
                 format_help_lines.append(i)
 
-        # Check for raw sys.stdout.write() / sys.stderr.write() (bypasses Rich)
-        if "sys.stdout.write(" in stripped or "sys.stderr.write(" in stripped:
-            if "#" in line:
-                code_part = line.split("#")[0]
-                if "sys.stdout.write(" in code_part or "sys.stderr.write(" in code_part:
-                    raw_write_lines.append(i)
-            else:
-                raw_write_lines.append(i)
+        # Raw sys.stdout/stderr.write() — bypasses Rich, EXCEPT when it is a
+        # verbatim relay of a captured subprocess stream (see the helper), or
+        # when it sits in the window before this module's own console exists.
+        if _is_raw_write_violation(line) and not _is_pre_console_bootstrap(i, console_line):
+            raw_write_lines.append(i)
 
         # Use regex to find BARE print() - not preceded by . or word character
         # This excludes: console.print(), logger.print(), pprint(), etc.

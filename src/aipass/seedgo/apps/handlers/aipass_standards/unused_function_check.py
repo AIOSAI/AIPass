@@ -323,12 +323,23 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             details.append(f"  ... and {len(unused_functions) - 15} more")
         detail_text = "\n".join(details)
 
+        # SAYS WHAT IT MEASURED, and no more. This scan is per-branch and
+        # static; it cannot see a cross-branch consumer, least of all one that
+        # arrives through importlib. It said "unused" and nominated
+        # entry_limits.changed_entries() — called by @hooks at
+        # security/edit_gate.py:496, the entry-cap half of the fleet's write
+        # gate (@memory, 2026-08-31). The measurement was right; the word was
+        # not, and the danger is that this check is USEFUL enough to be trusted
+        # into deleting a real entry point for a green score.
         checks = [
             {
                 "name": "Unused functions",
                 "passed": passed,
                 "message": (
-                    f"{len(unused_functions)} unused out of {total_functions} functions ({score}% clean)\n{detail_text}"
+                    f"{len(unused_functions)} with no caller in this branch, out of "
+                    f"{total_functions} functions ({score}% clean) — a static per-branch scan; "
+                    f"cross-branch and dynamic (importlib) callers are NOT visible to it, so "
+                    f"confirm before deleting\n{detail_text}"
                 ),
                 "unused": unused_functions,
             }

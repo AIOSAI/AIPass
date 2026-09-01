@@ -32,12 +32,13 @@ from urllib.request import Request, urlopen
 
 from aipass.prax import append_jsonl
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.module_root import module_file
 
 PENDING_DIR = Path.home() / ".aipass" / "telegram_pending"
 MIRROR_DIR = Path.home() / ".aipass" / "telegram_bots"
 PENDING_TTL = 3600
 TELEGRAM_CHAR_LIMIT = 4096
-_PROD_DELIVERY_LOG = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "telegram_delivery.jsonl"
+_PROD_DELIVERY_LOG = module_file(__file__).parent.parent.parent.parent / "logs" / "telegram_delivery.jsonl"
 
 
 def _get_delivery_log() -> Path:

@@ -16,13 +16,14 @@ Usage:
     closed_plans = get_closed_plans()
 """
 
-from pathlib import Path
 from typing import List, Tuple, Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # Internal: Registry handler
 from aipass.flow.apps.handlers.registry.load_registry import load_registry

@@ -22,8 +22,9 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.module_root import module_file
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]  # json/ -> handlers/ -> apps/ -> {branch}/
+_BRANCH_ROOT = module_file(__file__).parents[3]  # json/ -> handlers/ -> apps/ -> {branch}/
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 
@@ -181,8 +182,17 @@ def get_json_path(module_name: str, json_type: str) -> Path:
     return JSON_DIR / filename
 
 
-def ensure_json_exists(module_name: str, json_type: str) -> bool:
-    """Ensure JSON file exists, create from template if missing"""
+def ensure_json_exists(module_name: str, json_type: str) -> None:
+    """Ensure JSON file exists, create from template if missing.
+
+    Returns nothing on purpose. This was annotated `-> bool` and returned True
+    on every path, which advertises a failure signal that never arrives and
+    invites `if not ensure_json_exists(...)` — a branch that can never be taken.
+    Failure is reported by exception: _atomic_write_json raises OSError.
+
+    Raises:
+        OSError: The template could not be written.
+    """
     JSON_DIR.mkdir(parents=True, exist_ok=True)
 
     json_path = get_json_path(module_name, json_type)
@@ -193,7 +203,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
                 data = json.load(f)
 
             if validate_json_structure(data, json_type):
-                return True
+                return
             # If corrupted, fall through to regenerate
         except Exception:
             logger.info("JSON file unreadable or corrupted, regenerating: %s", json_path)
@@ -201,7 +211,6 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
     template = _create_default(json_type, module_name)
 
     _atomic_write_json(json_path, template)
-    return True
 
 
 def load_json(module_name: str, json_type: str) -> Optional[Any]:
@@ -213,8 +222,11 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     template so callers always get a valid structure. A non-empty but malformed
     file still raises (fail honestly — that is real corruption, not a race).
     """
-    if not ensure_json_exists(module_name, json_type):
-        return None
+    # No `if not ensure_json_exists(...)` guard: it returns nothing and reports
+    # failure by raising. The guard that used to be here could never fire — the
+    # function returned an unconditional True — and it is exactly the dead
+    # branch a bool-that-is-always-True invites a caller to write.
+    ensure_json_exists(module_name, json_type)
 
     json_path = get_json_path(module_name, json_type)
 
@@ -242,12 +254,19 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
     return True
 
 
-def ensure_module_jsons(module_name: str) -> bool:
-    """Ensure all 3 JSON files exist for a module"""
+def ensure_module_jsons(module_name: str) -> None:
+    """Ensure all 3 JSON files exist for a module.
+
+    Returns nothing on purpose — see ensure_json_exists. This previously
+    discarded three booleans and then returned an unconditional True, so it
+    reported success no matter what the three calls did.
+
+    Raises:
+        OSError: Any of the three templates could not be written.
+    """
     ensure_json_exists(module_name, "config")
     ensure_json_exists(module_name, "data")
     ensure_json_exists(module_name, "log")
-    return True
 
 
 def log_operation(operation: str, data: Dict[str, Any] | None = None, module_name: str | None = None) -> bool:

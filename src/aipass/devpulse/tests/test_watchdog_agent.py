@@ -28,6 +28,24 @@ from pathlib import Path
 import pytest
 
 from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_watch_store(tmp_path, monkeypatch):
+    """Every watch_agent call registers a handle via the DEFAULT store path.
+
+    Unpatched, these tests wrote the live .watchdog/watchdog_active.json —
+    and before the __file__-derived root (2026-08-31) they wrote wherever the
+    process stood, which on CI's composed runner was the repo root. Module-
+    local autouse, per this branch's conftest philosophy: the registry pin
+    tests measure _default_storage_path itself and must not inherit a patch.
+    """
+    monkeypatch.setattr(
+        watch_registry,
+        "_default_storage_path",
+        lambda: tmp_path / "watchdog_active.json",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -767,3 +785,72 @@ def test_watch_agent_crash_path_skipped():
     branch via the same code path the monitor uses.
     """
     pytest.skip("Crash path covered by unit test test_watch_agent_crashed_via_bounce_file")
+
+
+def _case_insensitive_glob(monkeypatch):
+    """Emulate a Windows directory listing on any OS: *_REGISTRY.json also
+    matches *_registry.json there, because NTFS compares names case-folded.
+    The wrapper widens the real glob the same way, so the exact-case filter
+    in agent.py can be proven load-bearing from a Linux box."""
+    real_glob = agent_handler.Path.glob
+
+    def widened(self, pattern):
+        if pattern.endswith("_REGISTRY.json"):
+            folded = pattern[: -len("_REGISTRY.json")] + "_registry.json"
+            yield from real_glob(self, folded)
+        yield from real_glob(self, pattern)
+
+    monkeypatch.setattr(agent_handler.Path, "glob", widened)
+
+
+def test_lowercase_counter_never_answers_a_projects_resolve(monkeypatch, tmp_path):
+    """A lowercase *_registry.json (a plan counter, a template registry) must
+    never be read as a project's trust anchor, even where the filesystem
+    globs case-insensitively. The decoy sorts FIRST and maps the same email
+    to a wrong directory — without the exact-case re-check it wins."""
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    wrong_dir = tmp_path / "projects" / "aaa" / "wrong"
+    wrong_dir.mkdir(parents=True)
+    (tmp_path / "projects" / "aaa" / "aaa_registry.json").write_text(
+        json.dumps({"branches": [{"name": "AAA", "email": "@baud", "path": "wrong"}]}),
+        encoding="utf-8",
+    )
+    right_dir = tmp_path / "projects" / "baud" / "home"
+    right_dir.mkdir(parents=True)
+    (tmp_path / "projects" / "baud" / "BAUD_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "BAUD", "email": "@baud", "path": "home"}]}),
+        encoding="utf-8",
+    )
+
+    _case_insensitive_glob(monkeypatch)
+    widened = [p.name for p in (tmp_path / "projects").glob("*/*_REGISTRY.json")]
+    assert "aaa_registry.json" in widened, "emulation is blind — this test proves nothing"
+
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
+    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+
+    resolved = agent_handler._resolve_branch_path("@baud")
+    assert resolved is not None
+    assert resolved.resolve() == right_dir.resolve()
+
+
+def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_path):
+    """Same defect, the external-roots walk: a lowercase counter in a caller's
+    project must not resolve a branch at all — absence is the right answer."""
+    ext = tmp_path / "ext"
+    (ext / "somewhere").mkdir(parents=True)
+    (ext / "ext_registry.json").write_text(
+        json.dumps({"branches": [{"name": "EXT", "email": "@ext", "path": "somewhere"}]}),
+        encoding="utf-8",
+    )
+
+    _case_insensitive_glob(monkeypatch)
+    widened = [p.name for p in ext.glob("*_REGISTRY.json")]
+    assert "ext_registry.json" in widened, "emulation is blind — this test proves nothing"
+
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: None)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(ext))
+    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+
+    assert agent_handler._resolve_branch_path("@ext") is None

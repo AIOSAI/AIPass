@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-30
-# Modified: 2026-08-24
+# Modified: 2026-08-31
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -25,6 +25,7 @@ from typing import NamedTuple
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
+from aipass.drone.apps.modules.router import caller_cwd
 from aipass.drone.apps.modules.registry import (
     RegistryMismatchError,
     get_registry_path,
@@ -157,8 +158,26 @@ def _resolve_caller() -> Caller:
     """Walk up from CWD to find passport.json and return the caller's identity.
 
     Raises PermissionError if no readable, named passport is found.
+
+    THE ONE SITE IN THIS SWEEP THAT FAILS CLOSED. Everywhere else "no current
+    directory" is the absence of a convenience and the answer is None. Here it
+    decides whether a caller may write to the repository, and an authority the
+    gate cannot establish is an authority the caller does not have — the same
+    answer it already gives when the walk finds no passport. What changed is
+    that it now arrives as a stated refusal instead of an ENOENT traceback out
+    of the middle of a credential check.
     """
-    current = Path.cwd().resolve()
+    cwd = caller_cwd()
+    if cwd is None:
+        msg = (
+            "This process has no current directory — it was deleted out from under it. "
+            "Caller identity is inferred by walking up from where you stand, so there is "
+            "nothing to verify against and owner-tier access is refused."
+        )
+        logger.warning(msg)
+        raise PermissionError(msg)
+
+    current = cwd.resolve()
     for _ in range(10):
         passport_path = current / ".trinity" / "passport.json"
         if passport_path.exists():
@@ -188,7 +207,7 @@ def _resolve_caller() -> Caller:
     # page anyone (@trigger log-fix 906263c8ff2e). The caller's cwd is the one
     # fact that identifies WHO tripped the gate; trigger's normalizer collapses
     # it to <path>, so repeat signatures stay unified across callers.
-    msg = f"No .trinity/passport.json found in directory hierarchy (caller cwd: {Path.cwd()}) — cannot verify caller"
+    msg = f"No .trinity/passport.json found in directory hierarchy (caller cwd: {cwd}) — cannot verify caller"
     logger.warning(msg)
     raise PermissionError(msg)
 

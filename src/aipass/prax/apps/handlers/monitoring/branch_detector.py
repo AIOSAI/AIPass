@@ -23,8 +23,30 @@ import json
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 logger = get_direct_logger()
+
+
+def _exact_case_registries(project_dir: Path) -> list:
+    """Glob for project registries, then re-check the case EXACTLY.
+
+    ``Path.glob`` is case-INSENSITIVE on Windows, so ``*_REGISTRY.json`` also
+    matches ``project_registry.json`` there and a file that is not the trust
+    anchor gets read as one. @memory found the same exposure in both their
+    registry walks on 2026-08-31 and closed it with an exact-case post-filter;
+    this is that filter, in prax's one exposed walk.
+
+    The post-filter is the fix rather than a different pattern, because the
+    case-folding lives in the OS matcher and no pattern spelling escapes it.
+
+    Args:
+        project_dir: A directory under ``projects/`` to look in.
+
+    Returns:
+        Sorted registry files whose names really do end in ``_REGISTRY.json``.
+    """
+    return sorted(path for path in project_dir.glob("*_REGISTRY.json") if path.name.endswith("_REGISTRY.json"))
 
 
 class BranchDetector:
@@ -50,15 +72,14 @@ class BranchDetector:
         json_handler.log_operation("branch_detected", {"known_branches": len(self.known_branches)})
 
     def _find_repo_root(self) -> Path:
-        """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-        if self._repo_root is not None:
-            return self._repo_root
-        current = Path(__file__).resolve().parent
-        for parent in [current] + list(current.parents):
-            if (parent / "AIPASS_REGISTRY.json").exists():
-                self._repo_root = parent
-                return parent
-        self._repo_root = Path.cwd()
+        """Walk up from this file to find the repo root, never reading the cwd.
+
+        Delegates to ``handlers/repo_root.py`` — see that module for why the
+        fallback must be derived from ``__file__``. The per-instance cache stays:
+        the shared resolver is cheap but this is called per registry entry.
+        """
+        if self._repo_root is None:
+            self._repo_root = find_repo_root(Path(__file__))
         return self._repo_root
 
     def _register_branch(self, branch: dict, base: "Optional[Path]" = None) -> None:
@@ -184,7 +205,7 @@ class BranchDetector:
             return
 
         for project_dir in project_dirs:
-            for registry_file in sorted(project_dir.glob("*_REGISTRY.json")):
+            for registry_file in _exact_case_registries(project_dir):
                 try:
                     data = json.loads(registry_file.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError) as exc:

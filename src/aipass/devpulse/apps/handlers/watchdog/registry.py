@@ -62,27 +62,23 @@ _KILL_WAIT_SECONDS = 2.0
 _KILL_POLL_INTERVAL = 0.1
 
 
-def _find_devpulse_root(start: Path | None = None) -> Path | None:
-    """Walk upward looking for AIPASS_REGISTRY.json, then return the devpulse dir."""
-    cur = (start or Path.cwd()).resolve()
-    for candidate in [cur, *cur.parents]:
-        if (candidate / "AIPASS_REGISTRY.json").exists():
-            devpulse_dir = candidate / "src" / "aipass" / "devpulse"
-            if devpulse_dir.exists():
-                return devpulse_dir
-            return candidate
-    for candidate in [cur, *cur.parents]:
-        if candidate.name == "devpulse":
-            return candidate
-    return None
+def _devpulse_root() -> Path:
+    """The devpulse package dir, derived from ``__file__`` — never from cwd.
+
+    The store is package state, so it lives where the package lives. The old
+    walk keyed on AIPASS_REGISTRY.json — machine-local runtime state, absent
+    on every fresh checkout — and fell back to Path.cwd(), which planted
+    ``.watchdog/`` at whatever directory the process happened to stand in
+    (CI's composed runner hands children cwd = repo root; caught by seedgo's
+    left-nothing-behind fixture, 2026-08-31). ``__file__`` gives the same
+    answer on a dev machine, a fresh checkout, and a dead cwd.
+    """
+    return Path(__file__).resolve().parents[3]
 
 
 def _default_storage_path() -> Path:
     """Resolve `.watchdog/watchdog_active.json` relative to the devpulse root."""
-    root = _find_devpulse_root()
-    if root is None:
-        root = Path.cwd()
-    return root / ".watchdog" / _STORAGE_FILENAME
+    return _devpulse_root() / ".watchdog" / _STORAGE_FILENAME
 
 
 def _empty_store() -> dict:

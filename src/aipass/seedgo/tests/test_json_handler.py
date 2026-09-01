@@ -323,8 +323,7 @@ def test_get_json_path_different_combos_differ(tmp_path: Path) -> None:  # JH-01
 
 
 def test_ensure_creates_file_when_missing(tmp_path: Path) -> None:  # JH-018
-    result = json_handler.ensure_json_exists("ens_mod", "config")
-    assert result is True
+    json_handler.ensure_json_exists("ens_mod", "config")
     json_dir = _json_dir_as_path(tmp_path)
     created = json_dir / "ens_mod_config.json"
     assert created.exists(), "ensure_json_exists must create the file"
@@ -373,10 +372,19 @@ def test_ensure_regenerates_invalid_structure(tmp_path: Path) -> None:  # JH-021
     assert "config" in data
 
 
-def test_ensure_returns_bool(tmp_path: Path) -> None:  # JH-022
-    result = json_handler.ensure_json_exists("bool_mod", "data")
-    assert isinstance(result, bool), "ensure_json_exists must return bool"
-    assert result is True
+def test_ensure_reports_failure_by_RAISING_not_by_returning(tmp_path: Path, monkeypatch) -> None:  # JH-022
+    """Was `assert result is True` against a function that returned True on every
+    path — a test that could not go red. The contract it should have been pinning
+    is that a failed write PROPAGATES rather than being reported as a value."""
+    json_handler.ensure_json_exists("bool_mod", "data")
+    assert (_json_dir_as_path(tmp_path) / "bool_mod_data.json").exists()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(json_handler, "_atomic_write_json", boom)
+    with pytest.raises(OSError):
+        json_handler.ensure_json_exists("bool_mod_two", "data")
 
 
 # ============================================================================
@@ -561,11 +569,16 @@ def test_ensure_module_jsons_creates_all_three(tmp_path: Path) -> None:  # JH-03
     assert (json_dir / "triple_log.json").exists(), "Log file must exist"
 
 
-def test_ensure_module_jsons_returns_true(tmp_path: Path) -> None:  # JH-037
+def test_ensure_module_jsons_success_means_files_not_return_value(tmp_path: Path) -> None:  # JH-037
+    """Was `assert result is True` — which the function returned unconditionally
+    while DISCARDING the three booleans it collected, so it reported success no
+    matter what the three calls did. Pin the three files instead."""
     if not hasattr(json_handler, "ensure_module_jsons"):
         pytest.skip("Branch does not have ensure_module_jsons")
-    result = json_handler.ensure_module_jsons("retmod")
-    assert result is True, "ensure_module_jsons must return True"
+    json_handler.ensure_module_jsons("retmod")
+    json_dir = _json_dir_as_path(tmp_path)
+    for json_type in ("config", "data", "log"):
+        assert (json_dir / f"retmod_{json_type}.json").exists(), json_type
 
 
 def test_ensure_module_jsons_files_pass_validation(tmp_path: Path) -> None:  # JH-038
@@ -700,3 +713,73 @@ def test_reimport_after_mock(tmp_path: Path) -> None:
     handler_module = sys.modules.get(f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler")
     if handler_module:
         importlib.reload(handler_module)
+
+
+class TestEnsureFunctionsDoNotPromiseASignalTheyNeverSend:
+    """`-> bool` that is always `True` invites a branch that can never fire.
+
+    FOUND BY DOGFOODING a rule @memory proposed 2026-08-30. Their rollover bug
+    was `write_memory_file_simple` reporting failure by RETURNING False while
+    the caller discarded the boolean — so a refusal reached nobody and every
+    try/except above it was decorative. They suggested a checker for it.
+
+    Running that idea against seedgo's own tree found 194 discarded bool
+    returns, ~180 of them `log_operation()` where discarding is deliberate —
+    which is why the rule as stated is not shippable. The real positives were
+    here: `ensure_json_exists` and `ensure_module_jsons` were annotated
+    `-> bool` and returned `True` on EVERY path. The value was not a signal, it
+    was decoration, and a caller writing `if not ensure_json_exists(...)` would
+    have written a branch that can never be taken.
+
+    Failure IS reported — `_atomic_write_json` raises OSError. These pins say
+    that out loud so the honest channel cannot be quietly replaced by a boolean
+    that only ever means one thing.
+    """
+
+    def test_ensure_json_exists_does_not_advertise_a_bool_return(self):
+        import typing
+
+        from aipass.seedgo.apps.handlers.json import json_handler
+
+        hints = typing.get_type_hints(json_handler.ensure_json_exists)
+        assert hints.get("return") is not bool, (
+            "a return type that is always True promises a failure signal that never arrives"
+        )
+
+    def test_ensure_module_jsons_does_not_advertise_a_bool_return(self):
+        import typing
+
+        from aipass.seedgo.apps.handlers.json import json_handler
+
+        hints = typing.get_type_hints(json_handler.ensure_module_jsons)
+        assert hints.get("return") is not bool
+
+    def test_a_failing_write_RAISES_rather_than_returning_a_falsy_value(self, tmp_path, monkeypatch):
+        """The honest channel, pinned: failure propagates."""
+        import pytest
+
+        from aipass.seedgo.apps.handlers.json import json_handler
+
+        def boom(*a, **k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(json_handler, "JSON_DIR", tmp_path)
+        monkeypatch.setattr(json_handler, "_atomic_write_json", boom)
+
+        with pytest.raises(OSError):
+            json_handler.ensure_json_exists("nonexistent_module_xyz", "config")
+
+    def test_ensure_module_jsons_propagates_instead_of_reporting_success(self, tmp_path, monkeypatch):
+        """The original defect: three discarded bools, then `return True`."""
+        import pytest
+
+        from aipass.seedgo.apps.handlers.json import json_handler
+
+        def boom(*a, **k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(json_handler, "JSON_DIR", tmp_path)
+        monkeypatch.setattr(json_handler, "_atomic_write_json", boom)
+
+        with pytest.raises(OSError):
+            json_handler.ensure_module_jsons("nonexistent_module_xyz")

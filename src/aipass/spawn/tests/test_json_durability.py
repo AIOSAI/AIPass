@@ -25,10 +25,14 @@ a temp already) say so rather than pretending.
 import ast
 import errno
 import json
+import os
+import sys
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,6 +42,13 @@ import pytest
 # =============================================================================
 
 RACE_SECONDS = 0.6
+
+# How long run() will wait for BOTH sides to prove they are live before it opens
+# the timed window. On an idle machine the first read and write land inside a few
+# milliseconds and this costs nothing; on a loaded one it converts "the scheduler
+# was busy" from a red into a little latency. Generous on purpose — the deadline
+# exists to bound a hang, not to tune a race.
+RACE_WARMUP_SECONDS = 20.0
 
 # Marker embedded in the payload a test wants to fail. Both fault injectors below
 # fire only when they see it, so pytest's own I/O is never disturbed.
@@ -61,8 +72,17 @@ class _Racer:
         self.unparseable = 0
         self.reads = 0
         self.writes = 0
+        self.missing = 0
+        self.refused = 0
+        self.warmed_up = False
         self._stop = False
         self._lock = threading.Lock()
+        # One-way flags, set by the threads the instant they first succeed, so
+        # run() can watch the race come alive. The per-thread counters above are
+        # only merged at join time, which is far too late to wait on. A bool
+        # that goes False -> True exactly once needs no lock under the GIL.
+        self._saw_read = False
+        self._saw_write = False
 
     def _writer(self):
         n = 0
@@ -79,12 +99,13 @@ class _Racer:
             # the call under test decided there was nothing to write.
             if self.write_once(n) is True:
                 effective += 1
+                self._saw_write = True
             n += 1
         with self._lock:
             self.writes += effective
 
     def _reader(self):
-        reads = empty = unparseable = 0
+        reads = empty = unparseable = missing = refused = 0
         while not self._stop:
             # Yield between polls — Windows share-mode semantics, not tuning.
             # A zero-delay spin-reader holds the target open at near-100% duty
@@ -101,46 +122,129 @@ class _Racer:
             try:
                 raw = self.target.read_text(encoding="utf-8")
             except FileNotFoundError:
+                # Counted, not swallowed. "The file was not there yet" and "the
+                # reader never got a turn" both end with reads == 0, and the
+                # skip reason has to be able to tell them apart — that is the
+                # difference between a slow starter and a starved scheduler.
+                missing += 1
                 continue
             except PermissionError:
                 # Windows refuses the open while a concurrent os.replace is in
                 # flight. A refused open is share-mode semantics — not a torn
-                # document, and not counted as a read.
+                # document, and not counted as a read. Counted separately so a
+                # run starved by share-mode collisions says so out loud.
+                refused += 1
                 continue
             reads += 1
+            self._saw_read = True
             if raw == "":
                 empty += 1
                 continue
             try:
                 json.loads(raw)
             except json.JSONDecodeError:
+                # The defect this whole file exists to catch: a half-written
+                # document. Recorded, and assert_clean fails on it.
                 unparseable += 1
         with self._lock:
             self.reads += reads
             self.empty += empty
             self.unparseable += unparseable
+            self.missing += missing
+            self.refused += refused
 
-    def run(self, seconds: float = RACE_SECONDS):
+    def run(self, seconds: float = RACE_SECONDS, warmup: float = RACE_WARMUP_SECONDS):
+        """Start the threads, wait until both sides are live, then race.
+
+        The timed window used to open the instant the threads were started, so
+        on a loaded machine a 0.6s race could end with the reader never having
+        been scheduled at all — reads == 0, and assert_clean called that a
+        defect (@prax, whole-tree batch run 2026-08-30). Waiting for first
+        contact first turns that from a red into a few milliseconds of latency
+        on an idle box and a bounded wait on a busy one.
+        """
         threads = [threading.Thread(target=self._writer) for _ in range(self.writers)]
         threads += [threading.Thread(target=self._reader) for _ in range(self.readers)]
         for t in threads:
             t.start()
+
+        deadline = time.monotonic() + warmup
+        while time.monotonic() < deadline and not (self._saw_read and self._saw_write):
+            time.sleep(0.005)
+        self.warmed_up = self._saw_read and self._saw_write
+
         time.sleep(seconds)
         self._stop = True
         for t in threads:
             t.join(timeout=30)
         return self
 
+    def final_state(self) -> str:
+        """One direct read of the target, after the threads have stopped.
+
+        Returns exactly one of: ``absent`` (never created — not a tear),
+        ``empty`` / ``unparseable`` (torn, right now, on disk), ``unreadable``
+        (the open itself was refused — share-mode or permissions, which is not
+        evidence of tearing and must not be convicted as such), or ``whole``.
+        """
+        try:
+            raw = self.target.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "absent"
+        except OSError:
+            return "unreadable"
+        if raw == "":
+            return "empty"
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError:
+            return "unparseable"
+        return "whole"
+
     def assert_clean(self):
-        assert self.writes > 0, "harness never rewrote the target — the race proves nothing"
-        assert self.reads > 0, "harness never read — the race proves nothing"
+        """Fail on a torn file; SKIP when the race never happened.
+
+        Order matters and is the whole safety argument: the tear check runs
+        FIRST, so an observed tear fails loudly no matter how few reads or
+        writes the run managed. Only once the file is known clean does an
+        unexercised race downgrade to a skip — a test may say "I could not
+        measure this", but it may never say "this is broken" when that is what
+        it means.
+
+        The tear check reads the target DIRECTLY here as well as through the
+        reader threads' samples. @prax asked for exactly this when reviewing
+        the skip ordering (2026-08-31), and it was a real gap rather than a
+        formality: the readers poll on a 1ms yield, so a file left torn by the
+        final write can go unsampled entirely — and a run ending with reads == 0
+        would then take the skip branch while the target sits torn on disk. One
+        open at assert time cannot be starved by the scheduler. A missing target
+        is still not a tear; never-created is the case the skip exists for.
+        """
+        final = self.final_state()
         bad = self.empty + self.unparseable
-        pct = bad / self.reads * 100
-        assert bad == 0, (
-            f"concurrent reader observed a torn file: {self.empty} EMPTY + "
-            f"{self.unparseable} UNPARSEABLE out of {self.reads} reads "
-            f"({pct:.2f}% unusable) across {self.writes} writes"
+
+        sampled = f"{self.empty} EMPTY + {self.unparseable} UNPARSEABLE out of {self.reads} reads"
+        if self.reads:
+            sampled += f" ({bad / self.reads * 100:.2f}% unusable)"
+
+        assert bad == 0 and final not in ("empty", "unparseable"), (
+            f"torn file: sampled {sampled}; file on disk at the end of the run "
+            f"is {final.upper()} — across {self.writes} writes"
         )
+
+        if self.writes == 0:
+            pytest.skip(
+                "race not exercised: harness never rewrote the target "
+                f"(reads={self.reads}, writes=0, final={final}) — 0 writes is a "
+                "result, not a defect"
+            )
+        if self.reads == 0:
+            pytest.skip(
+                "race not exercised: harness never read "
+                f"(reads=0, writes={self.writes}, target-absent={self.missing}, "
+                f"open-refused={self.refused}, final={final}) — the file itself was "
+                "checked directly and is not torn; nothing else is claimed either way"
+            )
 
 
 @contextmanager
@@ -844,11 +948,20 @@ class TestReplaceRetriesThroughSharingViolations:
         and becomes decoration. It survived a mutation run on 2026-08-18.
         Counting the sleeps pins the wait without asserting on wall-clock time,
         which would be flaky on a loaded runner.
+
+        The patch replaces atomic_write's OWN ``time`` name, not the attribute
+        on the shared time module. ``setattr(aw.time, "sleep", ...)`` reached
+        every thread in the process, so this list collected foreign sleeps too
+        and the test failed intermittently in a full-suite run (seen
+        2026-08-30). Same rule as the logger fixture: patch the consuming
+        module's binding, not something upstream of it. atomic_write uses
+        nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
+        carrying only ``sleep`` is the whole surface.
         """
         import aipass.spawn.apps.handlers.atomic_write as aw
 
         sleeps = []
-        monkeypatch.setattr(aw.time, "sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
         monkeypatch.setattr(
             aw.os,
             "replace",
@@ -1108,3 +1221,253 @@ class TestNoRawTruncatingWritesInSource:
         assert 'open(lock_path, "w"' in registry_src, (
             "registry.py's flock target changed shape — re-check the guard exemption"
         )
+
+
+# =============================================================================
+# THE HARNESS ITSELF — a race that never raced must not read as a defect
+# =============================================================================
+
+
+class TestRacerReportsWeatherHonestly:
+    """The guard "the race proves nothing" is right; failing for it is not.
+
+    MEASURED by @prax 2026-08-30, running every json/log test file in the tree
+    as one batch from the repo root: 1380 passed, 1 failed — ours, and it failed
+    on its OWN guard (``reads == 0``), not on a torn read. It passes 3/3 alone.
+    Under a loaded machine the reader thread simply never gets scheduled inside
+    a 0.6s window, so the harness genuinely never read; the guard correctly
+    refuses to claim the race was exercised, and then reports that refusal as a
+    defect in the code under test. That reds a whole-repo run for weather.
+
+    A test may say "I could not measure this". It may not say "this is broken"
+    when what it means is "I could not measure this" — the same species as
+    tonight's migrate-passports empty scan reporting an all-clear.
+
+    So the harness now does two things: it WAITS for evidence that both sides
+    are live before the timed window opens (weather becomes latency, not
+    failure), and if even that deadline expires it SKIPS with the counters in
+    the reason. What it never does is let a skip mask a torn read — the tear
+    check runs first, so an observed tear fails loudly no matter how few reads
+    or writes the run managed.
+    """
+
+    def test_a_race_that_never_read_skips_rather_than_fails(self, tmp_path):
+        """reads == 0 is a result, not a defect."""
+        racer = _Racer(tmp_path / "never_created.json", lambda n: True)
+        racer.run(seconds=0.05, warmup=0.05)
+
+        assert racer.reads == 0, "fixture assumption broken — the target must never appear"
+        with pytest.raises(pytest.skip.Exception) as exc:
+            racer.assert_clean()
+
+        assert "never read" in str(exc.value)
+
+    def test_a_race_that_never_wrote_skips_rather_than_fails(self, tmp_path):
+        """writes == 0 is the same result seen from the other side."""
+        target = tmp_path / "static.json"
+        target.write_text('{"a": 1}\n', encoding="utf-8")
+
+        racer = _Racer(target, lambda n: False)
+        racer.run(seconds=0.05, warmup=0.05)
+
+        with pytest.raises(pytest.skip.Exception) as exc:
+            racer.assert_clean()
+
+        assert "never rewrote" in str(exc.value)
+
+    def test_the_skip_reason_carries_the_counters(self, tmp_path):
+        """A skip nobody can diagnose is only a quieter silence."""
+        racer = _Racer(tmp_path / "never_created.json", lambda n: True)
+        racer.run(seconds=0.05, warmup=0.05)
+
+        with pytest.raises(pytest.skip.Exception) as exc:
+            racer.assert_clean()
+
+        reason = str(exc.value)
+        assert "reads=0" in reason
+        assert "writes=" in reason
+
+    def test_an_observed_tear_still_fails_even_with_one_read(self, tmp_path):
+        """ORDERING PIN — the tear check must run BEFORE the skip.
+
+        Without this, a run unlucky enough to be short would skip past a real
+        torn read and call the day green. This is the pin that makes the skip
+        safe to add.
+        """
+        racer = _Racer(tmp_path / "irrelevant.json", lambda n: True)
+        racer.reads = 1
+        racer.empty = 1
+        racer.writes = 0
+
+        with pytest.raises(AssertionError) as exc:
+            racer.assert_clean()
+
+        assert "torn file" in str(exc.value)
+
+    def test_a_clean_exercised_race_still_passes(self, tmp_path):
+        """The normal path is untouched."""
+        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+
+        target = tmp_path / "live.json"
+
+        def write_once(n):
+            atomic_write_text(target, json.dumps({"round": n}) + "\n")
+            return True
+
+        racer = _Racer(target, write_once).run()
+        racer.assert_clean()
+
+        assert racer.reads > 0 and racer.writes > 0
+
+    def test_warmup_waits_for_a_slow_starter(self, tmp_path):
+        """A target that appears late still gets a real race, not a skip.
+
+        This is the half that turns weather into latency: the timed window does
+        not open until both sides have proven they are live.
+        """
+        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+
+        target = tmp_path / "slow.json"
+
+        def write_once(n):
+            if n < 3:
+                return False
+            atomic_write_text(target, json.dumps({"round": n}) + "\n")
+            return True
+
+        racer = _Racer(target, write_once).run(seconds=0.2, warmup=20.0)
+        racer.assert_clean()
+
+        assert racer.reads > 0 and racer.writes > 0
+
+
+@contextmanager
+def _target(content):
+    """A _Racer over a throwaway file with a known final state, zero samples.
+
+    ``content=None`` leaves the target absent. The counters start at zero on
+    purpose: these pins measure what the DIRECT read contributes, so the
+    sampling readers must have contributed nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "final_state.json"
+        if content is not None:
+            target.write_text(content, encoding="utf-8")
+        racer = _Racer(target, lambda n: True)
+        racer.reads = 0
+        racer.writes = 0
+        yield racer
+
+
+def _verdict(racer):
+    """Classify what assert_clean DID: FAILED / SKIPPED / PASSED.
+
+    The pins below must be able to tell a red apart from a skip, and
+    ``pytest.raises(AssertionError)`` cannot: ``pytest.skip`` raises its own
+    exception, which sails straight past the raises block and reports the whole
+    test as SKIPPED — a defeat wearing a pass's clothes. That is the same
+    species @memory killed in their own guard tests on 2026-08-30. Catching
+    both here makes the verdict a value the test asserts on.
+    """
+    try:
+        racer.assert_clean()
+    except AssertionError as exc:
+        return "FAILED", str(exc)
+    except pytest.skip.Exception as exc:
+        return "SKIPPED", str(exc)
+    return "PASSED", ""
+
+
+class TestTheFinalStateIsCheckedDirectly:
+    """@prax's review question, answered by closing it rather than agreeing.
+
+    Reviewing the skip ordering, @prax wrote: "If your tear check reads the file
+    directly at the end rather than only through the reader thread's samples,
+    that closes the last thing I would have asked about."
+
+    It did not, and the honest answer was to build it. ``assert_clean`` judged
+    only what the reader THREADS happened to sample, so a target left torn on
+    disk was invisible whenever no sample landed on the write that tore it —
+    and the run then SKIPPED, with the very reasonable-sounding explanation that
+    nothing had been observed. The ordering was already right; the evidence set
+    was too small. A direct read costs one open and cannot be starved by the
+    scheduler, which is the exact condition under which the sampling reader
+    fails.
+    """
+
+    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self):
+        """reads == 0 must not launder a file that is torn right now."""
+        with _target('{"half') as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "FAILED", (
+            f"a file left torn on disk was reported {verdict} — the sampling "
+            f"readers saw nothing, so only a direct read can catch it: {message}"
+        )
+        assert "torn" in message.lower()
+        assert "UNPARSEABLE" in message
+
+    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self):
+        with _target("") as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "FAILED", f"an empty target was reported {verdict}: {message}"
+        assert "EMPTY" in message
+
+    def test_a_missing_target_is_still_a_skip_not_a_tear(self):
+        """Never created is not torn — the distinction the skip exists for."""
+        with _target(None) as racer:
+            verdict, message = _verdict(racer)
+
+        assert verdict == "SKIPPED", f"a never-created target was reported {verdict}"
+        assert "final=absent" in message
+
+    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self):
+        """Positive control — the direct read must not manufacture reds."""
+        with _target('{"round": 7}\n') as racer:
+            racer.reads = 5
+            racer.writes = 5
+            verdict, message = _verdict(racer)
+
+        assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
+
+    def test_an_unreadable_target_is_not_convicted_as_torn(self):
+        """Share-mode / permission refusal is not evidence of tearing.
+
+        The world here is built by chmod, and chmod does not build it
+        everywhere: Windows ignores POSIX mode bits (it wants an ACL), and root
+        reads through them on POSIX. Both were guesses in the first version of
+        this test — it inferred "running as root" from a PASSED verdict, which
+        is a cause read off a symptom, and on the Windows gate the verdict was
+        SKIPPED for a different reason entirely and the assertion below failed
+        (@devpulse, ebb8075d windows-setup).
+
+        So the world is PROBED, not assumed: after the chmod, actually try to
+        read the file. If it still reads, this host cannot build the state and
+        the test says so with what it measured. @memory's ruling, applied —
+        probe the host, do not skipif what a probe can measure.
+        """
+        with _target('{"whole": true}') as racer:
+            racer.target.chmod(0o000)
+            try:
+                try:
+                    racer.target.read_text(encoding="utf-8")
+                except OSError:
+                    unreadable = True
+                else:
+                    unreadable = False
+
+                verdict, message = _verdict(racer)
+            finally:
+                racer.target.chmod(0o644)
+
+        if not unreadable:
+            pytest.skip(
+                "world not built: chmod(0o000) left the file readable on this "
+                f"host (platform={sys.platform}, euid={getattr(os, 'geteuid', lambda: 'n/a')()}) "
+                "— Windows ignores POSIX mode bits and root reads through them, "
+                "so the unreadable state cannot be constructed this way here"
+            )
+
+        assert verdict == "SKIPPED", f"an unreadable target was reported {verdict}: {message}"
+        assert "final=unreadable" in message

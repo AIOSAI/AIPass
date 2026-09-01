@@ -36,7 +36,7 @@ import pytest
 
 # ============ BRANCH CONFIG ============
 # Change these two lines when deploying to a branch:
-BRANCH_MODULE = "seedgo"  # e.g. "prax", "drone", "backup", "cli", etc.
+BRANCH_MODULE = "devpulse"  # e.g. "prax", "drone", "backup", "cli", etc.
 # For commons: "commons" (import path is different: aipass -> just commons)
 # For skills: "skills" (import path is different: aipass -> just skills)
 # =======================================

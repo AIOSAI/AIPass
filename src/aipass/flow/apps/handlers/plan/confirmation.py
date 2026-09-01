@@ -13,13 +13,14 @@ User interaction and confirmation prompts for plan operations.
 """
 
 import sys
-from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
 # Infrastructure
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 
 def confirm_plan_deletion(plan_key: str) -> bool:

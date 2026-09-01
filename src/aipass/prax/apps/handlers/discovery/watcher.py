@@ -40,12 +40,24 @@ from aipass.prax.apps.handlers.registry.save import save_module_registry
 from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
 
-# Trigger integration - graceful fallback if trigger not available
+# Trigger integration - graceful fallback if trigger not available.
+#
+# The except is (ImportError, OSError), matching modules/logger.py's own trigger
+# import, and the second half is not decoration. MEASURED 2026-08-31: @trigger's
+# handlers/__init__.py guard resolves a frame filename at import time, and in a
+# process with no readable working directory that raises FileNotFoundError — an
+# OSError, never an ImportError. So this clause, which exists precisely to say
+# "we can live without trigger", let a failure in the dependency we can live
+# without kill the import of every prax consumer, including the fleet's logger.
+#
+# The rule that fixed it: an optional dependency's fallback must be at least as
+# wide as the failures its import can produce. A peer branch being broken is
+# allowed; us dying of it is not.
 try:
     from aipass.trigger.apps.modules.core import trigger
 
     _HAS_TRIGGER = True
-except ImportError as e:
+except (ImportError, OSError) as e:
     logger.info(f"[watcher] trigger module not available, falling back: {e}")
     trigger = None  # type: ignore[assignment]
     _HAS_TRIGGER = False

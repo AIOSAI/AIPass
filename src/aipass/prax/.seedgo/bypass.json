@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-08-13T18:05:00.000000"
+    "last_updated": "2026-08-31T05:00:00.000000"
   },
   "bypass": [
     {
@@ -47,6 +47,12 @@
       "standard": "log_visibility",
       "pattern": "logging.getLogger(",
       "reason": "Prax import chain \u2014 imported via discovery/watcher.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain \u2014 imported by config/load.py, which logger.py calls while CONSTRUCTING the system logger. Cannot import from aipass.prax.apps.modules.logger (circular dependency), and a diagnostic that needs the logger it is being emitted from is a second crash wearing a diagnostic's clothes (@memory, 2026-08-31). A test pins that this module imports nothing from aipass at all."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",

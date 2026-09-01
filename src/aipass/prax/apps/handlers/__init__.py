@@ -1,6 +1,7 @@
 """Prax handlers package - Security protected."""
 
-import inspect
+import linecache
+import sys
 from pathlib import Path
 
 MY_BRANCH = "aipass.prax"
@@ -16,27 +17,58 @@ def _find_real_caller():
     - Frozen modules
 
     Returns tuple: (file_path, import_line) or (None, None)
-    """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    Walks frames with sys._getframe rather than inspect.stack(). MEASURED on the
+    Windows CI gate 2026-08-31 by @spawn, reproduced here: inspect.stack() needs
+    a READABLE WORKING DIRECTORY, and it needs one before any of this function's
+    own code runs. It builds a FrameInfo per frame, which reaches getsourcefile()
+    -> getmodule() -> os.path.realpath(); ntpath.realpath calls os.getcwd()
+    unconditionally on its first lines, before it even checks whether the path is
+    absolute, and that call site inside getmodule is not in a try. On POSIX the
+    equivalent raise happens earlier, inside getabsfile(), where inspect catches
+    it — so every Linux pin here was green for a reason unrelated to correctness.
+
+    A frame's co_filename is already a string in memory. Reading it touches
+    nothing, so the walk itself cannot need a working directory.
+    """
+    # Path.resolve() reaches the same ntpath.realpath, so this is guarded too.
+    # __file__ is already absolute; the resolve only normalises it.
+    try:
+        this_file = str(Path(__file__).resolve())
+    except OSError:
+        this_file = __file__
+
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
+
+        # Skip Python internals BEFORE touching the filesystem — resolve() on a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd was
+        # deleted (drone's dead-cwd routing case) dies here otherwise.
+        if filename.startswith("<") or "importlib" in filename:
+            frame = frame.f_back
+            continue
+
+        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # the raw spelling rather than crashing the import of every prax consumer.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
 
         # Skip this file
-        if this_file in str(Path(filename).resolve()):
+        if this_file in resolved or __file__ in filename:
+            frame = frame.f_back
             continue
 
-        # Skip Python internals
-        if filename.startswith("<") or "importlib" in filename:
-            continue
+        # linecache is what inspect used for code_context. Called directly it
+        # reads one named file and returns "" rather than raising.
+        try:
+            import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        except OSError:
+            import_line = None
 
-        # Found a real file - try to get the import line
-        import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
-
-        return str(Path(filename).resolve()), import_line
+        return resolved, import_line
 
     return None, None
 
@@ -70,14 +102,17 @@ def _guard_branch_access():
         print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
 
     if caller_file is None:
-        # Can't determine caller from real files
-        # Check if we're being run from command line (external)
-        # by looking at the raw stack for <string> or <stdin>
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return  # Allow command-line Python through
-        return  # Allow if truly can't determine
+        # An undeterminable caller is ALLOWED — a command line, an embedded
+        # interpreter, a frozen loader. The guard convicts on evidence; not
+        # having any is not evidence.
+        #
+        # A second inspect.stack() used to sit here, scanning for <string> or
+        # <stdin> — and it was DEAD: both the match and the fall-through
+        # returned None with no side effect, so the whole call could not change
+        # the answer. It is deleted rather than guarded, because a call that
+        # needs a working directory to compute a value nobody reads is pure
+        # exposure. @devpulse's rule from the fleet sweep, and it applied here.
+        return
 
     # Check if caller is from our branch
     # MY_BRANCH is "aipass.prax" (dotted), but filesystem uses "/aipass/prax/"

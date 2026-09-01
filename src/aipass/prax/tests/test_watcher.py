@@ -11,6 +11,7 @@
 - apps/handlers/discovery/watcher.py (PythonFileWatcher, start/stop_file_watcher)
 """
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -789,4 +790,117 @@ class TestWatcherLiveness:
         assert acquisitions["n"] == 1, (
             f"the lock was taken {acquisitions['n']} times for 200 log calls — "
             "the throttle check has moved inside the lock and every log call now contends"
+        )
+
+
+# ============================================================================
+# THE OPTIONAL TRIGGER IMPORT - it must never take prax's import down
+# ============================================================================
+
+_DENY_TRIGGER = '''
+import importlib.abc
+import sys
+
+TARGET = "aipass.trigger.apps.modules.core"
+
+
+class DenyTrigger(importlib.abc.MetaPathFinder):
+    """Make the optional cross-branch import fail the way it failed for real."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == TARGET:
+            raise OSError(2, "No such file or directory")
+        return None
+
+
+sys.meta_path.insert(0, DenyTrigger())
+'''
+
+
+def _run_with_trigger_denied(body: str) -> subprocess.CompletedProcess:
+    """Run ``body`` in a fresh interpreter where importing trigger raises OSError.
+
+    A subprocess because the claim is about IMPORT TIME: watcher.py's fallback runs
+    once, at module level, and this process already imported it successfully. Fed on
+    STDIN rather than -c so a traceback names real line numbers.
+    """
+    script = _DENY_TRIGGER + body
+    return subprocess.run(
+        [sys.executable, "-"],
+        input=script,
+        text=True,
+        capture_output=True,
+        cwd=str(Path(__file__).resolve().parents[3]),
+    )
+
+
+class TestOptionalTriggerIntegration:
+    """`trigger` is declared optional. The fallback must be as wide as the failures.
+
+    MEASURED 2026-08-31: it was not. The except clause caught only ImportError, and
+    @trigger's own handlers/__init__.py guard raised FileNotFoundError — an OSError,
+    not an ImportError — while resolving a frame filename without a working
+    directory. So prax's whole logger import chain died on a failure in a dependency
+    prax had already declared it could live without. The bug is not that trigger
+    raised; a peer branch is allowed to be broken. The bug is that "graceful
+    fallback if trigger not available" was written to cover one spelling of
+    unavailable.
+    """
+
+    def test_the_denial_is_live(self):
+        """Negative control FOR the positive control below.
+
+        If the injected finder never fires, the next test passes for the boring
+        reason that trigger imports fine on this machine — a green that proves
+        nothing. This asserts the hostile world is actually hostile before any
+        test relies on it.
+        """
+        result = _run_with_trigger_denied(
+            "\n"
+            "try:\n"
+            "    import aipass.trigger.apps.modules.core  # noqa: F401\n"
+            "except BaseException as exc:\n"
+            "    print('DENIED', type(exc).__name__, isinstance(exc, OSError))\n"
+            "else:\n"
+            "    print('NOT DENIED')\n"
+        )
+        # FileNotFoundError, not the bare OSError raised: Python's errno mapping
+        # picks the subclass for errno 2. That is exactly the exception @trigger's
+        # guard produced on the real machine, so the world is faithful, not merely
+        # similar. The pin asserts the CATEGORY the fallback has to cover.
+        assert "DENIED FileNotFoundError True" in result.stdout, (
+            "the meta_path finder did not deny the trigger import, so every pin built "
+            f"on this world is vacuous.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_an_oserror_from_the_optional_import_falls_back(self):
+        """Prax imports, and knows trigger is absent, when trigger raises OSError."""
+        result = _run_with_trigger_denied(
+            "\nfrom aipass.prax.apps.handlers.discovery import watcher\nprint('HAS_TRIGGER', watcher._HAS_TRIGGER)\n"
+        )
+        assert result.returncode == 0, (
+            "an OSError from the OPTIONAL trigger import killed prax's watcher import.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "HAS_TRIGGER False" in result.stdout, (
+            "the import survived but still believes trigger is available — the fallback "
+            f"did not run.\nstdout: {result.stdout}"
+        )
+
+    def test_the_public_logger_survives_it_too(self):
+        """The chain that actually broke: modules/logger.py -> watcher -> trigger.
+
+        Pinned at the public entry point rather than only at the handler, because
+        the handler is an implementation detail and every other branch in the fleet
+        reaches this through `get_system_logger`.
+        """
+        result = _run_with_trigger_denied(
+            "\n"
+            "from aipass.prax.apps.modules.logger import get_system_logger\n"
+            "get_system_logger().info('the optional dependency is absent and that is fine')\n"
+            "print('LOGGER OK')\n"
+        )
+        assert "LOGGER OK" in result.stdout, (
+            "prax's public logger could not be built while trigger was unavailable.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )

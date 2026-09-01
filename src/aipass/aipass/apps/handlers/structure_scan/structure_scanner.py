@@ -21,6 +21,7 @@ from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.prax import logger
+from aipass.aipass.shared.registry_discovery import registries_in
 
 
 class AgentInfo(NamedTuple):
@@ -78,7 +79,7 @@ def find_project_root(start: Path) -> Optional[Path]:
     """
     p = start.resolve()
     for parent in (p, *p.parents):
-        if list(parent.glob("*_REGISTRY.json")):
+        if registries_in(parent):
             return parent
         if (parent / "pyproject.toml").exists() and (parent / "src").is_dir():
             return parent

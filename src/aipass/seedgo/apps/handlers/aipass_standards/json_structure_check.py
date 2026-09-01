@@ -21,7 +21,9 @@ For json_handler.py itself (in a json/ directory):
 Entry points and other files outside modules/handlers are skipped.
 """
 
+import ast
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
 
@@ -126,6 +128,43 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "JSON STRUCTURE",
         }
 
+    # --- Declarations-only module: nothing to log, so nothing to ask ---
+    if (in_modules or in_handlers) and _declares_no_callable_code(content):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": (
+                        "Declarations only — no functions or methods, so the module performs "
+                        "no operations to log (not applicable)"
+                    ),
+                }
+            ],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
+        }
+
+    # --- Pre-logging bootstrap module: importing json_handler here is a cycle ---
+    if (in_modules or in_handlers) and _is_prelogging_bootstrap(path, content):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": (
+                        "Pre-logging bootstrap module — reached from the logging chain's own "
+                        "imports and holds no aipass import of any kind, so json_handler cannot "
+                        "be imported here without a cycle (not applicable)"
+                    ),
+                }
+            ],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
+        }
+
     # --- Cases (b) and (c): code wiring check ---
     if in_modules or in_handlers:
         checks = _check_code_wiring(path, content)
@@ -148,6 +187,238 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
+
+def _declares_no_callable_code(content: str) -> bool:
+    """True when a module defines no function or method ANYWHERE.
+
+    "Every module/handler must log operations" is a rule about modules that
+    PERFORM operations. A file of pure exception or dataclass declarations
+    performs none, so the check was asking a question the file cannot answer —
+    and the only two ways to answer it were both worse than the violation
+    (@drone, 2026-08-31): restore a module-level log_operation, which is the
+    import-time-write defect that fires during pytest COLLECTION where no
+    fixture can intercept it; or add a function to a file of class definitions
+    solely so there is somewhere to call log_operation from.
+
+    Deliberately keyed on callable code and nothing else. ONE method anywhere —
+    including in a class body — puts the module back in scope, because a method
+    is somewhere an operation can happen. Constants and dataclass fields do not
+    buy the exemption back; data is still declarations.
+
+    An unparseable file is NOT exempt: a syntax error is not evidence of purity,
+    and answering "no callable code" for a file we could not read would hand out
+    the exemption on ignorance.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("json_structure: could not parse for the declarations-only test: %s", exc)
+        return False
+    return not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
+
+
+#: How many modules the bootstrap walk will visit before it gives up. The whole
+#: fleet's logging chain measures ~100; this is a runaway guard, not a budget.
+_BOOTSTRAP_WALK_CAP = 2000
+
+
+def _resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
+    """Absolute dotted name for a relative import, given the importer's package.
+
+    ``from ..paths import module_file`` inside
+    ``aipass.canary.apps.handlers.json.json_handler`` is
+    ``aipass.canary.apps.handlers.paths`` — a perfectly static fact the walk was
+    throwing away.
+
+    Args:
+        module_name: The ``module`` of an ImportFrom, or None for ``from . import x``.
+        level: Number of leading dots.
+        package: Dotted package the importing file lives in, or None if unknown.
+
+    Returns:
+        The absolute dotted name, or None when it cannot be resolved.
+    """
+    if not package or level <= 0:
+        return None
+    parts = package.split(".")
+    if level - 1 > len(parts):
+        return None
+    base = parts[: len(parts) - (level - 1)] if level > 1 else parts
+    if not base:
+        return None
+    return ".".join(base + ([module_name] if module_name else []))
+
+
+def _aipass_imports(content: str, package: str | None = None) -> list[str]:
+    """Every ``aipass.*`` module name this source imports, at any nesting depth.
+
+    Function-level imports count. A module that reaches aipass only from inside
+    a function has still taken the dependency, and could take json_handler the
+    same way.
+
+    RELATIVE IMPORTS COUNT TOO, when the caller supplies ``package``. They did
+    not until 2026-08-31, and the hole was exactly where it hurt: @canary's
+    json_handler reaches its stdlib-only bootstrap helper by
+    ``from ..paths import module_file``, so ``paths.py`` never entered the
+    bootstrap chain, clause 2 of the exemption failed, and a module that IS
+    beneath the logging system was told to import it. A relative import is a
+    STATIC fact — unlike the importlib hops this walk deliberately cannot see —
+    so resolving it moves the set toward correct in the direction the walk's own
+    docstring already asks for.
+
+    Args:
+        content: File source.
+        package: Dotted package of the importing file, for relative resolution.
+            None keeps the old absolute-only behaviour, which is what the
+            "holds no aipass import" clause wants for a file it cannot place.
+
+    Returns:
+        Dotted ``aipass.*`` names, absolute.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        logger.info("json_structure: could not parse for the bootstrap-chain walk: %s", exc)
+        return []
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                names.append(node.module)
+                names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+                continue
+            resolved = _resolve_relative(node.module, node.level, package)
+            if resolved:
+                names.append(resolved)
+                names.extend(f"{resolved}.{alias.name}" for alias in node.names)
+    return [name for name in names if name.split(".")[0] == "aipass"]
+
+
+def _aipass_source_root(path: Path) -> Path | None:
+    """The ``src/aipass`` directory above this file, or None if it is not there.
+
+    None means no exemption: a file we cannot place in the fleet's import graph
+    is measured by the ordinary rule.
+    """
+    for parent in path.resolve().parents:
+        if parent.name == "aipass" and (parent / "prax").is_dir():
+            return parent
+    return None
+
+
+def _module_file(module_name: str, source_root: Path) -> Path | None:
+    """Resolve a dotted ``aipass.*`` name to the file it would import."""
+    candidate = source_root.parent / Path(*module_name.split("."))
+    if (candidate / "__init__.py").is_file():
+        return candidate / "__init__.py"
+    flat = candidate.with_suffix(".py")
+    return flat if flat.is_file() else None
+
+
+def _module_name(path: Path, source_root: Path) -> str | None:
+    """The dotted name a file is imported under, or None if it is outside the tree."""
+    try:
+        relative = path.resolve().relative_to(source_root.parent)
+    except ValueError as exc:
+        logger.info("json_structure: file is outside the resolved source root: %s", exc)
+        return None
+    parts = list(relative.with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts) if parts else None
+
+
+@lru_cache(maxsize=8)
+def _bootstrap_chain(source_root_str: str) -> frozenset:
+    """Every module the logging substrate imports, transitively.
+
+    Seeded from the system logger and from every branch's json_handler, because
+    those are the two things this standard tells a module to import. Anything
+    they reach is BENEATH them in the import order and cannot import them back
+    without a cycle.
+
+    ANCESTOR PACKAGES ARE DELIBERATELY ABSENT, and the reason is measured rather
+    than assumed. Importing aipass.flow.apps.handlers.json.json_handler runs
+    aipass/flow/apps/handlers/__init__.py first — Python imports every parent
+    package before the leaf, and no import statement says so, so the AST cannot
+    see it (@flow's fence, 2026-08-31). Adding them is therefore FACTUALLY
+    right about execution order and still wrong for this exemption: the wide
+    form (walking each ancestor's own imports) carried the exemption out across
+    every branch's public API via drone's re-exporting __init__ and exempted 4
+    stdlib-only helpers that have a working logger; the narrow form (record the
+    ancestor, do not walk it) changed 0 verdicts in 1040 files. A clause that
+    grants exemptions nobody needs today is a waiver waiting for a file to drift
+    into it. Execution order is not the property this exemption is for — being
+    unable to reach the logger is — and every fence in the fleet already passes
+    on its own.
+
+    Statically walked, so a dynamic (importlib) hop inside the chain is invisible
+    and the set comes out SHORT. That direction is deliberate: a missed member is
+    measured by the ordinary rule and stays red, which is the state it is in
+    today. An over-long set would hand out exemptions.
+    """
+    source_root = Path(source_root_str)
+    branches = [d.name for d in source_root.iterdir() if (d / "apps").is_dir()]
+    queue = ["aipass.prax.apps.modules.logger"]
+    queue += [f"aipass.{name}.apps.handlers.json.json_handler" for name in branches]
+
+    seen: set = set()
+    while queue and len(seen) < _BOOTSTRAP_WALK_CAP:
+        module_name = queue.pop()
+        if module_name in seen:
+            continue
+        module_file = _module_file(module_name, source_root)
+        if module_file is None:
+            continue
+        seen.add(module_name)
+        # The importing module's PACKAGE, so its relative imports resolve. A
+        # package __init__ is its own package; a plain module's package is its
+        # parent.
+        package = module_name if module_file.name == "__init__.py" else module_name.rsplit(".", 1)[0]
+        try:
+            queue.extend(_aipass_imports(module_file.read_text(encoding="utf-8", errors="ignore"), package))
+        except OSError as exc:
+            logger.info("json_structure: unreadable module in the bootstrap walk: %s", exc)
+    return frozenset(seen)
+
+
+def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
+    """True for a module that sits BENEATH the logging system it would have to call.
+
+    Two clauses, both measured here and neither declared by the branch:
+
+    1. The module holds no aipass import of any kind. @prax pins exactly this
+       property with an AST test, because a diagnostic that needs the logger it
+       is being emitted from is a second crash wearing a diagnostic's clothes.
+    2. The logging substrate's own imports reach it. This is what keeps the
+       exemption from being free: 79 modules in the fleet import nothing from
+       aipass, and 9 of them are in the chain.
+
+    Clause 1 alone would exempt every stdlib-only helper in the fleet; clause 2
+    alone would exempt ai_mail's whole dispatch stack, which the chain reaches
+    THROUGH json_handler and which logs perfectly well. Only the pair names the
+    class @prax reported (2026-08-31): log_operation() writes, so wiring it into
+    a module the logger imports puts a file write on the import path of every
+    branch — the ungateable write that fires during pytest COLLECTION.
+    """
+    try:
+        ast.parse(content)
+    except SyntaxError as exc:
+        # An unreadable file is not a bootstrap module; it is a file we could not
+        # read. _aipass_imports() answers [] for it, which would otherwise read as
+        # "holds no aipass import" and buy the exemption on ignorance.
+        logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
+        return False
+    if _aipass_imports(content):
+        return False
+    source_root = _aipass_source_root(path)
+    if source_root is None:
+        return False
+    module_name = _module_name(path, source_root)
+    return module_name is not None and module_name in _bootstrap_chain(str(source_root))
 
 
 def _check_code_wiring(_path: Path, content: str) -> List[Dict]:

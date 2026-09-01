@@ -15,10 +15,11 @@ inside a target project path, and a ``.backupignore`` at the project root.
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..path.module_paths import branch_root
 from ..json import json_handler
 from ..path import builder
 
-_TEMPLATE_PATH = Path(__file__).resolve().parents[3] / "templates" / "backupignore.template"
+_TEMPLATE_PATH = branch_root(__file__, 3) / "templates" / "backupignore.template"
 
 
 def _build_backupignore() -> str:

@@ -2,6 +2,8 @@
 
 import json
 import logging
+
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -645,6 +647,7 @@ class TestTotalClosedIsNotTruncated:
 
         assert first["total_closed"] == second["total_closed"] == 104
 
+    @pytest.mark.real_logger
     def test_missing_upstream_total_warns_instead_of_publishing_silently(self, tmp_path, caplog):
         """No upstream count = we cannot know the real total. Say so, don't invent one."""
         aggregate_central_impl = _import("aggregate_central_impl")

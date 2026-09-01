@@ -19,8 +19,17 @@ from typing import Dict, List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-# Devpulse branch path — resolved relative to this file's location
-_AIPASS_SRC = Path(__file__).resolve().parents[4]  # .../src/aipass/
+# Devpulse branch path — derived from this file's location.
+#
+# No .resolve() here, deliberately. `__file__` is already absolute, so the
+# resolve only normalised symlinks — and on Windows `ntpath.realpath` reads the
+# process working directory before it checks anything, which made this
+# module-level line a cwd read in a plugin that has no business needing one.
+# Walking parents does not need resolution: the four directories above this file
+# are structural. (prax's handlers route the same problem through
+# `handlers/repo_root.resolved_file`, but a plugin may only enter through
+# `apps.modules` — so the fix here is to not need it.)
+_AIPASS_SRC = Path(__file__).parents[4]  # .../src/aipass/
 DEVPULSE_PATH = _AIPASS_SRC / "devpulse"
 
 

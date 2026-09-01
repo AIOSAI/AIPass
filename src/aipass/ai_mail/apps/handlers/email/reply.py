@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reply.py
 # Description: Email Reply Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2025-11-30
-# Modified: 2026-08-07
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -22,6 +22,7 @@ from datetime import datetime
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.paths import registries_in
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
 from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
 
@@ -221,7 +222,7 @@ def _validate_reply_path(reply_path: str) -> Tuple[bool, str]:
         return False, f"Path does not end with .ai_mail.local/inbox.json: {path}"
 
     for parent in path.parents:
-        if any(parent.glob("*_REGISTRY.json")):
+        if registries_in(parent):
             return True, ""
         if parent == parent.parent:
             break

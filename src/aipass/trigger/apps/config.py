@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
-# Version: 1.3.0
+# Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
+# Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-08-09
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -36,8 +36,52 @@ try:
 except Exception:
     _append_jsonl = None
 
+# Resolve failures, recorded rather than logged: module_file runs before this
+# module has a logger at all (TrailLogger is defined below it), and in the world
+# that reaches its guard EVERY module import takes it — one line per module
+# would describe a single condition N times. Introspectable instead.
+UNRESOLVED: list[str] = []
+
+
+def module_file(file: str) -> Path:
+    """A module's own path, absolute, resolved when the filesystem allows.
+
+    ``Path(__file__).resolve()`` reached at IMPORT is a working-directory read on
+    Windows: ntpath.realpath calls ``os.getcwd()`` UNCONDITIONALLY — not only for
+    relative paths, the way posixpath does — and ``Path.resolve()`` routes
+    through it. So a process whose cwd was deleted cannot import the module at
+    all. Measured on the Windows CI gate 2026-08-31 (@memory's finding);
+    @prax's import chain died inside trigger's handler guard and took every
+    consumer of the prax logger with it.
+
+    ``.resolve()`` is still attempted, because normalising symlinks is why the
+    call is there and it succeeds on every healthy machine. The fallback is only
+    reached in the world where the alternative is a dead import, and it is
+    sound: ``__file__`` has been absolute since Python 3.9, so the return is the
+    right file either way — just spelled through the symlink rather than past it.
+
+    It lives in config.py rather than in a handler because config.py is where
+    this branch's package paths are defined and because config.py must not
+    import handlers: TRIGGER_ROOT below is its first caller.
+
+    Args:
+        file: A module's ``__file__``.
+
+    Returns:
+        The module's path, resolved if the filesystem could be asked.
+    """
+    path = Path(file)
+    try:
+        return path.resolve()
+    except OSError as exc:
+        UNRESOLVED.append(f"{path}: {type(exc).__name__}: {exc}")
+        return path
+
+
 # Trigger package root: .../aipass/trigger/
-TRIGGER_ROOT = Path(__file__).resolve().parents[1]
+#
+# module_file, not resolve(): this line runs at IMPORT. See module_file above.
+TRIGGER_ROOT = module_file(__file__).parents[1]
 
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
@@ -503,7 +547,8 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.warning("CLI console not available, using rich fallback")
         from rich.console import Console
 

@@ -23,7 +23,16 @@ from pathlib import Path
 
 from aipass.aipass.shared.json_handler import JsonHandler
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
+# NOT resolve(): this runs at IMPORT time, and ntpath.realpath calls os.getcwd()
+# unconditionally — not only for a relative path, the way posixpath does — so
+# resolve() here is a cwd read that takes the whole branch down on Windows when
+# the working directory is gone (Windows CI, 2026-08-31; @memory raised the
+# wider species). __file__ has been absolute since 3.9, so the only thing
+# resolve() added was symlink normalisation of a path that is used solely to
+# build a directory for file I/O and is never compared against another path —
+# a symlink resolves identically at the OS level. Guarding it with try/except
+# would work too, but not needing the call is better than surviving it.
+_BRANCH_ROOT = Path(__file__).parents[3]
 _JSON_DIR = _BRANCH_ROOT / "{{BRANCH}}_json"
 
 _handler = JsonHandler(json_dir=_JSON_DIR)

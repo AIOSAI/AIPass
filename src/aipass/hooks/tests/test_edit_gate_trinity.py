@@ -835,25 +835,26 @@ class TestTrinityMultiEdit:
 
 
 class TestTrinityEditUnrelatedFieldOnFatFile:
-    """REVERSED (DPLAN-0318 circle close): fat legacy entries no longer buy silence.
+    """REVERSED TWICE, and the second reversal restores the original answer.
 
-    This was "THE critical no-false-reject test" while the fleet was mid-migration
-    and every branch carried over-cap entries it could not yet cure. The fleet
-    converged (trinity 100 on 21 of 22, push 22/22), so the blanket exemption was
-    narrowed to todos. An over-cap session or key_learning sitting on disk is now
-    a violation whether or not this write created it — otherwise a fat entry
-    written straight to disk reads as "already there" forever.
+    Written as "THE critical no-false-reject test", flipped to expect a block on
+    2026-08-27 when the fleet had converged, flipped back on 2026-08-30. The
+    round trip is the lesson, not an embarrassment: the 08-27 premise was that
+    drift had been cured fleet-wide, and a clause justified by a temporary state
+    has to be re-read when that state ends. @memory measured that it had ended —
+    drift RECURS (@ai_mail carried three over-cap learnings the same evening,
+    @seedgo one) — and that refusing carried debt deadlocks the archiver:
+    a file cannot get smaller because it is too big.
 
-    The original intent — an uncurable entry elsewhere must not block an
-    unrelated edit — is not lost, it MOVED to the one container that still
-    cannot be cured by machine. See TestGrandfatherNarrowedToTodos.
+    So the rule is @memory's entry_limits 1.6.0 rule, and this gate now keeps
+    the same one: a write is refused for what it AUTHORS, never for what it
+    CARRIES. Blocking an unrelated edit over a fat entry the agent did not write
+    was never a standard worth having — it is unsatisfiable by any allowed
+    action, which is the species this branch has now fixed three times.
     """
 
-    def test_unrelated_edit_on_fat_file_now_blocked(self, tmp_path):
-        """Fat legacy sessions + key_learnings, edit touches only a todo.
-
-        Was ALLOWED pre-convergence; now BLOCKED, and the fat entries are named.
-        """
+    def test_unrelated_edit_on_fat_file_is_allowed(self, tmp_path):
+        """Fat legacy sessions + key_learnings, edit touches only a todo -> ALLOWED."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -879,8 +880,8 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
                 )
             )
 
-        assert result["exit_code"] == 2, "an on-disk over-cap entry kept the retired blanket exemption"
-        assert "key_learnings" in json.loads(result["stdout"])["reason"]
+        assert result["exit_code"] == 0, "an unrelated edit was refused for entries this write did not author"
+        assert result["stdout"] == "", "an allowed write must not print a refusal"
 
     def test_unrelated_edit_plus_new_over_limit_blocked(self, tmp_path):
         """Fat file, but Edit ALSO adds a new over-limit entry -> blocked."""
@@ -910,14 +911,18 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
 
 
 class TestTrinityEditUnchangedLegacy:
-    """REVERSED: an untouched over-limit key_learning is now reported.
+    """REVERSED BACK (2026-08-30): an untouched over-limit entry is carried, not refused.
 
-    "Unchanged" stopped meaning "legacy" the day the fleet converged; it now
-    means "written and not yet caught". Only todos keep the on-disk exemption.
+    "Unchanged" does not mean "legacy" and it does not mean "written and not yet
+    caught" either — it means THIS WRITE DID NOT AUTHOR IT, which is the only
+    thing a write gate can honestly judge. Detection of drift already on disk
+    belongs to drone @memory lint, which reads whole files; a PreToolUse gate
+    sees only the next write and is structurally blind to drift that arrived
+    through Bash — as this gate's own refusal text says out loud.
     """
 
-    def test_edit_unchanged_over_limit_now_blocked(self, tmp_path):
-        """Over-limit key_learning untouched by the Edit -> blocked anyway."""
+    def test_edit_unchanged_over_limit_is_allowed(self, tmp_path):
+        """Over-limit key_learning untouched by the Edit -> carried, allowed."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -939,7 +944,7 @@ class TestTrinityEditUnchangedLegacy:
                 )
             )
 
-        assert result["exit_code"] == 2, "untouched over-limit entry kept the retired exemption"
+        assert result["exit_code"] == 0, "a write was refused for an entry it did not author"
 
 
 class TestTrinityWriteDisabled:
@@ -960,15 +965,18 @@ class TestTrinityWriteDisabled:
 
 
 class TestTrinityWriteUnchangedLegacy:
-    """REVERSED: rollover-safety is now carried by todos alone.
+    """REVERSED BACK (2026-08-30): rollover-safety is universal, not todos-only.
 
-    A Write that carries an over-cap key_learning forward is blocked even
-    though it did not author it. Rollover writes stay unblocked where it
-    matters — todos, the container no machine may prune.
+    This is the exact shape that broke @memory's lane in production: the
+    extractor removed a tail, wrote the SMALLER document back, and the write was
+    refused over an entry in the head it never touched — failing identically
+    every 20 minutes for three hours. The archiver is always on the losing side
+    of that trade. Carrying an over-cap entry forward while adding a clean one
+    is a write that authored nothing over cap, and it is allowed.
     """
 
-    def test_unchanged_over_limit_now_blocked(self, tmp_path):
-        """Over-limit entry identical in before/after -> blocked anyway."""
+    def test_unchanged_over_limit_is_allowed(self, tmp_path):
+        """Over-limit entry identical in before/after -> carried, allowed."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -983,7 +991,7 @@ class TestTrinityWriteUnchangedLegacy:
         with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert result["exit_code"] == 2, "carried-forward over-limit entry kept the retired exemption"
+        assert result["exit_code"] == 0, "a rollover-shaped write was refused for what it carried"
 
     def test_changed_legacy_blocked(self, tmp_path):
         """Legacy entry modified (text changed, still over-limit) -> blocked."""
@@ -2239,15 +2247,15 @@ class TestRenamedFieldDodge:
 class TestRenamedFieldLegacyAsymmetry:
     """Only NEW or EDITED entries are refused — untouched legacy shapes pass."""
 
-    def test_untouched_legacy_entry_now_refused(self, tmp_path):
-        """REVERSED by the circle close — the fleet reset happened.
+    def test_untouched_legacy_entry_is_carried_not_refused(self, tmp_path):
+        """REVERSED BACK (2026-08-30) — and the round trip is the record.
 
-        This test was written the night B3 landed, when nine-plus branches held
-        legacy shapes and refusing them would have bricked memory writes
-        fleet-wide. The push then cured them (22/22), so the exemption's own
-        premise expired. A drifted key_learning on disk is now refused whether
-        or not this write authored it; todos are the only container that keeps
-        the on-disk pass.
+        Written the night B3 landed, flipped on 08-27 because the push had cured
+        the fleet (22/22), flipped back now because @memory measured that drift
+        RECURS and that refusing carried debt deadlocks their rollover. The
+        08-27 premise was a temporary state treated as permanent. A write is
+        refused for what it AUTHORS, never for what it CARRIES — the NEW
+        canonical entry on top is judged; the untouched legacy one is not.
         """
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
@@ -2262,7 +2270,7 @@ class TestRenamedFieldLegacyAsymmetry:
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_LIST_ENFORCE)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert result["exit_code"] == 2, "untouched drifted key_learning kept the retired exemption"
+        assert result["exit_code"] == 0, "a write was refused for a drifted entry it did not author"
 
     def test_editing_a_legacy_entry_refuses_it(self, tmp_path):
         """Touch the drifted entry and you own its shape."""
@@ -2404,24 +2412,28 @@ class TestNoDuplicateViolationLines:
 
 
 # ---------------------------------------------------------------------------
-# Grandfather narrowing — todos only (DPLAN-0318 circle close)
+# Authored vs carried — the on-disk pass is universal (2026-08-30)
 # ---------------------------------------------------------------------------
 #
-# The blanket exemption existed so a drifted fleet would not be bricked
-# mid-migration. The fleet converged (trinity 100 on 21 of 22, push 22/22), so
-# the clause now protects nothing real and hides everything new: a drifted
-# entry written straight to disk reads as "already there" on the next write and
-# never surfaces again.
+# I narrowed the exemption to todos on 08-27 on two beliefs: the fleet had
+# converged, so the clause protected nothing real; and "unchanged and over cap
+# passes" hid new drift. @memory disproved both from the outside — their
+# rollover lane failed identically every 20 minutes for three hours because the
+# extractor removed a tail, wrote the SMALLER document back, and a write gate
+# refused the whole file over an entry in the head it never touched. The
+# archiver is always on the losing side of that trade: the file cannot get
+# smaller because it is too big.
 #
-# todos keep it, and only todos. The push is forbidden to archive open work
-# (@memory 1.1.0, after it archived 67 todos fleet-wide and had to mail them
-# back), so nothing but the branch's own agent can ever cure a drifted todo.
-# Refusing every write to such a file would brick its rollover — preserving the
-# debt by destroying the lane that preserves everything else.
+# So the rule is @memory's, and it is universal: a write is refused for what it
+# AUTHORS, never for what it CARRIES. My own refusal text is the other half of
+# the evidence — writes made through Bash are not checked, so a write gate is
+# structurally blind to how drift ARRIVES and was never the thing that could
+# detect it. That job is drone @memory lint, which reads the file.
 #
-# The list is read off @memory's RESHAPE_ONLY_SECTIONS at call time rather than
-# restated here: two lists of "containers we may not prune" would disagree
-# within a release.
+# Carried drift is REPORTED at INFO, never refused. Identity is the raw entry,
+# never its index: a prepend shifts every position down, and an index-keyed
+# diff would call the whole file newly authored on exactly the write that
+# authored nothing.
 
 
 _LIMITS_TODOS = {
@@ -2450,16 +2462,16 @@ def _write_before(file_path, payload):
     Path(file_path).write_text(json.dumps(payload), encoding="utf-8")
 
 
-class TestGrandfatherNarrowedToTodos:
-    """Untouched drift is refused everywhere EXCEPT todos."""
+class TestCarriedDriftIsNotRefused:
+    """Untouched drift is CARRIED everywhere — reported, never refused."""
 
-    def test_untouched_drifted_key_learning_now_refused(self, tmp_path):
-        """REVERSAL of the mid-migration exemption.
+    def test_untouched_drifted_key_learning_is_carried_not_refused(self, tmp_path):
+        """REVERSED BACK (2026-08-30): the on-disk pass is universal, not todos-only.
 
-        Before the fleet converged this entry was allowed to sit untouched.
-        Now it is a violation whether or not this write created it — the fleet
-        is canonical, so "unchanged" no longer means "legacy", it means
-        "written and not yet caught".
+        "Unchanged" means this write did not author it — the only thing a write
+        gate can honestly judge. Reading whole files for drift already on disk
+        is drone @memory lint's job, and it is the only component that can
+        actually see drift that arrived through Bash.
         """
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
@@ -2475,8 +2487,8 @@ class TestGrandfatherNarrowedToTodos:
         with patch("importlib.import_module", return_value=_mock_entry_limits(_LIMITS_TODOS)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert result["exit_code"] == 2, "untouched drifted key_learning kept its exemption"
-        assert "value" in json.loads(result["stdout"])["reason"]
+        assert result["exit_code"] == 0, "a write was refused for a drifted entry it did not author"
+        assert result["stdout"] == "", "carried drift must be reported in the log, never in a block"
 
     def test_untouched_drifted_todo_still_passes(self, tmp_path):
         """THE CAUTION: a drifted todo must not brick a write to another section.
@@ -2536,56 +2548,72 @@ class TestGrandfatherNarrowedToTodos:
         assert result["exit_code"] == 2, "an edited drifted todo kept its exemption"
 
 
-class TestReshapeOnlySeam:
-    """The exemption list is @memory's, read at call time — never a local copy."""
+class TestAuthoredVsCarriedUnit:
+    """Unit-level, because handle() cannot see this half fail.
 
-    def test_reads_memorys_constant_not_a_local_copy(self):
-        """Two lists of 'containers we may not prune' would disagree in a release.
+    Mutation found the gap (2026-08-30): making _missing_field_violations
+    return NOTHING left all 115 end-to-end tests green. The union in
+    _evaluate_limits adds @memory's real changed_entries, which refuses a new
+    missing-field entry through its own lane — so every through-handle() test
+    that proves "authored drift is refused" passes for the wrong reason and
+    would keep passing if this checker were deleted outright. The overlap is
+    deliberate; a test suite that cannot tell the two halves apart is not.
+    """
 
-        Unit-level on purpose. Going through handle() cannot prove this: the
-        union also runs @memory's REAL changed_entries, which reads @memory's
-        real module constant and would refuse the entry no matter what this
-        gate decided. Isolating this half is the only way to see whose list it
-        is reading — a wider end-to-end test here would pass for the wrong
-        reason and prove nothing.
-        """
-        legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
-        before = {"key_learnings": [legacy]}
-        after = {"key_learnings": [legacy]}
+    def test_a_new_missing_field_entry_is_refused(self):
+        """The authored half, isolated from @memory's overlapping refusal."""
+        before = {"key_learnings": []}
+        after = {"key_learnings": [{"number": 1, "date": "2026-08-30", "learning": "renamed field"}]}
 
-        narrow = MagicMock()
-        narrow.RESHAPE_ONLY_SECTIONS = ("todos",)
-        assert edit_gate._missing_field_violations(before, after, _LIMITS_TODOS, narrow), (
-            "key_learnings is not in the exemption list but the on-disk entry was skipped"
+        hits = edit_gate._missing_field_violations(before, after, _LIMITS_TODOS)
+
+        assert len(hits) == 1, "a newly authored entry with no 'value' field was not refused"
+        assert hits[0]["reason"] == "missing_field"
+        assert hits[0]["field"] == "value"
+        assert hits[0]["key"] == "0", "keys are rendered as strings — @memory's six-key contract"
+
+    def test_an_identical_on_disk_entry_is_carried(self):
+        """Byte-identical to disk: this write did not author it."""
+        legacy = {"number": 1, "date": "2026-08-01", "learning": "renamed field"}
+
+        hits = edit_gate._missing_field_violations(
+            {"key_learnings": [legacy]}, {"key_learnings": [legacy]}, _LIMITS_TODOS
         )
 
-        widened = MagicMock()
-        widened.RESHAPE_ONLY_SECTIONS = ("todos", "key_learnings")  # @memory widened it
-        assert edit_gate._missing_field_violations(before, after, _LIMITS_TODOS, widened) == [], (
-            "gate ignored @memory's widened exemption — it carries its own copy"
+        assert hits == [], "a write was refused for an entry it carried unchanged"
+
+    def test_carrying_one_does_not_license_authoring_another(self):
+        """The mixed case names the new entry and only the new entry.
+
+        This is the test the two survivors could not have been caught without:
+        it needs the checker to both skip AND refuse in the same call, so no
+        blanket answer — refuse everything, refuse nothing — satisfies it.
+        """
+        legacy = {"number": 1, "date": "2026-08-01", "learning": "carried"}
+        fresh = {"number": 2, "date": "2026-08-30", "learning": "authored in the same shape"}
+
+        hits = edit_gate._missing_field_violations(
+            {"key_learnings": [legacy]}, {"key_learnings": [fresh, legacy]}, _LIMITS_TODOS
         )
 
-    def test_absent_constant_falls_back_to_todos_and_says_so(self, caplog):
-        """An @memory too old to publish the list must not brick the fleet.
+        assert len(hits) == 1, f"expected exactly the authored entry to be refused, got {hits}"
+        assert hits[0]["key"] == "0", "the refusal named the carried entry's position, not the authored one"
 
-        Exempting nothing would refuse every write to a file carrying one
-        drifted todo — the exemption bricking the branch it protects. Falls
-        back to todos and logs, because a silent fallback is the failure mode
-        this whole standard exists to end.
+    def test_a_prepend_does_not_reauthor_the_whole_file(self):
+        """Identity is the entry text, never its index.
+
+        A prepend shifts every position down. An index-keyed diff reads the
+        entire file as newly authored on exactly the write that authored
+        nothing new below the head.
         """
-        drifted = {"priority": "low", "status": "open", "chore": "reshape me"}
-        before = {"todos": [drifted]}
-        after = {"todos": [drifted]}
+        carried = [
+            {"number": 1, "date": "2026-08-01", "learning": "a"},
+            {"number": 2, "date": "2026-08-02", "learning": "b"},
+        ]
+        clean_head = {"number": 3, "date": "2026-08-30", "value": "measurable"}
 
-        ancient = MagicMock(spec=[])  # publishes no RESHAPE_ONLY_SECTIONS
+        hits = edit_gate._missing_field_violations(
+            {"key_learnings": carried}, {"key_learnings": [clean_head, *carried]}, _LIMITS_TODOS
+        )
 
-        with caplog.at_level(logging.WARNING):
-            hits = edit_gate._missing_field_violations(before, after, _LIMITS_TODOS, ancient)
-
-        assert hits == [], "fallback did not exempt todos"
-        assert "RESHAPE_ONLY_SECTIONS" in caplog.text, "fell back silently"
-
-    def test_live_constant_is_todos_only(self):
-        """Guard on the real module: the shipped ruling is todos and only todos."""
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-        assert el.RESHAPE_ONLY_SECTIONS == ("todos",)
+        assert hits == [], f"a prepend re-authored entries it only shifted: {hits}"

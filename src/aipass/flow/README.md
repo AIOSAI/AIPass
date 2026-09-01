@@ -4,9 +4,9 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.2.1
+**Version:** 2.6.0
 **Created:** 2025-11-15
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-31
 
 ---
 
@@ -113,6 +113,7 @@ flow/
 │   │   ├── post_close_runner.py # Background post-processing with lock management
 │   │   └── template_manager.py  # Template registry management
 │   └── handlers/                # Implementation details
+│       ├── repo_root.py         # module_file / find_repo_root / exists_exactly — the one location answer
 │       ├── plan/                # Lifecycle: create, close, list, restore, display, validation, project scope
 │       ├── cli/                 # Shared --help flag detection (help_flags.py)
 │       ├── registry/            # Load, save, auto-heal registries
@@ -134,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 950 tests across 27 files
+├── tests/                       # 1013 tests across 31 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -226,6 +227,210 @@ Anything unattributable is **quarantined, never guessed and never dropped** —
 the row stays untouched and `drone @flow registry status` lists it with the
 reason, for a human ruling. Re-running the healer changes nothing the second
 time.
+
+---
+
+## Location Discovery — `handlers/repo_root.py`
+
+**Nothing in flow reads the process working directory to find itself.** One
+module answers both location questions, and every caller routes through it.
+
+| Function | Answers | Guard it carries |
+|----------|---------|------------------|
+| `module_file(__file__)` | where is *this module* | `.resolve()` attempted, falls back to the absolute spelling |
+| `find_repo_root(start=None)` | which repo root is this | falls back to `SOURCE_ROOT`, **never** `Path.cwd()` |
+| `exists_exactly(path)` | is this filename spelled exactly so | lists the parent; `exists()` alone folds case |
+| `exactly_named(paths, suffix)` | post-filter for a cased glob | a glob is case-blind on Windows/macOS |
+
+Built 2026-08-31 (Windows round 4, @memory's finding via @devpulse).
+`ntpath.realpath` reads `os.getcwd()` **unconditionally** — before it checks
+whether the path is even absolute, where `posixpath` only reads it for a
+relative one — and `Path.resolve()` routes through it. So on Windows every
+module-level `Path(__file__).resolve()` is an import-time working-directory
+dependency: a process whose cwd is gone cannot import the module. Guarding
+inside the module's functions changes nothing, because the import died before
+any of them existed.
+
+Measured red-first, in a subprocess, before any cure: **61 of 61 flow modules
+died on import** in both injected worlds. The count only became true as cures
+landed, because the first crash line masks everything under it — 61 → 43 after
+the guard, → 0 after the 29 module-level sites. Flow carried:
+
+- **29** `_PKG_ROOT = Path(__file__).resolve().parents[N]` sites — every module,
+  nearly every handler
+- **7** private `_find_repo_root` copies, each ending `return Path.cwd()`, **6
+  of them called at module level**
+- **2** `inspect.stack()` calls — the import guard, and `log_operation`'s
+  caller detection (which no import probe reaches; it runs at write time)
+
+The `Path.cwd()` fallback carried two defects, and only the loud one was a
+crash. The quiet one: cwd is a *guess*. Four of those seven callers are
+**writers** — `push_central`/`aggregate_central` build
+`.ai_central/PLANS.central.json`, `close_helpers` and `restore_ops` build the
+`.backup/processed_plans` path — and on a registry-less checkout (the core
+registry is gitignored, so every clean clone and CI runner qualifies) each one
+resolved against whatever directory the caller's shell happened to be in. A
+`try`/`except` would have fixed the traceback and kept the wrong answer.
+
+**Two `Path.cwd()` reads remain, and both are correct.**
+`project_scope.caller_cwd()` and `resolve_location._get_caller_cwd()` ask
+*where did the caller stand* — a location, observed — and fall back to the
+process directory only when `AIPASS_CALLER_CWD` is absent. They are named in
+`tests/test_import_dead_cwd.py` so the ban can never delete a right answer, and
+the exemption is keyed on **(file, function)**, not on the name alone.
+
+Enforced by `tests/test_import_dead_cwd.py`: two injected worlds with their own
+liveness controls, an AST ban, **and** a behavioural sibling that reaches the
+caller-is-None branch by calling the guard directly from a `python -c` child
+under a realpath denial. Both instruments are kept: regrowing the deleted walk
+kills both, and each catches what the other cannot — the ban names the offending
+line anywhere in the tree with no subprocess, the behavioural pin proves the cure
+in the world it was built for. (The round-4 guidance said only an AST ban could
+watch that branch; @spawn measured the correction — it is unreachable from
+*import-shaped* pins, not unreachable.)
+
+### The bare-checkout world is a tested world
+
+`AIPASS_REGISTRY.json` is **gitignored and machine-local**, so a dev box and a CI
+runner disagree about whether `find_repo_root` takes its fallback. That is not a
+detail — it is a whole second world flow's tests must pass in, and it is where
+round 5's CI red came from.
+
+The fallback logs `repo_root_fallback` through `json_handler.log_operation`, and
+six modules take the walk while **loading**. On a bare checkout that import-time
+diagnostic lands inside whichever test window triggers the first import, where
+the autouse `mock_json_handler` counts it — so a test pinning
+`assert_called_once` breaks on CI and passes everywhere else.
+
+`tests/conftest.py` therefore **pre-imports all six module-level callers**,
+settling the walk before any test window exists on every machine. The list is
+guarded by `TestThePreImportListIsComplete`, which measures the callers off the
+tree by parse and compares them against what conftest actually imports — neither
+side hand-copied, because a hand-written list is exactly where an undercount
+hides.
+
+Measured, not assumed: with the marker denied and every count-asserting test run
+in **full isolation**, **2 of 10** failed. CI had named one.
+
+### An instrument must not import behaviour it is not testing
+
+Round 7's Windows red, and it is the sharper half of the lesson above. The
+accessor probes captured the live `os.path.realpath`, then asked *"did a later
+patch reach it?"* by denying `os.getcwd` and reading raise/no-raise. That
+discriminates on posix, where the captured function ignores the cwd for an
+absolute path — so a raise can only mean the patch landed. On nt `os.path` **is**
+`ntpath`, and `ntpath.realpath` reads `os.getcwd` unconditionally, so the
+**original** raises too and *raised* stops meaning *reached*.
+
+Three rules came out of it (@memory measured the same species on four of their
+own reds; each is verified here rather than imported on their word):
+
+1. **Emulate both platforms or neither.** A table with one emulated row and one
+   bare row is host-dependent in the half nobody thought about — "no emulation"
+   reads as posix only while the host is posix.
+2. **Build an emulation from the dialect module by name** (`posixpath`,
+   `ntpath`), never from `os.path`, which *is* the host.
+3. **When a probe asks "did my patch reach X", let X have captured a sentinel.**
+   Otherwise the original's own platform behaviour answers the question.
+
+The litmus that finds all three: run each probe under the *opposite* platform's
+emulation and require the verdict not to move. `TestTheWorldArmsOnAPreCapturedAccessor`
+runs it on every direction, with a control pinning that the two emulated hosts
+are genuinely different worlds — two identical hosts would pass the litmus for
+free.
+
+### An instrument's INPUTS are behaviour too
+
+Round 8's Windows red, and it is the round-7 rule one level along. The
+emulations were built from `posixpath`/`ntpath` by name and were correct — but
+the probe *path* was still built from `os.sep` and `pathlib.__file__`, which are
+the **runner's**. On the Windows runner that yields `\definitely\not\here`,
+which `posixpath` reads as **relative**; `posixpath.realpath` reads the cwd for a
+relative path on every platform, so the posix row convicted for the path's shape
+and announced *"the posix emulation is not posix-shaped"* about an emulation that
+was doing its job.
+
+Each host now publishes its own dialect-absolute literal, pinned with `isabs`
+from the dialect module by name. **The table is not symmetric**, and saying so
+matters: `posixpath` refuses an nt literal, while `ntpath` *accepts* a posix one
+and treats it as drive-relative — so an nt probe path must carry a drive, and
+`isabs` alone is not enough.
+
+The missing instrument was a second dimension. Round 7's litmus varied the
+emulated **host**; nothing varied the **runner**. `WINDOWS_RUNNER` fakes exactly
+what a probe can read to construct a path — `os.sep`, `os.path`,
+`pathlib.__file__` — and every direction must return the same verdict with and
+without it. Reverting the dialect-absolute literals reds it on Linux, which is
+the point: the failure was otherwise only observable on hardware nobody here has.
+
+### Host == faked is one layer
+
+Round 9, named by @seedgo. Round 8 shipped `WINDOWS_RUNNER`, a fake of everything
+a probe can read to build a path. It works on Linux — and it is **dark on the
+runner it was written for**. On a Windows host the fake installs Windows-shaped
+values over Windows-shaped values, so the faked and unfaked runs are
+byte-identical and the control that requires them to *differ* can never arm. A
+single fake cannot arm on the host it imitates, for the same reason a
+`nt`-emulating world proves nothing on `nt`.
+
+What the campaign reported was that control going dark. The bigger hole was
+behind it: the **litmus** was dark too. Round 8's check varied the emulated host
+only, so on Windows it measured nothing at all — *a one-dimension litmus is blind
+on the host that already IS that dimension.*
+
+The cure is a **set**, not a fake: `RUNNERS` carries a posix-shaped and a
+windows-shaped runner, every direction runs under both, and the verdict must not
+move. Whichever one matches the host is inert there — and it says so, in
+@spawn's three-state shape: **CHANGED / ALREADY-with-the-reason /
+UNAVAILABLE-with-the-child's-own-reason.** A row that cannot arm here reports
+*why*; it never passes quietly and never fails on someone else's platform. One
+pin then simulates *both kinds of host* so the Windows leg is falsifiable from
+Linux, forever.
+
+Two rules ride along. Each fake must override **every** host read a probe makes,
+pinned per attribute — a partial fake (`os.sep` without `os.path`) survived
+otherwise. And the probe path itself must be a **published literal**: anything
+computed from the running host — `os.sep`, `sys.executable`, `__file__` — is the
+round-8 defect returning under a new spelling, so the source is parsed and a
+non-`Constant` right-hand side is refused by name (@trigger's shape, and their
+own round-8 red).
+
+### A sentinel cannot arm, so it takes the eagerness pin dark
+
+@trigger's correction, adopted. A sentinel is stale-proof by construction, so a
+lazy wrapper *around* the sentinel returns exactly what an eager capture of it
+returns — and the behavioural eagerness pin answered the same either way
+(measured: that mutation left it green). An identity check cannot be satisfied by
+accident, but it **can go dark when the thing whose identity you are checking
+stops being able to differ.**
+
+The durable form is a difference you *construct*: two distinguishable sentinels
+and a source name rebound after the class body runs. An eager capture answers
+`CAPTURED`, a lazy one follows the name and answers `MOVED` — return-value, with
+no filesystem, cwd or path dialect anywhere in the question.
+
+### An injected world has to ARM, and the arming is version-shaped
+
+The dead-cwd pins install their world by patching `os.path.realpath` in a
+subprocess. On **Python 3.10 that patch reaches nothing**: `pathlib` still has
+`_NormalAccessor`, whose `realpath = staticmethod(os.path.realpath)`
+(`Lib/pathlib.py:358`) takes its copy when `pathlib` is first imported, and
+`Path.resolve` reads it as `self._accessor.realpath(self, strict=strict)`
+(`:1077`). Patching the module attribute afterwards rebinds a name nothing will
+read again. 3.11 removed the accessor and calls `os.path.realpath` at use —
+which is why one CI leg reddened and three stayed green.
+
+Both worlds therefore end in `_ACCESSOR_CURE`, which patches the accessor as a
+`staticmethod` behind a `hasattr` — order-independent on 3.10, inert on 3.11+.
+A plain function would arrive **bound** and eat the path into `self`.
+
+Because only 3.12 exists on a dev box, that cure would otherwise be a row nobody
+here could contradict. So `TestTheWorldArmsOnAPreCapturedAccessor` **rebuilds
+3.10's construction locally** and pins both directions — bare module patch →
+`ACCESSOR_DIES: NO` (CI's failure, reproduced), plus the cure →
+`ACCESSOR_DIES: YES` — with the three traps that make the shape vacuously green
+(lazy capture, class-level read, relative probe path) pinned as their own
+controls.
 
 ---
 
@@ -353,12 +558,13 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ## Quality
 
-- **Seedgo:** 100% (46 standards, 44 files, no type errors)
-- **Tests:** 950 tests in 27 files — 969 cases collected after parametrisation, 968 pass / 1 skip. 98/98 public functions tested (100%, `drone @seedgo test_map @flow`)
-- **Source files:** 44 tracked by seedgo (61 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
+- **Seedgo:** 100% (46 standards, no type errors)
+- **Tests:** 1013 tests in 31 files — 1042 cases collected after parametrisation, 1041 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
-- **Registries:** 7 registered plan types + 1 orphan; **798 plans on disk, 23 open, 775 closed**
-- **Last audit:** 2026-08-25 (every figure on this list re-measured, not carried forward)
+- **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**
+- **Dead-cwd:** 0 of 62 modules die on import with no readable working directory, in both injected worlds (`tests/test_import_dead_cwd.py`)
+- **Last audit:** 2026-08-31 (every figure on this list re-measured, not carried forward)
 
 ### Known Issues
 - **315 of 775 closed plans have no archived copy and cannot be restored.**
@@ -385,7 +591,30 @@ aggregation untouched, plus anything auto-closed during the run.
   `get_status_impl` calls a bare `load_registry()`. Its quarantine list and
   `Ignored folders: 33` are branch-wide and correct; only the two totals are
   scoped to one type.
-- **`flow_json/PLAN_REGISTRY.json` is legacy but NOT unread.** No flow code
+- **The cross-branch handler fence never arms.** `apps/__init__.py` is
+  `from . import handlers`, so importing *anything* under `aipass.flow.apps`
+  loads the handlers package first, and at that moment the nearest real-file
+  frame is `apps/__init__.py` itself — which lives under `/flow/` and is
+  therefore allowed. An external branch reaching for a flow handler passes the
+  guard every time. Reported, deliberately NOT fixed: Patrick's fleet ruling
+  (2026-08-31) is that this is one change made everywhere at once, not
+  per-branch. Flow has exactly ONE such pre-import door — `flow/__init__.py` is
+  a bare docstring and there is no public API surface re-exporting handlers.
+- **The fence's branch check is a substring, not a path segment.** `MY_BRANCH`
+  is `"flow"` and the test is `"/flow/" in caller_file`, so any caller whose
+  path contains a directory named `flow` — in any repo, at any depth — reads as
+  local. @spawn's cured guard uses the full dotted package (`aipass.spawn` →
+  `/aipass/spawn/`). Out of scope for the round-4 dispatch (which is about the
+  cwd defect, not the matching rule) and reported rather than changed, because
+  narrowing it is a fence behaviour change that deserves its own red-first pin.
+- **`flow_json/PLAN_REGISTRY.json` is legacy and no longer read.** @trigger
+  retired their `plan_file.py` handler on 2026-08-31 after measuring it
+  themselves: their regex matched **1** of the 366 FPLAN files on disk, so it
+  had been inert for essentially every plan since the naming convention took a
+  slug. The handler and its 16 tests are archived and the three `trigger.on()`
+  registrations are removed, with a comment naming the events as deliberately
+  unwired. The paragraph below records the state that preceded that.
+- **`flow_json/PLAN_REGISTRY.json` was legacy but NOT unread.** No flow code
   touches it, but `@trigger`'s `apps/handlers/events/plan_file.py` both reads
   and writes it (`_load_registry`/`_save_registry`), and the file's own contents
   are the evidence — 1 plan row against `next_number: 402`, last written
@@ -393,7 +622,12 @@ aggregation untouched, plus anything auto-closed during the run.
   in the tree"; that was wrong. Whether @trigger's handler should be pointed at
   the typed registries is a question for @trigger, not a flow-side fix.
 - `flow_json/pbplan_registry.json` is an orphaned type registry (see Auto-healing)
-- Registry scan fires trigger events that are never handled (by design — foreground close handles everything)
+- Registry scan fires trigger events that are never handled — and as of
+  2026-08-31 that is a **decision, not an accident**. @trigger removed the three
+  registrations deliberately when they retired `plan_file.py`, and their
+  `registry.py` comment says so. An earlier edition of this README called it
+  "by design" while the handlers were in fact registered; the sentence is true
+  again, for a different reason.
 - Dashboard push warns on some closes
 - `mbank/process.py` at 718 lines (over the 700 limit)
 - **`CLOSED_PLANS.local.json` carries foreign keys on every branch that has
@@ -413,7 +647,7 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ---
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-08-31*
 
 ---
 [← Back to AIPass](../../../README.md)

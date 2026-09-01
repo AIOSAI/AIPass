@@ -10,6 +10,8 @@ kind of event worth finding later, and it is the only trace that event leaves.
 """
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -357,8 +359,19 @@ class TestLogLocation:
         assert deletion_log.deletion_log_path() == elsewhere
 
     def test_override_cannot_silence_the_prax_line(self, project, monkeypatch):
-        """Relocating the store must not become a way to erase the event."""
-        monkeypatch.setenv("AIPASS_DELETION_LOG", "/proc/nonexistent/d.jsonl")
+        """Relocating the store must not become a way to erase the event.
+
+        The unwritable target is a FILE standing where the parent directory has
+        to be, so ``_append_record``'s ``mkdir(parents=True)`` raises inside the
+        tmp project. It used to be ``/proc/nonexistent``, which raised the same
+        OSError family but reached OUTSIDE the tree under test: the two os.mkdir
+        attempts were this suite's last outside-copy records in @seedgo's
+        hygiene gate. An unwritable path does not have to be someone else's
+        filesystem to be unwritable.
+        """
+        blocked = project / "not_a_directory"
+        blocked.write_text("a file where a directory would have to be")
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
         target = project / "x.txt"
         target.write_text("x")
 
@@ -393,3 +406,178 @@ class TestRecordFailureIsContained:
                 safe_delete([str(target)])
 
         assert log.error.called, "a lost deletion record must be loud"
+
+    @pytest.mark.deletable_cwd
+    def test_deleting_the_current_directory_still_reports_success(self, project, monkeypatch):
+        """The delete worked. Losing cwd must not turn it into a failure.
+
+        ``drone rm`` on the directory you are standing in is an ordinary thing
+        to do with a scratch dir. The rmtree succeeds and the process is left
+        with no cwd — every later ``Path.cwd()`` raises ENOENT. That is the
+        record's problem to absorb, not a result the caller should see.
+        """
+        doomed = project / "scratch"
+        doomed.mkdir()
+        (doomed / "f.txt").write_text("x")
+        monkeypatch.chdir(doomed)
+
+        results = safe_delete([str(doomed)])
+
+        assert results[0][1] is True, "the delete succeeded; the result must say so"
+        assert not doomed.exists()
+
+    @pytest.mark.deletable_cwd
+    def test_deleting_the_current_directory_does_not_raise(self, project, monkeypatch):
+        """safe_delete returns per-path results. It must not become a crash.
+
+        The failure this pins was worse than a wrong result: the record raised
+        inside the success path, the except handler recorded the failure, and
+        the SECOND record raised the same way — straight out of safe_delete,
+        past every caller expecting a list.
+        """
+        doomed = project / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+
+        results = safe_delete([str(doomed)])
+
+        assert isinstance(results, list)
+        assert len(results) == 1
+
+    @pytest.mark.deletable_cwd
+    def test_record_deletion_does_not_raise_when_cwd_is_gone(self, project, monkeypatch):
+        """The docstring says 'Never raises'. Two lines read cwd outside its try."""
+        doomed = project / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+        shutil.rmtree(doomed)
+
+        record = deletion_log.record_deletion(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_DELETED,
+            requested=str(doomed),
+            resolved=doomed,
+            reason="Deleted",
+        )
+
+        assert record["outcome"] == deletion_log.OUTCOME_DELETED
+
+    @pytest.mark.deletable_cwd
+    def test_a_successful_delete_is_never_logged_as_a_failure(self, project, monkeypatch):
+        """The log said 'deleted' and 'delete failed' for one path, one second.
+
+        Both lines were true of what the code did and only one was true of
+        what happened. Whoever reads the log next must not have to guess which.
+        """
+        doomed = project / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+
+        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
+            safe_delete([str(doomed)])
+
+        failures = [c for c in log.error.call_args_list if "delete failed" in str(c)]
+        assert not failures, f"a delete that succeeded was reported as failed: {failures}"
+
+    @pytest.mark.deletable_cwd
+    def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
+        """Losing cwd must not cost the durable half of the record.
+
+        The store path is derived by walking up from cwd, so the same ENOENT
+        that broke the caller's result also broke the walk — and the record of
+        the one delete most worth finding later fell to the prax line alone.
+        The env override and the tempdir home were both sitting right there,
+        unreachable because the walk raised before either was consulted.
+        """
+        # tempfile caches gettempdir() on first use, so setting TMPDIR here
+        # would silently keep the real /tmp — and the test would write its
+        # record outside the tree it was given. Patch the resolved value.
+        home = project / "tmphome"
+        home.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(home))
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        doomed = project / "scratch"
+        doomed.mkdir()
+        monkeypatch.chdir(doomed)
+
+        safe_delete([str(doomed)])
+
+        # No cwd to walk up from and no AIPASS_HOME, so the tempdir home the
+        # docstring already promises is the only place left that can answer.
+        store = home / "deletions.jsonl"
+        assert store.exists(), "the deletion record was lost with the directory"
+        record = json.loads(store.read_text().strip().splitlines()[-1])
+        assert record["outcome"] == deletion_log.OUTCOME_DELETED
+        assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
+
+
+# ---------------------------------------------------------------------------
+# The same claims, on every OS
+# ---------------------------------------------------------------------------
+
+
+class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
+    """What the deletable-cwd tests above claim, built the portable way.
+
+    Those tests reach the no-cwd state by deleting the directory they stand in,
+    which Windows refuses (see WINDOWS_CWD_REASON in conftest) — so on Windows
+    they are skipped and these are the only cover the record's guards have.
+
+    The state here is supplied rather than produced: ``Path.cwd`` raises the
+    ENOENT it raises for real. That is weaker in exactly one way, stated so
+    nobody has to rediscover it — it cannot catch a read that reaches
+    ``os.getcwd`` inside C, the way ``Path.resolve()`` does. It is also stronger
+    in one way: it runs on all three operating systems.
+    """
+
+    @pytest.fixture()
+    def no_cwd(self, monkeypatch):
+        def gone():
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        yield
+
+    def test_record_deletion_does_not_raise(self, no_cwd, tmp_path, monkeypatch):
+        """The docstring says "never raises". Two lines read cwd outside its try."""
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+
+        record = deletion_log.record_deletion(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_DELETED,
+            requested=str(tmp_path / "scratch"),
+            resolved=tmp_path / "scratch",
+            reason="Deleted",
+        )
+
+        assert record["outcome"] == deletion_log.OUTCOME_DELETED
+        assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
+
+    def test_the_record_still_lands_somewhere_durable(self, no_cwd, tmp_path, monkeypatch):
+        """Losing the cwd must not cost the durable half of the record.
+
+        The store path is derived by walking up from cwd, so the same absence
+        that broke the caller's result also broke the walk — and the record of
+        the one delete most worth finding later fell to the prax line alone.
+        """
+        home = tmp_path / "tmphome"
+        home.mkdir()
+        # tempfile caches gettempdir() on first use, so setting TMPDIR here
+        # would silently keep the real one. Patch the resolved value.
+        monkeypatch.setattr(tempfile, "tempdir", str(home))
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+
+        deletion_log.record_deletion(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_DELETED,
+            requested=str(tmp_path / "scratch"),
+            resolved=tmp_path / "scratch",
+            reason="Deleted",
+        )
+
+        store = home / "deletions.jsonl"
+        assert store.exists(), "the deletion record had nowhere left to land"
+        record = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert record["outcome"] == deletion_log.OUTCOME_DELETED
+        assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY

@@ -26,6 +26,7 @@ import json
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers import registry_scan
 
 # =============================================================================
 # PRIVATE BRANCH DETECTION
@@ -60,34 +61,15 @@ def _find_registry() -> Path:
     CWD-first matches drone's registry_handler search order and supports
     external projects with their own registries.
     """
-    # Walk up from CWD first — this is where the user is working
-    cwd = Path.cwd()
-    for parent in [cwd] + list(cwd.parents):
-        matches = sorted(parent.glob("*_REGISTRY.json"))
-        if matches:
-            return matches[0]
-    # Fallback: walk up from this file (pip editable installs)
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        matches = sorted(parent.glob("*_REGISTRY.json"))
-        if matches:
-            return matches[0]
-    return Path.cwd() / "AIPASS_REGISTRY.json"
+    # Delegates: the name is the contract, the private glob walk was the disease.
+    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
+    # a flow_json plan counter could be served as the trust anchor.
+    return registry_scan.find_registry()
 
 
 def _find_caller_registries() -> List[Path]:
     """Find registries from the caller's project via AIPASS_CALLER_CWD."""
-    import os
-
-    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
-    if not caller_cwd:
-        return []
-    caller_path = Path(caller_cwd)
-    for parent in [caller_path] + list(caller_path.parents):
-        matches = sorted(parent.glob("*_REGISTRY.json"))
-        if matches:
-            return matches
-    return []
+    return registry_scan.caller_registries()
 
 
 def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:

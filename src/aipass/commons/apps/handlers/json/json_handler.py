@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON Auto-Creating Handler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-08-18
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -16,7 +16,7 @@ see _atomic_write_json.
 
 import json
 import os
-import inspect
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -25,8 +25,13 @@ from typing import Dict, Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# Constants - relative path resolution (pip-safe, no hardcoded absolutes)
-_HANDLER_DIR = Path(__file__).resolve().parent  # .../commons/apps/handlers/json/
+from aipass.commons.apps.handlers.module_root import module_file
+
+# Constants - relative path resolution (pip-safe, no hardcoded absolutes).
+# module_file() rather than a bare .resolve(): this runs at IMPORT time, and on
+# Windows ntpath.realpath reads os.getcwd() unconditionally, so a bare resolve
+# here makes every commons import depend on a readable working directory.
+_HANDLER_DIR = module_file(__file__).parent  # .../commons/apps/handlers/json/
 _APPS_DIR = _HANDLER_DIR.parent.parent  # .../commons/apps/
 _COMMONS_ROOT = _APPS_DIR.parent  # .../commons/
 BRANCH_JSON_DIR = str(_COMMONS_ROOT / "commons_json")
@@ -107,16 +112,26 @@ def _get_caller_module_name() -> str:
     """
     Auto-detect calling module name from call stack.
 
+    Walks with sys._getframe rather than inspect.stack() for the same reason
+    the handlers guard does (round 4, 2026-08-31): inspect.stack() builds a
+    FrameInfo for EVERY frame, and any frame whose filename is not on disk -
+    a "<string>" entry point, a frozen importlib frame - sends it through
+    getmodule() to an os.path.realpath() that reads os.getcwd()
+    unconditionally on Windows. This function only ever wanted ONE frame's
+    co_filename, which is already a string in memory.
+
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
-    stack = inspect.stack()
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = caller_frame.filename
-        module_name = os.path.splitext(os.path.basename(caller_path))[0]
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    # Depth 2: this function (0), log_operation (1), the real caller (2) -
+    # matching the old stack[2]. ValueError where the old form found len <= 2.
+    try:
+        caller_path = sys._getframe(2).f_code.co_filename
+    except ValueError:
+        return "unknown"
+    module_name = os.path.splitext(os.path.basename(caller_path))[0]
+    if module_name and not module_name.startswith("_"):
+        return module_name
     return "unknown"
 
 

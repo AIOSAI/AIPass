@@ -46,14 +46,17 @@ except ImportError:
 # Handler imports (relative within package — after conditional watchdog block)
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
 from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
+from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers.repo_root import exactly_named, exists_exactly  # noqa: E402
 from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
 from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
 from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
+from aipass.memory.apps.handlers.repo_root import module_file  # noqa: E402
 
 logger = get_system_logger()
 
 # Memory root resolved relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 
 # Global observer instance
 _observer: Any = None
@@ -148,7 +151,10 @@ def check_and_rollover() -> Dict[str, Any]:
         if not trinity_dir.exists():
             continue
         for pattern in ["local.json", "observations.json"]:
-            for memory_file in trinity_dir.glob(pattern):
+            # Not glob(): the pattern has no wildcard, and a folding filesystem
+            # would serve Local.json here. Rollover REWRITES what this matches,
+            # so a near-miss is damage rather than a miscount.
+            for memory_file in [trinity_dir / pattern] if exists_exactly(trinity_dir / pattern) else []:
                 results["files_checked"] += 1
 
                 try:
@@ -330,12 +336,17 @@ def _check_code_archive() -> Dict[str, Any]:
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="memory_watcher")
 
 
 def _paths_from_registry(registry_path: Path, root: Path) -> list[Path]:
@@ -400,7 +411,10 @@ def _get_branch_paths() -> list[Path]:
 
     cwd_found: list[Path] = []
     for parent in [caller_cwd] + list(caller_cwd.parents):
-        for reg in parent.glob("*_REGISTRY.json"):
+        # EXACT CASE -- detector's twin of this walk, and the consequence here
+        # is that a folded match's "branches" become paths this watcher ROLLS
+        # OVER, i.e. rewrites. See repo_root.exactly_named.
+        for reg in exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
         if cwd_found:

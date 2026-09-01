@@ -1,7 +1,11 @@
 """Tests for email header handler -- get_dispatch_header, prepend_dispatch_header."""
 
+import ast
+
 import pytest
 from unittest.mock import MagicMock
+
+from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.header as mod
 
@@ -147,3 +151,126 @@ def test_culture_fence_reaches_the_recipient():
     not just a module constant."""
     result = mod.prepend_dispatch_header("Task body.")
     assert "never invent an author" in result
+
+
+# --- The module docstring is where Python can see it -----------------
+#
+# Found by @seedgo (2026-08-31) when they rewrote check_module_docstring off a
+# 30-line scan for a triple quote and onto ast.get_docstring. This file's
+# docstring sat AFTER the json_handler import. Python evaluates such a string,
+# discards it, and leaves __doc__ None — so the module read as documented to
+# every human opening it and to nothing that reads __doc__: help(), pydoc, and
+# seedgo's new checker. That is why the old line scan agreed with the reader
+# instead of with the interpreter, and why the verdict was 100 for eight months.
+
+
+def test_header_module_has_a_real_docstring():
+    """The defect itself: __doc__ is populated, not silently discarded.
+
+    Goes red on the pre-fix file — the string was there, ``__doc__`` was None.
+    """
+    assert mod.__doc__ is not None
+    assert "Email Header Handler" in mod.__doc__
+
+
+def test_header_docstring_opens_the_module_body():
+    """The MECHANISM, separately from the outcome: the string is statement zero.
+
+    ``__doc__`` being populated is the outcome; a string literal opening the
+    body is the cause. Pinned apart so a future red names which one moved —
+    a docstring assigned some other way would satisfy the pin above and still
+    leave the shape seedgo measures wrong.
+    """
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    first = tree.body[0]
+    assert isinstance(first, ast.Expr), f"module opens with {type(first).__name__}"
+    assert isinstance(first.value, ast.Constant)
+    assert isinstance(first.value.value, str)
+
+
+def _discarded_module_strings(source: str) -> list:
+    """Line numbers of module-level strings Python evaluates and throws away.
+
+    A bare string expression at the top of the body IS the docstring; anywhere
+    below it, it is a no-op the interpreter discards. Reports lines only when
+    the module has no real docstring, which is the shape that reads as
+    documentation and is not.
+    """
+    tree = ast.parse(source)
+    if ast.get_docstring(tree) is not None:
+        return []
+    discarded = [
+        node.lineno
+        for index, node in enumerate(tree.body)
+        if index != 0
+        and isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    ]
+    # An f-string OPENING the body is the same defect one step along: it reads
+    # as the docstring to a human, ``ast.get_docstring`` refuses it (JoinedStr,
+    # not Constant), and Python leaves __doc__ None. Named by a mutant here,
+    # measured at 0 live sites in apps/ on 2026-08-31 — reachable, not armed,
+    # so the sweep watches for it rather than waiting to be surprised.
+    if tree.body:
+        first = tree.body[0]
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.JoinedStr):
+            discarded.append(first.lineno)
+    return sorted(discarded)
+
+
+_DEFECT_SHAPE = '"""Not the docstring."""'
+_CURED_SHAPE = '"""The docstring."""'
+
+
+def test_the_sweep_convicts_the_defect_shape():
+    """Negative control. A matcher that convicts nothing reports any tree clean.
+
+    Built from a synthetic source, never the live file, so it cannot pass for
+    the sweep's own reason — the thing it measures is present here by
+    construction whatever the tree below does.
+    """
+    guilty = f"import os\n\n{_DEFECT_SHAPE}\n"
+    assert _discarded_module_strings(guilty) == [3]
+
+
+def test_the_sweep_acquits_a_real_docstring():
+    """Positive control. The cured shape — string first, import after — is clean.
+
+    Without this, a matcher that convicts unconditionally would look identical
+    to a working one from the tree sweep's green.
+    """
+    cured = f"{_CURED_SHAPE}\n\nimport os\n"
+    assert _discarded_module_strings(cured) == []
+
+
+def test_the_sweep_convicts_an_fstring_opener():
+    """The species M4 named: an f-string reads as the docstring and is not one.
+
+    Zero live sites in ``apps/`` when this was written, so the sweep's green on
+    this shape says nothing on its own — this control is what makes the tree
+    result mean something.
+    """
+    guilty = 'f"""Module {1}."""\n\nimport os\n'
+    assert _discarded_module_strings(guilty) == [1]
+
+
+def test_no_module_in_the_tree_documents_itself_into_the_void():
+    """Tree-wide: the species dies everywhere in this branch, not just here.
+
+    seedgo's sweep named one ai_mail file and my own sweep agreed on one — but
+    a handed list is a starting point, never the scope, so this asks the tree
+    directly and keeps asking on every run.
+    """
+    apps = Path(__file__).resolve().parents[1] / "apps"
+    scanned, offenders = 0, []
+    for source in apps.rglob("*.py"):
+        scanned += 1
+        lines = _discarded_module_strings(source.read_text(encoding="utf-8"))
+        if lines:
+            offenders.append(f"{source.name}:{lines}")
+
+    # Arming probe: a sweep over an empty file list passes for free. A wrong
+    # root or a renamed apps/ would otherwise read as a clean tree forever.
+    assert scanned > 30, f"sweep only visited {scanned} files — wrong root?"
+    assert not offenders, f"module strings Python discards: {offenders}"

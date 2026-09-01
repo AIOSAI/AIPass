@@ -1,6 +1,7 @@
 """CANARY handlers package - Security protected."""
 
-import inspect
+import linecache
+import sys
 from pathlib import Path
 
 MY_BRANCH = "aipass.canary"
@@ -11,24 +12,54 @@ def _find_real_caller():
 
     Skips this file, importlib internals, and frozen modules.
     Returns tuple: (file_path, import_line) or (None, None).
+
+    Walks frames with sys._getframe rather than inspect.stack(): inspect
+    builds a FrameInfo per frame, and getmodule() calls os.path.realpath()
+    outside any try (inspect.py:1009) — while ntpath.realpath reads
+    os.getcwd() UNCONDITIONALLY, unlike posixpath which reads it only for
+    relative paths. So on Windows a process whose cwd is unreadable cannot
+    import this package at all. Measured here 2026-08-31: denying realpath
+    convicted line 15 (inspect.stack) and denying getcwd convicted line 16
+    (the raw resolve) — two separate species in one function. A frame's
+    co_filename is already a string in memory; reading it touches nothing.
     """
-    stack = inspect.stack()
-    this_file = str(Path(__file__).resolve())
+    # Path.resolve() reaches the same ntpath.realpath. __file__ is already
+    # absolute, so the resolve only normalises it — the raw spelling is a
+    # correct answer when the cwd is gone.
+    try:
+        this_file = str(Path(__file__).resolve())
+    except OSError:
+        this_file = __file__
 
-    for frame_info in stack:
-        filename = frame_info.filename
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
 
-        if this_file in str(Path(filename).resolve()):
-            continue
-
+        # Skip Python internals BEFORE touching the filesystem — resolve() on a
+        # pseudo-filename like <string> needs a cwd, and a process whose cwd was
+        # deleted dies here otherwise.
         if filename.startswith("<") or "importlib" in filename:
+            frame = frame.f_back
             continue
 
-        import_line = None
-        if frame_info.code_context:
-            import_line = frame_info.code_context[0].strip()
+        # resolve() on a relative frame filename also needs a cwd; fall back to
+        # the raw spelling rather than crashing the import.
+        try:
+            resolved = str(Path(filename).resolve())
+        except OSError:
+            resolved = filename
 
-        return str(Path(filename).resolve()), import_line
+        if this_file in resolved or __file__ in filename:
+            frame = frame.f_back
+            continue
+
+        # linecache reads one named file and returns "" rather than raising.
+        try:
+            import_line = linecache.getline(filename, frame.f_lineno).strip() or None
+        except OSError:
+            import_line = None
+
+        return resolved, import_line
 
     return None, None
 
@@ -52,10 +83,10 @@ def _guard_branch_access():
     caller_file, import_line = _find_real_caller()
 
     if caller_file is None:
-        stack = inspect.stack()
-        for frame in stack:
-            if frame.filename in ("<string>", "<stdin>"):
-                return
+        # No caller outside this file: an interactive session, a -c script, or
+        # an importlib-only stack — all allowed. The old second inspect.stack()
+        # walk here returned on every path, so it could not change this answer;
+        # it was a second copy of the cwd dependency in service of nothing.
         return
 
     branch_path = "/" + MY_BRANCH.replace(".", "/") + "/"

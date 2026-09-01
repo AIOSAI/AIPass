@@ -15,10 +15,17 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
+import sys
 
-# Constants — resolved via __file__ (portable across any machine)
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]  # json/ -> handlers/ -> apps/ -> cli/
+# Constants — resolved via __file__ (portable across any machine).
+# The resolve is guarded: it runs at IMPORT time, and Path.resolve() routes
+# through ntpath.realpath on Windows, which reads os.getcwd() unconditionally.
+# A process whose cwd was deleted cannot import this module otherwise, and most
+# of the fleet imports it. __file__ is already absolute; resolve only normalises.
+try:
+    _BRANCH_ROOT = Path(__file__).resolve().parents[3]  # json/ -> handlers/ -> apps/ -> cli/
+except OSError:
+    _BRANCH_ROOT = Path(__file__).parents[3]
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 
@@ -29,17 +36,27 @@ def _get_caller_module_name() -> str:
 
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
-    """
-    stack = inspect.stack()
-    # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = Path(caller_frame.filename)
-        module_name = caller_path.stem
 
-        # Validate module name
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    Uses sys._getframe rather than inspect.stack() for the same reason the
+    handler guard does: inspect.stack() builds a FrameInfo per frame, which
+    reaches os.path.realpath() through getmodule(), and ntpath's realpath reads
+    os.getcwd() unconditionally. This one is CALL-time rather than import-time,
+    so it never blocked an import — but log_operation() is called from across the
+    fleet, and a branch logging an operation in a dead-cwd world would have died
+    here. Reading f_code.co_filename touches the filesystem not at all.
+    """
+    # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError:
+        # Stack shallower than 3 frames — the old len(stack) > 2 guard.
+        return "unknown"
+
+    module_name = Path(caller_frame.f_code.co_filename).stem
+
+    # Validate module name
+    if module_name and not module_name.startswith("_"):
+        return module_name
 
     # Fallback
     return "unknown"

@@ -50,7 +50,8 @@ apps/
     ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
     ├── ignore/            # .backupignore patterns + whitelist
     ├── json/              # JSON persistence, atomic writes, ops log
-    ├── path/              # Backup path building + caller-CWD resolution
+    ├── path/              # Backup path building, caller-CWD resolution,
+    │                      #   and module_paths.py (the safe-resolve helper)
     ├── project/           # Config, registry, setup (.backup/)
     ├── report/            # Result formatting
     ├── scan/              # Directory walking + filtering + the run ceiling
@@ -218,6 +219,83 @@ sweep above. Treat the key as advertised-but-unimplemented until a pruning lane
 exists.
 
 Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
+
+---
+
+### Fabricated filenames never name the real tree (round 12)
+
+The fence pins drive the guard by compiling `check()` under a made-up caller
+filename. coverage.py records every executed code object BY FILENAME, existing
+file or not -- so a fabrication that looks like a real tree file makes the
+coverage *report* step exit 1 with `No source for code` while every test passes.
+That is what reddened the coverage CI leg on `5bfd5b63`.
+
+Two rules, both pinned:
+
+- Every fabricated filename lives under `tmp_path`, outside coverage's `source`
+  filter. Real-tree adjacency (is `src/aipass/memory` foreign? is a real backup
+  file kin?) is asserted on `_is_kin`, which is pure and compiles nothing.
+- There is exactly ONE `compile()` in the test file, and it refuses a filename
+  that `abspath`s inside the source tree. `abspath`, not the literal: coverage
+  resolves a relative name against the cwd at trace time, so a Windows-spelled
+  literal is inert from the repo root and a minter from the branch directory.
+
+### Kinship is spelled, not compared raw (round 5)
+
+The handlers fence asks one question -- is this caller inside my branch? -- and
+until 2026-08-31 it asked it with a raw substring test that normalised only ONE
+side. On Windows `_BRANCH_ROOT` arrives from `Path` with backslashes while the
+caller had just had its backslashes replaced with forward slashes, so the test
+could never match: every file in this branch read as FOREIGN and the whole tree
+died at the door with backup's own ACCESS DENIED message.
+
+Both sides now go through `_spell_for_kinship()`. Case is folded only when
+`os.name == "nt"` -- folding everywhere would ADMIT a foreign `/tmp/BACKUP` on a
+case-sensitive filesystem, which is a wider fence, not a safer one. The guard's
+own-frame skip uses the same rule for a sharper reason: if that skip misses,
+`__init__.py` becomes the reported caller, is trivially kin, and the real
+foreign frame beneath it is never examined.
+
+## Path Resolution — why nothing here calls `resolve()` at import
+
+`ntpath.realpath` reads `os.getcwd()` **unconditionally** (posixpath only does so
+for relative paths), and `Path.resolve()` routes through it. So on Windows every
+`resolve()` *reached at import time* is an import-time crash for a process whose
+cwd has been deleted: the module cannot be imported at all. The discriminator is
+**reached-at-import**, not written-at-module-scope — a `resolve()` inside a
+function that the module calls while importing is just as fatal.
+
+Every module-level path in this branch therefore goes through one helper,
+`handlers/path/module_paths.py`:
+
+- `module_file(__file__)` — `resolve()` first, so symlinks still collapse
+  normally; on `OSError` it degrades to `os.path.abspath`, which is the identity
+  for an already-absolute path and needs no cwd.
+- `branch_root(__file__, n)` — the same, then climbs `n` levels.
+
+The helper is **stdlib-only on purpose**. Importing `@prax` here would put the
+logger's own cwd-reading construction onto the path this module exists to
+protect, so its diagnostics go to `sys.stderr` — reported once per path, because
+in a dead-cwd world *every* resolve fails and one line per call would bury the
+real traceback.
+
+The handlers package guard walks `sys._getframe` rather than `inspect.stack()`.
+`inspect.stack()` calls `getmodule` → `getabsfile` → `os.path.realpath` on every
+frame with no guard (inspect.py:1009), so it dies before the guard's own
+skip-the-pseudo-frame logic is ever consulted. Reading `f_code.co_filename` off
+the frame touches no filesystem at all.
+
+Measured on 2026-08-31 by importing all 57 modules in a child interpreter under
+two injections: **57/57 failed to import before the cure, 0/57 after**.
+See `tests/test_dead_cwd_imports.py`, which carries an AST ban on
+`inspect.stack()` — a behavioural test cannot catch its return, because the
+branch that used it is unreachable from any import-shaped pin.
+
+**Backup destinations are unaffected by all of this.** Every path under
+`.backup/` is derived from the caller-supplied `project_root` (see
+`handlers/path/builder.py`), never from a module-level resolve and never from
+the cwd — so no backup or archive has ever been written to a location derived
+from where the caller's shell happened to be standing.
 
 ---
 

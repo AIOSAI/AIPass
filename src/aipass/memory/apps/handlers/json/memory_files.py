@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_files.py
 # Description: Memory File Safe I/O Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-17
-# Modified: 2026-08-08
+# Modified: 2026-08-30
 # =============================================
 
 """
@@ -35,12 +35,13 @@ from typing import Dict, Any, Optional
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, changed_entries
+from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
 # Resolve paths relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _CONFIG_DIR = _MEMORY_ROOT / "config"
 _TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 
@@ -66,9 +67,10 @@ def _validate_entry_limits(
     in :data:`_TRACKED_TRINITY_FILES`.  For all other paths this function
     returns ``None`` immediately (no validation).
 
-    Unchanged entries (same text as on disk) are intentionally skipped so
-    that rollover and other maintenance writes are never blocked by
-    legacy over-limit entries.
+    A write is judged by what it AUTHORS. Entries byte-identical to what is
+    already on disk are reported as carried debt and never refused, so
+    rollover and other maintenance writes cannot be blocked by an entry they
+    are not allowed to shrink.
 
     Args:
         file_path: Target path for the write.
@@ -113,7 +115,42 @@ def _validate_entry_limits(
             logger.warning(f"[entry_limits] Could not parse {file_path.name} for diff: {exc}")
             before = {}  # Unparseable — treat as empty (all entries "new")
 
-    over = changed_entries(before, data, filtered_limits)
+    split = classify_entries(before, data, filtered_limits)
+    over = split["authored"]
+
+    # --- Carried debt: report, never refuse -----------------------------------
+    # An over-cap entry byte-identical to the one on disk was not written by
+    # this write, so refusing the write cannot cure it and only stops the write.
+    # For rollover that refusal is a deadlock — the document it hands back is
+    # the SMALLER one, and it may not shrink an entry it is merely moving past.
+    # Passing it in silence is the other half of the defect, and the half the
+    # 2026-08-27 narrowing was right about: the old clause skipped these
+    # without a word, so a fat entry that arrived through an ungated lane never
+    # surfaced here again. It gets a line now, naming the branch, the entry and
+    # the numbers — `drone @memory lint` remains the lane that reads disk.
+    for debt in split["carried"]:
+        logger.warning(
+            f"[entry_limits] CARRIED {branch} {file_path.name} "
+            f"{debt['container']}[{debt['key']}] "
+            f"{debt['length']}/{debt['cap']} (+{debt['over_by']} over) — "
+            f"not written by this write, not refused; only @{branch} can cure it"
+        )
+
+    # --- Near the cap: the line that arrives while there is still room --------
+    # @ai_mail's ask, and their evidence was the argument: they wrote over the
+    # cap FOUR HOURS after being burned by it, knowing the number. "Nothing in
+    # the act of writing shows you the limit — the only instrument is
+    # downstream." A refusal teaches at the moment it is too late; this teaches
+    # one entry early. Authored only: warning about carried near-cap text on
+    # every write is how a channel becomes noise nobody reads.
+    for close in split["near"]:
+        logger.warning(
+            f"[entry_limits] NEAR {branch} {file_path.name} "
+            f"{close['container']}[{close['key']}] "
+            f"{close['length']}/{close['cap']} — "
+            f"{close['cap'] - close['length']} chars of headroom left; the next edit may be refused"
+        )
+
     if not over:
         return None
 
@@ -294,7 +331,7 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     # --- Entry-limits validation (rollover-safe) ------------------------------
     # Only validate .trinity/ files that are tracked (local.json, observations.json).
-    # Unchanged legacy over-limit entries pass untouched so rollover is never blocked.
+    # Refuses what this write authored; reports what it carries.
     try:
         rejection = _validate_entry_limits(file_path, data)
         if rejection is not None:

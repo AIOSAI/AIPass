@@ -235,7 +235,13 @@ def print_help():
     CONSOLE.print("[bold cyan]REFERENCE:[/bold cyan]")
     CONSOLE.print()
     # RICH FORMATTING TIP: Use [yellow] for labels, [dim] for paths
-    _display_path = Path(__file__).resolve()
+    # Guarded: resolve() routes through ntpath.realpath on Windows, which reads
+    # os.getcwd() unconditionally. Call-time, not import-time — but printing help
+    # in a dead-cwd world should not traceback. __file__ is already absolute.
+    try:
+        _display_path = Path(__file__).resolve()
+    except OSError:
+        _display_path = Path(__file__)
     _cli_root = _display_path.parents[2]  # display.py -> modules -> apps -> cli
     CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{_display_path}[/dim]")
     CONSOLE.print(f"  [yellow]Handlers:[/yellow]    [dim]{_cli_root / 'apps' / 'handlers' / 'display'}[/dim]")

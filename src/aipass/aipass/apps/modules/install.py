@@ -51,6 +51,7 @@ from aipass.prax import logger
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.ui.progress import render_step_header
+from aipass.aipass.shared.registry_discovery import registries_in
 
 COMMAND = "install"
 TOTAL_STEPS = 4
@@ -78,7 +79,7 @@ def _looks_like_aipass_tree(home: Path) -> bool:
         return False
     if (home / "setup.sh").is_file():
         return True
-    return bool(list(home.glob("*_REGISTRY.json")))
+    return bool(registries_in(home))
 
 
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:

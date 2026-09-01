@@ -1,3 +1,12 @@
+"""Files arriving over Telegram: download, classify, prompt, clean up.
+
+Pulls an attachment into a temp directory under a sanitised name, decides
+whether it is readable text or opaque binary, and builds the prompt the bot
+hands onward. Bounded on purpose - a size ceiling, a text-content ceiling
+and an explicit extension set - because the sender chooses the file and this
+branch chooses what it is willing to read.
+"""
+
 import uuid
 from pathlib import Path
 

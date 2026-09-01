@@ -24,6 +24,7 @@ build/
 
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json
+AIPASS_ROOTS.json
 .trinity/
 .watchdog/
 .ai_mail.local/

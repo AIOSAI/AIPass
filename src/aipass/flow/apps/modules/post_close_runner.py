@@ -30,7 +30,6 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
@@ -39,7 +38,9 @@ from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 from aipass.flow.apps.handlers.runner.lock_ops import acquire_lock, release_lock
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-_PKG_ROOT = Path(__file__).resolve().parents[3]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[3]
 FLOW_ROOT = _PKG_ROOT / "flow"
 MODULE_NAME = "post_close_runner"
 LOCK_FILE = FLOW_ROOT / ".post_close_runner.lock"

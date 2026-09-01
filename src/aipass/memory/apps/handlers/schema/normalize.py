@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
+from aipass.memory.apps.handlers import repo_root
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -125,12 +126,17 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="normalize")
 
 
 def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, Any]:
@@ -262,7 +268,10 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
     # Read registry
     registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-    if not registry_path.exists():
+    # exists_exactly, not exists(): a folding filesystem answers this question
+    # about aipass_registry.json, and this lane REWRITES every memory file the
+    # answer names. See handlers/repo_root.py.
+    if not repo_root.exists_exactly(registry_path):
         return {"success": False, "error": "AIPASS_REGISTRY.json not found"}
 
     try:

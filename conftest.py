@@ -31,16 +31,53 @@ _REPO_ROOT = Path(__file__).resolve().parent
 
 
 def _points_into_repo(mod: types.ModuleType) -> bool:
-    """True if mod's *JSON_DIR* constant currently resolves inside this repo."""
+    """True if mod's next log write would land inside this repo.
+
+    Seam-adopted handlers (prax's 2026-08-30 contract) expose
+    ``_current_json_dir()`` — the same resolver their own write consults, per
+    call, honouring both a monkeypatched ``JSON_DIR`` and the
+    ``AIPASS_TEST_LOG_DIR`` redirect. When it exists, ask IT: re-deriving the
+    answer here from constants is a second implementation, and it already
+    misfired once — the seam's ``_IMPORT_TIME_JSON_DIR`` fixed point is
+    env-independent BY CONTRACT (always the real dir), so a substring scan
+    read every seam-adopted module as unpatched and skipped writes their
+    tests were asserting on (CI-only: this conftest loads only on repo-root
+    runs, which is why 12 log_operation tests were green per-branch and red
+    in CI on 2026-08-31).
+
+    Handlers without the seam keep the constant scan, with one narrowing:
+    underscore-private names are anchors, not the live dir, and are ignored.
+    A public *JSON_DIR* patched outside the repo means the test controls the
+    write; all-inside means production state, skip.
+    """
+    resolver = getattr(mod, "_current_json_dir", None)
+    if callable(resolver):
+        try:
+            target = Path(str(resolver())).resolve()
+        except Exception as exc:  # a broken resolver must fail safe: skip the write
+            # Lazy prax import: every wrapped module already imported prax
+            # itself, and importing it at conftest top would start the logger
+            # for every collection this guard exists to keep quiet.
+            from aipass.prax import logger
+
+            logger.warning(
+                "conftest guard: %s._current_json_dir raised %r — failing safe, write skipped",
+                mod.__name__,
+                exc,
+            )
+            return True
+        return target.is_relative_to(_REPO_ROOT)
+    verdict = False
     for name, val in vars(mod).items():
+        if name.startswith("_"):
+            continue
         if "JSON_DIR" not in name or not isinstance(val, (str, Path)):
             continue
-        try:
-            Path(str(val)).resolve().relative_to(_REPO_ROOT)
-            return True
-        except ValueError:
+        if Path(str(val)).resolve().is_relative_to(_REPO_ROOT):
+            verdict = True
+        else:
             return False
-    return False
+    return verdict
 
 
 def _guarded(mod: types.ModuleType, real):

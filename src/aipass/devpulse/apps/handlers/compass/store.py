@@ -46,11 +46,12 @@ except Exception as _prax_exc:  # pragma: no cover - defensive fallback only
     logger.info("[compass] prax logger unavailable, using stdlib logging: %s", _prax_exc)
 
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.module_root import module_file
 
 # Branch-root-relative default DB path. store.py lives at
 # <branch_root>/apps/handlers/compass/store.py, so parents[3] is the branch
 # root. NEVER hardcode an absolute /home/... path here.
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT = module_file(__file__).parents[3]
 DEFAULT_DB_PATH = _BRANCH_ROOT / "devpulse_json" / "compass" / "compass.db"
 
 VALID_RATINGS = ("good", "bad", "impressive", "interesting")

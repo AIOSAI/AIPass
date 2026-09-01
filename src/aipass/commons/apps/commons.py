@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -35,9 +35,33 @@ if sys.platform == "win32":
 # Fix: When run as a script, Python adds apps/ to sys.path[0] which causes
 # this file (commons.py) to shadow the commons package. Remove it so the
 # installed package resolves correctly.
-_script_dir = str(Path(__file__).resolve().parent)
-if _script_dir in sys.path:
-    sys.path.remove(_script_dir)
+#
+# The .resolve() is LOAD-BEARING and measured, not decorative: through a
+# symlinked checkout CPython sets sys.path[0] to the REAL directory while
+# __file__ keeps the symlinked spelling, so the unresolved form alone would
+# never match and the repair would silently not happen. Both spellings are
+# removed, because the guarded world below can only offer the raw one.
+#
+# The guard is inline rather than through handlers.module_root because it runs
+# BEFORE this repair - importing the commons package here is exactly what the
+# repair exists to make safe. Same reason as everywhere else in this branch:
+# on Windows ntpath.realpath reads os.getcwd() unconditionally, so a bare
+# resolve() makes the entry point undefined in a process with a dead cwd.
+_script_dirs = [str(Path(__file__).parent)]
+try:
+    _script_dirs.append(str(Path(__file__).resolve().parent))
+except OSError as _exc:
+    # stderr, not the logger: @prax is imported below, AFTER this block, and
+    # importing it up here is what the repair exists to make safe. The
+    # condition is abnormal and belongs on the operator's screen rather than
+    # being swallowed - a shadowed package is a confusing failure to debug.
+    sys.stderr.write(
+        f"[commons] Cannot resolve {__file__} ({type(_exc).__name__}) — "
+        "sys.path repair limited to its unresolved spelling\n"
+    )
+for _script_dir in _script_dirs:
+    if _script_dir in sys.path:
+        sys.path.remove(_script_dir)
 
 # Handle broken pipe gracefully (e.g. output piped to head)
 if hasattr(signal, "SIGPIPE"):

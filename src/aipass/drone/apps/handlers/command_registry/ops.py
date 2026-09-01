@@ -30,6 +30,7 @@ from typing import Any
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.module_root import module_file
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -38,7 +39,7 @@ from aipass.drone.apps.handlers.json import json_handler
 MODULE_NAME = "command_registry"
 
 # ops.py -> command_registry/ -> handlers/ -> apps/ -> drone/
-_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT: Path = module_file(__file__).parents[3]
 REGISTRY_FILE: Path = _BRANCH_ROOT / "drone_command_registry.json"
 
 

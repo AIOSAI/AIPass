@@ -79,7 +79,7 @@ def _resolve_aipass_home() -> str:
     if home:
         return home
     registry = find_registry(package_root=str(Path(__file__).resolve().parent))
-    if registry.exists():
+    if registry is not None and registry.exists():
         return str(registry.parent)
     return ""
 

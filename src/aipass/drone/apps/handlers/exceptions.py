@@ -12,9 +12,14 @@ Drone module custom exceptions.
 Defines the exception hierarchy for routing and branch resolution errors.
 """
 
-from aipass.drone.apps.handlers.json import json_handler
-
-json_handler.log_operation("exceptions_loaded", module_name="exceptions")
+# This module deliberately records nothing when it loads. It used to call
+# log_operation("exceptions_loaded") at module level, which wrote into
+# drone_json on every import — including during pytest COLLECTION, before any
+# fixture exists, so neither the repo-root conftest's autouse guard nor
+# AIPASS_TEST_LOG_DIR could intercept it. It was the last live-tree write left
+# after the seam was adopted, and it recorded nothing a reader wanted: that an
+# exception class file was imported. Defining exceptions is not an operation.
+# Raising one is, and the raiser logs it.
 
 
 class RoutingError(Exception):

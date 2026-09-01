@@ -76,6 +76,7 @@ from aipass.trigger.apps.config import (
     migrate_json_file,
     trail_logger,
 )
+from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 
 DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
@@ -90,16 +91,7 @@ VOLUME_MUTE_KEY = "volume_muted_branches"
 logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-_REPO_ROOT = _find_repo_root()
+_REPO_ROOT = find_repo_root(caller="runaway_handler")
 ALERTS_FILE = _REPO_ROOT / ".aipass" / "alerts.json"
 # Live medic state — see medic_state.py for why it is not on the trio path.
 MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"

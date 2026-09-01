@@ -23,7 +23,6 @@ def setup_handlers():
     from aipass.trigger.apps.modules.core import trigger
     from .startup import handle_startup
     from .cli import handle_cli_header_displayed
-    from .plan_file import handle_plan_file_created, handle_plan_file_deleted, handle_plan_file_moved
     from .error_detected import handle_error_detected, set_send_email_callback
     from .runaway_handler import handle_runaway_log_detected, set_send_email_callback as set_runaway_email_callback
     from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
@@ -76,7 +75,8 @@ def setup_handlers():
         # Escalation digests go out through the same adapter with
         # auto_execute=False — an email to a manager, never a wake.
         set_escalation_email_callback(_send_email_adapter)
-    except ImportError:
+    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    except (ImportError, OSError):
         logger.warning("ai_mail not available — error notifications won't send")
     from .warning_logged import handle_warning_logged
     from .memory_template_updated import handle_memory_template_updated
@@ -86,9 +86,11 @@ def setup_handlers():
 
     trigger.on("startup", handle_startup)
     trigger.on("cli_header_displayed", handle_cli_header_displayed)
-    trigger.on("plan_file_created", handle_plan_file_created)
-    trigger.on("plan_file_deleted", handle_plan_file_deleted)
-    trigger.on("plan_file_moved", handle_plan_file_moved)
+    # plan_file_created / _deleted / _moved are NOT wired. The handler was
+    # retired 2026-08-31 as measured inert — see .archive/plan_file.py for the
+    # evidence (its regex matched 1 of 366 real plan filenames). @flow fires
+    # these events from their own registry scan and needs nothing back, so the
+    # events stay in the vocabulary and simply run no handler.
     trigger.on("error_detected", handle_error_detected)
     trigger.on("warning_logged", handle_warning_logged)
     trigger.on("memory_template_updated", handle_memory_template_updated)

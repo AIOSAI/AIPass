@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.0.0
+# Version: 1.2.1
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -26,6 +26,7 @@ from .exceptions import (
     RegistryPermissionError,
 )
 from aipass.drone.apps.handlers.json import json_handler
+from .router_handler import caller_cwd, registries_in
 
 
 # ---------------------------------------------------------------------------
@@ -73,16 +74,36 @@ def _first_registry_in(directory: Path) -> Optional[Path]:
     When multiple matches exist, the alphabetically-first name wins
     so the result is deterministic across platforms.
     """
-    matches = sorted(directory.glob("*_REGISTRY.json"))
+    matches = registries_in(directory)
     return matches[0] if matches else None
 
 
 def _registry_matches_credential(registry_path: Path) -> bool:
     """Check whether a candidate registry matches the nearest passport.
 
-    Returns True when the registry is acceptable (IDs match, or either
-    side is missing an ID).  Returns False only when both IDs exist and
-    disagree — the caller should skip this registry and keep walking.
+    Returns True when the registry is acceptable (IDs match, either side is
+    missing an ID, or the caller has no directory to walk from).  Returns False
+    only when both IDs exist and disagree — the caller should skip this registry
+    and keep walking.
+
+    DECLARED ROOTS DO NOT COME THROUGH HERE, AND THAT IS DELIBERATE.
+    DECLARATION IS THE CREDENTIAL (@devpulse's ruling, FPLAN-0460 phase 3).
+    This gate asks an INTRA-installation question — "are you a citizen of the
+    registry you are standing in" — and a cross-repo answer is not available to
+    it, because the ids differ BY CONSTRUCTION: AIPASS 7087bb93, VERA-STUDIO
+    8fb38c96, WREN 9d11c395. Routing every external root through this check
+    would refuse all of them, always, for being what they are.
+
+    The authority a walk could never attach is Patrick blessing
+    AIPASS_ROOTS.json. That file is the credential, and @memory's reader is the
+    only thing that reads it.
+
+    NOTE FOR WHOEVER FINDS THE UNCHECKED PATH LATER: the AIPASS_HOME fallback in
+    find_registry() has never been credential-checked either, and neither is the
+    external tier below. That is not an oversight to fix. "Fixing" it silently
+    kills every external citizen — the fence test (@wren) simply stops
+    resolving, with no error, because being refused is indistinguishable from
+    never having been declared.
     """
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
@@ -91,7 +112,20 @@ def _registry_matches_credential(registry_path: Path) -> bool:
         if not registry_id:
             return True
 
-        cwd = Path.cwd()
+        cwd = caller_cwd()
+        if cwd is None:
+            # No location is not a failed check. The walk below infers from
+            # where the caller STANDS, and a process whose directory was
+            # deleted stands nowhere — the same answer as a walk that finds no
+            # passport, reached honestly instead of through the except below
+            # logging "pre-check failed" for a check that did not fail.
+            logger.info(
+                "Credential pre-check for %s has no current directory to walk from — "
+                "no passport is reachable, so the registry is accepted",
+                registry_path,
+            )
+            return True
+
         for parent in [cwd] + list(cwd.parents):
             candidate = parent / ".trinity" / "passport.json"
             if candidate.is_file():
@@ -121,14 +155,18 @@ def find_registry() -> Path:
     When a candidate registry's metadata.id conflicts with the nearest
     passport's registry_id, it is skipped and the walk continues upward.
     """
-    # Walk up from cwd FIRST — this is where the user is working
-    cwd = Path.cwd()
-    for parent in [cwd] + list(cwd.parents):
-        hit = _first_registry_in(parent)
-        if hit is not None:
-            if _registry_matches_credential(hit):
-                return hit
-            continue
+    # Walk up from cwd FIRST — this is where the user is working. A caller
+    # whose directory was deleted has no "where", so step 3 is SKIPPED rather
+    # than attempted: the remaining sources (AIPASS_HOME, the package walk)
+    # never depended on a location and still answer.
+    cwd = caller_cwd()
+    if cwd is not None:
+        for parent in [cwd] + list(cwd.parents):
+            hit = _first_registry_in(parent)
+            if hit is not None:
+                if _registry_matches_credential(hit):
+                    return hit
+                continue
 
     # AIPASS_HOME fallback — for external projects where CWD walk finds nothing
     aipass_home = os.environ.get("AIPASS_HOME")
@@ -189,8 +227,19 @@ def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, An
         if not registry_id:
             return
 
-        # Walk up from CWD looking for .trinity/passport.json
-        cwd = Path.cwd()
+        # Walk up from CWD looking for .trinity/passport.json. No location
+        # means no passport to compare against — the same silent pass as a walk
+        # that finds none, said at INFO instead of arriving as a warning about
+        # a verification that never failed.
+        cwd = caller_cwd()
+        if cwd is None:
+            logger.info(
+                "Registry credential verification for %s has no current directory to walk from — "
+                "no passport is reachable, so there is nothing to compare",
+                registry_path,
+            )
+            return
+
         passport_path = None
         for parent in [cwd] + list(cwd.parents):
             candidate = parent / ".trinity" / "passport.json"
@@ -327,6 +376,108 @@ def load_registry() -> Dict[str, Any]:
     return data
 
 
+def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Citizens in declared roots, in DECLARATION ORDER, as registry entries.
+
+    Consumes @memory's public gateway and never reads AIPASS_ROOTS.json — the
+    file has exactly one reader and it is theirs. A second reader here would be
+    the two-implementations failure the gateway exists to prevent, and it would
+    drift the first time their schema moved.
+
+    Keyed the way local branches are: the registry's own ``name`` field,
+    lowercased. ``name_from="registry"`` is not a preference — local resolution
+    keys on that field (see _load_registry_data), and giving the external tier a
+    different rule would mean ``@wren`` resolving by one law and ``@memory`` by
+    another.
+
+    Returns [] and says so LOUDLY when the gateway fails. An empty declared-roots
+    file is a legal state and silent; another branch's module raising is not.
+    """
+    # Scoped to the project being resolved AGAINST, not to this checkout.
+    # get_all_branches(registry=X) must read X's declared roots, so an external
+    # project resolves through its own AIPASS_ROOTS.json and a caller that
+    # repoints the registry is not silently answered with ours.
+    #
+    # This is also the isolation seam the other two sources already have: the
+    # AIPASS_HOME source is switched off by unsetting its env var, and without
+    # an equivalent here the real machine's declared roots leaked into every
+    # enumeration test the moment Patrick blessed the file. A third source with
+    # no way to scope it is a third source that cannot be tested around.
+    if repo_root is None:
+        try:
+            repo_root = get_registry_path().parent
+        except Exception as exc:
+            logger.warning("External tier: cannot locate a project root to scope declared roots: %s", exc)
+            return []
+
+    # Imported HERE, not at module level, and the import sits INSIDE the guard.
+    # A module-level import made every failure in @memory's import chain a
+    # failure to import drone — router, `drone rm`, `drone systems`, all of it —
+    # which is the opposite of the containment this function's docstring
+    # promises. The live instance: registry_scope.py runs
+    # `REPO_ROOT = find_repo_root()` at module level and falls back to
+    # Path.cwd() when the walk up from __file__ finds no AIPASS_REGISTRY.json.
+    # A clean checkout has no registry (gitignored, machine-local), so CI takes
+    # that fallback, and a process whose directory was deleted raises ENOENT
+    # there. Theirs to fix; ours not to die of.
+    #
+    # sys.modules caches the module object, so this stays the SAME object the
+    # suite patches with patch.object(fleet, ...) — a call-time import is not a
+    # fresh one.
+    try:
+        from aipass.memory.apps.modules import fleet
+
+        records = fleet.external_branches(repo_root, name_from="registry")
+    except Exception as exc:
+        logger.error(
+            "External tier unavailable — @memory's fleet gateway raised: %s. "
+            "Local and AIPASS_HOME resolution continue; declared-root citizens do not resolve.",
+            exc,
+        )
+        return []
+
+    entries: List[Dict[str, Any]] = []
+    for record in records:
+        name = str(record.get("name", "")).lower()
+        path = record.get("path")
+        registry_name = record.get("registry")
+        if not name or path is None or not registry_name:
+            logger.warning("Skipping malformed external record from the fleet gateway: %r", record)
+            continue
+        entries.append(
+            {
+                "name": name,
+                "path": str(path),
+                "email": record.get("email"),
+                "status": "active",
+                "residency": record.get("residency"),
+                "registry": registry_name,
+            }
+        )
+    return entries
+
+
+def _external_registry_path(entry: Dict[str, Any]) -> Optional[Path]:
+    """The sealed registry an external entry was read from.
+
+    Derived by containment, never by walking up: the gateway hands back the
+    branch path and its registry FILENAME, and the declared root is the only
+    ancestor holding that file.
+    """
+    branch_path = Path(entry["path"])
+    for root in [branch_path, *branch_path.parents]:
+        candidate = root / entry["registry"]
+        if candidate.is_file():
+            return candidate
+    logger.warning(
+        "External citizen '%s' names registry %s but it was not found above %s",
+        entry["name"],
+        entry["registry"],
+        entry["path"],
+    )
+    return None
+
+
 def get_all_branches(
     branch_type: Optional[str] = None,
     status: str = "active",
@@ -358,6 +509,26 @@ def get_all_branches(
                     merged[name] = branch
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_all_branches: AIPass home registry unavailable: %s", exc)
+
+    # --- Declared roots (external tier) ---
+    # Last on purpose: AIPass local ALWAYS wins, and among externals the
+    # declaration order in roots[] breaks ties. Both are @devpulse's ruling.
+    # This is the one place both sides of a collision are visible at once, so it
+    # is where the collision is named — a shadowed citizen that vanishes without
+    # a line is indistinguishable from one that was never declared.
+    for entry in _external_branches():
+        name = entry["name"]
+        if name in merged:
+            logger.warning(
+                "Name collision: '%s' is declared by external root %s (%s) and is SHADOWED by %s. "
+                "The external citizen is unreachable by name until one side renames.",
+                name,
+                entry["registry"],
+                entry["path"],
+                merged[name].get("path"),
+            )
+            continue
+        merged[name] = entry
 
     filtered = []
     for branch in merged.values():
@@ -394,9 +565,25 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
     if home_path is not None and home_path != primary_path:
         try:
             home_data = _load_registry_data(home_path)
-            return home_data.get("branches", {}).get(lower_name)
+            branch = home_data.get("branches", {}).get(lower_name)
+            if branch is not None:
+                return branch
+            # A MISS here is not an answer. This used to return the lookup
+            # itself, so on any machine where AIPass home is not the project
+            # registry, an unknown name ended the search here and the declared
+            # roots below were unreachable. get_branch_with_registry has always
+            # guarded the identical lookup this way.
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_branch_by_name: AIPass home registry unavailable for '%s': %s", name, exc)
+
+    # --- Declared roots (external tier) ---
+    # Consulted only after both local sources miss, so a local citizen never
+    # pays a cross-repo read to resolve. First match wins, and the gateway
+    # returns declaration order, so the tiebreak is the file's own ordering.
+    for entry in _external_branches():
+        if entry["name"] == lower_name:
+            logger.info("Resolved '%s' from declared root %s", lower_name, entry["registry"])
+            return entry
 
     return None
 
@@ -429,5 +616,14 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
                 return branch, home_path
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_branch_with_registry: AIPass home registry unavailable for '%s': %s", name, exc)
+
+    # --- Declared roots (external tier) ---
+    for entry in _external_branches():
+        if entry["name"] == lower_name:
+            external_registry = _external_registry_path(entry)
+            if external_registry is None:
+                continue
+            logger.info("Resolved '%s' from declared root %s", lower_name, external_registry)
+            return entry, external_registry
 
     return None

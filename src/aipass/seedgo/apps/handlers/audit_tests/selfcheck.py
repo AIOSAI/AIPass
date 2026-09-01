@@ -149,17 +149,18 @@ def _bytecode_row(config_note: str) -> dict:
 def _m10_rows(m10_proof: dict) -> List[dict]:
     """Checks 1 and 12 - the real tree, fingerprinted at both ends."""
     probed = bool(m10_proof.get("probed"))
-    intact = m10_proof.get("real_tree_unchanged")
 
     if not probed:
         detail = str(m10_proof.get("note", "the fingerprint could not be taken"))
         return [
             _check(1, "pristine fingerprint of the real tree, taken at START", "RESTORE-AT-START", FAIL, detail),
-            _check(12, "the real target is byte-unchanged after the run", "OBSERVER-FORGERY", FAIL, detail),
+            _check(12, "the measured suite wrote nothing into the real target", "OBSERVER-FORGERY", FAIL, detail),
+            _check(17, "every real-tree change was ATTRIBUTED", "UNATTRIBUTED-CHANGE", FAIL, detail),
         ]
 
     count = m10_proof.get("files_fingerprinted", 0)
     unattributed = m10_proof.get("unattributed_changes", [])
+    by_the_suite = m10_proof.get("changed_by_the_measured_suite", [])
     concurrent = m10_proof.get("attributed_to_concurrent_writers", [])
 
     # Check 12 fails on what NOTHING ELSE was seen writing. A live citizen's
@@ -173,7 +174,9 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
     detail = (
         f"{count} file(s) re-hashed after teardown; {len(unattributed)} change(s) nothing else "
         f"was observed writing, {len(concurrent)} attributed to the target's own concurrent "
-        f"writers (probe ran: {m10_proof.get('live_writers_probed')}); diff: "
+        f"writers (probe ran: {m10_proof.get('live_writers_probed')}, window "
+        f"{m10_proof.get('live_writer_probe_seconds')}s - a window shorter than the run "
+        f"UNDER-detects, so an unattributed change may still be a live service); diff: "
         f"{m10_proof.get('diff', {})}"
     )
     return [
@@ -184,12 +187,34 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
             PASS,
             f"{count} file(s) hashed before the copy was made",
         ),
+        # SPLIT FROM THE UNATTRIBUTED SET, on @trigger's report 2026-08-30.
+        # This row is the finding the lane exists to make: the gate watched the
+        # suite in-process and NAMED the real-tree paths it opened for writing.
+        # Keying the red on that, and only that, is what stops a recipient
+        # reading "your suite dirtied the real tree" off a branch whose suite
+        # wrote nothing and whose ten moved files were a systemd unit and the
+        # citizen answering their own mail mid-audit.
         _check(
             12,
-            "no change to the real target that the run cannot account for",
+            "the measured suite wrote nothing into the real target",
             "OBSERVER-FORGERY",
+            PASS if not by_the_suite else FAIL,
+            (
+                f"the gate observed the suite writing {len(by_the_suite)} real-tree path(s): {by_the_suite}"
+                if by_the_suite
+                else f"{count} file(s) re-hashed after teardown; the gate recorded the suite writing none of them"
+            ),
+        ),
+        # The honest remainder, never folded into the row above and never
+        # exempted away. A path allowance for `.ai_mail.local/` or a systemd
+        # name match would both be DECLARED discriminators, which is precisely
+        # what `live_writers` refuses to be - so this stays red and says why.
+        _check(
+            17,
+            "every real-tree change was ATTRIBUTED",
+            "UNATTRIBUTED-CHANGE",
             PASS if not unattributed else FAIL,
-            detail if not intact else f"{count} file(s) re-hashed after teardown; byte-identical",
+            detail,
         ),
     ]
 

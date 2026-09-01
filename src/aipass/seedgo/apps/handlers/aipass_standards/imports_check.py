@@ -153,7 +153,19 @@ def _process_docstring_marker(stripped, in_docstring, docstring_marker):
 
 
 def filter_docstrings(lines: List[str]) -> List[str]:
-    """Filter out docstrings from lines to prevent false positives."""
+    """Blank out docstring lines, PRESERVING every line's position.
+
+    The blanking is not cosmetic. This function used to `continue` past
+    docstring lines, which COMPACTED the list — so every check that runs on the
+    result enumerated a shorter list and reported an index into it rather than a
+    line in the file. @memory was sent to line 40 for a violation at line 106
+    (2026-08-30), and the defect was never this one check's: check_no_sys_path,
+    check_prax_logger, check_import_order and check_no_bare_imports all read the
+    same list and all carried the same off-by-however-many-docstring-lines.
+
+    Every one of those checks already skips an empty line, so neutralising the
+    content while keeping the position costs nothing and fixes all five.
+    """
     filtered_lines = []
     in_docstring = False
     docstring_marker = None
@@ -164,9 +176,11 @@ def filter_docstrings(lines: List[str]) -> List[str]:
         if '"""' in stripped or "'''" in stripped:
             skip, in_docstring, docstring_marker = _process_docstring_marker(stripped, in_docstring, docstring_marker)
             if skip:
+                filtered_lines.append("\n")
                 continue
 
         if in_docstring:
+            filtered_lines.append("\n")
             continue
 
         filtered_lines.append(line)
@@ -183,6 +197,16 @@ def find_import_section_end(lines: List[str]) -> int:
     return len(lines)
 
 
+#: AIPASS_ROOT as a WHOLE TOKEN. A substring match convicted
+#: `DECLARED_ROOTS = "AIPASS_ROOTS.json"` — a machine-managed filename that sits
+#: beside AIPASS_REGISTRY.json and reads no environment variable of any name
+#: (@memory, 2026-08-30). Every present and future `AIPASS_ROOT*` collided the
+#: same way, so the fix is not a longer exception list. `_` is a word character,
+#: so this also declines to match `MY_AIPASS_ROOT` and `AIPASS_ROOT_MAP`: the
+#: check means the env var, and the env var is the only thing it may claim.
+_AIPASS_ROOT_TOKEN = re.compile(r"\bAIPASS_ROOT\b")
+
+
 def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Dict:
     """
     Check that file does NOT use AIPASS_ROOT.
@@ -196,11 +220,13 @@ def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: li
         if not stripped or stripped.startswith("#"):
             continue
         code_part = line.split("#")[0] if "#" in line else line
-        if "AIPASS_ROOT" in code_part:
+        if _AIPASS_ROOT_TOKEN.search(code_part):
             return {
                 "name": "No AIPASS_ROOT",
                 "passed": False,
-                "message": f"AIPASS_ROOT found on line {i} (pip packages must not use AIPASS_ROOT)",
+                "message": (
+                    f"AIPASS_ROOT found on line {i} (pip packages must not read the AIPASS_ROOT environment variable)"
+                ),
             }
 
     return {"name": "No AIPASS_ROOT", "passed": True, "message": "No AIPASS_ROOT usage (correct for pip packages)"}
@@ -234,9 +260,32 @@ def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list 
 
 
 def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
-    """
-    Check for Prax logger import via aipass.prax namespace.
-    Pattern: from aipass.prax import logger
+    """Check that logging is routed through the `aipass.prax` namespace.
+
+    BOTH BINDING FORMS PASS, and the reason is the standard's own intent:
+
+        from aipass.prax import logger      # binds the logger OBJECT
+        from aipass import prax             # binds the MODULE; prax.logger.x()
+
+    This standard is about ROUTING - that logging goes through prax rather than
+    round a side channel. Both forms route identically, so a check that accepts
+    only the first was enforcing a BINDING STYLE the standard never asked for -
+    narrower than the rule it speaks for, the same defect as the handlers check
+    that once forbade every apps.modules import.
+
+    AND THE NARROWER FORM HAS A MEASURED COST. `from aipass.prax import logger`
+    binds the object at import time, so it is UNREBINDABLE: a conftest that
+    swaps sys.modules["aipass.prax"] in an autouse fixture - which is most of
+    this fleet - cannot reach a name already bound. Raised by @memory
+    2026-08-30 with fleet numbers (1552 writes in @memory, 1968 in @daemon) and
+    reproduced here: ONE daemon test under plain pytest performed 23 atomic
+    writes into @prax's REAL prax_json/, attributed by audit hook rather than
+    inferred from a before/after diff, which a live machine's ambient writes
+    make unattributable. The module form is rebindable because the attribute is
+    looked up at CALL time.
+
+    Which form is RECOMMENDED is @prax's contract to set, not this checker's.
+    This check no longer takes that decision by rejecting one of them.
     """
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "Prax logger import", "passed": True, "message": "Bypassed by bypass rules"}
@@ -245,14 +294,31 @@ def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list 
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if "from aipass.prax" in line and "logger" in line:
-            return {"name": "Prax logger import", "passed": True, "message": f"Found on line {i}"}
+        if "from aipass.prax" in stripped and "logger" in stripped:
+            return {"name": "Prax logger import", "passed": True, "message": f"Found on line {i} (object form)"}
+        if _imports_prax_module(stripped):
+            return {"name": "Prax logger import", "passed": True, "message": f"Found on line {i} (module form)"}
 
     return {
         "name": "Prax logger import (recommended)",
         "passed": False,
-        "message": "Prax logger import not found (recommended: from aipass.prax import logger)",
+        "message": (
+            "Prax logger import not found (either form: 'from aipass.prax import logger' or 'from aipass import prax')"
+        ),
     }
+
+
+def _imports_prax_module(stripped: str) -> bool:
+    """True for `from aipass import prax`, the rebindable module binding.
+
+    Matched on the comma-separated import LIST so `from aipass import cli`
+    never counts, and `from aipass import cli, prax` does.
+    """
+    source, separator, imported = stripped.partition(" import ")
+    if not separator or source.strip() != "from aipass":
+        return False
+    names = imported.split("#")[0].split(",")
+    return "prax" in [name.strip().split(" as ")[0].strip() for name in names]
 
 
 def check_handler_independence(

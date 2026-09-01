@@ -12,13 +12,13 @@ import json
 import os
 import tempfile
 from datetime import datetime
-from pathlib import Path
 
 from aipass.prax import logger
 
+from ..path.module_paths import branch_root
 from ..json import json_handler
 
-_BACKUP_ROOT = Path(__file__).resolve().parents[3]
+_BACKUP_ROOT = branch_root(__file__, 3)
 TIMESTAMPS_FILE = _BACKUP_ROOT / "backup_json" / "backup_timestamps.json"
 
 MODES = ["snapshot", "versioned", "drive_sync"]

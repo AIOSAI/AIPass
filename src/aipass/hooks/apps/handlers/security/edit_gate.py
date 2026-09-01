@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.6.0
-# Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
+# Version: 1.8.0
+# Description: Cross-project (tool + scripted), cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-27
+# Modified: 2026-08-30
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -21,6 +21,12 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
+# The one seat that reaches outwards. Patrick, 2026-08-30, compassed as devpulse
+# entry 322: "It is only you who can reach outwards. Nobody else." The cross-
+# project fence stays for every other agent, tool lane and scripted lane alike.
+# Named here for the log line only — WHO is decided by the verified rail below,
+# never by this string matching a directory.
+ADMIN_SEAT = "devpulse"
 # A project root is the directory holding a *_REGISTRY.json — the same marker
 # @ai_mail's find_project_root uses (handlers/paths.py). Deliberately identical:
 # the file fence and the mail fence must draw the boundary in the same place, or
@@ -70,6 +76,62 @@ def _find_project_root(start: Path) -> Path | None:
     return None
 
 
+def _is_admin_seat(cwd: str) -> bool:
+    """True only when the 5-leg admin grant verifies for this session.
+
+    Consumes @ai_mail's ``is_verified_admin_caller`` — the same boolean their
+    projects sweep gates on — rather than mirroring it. The contract has one
+    home (@devpulse's ``admin_grant``, FPLAN-0401) and a second reading of it
+    here could silently disagree with the lane that already enforces it.
+
+    THE ONE THING A HOOK MUST SUPPLY. That rail reads identity from the env
+    drone's router stamps (``AIPASS_CALLER_BRANCH`` / ``AIPASS_CALLER_CWD``),
+    and a PreToolUse hook is not drone-invoked: neither variable exists in the
+    hook process, so the rail would answer "unprovable" for devpulse and every
+    other seat alike and the exemption would never open. What the hook does
+    have is the platform's own record of the session directory, handed to it in
+    the hook payload — the same species of evidence drone stamps, from the same
+    kind of source: the process that launched the session, not the agent
+    running inside it. So the caller cwd is stamped here and the rail does the
+    rest: the passport walk, the registry-resolved certificate, the HMAC, the
+    admin flag. An existing stamp is never overwritten — a drone-invoked caller
+    keeps the identity drone gave it.
+
+    Deliberately NOT a name check. ``ADMIN_SEAT`` never decides anything: a
+    session standing in a directory called devpulse with no valid grant on the
+    machine is refused, which is the defect ``drone rm`` fell to and the reason
+    the dispatch named it.
+
+    Residual, stated rather than discovered: leg 1 resolves through the session
+    directory, so a session whose cwd is devpulse's tree AND a validly signed
+    grant on this machine together satisfy it. That is the grant's own stated
+    threat model — every agent here shares one OS user, and the signature buys
+    tamper-EVIDENCE, not attack-proofing (admin_grant.py, "Security note"). It
+    is also no new reach: a session standing in devpulse's tree already writes
+    devpulse's tree under the cross-branch fence, which keys on the same cwd.
+
+    Fails closed at every edge: an unimportable rail, a raise, or an unprovable
+    caller all return False.
+    """
+    try:
+        vc = importlib.import_module("aipass.ai_mail.apps.handlers.users.verified_caller")
+    except Exception as exc:
+        logger.warning("[HOOKS] edit_gate: admin lane dark — verified-caller rail unavailable: %s", exc)
+        return False
+
+    stamped = not os.environ.get("AIPASS_CALLER_CWD") and bool(cwd)
+    if stamped:
+        os.environ["AIPASS_CALLER_CWD"] = cwd
+    try:
+        return bool(vc.is_verified_admin_caller())
+    except Exception as exc:
+        logger.warning("[HOOKS] edit_gate: admin verification raised (refusing): %s", exc)
+        return False
+    finally:
+        if stamped:
+            os.environ.pop("AIPASS_CALLER_CWD", None)
+
+
 def _check_project_boundary(cwd: str, target: Path) -> dict | None:
     """Block a write that crosses out of the caller's project.
 
@@ -92,10 +154,17 @@ def _check_project_boundary(cwd: str, target: Path) -> dict | None:
     caller_root = _find_project_root(Path(cwd))
     if caller_root is None:
         return None
-    target_root = _find_project_root(target.parent)
-    if target_root is None or target_root == caller_root:
+    target_root = _crossing_root(caller_root, target)
+    if target_root is None:
         return None
-    if caller_root in target_root.parents:
+    if _is_admin_seat(cwd):
+        logger.info(
+            "[HOOKS] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
+            ADMIN_SEAT,
+            caller_root.name,
+            target_root.name,
+            target,
+        )
         return None
 
     logger.warning(
@@ -104,9 +173,33 @@ def _check_project_boundary(cwd: str, target: Path) -> dict | None:
         target_root,
         target,
     )
+    return _cross_project_block(caller_root, target_root, target, "")
+
+
+def _crossing_root(caller_root: Path, target: Path) -> Path | None:
+    """Return the foreign project root *target* lands in, or None if it stays home.
+
+    The direction rules live here alone so the tool lane and the scripted lane
+    cannot answer the same question differently — which is exactly how the
+    scripted lane came to be open while the tool lane was fenced.
+
+    The walk starts AT *target*, not at its parent: a bash operand can name a
+    directory (``mkdir``, ``cp -r``), and starting at the parent would read a
+    write to a project root as a write to the tree that contains it.
+    """
+    target_root = _find_project_root(target)
+    if target_root is None or target_root == caller_root:
+        return None
+    if caller_root in target_root.parents:
+        return None
+    return target_root
+
+
+def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how: str) -> dict:
+    """Build the refusal both lanes print. *how* names the shell verb, or "" for a tool edit."""
+    lane = f"Cross-project write blocked ({how})" if how else "Cross-project write blocked"
     reason = (
-        f"Cross-project write blocked: project '{caller_root.name}' cannot write into "
-        f"project '{target_root.name}'.\n"
+        f"{lane}: project '{caller_root.name}' cannot write into project '{target_root.name}'.\n"
         f"Target: {target}\n"
         "A project writes inside itself only — never into its host or a sibling. This is the "
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
@@ -117,6 +210,61 @@ def _check_project_boundary(cwd: str, target: Path) -> dict | None:
         "exit_code": 2,
         "sound": "edit gate",
     }
+
+
+def _check_bash_project_boundary(cwd: str, command: str) -> dict | None:
+    """Block a cross-project write made through the shell rather than a tool.
+
+    The tool lane was fenced and this one was not: @devpulse's Edit into a
+    sibling project was refused on 2026-08-30 and ``sed -i`` on the same file
+    went through, for every seat, not just the admin one. Same boundary, same
+    direction rules, same refusal text — only the evidence differs, because a
+    shell command names its targets in grammar rather than in a ``file_path``
+    field.
+
+    Scope is honest by construction: ``bash_writes`` reports only what it can
+    SEE, and what it cannot see is enumerated in ``bash_writes.NOT_CAUGHT`` and
+    repeated in the README. A parser that guessed would refuse correct commands,
+    which is the failure mode that teaches agents to route around a gate.
+
+    Returns a block dict, or None to allow.
+    """
+    if not command:
+        return None
+    caller_root = _find_project_root(Path(cwd))
+    if caller_root is None:
+        return None
+    try:
+        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        targets = bw.write_targets(command, cwd)
+    except Exception as exc:
+        # A parser that cannot read a command has learned nothing about it. It
+        # must not convict on that, and it must not go quiet about it either.
+        logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
+        return None
+
+    for target, how in targets:
+        target_root = _crossing_root(caller_root, target)
+        if target_root is None:
+            continue
+        if _is_admin_seat(cwd):
+            logger.info(
+                "[HOOKS] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
+                ADMIN_SEAT,
+                caller_root.name,
+                target_root.name,
+                target,
+            )
+            return None
+        logger.warning(
+            "[HOOKS] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
+            caller_root,
+            target_root,
+            how,
+            target,
+        )
+        return _cross_project_block(caller_root, target_root, target, how)
+    return None
 
 
 def _get_package_from_cwd(cwd: str) -> str:
@@ -172,37 +320,29 @@ def _entries_of(container: Any, kind: str) -> list[tuple[str, Any]]:
     return []
 
 
-_RESHAPE_ONLY_FALLBACK: tuple[str, ...] = ("todos",)
+def _log_carried(entry_type: str, container: str, key: str, field: str) -> None:
+    """Record a drifted entry this write carried but did not author.
 
-
-def _reshape_only_sections(el: Any) -> tuple[str, ...]:
-    """The containers where on-disk drift may legitimately persist.
-
-    Read off @memory's already-imported ``entry_limits`` at call time rather
-    than restated here. Two lists of "containers we may not prune" would
-    disagree within a release, and this gate and @memory's push must exempt the
-    same set or one of them is wrong about the other.
-
-    This is not a new dependency — ``_check_trinity_change`` already imports the
-    module for ``load_entry_limits`` and ``changed_entries``; this reads an
-    attribute off the object it already holds.
-
-    On an @memory too old to publish the constant, fall back to todos and SAY
-    SO. The alternative default — exempting nothing — would refuse every write
-    to a file carrying one drifted todo, bricking the branch the exemption
-    exists to protect.
+    Carried debt must not be SILENT — that was the half of my 2026-08-27
+    concern that was right, and @memory kept it when they reversed the rest:
+    their writer logs a CARRIED line too. Not refused, not hidden, and not
+    printed at the agent either: detection belongs to ``drone @memory lint``,
+    which reads whole files on demand, rather than to a write gate that sees
+    only the next write. INFO, because carrying inherited drift is not
+    misbehaviour and a standing condition logged as a warning is what fed
+    @trigger's escalation lane the last time.
     """
-    sections = getattr(el, "RESHAPE_ONLY_SECTIONS", None)
-    if isinstance(sections, (tuple, list)):
-        return tuple(sections)
-    logger.warning(
-        "[HOOKS] edit_gate: entry_limits publishes no RESHAPE_ONLY_SECTIONS — falling back to %s",
-        _RESHAPE_ONLY_FALLBACK,
+    logger.info(
+        "[HOOKS] edit_gate: CARRIED (not authored, not refused) %s [%s] in %s — no '%s' field. "
+        "Cure it with drone @memory lint.",
+        entry_type,
+        key,
+        container,
+        field,
     )
-    return _RESHAPE_ONLY_FALLBACK
 
 
-def _missing_field_violations(before: dict, after: dict, limits: dict, el: Any) -> list[dict]:
+def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[dict]:
     """Refuse entries whose CANONICAL field is absent (DPLAN-0318 bug B3).
 
     The cap check reads one field name per entry type, taken from @memory's
@@ -214,20 +354,31 @@ def _missing_field_violations(before: dict, after: dict, limits: dict, el: Any) 
     compliance. ``""`` and "cannot read this" are different answers; a field the
     gate cannot find is named, not measured.
 
-    The on-disk exemption is now TODOS ONLY, matching @memory's narrowing. It
-    existed so a drifted fleet would not be bricked mid-migration; the fleet
-    converged, so everywhere else it protects nothing real and hides everything
-    new — a drifted entry written straight to disk would read as "already
-    there" on the next write and never surface again.
+    THE ON-DISK RULE IS NOW UNIVERSAL, not todos-only (2026-08-30, @memory's
+    entry_limits 1.6.0). A write is refused for what it AUTHORS, never for what
+    it CARRIES. I narrowed this to todos on 08-27 because the fleet had
+    converged and "unchanged and over cap passes" looked like it hid new drift
+    rather than protecting old. Both halves of that were wrong about the world,
+    and @memory proved it from the outside: their rollover lane failed
+    identically every 20 minutes for three hours because the extractor removed a
+    tail, wrote the SMALLER document back, and a write gate refused the whole
+    file over an entry in the head the extraction never touched. The archiver is
+    always on the losing side of that trade — the file cannot get smaller
+    because it is too big. My own refusal text is the other half of the
+    evidence: writes made through Bash are not checked, so a write gate is
+    structurally blind to how drift ARRIVES and cannot be the thing that
+    detects it. That job belongs to ``drone @memory lint``, which reads the file.
 
-    todos keep it because no machine may prune them: the push is forbidden to
-    archive open work, so only the branch's own agent can cure a drifted todo,
-    and refusing every write until it does would brick the rollover that
-    preserves everything else. Even there the exemption covers only what is
-    ALREADY ON DISK, by raw-entry identity — carrying one drifted todo must not
-    license adding ten more in the same shape.
+    So this checker was fixed to match. @memory fixed their half and mine still
+    deadlocked — measured live before this change: a write with an identical
+    before and after still drew a refusal here. Identity is the raw entry, never
+    the index: a prepend shifts every position down, and an index-keyed diff
+    would call the whole file newly authored on exactly the write that authored
+    nothing.
+
+    Carrying a drifted entry still does not license adding another in the same
+    shape — a NEW entry with a missing canonical field is authored, and refused.
     """
-    exempt_sections = _reshape_only_sections(el)
     hits: list[dict] = []
     for type_name, type_def in limits.get("entry_types", {}).items():
         if not isinstance(type_def, dict):
@@ -240,16 +391,19 @@ def _missing_field_violations(before: dict, after: dict, limits: dict, el: Any) 
         if after_container is None:
             continue
 
-        exempt = container_key in exempt_sections
-        legacy = [entry for _, entry in _entries_of(before.get(container_key), kind)] if exempt else []
+        carried = [entry for _, entry in _entries_of(before.get(container_key), kind)]
 
         for key, entry in _entries_of(after_container, kind):
             # Plain-string entries carry their own text — measurable, and
             # @memory's extractor already handles them.
             if not isinstance(entry, dict) or field in entry:
                 continue
-            if exempt and entry in legacy:
-                continue  # Already on disk in a container nothing may prune
+            if entry in carried:
+                # Byte-identical to disk: this write did not author it. Report,
+                # never refuse — refusing here is what deadlocks the rollover
+                # that is trying to shrink the very file being complained about.
+                _log_carried(type_name, container_key, key, field)
+                continue
             hits.append(
                 {
                     "entry_type": type_name,
@@ -340,19 +494,25 @@ def _dedupe_violations(violations: list[dict]) -> list[dict]:
 def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict | None:
     """Diff changed entries and return block dict or None (allow)."""
     over = el.changed_entries(before, after, limits)
-    over = _dedupe_violations(over + _missing_field_violations(before, after, limits, el))
+    over = _dedupe_violations(over + _missing_field_violations(before, after, limits))
     if not over:
         return None
     if limits.get("enforce"):
         lines = ["Unwritable .trinity entries (fix before saving):"]
         for v in over:
             lines.append(_format_violation(v))
-        # Say what this gate can actually see. It is a PreToolUse hook on Edit/Write,
-        # so a write made through Bash (python -c, heredoc, sed) never reaches it and
-        # is not checked. Three branches have drifted over cap through that lane —
-        # @baud to 2529/300 for a week, @api to 12 sessions + 16 learnings. Claiming
+        # Say what this gate can actually see. Bash now reaches this handler, but
+        # only its PROJECT fence — the cap check runs on the Edit/Write lane alone,
+        # so a write made through python -c, a heredoc or sed is still unmeasured.
+        # Three branches have drifted over cap through that lane — @baud to
+        # 2529/300 for a week, @api to 12 sessions + 16 learnings. Claiming
         # enforcement it does not have is what let the drift read as compliance.
-        lines.append("  (Edit/Write only — writes made through Bash are NOT checked. Caps are yours to keep there.)")
+        # Same reason the on-disk pass is universal: a gate blind to how drift
+        # ARRIVES cannot be the thing that refuses a file for already carrying it.
+        lines.append(
+            "  (Caps are measured on Edit/Write only — a write made through Bash is not measured. "
+            "Cure drift already on disk with drone @memory lint.)"
+        )
         return {
             "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
             "exit_code": 2,
@@ -628,6 +788,18 @@ def handle(hook_data: dict) -> dict:
         tool_name = hook_data.get("tool_name", "")
         tool_input = hook_data.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
+
+        # The scripted lane. Only the project fence runs here — the branch,
+        # inbox, daemon and .trinity checks read a single named file, and a
+        # shell command has no such field to read. Claiming they apply would be
+        # the enforcement-it-does-not-have mistake the caps advisory already
+        # names out loud.
+        if tool_name == "Bash":
+            cwd = hook_data.get("cwd", "") or os.getcwd()
+            return _check_bash_project_boundary(cwd, tool_input.get("command", "")) or {
+                "stdout": "",
+                "exit_code": 0,
+            }
 
         if tool_name not in EDIT_TOOLS:
             return {"stdout": "", "exit_code": 0}

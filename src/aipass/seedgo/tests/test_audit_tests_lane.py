@@ -1485,3 +1485,219 @@ class TestLaneVerbRefusesTheUnrecognized:
         verb.handle_command("audit-tests", ["-tests", "--help"])
 
         assert seen == ["help"]
+
+
+class TestLiveWriterProbeWindowIsDisclosed:
+    """`live_writers_probed: true` must never read as "probed ADEQUATELY".
+
+    THE DEFECT THIS PINS, reported by @trigger 2026-08-30 with this lane's own
+    artifact as the evidence. Their artifact said `live_writers_probed: true`
+    and `attributed_to_concurrent_writers: []`, and ten files had changed
+    anyway - six of them written by a systemd USER unit (trigger-log-watcher,
+    up since 08-27) that writes continuously.
+
+    The probe is two BACK-TO-BACK snapshots, so its window is milliseconds
+    while the run it is meant to explain takes tens of seconds. `live_writers`
+    already confesses this in its own docstring ("a service that writes once a
+    minute will not show up"), and the confession is correct - but it lives in
+    the source, and the artifact published a bare `true`. A reader comparing a
+    0.02s probe against a 40s run cannot make that comparison unless BOTH
+    numbers are in the document.
+
+    So the fix is disclosure, not a path exemption and not a systemd name
+    match: @trigger proposed reading `systemctl --user list-units`, and that is
+    a DECLARED discriminator of exactly the kind `live_writers` refuses to be -
+    it would let anything that names itself a service explain away its writes.
+    The window is published instead, and the reader judges.
+    """
+
+    def _proof(self, **options):
+        from aipass.seedgo.apps.handlers.audit_tests import runner
+
+        return runner._m10_not_probed("test"), options
+
+    def test_the_not_probed_proof_carries_the_window_field_too(self):
+        """A missing field and a zero window must not look the same.
+
+        The not-probed shape is built to mirror the probed one exactly - the
+        module says so in its own words - so a field added to one and not the
+        other reintroduces the drift that shape was created to prevent.
+        """
+        from aipass.seedgo.apps.handlers.audit_tests import runner
+
+        assert "live_writer_probe_seconds" in runner._m10_not_probed("test")
+
+    def test_an_unprobed_run_publishes_none_not_a_misleading_zero(self):
+        from aipass.seedgo.apps.handlers.audit_tests import runner
+
+        assert runner._m10_not_probed("test")["live_writer_probe_seconds"] is None
+
+    def test_the_probe_records_how_long_its_window_actually_was(self, tmp_path):
+        from aipass.seedgo.apps.handlers.audit_tests import runner
+        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
+
+        (tmp_path / "f.txt").write_text("x")
+        options: dict = {}
+        runner._probe_live_writers(
+            target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test"), options
+        )
+
+        assert options["live_writers_probed"] is True
+        window = options["live_writer_probe_seconds"]
+        assert isinstance(window, float)
+        assert window >= 0.0
+
+    def test_a_failed_probe_still_publishes_a_window_of_none(self, tmp_path, monkeypatch):
+        """The probe failing is the case where a bare `true` misleads most."""
+        from aipass.seedgo.apps.handlers.audit_tests import m10, runner
+        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
+
+        def boom(*a, **k):
+            raise OSError("no")
+
+        monkeypatch.setattr(m10, "live_writers", boom)
+        options: dict = {}
+        runner._probe_live_writers(
+            target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test"), options
+        )
+
+        assert options["live_writers_probed"] is False
+        assert options["live_writer_probe_seconds"] is None
+
+    def test_the_unattributed_row_states_the_window_beside_the_probe_flag(self):
+        """The two numbers must meet in ONE sentence to be comparable.
+
+        Repointed to check 17 when the verdict was split (@trigger, same day):
+        the window is what makes an UNATTRIBUTED red judgeable, so it belongs on
+        the row that reds on unattributed changes, not on the forgery row.
+        """
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        proof = {
+            "probed": True,
+            "files_fingerprinted": 3,
+            "unattributed_changes": ["a"],
+            "attributed_to_concurrent_writers": [],
+            "live_writers_probed": True,
+            "live_writer_probe_seconds": 0.02,
+            "changed_by_the_measured_suite": [],
+            "diff": {},
+        }
+        checks = selfcheck._m10_rows(proof)
+        row = [c for c in checks if c["check"] == 17]
+        assert row, "check 17 must be present"
+        assert "0.02" in row[0]["detail"]
+
+    def test_the_PUBLISHED_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
+        """The reader of the ARTIFACT is who needs this number.
+
+        The first cut of this class pinned the options dict and the not-probed
+        shape and left the probed artifact block unpinned - deleting the line
+        that copies the window into the published proof kept all five tests
+        green. A disclosure nobody can read is not a disclosure, so the pin
+        belongs on the document, not on the intermediate state.
+        """
+        from aipass.seedgo.apps.handlers.audit_tests import m10, runner
+        from aipass.seedgo.apps.handlers.audit_tests import target as target_module
+
+        (tmp_path / "f.txt").write_text("x")
+        target = target_module.Target(name="t", path=tmp_path, kind="branch", resolved_from="test")
+        before = m10.snapshot_tree(tmp_path)
+        options: dict = {}
+        runner._probe_live_writers(target, options)
+
+        proof = runner._m10_proof(target, before, options)
+
+        assert proof["probed"] is True
+        assert "live_writer_probe_seconds" in proof
+        assert proof["live_writer_probe_seconds"] == options["live_writer_probe_seconds"]
+        assert isinstance(proof["live_writer_probe_seconds"], float)
+
+
+class TestCheck12VerdictIsSplitFromUnattributedChanges:
+    """A FAIL must name what it found, not what it could not explain.
+
+    THE MISREAD, reported by @trigger 2026-08-30. Check 12 is named "no change
+    to the real target that the run cannot account for" and it FAILED on their
+    branch - honestly, because ten files really did move. But it keyed the
+    verdict on `unattributed_changes` alone, while the artifact three fields up
+    said `changed_by_the_measured_suite: []`. To a recipient the red reads as
+    "your suite dirtied the real tree", and for @trigger it was six files
+    written by a systemd user unit that has run since 08-27 and four written by
+    the citizen answering their own mail WHILE the audit ran.
+
+    Both facts deserve a row. The suite-attributed finding is the one this lane
+    exists to make and it keeps check 12 and the OBSERVER-FORGERY name. The
+    unattributed set is a genuine "a human must look at this" and gets its own
+    row that says so. Nothing is downgraded, nothing is exempted - a path
+    allowance for `.ai_mail.local/` or a systemd name-match would both be
+    DECLARED discriminators, and `live_writers` refuses to be one.
+    """
+
+    def _proof(self, *, by_suite, unattributed):
+        return {
+            "probed": True,
+            "files_fingerprinted": 9,
+            "unattributed_changes": unattributed,
+            "attributed_to_concurrent_writers": [],
+            "live_writers_probed": True,
+            "live_writer_probe_seconds": 0.02,
+            "changed_by_the_measured_suite": by_suite,
+            "real_tree_unchanged": not (by_suite or unattributed),
+            "diff": {},
+        }
+
+    def _row(self, rows, number):
+        found = [r for r in rows if r["check"] == number]
+        assert found, f"check {number} must be present"
+        return found[0]
+
+    def test_check_12_passes_when_the_SUITE_changed_nothing(self):
+        """@trigger's exact case: ten unattributed, zero from the suite."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
+        assert self._row(rows, 12)["status"] == selfcheck.PASS
+
+    def test_check_12_still_fails_when_the_suite_DID_write_the_real_tree(self):
+        """The finding the lane exists for must not be softened by the split."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=["logs/x.jsonl"], unattributed=[]))
+        assert self._row(rows, 12)["status"] == selfcheck.FAIL
+        assert "logs/x.jsonl" in self._row(rows, 12)["detail"]
+
+    def test_the_unattributed_set_gets_its_own_row_and_is_not_swallowed(self):
+        """Splitting must not become hiding."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
+        assert self._row(rows, 17)["status"] == selfcheck.FAIL
+
+    def test_the_unattributed_row_names_the_probe_window_so_the_red_is_judgeable(self):
+        """A short probe UNDER-detects; the reader needs that number here."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a"]))
+        assert "0.02" in self._row(rows, 17)["detail"]
+
+    def test_the_two_rows_do_not_share_a_name(self):
+        """If both rows say the same thing the split bought nothing."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=["x"], unattributed=["a"]))
+        assert self._row(rows, 12)["name"] != self._row(rows, 17)["name"]
+
+    def test_a_clean_run_passes_both_rows(self):
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=[]))
+        assert self._row(rows, 12)["status"] == selfcheck.PASS
+        assert self._row(rows, 17)["status"] == selfcheck.PASS
+
+    def test_an_unprobed_proof_publishes_both_rows_rather_than_one(self):
+        """A missing row and a passing row must never look the same."""
+        from aipass.seedgo.apps.handlers.audit_tests import selfcheck
+
+        rows = selfcheck._m10_rows({"probed": False, "note": "no fingerprint"})
+        assert {r["check"] for r in rows} >= {1, 12, 17}

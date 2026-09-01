@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for drone data files
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-03-17
-# Modified: 2026-08-18
+# Modified: 2026-08-31
 # =============================================
 
 """JSON auto-creating handler for drone data files.
@@ -14,7 +14,6 @@ ensure_json_file() for auto-creating branch-scoped JSON files.
 
 from __future__ import annotations
 
-import inspect
 import json
 import os
 import sys
@@ -33,14 +32,95 @@ if sys.platform == "win32":
 
 from aipass.prax import logger
 
+from aipass.drone.apps.handlers.module_root import module_file
+
 # ---------------------------------------------------------------------------
 # Infrastructure — auto-detect branch root from file location
 # json_handler.py -> json/ -> handlers/ -> apps/ -> drone/
 # ---------------------------------------------------------------------------
 
-_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
+_BRANCH_ROOT: Path = module_file(__file__).parents[3]
 _BRANCH_NAME: str = _BRANCH_ROOT.name  # "drone"
-JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+
+# The real tree, captured once so an explicit patch can be told apart from it.
+_IMPORT_TIME_JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+
+# Kept as a module attribute because ~20 tests across this suite redirect state
+# with monkeypatch.setattr(json_handler, "JSON_DIR", ...). Reading it directly
+# is what put 4189 write records in this branch's hygiene artifact, so the path
+# builders go through _current_json_dir() instead.
+JSON_DIR: Path = _IMPORT_TIME_JSON_DIR
+
+# @prax's contract (2026-08-30), in @trigger's form. Adopted per branch in its
+# OWN json_handler: five mocking techniques already existed and every one of
+# them reaches nothing, so a sixth would be the problem rather than the fix.
+_TEST_DIR_ENV_VAR = "AIPASS_TEST_LOG_DIR"
+
+
+def _current_json_dir() -> Path:
+    r"""Where JSON state belongs RIGHT NOW — resolved per call, never at import.
+
+    Measured on this tree before this existed: under pytest the env var held a
+    temp directory and the module constant STILL pointed at the live
+    ``drone_json``. Something imports this module before the conftest that sets
+    the variable runs, and a value captured at import cannot be redirected by
+    anything afterwards. It is the same defect as the unmockable logger, and a
+    seam that has to win an import race is not a seam.
+
+    THE OVERRIDE TEST COMPARES AGAINST BOTH FIXED POINTS and holds nothing
+    stale, which is @prax's corrected contract after @daemon's 9 pins went green
+    alone and red in the full suite. A test that calls ``importlib.reload``
+    while a monkeypatch is live has its teardown write the PRE-reload Path back
+    onto the POST-reload module: same value, different object. An identity check
+    then reports "explicitly patched" for the rest of the session and the
+    redirect dies in a branch that looks adopted — measured here at 3757
+    resolutions per suite run before this was fixed.
+
+    Comparing by value against the real directory ALONE is not sufficient in
+    general either: where a branch's import-time constant can itself be the
+    redirect target, the written-back value and the post-reload default differ
+    and value comparison reads "patched" too. Drone survives both orderings
+    because ``_IMPORT_TIME_JSON_DIR`` is env-INDEPENDENT — it is always the real
+    directory, never the redirect — and that precondition is load-bearing, so it
+    is stated here rather than left to be rediscovered.
+
+    An override therefore counts only when it differs from the real directory
+    AND from the current redirect target. The cost, stated not hidden: patching
+    the dir to either of those two is indistinguishable from not patching at
+    all. Both resolve to the same path, so no answer changes.
+
+    An EMPTY env value is absence, not a redirect. ``Path("") / "x"`` is
+    relative, so honouring it would scatter state wherever the process happens
+    to be standing.
+
+    THE SECOND COMPARISON IS VALUE-NEUTRAL AND IS KEPT ANYWAY — @prax found this
+    by mutating their own copy, and it reproduces here: dropping
+    ``and current != default`` kills no test in this suite (1309 green with the
+    mutant). It cannot, on POSIX. The only branch the two forms disagree on is
+    ``current != real and current == default``, where one returns ``current``
+    and the other ``default`` — and ``Path`` equality on POSIX means identical
+    string parts, so the returned path is the same path. Untested by
+    construction, not a gap in coverage.
+
+    ONE ASYMMETRY MAKES KEEPING IT THE CHEAPER SIDE, and it is the reason this
+    is not simply dead weight: ``PurePath.__eq__`` compares case-folded on
+    Windows, so ``PureWindowsPath(r"C:\Temp\Drone_Json")`` equals
+    ``PureWindowsPath(r"c:\temp\drone_json")`` while ``str()`` of the two
+    differs. There, returning ``current`` instead of ``default`` yields the same
+    FILE under a different string — invisible to a write, visible in a log line
+    or in any assertion that compares paths as text. The clause also states the
+    two-fixed-point rule that three trees now implement identically, which is
+    worth more than removing a line that costs nothing.
+    """
+    real = _IMPORT_TIME_JSON_DIR
+    test_dir = os.environ.get(_TEST_DIR_ENV_VAR)
+    default = Path(test_dir) / _BRANCH_NAME / f"{_BRANCH_NAME}_json" if test_dir else real
+
+    current = Path(JSON_DIR)
+    if current != real and current != default:
+        return current
+    return default
+
 
 _JSON_TYPES: tuple[str, ...] = ("config", "data", "log")
 
@@ -61,16 +141,35 @@ def _get_caller_module_name() -> str:
     Walks past internal frames ([0] = this function, [1] = public function,
     [2] = actual caller) and returns the stem of the caller's filename.
 
+    Reads the frame directly rather than through ``inspect.stack()``. MEASURED
+    2026-08-31 in the hostile world that emulates a Windows box with no working
+    directory: ``inspect.stack()`` builds a ``FrameInfo`` per frame, and for any
+    frame whose filename is a PSEUDO-file — ``<string>``, which every interpreter
+    ``-c`` invocation and every exec'd hook puts on the stack — it reaches
+    ``getmodule()``, whose ``os.path.realpath`` sits outside that function's
+    every ``try``. The whole call then raises ``FileNotFoundError``, so
+    ``log_operation`` — the audit line drone writes on essentially every
+    operation — took the caller down from inside its own logging. On POSIX the
+    equivalent raise happens earlier, where ``inspect`` catches it, which is why
+    this stood on Linux for as long as it existed.
+
+    ``FrameInfo.filename`` is ``getsourcefile(frame) or getfile(frame)``, and
+    both fall back to ``co_filename`` for the frames this walk looks at, so the
+    stem is the same string by a route that touches no filesystem at all.
+
     Returns:
         Module name (e.g. ``"flight_controller"`` from ``flight_controller.py``).
     """
-    stack = inspect.stack()
     # Skip frames: [0]=this function, [1]=public wrapper, [2]=actual caller
-    if len(stack) > 2:
-        caller_path = Path(stack[2].filename)
-        module_name = caller_path.stem
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError:
+        # Fewer than three frames — the old form's `len(stack) > 2` guard.
+        return "unknown"
+
+    module_name = Path(caller_frame.f_code.co_filename).stem
+    if module_name and not module_name.startswith("_"):
+        return module_name
     return "unknown"
 
 
@@ -212,7 +311,7 @@ def get_json_path(module_name: str, json_type: str) -> Path:
     Returns:
         Absolute :class:`~pathlib.Path` to the JSON file.
     """
-    return JSON_DIR / f"{module_name}_{json_type}.json"
+    return _current_json_dir() / f"{module_name}_{json_type}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +331,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
     Returns:
         ``True`` after the file is confirmed present and valid.
     """
-    JSON_DIR.mkdir(parents=True, exist_ok=True)
+    _current_json_dir().mkdir(parents=True, exist_ok=True)
     json_path = get_json_path(module_name, json_type)
 
     if json_path.exists():
@@ -478,7 +577,7 @@ if __name__ == "__main__":
     )
     console.print()
     console.print(f"[dim]Branch root:[/dim]  {_BRANCH_ROOT}")
-    console.print(f"[dim]JSON dir:[/dim]     {JSON_DIR}")
+    console.print(f"[dim]JSON dir:[/dim]     {_current_json_dir()}")
     console.print()
 
     console.print("[yellow]TESTING:[/yellow] Creating drone JSONs...")

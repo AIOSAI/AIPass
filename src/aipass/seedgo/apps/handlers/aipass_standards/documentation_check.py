@@ -13,6 +13,7 @@ Validates documentation compliance: module docstrings and function docstrings.
 META block validation is handled separately by meta_check.py.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List
@@ -101,22 +102,152 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "DOCUMENTATION"}
 
 
-def check_module_docstring(lines: List[str]) -> Dict:
-    """
-    Check for module-level docstring.
+#: The two triple-quote spellings, named because the fallback below is a
+#: LINE SCAN and a literal quote in this file's own source is exactly the
+#: construct that makes such a scan hard to read.
+TRIPLE_DOUBLE: str = chr(34) * 3
+TRIPLE_SINGLE: str = chr(39) * 3
 
-    Looks for a triple-quoted string near the top of the file,
-    allowing for META block, comments, or blank lines before it.
+
+def _module_docstring_by_line_scan(lines: List[str]) -> Dict:
+    """The pre-AST scan, kept for files that will not parse.
+
+    Says so in the message, because a fallback that reads like a verdict from
+    the real arm is an exemption granted on ignorance wearing a clean result.
+
+    Args:
+        lines: The module's source lines.
+
+    Returns:
+        dict with name, passed, message keys
     """
     for line in lines[:30]:
         stripped = line.strip()
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            return {"name": "Module docstring", "passed": True, "message": "Module-level docstring present"}
+        if stripped.startswith(TRIPLE_DOUBLE) or stripped.startswith(TRIPLE_SINGLE):
+            return {
+                "name": "Module docstring",
+                "passed": True,
+                "message": "Module-level docstring present (file does not parse - line scan)",
+            }
+    return {
+        "name": "Module docstring",
+        "passed": False,
+        "message": "Missing module-level docstring (file does not parse - line scan)",
+    }
+
+
+def check_module_docstring(lines: List[str]) -> Dict:
+    r"""
+    Check for module-level docstring, read as Python reads it.
+
+    THE LINE SCAN THIS REPLACES WAS DECIDED BY SPELLING, in both directions, and
+    both were measured across 1,845 files before this changed:
+
+      - it MISSED a prefixed docstring. An r-prefixed triple-quoted string is a
+        module docstring to Python and to help(); to a scan for a line starting
+        with a quote character it is nothing. Found by auditing a file of my own
+        that had one.
+      - it CREDITED any triple-quoted string in the first 30 lines - a class or
+        function docstring on a short module, a multi-line constant - to a file
+        with no module docstring at all. Seven files fleet-wide, and this is the
+        dangerous direction: a false negative gets believed.
+
+    ast.get_docstring asks the only question that matters, which is whether the
+    first statement in the module body IS a string.
+
+    Args:
+        lines: The module's source lines.
+
+    Returns:
+        dict with name, passed, message keys
+    """
+    try:
+        tree = ast.parse("\n".join(lines))
+    except SyntaxError as exc:
+        # Logged rather than swallowed, and my own silent_catch rule is the
+        # reason: it accepts a bare `return None` here and flags a return that
+        # NAMES its fallback, which rewards the less informative spelling. That
+        # is the same defect I fixed in the classify-and-return clause tonight,
+        # one clause over - banked as a rule question rather than widened
+        # mid-train, because "any call return converts the exception" would gut
+        # a rule that exists to catch real swallows.
+        logger.info("Module docstring check fell back to a line scan: %s", exc)
+        return _module_docstring_by_line_scan(lines)
+
+    if ast.get_docstring(tree) is not None:
+        return {"name": "Module docstring", "passed": True, "message": "Module-level docstring present"}
 
     return {
         "name": "Module docstring",
         "passed": False,
-        "message": "Missing module-level docstring (expected within first 30 lines)",
+        "message": "Missing module-level docstring (no string literal opens the module body)",
+    }
+
+
+def _public_functions_by_ast(content: str):
+    """Public functions and whether each has a docstring, read as Python reads.
+
+    THE LINE SCAN BELOW READ STRINGS AS SOURCE. ``stripped.startswith("def ")``
+    over the raw file matches a ``def`` inside a docstring's code example or
+    inside a module built as a string literal and fed to a subprocess — the
+    shape every branch wrote this week for the dead-cwd worlds. @api, @canary,
+    @skills and two seedgo files were all flagged for functions that do not
+    exist. Caught by dogfooding: this checker flagged a three-line example in a
+    new nominator's own docstring.
+
+    It had the mirror defect too. ``async def`` never matched at all, so an
+    undocumented async function was invisible — ``find_import_section_end`` in
+    the imports pack has handled ``async def`` since it was written.
+
+    Scope is UNCHANGED: nested functions still count, exactly as the line scan
+    counted them. Narrowing to module and class level would clear 40 more files
+    and that is a different decision, not this fix.
+
+    Args:
+        content: Module source.
+
+    Returns:
+        A list of ``(name, line, has_docstring)`` triples, or None when the
+        source will not parse.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return None
+
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        found.append((node.name, node.lineno, bool(ast.get_docstring(node))))
+    return found
+
+
+def _judge(found: list) -> Dict:
+    """Turn the parsed function list into this check's verdict.
+
+    Args:
+        found: ``(name, line, has_docstring)`` triples.
+
+    Returns:
+        The check result dict.
+    """
+    if not found:
+        return {"name": "Function docstrings", "passed": True, "message": "No public functions to check"}
+
+    undocumented = [f"{name} (line {line})" for name, line, documented in found if not documented]
+    if undocumented:
+        return {
+            "name": "Function docstrings",
+            "passed": False,
+            "message": f"{len(undocumented)} public functions missing docstrings: {undocumented[0]}",
+        }
+    return {
+        "name": "Function docstrings",
+        "passed": True,
+        "message": f"All {len(found)} public functions have docstrings",
     }
 
 
@@ -126,6 +257,14 @@ def check_function_docstrings(content: str, lines: List[str]) -> Dict:  # noqa: 
 
     Public functions (not starting with _) should have docstrings.
     """
+    parsed = _public_functions_by_ast(content)
+    if parsed is not None:
+        return _judge(parsed)
+
+    # AST unavailable (the file will not parse). Fall back to the line scan
+    # rather than reporting clean: a file we could not read has not been proven
+    # to document anything, and an exemption bought with a SyntaxError is an
+    # exemption granted on ignorance.
     public_functions = []
     for i, line in enumerate(lines, 1):
         stripped = line.strip()

@@ -16,13 +16,14 @@ Usage:
     open_plans = get_open_plans()
 """
 
-from pathlib import Path
 from typing import List, Tuple, Dict, Any
 
 from aipass.prax import logger
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 MODULE_NAME = "get_open_plans"
 

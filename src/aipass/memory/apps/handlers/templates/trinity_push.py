@@ -78,6 +78,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aipass.memory.apps.handlers import repo_root
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
@@ -86,22 +87,28 @@ from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.tracking import tab_renderer
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # =============================================================================
 # PATHS
 # =============================================================================
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _TEMPLATES_DIR = _MEMORY_ROOT / "templates"
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to the repo root (the dir holding AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
+
+    Kept as a local name because callers and tests patch it here. The body is a
+    delegation on purpose: this function used to be one of ten byte-identical
+    copies, so the first cure landed on one file and CI went red on the next.
+
+    Returns:
+        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
+        the process working directory.
+    """
+    return repo_root.find_repo_root(caller="trinity_push")
 
 
 _REPO_ROOT = _find_repo_root()
@@ -302,7 +309,18 @@ def resolve_scope(branch: str | None = None) -> dict:
     # copy did no residency classification at all, so the push would have kept
     # sweeping projects by the retired rules while every other lane read the
     # passport. Same list, same order, one place.
-    branches = registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
+    # ...and narrowed again 2026-08-30 (FPLAN-0460 phase 4). registry_scope
+    # 3.0.0 added the external tier, so `fleet_branches` now answers with
+    # citizens living in OTHER repositories. Every other consumer of that list
+    # reads; this lane WRITES template files into each branch it resolves. The
+    # external tier build never writes outside this repo and the push does not
+    # get to be the exception, so the scope stops at the repo edge here — at the
+    # one consumer that acts on the list, not in the reader that serves them all.
+    branches = [
+        item
+        for item in registry_scope.fleet_branches(_REPO_ROOT, name_from="path")
+        if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL
+    ]
 
     if branch is None:
         return {"branches": branches, "error": None}

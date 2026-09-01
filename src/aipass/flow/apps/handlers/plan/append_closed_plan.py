@@ -21,7 +21,9 @@ import time
 from pathlib import Path
 
 # INFRASTRUCTURE IMPORT PATTERN
-_PKG_ROOT = Path(__file__).resolve().parents[4]
+from aipass.flow.apps.handlers.repo_root import module_file
+
+_PKG_ROOT = module_file(__file__).parents[4]
 
 # External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger

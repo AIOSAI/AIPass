@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-08-11
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -14,7 +14,6 @@ to the handler layer.
 """
 
 import sys
-from pathlib import Path
 from typing import Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
@@ -23,6 +22,11 @@ from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
+    caller_cwd,
+    # Re-exported, not used here: apps/drone.py reaches handlers through this
+    # module rather than importing them directly (the same route caller_cwd
+    # already takes), so the entry point keeps one seam into the handler layer.
+    registries_in,  # noqa: F401
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch
@@ -115,7 +119,7 @@ def route_command(
     # Same resolver execute_branch_command uses — logging its own precedence
     # here would let the CALLER: tag name someone other than the branch actually
     # stamped on the work.
-    caller = resolve_caller_identity(Path.cwd())
+    caller = resolve_caller_identity(caller_cwd())
     # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
     # hides the gap. detect_caller_signal already logged the cwd.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"

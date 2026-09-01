@@ -327,7 +327,12 @@ def test_auto_detection_missing():
     result = check_auto_detection(content)
     assert result is not None
     assert result["passed"] is False
-    assert "missing auto-detection" in result["message"]
+    assert "never reads the caller frame" in result["message"]
+    # The message used to PRESCRIBE inspect.stack(), which is the Windows
+    # dead-cwd defect the fleet is removing (@prax, 2026-08-31). Pinned as a
+    # refusal so nobody restores the old wording as a "clearer" instruction.
+    assert "use sys._getframe" in result["message"]
+    assert "NOT inspect.stack()" in result["message"]
 
 
 def test_auto_detection_with_get_caller():
@@ -1288,6 +1293,70 @@ def test_constant_naming_function_call_ignored():
     result = check_constant_naming(content)
     # Function call assignment is skipped, no constants to check
     assert result is None
+
+
+def test_constant_naming_exempts_the_pytest_contract_globals():
+    """The names pytest reads by their exact spelling are not style.
+
+    @devpulse hit this live: the auto-fix lane offered to rename
+    collect_ignore_glob in src/aipass/conftest.py, and they refused it, because
+    pytest looks that name up at collection time and an UPPER_CASE version
+    would disable the ignore mechanism while reporting a tidier file. Measured
+    across the fleet before the exemption shipped: 7 verdicts change, every one
+    of them a conftest going from FAIL to no-verdict, and no file moves from
+    pass to fail.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+        PYTEST_CONTRACT_GLOBALS,
+        check_constant_naming,
+    )
+
+    for name in sorted(PYTEST_CONTRACT_GLOBALS):
+        content = f'{name} = ["x"]\n'
+        assert check_constant_naming(content) is None, (
+            f"{name} is read by pytest under that spelling and must not be nominated"
+        )
+
+
+def test_the_exemption_is_a_NAMED_SET_and_not_a_lowercase_amnesty():
+    """The control that keeps the cure narrow.
+
+    An exemption that widened to "lowercase module globals in files that look
+    like conftests" would acquit the species this rule exists for. So a
+    lowercase global that is NOT in the set still fails, and it fails in the
+    same file as an exempt one - which is the arrangement a real conftest has.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+        check_constant_naming,
+    )
+
+    result = check_constant_naming('collect_ignore_glob = ["x"]\nmy_helper = 3\n')
+    assert result is not None, "the non-contract name was swallowed with the exempt one"
+    assert result["passed"] is False
+    assert "my_helper" in result["message"]
+    assert "collect_ignore_glob" not in result["message"]
+
+
+def test_the_real_conftest_that_reported_it_is_no_longer_nominated():
+    """Reproduced against the actual file, not a synthetic string.
+
+    The report named src/aipass/conftest.py. This reads that file if it is
+    there and requires the verdict to be clean; if it has moved, the row says
+    so rather than passing quietly on a file it never opened.
+    """
+    from pathlib import Path
+
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
+        check_constant_naming,
+    )
+
+    conftest = Path(__file__).resolve().parents[2] / "conftest.py"
+    if not conftest.is_file():
+        pytest.skip(f"the reported file is not at {conftest} on this checkout")
+    result = check_constant_naming(conftest.read_text(encoding="utf-8"))
+    assert result is None or result["passed"] is True, (
+        f"the file that produced the counterexample still fails: {result}"
+    )
 
 
 # ===========================================================================

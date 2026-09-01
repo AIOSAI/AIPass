@@ -32,7 +32,12 @@ def _mock_infrastructure(monkeypatch):
 
     # Mock prax logger
     mock_logger = MagicMock()
-    prax_mod = MagicMock()
+    # A stand-in at a PACKAGE name must answer __path__, exactly as the json
+    # stand-in below does and for the same reason. This one sat six lines above
+    # that paragraph, unfixed, because the pin naming the rule named a constant
+    # instead of a shape — see test_import_isolation.py.
+    prax_mod = ModuleType("aipass.prax")
+    prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
     prax_mod.logger = mock_logger
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()
@@ -217,8 +222,11 @@ def live_fleet():
     from aipass.memory.apps.handlers.templates import trinity_push
 
     for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
-        if not (root / registry_scope.CORE_REGISTRY).is_file():
+        registry = root / registry_scope.CORE_REGISTRY
+        if not registry.is_file():
             pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+        if not _registry_branch_rows(registry):
+            pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
     return registry_scope.REPO_ROOT
 
 
@@ -268,3 +276,177 @@ def live_residents(live_fleet):
             f"not installed at {live_fleet} ({', '.join(missing)}) -- live-state guard skipped"
         )
     return live_fleet
+
+
+@pytest.fixture
+def live_all_tiers(live_residents):
+    """A repo root carrying ALL THREE tiers — core, resident AND external — or SKIP.
+
+    `live_fleet` answers "is aipass installed here", `live_residents` adds "are
+    the four resident projects on disk". Neither says anything about the
+    external tier, and a test asserting on all three needs all three.
+
+    CI on PR#750 is why this exists. A bare ubuntu checkout ships no registry
+    and no `AIPASS_ROOTS.json` (both gitignored) and no `projects/`, so every
+    tier but core resolves empty — and something in the whole-repo run MINTED a
+    core-only registry mid-run. `live_fleet` asked "is there a registry" and
+    there was, so the three-tier assertion ran in a one-tier world and reported
+    the world's shape as a defect in the record.
+
+    EXISTENCE IS NOT SUFFICIENCY. That is the whole lesson, and it applies to
+    each tier separately: a registry can exist with no rows, a roots anchor can
+    exist declaring nothing, and a declared root can exist holding no citizen.
+    Each of those is a half-present world, and each gets its own reason here so
+    a skip on CI names which tier was missing rather than "guard skipped".
+
+    MEASURED WITH pathlib AND json, never through `registry_scope`. Asking the
+    resolver whether its own inputs are sufficient would turn every regression
+    in it into a SKIP — the guard deleting the failure it exists to expose.
+    `declared_roots()` is the code these tests judge; reading the anchor by hand
+    is what keeps the guard independent of it. Same argument as the literal
+    resident paths above, one tier further out.
+
+    Returns:
+        The repo root carrying all three tiers.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    anchor = live_residents / registry_scope.DECLARED_ROOTS
+    if not anchor.is_file():
+        pytest.skip(
+            f"no {registry_scope.DECLARED_ROOTS} at {live_residents} "
+            f"-- no external tier declared, live-state guard skipped"
+        )
+
+    try:
+        declared = json.loads(anchor.read_text(encoding="utf-8")).get("roots", [])
+    except (OSError, ValueError, AttributeError) as exc:
+        pytest.skip(f"unreadable {registry_scope.DECLARED_ROOTS} at {anchor} ({exc}) -- guard skipped")
+
+    if not _an_external_citizen_exists(live_residents, declared):
+        pytest.skip(
+            f"{registry_scope.DECLARED_ROOTS} declares {len(declared)} root(s) but no reachable "
+            f"external citizen -- the third tier is absent, live-state guard skipped"
+        )
+    return live_residents
+
+
+def _registry_branch_rows(registry_path):
+    """Branch rows in a registry file, or an empty list — NEVER an exception.
+
+    A guard that raises is worse than a guard that skips: it turns "this
+    machine has no fleet" into a red nobody can act on. Corrupt is absence.
+
+    Both registry shapes are read because both ship: `branches` is a list on
+    some registries and a name-keyed dict on others, and a guard that knew only
+    one would call half the fleet empty.
+    """
+    try:
+        data = json.loads(Path(registry_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    branches = data.get("branches", [])
+    if isinstance(branches, dict):
+        return [row for row in branches.values() if isinstance(row, dict)]
+    if isinstance(branches, list):
+        return [row for row in branches if isinstance(row, dict)]
+    return []
+
+
+def _an_external_citizen_exists(repo_root, declared):
+    """True when some declared root really holds a citizen, read off disk.
+
+    A declaration is not a citizen — `AIPASS_ROOTS.json` can name four sibling
+    repositories and every one of them be gone, which on a fresh machine is the
+    normal case. The tier is present only if a passport is actually reachable
+    through one of them.
+
+    Deliberately shallow, mirroring the walk law the resolver obeys: a
+    registry at the root's top level, then that registry's own branches. A
+    recursive passport hunt here would make the guard find citizens the code
+    under test would refuse to.
+    """
+    for row in declared:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("path", "")
+        if not raw:
+            continue
+        root = Path(raw) if Path(raw).is_absolute() else (repo_root / raw)
+        if not root.is_dir():
+            continue
+        for registry in sorted(root.glob("*_REGISTRY.json")):
+            for entry in _registry_branch_rows(registry):
+                branch_path = entry.get("path", "")
+                if branch_path and (root / branch_path / ".trinity" / "passport.json").is_file():
+                    return True
+    return False
+
+
+@pytest.fixture
+def case_insensitive_filesystem(monkeypatch):
+    """Make ``Path.glob`` match the way Windows and macOS match.
+
+    THE CONDITION BEING PINNED IS "the glob returned more than the pattern
+    spells", not "the test is running on Windows". @drone hit this on the
+    Windows CI leg — ``*_REGISTRY.json`` also matched a real lowercase file in
+    their tree — and a skipif here would mean the pin only ever fires on the
+    one platform where the defect has already shipped. Injecting the widened
+    match runs the same code path on the Linux dev box, red-first, before CI.
+
+    The emulation is deliberately literal: split the pattern on ``/``, walk one
+    level per part, compare case-folded. ``fnmatchcase`` on lowered strings
+    rather than ``fnmatch``, because ``fnmatch`` itself consults the host
+    platform and would make this fixture a no-op on the box that needs it most.
+    """
+    import fnmatch
+
+    real_glob = Path.glob
+
+    def widened(self, pattern, *args, **kwargs):
+        if "**" in pattern:
+            return real_glob(self, pattern, *args, **kwargs)
+        current = [self]
+        for part in pattern.split("/"):
+            nxt = []
+            for base in current:
+                if base.is_dir():
+                    nxt.extend(
+                        child for child in base.iterdir() if fnmatch.fnmatchcase(child.name.lower(), part.lower())
+                    )
+            current = nxt
+        return iter(sorted(current))
+
+    monkeypatch.setattr(Path, "glob", widened)
+    return widened
+
+
+@pytest.fixture
+def case_insensitive_exists(monkeypatch):
+    """Make ``Path.exists`` answer about a case-folded name, as Windows does.
+
+    @seedgo published this as their own discriminator's blind spot and it is the
+    worse half of the pair: ``(dir / "AIPASS_REGISTRY.json").exists()`` reads a
+    lowercase file with no glob in the line to warn a reader.
+
+    The emulation only ever ADDS a True — an exact hit still answers exactly —
+    so patching it globally cannot break the machinery around the test the way a
+    replacement implementation would.
+    """
+    import os as _os
+
+    real_exists = Path.exists
+
+    def folded(self, *args, **kwargs):
+        if real_exists(self, *args, **kwargs):
+            return True
+        try:
+            with _os.scandir(self.parent) as entries:
+                return any(entry.name.lower() == self.name.lower() for entry in entries)
+        except OSError:
+            return False
+
+    monkeypatch.setattr(Path, "exists", folded)
+    return folded

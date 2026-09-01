@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON Auto-Creating Handler
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2025-11-21
-# Modified: 2026-08-18
+# Modified: 2026-08-31
 # =============================================
 
 """
@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-import inspect
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -30,11 +29,63 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
+from aipass.daemon.apps.handlers.module_root import module_file
 
 # Constants
-_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
-JSON_DIR = _DAEMON_ROOT / "daemon_json"
+_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
+
+# The real directory, kept under its own name so the resolver below can tell an
+# explicit test patch from the untouched default. Recomputed on a module
+# reload exactly like JSON_DIR is, which is what makes the comparison survive
+# one (see _current_json_dir).
+_IMPORT_TIME_JSON_DIR = _DAEMON_ROOT / "daemon_json"
+
+# Still a module attribute: ~20 existing tests redirect by monkeypatching this,
+# and the fleet contract (@prax, mail 01fb09c6) keeps that door open on purpose.
+JSON_DIR = _IMPORT_TIME_JSON_DIR
+
+# The fleet-wide test redirect, @trigger's spelling. NOT read into a constant
+# here: daemon's own conftest sets it at module scope, yet something imports
+# this handler first, so a value captured at import time resolves to the live
+# tree anyway. A seam that has to win an import race is not a seam - so the
+# read happens inside _current_json_dir(), at call time, every call.
+_TEST_LOG_DIR_ENV = "AIPASS_TEST_LOG_DIR"
+
 MAX_LOG_ENTRIES = 100  # Default FIFO limit for log_operation (overridable via config)
+
+
+def _current_json_dir() -> Path:
+    """Resolve the JSON directory NOW - never at import.
+
+    Precedence, each step pinned in test_json_log_dir_seam.py:
+      1. An explicit monkeypatch of JSON_DIR wins outright, detected by
+         VALUE rather than by identity. @prax's recipe compares by identity;
+         that breaks here, and the failure is not theoretical - test_contracts
+         calls importlib.reload(json_handler) while its autouse monkeypatch is
+         active, so the patch is undone by writing the PRE-reload object back
+         onto the POST-reload module. JSON_DIR is then equal to the default and
+         not identical to it, every later call reads "explicitly patched", and
+         the redirect silently stops working for the rest of the session. The
+         cost of value comparison is one lost distinction: a test that patches
+         JSON_DIR to the real directory on purpose is indistinguishable from
+         one that never patched at all. Pinned by name below.
+      2. AIPASS_TEST_LOG_DIR redirects, under <root>/daemon/daemon_json/ so a
+         root shared with other branches never collides.
+      3. Otherwise the real directory.
+
+    An EMPTY or blank value is absence, not a redirect - Path("") / "x" is
+    relative and would scatter daemon state wherever the process happens to be
+    standing.
+    """
+    patched = Path(JSON_DIR)  # coerced: some callers patch it with a str
+    if patched != _IMPORT_TIME_JSON_DIR:
+        return patched
+
+    test_root = os.environ.get(_TEST_LOG_DIR_ENV)
+    if test_root and test_root.strip():
+        return Path(test_root.strip()) / "daemon" / "daemon_json"
+
+    return _IMPORT_TIME_JSON_DIR
 
 
 # os.replace on Windows raises PermissionError while ANY reader holds the
@@ -113,17 +164,37 @@ def _get_caller_module_name() -> str:
     """
     Auto-detect calling module name from call stack.
 
+    Walks past internal frames ([0] = this function, [1] = public function,
+    [2] = actual caller) and returns the stem of the caller's filename.
+
+    Reads the frame directly rather than through inspect.stack(). MEASURED
+    2026-08-31 in the hostile world that emulates a Windows box with no working
+    directory: inspect.stack() builds a FrameInfo per frame, and for any frame
+    whose filename is a PSEUDO-file - <string>, which every interpreter -c
+    invocation and every exec'd hook puts on the stack - it reaches getmodule(),
+    whose os.path.realpath sits outside that function's every try. The whole
+    call then raises FileNotFoundError, so log_operation - the audit line daemon
+    writes on essentially every scheduler tick - took the caller down from inside
+    its own logging. On POSIX the equivalent raise happens earlier, where inspect
+    catches it, which is why this stood on Linux for as long as it existed.
+
+    FrameInfo.filename is getsourcefile(frame) or getfile(frame), and both fall
+    back to co_filename for the frames this walk looks at, so the stem is the
+    same string by a route that touches no filesystem at all.
+
     Returns:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
-    stack = inspect.stack()
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = Path(caller_frame.filename)
-        module_name = caller_path.stem
+    # Skip frames: [0]=this function, [1]=public wrapper, [2]=actual caller
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError:
+        # Fewer than three frames - the old form's `len(stack) > 2` guard.
+        return "unknown"
 
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    module_name = Path(caller_frame.f_code.co_filename).stem
+    if module_name and not module_name.startswith("_"):
+        return module_name
 
     return "unknown"
 
@@ -173,12 +244,12 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Get path for module JSON file."""
     filename = f"{module_name}_{json_type}.json"
-    return JSON_DIR / filename
+    return _current_json_dir() / filename
 
 
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
     """Ensure JSON file exists, create from template if missing."""
-    JSON_DIR.mkdir(parents=True, exist_ok=True)
+    _current_json_dir().mkdir(parents=True, exist_ok=True)
 
     json_path = get_json_path(module_name, json_type)
 
@@ -220,6 +291,14 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
 
     if json_type == "data" and isinstance(data, dict):
         data["last_updated"] = datetime.now().date().isoformat()
+
+    # save_json was the one writer that never created its own directory - it
+    # only ever worked because the live daemon_json/ is committed and therefore
+    # always present. The moment the directory is resolved (a redirected test
+    # root, a fresh checkout), _atomic_write_json's tempfile raises
+    # FileNotFoundError before a single byte is written. Found by the redirect,
+    # not by a review.
+    json_path.parent.mkdir(parents=True, exist_ok=True)
 
     _atomic_write_json(json_path, data)
     return True
@@ -320,7 +399,7 @@ if __name__ == "__main__":
     update_data_metrics("daemon", test_metric="working")
 
     console.print()
-    console.print(f"[green]Check {JSON_DIR}/ for created files:[/green]")
+    console.print(f"[green]Check {_current_json_dir()}/ for created files:[/green]")
     console.print("  [dim]-[/dim] daemon_config.json")
     console.print("  [dim]-[/dim] daemon_data.json")
     console.print("  [dim]-[/dim] daemon_log.json")

@@ -9,6 +9,576 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-09-01] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461) · v2.8.1
+
+### Fixed
+
+- **Round 13 is a skip list, not a round** (FPLAN-0461, the ruling applied as
+  written). The round-12 board's real cures all held — the coverage report
+  step survived, the direction table went green on every POSIX leg — and every
+  remaining red was round-11/12 test instrumentation meeting a real host: six
+  tests in two files. Per the one-fix ruling they were skipped by name with
+  the reason in the mark, not cured with another instrument: seedgo's three
+  instrument self-checks (red on a different interpreter each board, green
+  only on the 3.12 box that wrote them; the worlds they self-check remain
+  exercised by every test that uses them) skip unconditionally, owner to
+  rewrite as measurement after the PR; backup's three coverage pins skip on
+  Windows only, because they are the live POSIX regression net for the real
+  report-step landmine and that stays armed. One commit for the whole board.
+
+- **Round 12: the hybrid row, the wrong attribute, and the coverage landmine —
+  under the one-fix-at-a-time ruling** (FPLAN-0461 continued). Patrick's ruling
+  landed mid-round and governs everything after: fix one thing at a time, no new
+  test instrumentation on this PR — future reds get the minimal cure or a named
+  skip; never add a test without a defect it pins (the audit-tests lane is the
+  instrument for test bloat, not more tests). This train is the last pre-ruling
+  pair, both cures of round-11-authored test code, zero production changes.
+  Seedgo: the 3.11 hybrid row measured instead of predicted (accessor removed,
+  flavour still an object — the route is a call-time module read), and the
+  stand-down guard read `PurePath._flavour` where 3.10/3.11 define it on the
+  CONCRETE class — a guard reading the wrong attribute is indistinguishable
+  from no guard and looks more careful in review; now reads the concrete class
+  with three measured arms. The Windows no-op break cured by breaking the
+  routing identity TOWARD the dialect the host is not — and their sweep then
+  caught the cure itself asserting this box's dialect as a literal, so what
+  ships is all measurement: the child announces where it started, a two-row
+  direction table decides where it must go, the both-sides pin asserts
+  movement rather than a destination, and hosts where the reading cannot move
+  report instead of convicting. Per the ruling, two extra pins were taken
+  back out; three surviving mutants are named on the record instead of
+  pinned — all one species, an arm that only fires on a host this box is
+  not. Backup: the coverage
+  report landmine reproduced to the line — a test compiled code under a fake
+  filename inside the source tree, so coverage recorded a measured file absent
+  from disk and the REPORT step failed with zero test failures; the two sites
+  called likely-inert were NOT (drive-lettered PureWindowsPath literals are
+  RELATIVE on POSIX, resolved against cwd at trace time — they fire from the
+  branch cwd). Cure: one guarded mint point every future site inherits by
+  construction, fabrications moved under tmp_path, both cwds pinned. Rule
+  banked: whether a fabricated filename mints depends on the cwd, because
+  abspath does. Also this round: the test-quality audit lane ran for the first
+  time in the campaign (harness 12/13; its one fail correctly named real
+  unattributed tree writes) and joins the standing verification bar alongside
+  the standards audit; @aipass dispatched on round-2 research — a ranked
+  per-test inventory for a 20k-test fleet, culling precedent, and AI test
+  bloat as a named industry problem.
+
+- **Round 11: the fixture's first catch, the captured accessor, and the end of
+  arms** (FPLAN-0461 continued). Round 10's board (c5b6e173): six red legs and
+  every red ONE FILE — while spawn's import guard went green on every leg for
+  the first time in six boards and seedgo's alias cures held everywhere. Three
+  tests. The first was seedgo's day-old left-nothing-behind fixture CONVICTING
+  A REAL FLEET DEFECT on its first live catch — and the defect was devpulse's
+  own: the watchdog storage resolver walked up from Path.cwd() looking for
+  AIPASS_REGISTRY.json (machine-local, absent on every fresh checkout) and
+  fell back to Path.cwd()/.watchdog, so a parallel devpulse test planted
+  .watchdog/ at the repo root on CI — invisible on every dev machine because
+  the marker exists there, and the timer copy carried a comment defending the
+  fallback as production-only, refuted by CI within a day. Cured by devpulse:
+  root derived from __file__, both walks and both fallbacks deleted, red-first
+  pins reproducing the exact fallback answer before the fix, agent tests
+  hermetic via module-local autouse. The other two were seedgo's own round-10
+  pins carrying the species one level up — the assumption in the assertion of
+  the very pin that documents the assumption. ROUTES_THROUGH pinned "Path's
+  routing module IS os.path" — the 3.12 spelling; the fact that DECIDES the
+  route is the pre-3.11 CAPTURED ACCESSOR (pathlib holds a private copy of
+  realpath a module patch can never reach), measured by a spy and pinned as a
+  four-row literal table falsifiable from 3.12 twice over. DISARMS_world_a's
+  negative control asserted a 3.11+ fact on every interpreter — and devpulse's
+  machine-shaped diagnosis was REFUTED WITH RECEIPTS (child run from a
+  marker-less cwd: still survives), while devpulse's OWN overclaim (red on
+  all six including 3.12) was corrected on seedgo's challenge: the 3.12 leg
+  carried only the watchdog conviction, and the correction relocated the one
+  unexplained leg to 3.13 — where a targeted addendum found THE THIRD
+  MECHANISM: 3.13's resolve reads os.path at call time, so the chimera does
+  not sever the route, it MOVES it — world A's own patch rides along on
+  ntpath and the defect dies. The cure is the end of arms: after three rounds
+  of predict-from-version-and-platform tables each refuted by a real host,
+  the control now ASKS THE CHILD which routes survive the chimera — right on
+  3.13, nt, pre-3.11, and interpreters nobody has shipped yet, without naming
+  any of them. The sweep pre-killed three more 3.13 reds and caught seedgo's
+  own hour-old pin carrying the species it was written to cure. Fleet lines
+  banked: an arm that only fires on a host you do not have needs a table,
+  not a branch (the mutant that deletes it is invisible on the only machine
+  you can run); a new world needs its stand-down and its host-already-has-one
+  pin on day one. Devpulse 607x2, seedgo 2916x2 across the two passes, audits
+  100.
+
+- **Round 10: the assumption moves into the assertion next** (FPLAN-0461
+  continued). Round 9's board (84175b82): production clean a FOURTH consecutive
+  board, red owners down to two, five unique failing tests — and spawn's
+  windows-leg skip-by-name cure HELD on the real Windows runner. Every red was
+  one species, seen twice in one round: round 9 made the verdicts honest
+  three-state, and the reds were the ASSERTIONS over those verdicts, still
+  spelling the answer of the host they were written on. Devpulse diagnosed all
+  four mechanisms from the CI evidence before dispatching; two survived contact,
+  two were corrected with receipts and the conclusions stood. Spawn: the posix
+  control now measures a control (untouched-host run first, forcing posix must
+  LEAVE the row, forcing nt must MOVE it — no literal anywhere, and the row
+  runs again against an object-flavour host so the restored-literal mutant dies
+  on the exact CI red reproduced locally); the parse_parts dialect mismatch is
+  gated by a MEASUREMENT, not a version table — a probe asks the host's own
+  pathlib what it reaches for, rows carrying a module-shaped flavour skip by
+  name with the host's own answer, and the probe carries a negative control
+  that grows 3.10's consumer to prove it can fire (a silent child reads as
+  unknown and CLOSES the rows). Seedgo: the alias judgement keys on measured
+  module identity with both arms asserted and an nt-identity world reachable
+  from Linux forever — the world's two halves pinned alone, because identity
+  without the cwd-reading realpath is the Linux answer wearing an nt label;
+  and the refuted mechanism's cure was one dialect-neutral literal — the probe
+  had built its input as abspath(os.sep), which is rooted-driveless on posix
+  but DRIVE-rooted on nt: the input changed shape underneath the row. Seedgo's
+  property sweep then caught THREE literals true only where ntpath carries the
+  3.12 legacy clause — next board's 3.13 reds, killed tonight — and grew a
+  fourth verdict for a foreign ntpath that reads the cwd anyway (an emulation
+  reported as a platform). The night's found-object: backslash-named files
+  minting at the repo root, spawn measured them without naming an author,
+  devpulse attributed them to seedgo's window, and seedgo corrected the
+  attribution with receipts — their throwaway sweep instrument, not shipped
+  code — while writing down the harness property that made it a commit risk at
+  all: the composed runner hands every child cwd = repo root, so any relative
+  write anywhere lands in the tree. Pinned one level stronger than asked: a
+  fixture that fails the module if children leave ANYTHING behind, deliberately
+  non-deleting, acquitting removed entries, its watched directory pinned to the
+  real child cwd. Fleet lessons banked: a mutant that deletes a COUPLING is
+  invisible to a single-mutant run (the pair is the mutant); an assertion that
+  holds cannot be killed by deleting it (mutate the source); and the naming
+  checker learned PYTEST_CONTRACT_GLOBALS from devpulse's refused auto-fix —
+  2074 files, 7 verdicts change, all FAIL to no-verdict. Spawn 977x2 with 12/13
+  mutants named, seedgo 2901x2 with 8/8 named, both audits 100.
+
+- **Round 9: the instruments learned to say where they cannot speak — cross
+  terms, one-dimension litmuses, and the wrong question** (FPLAN-0461
+  continued). Round 8's board (9bd2618b) was five red legs, zero production
+  defects for the third consecutive board — and every red was a cross term:
+  a shape simulated on a real host where neither side is 3.12. Three owners,
+  one evening. **Spawn** (965×2, 147 pins in the file, 14/15 mutants each named
+  with the assertion that fired) decomposed the cross into four mechanisms and
+  found the deepest one under it: the old symptom table pinned whether a
+  rebinding reaches the route *afterwards* — an answer that moves with the host
+  for reasons unrelated to the emulation. Three reds, one wrong question. The
+  cures are the terminal shapes: symptoms as judgements over measured values,
+  simulations that declare which real hosts they can speak from and skip with
+  the child's own reason elsewhere, and the platform asymmetry stated plainly —
+  the nt getcwd row is measurable from posix (it rests on the cwd read sitting
+  above the isabs check), the posix row is not measurable from nt (it rests on
+  what counts as absolute), so on the windows leg those rows now skip by name.
+  Two findings that travel: *an emulation friendlier than the thing it emulates
+  hides the defect* (their flavour stand-in forwarded to posixpath, which has a
+  realpath the real `_PosixFlavour` lacks — delegate to the thing you stand in
+  FOR, not a convenient neighbour), and rebinding `pathlib.Path` moves pathlib's
+  own `cls is Path` identity test — the tidier rewrite is the broken one.
+  **Seedgo** (2882×2, 8/8 mutants named) found round 8's defect committed again
+  one file over — the *reproduction partner* of the cure installed a three-method
+  accessor stand-in that decapitated a real 3.10: "a cure and its reproduction
+  are two instruments, and I applied the rule to one of them." Their synthetic
+  accessor now delegates every unnamed attribute ("a stand-in for a namespace
+  that answers three questions is a trap for the fourth") and prints whether it
+  synthesised or stood down. The alias-catchability red confirmed the dispatch
+  hypothesis against CPython source: 3.13 removed ntpath's LEGACY BUG clause
+  (3.12 ntpath.py:99–102) keeping rooted-driveless paths absolute — a platform
+  fact that was a version fact, their own checker-pack sentence landing in their
+  own file; the verdict is now three-state, because a verdict that cannot tell
+  two different losses apart hides the more interesting one. **Flow** (1041×2 +
+  bare-checkout, 15/15 valid mutants dead, 2 invalid published as invalid) found
+  worse than their reported red: *a one-dimension litmus is blind on the host
+  that already is that dimension* — on Windows their runner fake installed
+  Windows-shaped values over Windows-shaped values and the litmus measured
+  nothing while reporting green. The cure is a runner **set**: both platform
+  fakes run every direction and the verdict must not move, so on any host at
+  least one row is a real measurement. Trigger's round-9 line — a mutant report
+  says *which assertion fired*, not only how many — was taken by all three
+  owners the same evening it was proposed. Devpulse fixed the unowned repo-root
+  `conftest.py` docstring and refused the auto-fix rename of
+  `collect_ignore_glob` (the lowercase name is pytest's API contract; the tidier
+  spelling silently disables the mechanism), reported to seedgo as a live
+  checker counterexample. The seedgo-audit leg and test 3.12 went green this
+  board; expected next: the campaign's first fully green board, with the
+  windows-leg posix-only rows skipping by name rather than asserting what the
+  runner can contradict.
+
+- **Round 8: the assumption moves up a level every time it is cured — round 7's
+  instruments were sound, and the machinery that installs them was not**
+  (FPLAN-0461 continued). Round 7's board (commit 68ab5132) came back 20/20
+  checks with six non-green and **zero production defects** — the first board
+  where Windows ran the fleet's own litmus for real: an nt host, and every
+  expectation still keyed on "here = posix host" moved. Six owners, every red an
+  instrument, every cure red-first on Linux. **Spawn** (930×2, 14/16 mutants + 2
+  named equivalents) owned the largest share and the round's sentence: *the
+  version-shaped assumption moves up a level every time it is cured* — round 6
+  the world, round 7 the emulation, round 8 the installer. Their shape preludes
+  reached `PurePath._parse_path` (3.12+; older interpreters spell it
+  `_parse_args`), so the child died before printing and all 37 failures on
+  3.10/3.11 wore the arming probe's message — *a harness crash wears the message
+  of the instrument it never reached*. Their 3.13 red was the probe building its
+  own input **inside** the world it measures, meeting 3.13's ntpath dropping the
+  legacy clause that kept rooted-driveless paths absolute; the cure vocabulary —
+  halves with three verdicts (NATIVE / INSTALLED / UNAVAILABLE-with-the-child's-
+  own-reason), decisions by measurement not `hasattr`, the probe literal built
+  once and its VALUE reused — is the round's export. They also corrected the
+  dispatcher's brief by measurement: the coverage leg runs **3.13, not 3.12**
+  (ci.yml:101), so the "dies under the coverage tracer" hypothesis is refuted —
+  one mechanism had been counted twice. **Flow** (1029×2 + bare-checkout, 13/13)
+  extended the verdict: *an instrument's inputs are behaviour too* — round 7
+  cured the captured function and left the probe path built from `os.sep` and
+  `pathlib.__file__`, the runner's spelling, which posixpath rightly reads as
+  relative; and they named the litmus's missing dimension — it varied the
+  emulated host, but what convicted CI was the platform the **process** runs on,
+  so WINDOWS_RUNNER now fakes exactly what a probe can read to build a path and
+  is deliberately *not* a world. Their confession pair: a structural check that
+  reddened on its own documentation, and an nt literal mangled by its enclosing
+  triple-quote (`\not` became a newline — the instrument's input corrupted by
+  the language it is written in). **Trigger** (1092×2, 0 skips) refuted the
+  dispatcher's mechanism while confirming the conclusion — the probe path was
+  `sys.executable`, drive-lettered on the runner, and the fix a one-line
+  dialect-neutral literal; their addendum deleted a control clause a mutant
+  proved could never fire ("it looked more careful than what replaced it") and
+  found their own round-7 two-sentinel discriminator gone dark one round later
+  by the mechanism it guarded against. Their round-9 line rides ahead: *a mutant
+  report should say which assertion fired, not only how many — false kills are
+  worse than false survivors, because nobody re-examines a kill.* **Seedgo**
+  (2869×2, 8/8) named the verdict's mirror — *an instrument must not REMOVE
+  behaviour it is not testing* — after their 3.10 emulation stubbed the accessor
+  a real 3.10 routes its whole API through, decapitating the interpreter before
+  the measured defect was reached; and their windows red was their own round-7
+  sentence ("absolute never reads the cwd is a posixpath fact") shipped as a
+  constant one file over — the nt alias row is now *reported* as unfalsifiable
+  there rather than asserted away. Their stacking find (host == emulated is one
+  layer) was acted on by spawn the same hour: applied each emulation twice,
+  pinned no-recursion, and killed the mutant that proves the property is
+  measured, with seedgo's name on the pin. **Skills** cured **six** docstring
+  files, not the three CI flagged nor the five seedgo's mail named — the sixth
+  was invisible to both lists because its verdict never *moved*, and seedgo's
+  list was correctly a diff of moved verdicts: *a handed list is a lower bound
+  whenever the thing that produced it is a diff — re-measure until the number
+  stops moving.* They also caught spawn's `ntpath.py:678` citation reading `:673`
+  on 3.12.3 — the ordering travels, the line number doesn't. **Ai_mail** (1446×2)
+  reproduced their discarded string-after-import before fixing it (`__doc__` was
+  None on the live module), worked the tree not the list, and named an unarmed
+  species for seedgo to confirm: an f-string opening a module body reads as a
+  docstring to a human and is refused by `ast.get_docstring`. The seedgo-audit
+  leg itself was the dispatcher's own train collision — `--all` swept the new
+  ast-based checker onto CI before the flagged owners had fixed their files.
+  Composed verify before this commit: full universe from the repo root under
+  exact CI mode, plus per-branch both-rootdirs by every owner; the train
+  deliberately carries seedgo's held work (the posix-literal checker pack, the
+  docstring rule, the settle-recheck, and the round-7 litmus pins).
+
+- **Round 7: an instrument must not import behaviour it is not testing — the
+  round-6 instruments met the interpreters and platforms they were built to
+  emulate, and lost everywhere except home** (FPLAN-0461 continued). Round 6's
+  board was 12 green with test 3.12 passing — the exact interpreter the fleet
+  builds on — and red on 3.10/3.11/3.13 and windows-setup (13 failed /
+  19,697 passed on *Python 3.12.10*, isolating pure nt semantics). Every red
+  was round 6's own new accessor instruments; zero production defects, all
+  prior cures held. Memory measured the mechanism in 553 seconds and named the
+  fleet verdict: the probes were built out of the **live** `os.path` and
+  `os.getcwd`, so their verdicts carried platform behaviour they weren't
+  testing — on nt `os.path` *is* `ntpath`, whose `realpath` reads the cwd
+  unconditionally (round 4's own headline turned back on its finders) and
+  makes a POSIX-absolute literal drive-relative (`/tmp` → `D:\tmp`). Three
+  rules, each paid for: emulate *both* platforms or neither; build emulations
+  from `posixpath`/`ntpath` **by name**, never `os.path` (which *is* the
+  host — flow's first try recursed into itself 997 frames deep); and probes
+  asking "did my patch reach X" capture a **sentinel** that returns its
+  argument, so the original's platform behaviour can't answer for it. Plus the
+  litmus that finds all three: run every probe under the *opposite* platform's
+  emulation and require the verdict not to move — it caught spawn's next CI
+  red before it shipped. Spawn's cluster decomposed differently by reading
+  CPython per version: 3.10/3.11 reds were their emulation *crashing while
+  parsing* (a wrapped `_flavour` lost `parse_parts`), 3.13's patch was a write
+  nothing reads, Windows instantiates `WindowsPath` outside the patched
+  hierarchy — the new emulation replaces exactly one method and proves it
+  armed (`ROUTE_ARMED`/`ROUTE_DARK`) before anything downstream claims.
+  Refinements traveled mid-round: skills corrected flow's alias trap by source
+  read (off-Windows `ntpath.realpath` is a *wrapper*, not an alias — an `is`
+  test proves nothing) and kept `getcwd` a live capture deliberately (a
+  sentinel can never arm, so sentinelling it takes the eagerness pin dark);
+  trigger closed that hole with two distinguishable sentinels (eager answers
+  CAPTURED, lazy answers MOVED — no platform behaviour in the discriminator);
+  drone generalized: a pin that reads a *value* back can be measuring the
+  host, so the litmus lives beside every return-value pin as a test. On the
+  record: trigger's mis-aimed mutant that would have logged a false survivor
+  ("looks exactly like a real hole"), seedgo's refuted round-6 mechanism
+  rewritten in place with attribution rather than deleted, drone's stale
+  held-tree list corrected from git rather than memory, and skills' recurrence
+  of the poisoned-baseline species caught by ai_mail's guard — the guard is
+  the cure, not the `finally`. Seven branches: memory 1596×2, seedgo 2808×2,
+  spawn 902×2 (14/14 mutants), flow 1022×2 + bare-checkout, drone 1349×2,
+  skills 355×2 + 1119 lib, trigger 1087×2 with 0 skips.
+
+- **Round 6: the interpreter is part of the platform — the 3.10 leg convicted
+  the instruments, and the fleet cured the capture** (FPLAN-0461 continued).
+  Round 5's CI left two named clusters and both are dead. The Python 3.10 reds
+  were all *arming probes refusing honestly*: on ≤3.10, `pathlib` reads
+  `os.path.realpath` (and `os.getcwd` — skills) through a `_NormalAccessor`
+  that **captured its copy when pathlib was first imported**, so rebinding the
+  module attribute rebinds a name nothing reads again and the injected worlds
+  never armed. My first diagnosis ("3.10 doesn't delegate") was wrong — memory
+  read the CPython source and refuted it, seedgo reproduced the capture by
+  construction, and the correction propagated mid-flight; the cure is four
+  hasattr-guarded lines (patch the captured accessor too) and the same world
+  arms on every interpreter — no version tables, no skipif. Eight branches
+  cured, each making the 3.10 row *falsifiable locally* by rebuilding the
+  capture on 3.12 rather than asserting from the CI red. The round's traps,
+  each measured: patch as `staticmethod` or a plain function eats the path
+  into `self` and raise-shaped pins stay green for the wrong reason
+  (return-value pins cure); exercise through an instance; probe with absolute
+  paths (a relative path convicts for the path's *shape* — skills had this
+  live); emulations must capture eagerly (flow shipped the trap inside the
+  instrument built to avoid it and their ninth mutant caught it); `cwd` and
+  `resolve` ride *different* captured attributes (skills' M16). Structural
+  finds beyond the cure: spawn's gate was reporting one red while several
+  sibling pins *silently skipped* under an unrelated platform message (gates
+  now fail, not skip, where no platform reason exists); trigger's version
+  escape hatch cited the retracted diagnosis and was green only by
+  import-order luck on the one leg where order decides — deleted, and made
+  falsifiable on a host that cannot produce the condition it excused;
+  memory's windows-setup pins (the last two on the board) got the six-row
+  os.name table with both nt rows measured twice. Seedgo's sentence carries
+  the round: *a careful falsifiable table on a wrong mechanism is more durable
+  than a guess — read the source before keying an instrument to it.*
+
+- **Round 5: the round-4 pins met the real Windows platform, and every red
+  taught a structural rule** (FPLAN-0461 continued). CI on the round-4 commit
+  came back red where the new pins *measured the platform for the first time* —
+  POSIX facts asserted as universal. Eight branches cured by their owners:
+  per-platform expectation tables replace universal assertions, each stating
+  which rows are measured live here vs derived from the CI red (a CI red is a
+  *negative* measurement — it proves not-unconditionally-X, never which value;
+  recording a guess is inventing a measurement, so unfalsifiable rows are
+  pinned as `None` *decisions*). The round's converged rules, each named to its
+  finder: **emulate the platform, not just the denial** (prax — getcwd-denied
+  Linux is a genuinely different world from Windows-with-no-cwd, because
+  `ntpath.abspath` never touches getcwd); **split cause / outcome / link into
+  separate pins** (canary — a future red names its own mechanism, and the link
+  pin makes derived rows falsifiable locally); **key the table on the variable
+  that actually decides** (ai_mail — `os.name` answers which path module,
+  `sys.platform` answers does-the-filesystem-fold: darwin folds on posixpath);
+  **a table row no local platform can falsify enters silently** (ai_mail's
+  darwin mutant — the original defect's shape, one platform along); **separate
+  the judgement from the world** (commons — their first rebuild shipped the
+  unreachable-branch species one level up in the instrument: four survivors all
+  mutated branches Linux never executes; judgements became plain functions fed
+  synthetic values, every platform case reachable on any host); **a line-scoped
+  waiver whose number moves fails open and silent** (trigger — one round-4
+  edit shifted four bypass.json waivers, resurfacing as "new" violations;
+  re-derive, never hand-adjust); **mutate the source, never the test** (daemon
+  — deleting a currently-true assertion proves nothing). Real defects found
+  under the noise: prax's log-dir resolver mkdir'd the literal `<stdin>` (21
+  such dirs in /tmp; reserved-character crash on Windows — cured, bracketed
+  names → "unknown"); backup's fence compared one normalised operand against
+  one raw (refused its *own kin* on Windows — cured both sides); trigger's
+  `_systemctl` had never been executed by its suite (extraction exposed it;
+  `return True` left all 40 tests green — 9 pins now). Exactly-once log pins
+  on Linux cured at conftest altitude (flow/memory — the bare-checkout world
+  logs a fallback diagnostic *inside* the test window on CI only). Daemon
+  caught their own CI-red-in-waiting pre-commit (a pin asserting the
+  gitignored `tools/` exists — verified in the absent world). Composed
+  universe green before commit; per-branch by owners, both rootdirs, audits
+  100 across every touched branch.
+
+- **Round 4: the import-time dead-cwd defect cured in all 16 branches (~150
+  sites), and the instrument that watches the cure** (FPLAN-0461 continued).
+  `ntpath.realpath` reads `os.getcwd()` unconditionally and `Path.resolve()`
+  routes through it, so every module-level resolve *reached at import* is an
+  import-time crash on Windows — and every branch's `handlers/__init__.py`
+  guard called `inspect.stack()` first, masking its whole tree (the mask ran
+  two layers deep in daemon/api/backup via a json_handler root constant, three
+  in skills with two *parallel* second layers — counts only become true as
+  cures land; re-measure until the number stops moving). Each branch cured by
+  its owner, red-first in two subprocess worlds, mutants run not assumed:
+  guard walks on `sys._getframe` over `co_filename`, module-level resolves
+  routed through one guarded `module_file()` helper per branch (diagnostics
+  inside their own protection — daemon's rule, stderr deduped last resort),
+  the hot-path `_get_caller_module_name` stack walks cured to
+  `sys._getframe(2)` with pins asserting the audit trail still *answers*
+  (aipass's shared fix reaches five shims including spawn's citizen template —
+  newborns born cured AND born pinned). The deleted second stack walk proved
+  unreachable from import-shaped pins in nine independent reproductions
+  (restoring the defect left 1118/1120 green in aipass), so every tree carries
+  an AST ban — and spawn's capstone correction landed the behavioural sibling:
+  the branch IS reachable by calling the guard directly from a `-c` child,
+  adopted fleet-wide within 90 minutes of the relay. Five harness species now
+  named in the record: a mutant with no pytest output is invalid, never
+  survived (canary); the lookup frame must be the compiled one (aipass); a
+  world can be too hostile to convict — denying getcwd *hides* the stack
+  defect inside `getabsfile`'s own except (prax); a world spelled too
+  realistically is silently inert — script-run probes make every frame a real
+  file (commons); a negative control that can fail for the ban's own reason is
+  a second ban, not a control (spawn, confirmed retroactively by prax).
+  Report-only for Patrick's ruling, all measured: the handlers fence is
+  decorative in fact (backup/skills proved a foreign import ALLOWED, causally
+  — door closed = blocked), and one-word branch kinship tests admit any
+  same-named directory as kin (api: drone's own `api/` subdir admitted; skills:
+  14 same-named dirs on this machine). Rode along: daemon's `_calc_next_run`
+  read the wall clock instead of the timestamp it was handed — `next_run` had
+  advertised impossible fires on the human status surface daily (13 pins, 3
+  live records repaired); skills' `get_search_paths` raised on dead cwd taking
+  every list/info/run down — cured by asymmetry (discovery skips, creators
+  refuse); the medic warning-storm species (a WARNING logged at module import
+  escalates on volume alone) moved to first-use, deduped.
+
+- **The two-test-universes defect class, closed at root cause across 7 branches**
+  (FPLAN-0461, night shift on Patrick's brief "every change we make it turns
+  red — is it a norm?"; answer: no). The commit gate runs each branch's suite
+  with rootdir pinned to the branch by its own `pytest.ini`, so the repo-root
+  `conftest.py` never loads there — while CI composes every conftest in one
+  process under xdist. All 30 CI reds classified with zero speculation, each
+  fixed by its owner, every fix independently verified by devpulse:
+  - repo-root conftest guard (devpulse): consult the handler's own
+    `_current_json_dir()` seam instead of re-deriving from constants — the
+    substring scan read seam-adopted modules as unpatched and skipped writes
+    their tests asserted on (12 reds).
+  - prax json_handler 1.4.0: the import-time anchor was seeded WITH
+    `AIPASS_TEST_LOG_DIR`, violating the env-independence its own adopters
+    pinned as load-bearing; an env-derived anchor is sufficient for the defect
+    alone, no reload needed — and prax's own suite was green only by
+    import-order luck (2 reds). Subprocess import pins now bite in both
+    universes.
+  - drone registry tests: a stand-in installation that passes the credential
+    gate on merit, not unverifiability; the memory-gateway import moved inside
+    the never-take-routing-down guard (5 CI-only reds, one a real bare-world
+    import crash).
+  - memory: marker7 guarded on `live_all_tiers` — existence is not sufficiency,
+    a registry with no rows or no external tier is a half-present world that
+    skips with a named reason (2 reds); plus registry_scope's module-level
+    `Path.cwd()` fallback replaced with a `__file__`-derived source root
+    (the import-time crash behind drone's).
+  - **the CI polluter, fingerprinted and killed**: `tests/e2e` `routing_root`
+    wrote a 3-branch synthetic `AIPASS_REGISTRY.json` at the repo root for a
+    whole module — true sequentially, poison under xdist (40/60 parallel reads
+    saw the synthetic in @aipass's repro), and on a live machine it overwrote
+    the real fleet registry with the backup held only in process memory
+    (kill -9 repro: the 22 rows existing nowhere). The fixture now builds a
+    throwaway root under tmp — no repo write exists, no teardown left to fail.
+    Only macOS/Windows CI run e2e, which is why only those jobs saw `{'core'}`.
+  - aipass `find_registry`: absence is `None`, never `Path.cwd()/…` — the old
+    code answered a question about one directory with a file from wherever the
+    caller stood; paired with spawn's `load_registry` minting a fresh
+    `metadata.id` for missing paths, two lines conjured a registry with a new
+    trust credential out of nothing (loaded gun, unfired, disarmed). Spawn moved
+    the mint to `resolve_project_credential`, called by name from the two
+    create sites — the create path knows it is creating; the load path knows
+    nothing — and hardened all fifteen resolver call sites to refuse in their
+    own vocabulary (four were live `None.exists()` crashes, one an
+    AttributeError escaping a narrow except inside the delete-protection
+    check). Their live-fleet baseline test now guards on what the WORLD
+    contains, not where the process runs (`GITHUB_ACTIONS` was protecting one
+    CI provider and nobody else).
+  - spawn: the read-torn race harness reports weather as weather (warmup until
+    both sides prove live, skip-with-counted-reasons backstop, tear-check-first
+    pinned so a skip can never mask a real tear; proved under load 5.29 with
+    races exercised) — it was the one intermittent red in prax's 1380-file
+    fleet batch.
+
+- **Round two, caught by the first round's own pins on CI** (same night):
+  - memory: nine private repo-root walks with `Path.cwd()` fallbacks became ONE
+    implementation (`handlers/repo_root.py`) behind the existing names, with a
+    parse-tree pin — no lane may define a walk that is not a delegation, no
+    `return Path.cwd()` anywhere in apps/ — that named all ten offenders
+    red-first and carries a positive control (a mutant that blinded the filter
+    left the suite green; skip-reads-green, caught twice in one night). One
+    reversed test told the whole story: `test_find_repo_root_falls_back_to_cwd`
+    had pinned the defect as the contract — a green test standing guard over
+    the bug.
+  - prax `config/load.py`: the same cwd fallback under `get_system_logger()` —
+    called at module level by nearly every handler in the fleet — fixed within
+    the hour of memory's cross-branch report (memory verified 11/11 bare-world
+    imports clean, then removed their own xfail hatch the moment the blocker
+    died).
+  - **hooks bash_writes 1.2.0 — the Windows fence was open**: `shlex`'s POSIX
+    lexer eats backslashes as escapes, so a drive-absolute foreign path arrived
+    as one relative token and resolved LOCAL — every scripted-lane category
+    allowed with exit 0 on Windows CI. Fixed by dual-dialect lexing with
+    unioned write targets (reading `\` as a separator can only ADD components,
+    so local can never become foreign by it — the reverse is exactly what
+    happened); unwalkable foreign roots published as NOT_CAUGHT entry 8, never
+    a silent allow. Reproduced and pinned on Linux — the bug needed a
+    backslash, not a Windows box.
+  - seedgo: three "deliberate violations" ruled — all three were checkers
+    overclaiming, all three taught instead of waived (pure-declaration modules
+    `not_applicable` for json_structure; relaying a captured subprocess stream
+    is an authorship class, and crossed streams are now caught under the same
+    rule; unused_function says "no caller in this branch" and warns about
+    cross-branch/dynamic callers it cannot see — the dead-code checker had
+    nominated the fleet's most load-bearing function, memory's
+    `changed_entries`, called by hooks' write gate via importlib). Adopted
+    rule: a structurally detectable exemption goes in the checker; a waiver is
+    only for what cannot be measured.
+  - drone: the no-cwd sweep's own new test asserted a fact about the machine
+    (registry presence) instead of the function — rebuilt against stand-ins,
+    claim strengthened to "carries a project marker" (the weak claim was
+    satisfied by the function's own last-resort return); two POSIX separator
+    pins converted to `Path.parts`.
+
+- **Windows joins the one universe: the case-fold registry defect, closed at
+  every site in the fleet** (FPLAN-0461 round 3, dawn shift). ef029782's
+  windows-setup leg — the last red gate, 20/21 green — failed only in the
+  night's own new tests, and the diagnosis found a real cross-platform defect
+  under the noise: pathlib's glob is case-insensitive on Windows (and default
+  macOS), so `*_REGISTRY.json` also matches `*_registry.json` — and the bait is
+  everywhere (ten `flow_json/*_registry.json` plan counters, spawn's dotfile
+  `.template_registry.json` in every branch; pathlib's `*` matches dotfiles).
+  CI's proof: `find_registry()` served `drone_command_registry.json` as a
+  trust-anchor candidate. **44 exposed walk sites cured across 9 branches**
+  (drone 13 → one `registries_in` reader; aipass 7 incl. the shared
+  `registry_discovery` everyone imports; ai_mail 6 — two more than any list
+  named, one hidden behind a CONSTANT pattern a literal grep cannot see, and
+  the live harm measured rather than assumed: a walk that ENDS at the decoy
+  resolved an external caller to None, and `find_project_root` handed the
+  fence a wrong root; seedgo 9 → one reader + the measured two-clause checker
+  discriminator, build queued; memory 4 — detector PERSISTED the folded match
+  into fleet state forever and a nearer decoy `break`-ended the walk above the
+  real registry; spawn 2; prax 1; commons 1 — whose
+  `name != "AIPASS_REGISTRY.json"` filter was the instructive near-miss; and
+  devpulse 2). Fix shape everywhere: glob, then re-check the name with
+  case-sensitive `endswith("_REGISTRY.json")` — suffix only, never the stem,
+  so externally-named registries survive. Memory's follow-through went one
+  door further: a cased LITERAL folds too, so `find_repo_root`'s
+  `(parent / "AIPASS_REGISTRY.json").exists()` could accept a lowercase file
+  as THE repo root — `exists_exactly` now guards it and three sibling lanes.
+  All pins red-first on Linux by emulating the widened listing, with positive
+  AND negative instrument controls (aipass's first control re-implemented the
+  matcher's logic and proved nothing while the walk visited zero files;
+  commons measured that without the control, breaking the emulator turns every
+  pin green). Precedent noted for the record: prax's branch_detector and eight
+  aipass sites already carried the exact cure — it never traveled to the sites
+  that globbed.
+
+- **The dead-cwd test world, made honest on Windows** (same round). The night's
+  deleted-cwd pins died at SETUP on Windows — `WinError 32`, the OS locks a
+  process's cwd, the world is unbuildable by chdir+rmdir. Two rulings, both
+  pinned, each owner choosing per claim: memory's — pin the CONDITION
+  (`os.getcwd()` raises), not the CAUSE (a deleted directory): inject a raising
+  `getcwd` in the child, licensed by `TestBothConstructionsAgree` (both worlds
+  must agree on POSIX or the stand-in expires); drone's — Windows removes the
+  RECIPE, not the STATE (a disconnected share is a live dead cwd), so the
+  deletion tests keep running where they can under a registered
+  `deletable_cwd` marker whose skip is itself pinned observable from Linux,
+  with portable siblings supplying the state and the one genuinely lost claim
+  named out loud. Spawn measured which ruling their defect needed instead of
+  picking by taste, and added the round's best control: a negative control for
+  the positive control, after a mutant showed a lying `CONTROL_LIVE` probe
+  turning every portable pin vacuously green. Prax's entry found the deeper
+  vacancy: their dead-cwd pins passed on dev machines because the marker walk
+  succeeds there and the cwd fallback never runs — the probes now hide the
+  marker so every machine runs CI's world. Hooks' two remaining Windows reds
+  were separator spellings in the tests (`Path.parts` tail comparison now) —
+  and the fence-fix measurement arrived: TestScriptedLaneCatches is GREEN on
+  the real Windows runner; the dual-dialect gate holds on every OS.
+
+### Added
+
+- **daemon+ai_mail+hooks+memory: Vera woke** (FPLAN-0460 closed, c9d0327e —
+  entry owed from that commit). The first external citizen fired by the real
+  clock; scheduled manager wakes are headless dispatches under Patrick's
+  rulings (always bypass permissions, managers-are-Fable-only-managers, marked
+  sessions, blocked-is-not-ran three-state runstate); hooks edit_gate 1.7.0
+  verifies the admin seat through ai_mail's 5-leg grant and bash_writes.py
+  closes the scripted lane for everyone else; memory's entry_limits 1.6.0
+  refuses what a write AUTHORS, never what it CARRIES.
+
 ## [2026-08-30] — the audit-tests lane: testing the tests (DPLAN-0320 campaign) · v2.8.0
 
 ### Added

@@ -97,6 +97,13 @@ def resolve_relative_path(target_dir, registry_path=None) -> str:
                 return target.relative_to(projects_root / parts[0]).as_posix()
 
     reg_path = Path(registry_path) if registry_path else find_registry(start_path=target.parent)
+    if reg_path is None:
+        # find_registry answers absence with None now (@aipass, 2026-08-31).
+        # There is no project root to make the path relative TO, which is the
+        # same outcome the ValueError arm already handles: fall back to the bare
+        # name rather than inventing an anchor.
+        logger.warning("[spawn] No registry found above %s — passport path falls back to the bare name", target)
+        return target.name
     try:
         return target.relative_to(Path(reg_path).resolve().parent).as_posix()
     except ValueError:
@@ -140,7 +147,10 @@ def build_replacements_dict(target_dir, branch_name, **overrides):
         registry_path = (
             Path(caller_registry_path) if caller_registry_path else find_registry(start_path=Path(target_dir).parent)
         )
-        if registry_path.exists():
+        # None means no registry above the target at all; absent and unfindable
+        # are the same answer here — leave registry_id empty rather than
+        # substituting a credential nobody issued.
+        if registry_path is not None and registry_path.exists():
             data = json.loads(registry_path.read_text(encoding="utf-8"))
             registry_id = data.get("metadata", {}).get("id", "")
 

@@ -16,8 +16,9 @@ from pathlib import Path
 
 from aipass.prax import append_jsonl
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.hooks.apps.handlers.module_root import module_file
 
-BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
 _PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
 
 

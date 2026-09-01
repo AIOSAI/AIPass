@@ -42,6 +42,7 @@ from urllib.request import Request, urlopen
 
 # Logging
 from aipass.prax import logger
+from aipass.skills.apps.handlers.module_paths import module_file
 
 # JSON handler (seedgo standard)
 from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
@@ -203,7 +204,7 @@ def set_bot_commands(bot_token: str, commands: list[dict]) -> bool:
 
 def _install_service_unit() -> bool:
     """Copy telegram-bot@.service into ~/.config/systemd/user/ and reload."""
-    UNIT_SRC = Path(__file__).resolve().parents[2] / "telegram-bot@.service"
+    UNIT_SRC = module_file(__file__).parents[2] / "telegram-bot@.service"
     UNIT_DST_DIR = Path.home() / ".config" / "systemd" / "user"
     UNIT_DST = UNIT_DST_DIR / "telegram-bot@.service"
 

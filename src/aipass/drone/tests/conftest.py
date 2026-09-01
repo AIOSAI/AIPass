@@ -11,6 +11,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import json
 import logging
 import shutil
+import sys
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
@@ -183,3 +184,45 @@ def mock_json_handler() -> MagicMock:
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler
+
+
+# ---------------------------------------------------------------------------
+# The deletable-cwd marker
+# ---------------------------------------------------------------------------
+
+DELETABLE_CWD_MARKER = "deletable_cwd"
+
+WINDOWS_CWD_REASON = (
+    "This test builds its world by deleting the directory the process stands in. "
+    "Windows holds the current directory open without delete sharing, so rmtree(cwd) "
+    "raises PermissionError WinError 32 and the directory is never removed — the RECIPE "
+    "is unavailable there, not the STATE. A disconnected share or an ejected volume still "
+    "leaves a live Windows process whose getcwd() raises, so the guards themselves stay "
+    "pinned on every OS by the patched-Path.cwd construction (tests/test_no_cwd_sweep.py "
+    "and the portable siblings beside each skipped test). What Windows loses is only the "
+    "end-to-end half: that a real deletion actually produces the state."
+)
+
+
+def pytest_configure(config):
+    """Register the marker here rather than in pytest.ini.
+
+    The composed CI run loads this suite from the repository root with a
+    different inifile, so a marker declared in drone's own pytest.ini would be
+    unknown there — and --strict-markers turns an unknown marker into a
+    collection error. A conftest travels with the tests that use it.
+    """
+    config.addinivalue_line(
+        "markers",
+        f"{DELETABLE_CWD_MARKER}: needs a process to delete the directory it stands in (POSIX only)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip deletable-cwd tests on Windows only, and say the whole reason."""
+    if sys.platform != "win32":
+        return
+    skip = pytest.mark.skip(reason=WINDOWS_CWD_REASON)
+    for item in items:
+        if DELETABLE_CWD_MARKER in item.keywords:
+            item.add_marker(skip)

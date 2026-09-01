@@ -20,7 +20,6 @@ import subprocess
 import json
 import os
 import sys
-from pathlib import Path
 from typing import List
 
 if sys.platform == "win32":
@@ -34,17 +33,18 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
+from aipass.memory.apps.handlers.repo_root import module_file
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
 # =============================================================================
 
 # Subprocess script for ChromaDB operations (run in memory venv)
-_HANDLERS_DIR = Path(__file__).resolve().parent.parent / "handlers"
+_HANDLERS_DIR = module_file(__file__).parent.parent / "handlers"
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 
 # Memory venv python -- auto-detect from memory/.venv/ or use env var override
-_MEMORY_ROOT = Path(__file__).resolve().parents[2]
+_MEMORY_ROOT = module_file(__file__).parents[2]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
 
@@ -211,7 +211,7 @@ def _discover_handlers() -> dict[str, list[str]]:
         Dict mapping handler directory name to list of .py filenames
         (excluding __init__.py and __pycache__).
     """
-    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
+    handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result
