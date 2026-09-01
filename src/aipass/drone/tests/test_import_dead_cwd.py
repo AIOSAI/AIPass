@@ -110,6 +110,11 @@ import aipass.api  # noqa: F401
 #     prevents the binding; ``*a`` survives it if a future edit drops the
 #     staticmethod. Keeping one and deleting the other is how the remaining half
 #     silently becomes load-bearing.
+#   * a bound wrapper that ate the path would still call os.getcwd() first and
+#     still raise, so a raise-shaped probe stays green FOR THE WRONG REASON.
+#     test_the_ntpath_wrapper_resolves_the_path_not_the_accessor pins the value
+#     it returns, through a sentinel so the answer is the wrapper's and not the
+#     host path module's.
 #
 # THE PATCH IS CLASS-LEVEL ONLY, AND THAT IS A MEASUREMENT RATHER THAN A COPY.
 # The first cut here also assigned ``_pathlib._normal_accessor.realpath`` on the
@@ -119,10 +124,8 @@ import aipass.api  # noqa: F401
 # pins stayed green. Removing the instance line turns that same mutant red. 3.10
 # stores no per-instance ``realpath``, so the class patch is what its
 # ``self._accessor.realpath(...)`` actually reaches; the extra line bought
-# nothing and cost the only pin that watches the binding.
-#   * a bound wrapper that ate the path would still call os.getcwd() first and
-#     still raise, so a raise-shaped probe stays green FOR THE WRONG REASON.
-#     TestTheNtpathWrapperResolvesThePathNotTheAccessor pins the return value.
+# nothing and cost the only pin that watches the binding. @memory has adopted the
+# same refusal, crediting drone's M24b, against @spawn's belt-and-braces form.
 _NTPATH_WRAPPER = """
 import os
 
@@ -183,6 +186,61 @@ class _NormalAccessor:
 
 _p._NormalAccessor = _NormalAccessor
 _p._normal_accessor = _NormalAccessor()
+"""
+
+# @memory's SENTINEL, and it is the cure for drone's one windows-setup red on
+# c82c3d34. The return-value pin below asked "did the wrapper receive the PATH or
+# the accessor?" and answered it by reading what came back from the real
+# ``os.path.realpath``. On Linux that discriminates. On nt it does not, because
+# ``ntpath.realpath('/tmp')`` returns ``D:\\tmp`` — a POSIX-absolute literal is
+# DRIVE-RELATIVE there — so the pin reported "it is arriving bound and resolving
+# the accessor" about a wrapper that had worked perfectly. The mechanism it
+# guards was right; the string it compared was a POSIX fact asserted as
+# universal, which is the species this whole file exists to catch, committed
+# inside the instrument built to catch it.
+#
+# @memory's rule, paid for by four of their own reds the same night: when a probe
+# asks "did my patch reach X", let X have captured a SENTINEL rather than the
+# real function — otherwise the original's own platform behaviour answers the
+# question for you. This one returns its argument and touches no filesystem, no
+# cwd and no path module, so whatever comes back afterwards is the wrapper's
+# doing on any platform. It also subsumes the drive-relative symptom entirely:
+# with nothing resolving the literal, there is no spelling to disagree about.
+_SENTINEL_REALPATH = """
+import os
+
+
+def _sentinel_realpath(path, *a, **kw):
+    return path
+
+
+os.path.realpath = _sentinel_realpath
+"""
+
+# The OPPOSITE platform, for the litmus @devpulse requires: run the probe under
+# an nt emulation and require the verdict not to move.
+#
+# @flow's M3 TRAP, honoured rather than repeated: do NOT alias ``ntpath.realpath``
+# on this host. CPython's ntpath.py cannot import ``nt`` on POSIX and falls back
+# to ``realpath = abspath``, and ``ntpath.abspath`` reads the cwd only for a
+# RELATIVE path — so the alias emulates THIS host wearing an nt label and proves
+# nothing. The win32 branch is built by name instead: read the cwd
+# UNCONDITIONALLY (ntpath.py:678), and spell the answer the way nt does, where a
+# POSIX-absolute literal is drive-relative. ``D:`` is CI's own drive, from the
+# failure log.
+_NT_EMULATION = """
+import os
+
+
+def _win32_realpath(path, *a, **kw):
+    os.getcwd()  # unconditional on nt, unlike posixpath
+    p = os.fspath(path)
+    if p[:1] in ("/", "\\\\"):
+        return "D:" + p.replace("/", "\\\\")
+    return "D:\\\\emulated_cwd\\\\" + p.replace("/", "\\\\")
+
+
+os.path.realpath = _win32_realpath
 """
 
 # Does THIS interpreter's resolve() reach the denied call for an ABSOLUTE path?
@@ -445,28 +503,83 @@ os.path.realpath = _bare
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RESOLVE_DIES: YES" in result.stdout, result.stdout
 
-    def test_the_ntpath_wrapper_resolves_the_path_not_the_accessor(self):
-        """@memory's return-value pin, and it is not decoration.
-
-        Every other assertion about world A is RAISE-shaped. A wrapper that
-        arrived bound would eat the real path into ``*a`` and resolve the
-        accessor object instead — and it would still call ``os.getcwd()`` first,
-        so it would still raise, and every raise-shaped probe would stay green
-        for entirely the wrong reason. Only the return value can tell the two
-        apart, so it is checked with the denial OFF.
-        """
-        body = """
+    RESOLVE_PROBE = """
 import pathlib as _p
 
 print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
 """
-        result = self._run(_FAKE_ACCESSOR + _NTPATH_WRAPPER + body)
+
+    def test_the_ntpath_wrapper_resolves_the_path_not_the_accessor(self):
+        """@memory's return-value pin, cured of the platform it was importing.
+
+        THE CLAIM is unchanged and it is still not decoration: every other
+        assertion about world A is RAISE-shaped, and a wrapper that arrived bound
+        would eat the real path into ``*a``, resolve the accessor object instead,
+        and STILL call ``os.getcwd()`` first — so it would still raise and every
+        raise-shaped probe would stay green for entirely the wrong reason. Only
+        the return value separates the two, so it is checked with the denial OFF.
+
+        WHAT CHANGED is what the accessor captured. This pin used to read the
+        answer back through the host's real ``os.path.realpath``, which made the
+        verdict a fact about the host's path module — and on nt it returned
+        ``D:\\tmp`` and the pin accused a wrapper that was working. It reads
+        through a sentinel now, so the only thing that can change the answer is
+        the wrapper's own argument handling, which is the thing under test.
+        """
+        result = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RESOLVED: /tmp" in result.stdout, (
-            "the wrapper did not resolve the path it was handed — it is arriving "
-            "bound and resolving the accessor: " + result.stdout
+            "the wrapper did not receive the path it was handed — it is arriving "
+            "bound and passing the accessor through: " + result.stdout
         )
+
+    def test_the_nt_emulation_reproduces_the_ci_red_without_the_sentinel(self):
+        """Red-first, locally: the failure @devpulse relayed, rebuilt on this host.
+
+        Without the sentinel the probe resolves a POSIX literal through whatever
+        path module the host has. Under the nt emulation that is ``D:\\tmp`` —
+        CI's exact string, from a wrapper doing exactly the right thing.
+
+        If this ever stops producing ``D:\\tmp``, the emulation has stopped being
+        able to express the bug and the litmus below proves nothing.
+        """
+        result = self._run(_NT_EMULATION + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RESOLVED: D:\\tmp" in result.stdout, (
+            "the nt emulation no longer reproduces the drive-relative spelling, "
+            "so it cannot defend the sentinel: " + result.stdout
+        )
+
+    def test_the_sentinel_gives_the_same_verdict_under_either_platform(self):
+        """@devpulse's litmus: run the probe under the OPPOSITE platform's
+        emulation and require the verdict not to move.
+
+        This is the test that would have caught the original red on Linux. The
+        two runs differ only in which path module the host appears to have, and a
+        pin about argument handling must not be able to notice that.
+
+        THE COMPARISON IS THE PIN, not the ``RESOLVED: /tmp`` line under it, and
+        that was measured rather than assumed. Neutering the comparison alone is
+        an INVALID mutant by @daemon's round-5 rule — an assertion that currently
+        holds cannot be killed by deleting it, so of course it stays green. The
+        valid form is the compound: revert the sentinel AND neuter the
+        comparison, and the whole file passes. So the cross-platform equality is
+        the only thing here that catches CI's actual defect. Do not delete it as
+        redundant with the literal check below; the literal check is what CI was
+        already doing when it went red.
+        """
+        here = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
+        as_nt = self._run(_NT_EMULATION + _SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
+
+        assert here.returncode == 0, here.stdout + here.stderr
+        assert as_nt.returncode == 0, as_nt.stdout + as_nt.stderr
+        assert here.stdout == as_nt.stdout, (
+            "the verdict moved when the platform did — this pin is measuring the "
+            f"host rather than the wrapper.\n  here: {here.stdout!r}\n  as nt: {as_nt.stdout!r}"
+        )
+        assert "RESOLVED: /tmp" in here.stdout, here.stdout
 
 
 class TestTheCallerIsNoneBranchRunsAndReturns:

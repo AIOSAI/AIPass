@@ -63,6 +63,7 @@ STATIC_GROUPS: tuple = (
     "static_entry_point_diff",
     "static_mock_drift",
     "static_no_oracle",
+    "static_posix_literal",
     "static_ruff_pt",
     "static_self_skip",
     "static_unentered_assert",

@@ -34,6 +34,7 @@ from aipass.memory.tests.dead_cwd import (
     ACCESSOR_SHAPE,
     DEAD_CWD_WORLD,
     DELETE_CWD_WORLD,
+    POSIX_EMULATED_WORLD,
     REALPATH_DENIED_WORLD,
     WINDOWS_EMULATED_WORLD,
     WINDOWS_REALPATH_WORLD,
@@ -1166,6 +1167,73 @@ class TestTheTwoWorldsMustNotBeStacked:
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
 
+    _EMULATIONS = {"posix": POSIX_EMULATED_WORLD, "nt": WINDOWS_EMULATED_WORLD}
+
+    def test_the_posix_emulation_actually_arms(self):
+        """Arming probe for the half round 6 forgot to build.
+
+        A posix world must let ``realpath`` through an ABSOLUTE path without
+        touching the cwd — that is the fact the SURVIVES rows rest on, and the
+        one an nt host contradicts.
+        """
+        world = (
+            POSIX_EMULATED_WORLD
+            + DEAD_CWD_WORLD
+            + (
+                "import os\n"
+                "try:\n"
+                "    os.path.realpath('/already/absolute')\n"
+                "    print('ABSOLUTE_REALPATH_IGNORED_THE_CWD')\n"
+                "except FileNotFoundError:\n"
+                "    print('IT_READ_THE_CWD')\n"
+            )
+        )
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "ABSOLUTE_REALPATH_IGNORED_THE_CWD" in result.stdout, (
+            "the posix half is not installed, so the rows below are measuring the host: " + result.stdout
+        )
+
+    def _world_for(self, platform: str) -> str:
+        """The emulation every row runs under. Extracted so a pin can convict it.
+
+        Round 6's bug was not in an emulation, it was in the CHOICE: the posix
+        rows ran with no prefix. That is unfalsifiable on a posix host — bare
+        and posix agree here by definition — so the mutant that restores it
+        passes every local run. Naming the choice is what makes it testable.
+        """
+        return self._EMULATIONS[platform]
+
+    def test_every_row_runs_under_an_emulation(self):
+        """No row inherits the host, and this is the pin the mutant needed.
+
+        Restoring round 6's ``"" if platform == "posix"`` cannot be caught by
+        any behavioural probe on Linux, because there is nothing to observe: the
+        bare world IS the posix world here. It can only be caught by asserting
+        that a world was chosen at all.
+        """
+        for platform in self._EXPECTED_PLATFORMS:
+            world = self._world_for(platform)
+            assert world, f"the {platform} rows run bare, so on a {platform}-foreign host they measure the runner"
+            assert world in self._EMULATIONS.values()
+
+    _EXPECTED_PLATFORMS = ("posix", "nt")
+
+    def test_neither_row_inherits_the_host(self):
+        """The failure of round 6, pinned: an unemulated row is a row about the runner.
+
+        Reproduced before fixing by standing the nt emulation in for a Windows
+        host and re-running what used to be the bare posix rows — DIES, exactly
+        what CI reported under a label that said posix.
+        """
+        for platform, emulation in self._EMULATIONS.items():
+            under_the_other_host = self._EMULATIONS["nt" if platform == "posix" else "posix"]
+            verdict = self._verdict(under_the_other_host + emulation + DEAD_CWD_WORLD)
+            assert verdict == self._EXPECTED[(platform, "getcwd")], (
+                f"the {platform} emulation did not survive being run on the other platform's host — "
+                "it is reading os.path instead of building its own semantics"
+            )
+
     def test_the_platform_emulation_actually_arms(self):
         """Arming probe: without BOTH halves patched, the nt rows are posix rows.
 
@@ -1194,7 +1262,10 @@ class TestTheTwoWorldsMustNotBeStacked:
     @pytest.mark.parametrize("denial", ["realpath", "getcwd", "both"])
     @pytest.mark.parametrize("platform", ["posix", "nt"])
     def test_the_table_holds(self, platform, denial):
-        prefix = WINDOWS_EMULATED_WORLD if platform == "nt" else ""
+        # BOTH rows are emulated. Round 6 ran the posix rows bare, which reads
+        # as "posix" only while the host is posix — on the Windows runner they
+        # measured nt and failed under a label that said otherwise.
+        prefix = self._world_for(platform)
         expected = self._EXPECTED[(platform, denial)]
         assert self._verdict(prefix + self._DENIALS[denial]) == expected, (
             f"the {platform} row for a {denial} denial moved. On posix that would be a change in "
@@ -1263,20 +1334,50 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
     # 3.10's shape, reduced to the two lines that matter: the accessor takes
     # its copy of os.path.realpath at class-definition time (pathlib.py:358),
     # and Path.resolve reaches it through an INSTANCE (pathlib.py:1077).
+    #
+    # THE CAPTURED FUNCTION IS A SENTINEL, NOT THE REAL ONE, and that is the
+    # round-7 correction. This class first let the accessor capture the live
+    # ``os.path.realpath`` and then used a getcwd denial to ask whether a later
+    # patch had reached it. On POSIX that works: the captured ``posixpath``
+    # function ignores the cwd for an absolute path, so RAISED could only mean
+    # the patch had landed. On nt it is ambiguous — ``ntpath.realpath`` reads
+    # ``os.getcwd()`` UNCONDITIONALLY (this branch's own round-4 finding), so
+    # the ORIGINAL raises too and RAISED no longer discriminates. Both accessor
+    # pins failed on the Windows runner for that reason, and neither failure was
+    # about the accessor.
+    #
+    # A sentinel that touches no filesystem and no cwd removes the platform from
+    # the measurement entirely: whatever raises or returns, it is the patch's
+    # doing. An instrument should not import behaviour it is not testing.
     _PRE_CAPTURED_ACCESSOR = (
         "import os, pathlib\n"
+        "def _original_realpath(p, *a, **k):\n"
+        "    return p\n"
+        "os.path.realpath = _original_realpath\n"
         "class _NormalAccessor:\n"
         "    realpath = staticmethod(os.path.realpath)\n"
         "pathlib._NormalAccessor = _NormalAccessor\n"
         "pathlib._the_accessor = _NormalAccessor()\n"
     )
 
+    # A literal no platform can complete with a drive. The round-7 red printed
+    # 'NO_RAISE D:\\tmp' against a hardcoded '/tmp', because a POSIX-absolute
+    # literal is DRIVE-RELATIVE on nt.
+    #
+    # PUBLISHED AS AN EQUIVALENT MUTANT GIVEN THE SENTINEL, because it is: with
+    # the captured original returning its argument untouched, nothing resolves
+    # the literal on any platform, so restoring '/tmp' passes everywhere. The
+    # sentinel fix SUBSUMED this one — two symptoms, one cause. It stays as the
+    # cheaper of the two guards, and it is named here so nobody reports it as a
+    # second cure or deletes it as decoration.
+    _PROBE_PATH = "SENTINEL_PATH_NOT_A_REAL_FILE"
+
     # Asked the way 3.10 asks: through an instance, which is what makes the
     # staticmethod load-bearing rather than decoration.
     _ASK_THE_ACCESSOR = (
         "import pathlib\n"
         "try:\n"
-        "    got = pathlib._the_accessor.realpath('/tmp')\n"
+        f"    got = pathlib._the_accessor.realpath({_PROBE_PATH!r})\n"
         "    print('NO_RAISE', got)\n"
         "except FileNotFoundError:\n"
         "    print('RAISED')\n"
@@ -1328,6 +1429,28 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
         )
         assert self._verdict(world) == "RAISED"
 
+    @pytest.mark.parametrize("host", ["posix", "nt"])
+    def test_these_verdicts_do_not_move_when_the_host_changes(self, host):
+        """The round-7 red, pinned: an instrument must not import the platform.
+
+        Both pins above failed on the Windows runner, and neither failure was
+        about the accessor. The old probe let the accessor capture the LIVE
+        ``os.path.realpath`` and then asked "did a later patch reach it?" by
+        denying the cwd — a question only ``posixpath`` answers cleanly, because
+        ``ntpath.realpath`` reads ``os.getcwd()`` unconditionally and so the
+        ORIGINAL raises too.
+
+        Run here under both emulated platforms. If the sentinel is ever replaced
+        by the real function, the nt case goes red on this machine rather than
+        three days later on a runner.
+        """
+        under = POSIX_EMULATED_WORLD if host == "posix" else WINDOWS_EMULATED_WORLD
+        bare = under + self._PRE_CAPTURED_ACCESSOR + self._BARE_PATCH + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
+        cured = under + self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
+
+        assert self._verdict(bare).startswith("NO_RAISE"), f"host={host}: the bare patch verdict is host-dependent"
+        assert self._verdict(cured) == "RAISED", f"host={host}: the cured world's verdict is host-dependent"
+
     def test_the_accessor_still_answers_CORRECTLY_when_the_cwd_is_fine(self):
         """A world that raises for the right reason can still return the wrong path.
 
@@ -1340,7 +1463,7 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
         is why it is here rather than in a comment saying "obviously needed".
         """
         world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + self._ASK_THE_ACCESSOR
-        assert self._verdict(world) == "NO_RAISE /tmp", (
+        assert self._verdict(world) == f"NO_RAISE {self._PROBE_PATH}", (
             "the patched accessor did not return the path it was handed — a bound plain "
             "function eats the argument. It must be a staticmethod."
         )

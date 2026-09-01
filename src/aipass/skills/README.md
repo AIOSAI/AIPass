@@ -223,7 +223,7 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Test suite (348 passing, 1 skipped)
+  tests/                   # Test suite (355 passing, 1 skipped)
 ```
 
 ---
@@ -279,6 +279,22 @@ name nothing reads again and the world never arms. Two of these pins were
 vacuously green on the 3.10 CI leg for exactly that reason. There is no 3.10 on
 this machine, so the capture is rebuilt locally on whatever interpreter is
 running and the discrimination is falsifiable here rather than derived.
+
+That rebuilt accessor captures a **sentinel** for realpath, not the host's.
+An instrument must not import behaviour it is not testing: the question it
+asks is "did the patch reach the captured attribute", and a live capture makes
+the answer depend on the dialect — on nt the accessor reads the cwd on its own
+account, so a world that reached nothing still answers *raised* and the probe
+convicts the host. The same file carries `posixpath`- and `ntpath`-shaped
+realpaths written **by name and by behaviour**, never by aliasing the dialect's
+own `realpath` (off Windows `ntpath.realpath` is a wrapper around `abspath` and
+leaves an absolute path alone, so an nt world built by aliasing never arms).
+Every accessor pin runs under both dialects and must return the same verdict;
+one shape that is *supposed* to differ is held alongside them, so a litmus that
+reached nothing cannot pass quietly. Where a claim really is per-platform — a
+relative arming path raises in both dialects, an absolute one only on nt — it
+is written as a two-row table with both rows measured here and a pin requiring
+the live host to agree with its own row.
 
 Pinned by `tests/test_dead_cwd_imports.py`, which imports every skills module
 in a child process under two denial worlds (deny `getcwd`; deny `realpath`),

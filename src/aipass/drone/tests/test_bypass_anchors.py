@@ -29,6 +29,14 @@ ONE LINE-SCOPED WAIVER SURVIVES, ``auth.py:27``, and it was on target. It stays
 because it is a genuine cannot-be-measured case, and it now carries an ``anchor``:
 the text that line must contain. This file is what makes the anchor mean anything.
 
+NOTHING BUT THIS FILE WATCHES THE ANCHOR. @trigger read the two match sites in
+seedgo before relying on theirs — ``bypass_handler.py:223`` and
+``bypass/utils.py:34`` both match on ``lines`` alone, so the ``anchor`` key is
+inert to the checker and this test is the only thing enforcing it. Said out loud
+because verifying the audit still scores 100 with the key present (which is what
+this branch did first) proves seedgo does not CHOKE on the field, not that it
+reads it — an absence of evidence standing in for knowledge.
+
 WHY AN ANCHOR RATHER THAN A RE-DERIVATION: re-deriving fixes today's numbers and
 leaves tomorrow's edit free to break them the same way. @seedgo has the general
 consequence queued for the checker pack — waivers should anchor to CONTENT, not to

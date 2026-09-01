@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - trigger imports without a readable cwd
 # Date: 2026-08-31
-# Version: 1.1.0
+# Version: 1.2.0
 # Category: trigger/tests
 # =============================================
 
@@ -340,39 +340,116 @@ def test_whole_branch_imports_under_the_ntpath_shaped_denial():
 #
 # The interpreter that needs it (3.10) is in the CI matrix and is not installed
 # on this machine, so "it works on 3.10" is not something this suite can claim.
-# What it CAN do is rebuild 3.10's capture shape on whatever interpreter runs -
-# an eager staticmethod bound at class creation, read back through an instance -
-# and pin the two directions separately: the bare os.path patch is INERT against
-# it, and the shipped patch ARMS it. Drop _ACCESSOR_PATCH and the second pin
-# goes red on every interpreter, including this one.
+# What it CAN do is rebuild 3.10's capture shape - an eager staticmethod bound at
+# class creation, read back through an instance - and pin the two directions
+# separately: the bare os.path patch is INERT against it, the shipped patch ARMS
+# it.
+#
+# ROUND 7, PAID FOR ON THE WINDOWS RUNNER. The first cut let the shape capture
+# the LIVE os.path.realpath and then asked "did a later patch reach it?" by
+# reading raise/no-raise under a denied getcwd. That discriminates on POSIX only:
+# posixpath.realpath ignores the cwd for an absolute path, so RAISED could only
+# mean the patch landed. On nt, ntpath.realpath (ntpath.py:673) computes
+# `cwd = os.getcwd()` UNCONDITIONALLY - above the `isabs` test that is the only
+# thing reading it - so the ORIGINAL raises too and RAISED stops discriminating.
+# CI printed EMULATION_EAGER / CAPTURE_ARMED and the pin failed for the reason it
+# was built to detect, one platform over.
+#
+# @memory's verdict, and the rule this file now obeys: AN INSTRUMENT MUST NOT
+# IMPORT BEHAVIOUR IT IS NOT TESTING. The captured function is a SENTINEL that
+# touches no filesystem, no cwd and no path module, and answers with a constant
+# rather than a path - so whatever raises or returns afterwards is the patch's
+# doing, on any platform, and no return-value pin can quietly start measuring the
+# host (@drone's addendum).
 # ---------------------------------------------------------------------------
 
-_EMULATED_CAPTURE = r"""
+# Two distinguishable sentinels, because a sentinel alone cannot show EAGERNESS.
+# @skills' asymmetry note: sentinel the dialect-divergent half only, or a pin
+# that measures when the capture happened goes dark. An identity check would not
+# have survived the cure either - a lazy wrapper around one sentinel returns the
+# same answer as an eager capture of it. Moving the SOURCE after class creation
+# is what separates them, and it needs no platform behaviour at all.
+_SENTINELS = r"""
+def _sentinel_captured(path, *, strict=False):
+    # Touches no filesystem, no cwd, no path module. Answers with a CONSTANT,
+    # not a path, so no return-value check can start measuring the host.
+    return "CAPTURED"
+
+
+def _sentinel_moved(path, *, strict=False):
+    return "MOVED"
+
+
+_source_realpath = _sentinel_captured
+"""
+
+# The win32 branch of ntpath.realpath, built BY NAME from ntpath's own helpers.
+#
+# NOT by aliasing: off Windows `ntpath.realpath` is a WRAPPER that returns
+# abspath(path) (ntpath.py:564), not an alias - `ntpath.realpath is
+# ntpath.abspath` is False here, so an is-test proves nothing either way
+# (@flow's alias trap as corrected by @skills). Aliasing it would produce a
+# green-looking answer that silently stops reproducing the bug.
+_NT_SHAPED = r"""
+import ntpath
+
+_getcwd_reads = []
+
+
+def _nt_shaped_realpath(path, *, strict=False):
+    # ntpath.py:659-673, str branch: cwd is computed BEFORE the isabs test that
+    # is the only thing that consumes it.
+    path = ntpath.normpath(path)
+    _getcwd_reads.append(1)
+    cwd = os.getcwd()
+    if not ntpath.isabs(path):
+        path = ntpath.join(cwd, path)
+    return path
+"""
+
+_CAPTURE_HEAD = r"""
 import os
+import posixpath
 import sys
 
-_real_realpath = os.path.realpath
-
-# An ABSOLUTE path: a relative one dies in abspath for its own shape and would
-# report ARMED whatever the patch did (@devpulse's trap (c)).
+# ABSOLUTE on purpose: a relative path dies in abspath for its own shape and
+# would report ARMED whatever the patch did or failed to do.
 _ABS = sys.executable
+"""
 
+# @spawn's ROUTE_ARMED/ROUTE_DARK: the emulation proves it TOOK the route before
+# anything downstream claims anything. For the nt shape that means showing the
+# unconditional cwd read really fires for an ABSOLUTE path - which is the entire
+# reason the nt dialect breaks a raise-shaped probe.
+_ROUTE_CONTROL = r"""
+if _CAPTURED is _nt_shaped_realpath or _HOST_REALPATH is _nt_shaped_realpath:
+    _before = len(_getcwd_reads)
+    _nt_shaped_realpath(_ABS)
+    print("ROUTE_ARMED" if len(_getcwd_reads) > _before else "ROUTE_DARK")
+"""
 
+_BUILD_ACCESSOR = r"""
 class _NormalAccessorShape:
     # EAGER, at class creation - exactly when pathlib 3.10 binds its own copy.
-    # A lambda forwarding to os.path.realpath would be LAZY and would arm for
-    # the wrong reason, making every verdict below it a statement about a
-    # different shape (@devpulse's trap (d)/(e)).
-    realpath = staticmethod(os.path.realpath)
+    realpath = staticmethod(_CAPTURED)
 
 
 _accessor = _NormalAccessorShape()
+"""
 
-# The control FOR the emulation: prove it captured, before trusting what it says.
-if _NormalAccessorShape.realpath is not _real_realpath:
-    print("EMULATION_NOT_EAGER")
-    raise SystemExit(1)
-print("EMULATION_EAGER")
+# The eagerness control, by VALUE and with no platform behaviour in it: move the
+# source name after the class was built. An eager capture still answers with the
+# function it captured; a lazy wrapper follows the name and answers "MOVED".
+_EAGER_CONTROL = r"""
+if _CAPTURED is _sentinel_captured:
+    _source_realpath = _sentinel_moved
+    print("EMULATION_EAGER" if _accessor.realpath(_ABS) == "CAPTURED" else "EMULATION_NOT_EAGER")
+else:
+    print("EMULATION_EAGER" if _NormalAccessorShape.realpath is _CAPTURED else "EMULATION_NOT_EAGER")
+"""
+
+_DENIAL_HEAD = r"""
+_real_realpath = _HOST_REALPATH
 
 
 def _denied(path, **kw):
@@ -390,19 +467,6 @@ def _dead_getcwd():
 os.getcwd = _dead_getcwd
 """
 
-# Read back through the INSTANCE, the way pathlib 3.10's resolve() does
-# (`self._accessor.realpath`), never off the class (@devpulse's trap (b)).
-_EXERCISE_CAPTURE = r"""
-try:
-    result = _accessor.realpath(_ABS)
-except FileNotFoundError:
-    print("CAPTURE_ARMED")
-else:
-    # A return-value check, not just a survived/raised one: a plain-function
-    # rebind eats the path into `self` and can look like a pass.
-    print("CAPTURE_INERT", result == _real_realpath.__call__(_ABS) or result == _ABS)
-"""
-
 # The shipped fragment, aimed at the emulated holder rather than pathlib's.
 _APPLY_SHIPPED_PATCH = r"""
 _captured = _NormalAccessorShape
@@ -410,35 +474,73 @@ if _captured is not None:
     _captured.realpath = staticmethod(os.path.realpath)
 """
 
-CAPTURE_INERT_WORLD = _EMULATED_CAPTURE + _EXERCISE_CAPTURE
-CAPTURE_CURED_WORLD = _EMULATED_CAPTURE + _APPLY_SHIPPED_PATCH + _EXERCISE_CAPTURE
-
-# Why the shipped patch wraps in staticmethod. Assigned bare, the function
-# becomes a bound method and the accessor instance lands in the path slot.
-CAPTURE_PLAIN_FUNCTION_WORLD = (
-    _EMULATED_CAPTURE
-    + r"""
-_NormalAccessorShape.realpath = os.path.realpath  # NO staticmethod - the trap
-
+# Read back through the INSTANCE, the way pathlib 3.10's resolve() does
+# (`self._accessor.realpath`), never off the class.
+_EXERCISE_CAPTURE = r"""
 try:
-    _accessor.realpath(_ABS)
+    result = _accessor.realpath(_ABS)
 except FileNotFoundError:
-    print("PLAIN_RAISED_FILENOTFOUND")
+    print("CAPTURE_ARMED")
 except TypeError as exc:
     print("PLAIN_EATS_SELF", type(exc).__name__)
 else:
-    print("PLAIN_SURVIVED")
+    # A return-value check, not a survived/raised one: a plain-function rebind
+    # eats the path into `self` and can otherwise look like a pass.
+    print("CAPTURE_INERT", result)
 """
-)
+
+_CAPTURE_EXPR = {
+    "sentinel": "_sentinel_captured",
+    "posix": "posixpath.realpath",
+    "nt": "_nt_shaped_realpath",
+}
+
+_HOST_EXPR = {"posix": "posixpath.realpath", "nt": "_nt_shaped_realpath"}
+
+
+def _capture_world(
+    capture: str,
+    *,
+    host: str = "posix",
+    apply_patch: bool = False,
+    bare_rebind: bool = False,
+) -> str:
+    """Assemble one capture world.
+
+    capture= what the accessor captured EAGERLY. "sentinel" is the shipped
+    shape; "posix"/"nt" rebuild the PRE-CURE shape so the round-7 failure stays
+    reproducible on this host rather than living only in a CI log.
+    host=    which dialect the SURROUNDING os.path.realpath speaks. Varying this
+    while holding the capture fixed is the litmus.
+    """
+    world = _CAPTURE_HEAD + _SENTINELS + _NT_SHAPED
+    world += f"\n_CAPTURED = {_CAPTURE_EXPR[capture]}\n"
+    world += f"_HOST_REALPATH = {_HOST_EXPR[host]}\n"
+    world += _ROUTE_CONTROL + _BUILD_ACCESSOR + _EAGER_CONTROL + _DENIAL_HEAD
+    if apply_patch:
+        world += _APPLY_SHIPPED_PATCH
+    if bare_rebind:
+        world += "\n_NormalAccessorShape.realpath = os.path.realpath  # NO staticmethod\n"
+    return world + _EXERCISE_CAPTURE
+
+
+def _assert_emulation_sound(out: str, capture: str, host: str = "posix") -> None:
+    """Nothing downstream may be believed until the emulation says it is real."""
+    assert "EMULATION_EAGER" in out, f"the emulation is not an eager capture - it describes another shape:\n{out}"
+    if "nt" in (capture, host):
+        assert "ROUTE_ARMED" in out, (
+            "the nt-shaped realpath did not read the cwd for an ABSOLUTE path, so "
+            f"this world is not the one that broke on the Windows runner:\n{out}"
+        )
 
 
 def test_the_captured_accessor_is_inert_under_a_bare_os_path_patch():
     """3.10's defect, rebuilt: patching os.path.realpath does not reach it."""
-    result = _run(CAPTURE_INERT_WORLD)
+    result = _run(_capture_world("sentinel"))
     out = result.stdout
 
-    assert "EMULATION_EAGER" in out, f"the emulation is not an eager capture - it describes a different shape:\n{out}"
-    assert "CAPTURE_INERT" in out, (
+    _assert_emulation_sound(out, "sentinel")
+    assert "CAPTURE_INERT CAPTURED" in out, (
         "the bare os.path patch reached the captured copy, so there is nothing "
         f"for _ACCESSOR_PATCH to fix and this file is carrying dead weight:\n{out}"
     )
@@ -446,10 +548,10 @@ def test_the_captured_accessor_is_inert_under_a_bare_os_path_patch():
 
 def test_the_shipped_accessor_patch_arms_the_captured_copy():
     """_ACCESSOR_PATCH is load-bearing: remove it and this pin goes red."""
-    result = _run(CAPTURE_CURED_WORLD)
+    result = _run(_capture_world("sentinel", apply_patch=True))
     out = result.stdout
 
-    assert "EMULATION_EAGER" in out, f"the emulation went lazy - verdict is about another shape:\n{out}"
+    _assert_emulation_sound(out, "sentinel")
     assert "CAPTURE_ARMED" in out, (
         "the shipped accessor patch did not arm the captured copy - on 3.10 the "
         f"dead-cwd worlds are inert and every pin under them is vacuous:\n{out}"
@@ -463,15 +565,56 @@ def test_the_accessor_patch_needs_staticmethod_not_a_bare_function():
     call fails with TypeError instead of FileNotFoundError, and a pin that only
     asks "did it raise" reports a cured world.
     """
-    result = _run(CAPTURE_PLAIN_FUNCTION_WORLD)
+    result = _run(_capture_world("sentinel", bare_rebind=True))
     out = result.stdout
 
+    _assert_emulation_sound(out, "sentinel")
     assert "PLAIN_EATS_SELF" in out, (
         "a bare function rebind did NOT bind as a method here - the staticmethod "
         f"wrapper in _ACCESSOR_PATCH may no longer be doing anything:\n{out}"
     )
-    assert "PLAIN_RAISED_FILENOTFOUND" not in out, (
-        f"the bare rebind looked like a working denial, which is the trap:\n{out}"
+    assert "CAPTURE_ARMED" not in out, f"the bare rebind looked like a working denial, which is the trap:\n{out}"
+
+
+@pytest.mark.parametrize("host", ["posix", "nt"])
+def test_the_inert_verdict_does_not_move_between_host_dialects(host: str):
+    """@memory's litmus: run the probe under the opposite platform's dialect and
+    require the verdict NOT to move.
+
+    The capture is held fixed at the sentinel and the SURROUNDING realpath is
+    swapped, which is the variable that actually moved between the Linux and
+    Windows runners. This is the round-7 regression pin: revert the sentinel to
+    a live capture and the nt row goes red HERE, on Linux, instead of on the
+    Windows runner three hours later.
+    """
+    result = _run(_capture_world("sentinel", host=host))
+    out = result.stdout
+
+    _assert_emulation_sound(out, "sentinel", host)
+    assert "CAPTURE_INERT CAPTURED" in out, f"the sentinel verdict moved under the {host} host dialect:\n{out}"
+
+
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    [("posix", "CAPTURE_INERT"), ("nt", "CAPTURE_ARMED")],
+)
+def test_the_litmus_is_armed_by_a_shape_whose_verdict_does_move(dialect: str, expected: str):
+    """The arming for the litmus above (@skills' trap (d)).
+
+    A run-under-both-dialects check is vacuously green if the dialect slot
+    reaches nothing - and with a sentinel it reaches nothing BY DESIGN. So one
+    shape whose verdict is SUPPOSED to move has to be measured beside it: the
+    PRE-CURE live capture, which reads INERT on posix and ARMED on nt for two
+    different reasons. That divergence IS the round-7 failure, reproduced on
+    this host rather than quoted from a CI log.
+    """
+    result = _run(_capture_world(dialect, host=dialect))
+    out = result.stdout
+
+    _assert_emulation_sound(out, dialect, dialect)
+    assert expected in out, (
+        f"the pre-cure {dialect} capture no longer reads {expected} - the failure "
+        f"this file was rebuilt around has stopped reproducing:\n{out}"
     )
 
 

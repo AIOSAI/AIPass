@@ -342,18 +342,94 @@ except OSError as exc:
         )
 
 
+def expected_route_without_cure(has_accessor: bool) -> str:
+    """What removing ``_ACCESSOR_CURE`` must do to the real ``Path.resolve`` route.
+
+    A PLAIN FUNCTION, fed synthetic values, because the alternative is a branch
+    only one interpreter can execute. @commons' round-5 separation: keep the
+    JUDGEMENT apart from the WORLD, and every row becomes reachable on any host —
+    including the row this machine cannot produce, which is the only row whose
+    inversion would otherwise sail through a green suite.
+
+    Args:
+        has_accessor: Whether this interpreter's ``pathlib`` still carries
+            ``_NormalAccessor`` — true on <=3.10, false from 3.11.
+
+    Returns:
+        ``"ROUTE_INERT"`` where the cure is load-bearing, ``"ROUTE_ARMED"`` where
+        it patches nothing and removing it can change nothing.
+    """
+    return "ROUTE_INERT" if has_accessor else "ROUTE_ARMED"
+
+
+class TestTheRouteExpectationIsReachableOnAnyHost:
+    """Both rows of the judgement above, on whichever interpreter runs this.
+
+    Round 7's M9: inverting the ``has_accessor`` branch of the live test left the
+    suite green, because no interpreter here can enter it. That is @ai_mail's
+    unfalsifiable-row species inside the pin written to answer a red about the
+    same species. Naming the choice is what makes it convictable — @memory's
+    ``_world_for()``, applied one file over.
+    """
+
+    def test_an_interpreter_with_an_accessor_needs_the_cure(self):
+        """The 3.10 row. Unreachable as a live branch here; reachable as a value."""
+        assert expected_route_without_cure(True) == "ROUTE_INERT", (
+            "with a real _NormalAccessor the cure is the only thing rebinding the "
+            "captured copy, so removing it must leave the route unarmed"
+        )
+
+    def test_an_interpreter_without_one_cannot_notice_the_cure(self):
+        """The 3.11+ row, which is also the row this machine measures live."""
+        assert expected_route_without_cure(False) == "ROUTE_ARMED"
+
+    def test_the_two_rows_disagree(self):
+        """Control: a judgement returning one constant would pass both rows above."""
+        assert expected_route_without_cure(True) != expected_route_without_cure(False), (
+            "the judgement is not keyed on its input — then the live test below is "
+            "asserting the same thing on every interpreter and the 3.10 row is decoration"
+        )
+
+
 class TestTheWorldArmsOnAPreCapturedAccessor:
     """The 3.10 row, made falsifiable on an interpreter that has no accessor.
 
-    ``_ACCESSOR_CURE`` is a no-op here: 3.11 removed ``_NormalAccessor``, so the
-    ``hasattr`` is False and nothing is patched. A cure whose only evidence is a
-    CI leg this machine cannot run is a row nobody here can contradict — the
-    species @ai_mail named in round 5, where a table entry no local platform can
-    falsify enters silently. So the 3.10 CONSTRUCTION is rebuilt here and both
-    directions are asserted against it.
+    ``_ACCESSOR_CURE`` is a no-op on 3.11+, which removed ``_NormalAccessor``. A
+    cure whose only evidence is a CI leg this machine cannot run is a row nobody
+    here can contradict — @ai_mail's round-5 species, where a table entry no
+    local platform can falsify enters silently. So the 3.10 CONSTRUCTION is
+    rebuilt here and both directions are asserted against it.
 
-    Built to the four traps @memory and @seedgo paid for, each of which makes
-    this vacuously green:
+    ROUND 7, AND THIS IS THE PART WORTH READING. Two of these pins went red on
+    the Windows runner, both reporting ``ACCESSOR_DIES: YES`` where they demanded
+    NO. Nothing about the cure was wrong; the PROBES were. They let the emulated
+    accessor capture the live ``os.path.realpath``, then asked "did a later patch
+    reach it?" by denying ``os.getcwd`` and reading raise/no-raise. That
+    discriminates on posix, where the captured function ignores the cwd for an
+    absolute path, so a raise can only mean the patch landed. On nt
+    ``os.path`` IS ``ntpath`` and ``ntpath.realpath`` reads ``os.getcwd``
+    UNCONDITIONALLY — this branch's own round-4 headline, turned back on the
+    instrument that quoted it — so the ORIGINAL raises too and RAISED stops
+    discriminating.
+
+    @memory measured the identical species on four of their own reds and
+    published the rule the fleet adopted: AN INSTRUMENT MUST NOT IMPORT BEHAVIOUR
+    IT IS NOT TESTING. Their three consequences, each verified here rather than
+    imported on their word:
+
+    1. emulate BOTH platforms or neither — a table with one emulated row and one
+       bare row is host-dependent in the half nobody thought about, and "no
+       emulation" reads as posix only while the host is posix;
+    2. build an emulation from the dialect module BY NAME (``posixpath``,
+       ``ntpath``), never from ``os.path``, which IS the host;
+    3. when a probe asks "did my patch reach X", let X have captured a SENTINEL —
+       otherwise the original's own platform behaviour answers the question.
+
+    Their litmus, and every accessor probe below now runs it: exercise the probe
+    under the OPPOSITE platform's emulation and require the verdict not to move.
+
+    Built to the four traps @memory and @seedgo paid for in round 6, each of
+    which makes this vacuously green:
 
     * ``staticmethod`` — a plain function on a class arrives bound and eats the
       path into ``self``, so the patch resolves the accessor OBJECT and a
@@ -369,17 +445,80 @@ class TestTheWorldArmsOnAPreCapturedAccessor:
       that proves nothing.
     """
 
-    # The 3.10 construction, byte-for-byte in shape: CPython 3.10
-    # Lib/pathlib.py:358 `realpath = staticmethod(os.path.realpath)`, captured
-    # when the class body executes — which is pathlib's first import, BEFORE any
-    # world is installed.
+    # ------------------------------------------------------------------
+    # The two hosts, built from the dialect modules BY NAME (@memory rule 2)
+    # ------------------------------------------------------------------
+    # ``os.path`` is the HOST: posixpath here, ntpath on the Windows runner. An
+    # emulation assembled out of it emulates whatever it is already running on,
+    # which is how a row labelled posix measured nt and reported it as fact.
+    POSIX_HOST = """
+import os
+import posixpath
+
+# Bound BEFORE the rebinding below, and this is not a style choice. On a posix
+# host ``os.path IS posixpath``, so assigning ``os.path.realpath`` assigns
+# ``posixpath.realpath`` — a body that then looked the name up again would call
+# itself forever. Measured the hard way: the first version of this constant
+# recursed 997 frames deep. The same identity that makes an os.path-built
+# emulation measure the host makes it eat itself.
+_posixpath_realpath = posixpath.realpath
+
+
+def _posix_realpath(path, *a, **k):
+    # posixpath.realpath reads the cwd ONLY for a relative path.
+    return _posixpath_realpath(path, *a, **k)
+
+
+os.path.realpath = _posix_realpath
+"""
+
+    NT_HOST = """
+import os
+import ntpath
+
+
+def _nt_realpath(path, *a, **k):
+    # CPython's ntpath.realpath takes ``cwd = os.getcwd()`` while picking its
+    # str/bytes prefixes — on the first lines, before it asks whether the path
+    # is even absolute. Spelled out rather than aliased to ``ntpath.realpath``,
+    # because on a posix host that name IS ``ntpath.abspath``, which reads the
+    # cwd only for a relative path: aliasing it would emulate this host wearing
+    # an nt label, which is the exact defect this constant exists to prevent.
+    os.getcwd()
+    return ntpath.normpath(path)
+
+
+os.path.realpath = _nt_realpath
+"""
+
+    # Both hosts, for the litmus. Named so a failing parametrisation says which
+    # platform moved.
+    HOSTS = {"posix": POSIX_HOST, "nt": NT_HOST}
+
+    # ------------------------------------------------------------------
+    # The 3.10 construction, with a SENTINEL where the live function was
+    # ------------------------------------------------------------------
+    # Shape byte-for-byte as CPython 3.10 Lib/pathlib.py:358
+    # ``realpath = staticmethod(os.path.realpath)``, captured when the class body
+    # executes — pathlib's first import, BEFORE any world is installed.
+    #
+    # What it captures is NOT ``os.path.realpath``. The question these probes ask
+    # is "did a later patch REPLACE this attribute", and the only honest way to
+    # ask it is to make the pre-patch value do nothing observable: the sentinel
+    # returns its argument and touches no filesystem, no cwd, no path module. Any
+    # raise afterwards is then the patch's doing, on any platform. Capturing the
+    # real function instead is what reddened this file on Windows.
     SHAPE = """
 import os
 import pathlib
 
 
+def _captured_sentinel(path, *a, **k):
+    return path
+
+
 class _Accessor:
-    realpath = staticmethod(os.path.realpath)   # captured EAGERLY, as 3.10 does
+    realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does
 
 
 _accessor = _Accessor()
@@ -404,8 +543,12 @@ import os
 import pathlib
 
 
+def _captured_sentinel(path, *a, **k):
+    return path
+
+
 class _NormalAccessor:
-    realpath = staticmethod(os.path.realpath)   # captured EAGERLY, as 3.10 does
+    realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does
 
 
 pathlib._NormalAccessor = _NormalAccessor
@@ -433,10 +576,27 @@ os.getcwd = _dead_getcwd
 """
 
     # The shipped cure, written against the emulated accessor rather than
-    # pathlib's, because this interpreter has none to patch.
+    # pathlib's, because 3.11+ has none to patch.
     EMULATED_CURE = """
 _Accessor.realpath = staticmethod(_denied_realpath)
 """
+
+    # The real route: no emulated accessor anywhere, just this interpreter's own
+    # pathlib. ``import pathlib`` comes FIRST so a 3.10 accessor takes its copy
+    # BEFORE the world is installed — which is the only ordering under which the
+    # cure is load-bearing, and the ordering every real import fan has.
+    REAL_ROUTE_PROBE = """
+import os
+from pathlib import Path as _RoutePath
+
+_abs = os.path.join(os.sep, "definitely", "not", "here")
+try:
+    _RoutePath(_abs).resolve()
+    print("ROUTE_INERT")
+except OSError:
+    print("ROUTE_ARMED")
+"""
+    PATHLIB_FIRST = "import pathlib\n"
 
     @staticmethod
     def _run(script: str) -> str:
@@ -444,70 +604,99 @@ _Accessor.realpath = staticmethod(_denied_realpath)
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
 
-    def test_a_bare_module_attribute_patch_does_not_reach_a_captured_accessor(self):
-        """CI's Python 3.10 failure, reproduced on this machine.
+    @staticmethod
+    def _world_without_cure() -> str:
+        """``_WORLD_A`` with the shipped cure sliced out, read off the constants.
+
+        Both operands come from the module rather than being restated, so a
+        control built on this cannot quietly start proving a different four lines
+        than the ones that ship.
+        """
+        world = _WORLD_A.replace(_ACCESSOR_CURE, "")
+        assert world != _WORLD_A, "the cure is not a substring of the world — this slice is not slicing anything"
+        return world
+
+    # ------------------------------------------------------------------
+    # The defect direction: a bare module patch must not reach the capture
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_a_bare_module_attribute_patch_does_not_reach_a_captured_accessor(self, host):
+        """CI's Python 3.10 failure, reproduced on this machine — under BOTH hosts.
 
         This is the defect: the denial lands on ``os.path.realpath`` and the
         accessor keeps calling the copy it took at import. Every pin that
         depended on the world would have been vacuously green.
+
+        Round 7 added the host parametrisation and the sentinel. Before them this
+        pin read ``ACCESSOR_DIES: YES`` on the Windows runner and reported it as
+        "a bare module-attribute patch reached the captured accessor" — which was
+        false. Nothing had reached anything; the captured ``ntpath.realpath`` was
+        raising on its own unconditional ``os.getcwd()``.
         """
-        out = self._run(self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
+        out = self._run(self.HOSTS[host] + self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
 
         assert "ACCESSOR_DIES: NO" in out, (
-            "a bare module-attribute patch reached the captured accessor — then "
-            "the 3.10 CI failure has no mechanism and this whole cure is unexplained: " + out
+            f"under the {host} host a bare module-attribute patch appeared to reach the "
+            "captured accessor. Either the patch really did land — and then the 3.10 CI "
+            "failure has no mechanism and this whole cure is unexplained — or the capture "
+            "is not a sentinel and the platform's own realpath is answering instead: " + out
         )
 
-    def test_the_shipped_world_arms_through_a_pre_captured_accessor(self):
-        """The cure, exercised as ``_WORLD_A`` VERBATIM against a 3.10-shaped accessor.
-
-        This is the pin that carries the round. Everything above establishes that
-        the construction reproduces CI; this one runs the SHIPPED world text
-        against it and asserts it arms — so deleting ``_ACCESSOR_CURE`` reds here
-        with CI's own sentence, on an interpreter that has no accessor of its own.
-        """
-        out = self._run(self.PUBLISHED_SHAPE + _WORLD_A + self.PROBE)
-
-        assert "ACCESSOR_DIES: YES" in out, (
-            "the ntpath world did not arm — the shipped world's denial did not reach a "
-            "pre-captured accessor, which is exactly the Python 3.10 failure on 8550ed10: " + out
-        )
-
-    def test_the_published_shape_is_inert_without_the_world(self):
-        """Control: the shape alone must not convict, or the pin above is free."""
-        out = self._run(self.PUBLISHED_SHAPE + self.PROBE)
-
-        assert "ACCESSOR_DIES: NO" in out, (
-            "the accessor died with no world installed at all — the pin above is measuring "
-            "something other than the world: " + out
-        )
-
-    def test_the_published_shape_captures_eagerly(self):
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_the_published_shape_captures_eagerly(self, host):
         """Trap (d) as a control on the PUBLISHED half, where it was missing.
 
-        Found by mutation, not by reading: making ``PUBLISHED_SHAPE`` capture
-        lazily left the whole class green. A lazy capture follows the patched
-        module attribute, so the arming pin above passes WITHOUT
+        Found by mutation in round 6, not by reading: making ``PUBLISHED_SHAPE``
+        capture lazily left the whole class green. A lazy capture follows the
+        patched module attribute, so the arming pin below passes WITHOUT
         ``_ACCESSOR_CURE`` doing anything — it stops distinguishing an accessor
-        patch from a module patch and silently proves nothing, which is the
-        exact shape of @seedgo's M9 one level along.
+        patch from a module patch, which is @seedgo's M9 one level along.
 
-        So: the shipped world with its cure REMOVED must leave this shape alive.
-        Both operands are read off the shipped constants rather than restated.
+        So: the shipped world with its cure REMOVED must leave this shape alive,
+        under either host.
         """
-        world_without_cure = _WORLD_A.replace(_ACCESSOR_CURE, "")
-        assert world_without_cure != _WORLD_A, (
-            "the cure is not a substring of the world — this control is not slicing anything"
-        )
-
-        out = self._run(self.PUBLISHED_SHAPE + world_without_cure + self.PROBE)
+        out = self._run(self.HOSTS[host] + self.PUBLISHED_SHAPE + self._world_without_cure() + self.PROBE)
 
         assert "ACCESSOR_DIES: NO" in out, (
-            "a module-only patch reached the published accessor, so it is not capturing "
-            "eagerly and the arming pin above is green for the wrong reason: " + out
+            f"under the {host} host a module-only patch appeared to reach the published "
+            "accessor, so either it is not capturing eagerly or the capture is not a "
+            "sentinel — and the arming pin below is green for the wrong reason: " + out
         )
 
-    def test_patching_the_accessor_arms_the_same_world(self):
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_the_published_shape_is_inert_without_the_world(self, host):
+        """Control: the shape alone must not convict, or the arming pin is free."""
+        out = self._run(self.HOSTS[host] + self.PUBLISHED_SHAPE + self.PROBE)
+
+        assert "ACCESSOR_DIES: NO" in out, (
+            f"under the {host} host the accessor died with no world installed at all — "
+            "the arming pin is measuring something other than the world: " + out
+        )
+
+    # ------------------------------------------------------------------
+    # The cure direction: the shipped world must arm the capture
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_the_shipped_world_arms_through_a_pre_captured_accessor(self, host):
+        """The cure, exercised as ``_WORLD_A`` VERBATIM against a 3.10-shaped accessor.
+
+        Everything above establishes that the construction reproduces CI; this
+        runs the SHIPPED world text against it and asserts it arms — so deleting
+        ``_ACCESSOR_CURE`` reds here with CI's own sentence, on an interpreter
+        that has no accessor of its own.
+        """
+        out = self._run(self.HOSTS[host] + self.PUBLISHED_SHAPE + _WORLD_A + self.PROBE)
+
+        assert "ACCESSOR_DIES: YES" in out, (
+            f"under the {host} host the ntpath world did not arm — the shipped world's "
+            "denial did not reach a pre-captured accessor, which is exactly the Python "
+            "3.10 failure on 8550ed10: " + out
+        )
+
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_patching_the_accessor_arms_the_same_world(self, host):
         """The same direction through the local emulation, without pathlib in it.
 
         Kept alongside the pin above because it isolates the CURE from the
@@ -515,9 +704,128 @@ _Accessor.realpath = staticmethod(_denied_realpath)
         name the world reaches for, this one still says whether patching an
         accessor arms the world at all.
         """
-        out = self._run(self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.EMULATED_CURE + self.PROBE)
+        out = self._run(self.HOSTS[host] + self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.EMULATED_CURE + self.PROBE)
 
-        assert "ACCESSOR_DIES: YES" in out, "the accessor patch did not arm the world it exists to arm: " + out
+        assert "ACCESSOR_DIES: YES" in out, (
+            f"under the {host} host the accessor patch did not arm the world it exists to arm: " + out
+        )
+
+    # ------------------------------------------------------------------
+    # The litmus, stated as its own pin rather than left implicit
+    # ------------------------------------------------------------------
+
+    def test_no_accessor_verdict_moves_between_the_two_hosts(self):
+        """@memory's litmus, run over every direction at once.
+
+        The parametrisation above already runs each probe on both hosts, but it
+        asserts a CONSTANT per probe. This asserts the weaker, more general thing
+        the constants are an instance of: the platform must not be able to change
+        any verdict. If someone later relaxes one expectation to a per-host value,
+        this pin is what refuses.
+        """
+        directions = {
+            "bare-patch": self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.PROBE,
+            "published-no-cure": self.PUBLISHED_SHAPE + self._world_without_cure() + self.PROBE,
+            "published-bare": self.PUBLISHED_SHAPE + self.PROBE,
+            "published-cured": self.PUBLISHED_SHAPE + _WORLD_A + self.PROBE,
+            "emulated-cure": self.SHAPE + self.BARE_MODULE_PATCH_ONLY + self.EMULATED_CURE + self.PROBE,
+        }
+        moved = {
+            name: (self._run(self.POSIX_HOST + body).strip(), self._run(self.NT_HOST + body).strip())
+            for name, body in directions.items()
+        }
+        disagreed = {name: pair for name, pair in moved.items() if pair[0] != pair[1]}
+
+        assert disagreed == {}, (
+            "an accessor verdict changed with the emulated platform, so the probe is "
+            f"measuring the host rather than the patch: {disagreed}"
+        )
+
+    def test_the_two_hosts_are_genuinely_different_worlds(self):
+        """Control for the litmus: two identical hosts would pass it for free.
+
+        Measures the one behaviour the whole round turns on — ``ntpath.realpath``
+        reads the cwd for an ABSOLUTE path and ``posixpath.realpath`` does not —
+        through the emulations themselves, so a future edit that quietly makes
+        ``NT_HOST`` posix-shaped reds here instead of silently disarming the
+        litmus above.
+        """
+        probe = """
+import os
+
+
+def _dead_getcwd():
+    raise FileNotFoundError(2, "cwd deleted", "")
+
+
+os.getcwd = _dead_getcwd
+try:
+    os.path.realpath(os.path.join(os.sep, "definitely", "not", "here"))
+    print("ABSOLUTE_READS_CWD: NO")
+except OSError:
+    print("ABSOLUTE_READS_CWD: YES")
+"""
+        assert "ABSOLUTE_READS_CWD: NO" in self._run(self.POSIX_HOST + probe), (
+            "the posix emulation read the cwd for an absolute path — it is not posix-shaped"
+        )
+        assert "ABSOLUTE_READS_CWD: YES" in self._run(self.NT_HOST + probe), (
+            "the nt emulation did NOT read the cwd for an absolute path — it is this host "
+            "wearing an nt label, and every 'verdict did not move' result above is free"
+        )
+
+    # ------------------------------------------------------------------
+    # The real accessor, on whichever interpreter actually has one
+    # ------------------------------------------------------------------
+
+    def test_the_cure_matches_the_accessor_this_interpreter_has(self):
+        """Both interpreters, one probe, no assertion about the host taken on faith.
+
+        ROUND 7 RED, and the assertion text named its own fix: this used to be
+        ``assert not hasattr(pathlib, "_NormalAccessor")`` — "on 3.11+ the shipped
+        four lines patch nothing" — which is true on three CI legs and FALSE on
+        3.10, where the cure is live by design. A pin that reds on the one
+        interpreter the cure exists for was measuring the emulation's redundancy,
+        not the cure.
+
+        So it is a two-row table now, and the row that runs is measured LIVE on
+        whichever interpreter runs it:
+
+        * every interpreter — the shipped world must ARM the real
+          ``Path.resolve`` route. This is the invariant the cure exists to hold,
+          and on 3.10 it is the REAL ``_NormalAccessor`` being exercised, not an
+          emulation of one.
+        * with a real accessor (<=3.10) — removing the cure must go INERT, which
+          is what makes it load-bearing rather than decorative.
+        * without one (3.11+) — removing the cure must change NOTHING, which is
+          what "inert here" actually means and is the honest version of the
+          deleted assertion.
+
+        ``pathlib`` is imported FIRST so a 3.10 accessor takes its copy before the
+        world exists. Without that ordering the accessor captures the already
+        denied function, the cure looks unnecessary, and the row lies in the
+        direction of a passing test.
+        """
+        import pathlib
+
+        has_accessor = hasattr(pathlib, "_NormalAccessor")
+        armed = self._run(self.PATHLIB_FIRST + _WORLD_A + self.REAL_ROUTE_PROBE)
+
+        assert "ROUTE_ARMED" in armed, (
+            "the shipped world did not arm this interpreter's own Path.resolve — "
+            f"whatever the accessor situation is (has_accessor={has_accessor}), the world "
+            "is not hostile and every import fan above is vacuous: " + armed
+        )
+
+        without = self._run(self.PATHLIB_FIRST + self._world_without_cure() + self.REAL_ROUTE_PROBE)
+        expected = expected_route_without_cure(has_accessor)
+
+        assert expected in without, (
+            f"this interpreter reports has_accessor={has_accessor}, so removing "
+            f"_ACCESSOR_CURE was expected to leave the real resolve route {expected}. "
+            "With an accessor that means the cure is the only thing rebinding the captured "
+            "copy; without one it means the cure patches nothing and cannot be noticed. "
+            "Neither held: " + without
+        )
 
     def test_the_shipped_cure_is_the_thing_being_emulated(self):
         """The emulation must not drift from the constant that actually ships.
@@ -537,18 +845,25 @@ _Accessor.realpath = staticmethod(_denied_realpath)
         # The emulation patches the same attribute name, the same way.
         assert "staticmethod(_denied_realpath)" in self.EMULATED_CURE
 
-    def test_the_cure_is_inert_on_this_interpreter(self):
-        """Said out loud: on 3.11+ the shipped four lines patch nothing.
+    def test_the_capture_is_a_sentinel_and_not_the_live_function(self):
+        """The round-7 cure, pinned in the source rather than only in behaviour.
 
-        Without this the reader cannot tell whether the two tests above are
-        measuring the shipped cure or a local accident.
+        The behavioural pins above would all pass again on Linux if someone
+        restored ``staticmethod(os.path.realpath)`` — that is exactly the state
+        this file shipped in, green here and red on Windows. So the sentinel is
+        asserted structurally too, in both shapes.
         """
-        import pathlib
-
-        assert not hasattr(pathlib, "_NormalAccessor"), (
-            "this interpreter HAS an accessor — the emulation above is redundant "
-            "and the real one should be exercised directly"
-        )
+        for name, shape in (("SHAPE", self.SHAPE), ("PUBLISHED_SHAPE", self.PUBLISHED_SHAPE)):
+            assert "staticmethod(_captured_sentinel)" in shape, (
+                f"{name} no longer captures a sentinel. If it captures the live "
+                "os.path.realpath, then on nt it captures ntpath.realpath, which reads "
+                "os.getcwd unconditionally — the ORIGINAL raises and 'it raised' stops "
+                "meaning 'the patch reached it'"
+            )
+            assert "os.path.realpath" not in shape.split("class ")[0], (
+                f"{name} reads os.path in the captured value — an instrument must not "
+                "import behaviour it is not testing (@memory, round 7)"
+            )
 
     def test_a_lazy_capture_would_prove_nothing(self):
         """@seedgo's M9, pinned as a control on the emulation itself.
@@ -558,9 +873,11 @@ _Accessor.realpath = staticmethod(_denied_realpath)
         construction would silently stop reproducing 3.10.
         """
         lazy_shape = self.SHAPE.replace(
-            "realpath = staticmethod(os.path.realpath)   # captured EAGERLY, as 3.10 does",
+            "realpath = staticmethod(_captured_sentinel)   # captured EAGERLY, as 3.10 does",
             "realpath = staticmethod(lambda p, *a, **k: os.path.realpath(p, *a, **k))",
         )
+        assert lazy_shape != self.SHAPE, "the lazy variant is not replacing anything"
+
         out = self._run(lazy_shape + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
 
         assert "ACCESSOR_DIES: YES" in out, (
@@ -568,20 +885,120 @@ _Accessor.realpath = staticmethod(_denied_realpath)
             "not the no-op M9 describes and this control is not controlling: " + out
         )
 
-    def test_a_relative_path_convicts_for_the_wrong_reason(self):
-        """Trap (c), pinned so the absolute probe above is not taken on faith.
+    def test_each_host_is_built_from_its_own_dialect_module(self):
+        """@memory's rule 2, pinned in the source because behaviour cannot pin it here.
 
-        ``posixpath.realpath`` reads the cwd for a RELATIVE path no matter what
-        is patched, so a relative probe reports a dead world even when the
-        accessor is untouched — success for the path's shape rather than the
-        cure's.
+        Building ``POSIX_HOST`` out of ``os.path`` is EQUIVALENT on this machine —
+        ``os.path IS posixpath``, so every verdict is identical and no probe can
+        tell. It is load-bearing on the Windows runner, where the same line would
+        capture ``ntpath.realpath`` and the "posix" host would emulate nt. That is
+        the round-7 defect exactly, one constant over.
+
+        A mutant proved it: swapping the dialect module for ``os.path`` left all
+        33 pins green. So the rule is asserted where it is checkable rather than
+        published as a survivor nobody can convict.
         """
-        relative_probe = self.PROBE.replace("_accessor.realpath(ABSOLUTE)", '_accessor.realpath("./somewhere")')
-        out = self._run(self.SHAPE + self.BARE_MODULE_PATCH_ONLY + relative_probe)
+        assert "_posixpath_realpath = posixpath.realpath" in self.POSIX_HOST, (
+            "the posix emulation no longer captures posixpath BY NAME. On nt os.path IS "
+            "ntpath, so this row would emulate the runner and report it as posix"
+        )
+        assert "ntpath." in self.NT_HOST, "the nt emulation no longer references ntpath by name"
+        for name, host in (("POSIX_HOST", self.POSIX_HOST), ("NT_HOST", self.NT_HOST)):
+            # Comments are stripped first: both constants EXPLAIN the os.path trap
+            # in prose, and a check that cannot tell the explanation from the
+            # defect reds on its own documentation. (It did, on the first run.)
+            capture = "\n".join(
+                line for line in host.split("def ")[0].splitlines() if not line.lstrip().startswith("#")
+            )
+            assert "os.path.realpath" not in capture, (
+                f"{name} reads os.path before installing its own function — os.path IS the "
+                "host, so the emulation would inherit exactly what it exists to replace"
+            )
 
-        assert "ACCESSOR_DIES: YES" in out, (
-            "the relative-path trap did not bite, so the absolute probe above is "
-            "not distinguishing what this test claims it distinguishes: " + out
+    def test_the_capture_ordering_is_what_makes_the_cure_load_bearing(self):
+        """Why ``PATHLIB_FIRST`` exists, measured rather than asserted.
+
+        Removing ``PATHLIB_FIRST`` is EQUIVALENT on 3.11+ and load-bearing on
+        3.10 — a mutant confirmed the whole suite stays green without it here. The
+        claim it encodes is about ORDER, and order IS measurable on this host
+        through the published accessor: capture before the world and a bare module
+        patch cannot reach it; capture after, and the accessor takes the already
+        denied function and arms with no cure at all.
+
+        That second row is also the scope @trigger corrected me on: import order
+        decides on 3.10, where a captured copy exists to go stale. On 3.12 the
+        flavour is read at call time and order is irrelevant — which is why this
+        pin measures the ORDERING against an emulated capture rather than claiming
+        anything about this interpreter's own pathlib.
+        """
+        world = self._world_without_cure()
+        # The LIVE capture, deliberately: staleness is a property of holding a real
+        # copy, and a sentinel is stale-proof by construction — it returns its
+        # argument whenever it was captured. Measuring ordering through the
+        # sentinel shape reports NO in both directions and proves nothing, which
+        # is how the first version of this pin failed. Run under POSIX_HOST so the
+        # absolute probe convicts only when the patch landed.
+        live_capture = self.PUBLISHED_SHAPE.replace(
+            "staticmethod(_captured_sentinel)", "staticmethod(os.path.realpath)"
+        )
+        assert live_capture != self.PUBLISHED_SHAPE
+
+        before = self._run(self.POSIX_HOST + live_capture + world + self.PROBE)
+        after = self._run(self.POSIX_HOST + world + live_capture + self.PROBE)
+
+        assert "ACCESSOR_DIES: NO" in before, (
+            "a capture taken BEFORE the world followed a later module patch — then there "
+            "is no stale copy, and the cure has nothing to cure: " + before
+        )
+        assert "ACCESSOR_DIES: YES" in after, (
+            "a capture taken AFTER the world did not pick up the denial, so ordering is "
+            "not the mechanism this class says it is: " + after
+        )
+        assert "import pathlib" in self.PATHLIB_FIRST, (
+            "PATHLIB_FIRST no longer imports pathlib ahead of the world, so on <=3.10 the "
+            "accessor would capture the already-denied function, the cure would look "
+            "unnecessary, and the row would lie in the direction of a passing test"
+        )
+
+    @pytest.mark.parametrize(
+        ("host", "absolute_verdict"),
+        [("posix", "ACCESSOR_DIES: NO"), ("nt", "ACCESSOR_DIES: YES")],
+    )
+    def test_the_absolute_probe_only_discriminates_on_one_platform(self, host, absolute_verdict):
+        """Trap (c) and the round-7 red, as one two-row table over the REAL function.
+
+        This is the only test here that deliberately captures the live
+        ``os.path.realpath``, because it is the only one making a claim ABOUT it.
+        Both rows are emulated; neither inherits the host.
+
+        posix: a RELATIVE path convicts with the accessor untouched, an ABSOLUTE
+        one does not — which is why every other probe uses an absolute path.
+
+        nt: BOTH convict. ``ntpath.realpath`` reads the cwd unconditionally, so
+        the absolute probe stops discriminating and a raise-shaped answer no
+        longer means the patch landed. That row is the round-7 CI red, kept as a
+        positive measurement instead of a fixed-and-forgotten symptom — it is the
+        whole reason the other probes capture a sentinel, and if it ever goes
+        green the sentinel has stopped being necessary and somebody should find
+        out why before deleting it.
+        """
+        live_capture = self.SHAPE.replace("staticmethod(_captured_sentinel)", "staticmethod(os.path.realpath)")
+        assert live_capture != self.SHAPE
+
+        relative = self.PROBE.replace("_accessor.realpath(ABSOLUTE)", '_accessor.realpath("./somewhere")')
+
+        relative_out = self._run(self.HOSTS[host] + live_capture + self.BARE_MODULE_PATCH_ONLY + relative)
+        absolute_out = self._run(self.HOSTS[host] + live_capture + self.BARE_MODULE_PATCH_ONLY + self.PROBE)
+
+        assert "ACCESSOR_DIES: YES" in relative_out, (
+            f"under the {host} host a relative path did not convict a live capture — then "
+            "the absolute probe is not distinguishing what this class claims it does: " + relative_out
+        )
+        assert absolute_verdict in absolute_out, (
+            f"the {host} row moved: an absolute path against a LIVE captured realpath was "
+            f"expected to report {absolute_verdict!r}. On posix a change here means "
+            "posixpath started reading the cwd for absolute paths; on nt it means "
+            "ntpath.realpath stopped, and the sentinel below may no longer be needed: " + absolute_out
         )
 
 

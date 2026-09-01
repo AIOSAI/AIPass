@@ -101,6 +101,10 @@ import aipass.aipass.shared.json_handler  # noqa: F401
 # still kills the OLD code, and only the old code can answer it.
 DEFECT_A_SOURCE = "from pathlib import Path\nX = Path(__file__).resolve()\n"
 DEFECT_B_SOURCE = "import inspect\nX = inspect.stack()\n"
+#: The second captured route. Path.cwd() reaches _accessor.getcwd before
+#: 3.11, never os.getcwd directly, so this defect and DEFECT_A_SOURCE are
+#: convicted by DIFFERENT halves of the same world (@skills, round 7).
+DEFECT_C_SOURCE = "from pathlib import Path\nX = Path.cwd()\n"
 
 ARM_WORLD_A = """
 import os
@@ -111,6 +115,10 @@ _real_realpath = os.path.realpath
 def _ntpath_condition(path, **kw):
     os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
     return _real_realpath(path, **kw)
+
+
+def _dead_getcwd():
+    raise FileNotFoundError(2, "cwd deleted", "")
 
 
 os.path.realpath = _ntpath_condition
@@ -129,27 +137,34 @@ try:
     import pathlib as _pathlib_for_accessor
 
     _pathlib_for_accessor._NormalAccessor.realpath = staticmethod(_ntpath_condition)
+    # The OTHER captured route: Path.cwd() is cls(cls._accessor.getcwd()) before
+    # 3.11, a separate attribute holding a separate copy. Curing realpath alone
+    # leaves a module-level Path.cwd() unconvicted on 3.10 — the world would
+    # deny a getcwd nothing reads (@skills, round 7).
+    _pathlib_for_accessor._NormalAccessor.getcwd = staticmethod(_dead_getcwd)
 except AttributeError:
     pass  # 3.11+ removed the accessor and calls os.path.realpath at use.
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
 
 os.getcwd = _dead_getcwd
 """
 
 # WORLD A-PRIME, the same condition injected one level UP. World A wraps
 # ``os.path.realpath`` because that is what ``ntpath`` does and what Windows
-# actually runs — but pathlib only DELEGATES ``Path.resolve()`` to
-# ``os.path.realpath`` from Python 3.11. On 3.10 pathlib carried its own resolve
-# (a flavour + accessor calling getcwd itself), so the wrapper is never reached
-# and world A cannot convict there. Measured by CI on the 3.10 leg of 8550ed10:
-# the arming probe reported DEFECT_SURVIVED rather than the pin passing quietly
-# (@devpulse, 2026-08-31).
+# actually runs, and until the accessor cure above it went inert on 3.10 —
+# measured by CI on the 3.10 leg of 8550ed10, where the arming probe reported
+# DEFECT_SURVIVED rather than the pin passing quietly (@devpulse, 2026-08-31).
 #
-# So the interpreter VERSION is part of the platform, exactly as os.name is.
+# THE SENTENCE THAT USED TO BE HERE WAS WRONG, and it is corrected rather than
+# deleted because the wrong mechanism is the lesson. It read: "pathlib only
+# delegates to os.path.realpath from 3.11; on 3.10 it carried its own resolve,
+# so the wrapper is never reached." 3.10 DOES delegate — through an accessor
+# holding a reference captured at import (pathlib.py:358, called at 1077), which
+# is why rebinding the module attribute alone changed nothing. @memory read the
+# CPython source and refuted it. A CI red is a NEGATIVE measurement: it says
+# not-armed and never why, and that gap is exactly where a plausible mechanism
+# moves in and settles into a comment.
+#
+# The interpreter VERSION is part of the platform, exactly as os.name is.
 # This world patches ``Path.resolve`` ITSELF — the public call the defect makes,
 # not the private delegate it happens to route through this year — so it arms on
 # every version by construction. It is the STAND-IN; world A stays because it is
@@ -239,6 +254,35 @@ except OSError:
 # instrument is keyed to it.
 
 
+# THE OPPOSITE-PLATFORM LITMUS, as a WORLD so it can ride into any child.
+#
+# Emulated BY PROPERTY, never by aliasing ntpath. On a posix host
+# ntpath.realpath IS ntpath.abspath, so an alias emulates the host wearing an nt
+# label and produces a green-looking answer that has silently stopped
+# reproducing anything (@flow's M3 trap, failure mode measured by @drone;
+# relayed round 7). The property that actually differs is one line:
+# ntpath.realpath reads os.getcwd() unconditionally, for absolute paths too
+# (ntpath.py:678), where posixpath reads it only for relative ones.
+#
+# @drone's addendum is why this is a TEST and not a one-time check: a pin that
+# reads a value back can be measuring the host, so the litmus lives BESIDE the
+# pin rather than in a commit message about a day someone once ran it.
+EMULATE_NT_REALPATH = """
+import os
+
+_posix_realpath_before_nt = os.path.realpath
+
+
+def _nt_shaped_realpath(path, *a, **kw):
+    # ntpath.py:678 - unconditional, even when the path is already absolute.
+    os.getcwd()
+    return _posix_realpath_before_nt(path, *a, **kw)
+
+
+os.path.realpath = _nt_shaped_realpath
+"""
+
+
 # World A WITHOUT the accessor cure — the shape that went red on the 3.10 CI
 # leg, kept as the negative control for the four lines that fixed it.
 BARE_MODULE_PATCH_ONLY = """
@@ -262,6 +306,12 @@ def _dead_getcwd_bare():
 os.getcwd = _dead_getcwd_bare
 """
 
+# EQUIVALENT MUTANT, recorded so nobody spends the evening on it twice. Binding
+# os.getcwd to something harmless inside EMULATE_NT_REALPATH survives every pin
+# — because both worlds above rebind os.getcwd to a denier as their LAST line,
+# and the emulation is concatenated FIRST. It is overwritten before anything
+# runs, so the mutation has no behaviour to change. Run round 7, M5.
+
 
 # A 3.10-SHAPED pathlib, so the accessor claim is falsifiable HERE.
 #
@@ -280,11 +330,47 @@ import os
 import pathlib
 
 
+def _captured_sentinel(path, *a, **kw):
+    # A SENTINEL, not the real os.path.realpath. What this emulation is FOR is
+    # the capture — that a reference taken at class-creation time cannot see a
+    # later rebinding — and the identity of the captured function is beside the
+    # point. Capturing the real one imported behaviour this file does not test:
+    # on Windows ntpath.realpath reads os.getcwd() UNCONDITIONALLY (ntpath.py
+    # :678, even for an absolute path, which is the posixpath fact that does not
+    # travel), so under the getcwd denial the bare-patch control raised and the
+    # pin read DEFECT_DIED. It died for the PLATFORM, not for the mechanism.
+    # Measured on the round-6 windows-setup leg of c82c3d34 and reproduced here
+    # by emulating that property (@memory's sentinel pattern, relayed round 7).
+    #
+    # Touching nothing means anything that raises afterwards is the patch's
+    # doing, on any host. My own round-6 rule said absolute targets are
+    # load-bearing; the half I missed is that "absolute never reads the cwd" is
+    # a posixpath fact, not a portable one.
+    return path
+
+
+def _captured_getcwd():
+    # The second sentinel. Returns a fixed absolute string rather than calling
+    # the real os.getcwd, for the same reason as its sibling: this emulation is
+    # about the CAPTURE, and anything it borrows from the host is a property the
+    # pin did not mean to depend on.
+    return os.sep + "captured"
+
+
 class _NormalAccessor:
     # CPython 3.10 pathlib.py:358. The capture is the whole point: this holds
-    # the function object os.path.realpath NAMED when the class body ran, and a
-    # later rebinding of that module attribute cannot be seen from here.
-    realpath = staticmethod(os.path.realpath)
+    # the function object NAMED when the class body ran, and a later rebinding
+    # of that module attribute cannot be seen from here.
+    #
+    # TWO captured routes, not one. Path.cwd() is cls(cls._accessor.getcwd())
+    # before 3.11 and Path.resolve() goes through _accessor.realpath — separate
+    # attributes, each with its own capture. Arming one says nothing about the
+    # other, and a world that cures only realpath still lets a module-level
+    # Path.cwd() sail through on 3.10 (@skills, who found it as a live mutant
+    # survivor: deleting their realpath patch changed nothing because every pin
+    # underneath was riding the getcwd half).
+    realpath = staticmethod(_captured_sentinel)
+    getcwd = staticmethod(_captured_getcwd)
 
 
 _normal_accessor = _NormalAccessor()
@@ -298,7 +384,14 @@ def _pre_311_resolve(self, strict=False):
     return pathlib.Path(_normal_accessor.realpath(str(self), strict=strict))
 
 
+def _pre_311_cwd(cls):
+    # CPython 3.10 pathlib.py:1088 — cls(cls._accessor.getcwd()).
+    return cls(cls._accessor.getcwd())
+
+
 pathlib.Path.resolve = _pre_311_resolve
+pathlib.Path._accessor = _normal_accessor
+pathlib.Path.cwd = classmethod(_pre_311_cwd)
 """
 
 
@@ -413,6 +506,83 @@ class TestTheInstrumentsCanFire:
         cross_check = _run(PRELOAD + ARM_WORLD_A_PRIME + body)
         assert "DEFECT_DIED" in faithful.stdout, faithful.stdout
         assert "DEFECT_DIED" in cross_check.stdout, cross_check.stdout
+
+    def test_a_getcwd_denial_does_NOT_reach_a_pre_captured_getcwd_accessor(self, tmp_path):
+        """The realpath control's sibling, on the route nothing here was driving.
+
+        Before 3.11 ``Path.cwd()`` is ``cls(cls._accessor.getcwd())`` — a
+        SEPARATE captured attribute from ``_accessor.realpath``. Rebinding
+        ``os.getcwd`` alone therefore cannot be seen from it, exactly as
+        rebinding ``os.path.realpath`` could not be seen from the other half.
+
+        Found by @skills, who hit it as a live mutant survivor: deleting their
+        world's realpath patch changed nothing, because every pin underneath was
+        riding the getcwd half. Arming one route says nothing about the other.
+        """
+        body = _defect_body(tmp_path, DEFECT_C_SOURCE, "defect_c")
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + BARE_MODULE_PATCH_ONLY + body)
+        assert "DEFECT_SURVIVED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_world_a_convicts_the_getcwd_route_TOO(self, tmp_path):
+        """And the cured world reaches it. Without the second staticmethod line
+        this pin is red — which is the whole reason it exists, because the tree
+        has seven Path.cwd() sites today and none of them is reached at import.
+        The day one is, the world must already have been able to convict it."""
+        body = _defect_body(tmp_path, DEFECT_C_SOURCE, "defect_c")
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A + body)
+        assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_bare_patch_control_holds_on_an_NT_SHAPED_HOST_TOO(self, tmp_path):
+        """THE LITMUS, and the pin that would have caught the round-6 red here.
+
+        The control above claims a bare module patch cannot reach a captured
+        accessor. That claim must not depend on which platform is running it —
+        and until tonight it did: the emulation captured the real
+        os.path.realpath, which on Windows reads the cwd unconditionally, so the
+        control raised and reported DEFECT_DIED on the runner while passing
+        here. Measured on windows-setup, c82c3d34.
+
+        Runs the same world with the nt property emulated. Same verdict, or the
+        pin above is a posix fact wearing a portable name.
+        """
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        world = EMULATE_NT_REALPATH + EMULATE_PY310_PATHLIB + BARE_MODULE_PATCH_ONLY
+        result = _run(PRELOAD + world + body)
+        assert "DEFECT_SURVIVED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_world_a_still_convicts_on_an_NT_SHAPED_HOST(self, tmp_path):
+        """The other half. A litmus that only showed the control surviving
+        everywhere would be satisfied by a world that denies nothing — so the
+        cured world must still ARM under the same emulation, or the pair proves
+        only that both are inert."""
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        world = EMULATE_NT_REALPATH + EMULATE_PY310_PATHLIB + ARM_WORLD_A
+        result = _run(PRELOAD + world + body)
+        assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_nt_emulation_is_armed_and_is_not_an_ntpath_alias(self, tmp_path):
+        """Arming probe for the litmus itself, plus @flow's M3 trap named.
+
+        Asserts the emulation actually CHANGED the cwd-reading behaviour for an
+        ABSOLUTE path — which is the whole difference — rather than being an
+        alias of ntpath that on this host is just abspath again and reproduces
+        nothing.
+        """
+        probe = (
+            "import os\n"
+            "_abs = os.path.abspath(os.sep)\n"
+            "print('PROBE_IS_ABS:', os.path.isabs(_abs))\n"
+            "_seen = []\n"
+            "_real_getcwd = os.getcwd\n"
+            "os.getcwd = lambda: (_seen.append(1), _real_getcwd())[1]\n"
+            "os.path.realpath(_abs)\n"
+            "print('ABSOLUTE_PATH_READ_CWD:', bool(_seen))\n"
+        )
+        plain = _run(PRELOAD + probe)
+        emulated = _run(PRELOAD + EMULATE_NT_REALPATH + probe)
+        assert "PROBE_IS_ABS: True" in emulated.stdout, emulated.stdout
+        assert "ABSOLUTE_PATH_READ_CWD: False" in plain.stdout, plain.stdout
+        assert "ABSOLUTE_PATH_READ_CWD: True" in emulated.stdout, emulated.stdout
 
     def test_world_a_ARMS_against_a_310_shaped_pathlib(self, tmp_path):
         """The cure, measured on the interpreter shape this machine does not

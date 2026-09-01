@@ -102,22 +102,85 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "DOCUMENTATION"}
 
 
-def check_module_docstring(lines: List[str]) -> Dict:
-    """
-    Check for module-level docstring.
+#: The two triple-quote spellings, named because the fallback below is a
+#: LINE SCAN and a literal quote in this file's own source is exactly the
+#: construct that makes such a scan hard to read.
+TRIPLE_DOUBLE: str = chr(34) * 3
+TRIPLE_SINGLE: str = chr(39) * 3
 
-    Looks for a triple-quoted string near the top of the file,
-    allowing for META block, comments, or blank lines before it.
+
+def _module_docstring_by_line_scan(lines: List[str]) -> Dict:
+    """The pre-AST scan, kept for files that will not parse.
+
+    Says so in the message, because a fallback that reads like a verdict from
+    the real arm is an exemption granted on ignorance wearing a clean result.
+
+    Args:
+        lines: The module's source lines.
+
+    Returns:
+        dict with name, passed, message keys
     """
     for line in lines[:30]:
         stripped = line.strip()
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            return {"name": "Module docstring", "passed": True, "message": "Module-level docstring present"}
+        if stripped.startswith(TRIPLE_DOUBLE) or stripped.startswith(TRIPLE_SINGLE):
+            return {
+                "name": "Module docstring",
+                "passed": True,
+                "message": "Module-level docstring present (file does not parse - line scan)",
+            }
+    return {
+        "name": "Module docstring",
+        "passed": False,
+        "message": "Missing module-level docstring (file does not parse - line scan)",
+    }
+
+
+def check_module_docstring(lines: List[str]) -> Dict:
+    r"""
+    Check for module-level docstring, read as Python reads it.
+
+    THE LINE SCAN THIS REPLACES WAS DECIDED BY SPELLING, in both directions, and
+    both were measured across 1,845 files before this changed:
+
+      - it MISSED a prefixed docstring. An r-prefixed triple-quoted string is a
+        module docstring to Python and to help(); to a scan for a line starting
+        with a quote character it is nothing. Found by auditing a file of my own
+        that had one.
+      - it CREDITED any triple-quoted string in the first 30 lines - a class or
+        function docstring on a short module, a multi-line constant - to a file
+        with no module docstring at all. Seven files fleet-wide, and this is the
+        dangerous direction: a false negative gets believed.
+
+    ast.get_docstring asks the only question that matters, which is whether the
+    first statement in the module body IS a string.
+
+    Args:
+        lines: The module's source lines.
+
+    Returns:
+        dict with name, passed, message keys
+    """
+    try:
+        tree = ast.parse("\n".join(lines))
+    except SyntaxError as exc:
+        # Logged rather than swallowed, and my own silent_catch rule is the
+        # reason: it accepts a bare `return None` here and flags a return that
+        # NAMES its fallback, which rewards the less informative spelling. That
+        # is the same defect I fixed in the classify-and-return clause tonight,
+        # one clause over - banked as a rule question rather than widened
+        # mid-train, because "any call return converts the exception" would gut
+        # a rule that exists to catch real swallows.
+        logger.info("Module docstring check fell back to a line scan: %s", exc)
+        return _module_docstring_by_line_scan(lines)
+
+    if ast.get_docstring(tree) is not None:
+        return {"name": "Module docstring", "passed": True, "message": "Module-level docstring present"}
 
     return {
         "name": "Module docstring",
         "passed": False,
-        "message": "Missing module-level docstring (expected within first 30 lines)",
+        "message": "Missing module-level docstring (no string literal opens the module body)",
     }
 
 

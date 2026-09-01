@@ -56,6 +56,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dead_cwd_world import (  # noqa: E402
     ACCESSOR_SHAPE,
+    NATIVE_PATHS,
+    NT_EMULATED_PLATFORM,
+    POSIX_EMULATED_PLATFORM,
     WORLD_A,
     WORLD_B,
     WORLD_GETCWD_DENIED,
@@ -686,6 +689,10 @@ import os
 import os.path
 import pathlib
 
+# The platform emulation is installed BEFORE the shape, so the capture below
+# sees the emulated dialect. An empty string here means "this host, unchanged".
+{platform}
+
 {shape}
 
 _acc = pathlib._NormalAccessor()
@@ -698,8 +705,29 @@ def _cwd_pre_311():
 
 def _resolve_pre_311():
     # 3.10 Lib/pathlib.py:1077 -> s = self._accessor.realpath(self, strict=...)
-    # ABSOLUTE input: a relative one reads the cwd for the path's own shape.
-    return _acc.realpath(os.path.abspath(os.sep) + "probe")
+    # A LITERAL, not os.path.abspath(os.sep) + "probe": building the argument
+    # through the host's path module puts host behaviour inside a probe that
+    # exists to measure the patch.
+    #
+    # HONEST RECORD, measured 2026-08-31 (M25): swapping the literal back for
+    # the host-built spelling SURVIVES the whole suite. It is an EQUIVALENT
+    # MUTANT, and not narrowly - the four-cell table below is flat:
+    #
+    #     capture     dialect   literal    host-built
+    #     sentinel    posix     NO_RAISE   NO_RAISE
+    #     sentinel    nt        NO_RAISE   NO_RAISE
+    #     live        posix     NO_RAISE   NO_RAISE
+    #     live        nt        RAISED     RAISED
+    #
+    # Every accessor this runs against - sentinel, denial, cwd-reading wrapper
+    # - answers before it looks at the path, so the argument decides nothing
+    # in any cell. The literal is therefore a PURITY rule and not a measured
+    # discriminator: it is here so that no host path module is consulted
+    # inside an instrument, which is the round-7 species stated as a habit.
+    # It would start deciding the day a world let a real realpath run to
+    # completion on this route. Recorded rather than scored as a kill,
+    # because a mutation run that quietly counts it is lying.
+    return _acc.realpath("/probe")
 
 
 {world}
@@ -720,11 +748,32 @@ else:
 
 _BARE_MODULE_PATCH = "def _dead(*a, **k):\n    raise FileNotFoundError(2, 'dead cwd')\nos.getcwd = _dead\n"
 
+# A bare module patch that ALSO gives os.path.realpath the windows shape.
+# Reaches nothing the accessor captured, which is exactly the point.
+_BARE_WINDOWS_MODULE_PATCH = _BARE_MODULE_PATCH + (
+    "_rr = os.path.realpath\n"
+    "def _reads(p, *a, **k):\n"
+    "    os.getcwd()\n"
+    "    return _rr(p, *a, **k)\n"
+    "os.path.realpath = _reads\n"
+)
+
 _ZERO_ARG_ACCESSOR_PATCH = (
     "def _dead():\n"
     "    raise FileNotFoundError(2, 'dead cwd')\n"
     "os.getcwd = _dead\n"
     "pathlib._NormalAccessor.getcwd = _dead\n"
+)
+
+# The shape as it was WRITTEN BEFORE ROUND 7 - capturing the live host
+# realpath. Kept as a named constant, not as a comment, because it is the only
+# thing that makes the platform slot falsifiable: it is the one shape whose
+# verdict is SUPPOSED to move with the dialect.
+_LIVE_CAPTURE_SHAPE = (
+    "class _NormalAccessor:\n"
+    "    getcwd = staticmethod(os.getcwd)\n"
+    "    realpath = staticmethod(os.path.realpath)\n"
+    "pathlib._NormalAccessor = _NormalAccessor\n"
 )
 
 _LAZY_SHAPE = (
@@ -737,7 +786,14 @@ _LAZY_SHAPE = (
 )
 
 
-def _run_emulation(shape: str, world: str, call: str = "cwd") -> str:
+_PLATFORMS = {
+    "host": "",
+    "posix": POSIX_EMULATED_PLATFORM,
+    "nt": NT_EMULATED_PLATFORM,
+}
+
+
+def _run_emulation(shape: str, world: str, call: str = "cwd", platform: str = "host") -> str:
     """Run the pre-3.11 accessor emulation under a given world.
 
     Args:
@@ -747,11 +803,15 @@ def _run_emulation(shape: str, world: str, call: str = "cwd") -> str:
             ``Path.cwd() -> _accessor.getcwd()``, or "resolve" for
             ``Path.resolve() -> _accessor.realpath()``. They are patched
             separately and a world can arm one while leaving the other inert.
+        platform: "host" to leave this interpreter's path module alone, or
+            "posix"/"nt" to install that dialect's realpath before the shape
+            captures anything. Every verdict here must be identical under all
+            three - see ``test_every_accessor_verdict_is_platform_blind``.
 
     Returns:
         str: The child's VERDICT line.
     """
-    source = _EMULATION.format(shape=shape, world=world)
+    source = _EMULATION.format(platform=_PLATFORMS[platform], shape=shape, world=world)
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env.pop("AIPASS_TEST_LOG_DIR", None)
     env["EMU_CALL"] = call
@@ -819,44 +879,158 @@ class TestTheAccessorTrapIsReproducibleLocally:
         """
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_GETCWD_DENIED) == "VERDICT=RAISED"
 
-    def test_a_relative_arming_path_reports_live_on_a_world_that_never_armed(self):
-        """Why the world A arming probe uses an ABSOLUTE path.
+    def test_the_platform_slot_is_live(self):
+        """ARMING PROBE for the litmus below - and the CI red, kept local.
 
-        posixpath.realpath reads the cwd for any RELATIVE path, so a probe
-        using "." raises for the path's SHAPE rather than for the world - it
-        reports the world live on an interpreter the world never reached. The
-        absolute probe reports honestly. On 3.11+ both answer the same, which
-        is exactly why this had to be measured against the emulation.
+        A litmus that requires verdicts NOT to move is vacuously green if the
+        platform emulation never reaches the child: drop the slot, patch
+        nothing, and all three runs are the same run. So one shape must be
+        held whose verdict is SUPPOSED to move, and the honest choice is the
+        exact shape round 6 shipped - a live capture of the host realpath.
 
-        HONEST RECORD, measured 2026-08-31: swapping the arming probe back to
-        "." SURVIVES the whole suite on its own. It is an EQUIVALENT MUTANT
-        GIVEN the accessor patch - once the world reaches pathlib, both
-        spellings answer the same in every armed world. It stops being
-        equivalent the moment the accessor patch is dropped: on an emulated
-        3.10 with that patch removed, the relative probe answers RAISED (the
-        world reported live) while the absolute one answers NO_RAISE (the
-        world reported dead, correctly). So the two halves cover each other,
-        and the absolute spelling is what keeps the arming probe honest if the
-        other half is ever lost. Recorded rather than scored as a kill,
-        because a mutation run that quietly counts it is lying.
+        posix leaves an absolute path alone; nt reads the cwd before looking
+        at it. Same world, same call, two answers - which IS the windows-setup
+        red of round 7, reproduced on Linux and now unable to leave silently.
         """
-        relative = _run_emulation(
-            ACCESSOR_SHAPE,
-            _BARE_MODULE_PATCH + "import pathlib as _p\n",
-        )
-        # Sanity: the emulated world is NOT armed under a bare module patch.
-        assert relative == "VERDICT=NO_RAISE"
+        posix = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="posix")
+        nt = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="nt")
+        assert posix == "VERDICT=NO_RAISE", posix
+        assert nt == "VERDICT=RAISED", nt
+        assert posix != nt, "the platform slot reached nothing; the litmus below proves nothing"
 
+    def test_every_accessor_verdict_is_platform_blind(self):
+        """THE LITMUS: no verdict in this class may move with the platform.
+
+        This class measures whether a PATCH reached a CAPTURED attribute. That
+        question has nothing to do with which path dialect the host speaks, so
+        every probe here must answer the same under a posix realpath, an nt
+        realpath, and this interpreter's own - and any probe whose answer moves
+        is importing behaviour it is not testing.
+
+        It cost a windows-setup red to learn: ``ACCESSOR_SHAPE`` used to
+        capture the LIVE ``os.path.realpath``, and on nt that reads the cwd on
+        its own account, so a world that reached NOTHING still answered RAISED
+        and the pin below convicted the host. Restore that capture and this
+        pin reddens here, on Linux, without waiting for CI.
+        """
+        cases = [
+            (ACCESSOR_SHAPE, _BARE_MODULE_PATCH, "cwd"),
+            (ACCESSOR_SHAPE, WORLD_A, "cwd"),
+            (ACCESSOR_SHAPE, WORLD_GETCWD_DENIED, "cwd"),
+            (_LAZY_SHAPE, _BARE_MODULE_PATCH, "cwd"),
+            (ACCESSOR_SHAPE, WORLD_A, "resolve"),
+            (ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, "resolve"),
+        ]
+        moved = []
+        for shape, world, call in cases:
+            verdicts = {
+                platform: _run_emulation(shape, world, call=call, platform=platform)
+                for platform in ("host", "posix", "nt")
+            }
+            if len(set(verdicts.values())) != 1:
+                moved.append((call, verdicts))
+        assert not moved, f"verdicts moved with the platform: {moved}"
+
+
+class TestTheArmingProbeIsDialectDependent:
+    """Why the world A arming probe uses an ABSOLUTE path - per dialect.
+
+    Round 6 established this claim on posix and shipped it as universal, and
+    the windows-setup leg refused it. It is TWO rows, not one, and each is
+    measured here under an emulated dialect rather than derived from a CI red:
+
+        dialect   relative probe   absolute probe
+        posix     RAISED           NO_RAISE
+        nt        RAISED           RAISED
+
+    posixpath.realpath consults the cwd only to complete a RELATIVE path;
+    ntpath.realpath reads it on its first lines whatever it was handed. So the
+    relative probe raises in both dialects, and in neither does that raise
+    mean the world armed - it means the path had a shape. That is the whole
+    claim, and it is what makes an arming probe spelled "." dishonest.
+
+    The absolute probe is where the dialects part, and the nt row is a fact
+    rather than a defect: ntpath's cwd read is a module-attribute lookup, so a
+    bare ``os.getcwd`` rebind reaches THROUGH a captured realpath on nt while
+    being inert on posix. The pre-3.11 capture that hid a dead world on 3.10
+    Linux would not have hidden it on 3.10 Windows.
+    """
+
+    _EXPECTED = {
+        "posix": {"relative": "RAISED", "absolute": "NO_RAISE"},
+        "nt": {"relative": "RAISED", "absolute": "RAISED"},
+    }
+
+    @staticmethod
+    def _probe(platform: str, path: str) -> str:
+        """Resolve one path under one emulated dialect, cwd denied."""
+        source = (
+            "import os\nimport os.path\n" + _PLATFORMS[platform] + _BARE_MODULE_PATCH + "try:\n"
+            "    os.path.realpath(%r)\n"
+            "    print('VERDICT=NO_RAISE')\n"
+            "except OSError:\n"
+            "    print('VERDICT=RAISED')\n" % path
+        )
+        env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
+        env.pop("AIPASS_TEST_LOG_DIR", None)
+        result = subprocess.run(
+            [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(SRC_ROOT),
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr[-600:]
+        return result.stdout.strip().split("=", 1)[1]
+
+    @pytest.mark.parametrize("dialect", ["posix", "nt"])
+    def test_a_relative_probe_raises_in_both_dialects(self, dialect):
+        """The load-bearing half: "." can never report a world, only a shape.
+
+        Both dialects, same answer, and the world here armed NOTHING the
+        captured accessor reads - so a RAISED from "." is worth nothing as an
+        arming signal on any platform.
+        """
+        assert self._probe(dialect, NATIVE_PATHS[dialect]["relative"]) == "RAISED"
+
+    @pytest.mark.parametrize("dialect", ["posix", "nt"])
+    def test_the_absolute_probe_answers_per_dialect(self, dialect):
+        """The half that parts, with both rows measured on this host."""
+        expected = self._EXPECTED[dialect]["absolute"]
+        assert self._probe(dialect, NATIVE_PATHS[dialect]["absolute"]) == expected
+
+    def test_a_dialect_probe_fed_the_other_dialect_spelling_measures_nothing(self):
+        """Negative control for the table: the spellings are not swappable.
+
+        Hand posix's "/probe" to the nt shape and it still raises - but for
+        the shape's unconditional read, not for anything about the path. Hand
+        nt's "C:\\probe" to the posix shape and it raises too, because
+        posixpath does not read a drive letter as absolute. Either mix-up
+        produces an all-RAISED table that looks like agreement and measures
+        the SPELLING. This is why NATIVE_PATHS exists.
+        """
+        assert self._probe("posix", NATIVE_PATHS["nt"]["absolute"]) == "RAISED"
+        assert self._probe("nt", NATIVE_PATHS["posix"]["absolute"]) == "RAISED"
+
+    def test_the_live_host_agrees_with_its_own_dialect_row(self):
+        """The emulations are stand-ins; this is the run that licenses them.
+
+        Drives the real thing - ``pathlib.Path(p).resolve()`` on this
+        interpreter, this platform, no dialect patched - and requires it to
+        land on the row the table claims for ``os.name``. The day a host stops
+        agreeing with its own row, the table is wrong rather than the host.
+        """
         probe = (
-            "import pathlib, os\n"
-            "def _try(p):\n"
+            "import os, pathlib\n" + _BARE_MODULE_PATCH + "def _try(p):\n"
             "    try:\n"
             "        pathlib.Path(p).resolve()\n"
             "        return 'NO_RAISE'\n"
             "    except OSError:\n"
             "        return 'RAISED'\n"
-            "print('REL=%s ABS=%s' % (_try('.'), _try(os.path.abspath(os.sep) + 'probe')))\n"
+            "print('REL=%s ABS=%s' % (_try(_REL), _try(_ABS)))\n"
         )
+        preamble = "import os, os.path\n_REL = '.'\n_ABS = os.path.abspath(os.sep) + 'probe'\n"
         env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
         env.pop("AIPASS_TEST_LOG_DIR", None)
         result = subprocess.run(
@@ -864,7 +1038,7 @@ class TestTheAccessorTrapIsReproducibleLocally:
                 sys.executable,
                 "-c",
                 "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))",
-                "import os, os.path, pathlib\n" + _BARE_MODULE_PATCH + probe,
+                preamble + probe,
             ],
             capture_output=True,
             text=True,
@@ -873,14 +1047,21 @@ class TestTheAccessorTrapIsReproducibleLocally:
             timeout=60,
         )
         assert result.returncode == 0, result.stderr[-600:]
-        assert "REL=RAISED" in result.stdout, (
-            f"a relative path stopped reading the cwd; the reason the arming "
-            f"probe must be absolute no longer holds: {result.stdout!r}"
+        row = self._EXPECTED[os.name if os.name in self._EXPECTED else "posix"]
+        assert f"REL={row['relative']}" in result.stdout, (
+            f"host {os.name} disagrees with its own table row: {result.stdout!r}"
         )
-        assert "ABS=NO_RAISE" in result.stdout, (
-            f"an absolute path read the cwd; the absolute arming probe would "
-            f"then be no more honest than the relative one: {result.stdout!r}"
+        assert f"ABS={row['absolute']}" in result.stdout, (
+            f"host {os.name} disagrees with its own table row: {result.stdout!r}"
         )
+
+
+class TestTheAccessorTrapResolveRoute:
+    """The realpath half of the capture - Path.resolve(), not Path.cwd().
+
+    Before 3.11 these ride DIFFERENT captured attributes, so arming one says
+    nothing about the other.
+    """
 
     def test_world_a_reaches_the_captured_accessor_on_the_RESOLVE_route(self):
         """WORLD_A patches two accessor attributes; this measures the second.
@@ -898,11 +1079,4 @@ class TestTheAccessorTrapIsReproducibleLocally:
         Without this the pin above could pass because the world armed for some
         other reason rather than because it reached the accessor.
         """
-        bare_windows = _BARE_MODULE_PATCH + (
-            "_rr = os.path.realpath\n"
-            "def _reads(p, *a, **k):\n"
-            "    os.getcwd()\n"
-            "    return _rr(p, *a, **k)\n"
-            "os.path.realpath = _reads\n"
-        )
-        assert _run_emulation(ACCESSOR_SHAPE, bare_windows, call="resolve") == "VERDICT=NO_RAISE"
+        assert _run_emulation(ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve") == "VERDICT=NO_RAISE"

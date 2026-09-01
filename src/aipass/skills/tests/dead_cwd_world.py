@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_cwd_world.py
 # Description: The one definition of the hostile worlds this branch's pins use
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -58,6 +58,9 @@ WORLD_B exists separately to convict ``inspect.stack()``.
 
 __all__ = [
     "ACCESSOR_SHAPE",
+    "NATIVE_PATHS",
+    "NT_EMULATED_PLATFORM",
+    "POSIX_EMULATED_PLATFORM",
     "WORLD_A",
     "WORLD_B",
     "WORLD_GETCWD_DENIED",
@@ -99,12 +102,83 @@ WORLD_B = _DENIAL + (
     "    _pl._NormalAccessor.realpath = staticmethod(_dead)\n"
 )
 
-# Pre-3.11 pathlib reduced to the three lines that matter. The capture is
-# EAGER - at class creation - because that IS the defect; a lazily-read
-# attribute would resolve the patched name and reproduce nothing.
-ACCESSOR_SHAPE = (
+# ---------------------------------------------------------------------------
+# Platform emulations
+# ---------------------------------------------------------------------------
+# Built BY NAME from the dialect module - posixpath, ntpath - and never from
+# os.path, which IS the host and would emulate nothing. Only PURE STRING
+# functions are borrowed (isabs, join, normpath): they consult no filesystem
+# and no cwd, so the only cwd read in either body is the one written here on
+# purpose.
+#
+# ALIASING THE DIALECT'S OWN realpath WOULD NOT WORK. ntpath.py defines
+# realpath TWICE and picks at import by whether nt._getfinalpathname exists:
+# off Windows it is the fallback ``def realpath(path, *, strict=False): return
+# abspath(path)`` - a wrapper, not an alias, so ``ntpath.realpath is
+# ntpath.abspath`` is False on 3.12.3 while behaving as abspath does. Measured
+# here 2026-08-31: under a denied getcwd, ntpath.realpath(".") raises but
+# ntpath.realpath("/probe") returns "\\probe" quite happily. An nt world built
+# by aliasing therefore never arms for the absolute case, which is the case
+# the defect is about. Write the behaviour; do not import it.
+
+_POSIX_SHAPED_REALPATH = (
+    "import posixpath as _pp\n"
+    "def _posix_shaped_realpath(p, *a, **k):\n"
+    "    # posixpath.realpath consults the cwd ONLY to complete a relative path.\n"
+    "    if not _pp.isabs(p):\n"
+    "        p = _pp.join(os.getcwd(), p)\n"
+    "    return _pp.normpath(p)\n"
+)
+
+_NT_SHAPED_REALPATH = (
+    "import ntpath as _np\n"
+    "def _nt_shaped_realpath(p, *a, **k):\n"
+    "    # ntpath.realpath reads the cwd on its FIRST lines, unconditionally,\n"
+    "    # before it has looked at the path at all - 3.12 Lib/ntpath.py:\n"
+    "    #     cwd = os.getcwd()\n"
+    "    # is computed in the str branch ahead of every use. That read is a\n"
+    "    # module-attribute lookup, which is why a bare os.getcwd rebind\n"
+    "    # reaches THROUGH a captured realpath on nt and not on posix.\n"
+    "    os.getcwd()\n"
+    "    return _np.normpath(p)\n"
+)
+
+# Install one dialect as the host's os.path.realpath. Use these to run a probe
+# under the OPPOSITE platform and require its verdict not to move - a verdict
+# that moves is the instrument importing behaviour it is not testing.
+POSIX_EMULATED_PLATFORM = _POSIX_SHAPED_REALPATH + "os.path.realpath = _posix_shaped_realpath\n"
+NT_EMULATED_PLATFORM = _NT_SHAPED_REALPATH + "os.path.realpath = _nt_shaped_realpath\n"
+
+# Dialect-native spellings for a probe. A relative path is spelled the same in
+# both; an absolute one is not, and feeding posix "/probe" to the nt shape (or
+# the reverse) measures the SPELLING rather than the dialect.
+NATIVE_PATHS = {
+    "posix": {"relative": ".", "absolute": "/probe"},
+    "nt": {"relative": ".", "absolute": "C:\\probe"},
+}
+
+# ---------------------------------------------------------------------------
+# Pre-3.11 pathlib, reduced to the three lines that matter
+# ---------------------------------------------------------------------------
+# The capture is EAGER - at class creation - because that IS the defect; a
+# lazily-read attribute would resolve the patched name and reproduce nothing.
+#
+# WHY realpath CAPTURES A SENTINEL AND getcwd DOES NOT. The question this
+# emulation exists to answer is "did the patch reach the captured attribute",
+# and the answer must not depend on the host. ``os.getcwd`` is one call with
+# one meaning on every platform and it is the call under denial, so capturing
+# the live one imports nothing. ``os.path.realpath`` is the dialect-divergent
+# half: capture the live one and on nt the accessor reads the cwd on its own
+# account, so a world that reached NOTHING still answers RAISED and the probe
+# convicts the host instead of the world. That was a real CI red on the
+# windows-setup leg (round 7). The sentinel returns its argument and touches
+# no filesystem, no cwd and no path module, so whatever raises afterwards is
+# the patch's doing on any platform.
+_SENTINEL_REALPATH = "def _sentinel_realpath(p='/sentinel', *a, **k):\n    return p\n"
+
+ACCESSOR_SHAPE = _SENTINEL_REALPATH + (
     "class _NormalAccessor:\n"
     "    getcwd = staticmethod(os.getcwd)\n"
-    "    realpath = staticmethod(os.path.realpath)\n"
+    "    realpath = staticmethod(_sentinel_realpath)\n"
     "pathlib._NormalAccessor = _NormalAccessor\n"
 )

@@ -14,6 +14,8 @@ from typing import List
 import pytest
 from unittest.mock import MagicMock
 
+from aipass.seedgo.apps.handlers.aipass_standards import documentation_check
+
 
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
@@ -3104,3 +3106,100 @@ class TestFunctionDocstringsReadTheSourceNotTheStrings:
         line in the message must be the line in the file."""
         source = "\n\n\n\n\ndef visible(x):\n    return x\n"
         assert "line 6" in self._check(source)["message"]
+
+
+class TestModuleDocstringReadsThePositionNotTheSpelling:
+    """The sibling defect, found the same way: by auditing a file of my own.
+
+    ``check_module_docstring`` was a line scan for a line STARTING with a triple
+    quote in the first 30. That is wrong in both directions, and both were
+    measured across 1,845 files before the rule changed:
+
+      - an r-prefixed module docstring does not start with a quote character, so
+        the scan reported MISSING on a file that has one (this checker's own
+        ``posix_literal_check.py``, scored 50 for a docstring it carries);
+      - any triple-quoted string in the first 30 lines was credited to the
+        module - a class docstring, a function docstring on a short file, a
+        string sitting after an import where Python discards it. Seven files
+        fleet-wide, and that is the direction that matters: a false negative
+        gets believed.
+
+    Blast radius measured with the real checker before the change: 8 verdicts
+    move across 1,560 files. Six from 100 to 50 (@skills 5, @ai_mail 1), one
+    from 50 to 0 (@hooks), one from 50 to 100 (mine). Owners mailed - reported,
+    never edited.
+    """
+
+    def test_an_r_prefixed_docstring_is_a_docstring(self):
+        """The false negative that started it."""
+        source = 'r"""Raw module docstring."""\n\n\ndef f():\n    pass\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is True
+
+    @pytest.mark.parametrize("prefix", ["r", "R", "u", "b", "rb", "f"])
+    def test_every_string_prefix_python_accepts_is_accepted_here(self, prefix):
+        """A literal table over the prefixes, so this one cannot vanish. b and
+        rb are not docstrings to ``ast.get_docstring`` and f-strings are not
+        constants at all - the point of the row is that the ANSWER is Python's,
+        whatever it is, rather than a guess made by looking at the first
+        character."""
+        source = prefix + '"""Text."""\n'
+        expected = ast.get_docstring(ast.parse(source)) is not None
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is expected
+
+    def test_a_string_after_an_import_is_NOT_a_module_docstring(self):
+        """@ai_mail's header.py, reduced. Python evaluates and discards it;
+        ``help()`` shows nothing. A reader sees documentation, which is exactly
+        why the scan agreed with the reader and not with the interpreter."""
+        source = 'import os\n\n"""Looks like documentation."""\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is False
+
+    def test_a_function_docstring_is_not_credited_to_the_module(self):
+        """@skills' registry.py, reduced - five files of theirs scored 100 on
+        the strength of the first function's docstring."""
+        source = 'from pathlib import Path\n\n\ndef f():\n    """Real, and not the module\'s."""\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is False
+
+    def test_a_class_docstring_is_not_credited_to_the_module(self):
+        """@hooks' test_live_config_timeouts.py, reduced."""
+        source = 'import json\n\n\nclass TestX:\n    """A class docstring."""\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is False
+
+    def test_a_real_module_docstring_still_passes(self):
+        """The positive control. A rule that failed everything would satisfy
+        every negative pin above and teach nothing."""
+        source = '"""The module docstring."""\n\n\ndef f():\n    pass\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is True
+
+    def test_a_docstring_after_the_AIPass_header_still_passes(self):
+        """Every file in the fleet opens with a comment banner. If the AST arm
+        had been wrong about comments, 1,677 files would have gone red at once -
+        which is the kind of blast radius worth pinning rather than assuming."""
+        source = "# === AIPass ===\n# Name: x.py\n# ===\n\n" + '"""Doc."""\n'
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is True
+
+    def test_an_unparseable_file_falls_back_and_SAYS_SO(self):
+        """The fallback must not read as a verdict from the real arm. My own
+        round-2 sentence: an exemption bought with a SyntaxError is an exemption
+        granted on ignorance."""
+        source = '"""Doc."""\n\ndef broken(\n'
+        with pytest.raises(SyntaxError):
+            ast.parse(source)
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is True
+        assert "does not parse" in result["message"]
+
+    def test_the_unparseable_fallback_can_still_FAIL(self):
+        """The negative control for the control. A fallback that always passes
+        would make every unparseable file clean, which is the exemption-on-
+        ignorance shape one level down."""
+        source = "import os\n\ndef broken(\n"
+        result = documentation_check.check_module_docstring(source.split("\n"))
+        assert result["passed"] is False
+        assert "does not parse" in result["message"]

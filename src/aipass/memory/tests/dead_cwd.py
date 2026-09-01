@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_cwd.py
 # Description: The one definition of the dead-cwd world used by this branch's subprocess pins
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -50,14 +50,33 @@ Either fix alone would have turned CI green.  Both are here because they answer
 different questions, and the one CI asked about is not the one that was hiding
 the vacuum.
 
-THE ARITY AND THE ``staticmethod`` ARE REDUNDANT WITH EACH OTHER, deliberately,
-and measured rather than assumed.  Dropping ``staticmethod`` alone SURVIVES the
-suite because ``*a`` absorbs the ``self`` a bound call passes; dropping ``*a``
-alone is caught; dropping BOTH reddens two pins.  So the survivor is an
-equivalent mutant given the other half, not a hole — recorded here because a
-mutation run that quietly scores it as killed is lying, and because whichever
-half a future reader deletes as "obviously covered" is the one that was
-covering the other.
+THE ARITY AND THE ``staticmethod`` ARE REDUNDANT ONLY FOR RAISE-SHAPED PINS, and
+that qualifier was missing here until @drone measured it.  This paragraph used
+to say ``staticmethod``-alone is a surviving equivalent mutant given ``*a``, and
+that was true of the suite as it stood: ``*a`` absorbs the ``self`` a bound call
+passes, so the world still RAISES for the right reason and every raise-shaped
+pin stays green.  It stops being true the moment a RETURN-VALUE pin exists — a
+bound plain function eats the path into ``*a`` and resolves the accessor object
+instead, which a pin that checks what came back can see and a pin that checks
+that something was thrown cannot.  @drone's tree caught it that way first; this
+branch's own return-value pin (added the following round for the realpath
+sibling) now kills it here too.  Their ``*a``-alone and both-together rows match
+these exactly.
+
+So the sharpened sentence, and it is the one to carry forward: the pair is
+redundant for raise-shaped pins and NOT redundant once anything asserts the
+value.  Recorded because a mutation run that quietly scores the survivor as
+killed is lying, and because whichever half a future reader deletes as
+"obviously covered" is the one that was covering the other.
+
+DO NOT ALSO PATCH THE INSTANCE.  @spawn suggested the belt-and-braces form —
+staticmethod on the class plus a plain function on the instance — and @drone
+measured why it is worse than nothing: an instance attribute SHADOWS the class
+staticmethod, so the class-level pin can no longer be falsified and the
+instrument disarms itself.  The class patch is sufficient because 3.10 holds one
+shared, attribute-free instance (``pathlib.py:361 _normal_accessor =
+_NormalAccessor()``, ``:954 _accessor = _normal_accessor``), so attribute lookup
+falls through to the class.  Verified against the 3.10 source, not assumed.
 
 THE RULE THIS IS AN INSTANCE OF, from @spawn on the same night: the injection
 must deny the call the DEFECT actually makes.  On 3.10 that call is
@@ -104,14 +123,20 @@ ACCESSOR_SHAPE = "class _Accessor:\n    getcwd = os.getcwd\n_accessor = _Accesso
 # Denying ``realpath`` directly lands on that same unprotected call on both
 # platforms.  It is the injection that denies the call the DEFECT actually
 # makes — @spawn's rule, applied to their own finding.
-# NEVER CONCATENATE THIS WITH ``DEAD_CWD_WORLD``. The two denials MASK each
-# other, and the combination is LESS hostile than this one alone — measured
-# here on CPython 3.12, and independently by @prax, who found it while curing
-# the same species in their tree:
+# NEVER CONCATENATE THIS WITH ``DEAD_CWD_WORLD`` ON POSIX. The two denials MASK
+# each other there, and the combination is LESS hostile than this one alone —
+# measured on CPython 3.12, and independently by @prax while curing the same
+# species in their tree:
 #
-#     getcwd denied              -> inspect.stack() SURVIVES
-#     realpath denied            -> inspect.stack() DIES
-#     getcwd AND realpath denied -> inspect.stack() SURVIVES
+#     world                        posix     nt
+#     getcwd denied                SURVIVES  DIES
+#     realpath denied              DIES      DIES
+#     getcwd AND realpath denied   SURVIVES  DIES
+#
+# THE PLATFORM COLUMN IS NOT DECORATION — this note carried the posix column
+# alone until round 7, and stating three Linux measurements as facts about
+# ``inspect`` is the exact defect the table below exists to prevent, written
+# one comment over from the table. Masking is a ``posixpath`` behaviour.
 #
 # The outer denial wins because ``getabsfile`` is called INSIDE
 # ``except (TypeError, FileNotFoundError)``: deny getcwd and ``abspath`` raises
@@ -212,6 +237,49 @@ WINDOWS_REALPATH_WORLD = (
 #
 # So: a verdict measured under these worlds is a fact about ONE platform until
 # it has been measured on the other or reproduced under the emulation below.
+
+
+# The OTHER half of the same idea, and its absence is what went red next.
+#
+# Round 6 shipped ``WINDOWS_EMULATED_WORLD`` and left the posix rows running
+# with NO prefix at all — "no emulation" reads as "posix" only while the host IS
+# posix. On the Windows runner those rows measured nt and reported it under a
+# label that said posix. The emulation was one-sided, so the table was
+# host-dependent in exactly the half nobody had thought to emulate.
+#
+# Built from ``posixpath`` EXPLICITLY rather than from ``os.path``, because on
+# nt ``os.path`` IS ``ntpath``: an emulation that captures ``os.path.realpath``
+# to build a posix world captures the nt function and emulates nothing.
+#
+# The two posix facts the table depends on, and both are here:
+#   * ``abspath`` reads the cwd for a RELATIVE path (which is what a
+#     pseudo-filename like ``<string>`` is), and
+#   * ``realpath`` does NOT read it for an absolute one.
+#
+# THE REALPATH HALF IS AN EQUIVALENT MUTANT ON A POSIX HOST, measured rather
+# than assumed: deleting it leaves the whole table green here, because once
+# ``abspath`` raises inside ``inspect.getabsfile()`` the realpath line is never
+# reached, and on Linux the host's own ``posixpath.realpath`` already behaves
+# the way the emulation would. It is load-bearing only on an nt host, where it
+# is the difference between emulating posix and relabelling nt — which is the
+# exact failure this constant exists to prevent, so it stays. Recorded here
+# because a mutation run that quietly scores it as killed is lying, and because
+# "obviously redundant" is what the next reader will call it.
+POSIX_EMULATED_WORLD = (
+    "import os, posixpath\n"
+    "def _posix_abspath(path, *a, **k):\n"
+    "    p = os.fspath(path)\n"
+    "    if not p.startswith('/'):\n"
+    "        p = os.getcwd() + '/' + p\n"
+    "    return posixpath.normpath(p)\n"
+    "def _posix_realpath(path, *a, **k):\n"
+    "    p = os.fspath(path)\n"
+    "    if not p.startswith('/'):\n"
+    "        p = os.getcwd() + '/' + p\n"
+    "    return posixpath.normpath(p)\n"
+    "os.path.abspath = _posix_abspath\n"
+    "os.path.realpath = _posix_realpath\n"
+)
 
 
 WINDOWS_EMULATED_WORLD = (

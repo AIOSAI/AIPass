@@ -13,6 +13,49 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 7: an instrument must not import behaviour it is not testing — the
+  round-6 instruments met the interpreters and platforms they were built to
+  emulate, and lost everywhere except home** (FPLAN-0461 continued). Round 6's
+  board was 12 green with test 3.12 passing — the exact interpreter the fleet
+  builds on — and red on 3.10/3.11/3.13 and windows-setup (13 failed /
+  19,697 passed on *Python 3.12.10*, isolating pure nt semantics). Every red
+  was round 6's own new accessor instruments; zero production defects, all
+  prior cures held. Memory measured the mechanism in 553 seconds and named the
+  fleet verdict: the probes were built out of the **live** `os.path` and
+  `os.getcwd`, so their verdicts carried platform behaviour they weren't
+  testing — on nt `os.path` *is* `ntpath`, whose `realpath` reads the cwd
+  unconditionally (round 4's own headline turned back on its finders) and
+  makes a POSIX-absolute literal drive-relative (`/tmp` → `D:\tmp`). Three
+  rules, each paid for: emulate *both* platforms or neither; build emulations
+  from `posixpath`/`ntpath` **by name**, never `os.path` (which *is* the
+  host — flow's first try recursed into itself 997 frames deep); and probes
+  asking "did my patch reach X" capture a **sentinel** that returns its
+  argument, so the original's platform behaviour can't answer for it. Plus the
+  litmus that finds all three: run every probe under the *opposite* platform's
+  emulation and require the verdict not to move — it caught spawn's next CI
+  red before it shipped. Spawn's cluster decomposed differently by reading
+  CPython per version: 3.10/3.11 reds were their emulation *crashing while
+  parsing* (a wrapped `_flavour` lost `parse_parts`), 3.13's patch was a write
+  nothing reads, Windows instantiates `WindowsPath` outside the patched
+  hierarchy — the new emulation replaces exactly one method and proves it
+  armed (`ROUTE_ARMED`/`ROUTE_DARK`) before anything downstream claims.
+  Refinements traveled mid-round: skills corrected flow's alias trap by source
+  read (off-Windows `ntpath.realpath` is a *wrapper*, not an alias — an `is`
+  test proves nothing) and kept `getcwd` a live capture deliberately (a
+  sentinel can never arm, so sentinelling it takes the eagerness pin dark);
+  trigger closed that hole with two distinguishable sentinels (eager answers
+  CAPTURED, lazy answers MOVED — no platform behaviour in the discriminator);
+  drone generalized: a pin that reads a *value* back can be measuring the
+  host, so the litmus lives beside every return-value pin as a test. On the
+  record: trigger's mis-aimed mutant that would have logged a false survivor
+  ("looks exactly like a real hole"), seedgo's refuted round-6 mechanism
+  rewritten in place with attribution rather than deleted, drone's stale
+  held-tree list corrected from git rather than memory, and skills' recurrence
+  of the poisoned-baseline species caught by ai_mail's guard — the guard is
+  the cure, not the `finally`. Seven branches: memory 1596×2, seedgo 2808×2,
+  spawn 902×2 (14/14 mutants), flow 1022×2 + bare-checkout, drone 1349×2,
+  skills 355×2 + 1119 lib, trigger 1087×2 with 0 skips.
+
 - **Round 6: the interpreter is part of the platform — the 3.10 leg convicted
   the instruments, and the fleet cured the capture** (FPLAN-0461 continued).
   Round 5's CI left two named clusters and both are dead. The Python 3.10 reds

@@ -4,7 +4,7 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.3.1
+**Version:** 2.4.0
 **Created:** 2025-11-15
 **Last Updated:** 2026-08-31
 
@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 990 tests across 29 files
+├── tests/                       # 998 tests across 29 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -312,6 +312,33 @@ hides.
 Measured, not assumed: with the marker denied and every count-asserting test run
 in **full isolation**, **2 of 10** failed. CI had named one.
 
+### An instrument must not import behaviour it is not testing
+
+Round 7's Windows red, and it is the sharper half of the lesson above. The
+accessor probes captured the live `os.path.realpath`, then asked *"did a later
+patch reach it?"* by denying `os.getcwd` and reading raise/no-raise. That
+discriminates on posix, where the captured function ignores the cwd for an
+absolute path — so a raise can only mean the patch landed. On nt `os.path` **is**
+`ntpath`, and `ntpath.realpath` reads `os.getcwd` unconditionally, so the
+**original** raises too and *raised* stops meaning *reached*.
+
+Three rules came out of it (@memory measured the same species on four of their
+own reds; each is verified here rather than imported on their word):
+
+1. **Emulate both platforms or neither.** A table with one emulated row and one
+   bare row is host-dependent in the half nobody thought about — "no emulation"
+   reads as posix only while the host is posix.
+2. **Build an emulation from the dialect module by name** (`posixpath`,
+   `ntpath`), never from `os.path`, which *is* the host.
+3. **When a probe asks "did my patch reach X", let X have captured a sentinel.**
+   Otherwise the original's own platform behaviour answers the question.
+
+The litmus that finds all three: run each probe under the *opposite* platform's
+emulation and require the verdict not to move. `TestTheWorldArmsOnAPreCapturedAccessor`
+runs it on every direction, with a control pinning that the two emulated hosts
+are genuinely different worlds — two identical hosts would pass the litmus for
+free.
+
 ### An injected world has to ARM, and the arming is version-shaped
 
 The dead-cwd pins install their world by patching `os.path.realpath` in a
@@ -462,7 +489,7 @@ aggregation untouched, plus anything auto-closed during the run.
 ## Quality
 
 - **Seedgo:** 100% (46 standards, no type errors)
-- **Tests:** 990 tests in 29 files — 1009 cases collected after parametrisation, 1008 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Tests:** 998 tests in 29 files — 1023 cases collected after parametrisation, 1022 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
 - **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**
