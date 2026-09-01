@@ -59,6 +59,7 @@ STATIC_GROUPS: tuple = (
     "static_assertion_shape",
     "static_capture_never_read",
     "static_coverage_slot",
+    "static_empty_parametrize",
     "static_entry_point_diff",
     "static_mock_drift",
     "static_no_oracle",

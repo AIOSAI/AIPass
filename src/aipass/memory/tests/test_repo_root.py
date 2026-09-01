@@ -35,6 +35,8 @@ from aipass.memory.tests.dead_cwd import (
     DEAD_CWD_WORLD,
     DELETE_CWD_WORLD,
     REALPATH_DENIED_WORLD,
+    WINDOWS_EMULATED_WORLD,
+    WINDOWS_REALPATH_WORLD,
 )
 
 # Every .py in the branch's own source, minus archives (kept deliberately as
@@ -738,14 +740,14 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
             assert retyped not in source, f"{module.__name__} retyped the world instead of importing it"
 
 
-_WINDOWS_REALPATH = (
-    "import os\n"
-    "_real_realpath = os.path.realpath\n"
-    "def _reads_the_cwd(p, *a, **k):\n"
-    "    os.getcwd()\n"
-    "    return _real_realpath(p, *a, **k)\n"
-    "os.path.realpath = _reads_the_cwd\n"
-)
+# Was a local copy, and the copy is what went red on Python 3.10: it patched
+# ``os.path.realpath`` without patching the accessor 3.10's pathlib had already
+# captured it into, so the probe below printed NO_RAISE and every pin under it
+# was vacuous on that interpreter. The cure lives in ``dead_cwd.py`` beside the
+# getcwd world that already carried it — which is where this constant should
+# have been all along, since living apart from that docstring is how it came to
+# repeat the exact trap the docstring describes.
+_WINDOWS_REALPATH = WINDOWS_REALPATH_WORLD
 
 
 class TestResolvingOwnFileIsACwdReadOnWindows:
@@ -1084,30 +1086,53 @@ class TestTheDiagnosticBranchIsReachableAfterAll:
 
 
 class TestTheTwoWorldsMustNotBeStacked:
-    """Denying MORE can deny LESS. Pinned because the trap is inviting.
+    """Denying MORE can deny LESS — on POSIX. This class used to say it everywhere.
 
-    ``dead_cwd.py`` publishes two hostile worlds as source prefixes, and a
-    reader who wants "the most hostile world available" will reach for both.
-    That combination is strictly kinder than the realpath denial alone, and
-    silently so: every pin built on it goes green while measuring a world in
-    which the defect cannot fire.
+    THE CI RED THAT REWROTE IT. On 8550ed10 windows-setup was down to exactly
+    two failures and both were this class::
 
-    The mechanism is one line of ``inspect.getmodule``::
+        test_getcwd_alone_does_not              assert 'DIES' == 'SURVIVES'
+        test_stacking_them_undoes_the_conviction assert 'DIES' == 'SURVIVES'
 
-        try:
-            file = getabsfile(object, _filename)
-        except (TypeError, FileNotFoundError):
-            return None
+    My failure message told the reader to suspect a CPython change. Wrong
+    suspect: it was the PLATFORM, and the mistake underneath it was that I
+    measured three verdicts on Linux and wrote them down as facts about
+    ``inspect``. They are facts about ``posixpath``.
 
-    Deny getcwd and ``posixpath.abspath`` raises INSIDE that try, inspect
-    swallows it, and the function returns before reaching
-    ``modulesbyfile[os.path.realpath(f)]`` — the call with nothing around it.
-    Let abspath succeed and you arrive at the unprotected line.
+    THE TABLE, and what decides each row. On POSIX, ``abspath`` raises inside
+    ``inspect.getabsfile()`` — which sits in inspect's own
+    ``except (TypeError, FileNotFoundError)`` — so a getcwd denial is SWALLOWED
+    and the unprotected ``os.path.realpath`` in ``getmodule`` is never reached.
+    On nt, ``abspath`` rides Win32 ``_getfullpathname`` and never touches
+    ``os.getcwd``, so it sails through that try and arrives at
+    ``ntpath.realpath``, which reads the cwd unconditionally.
 
-    Found by @prax while curing this species in their own tree, and measured
-    here three ways before adopting it. The pin is behavioural rather than a
-    comment because the day CPython moves that try/except, this is a fact the
-    fleet's shared world-builder needs to relearn out loud.
+    ==================  ========  ========
+    world               posix     nt
+    ==================  ========  ========
+    realpath denied     DIES      DIES
+    getcwd denied       SURVIVES  DIES
+    both denied         SURVIVES  DIES
+    ==================  ========  ========
+
+    KEYED ON ``os.name``, not ``sys.platform``, because the question this table
+    answers is WHICH PATH MODULE the stdlib is using — @ai_mail's rule, and the
+    right one here: ``sys.platform`` would need a darwin row that behaves
+    exactly like linux, since darwin runs posixpath.
+
+    WHICH HALVES ARE MEASURED WHERE, stated because a derived row that reads
+    like a measured one is how a guess becomes a fact:
+
+    * posix rows — measured live, on this host, every run.
+    * nt rows — measured TWICE. Once on the real Windows runner (8550ed10:
+      ``realpath denied`` PASSED, and the two reds carry their actual verdict in
+      the assertion diff, so all three are positive measurements of a value and
+      not merely proof that something was not SURVIVES). And once here, inside
+      ``WINDOWS_EMULATED_WORLD``, which patches BOTH halves so every nt row runs
+      on this machine and is falsifiable on it forever.
+
+    Emulating the denial was never enough; the platform had to be emulated. That
+    is @prax's correction, and this class is the thing it was aimed at.
     """
 
     _PROBE = (
@@ -1120,28 +1145,202 @@ class TestTheTwoWorldsMustNotBeStacked:
         "    print('SURVIVES')\n"
     )
 
+    # The whole claim, in the shape the reader can check against the docstring.
+    _EXPECTED = {
+        ("posix", "realpath"): "DIES",
+        ("posix", "getcwd"): "SURVIVES",
+        ("posix", "both"): "SURVIVES",
+        ("nt", "realpath"): "DIES",
+        ("nt", "getcwd"): "DIES",
+        ("nt", "both"): "DIES",
+    }
+
+    _DENIALS = {
+        "realpath": REALPATH_DENIED_WORLD,
+        "getcwd": DEAD_CWD_WORLD,
+        "both": DEAD_CWD_WORLD + REALPATH_DENIED_WORLD,
+    }
+
     def _verdict(self, world: str) -> str:
         result = subprocess.run([sys.executable, "-c", world + self._PROBE], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
 
-    def test_realpath_alone_convicts(self):
-        assert self._verdict(REALPATH_DENIED_WORLD) == "DIES"
+    def test_the_platform_emulation_actually_arms(self):
+        """Arming probe: without BOTH halves patched, the nt rows are posix rows.
 
-    def test_getcwd_alone_does_not(self):
-        assert self._verdict(DEAD_CWD_WORLD) == "SURVIVES"
-
-    def test_stacking_them_undoes_the_conviction(self):
-        assert self._verdict(DEAD_CWD_WORLD + REALPATH_DENIED_WORLD) == "SURVIVES", (
-            "The two worlds no longer mask each other. That is a CHANGE in CPython's "
-            "inspect.getmodule, not a fix — re-read dead_cwd.py before trusting either world."
+        The abspath half is the one that is easy to leave out, and leaving it
+        out is silent — the table below would still pass three of its six rows
+        and the two that changed would look like a platform fact.
+        """
+        world = (
+            WINDOWS_EMULATED_WORLD
+            + DEAD_CWD_WORLD
+            + (
+                "import os\n"
+                "try:\n"
+                "    os.path.abspath('relative')\n"
+                "    print('ABSPATH_SURVIVED_THE_DENIAL')\n"
+                "except FileNotFoundError:\n"
+                "    print('ABSPATH_DIED')\n"
+            )
+        )
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "ABSPATH_SURVIVED_THE_DENIAL" in result.stdout, (
+            "the Win32 abspath half is not installed, so the nt rows below are measuring posix: " + result.stdout
         )
 
-    def test_no_probe_in_this_branch_stacks_them(self):
-        """Structural: the trap is not sprung anywhere, today."""
+    @pytest.mark.parametrize("denial", ["realpath", "getcwd", "both"])
+    @pytest.mark.parametrize("platform", ["posix", "nt"])
+    def test_the_table_holds(self, platform, denial):
+        prefix = WINDOWS_EMULATED_WORLD if platform == "nt" else ""
+        expected = self._EXPECTED[(platform, denial)]
+        assert self._verdict(prefix + self._DENIALS[denial]) == expected, (
+            f"the {platform} row for a {denial} denial moved. On posix that would be a change in "
+            "CPython's inspect.getmodule; on nt it would mean the emulation no longer matches the "
+            "runner. Re-read dead_cwd.py and the CI log before trusting either world."
+        )
+
+    def test_no_probe_in_this_branch_stacks_them_outside_the_table(self):
+        """Structural: only the table above may build the masking world.
+
+        The masking is real on posix and the stacked world is genuinely kinder
+        there, so a probe that reaches for "as hostile as possible" and
+        concatenates both gets a world where the defect cannot fire.
+        """
         offenders = []
         for path in sorted(Path(__file__).parent.rglob("test_*.py")):
+            if path.name == Path(__file__).name:
+                continue
             text = path.read_text(encoding="utf-8")
-            if "DEAD_CWD_WORLD + REALPATH_DENIED_WORLD" in text and path.name != Path(__file__).name:
+            if "DEAD_CWD_WORLD + REALPATH_DENIED_WORLD" in text:
                 offenders.append(path.name)
         assert not offenders, "these stack the two denials and measure a kinder world: " + ", ".join(offenders)
+
+
+class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
+    """Python 3.10 held its own copy of ``os.path.realpath``, and my probe missed it.
+
+    CI, 2026-08-31, commit 8550ed10, Python 3.10 ONLY (3.11/3.12/3.13 green)::
+
+        TestResolvingOwnFileIsACwdReadOnWindows::test_the_injected_world_really_reads_the_cwd
+        AssertionError: NO_RAISE
+
+    That is the arming probe doing its whole job. The world was inert on that
+    interpreter, so every pin beneath it — the thirty-two import-time lanes —
+    had been passing on 3.10 while asserting nothing, and no other test could
+    have said so: a vacuous pin and a cured defect produce the same green.
+
+    THE MECHANISM, READ OUT OF CPython 3.10's ``Lib/pathlib.py`` rather than
+    inferred, because the diagnosis that reached me was that 3.10's pathlib does
+    not delegate to ``os.path.realpath`` at all, and that is not what the source
+    says::
+
+        358:  realpath = staticmethod(os.path.realpath)        # _NormalAccessor
+        1077: s = self._accessor.realpath(self, strict=strict)  # Path.resolve
+
+    It DOES delegate. It just took its copy when pathlib was first imported. So
+    a probe that imports pathlib and then rebinds ``os.path.realpath`` is
+    rebinding a name nothing will read again. 3.11 deleted the accessor and
+    calls ``os.path.realpath`` at use, which is why exactly one version reddened.
+
+    WHICH MAKES THIS THE SAME DEFECT AS THE GETCWD ONE, one constant over. The
+    getcwd world has carried the accessor cure since the last 3.10 red, with a
+    docstring explaining the trap in detail. Its sibling did not, because the
+    sibling lived in this test file instead of next to that docstring. A cure
+    that does not travel to the constant twenty lines away is the shape this
+    branch has now shipped twice; both worlds live in ``dead_cwd.py`` now.
+
+    NOT FALSIFIABLE BY RUNNING 3.10 — there is no 3.10 interpreter on this
+    machine. So the accessor is BUILT here instead, the way ``ACCESSOR_SHAPE``
+    already builds the getcwd one, and the pins below run on any interpreter.
+    That is a stand-in for a version, and it expires the moment a real 3.10 run
+    disagrees with it — which is the honest form for a row a local host cannot
+    reach.
+    """
+
+    # 3.10's shape, reduced to the two lines that matter: the accessor takes
+    # its copy of os.path.realpath at class-definition time (pathlib.py:358),
+    # and Path.resolve reaches it through an INSTANCE (pathlib.py:1077).
+    _PRE_CAPTURED_ACCESSOR = (
+        "import os, pathlib\n"
+        "class _NormalAccessor:\n"
+        "    realpath = staticmethod(os.path.realpath)\n"
+        "pathlib._NormalAccessor = _NormalAccessor\n"
+        "pathlib._the_accessor = _NormalAccessor()\n"
+    )
+
+    # Asked the way 3.10 asks: through an instance, which is what makes the
+    # staticmethod load-bearing rather than decoration.
+    _ASK_THE_ACCESSOR = (
+        "import pathlib\n"
+        "try:\n"
+        "    got = pathlib._the_accessor.realpath('/tmp')\n"
+        "    print('NO_RAISE', got)\n"
+        "except FileNotFoundError:\n"
+        "    print('RAISED')\n"
+    )
+
+    _BARE_PATCH = (
+        "import os\n"
+        "_before = os.path.realpath\n"
+        "def _reads_the_cwd(p, *a, **k):\n"
+        "    os.getcwd()\n"
+        "    return _before(p, *a, **k)\n"
+        "os.path.realpath = _reads_the_cwd\n"
+    )
+
+    def _verdict(self, world: str) -> str:
+        result = subprocess.run([sys.executable, "-c", world], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    def test_the_bare_patch_never_reaches_a_pre_captured_accessor(self):
+        """The 3.10 defect, reproduced on this interpreter. Red before the cure."""
+        world = self._PRE_CAPTURED_ACCESSOR + self._BARE_PATCH + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
+        assert self._verdict(world).startswith("NO_RAISE"), (
+            "a bare os.path.realpath patch now reaches a pre-captured accessor, which would "
+            "mean the 3.10 red had some other cause — re-read the CI log before trusting this file"
+        )
+
+    def test_the_shipped_world_does_reach_it(self):
+        """The cure: patch the accessor when one exists, exactly as the getcwd world does."""
+        world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
+        assert self._verdict(world) == "RAISED", (
+            "WINDOWS_REALPATH_WORLD did not arm through the accessor — this is the Python 3.10 "
+            "NO_RAISE from CI, reproduced"
+        )
+
+    def test_it_still_arms_where_there_is_no_accessor_at_all(self):
+        """3.11+ has no accessor. The cure must not depend on finding one."""
+        world = (
+            WINDOWS_REALPATH_WORLD
+            + DEAD_CWD_WORLD
+            + (
+                "import pathlib\n"
+                "try:\n"
+                "    pathlib.Path('/tmp').resolve()\n"
+                "    print('NO_RAISE')\n"
+                "except FileNotFoundError:\n"
+                "    print('RAISED')\n"
+            )
+        )
+        assert self._verdict(world) == "RAISED"
+
+    def test_the_accessor_still_answers_CORRECTLY_when_the_cwd_is_fine(self):
+        """A world that raises for the right reason can still return the wrong path.
+
+        ``staticmethod`` is what stops this. Through an instance a plain
+        function BINDS, so the accessor arrives as the first positional and the
+        real path slides into ``*a`` — the denial still fires, so every
+        raise-shaped pin above stays green, and the world silently starts
+        resolving the accessor object instead of the file. Dropping the
+        ``staticmethod`` survived the whole suite until this test existed, which
+        is why it is here rather than in a comment saying "obviously needed".
+        """
+        world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + self._ASK_THE_ACCESSOR
+        assert self._verdict(world) == "NO_RAISE /tmp", (
+            "the patched accessor did not return the path it was handed — a bound plain "
+            "function eats the argument. It must be a staticmethod."
+        )

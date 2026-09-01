@@ -33,6 +33,35 @@ Both were REPRODUCED RED ON LINUX against the pre-fix source before the cure was
 written; neither needed a Windows box. Measured on the Windows CI gate
 2026-08-31 (@memory's finding for A, @spawn's for B, relayed by @devpulse).
 
+THE INTERPRETER VERSION IS PART OF THE PLATFORM. Round 6, from CI: both worlds
+went red on the Python 3.10 leg and neither was a defect in seedgo. 3.10's pathlib
+delegates ``Path.resolve()`` to ``os.path.realpath`` through a ``_NormalAccessor``
+that CAPTURED its own reference when pathlib was first imported (CPython 3.10
+pathlib.py:358, called at :1077). Rebinding ``os.path.realpath`` afterwards
+rebinds a name nothing reads again, so world A was inert there — not because the
+delegation is missing, which was the first diagnosis and was wrong (@memory read
+the source and refuted it). The arming probes refused rather than passing
+quietly, which is the instrument discipline working; what they could not do was
+still measure the claim. So:
+
+  * world A stays as the faithful ntpath emulation, keyed to a per-version
+    cured in four lines: it patches the CAPTURED ACCESSOR too, so it arms on
+    every interpreter and needs no version table at all;
+  * ``ARM_WORLD_A_PRIME`` patches ``Path.resolve`` itself — the public call the
+    defect makes, not the private delegate it routes through this year — so it
+    arms on every version, and the module sweep rides it;
+  * ``EMULATE_PY310_PATHLIB`` rebuilds the capture so the whole claim is
+    falsifiable on THIS machine. A row no local platform can contradict enters
+    silently (@ai_mail, round 5), and a CI red is a negative measurement: it
+    proves not-armed, never why — which is precisely how the first, wrong
+    mechanism survived a careful write-up.
+
+World B needed no change — ``inspect`` calls ``os.path.realpath`` directly on
+every version. Its ARMING PROBE was the defect: it asked ``Path.resolve()``, a
+question about pathlib, while the world denies realpath. Identical answers on
+3.11+ by delegation, divergent on 3.10. Deny and measure the call the DEFECT
+makes (@memory's rule, applied to a probe rather than to a world).
+
 Each world carries a POSITIVE CONTROL — a module rebuilt in the defective shape
 and imported live, which must die — and a NEGATIVE CONTROL FOR THE POSITIVE
 CONTROL: the same module must import cleanly in the healthy world. @spawn's
@@ -86,6 +115,64 @@ def _ntpath_condition(path, **kw):
 
 os.path.realpath = _ntpath_condition
 
+# THE CAPTURED ACCESSOR. Before 3.11, pathlib's _NormalAccessor took its OWN
+# reference at class-creation time — `realpath = staticmethod(os.path.realpath)`,
+# CPython 3.10 pathlib.py:358 — and Path.resolve called it as
+# `self._accessor.realpath(self, strict=strict)` (line 1077). So 3.10 DOES
+# delegate to os.path.realpath; it just holds a copy taken when pathlib was
+# first imported, and rebinding the module attribute afterwards rebinds a name
+# nothing will read again. That, not a missing delegation, is why this world was
+# inert on the 3.10 CI leg (@memory read the source and refuted the first
+# diagnosis; relayed by @devpulse). staticmethod, not a plain function: bound as
+# a method it would swallow the path argument into self.
+try:
+    import pathlib as _pathlib_for_accessor
+
+    _pathlib_for_accessor._NormalAccessor.realpath = staticmethod(_ntpath_condition)
+except AttributeError:
+    pass  # 3.11+ removed the accessor and calls os.path.realpath at use.
+
+
+def _dead_getcwd():
+    raise FileNotFoundError(2, "cwd deleted", "")
+
+
+os.getcwd = _dead_getcwd
+"""
+
+# WORLD A-PRIME, the same condition injected one level UP. World A wraps
+# ``os.path.realpath`` because that is what ``ntpath`` does and what Windows
+# actually runs — but pathlib only DELEGATES ``Path.resolve()`` to
+# ``os.path.realpath`` from Python 3.11. On 3.10 pathlib carried its own resolve
+# (a flavour + accessor calling getcwd itself), so the wrapper is never reached
+# and world A cannot convict there. Measured by CI on the 3.10 leg of 8550ed10:
+# the arming probe reported DEFECT_SURVIVED rather than the pin passing quietly
+# (@devpulse, 2026-08-31).
+#
+# So the interpreter VERSION is part of the platform, exactly as os.name is.
+# This world patches ``Path.resolve`` ITSELF — the public call the defect makes,
+# not the private delegate it happens to route through this year — so it arms on
+# every version by construction. It is the STAND-IN; world A stays because it is
+# the faithful ntpath emulation, and the two are pinned to AGREE wherever both
+# arm, so the stand-in expires the day they diverge (@memory's licence, ratified
+# round 3).
+ARM_WORLD_A_PRIME = """
+import os
+import pathlib
+
+_real_resolve = pathlib.Path.resolve
+
+
+def _windows_shaped_resolve(self, strict=False):
+    # The PROPERTY ntpath gives Windows: resolve() reads the working directory
+    # whether or not the path is relative. Injected at the public call so no
+    # pathlib internal is assumed.
+    os.getcwd()
+    return _real_resolve(self, strict=strict)
+
+
+pathlib.Path.resolve = _windows_shaped_resolve
+
 
 def _dead_getcwd():
     raise FileNotFoundError(2, "cwd deleted", "")
@@ -119,6 +206,99 @@ try:
     print("PROBE_VACUOUS")
 except OSError:
     print("PROBE_ARMED")
+"""
+
+# World B denies ``os.path.realpath``, so the probe for it must MEASURE
+# os.path.realpath. The first version used the resolve probe above, which asks a
+# question about pathlib instead — true on 3.11+ by delegation, false on 3.10,
+# and the world-B pin went red on the 3.10 CI leg for a property world B never
+# depended on. @memory's rule, applied to a probe rather than to a world: deny
+# and measure the call the DEFECT actually makes. inspect calls
+# os.path.realpath directly on every version.
+PROBE_REALPATH = """
+import os
+
+try:
+    os.path.realpath(os.__file__)
+    print("PROBE_VACUOUS")
+except OSError:
+    print("PROBE_ARMED")
+"""
+
+# NO VERSION TABLE, and the first cut of this file had one. When the 3.10 CI leg
+# went red the diagnosis on hand was "pathlib does not delegate before 3.11", and
+# a two-row expectation table keyed on sys.version_info followed from it — every
+# row falsifiable, no skipif, all the round-5 discipline correctly applied to a
+# premise that was WRONG. @memory fetched CPython 3.10's pathlib and refuted it:
+# it delegates, through a captured accessor. The cure is four lines in the world
+# above and the table it would have justified does not need to exist.
+#
+# Keeping the note because the failure is instructive and cheap to repeat: a
+# careful table built on an unverified mechanism is more durable than a guess,
+# and therefore worse. The mechanism gets read from the source before the
+# instrument is keyed to it.
+
+
+# World A WITHOUT the accessor cure — the shape that went red on the 3.10 CI
+# leg, kept as the negative control for the four lines that fixed it.
+BARE_MODULE_PATCH_ONLY = """
+import os
+
+_real_realpath_bare = os.path.realpath
+
+
+def _ntpath_condition_bare(path, **kw):
+    os.getcwd()
+    return _real_realpath_bare(path, **kw)
+
+
+os.path.realpath = _ntpath_condition_bare
+
+
+def _dead_getcwd_bare():
+    raise FileNotFoundError(2, "cwd deleted", "")
+
+
+os.getcwd = _dead_getcwd_bare
+"""
+
+
+# A 3.10-SHAPED pathlib, so the accessor claim is falsifiable HERE.
+#
+# @ai_mail's round-5 finding, one dimension over: a table row no local platform
+# can contradict ENTERS SILENTLY. "3.10 cannot arm world A" arrived as a CI red
+# and would otherwise sit in this file unchallenged by every local run, which is
+# the original defect's shape wearing a version number.
+#
+# So the 3.10 CALL CHAIN is emulated rather than the version asserted: resolve()
+# is rebuilt to read the cwd itself and normalise without ever touching
+# os.path.realpath, which is what pathlib did before 3.11. Under it world A must
+# go inert and world A-prime must still convict — the same discrimination the
+# 3.10 CI leg reported, reproduced on 3.12.
+EMULATE_PY310_PATHLIB = """
+import os
+import pathlib
+
+
+class _NormalAccessor:
+    # CPython 3.10 pathlib.py:358. The capture is the whole point: this holds
+    # the function object os.path.realpath NAMED when the class body ran, and a
+    # later rebinding of that module attribute cannot be seen from here.
+    realpath = staticmethod(os.path.realpath)
+
+
+_normal_accessor = _NormalAccessor()
+pathlib._NormalAccessor = _NormalAccessor
+pathlib._normal_accessor = _normal_accessor
+
+
+def _pre_311_resolve(self, strict=False):
+    # CPython 3.10 pathlib.py:1077 — called through the INSTANCE, which is why
+    # a world must patch the class attribute the instance falls through to.
+    return pathlib.Path(_normal_accessor.realpath(str(self), strict=strict))
+
+
+pathlib.Path.resolve = _pre_311_resolve
 """
 
 
@@ -178,7 +358,27 @@ except OSError as exc:
 
 @pytest.fixture(scope="module")
 def world_a_result():
-    return _run(PRELOAD + ARM_WORLD_A + PROBE + _import_every_module_body())
+    """The module sweep rides WORLD A-PRIME, not world A.
+
+    The claim being measured is "every seedgo module imports with an unreadable
+    cwd", and on 3.10 world A does not arm — so the sweep would have passed
+    there against a world that denied nothing. Vacuously green on exactly one
+    interpreter, and nothing in the output would have said so.
+    """
+    return _run(PRELOAD + ARM_WORLD_A_PRIME + PROBE + _import_every_module_body())
+
+
+@pytest.fixture(scope="module")
+def world_a_result_on_310_shaped_pathlib():
+    """The same sweep on the interpreter shape this machine does not have.
+
+    Closes a mutant that survived the first run: swapping the sweep back to the
+    faithful world A changed nothing on 3.12, because there both worlds arm. It
+    is only on 3.10 that the choice decides whether the sweep measures anything
+    at all — so the 3.10 shape is emulated and the sweep run against it, and the
+    mutant now dies here.
+    """
+    return _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A_PRIME + PROBE + _import_every_module_body())
 
 
 @pytest.fixture(scope="module")
@@ -190,59 +390,105 @@ class TestTheInstrumentsCanFire:
     """Positive controls: each world must still kill the code the cure deleted."""
 
     def test_world_a_kills_a_module_level_resolve(self, tmp_path):
+        """Unconditional again, on every interpreter, now that the world patches
+        the captured accessor as well as the module attribute."""
         body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
         result = _run(PRELOAD + ARM_WORLD_A + body)
         assert "DEFECT_DIED" in result.stdout, f"world A is not armed: {result.stdout}\n{result.stderr}"
 
-    def test_world_b_kills_an_import_time_inspect_stack(self, tmp_path):
-        body = _defect_body(tmp_path, DEFECT_B_SOURCE, "defect_b")
-        result = _run(PRELOAD + ARM_WORLD_B + body)
-        assert "DEFECT_DIED" in result.stdout, f"world B is not armed: {result.stdout}\n{result.stderr}"
+    def test_world_a_prime_kills_a_module_level_resolve_on_every_version(self, tmp_path):
+        """The second construction, kept as a cross-check rather than as a
+        stand-in: it patches ``Path.resolve`` itself, so it cannot be fooled by
+        anything pathlib does internally on any version."""
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        result = _run(PRELOAD + ARM_WORLD_A_PRIME + body)
+        assert "DEFECT_DIED" in result.stdout, f"world A-prime is not armed: {result.stdout}\n{result.stderr}"
 
-    def test_world_b_does_not_ride_a_linecache_cached_frame(self, tmp_path):
-        """@hooks' instrument hazard, relayed by @devpulse, MEASURED here.
+    def test_the_two_world_a_constructions_agree(self, tmp_path):
+        """@memory's licence, ratified round 3: two ways of building one world
+        must agree, so a divergence surfaces as a red rather than as one
+        instrument quietly becoming the only one."""
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        faithful = _run(PRELOAD + ARM_WORLD_A + body)
+        cross_check = _run(PRELOAD + ARM_WORLD_A_PRIME + body)
+        assert "DEFECT_DIED" in faithful.stdout, faithful.stdout
+        assert "DEFECT_DIED" in cross_check.stdout, cross_check.stdout
 
-        ``inspect.getsourcefile`` early-returns for anything already in
-        ``linecache.cache``, so a world-B signal riding a cached top frame would
-        never reach ``getmodule`` and would report vacuous-or-armed wrongly.
-        Code fed on stdin CAN populate ``<stdin>`` there.
+    def test_world_a_ARMS_against_a_310_shaped_pathlib(self, tmp_path):
+        """The cure, measured on the interpreter shape this machine does not
+        have. With the captured accessor patched, the faithful world convicts
+        against a pre-3.11 pathlib exactly as it does natively — which is what
+        removed the need for a version table."""
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A + body)
+        assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
-        This child's control does not ride that frame — it dies inside frozen
-        importlib frames from ``exec_module``, which are never cached — but
-        "does not today" is not something a future reader can verify, so the
-        child asserts its own assumption. If a later edit makes the control
-        depend on a cached frame, this goes red rather than going quiet.
+    def test_world_a_prime_still_convicts_against_a_310_shaped_pathlib(self, tmp_path):
+        """The other half, and the whole reason the stand-in exists. Same
+        emulated world, opposite verdict — which is what makes the pair a
+        discrimination rather than two worlds that happen to agree."""
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_A_PRIME + body)
+        assert "DEFECT_DIED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_310_emulation_is_armed_and_not_merely_quiet(self, tmp_path):
+        """Arming probe for the emulation itself, @commons' species: a world
+        spelled so that nothing happens reports exactly what a cured tree
+        reports. The rebuilt resolve must still RESOLVE — otherwise the two pins
+        above pass because the emulation broke pathlib, not because it moved the
+        call."""
+        probe = (
+            "import os, pathlib\n"
+            "print('EMULATION_RESOLVES:', pathlib.Path(pathlib.__file__).resolve() == "
+            "pathlib.Path(os.path.normpath(pathlib.__file__)))\n"
+            "print('REALPATH_UNTOUCHED:', os.path.realpath is os.path.realpath)\n"
+        )
+        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + probe)
+        assert "EMULATION_RESOLVES: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_a_bare_module_patch_does_NOT_reach_a_pre_captured_accessor(self, tmp_path):
+        """The mechanism, measured rather than asserted.
+
+        Reproduced independently here before rebuilding the world: patching only
+        ``os.path.realpath`` cannot be seen through a reference captured at
+        class-creation time, which is exactly the state 3.10's pathlib is in
+        from the moment it is first imported.
+
+        Note on my own reproduction: the first run of this appeared to REFUTE
+        the claim, because the probe path was ``<stdin>`` — relative, and
+        ``posixpath.realpath`` reads the cwd for a relative path whatever else
+        is patched. An absolute target is load-bearing here.
         """
-        probe = "import linecache\nprint('STDIN_CACHED:', '<stdin>' in linecache.cache)\n"
-        body = _defect_body(tmp_path, DEFECT_B_SOURCE, "defect_b")
-        result = _run(PRELOAD + probe + ARM_WORLD_B + body)
-        assert "STDIN_CACHED: False" in result.stdout, result.stdout
-        assert "DEFECT_DIED" in result.stdout, result.stdout
-
-    @pytest.mark.parametrize(
-        "source,name",
-        [(DEFECT_A_SOURCE, "defect_a"), (DEFECT_B_SOURCE, "defect_b")],
-    )
-    def test_both_defect_modules_import_cleanly_in_the_healthy_world(self, tmp_path, source, name):
-        """The control FOR the controls.
-
-        A probe module that dies for its own reasons — a typo, a missing import —
-        reports DEFECT_DIED in every world and every pin above goes vacuously
-        green. So the same file must survive with nothing denied.
-        """
-        result = _run(PRELOAD + _defect_body(tmp_path, source, name))
-        assert "DEFECT_SURVIVED" in result.stdout, f"{name} dies unarmed: {result.stdout}\n{result.stderr}"
+        world = EMULATE_PY310_PATHLIB + BARE_MODULE_PATCH_ONLY
+        body = _defect_body(tmp_path, DEFECT_A_SOURCE, "defect_a")
+        result = _run(PRELOAD + world + body)
+        assert "DEFECT_SURVIVED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
 
 class TestEverySeedgoModuleImportsWithoutAReadableCwd:
-    def test_world_a_probe_reports_which_world_it_measured(self, world_a_result):
-        """Reported, never skipped: an interpreter that short-circuits resolve()
-        for absolute paths cannot fire world A's denial, and the pin below then
-        proves less. It says so out loud rather than passing quietly."""
-        assert "PROBE_ARMED" in world_a_result.stdout or "PROBE_VACUOUS" in world_a_result.stdout
+    def test_the_sweeps_world_is_ARMED_not_merely_reporting(self, world_a_result):
+        """Strengthened from either-outcome to ARMED, which the stand-in makes
+        possible on every interpreter.
+
+        The old form accepted PROBE_VACUOUS and said so out loud — honest, but it
+        meant the module sweep below could pass on 3.10 against a world that
+        denied nothing, with the report buried in stdout nobody reads. Now that
+        the sweep rides world A-prime the world arms everywhere, so a vacuous
+        probe is a defect rather than a disclosure.
+        """
+        assert "PROBE_ARMED" in world_a_result.stdout, world_a_result.stdout
 
     def test_world_a_imports_every_module(self, world_a_result):
         assert "IMPORTED_ALL" in world_a_result.stdout, world_a_result.stderr
+
+    def test_the_sweeps_world_arms_on_a_310_shaped_pathlib_too(self, world_a_result_on_310_shaped_pathlib):
+        """The sweep must measure something on 3.10, not merely pass there."""
+        assert "PROBE_ARMED" in world_a_result_on_310_shaped_pathlib.stdout, world_a_result_on_310_shaped_pathlib.stdout
+
+    def test_every_module_imports_on_a_310_shaped_pathlib_too(self, world_a_result_on_310_shaped_pathlib):
+        assert "IMPORTED_ALL" in world_a_result_on_310_shaped_pathlib.stdout, (
+            world_a_result_on_310_shaped_pathlib.stderr
+        )
 
     def test_world_b_imports_every_module(self, world_b_result):
         assert "IMPORTED_ALL" in world_b_result.stdout, world_b_result.stderr
@@ -353,13 +599,30 @@ class TestTheCallerIsNoneBranchIsReachableByADirectCall:
     """
 
     @staticmethod
-    @pytest.fixture(scope="class")
-    def result():
-        return _run(PRELOAD + ARM_WORLD_B + PROBE + _DIRECT_CALL_BODY)
+    @pytest.fixture(scope="class", params=["native", "310-shaped"])
+    def result(request):
+        """Run on BOTH interpreter shapes.
+
+        Parametrised to close a mutant that survived the first run: putting the
+        old resolve-shaped probe back changed nothing on 3.12, because
+        delegation makes the two probes agree there. Under the 3.10 shape the
+        old probe reports VACUOUS and the substitution finally has a
+        consequence a local run can see.
+        """
+        shape = EMULATE_PY310_PATHLIB if request.param == "310-shaped" else ""
+        return _run(PRELOAD + shape + ARM_WORLD_B + PROBE_REALPATH + _DIRECT_CALL_BODY)
 
     def test_the_denial_bites_in_this_child(self, result):
         """Arming probe 1. A world that silently failed to deny anything would
-        let a regrown inspect.stack() walk pass this whole class."""
+        let a regrown inspect.stack() walk pass this whole class.
+
+        MEASURES os.path.realpath, which is what world B denies and what
+        ``inspect`` calls directly on every interpreter. The first version asked
+        ``Path.resolve()`` instead — a question about PATHLIB, true on 3.11+
+        only by delegation — and went red on the 3.10 CI leg over a property
+        world B never depended on. The world was fine; the probe was measuring
+        something else (@devpulse relaying the 3.10 leg of 8550ed10).
+        """
         assert "PROBE_ARMED" in result.stdout, result.stderr
 
     def test_the_branch_under_test_actually_runs(self, result):
@@ -368,6 +631,23 @@ class TestTheCallerIsNoneBranchIsReachableByADirectCall:
         _find_real_caller returned a real caller here, the guard would be
         exercising the ALLOW-pytest path instead and proving nothing."""
         assert "CALLER_IS_NONE: True" in result.stdout, result.stdout
+
+    def test_the_OLD_probe_would_have_gone_vacuous_on_a_310_shaped_pathlib(self):
+        """Why this class's arming probe had to change, reproduced locally.
+
+        The original probe asked ``Path.resolve()`` — a question about pathlib —
+        while world B denies ``os.path.realpath``. On 3.11+ delegation makes the
+        two agree and the substitution is invisible; against a 3.10-shaped
+        pathlib the old probe reports VACUOUS while the world is fully armed,
+        which is the red the 3.10 CI leg produced.
+
+        Pinned so the correction is falsifiable HERE rather than only on the one
+        interpreter this machine does not have.
+        """
+        old_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE)
+        new_probe = _run(PRELOAD + EMULATE_PY310_PATHLIB + ARM_WORLD_B + PROBE_REALPATH)
+        assert "PROBE_VACUOUS" in old_probe.stdout, old_probe.stdout
+        assert "PROBE_ARMED" in new_probe.stdout, new_probe.stdout
 
     def test_the_guard_returns_rather_than_dying(self, result):
         """The claim itself. A regrown second walk dies here under the realpath

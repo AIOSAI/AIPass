@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.7.1
+# Version: 1.8.0
 # Created: 2026-06-13
 # Modified: 2026-08-31
 # =============================================
@@ -336,12 +336,31 @@ def check_entry(entry_type: str, text: Any, limits: dict[str, Any]) -> dict[str,
     cap = type_def.get("max_chars", 0)
     over_by = max(0, length - cap)
 
+    # The near-cap threshold is published as a CHARACTER COUNT rather than left
+    # for the caller to recompute from a ratio, for the same reason `over_by` is:
+    # a second implementation of the same arithmetic is a second chance for the
+    # warning and the refusal to disagree about one entry.
+    #
+    # `near_cap_ratio` on the type definition wins over the module default when
+    # it is present. @ai_mail's argument, and it is the right shape: one ratio
+    # across four containers whose median fill differs by seven points is one
+    # number doing four jobs. The knob now lives where `max_chars` lives, so
+    # whoever owns the caps owns this too — which is not me.
+    ratio = type_def.get("near_cap_ratio", NEAR_CAP_RATIO)
+    if not isinstance(ratio, int | float) or not 0 < ratio <= 1:
+        logger.warning(
+            f"[entry_limits] Ignoring near_cap_ratio {ratio!r} for '{entry_type}' — "
+            f"expected a number in (0, 1]; using {NEAR_CAP_RATIO}"
+        )
+        ratio = NEAR_CAP_RATIO
+
     return {
         "ok": length <= cap,
         "length": length,
         "cap": cap,
         "over_by": over_by,
         "entry_type": entry_type,
+        "near_at": cap * ratio,
     }
 
 
@@ -431,13 +450,18 @@ def is_near_cap(verdict: dict[str, Any]) -> bool:
         verdict: A verdict dict from :func:`check_entry`.
 
     Returns:
-        True when the entry is within cap but at or above
-        :data:`NEAR_CAP_RATIO` of it.
+        True when the entry is within cap but at or above the ``near_at``
+        threshold :func:`check_entry` published for it — which is
+        :data:`NEAR_CAP_RATIO` of the cap unless the entry type overrides it
+        with its own ``near_cap_ratio``.
     """
     cap = verdict.get("cap", 0)
     if not verdict.get("ok") or cap <= 0:
         return False
-    return verdict["length"] >= cap * NEAR_CAP_RATIO
+    # A verdict from before `near_at` existed still answers correctly rather
+    # than reading a missing key as "never near".
+    near_at = verdict.get("near_at", cap * NEAR_CAP_RATIO)
+    return verdict["length"] >= near_at
 
 
 def _violation(

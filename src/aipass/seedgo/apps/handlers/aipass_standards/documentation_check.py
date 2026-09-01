@@ -13,6 +13,7 @@ Validates documentation compliance: module docstrings and function docstrings.
 META block validation is handled separately by meta_check.py.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List
@@ -120,12 +121,87 @@ def check_module_docstring(lines: List[str]) -> Dict:
     }
 
 
+def _public_functions_by_ast(content: str):
+    """Public functions and whether each has a docstring, read as Python reads.
+
+    THE LINE SCAN BELOW READ STRINGS AS SOURCE. ``stripped.startswith("def ")``
+    over the raw file matches a ``def`` inside a docstring's code example or
+    inside a module built as a string literal and fed to a subprocess — the
+    shape every branch wrote this week for the dead-cwd worlds. @api, @canary,
+    @skills and two seedgo files were all flagged for functions that do not
+    exist. Caught by dogfooding: this checker flagged a three-line example in a
+    new nominator's own docstring.
+
+    It had the mirror defect too. ``async def`` never matched at all, so an
+    undocumented async function was invisible — ``find_import_section_end`` in
+    the imports pack has handled ``async def`` since it was written.
+
+    Scope is UNCHANGED: nested functions still count, exactly as the line scan
+    counted them. Narrowing to module and class level would clear 40 more files
+    and that is a different decision, not this fix.
+
+    Args:
+        content: Module source.
+
+    Returns:
+        A list of ``(name, line, has_docstring)`` triples, or None when the
+        source will not parse.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return None
+
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        found.append((node.name, node.lineno, bool(ast.get_docstring(node))))
+    return found
+
+
+def _judge(found: list) -> Dict:
+    """Turn the parsed function list into this check's verdict.
+
+    Args:
+        found: ``(name, line, has_docstring)`` triples.
+
+    Returns:
+        The check result dict.
+    """
+    if not found:
+        return {"name": "Function docstrings", "passed": True, "message": "No public functions to check"}
+
+    undocumented = [f"{name} (line {line})" for name, line, documented in found if not documented]
+    if undocumented:
+        return {
+            "name": "Function docstrings",
+            "passed": False,
+            "message": f"{len(undocumented)} public functions missing docstrings: {undocumented[0]}",
+        }
+    return {
+        "name": "Function docstrings",
+        "passed": True,
+        "message": f"All {len(found)} public functions have docstrings",
+    }
+
+
 def check_function_docstrings(content: str, lines: List[str]) -> Dict:  # noqa: ARG001
     """
     Check that public functions have docstrings.
 
     Public functions (not starting with _) should have docstrings.
     """
+    parsed = _public_functions_by_ast(content)
+    if parsed is not None:
+        return _judge(parsed)
+
+    # AST unavailable (the file will not parse). Fall back to the line scan
+    # rather than reporting clean: a file we could not read has not been proven
+    # to document anything, and an exemption bought with a SyntaxError is an
+    # exemption granted on ignorance.
     public_functions = []
     for i, line in enumerate(lines, 1):
         stripped = line.strip()

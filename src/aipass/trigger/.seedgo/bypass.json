@@ -154,7 +154,8 @@
         26
       ],
       "pattern": "import aipass.trigger.apps.handlers.reload_sentinel",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it."
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it.",
+      "anchor": "import aipass.trigger.apps.handlers.reload_sentinel"
     },
     {
       "file": "apps/log_watcher_service.py",
@@ -163,7 +164,8 @@
         17
       ],
       "pattern": "python -m in module docstring",
-      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form."
+      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form.",
+      "anchor": "python -m aipass.trigger.apps.log_watcher_service"
     },
     {
       "file": "apps/handlers/events/runaway_handler.py",
@@ -172,7 +174,8 @@
         336
       ],
       "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it. | LINE RE-DERIVED 2026-08-31: was [344], now [336]. The round-4 dead-cwd sweep deleted a _find_repo_root copy from this file and every line below it moved up; the waiver kept pointing at the old number and silently stopped suppressing."
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it. | LINE RE-DERIVED 2026-08-31: was [344], now [336]. The round-4 dead-cwd sweep deleted a _find_repo_root copy from this file and every line below it moved up; the waiver kept pointing at the old number and silently stopped suppressing.",
+      "anchor": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch"
     }
   ],
   "notes": {
@@ -185,7 +188,8 @@
       "functions": "Optional — function names, honoured by unused_function",
       "category": "Optional — read by trigger_check (e.g. handler_layer, initialization)",
       "pattern": "Optional — records the construct being bypassed. Documentation only; no checker reads it",
-      "reason": "Required — why this bypass exists, and why it is file-wide if it is"
+      "reason": "Required — why this bypass exists, and why it is file-wide if it is",
+      "anchor": "Required when 'lines' is set - the literal text that line must CONTAIN. seedgo does not read it; tests/test_bypass_anchors.py does, and reds the day an edit moves the line. A line number is a pointer that nothing validates: on 2026-08-31 four of these drifted silently and the suppressed violations resurfaced looking like new breakage."
     }
   }
 }

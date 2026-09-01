@@ -13,6 +13,38 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 6: the interpreter is part of the platform — the 3.10 leg convicted
+  the instruments, and the fleet cured the capture** (FPLAN-0461 continued).
+  Round 5's CI left two named clusters and both are dead. The Python 3.10 reds
+  were all *arming probes refusing honestly*: on ≤3.10, `pathlib` reads
+  `os.path.realpath` (and `os.getcwd` — skills) through a `_NormalAccessor`
+  that **captured its copy when pathlib was first imported**, so rebinding the
+  module attribute rebinds a name nothing reads again and the injected worlds
+  never armed. My first diagnosis ("3.10 doesn't delegate") was wrong — memory
+  read the CPython source and refuted it, seedgo reproduced the capture by
+  construction, and the correction propagated mid-flight; the cure is four
+  hasattr-guarded lines (patch the captured accessor too) and the same world
+  arms on every interpreter — no version tables, no skipif. Eight branches
+  cured, each making the 3.10 row *falsifiable locally* by rebuilding the
+  capture on 3.12 rather than asserting from the CI red. The round's traps,
+  each measured: patch as `staticmethod` or a plain function eats the path
+  into `self` and raise-shaped pins stay green for the wrong reason
+  (return-value pins cure); exercise through an instance; probe with absolute
+  paths (a relative path convicts for the path's *shape* — skills had this
+  live); emulations must capture eagerly (flow shipped the trap inside the
+  instrument built to avoid it and their ninth mutant caught it); `cwd` and
+  `resolve` ride *different* captured attributes (skills' M16). Structural
+  finds beyond the cure: spawn's gate was reporting one red while several
+  sibling pins *silently skipped* under an unrelated platform message (gates
+  now fail, not skip, where no platform reason exists); trigger's version
+  escape hatch cited the retracted diagnosis and was green only by
+  import-order luck on the one leg where order decides — deleted, and made
+  falsifiable on a host that cannot produce the condition it excused;
+  memory's windows-setup pins (the last two on the board) got the six-row
+  os.name table with both nt rows measured twice. Seedgo's sentence carries
+  the round: *a careful falsifiable table on a wrong mechanism is more durable
+  than a guess — read the source before keying an instrument to it.*
+
 - **Round 5: the round-4 pins met the real Windows platform, and every red
   taught a structural rule** (FPLAN-0461 continued). CI on the round-4 commit
   came back red where the new pins *measured the platform for the first time* —

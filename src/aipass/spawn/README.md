@@ -253,7 +253,7 @@ spawn/
 ├── templates/
 │   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 27 test files, 707 tests
+├── tests/                               # 29 test files, 788 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -314,8 +314,8 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**764 passed | 1 skipped | 0 failed** across 27 test files (765 collected — parametrized cases expand),
-measured 2026-08-28 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
+**869 passed | 1 skipped | 0 failed** across 29 test files (870 collected — parametrized cases expand),
+measured 2026-08-31 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
 scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
 
 | File | Focus |

@@ -963,3 +963,73 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
 
         assert any("NEAR" in line and "190/200" in line and "10 chars of headroom" in line for line in records), records
         assert logging  # the import is the point: nothing here reconfigures logging
+
+
+class TestTheNearCapLineIsAPerTypeKnob:
+    """One ratio across four containers was one number doing four jobs.
+
+    @ai_mail asked for the near-cap line, then asked for the fleet number before
+    accepting its threshold, then read the number and WITHDREW their own follow-up
+    ask — the measurement said a gate-time warning would fire on well over half
+    of all edits, and a warning that common teaches people to click past the
+    refusals beside it.
+
+    What survived their retraction is the sharper observation: the fleet's four
+    containers fire at 65.0 / 60.5 / 48.6 / 35.8 percent under a single 0.9, and
+    a distribution with no knee cannot be tuned into a rare signal by moving one
+    number that all four share.
+
+    So the knob moved to where ``max_chars`` lives rather than being turned here.
+    Whoever owns the caps owns the warning's tightness for each type, and this
+    file does not have to pick a number it cannot justify. The module default
+    stays 0.9 on measured value — it has caught @ai_mail three times and this
+    branch four in the days it has existed.
+
+    ``check_entry`` publishes ``near_at`` as a CHARACTER COUNT rather than
+    letting callers re-derive it from a ratio, for the same reason it publishes
+    ``over_by``: a second implementation of the same arithmetic is a second
+    chance for the warning and the refusal to disagree about one entry.
+    """
+
+    @staticmethod
+    def _limits(**type_extras):
+        return {"entry_types": {"notes": {"max_chars": 100, **type_extras}}}
+
+    def test_the_module_default_applies_when_the_type_says_nothing(self):
+        verdict = _get_entry_limits().check_entry("notes", "x" * 90, self._limits())
+        assert verdict["near_at"] == 100 * _get_entry_limits().NEAR_CAP_RATIO
+        assert _get_entry_limits().is_near_cap(verdict) is True
+
+    def test_a_type_can_ask_for_a_rarer_signal(self):
+        limits = self._limits(near_cap_ratio=0.97)
+        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 90, limits)) is False
+        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 97, limits)) is True
+
+    def test_a_type_can_ask_for_an_earlier_one(self):
+        limits = self._limits(near_cap_ratio=0.5)
+        assert _get_entry_limits().is_near_cap(_get_entry_limits().check_entry("notes", "x" * 50, limits)) is True
+
+    def test_over_cap_is_never_near_cap_whatever_the_ratio(self):
+        """The labels partition. A refusal must not also arrive as a soft word."""
+        limits = self._limits(near_cap_ratio=0.5)
+        verdict = _get_entry_limits().check_entry("notes", "x" * 101, limits)
+        assert verdict["ok"] is False
+        assert _get_entry_limits().is_near_cap(verdict) is False
+
+    def test_a_nonsense_ratio_is_refused_rather_than_obeyed(self):
+        """A ratio of 0 would silence the line; a ratio of 5 would delete it.
+
+        Both read as configuration and neither is, so the default is used and
+        the operator is told — silently obeying an out-of-range number is how a
+        channel goes dark without anyone deciding it should.
+        """
+        for bad in (0, -0.5, 5, "0.9", None):
+            verdict = _get_entry_limits().check_entry("notes", "x" * 90, self._limits(near_cap_ratio=bad))
+            assert verdict["near_at"] == 100 * _get_entry_limits().NEAR_CAP_RATIO, f"obeyed {bad!r}"
+
+    def test_a_verdict_built_before_near_at_existed_still_answers(self):
+        """The published shape gained a key; a caller holding the old one is not broken."""
+        legacy = {"ok": True, "length": 95, "cap": 100, "over_by": 0, "entry_type": "notes"}
+        assert _get_entry_limits().is_near_cap(legacy) is True
+        legacy["length"] = 10
+        assert _get_entry_limits().is_near_cap(legacy) is False

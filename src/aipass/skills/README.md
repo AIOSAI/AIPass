@@ -223,7 +223,7 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Test suite (340 passing, 1 skipped)
+  tests/                   # Test suite (348 passing, 1 skipped)
 ```
 
 ---
@@ -270,6 +270,15 @@ The handlers guard walks frames with `sys._getframe` rather than
 `getmodule()` calls `os.path.realpath` at `inspect.py:1009` outside any try —
 so the guard needed a readable cwd before a single line of its own code ran,
 and every module in this branch imports through it.
+
+The worlds themselves are defined once, in `tests/dead_cwd_world.py`. They
+patch pathlib's pre-3.11 `_NormalAccessor` as well as the module name: that
+accessor **captured** its copies of `os.getcwd` and `os.path.realpath` when
+pathlib was first imported, so on Python 3.10 a bare module rebind patches a
+name nothing reads again and the world never arms. Two of these pins were
+vacuously green on the 3.10 CI leg for exactly that reason. There is no 3.10 on
+this machine, so the capture is rebuilt locally on whatever interpreter is
+running and the discrimination is falsifiable here rather than derived.
 
 Pinned by `tests/test_dead_cwd_imports.py`, which imports every skills module
 in a child process under two denial worlds (deny `getcwd`; deny `realpath`),

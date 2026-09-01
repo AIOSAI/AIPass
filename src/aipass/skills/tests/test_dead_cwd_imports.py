@@ -53,6 +53,14 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dead_cwd_world import (  # noqa: E402
+    ACCESSOR_SHAPE,
+    WORLD_A,
+    WORLD_B,
+    WORLD_GETCWD_DENIED,
+)
+
 SRC_ROOT = Path(__file__).resolve().parents[3]
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
@@ -104,31 +112,25 @@ def _denied():
 
 INJECT = os.environ.get("SKILLS_PROBE_INJECT", "1") == "1"
 
-if MODE == "A" and INJECT:
-    _real_realpath = os.path.realpath
-
-    def _windows_shaped_realpath(path, **kwargs):
-        os.getcwd()
-        return _real_realpath(path, **kwargs)
-
-    def _denied_getcwd(*a, **k):
-        raise _denied()
-
-    os.path.realpath = _windows_shaped_realpath
-    os.getcwd = _denied_getcwd
-elif MODE == "B" and INJECT:
-    def _denied_realpath(path, **kwargs):
-        raise _denied()
-
-    os.path.realpath = _denied_realpath
+# The worlds are defined ONCE, in tests/dead_cwd_world.py, and injected here as
+# TEXT because the world has to exist before the module under test is imported.
+# They patch pathlib's pre-3.11 _NormalAccessor as well as the module name: the
+# accessor CAPTURED its copy when pathlib was first imported, so on 3.10 a bare
+# module rebind patches a name nothing reads again and the world never arms.
+if INJECT and MODE in ("A", "B"):
+    exec(os.environ["SKILLS_WORLD_TEXT"])
 
 if CONTROL_ONLY:
     # Does this world actually deny the call the DEFECT makes? World A must
     # break Path.resolve(); world B must break inspect.stack(). A world that
     # denies neither turns every pin below vacuously green.
     if MODE == "A":
+        # ABSOLUTE, deliberately. posixpath.realpath reads the cwd for any
+        # RELATIVE path regardless of what is patched, so a probe using "."
+        # reports LIVE for the path's shape rather than for the world - it was
+        # doing exactly that here until 2026-08-31.
         try:
-            pathlib.Path(__file__ if "__file__" in dir() else ".").resolve()
+            pathlib.Path(os.path.abspath(os.sep)).joinpath("probe").resolve()
         except OSError:
             print("CONTROL_LIVE")
             sys.exit(0)
@@ -176,6 +178,7 @@ def _run_probe(mode: str, target: str, inject: bool = True):
     """
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env["SKILLS_PROBE_INJECT"] = "1" if inject else "0"
+    env["SKILLS_WORLD_TEXT"] = {"A": WORLD_A, "B": WORLD_B}.get(mode, "")
     # The suite sets AIPASS_TEST_LOG_DIR, and log_streamer returns on it BEFORE
     # its resolve. Inheriting it here made reverting that site survive every
     # pin — a measurement that quietly stopped reaching the code it measures.
@@ -351,11 +354,19 @@ import os.path
 import sys
 
 
-def _denied_realpath(path, **kwargs):
+def _denied_realpath(*a, **k):
     raise FileNotFoundError(2, "No such file or directory (dead cwd)")
 
 
 os.path.realpath = _denied_realpath
+
+# Pre-3.11 pathlib captured its realpath at class creation, so a bare module
+# rebind leaves the world inert on 3.10. Takes any arguments because a plain
+# function on a class arrives BOUND - the accessor is passed as self.
+import pathlib as _pl
+
+if hasattr(_pl, "_NormalAccessor"):
+    _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
 
 sys.path.insert(0, sys.argv[1])
 import a_named_module
@@ -421,11 +432,22 @@ import sys
 from aipass.skills.apps.handlers import creator_handler, discovery_handler
 
 
-def _denied_getcwd(*a, **k):
-    raise FileNotFoundError(2, "No such file or directory (dead cwd)")
+# THE 3.10 FAILURE lived here as a private copy of the denial. It rebound
+# os.getcwd only, and before 3.11 Path.cwd() is cls(cls._accessor.getcwd()) -
+# the copy the accessor CAPTURED when pathlib was first imported. The world
+# never armed on that leg, production behaved normally, and both pins below
+# asserted a refusal that had no cause to happen. The world now comes from the
+# ONE definition in tests/dead_cwd_world.py, so it cannot drift again.
+exec(os.environ["SKILLS_WORLD_TEXT"])
+import pathlib as _pl
 
-
-os.getcwd = _denied_getcwd
+# An arming probe must ask the call ITS OWN world denies (@seedgo's rule).
+try:
+    _pl.Path.cwd()
+except OSError:
+    print("ARMED_CWD=1")
+else:
+    print("ARMED_CWD=0")
 
 labels = [label for _path, label in discovery_handler.get_search_paths()]
 print("SEARCH_PATHS=%s" % ",".join(labels))
@@ -440,6 +462,7 @@ def _run_runtime_probe():
     """Exercise the cwd-derived runtime paths with getcwd denied."""
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
     env.pop("AIPASS_TEST_LOG_DIR", None)
+    env["SKILLS_WORLD_TEXT"] = WORLD_GETCWD_DENIED
     return subprocess.run(
         [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _RUNTIME_PROBE],
         capture_output=True,
@@ -460,6 +483,9 @@ def test_skill_discovery_survives_a_dead_cwd():
     """
     result = _run_runtime_probe()
     assert result.returncode == 0, f"runtime probe crashed: {result.stderr[-800:]}"
+    assert "ARMED_CWD=1" in result.stdout, (
+        f"Path.cwd() did not raise, so the world never armed and this pin asserts nothing: {result.stdout!r}"
+    )
     line = [ln for ln in result.stdout.splitlines() if ln.startswith("SEARCH_PATHS=")][0]
     labels = line.split("=", 1)[1].split(",")
     assert "project" not in labels, f"the un-answerable path was still offered: {labels}"
@@ -475,6 +501,9 @@ def test_skill_creation_refuses_rather_than_guessing():
     """
     result = _run_runtime_probe()
     assert result.returncode == 0, f"runtime probe crashed: {result.stderr[-800:]}"
+    assert "ARMED_CWD=1" in result.stdout, (
+        f"Path.cwd() did not raise, so the world never armed and this pin asserts nothing: {result.stdout!r}"
+    )
     assert "CREATE_SUCCESS=False" in result.stdout, f"creation did not refuse without a cwd: {result.stdout!r}"
     assert "CREATE_ERROR_MENTIONS_CWD=True" in result.stdout, f"refusal did not name the reason: {result.stdout!r}"
 
@@ -503,11 +532,19 @@ import sys
 import aipass.skills.apps.handlers as guard
 
 
-def _denied_realpath(path, **kwargs):
+def _denied_realpath(*a, **k):
     raise FileNotFoundError(2, "No such file or directory (dead cwd)")
 
 
 os.path.realpath = _denied_realpath
+
+# Pre-3.11 pathlib captured its realpath at class creation, so a bare module
+# rebind leaves the world inert on 3.10. Takes any arguments because a plain
+# function on a class arrives BOUND - the accessor is passed as self.
+import pathlib as _pl
+
+if hasattr(_pl, "_NormalAccessor"):
+    _pl._NormalAccessor.realpath = staticmethod(_denied_realpath)
 
 # ARMING PROBE 1 - the denial actually bites the call the defect makes. A world
 # spelled too realistically (running this as a script, where every frame is a
@@ -630,3 +667,242 @@ def test_absent_telethon_is_not_announced_on_every_import():
     assert result.returncode == 0, f"import-warning probe crashed: {result.stderr[-800:]}"
     line = [ln for ln in result.stdout.splitlines() if ln.startswith("IMPORT_TIME_TELETHON_WARNINGS=")][0]
     assert line.endswith("=0"), f"the absent-Telethon condition is still announced at import time: {line}"
+
+
+# ---------------------------------------------------------------------------
+# The accessor trap, reproduced locally
+#
+# There is no Python 3.10 on this machine. Rather than record a derived row -
+# a CI red is a NEGATIVE measurement: it proves not-unconditionally-X, never
+# which value - these rebuild pre-3.11 pathlib's capture on whatever
+# interpreter is running, so the discrimination CI found stays falsifiable here
+# forever. Without them, dropping the accessor patch from the shipped worlds
+# would go unnoticed on 3.11+ and red again on the next 3.10 leg.
+# ---------------------------------------------------------------------------
+
+
+_EMULATION = r"""
+import os
+import os.path
+import pathlib
+
+{shape}
+
+_acc = pathlib._NormalAccessor()
+
+
+def _cwd_pre_311():
+    # 3.10: Path.cwd() -> cls(cls._accessor.getcwd())
+    return pathlib.Path(_acc.getcwd())
+
+
+def _resolve_pre_311():
+    # 3.10 Lib/pathlib.py:1077 -> s = self._accessor.realpath(self, strict=...)
+    # ABSOLUTE input: a relative one reads the cwd for the path's own shape.
+    return _acc.realpath(os.path.abspath(os.sep) + "probe")
+
+
+{world}
+
+_CALL = {{"cwd": _cwd_pre_311, "resolve": _resolve_pre_311}}[os.environ.get("EMU_CALL", "cwd")]
+
+try:
+    _CALL()
+except FileNotFoundError:
+    print("VERDICT=RAISED")
+except TypeError as exc:
+    # A zero-argument replacement bound through the accessor. The world denied
+    # nothing; it broke the call signature.
+    print("VERDICT=TYPEERROR(%s)" % exc)
+else:
+    print("VERDICT=NO_RAISE")
+"""
+
+_BARE_MODULE_PATCH = "def _dead(*a, **k):\n    raise FileNotFoundError(2, 'dead cwd')\nos.getcwd = _dead\n"
+
+_ZERO_ARG_ACCESSOR_PATCH = (
+    "def _dead():\n"
+    "    raise FileNotFoundError(2, 'dead cwd')\n"
+    "os.getcwd = _dead\n"
+    "pathlib._NormalAccessor.getcwd = _dead\n"
+)
+
+_LAZY_SHAPE = (
+    "class _NormalAccessor:\n"
+    "    @property\n"
+    "    def getcwd(self):\n"
+    "        return os.getcwd\n"
+    "    realpath = staticmethod(os.path.realpath)\n"
+    "pathlib._NormalAccessor = _NormalAccessor\n"
+)
+
+
+def _run_emulation(shape: str, world: str, call: str = "cwd") -> str:
+    """Run the pre-3.11 accessor emulation under a given world.
+
+    Args:
+        shape: Source defining ``pathlib._NormalAccessor``.
+        world: Source installing a denial.
+        call: Which pre-3.11 route to exercise - "cwd" for
+            ``Path.cwd() -> _accessor.getcwd()``, or "resolve" for
+            ``Path.resolve() -> _accessor.realpath()``. They are patched
+            separately and a world can arm one while leaving the other inert.
+
+    Returns:
+        str: The child's VERDICT line.
+    """
+    source = _EMULATION.format(shape=shape, world=world)
+    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
+    env.pop("AIPASS_TEST_LOG_DIR", None)
+    env["EMU_CALL"] = call
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", source],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(SRC_ROOT),
+        timeout=60,
+    )
+    assert result.returncode == 0, f"emulation crashed: {result.stderr[-600:]}"
+    return [ln for ln in result.stdout.splitlines() if ln.startswith("VERDICT=")][0]
+
+
+class TestTheAccessorTrapIsReproducibleLocally:
+    """Pin the 3.10 discrimination on whatever interpreter is running."""
+
+    def test_a_bare_module_patch_does_not_reach_a_captured_accessor(self):
+        """This is the defect: rebinding a name nothing reads again.
+
+        The accessor took its copy of os.getcwd at class creation, so the
+        world reports no denial at all - and every pin underneath it would be
+        vacuously green.
+        """
+        assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
+
+    def test_the_shipped_world_does_reach_a_captured_accessor(self):
+        """The cure, measured against the same emulation.
+
+        Same shape, same call, different world text - and this one arms. That
+        difference IS the fix; without it this pin and the one above would
+        agree and neither would mean anything.
+        """
+        assert _run_emulation(ACCESSOR_SHAPE, WORLD_A) == "VERDICT=RAISED"
+
+    def test_a_zero_argument_denial_breaks_the_call_instead_of_denying_it(self):
+        """A plain function on a class arrives BOUND - the accessor is self.
+
+        Without ``*a`` or ``staticmethod`` the replacement raises TypeError,
+        not FileNotFoundError, so a pin that only asserts "it raised" passes
+        for the wrong reason. Both halves are carried deliberately; either
+        alone cures this, which is why neither may be deleted as redundant.
+        """
+        verdict = _run_emulation(ACCESSOR_SHAPE, _ZERO_ARG_ACCESSOR_PATCH)
+        assert verdict.startswith("VERDICT=TYPEERROR"), verdict
+
+    def test_the_emulation_itself_captures_eagerly(self):
+        """The published shape must capture at class creation, not at read.
+
+        A lazily-read accessor resolves the PATCHED name and would arm under
+        the bare module patch - so the two pins above would stop
+        distinguishing an accessor patch from a module patch, and the
+        instrument would quietly stop measuring the thing it exists for.
+        """
+        assert _run_emulation(_LAZY_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=RAISED"
+        assert _run_emulation(ACCESSOR_SHAPE, _BARE_MODULE_PATCH) == "VERDICT=NO_RAISE"
+
+    def test_the_runtime_world_also_reaches_a_captured_accessor(self):
+        """The getcwd world the runtime pins use, under the same emulation.
+
+        Its consequence exists only before 3.11, so on this interpreter no
+        behavioural pin can tell the cured world from the uncured one. This is
+        where that difference is measured.
+        """
+        assert _run_emulation(ACCESSOR_SHAPE, WORLD_GETCWD_DENIED) == "VERDICT=RAISED"
+
+    def test_a_relative_arming_path_reports_live_on_a_world_that_never_armed(self):
+        """Why the world A arming probe uses an ABSOLUTE path.
+
+        posixpath.realpath reads the cwd for any RELATIVE path, so a probe
+        using "." raises for the path's SHAPE rather than for the world - it
+        reports the world live on an interpreter the world never reached. The
+        absolute probe reports honestly. On 3.11+ both answer the same, which
+        is exactly why this had to be measured against the emulation.
+
+        HONEST RECORD, measured 2026-08-31: swapping the arming probe back to
+        "." SURVIVES the whole suite on its own. It is an EQUIVALENT MUTANT
+        GIVEN the accessor patch - once the world reaches pathlib, both
+        spellings answer the same in every armed world. It stops being
+        equivalent the moment the accessor patch is dropped: on an emulated
+        3.10 with that patch removed, the relative probe answers RAISED (the
+        world reported live) while the absolute one answers NO_RAISE (the
+        world reported dead, correctly). So the two halves cover each other,
+        and the absolute spelling is what keeps the arming probe honest if the
+        other half is ever lost. Recorded rather than scored as a kill,
+        because a mutation run that quietly counts it is lying.
+        """
+        relative = _run_emulation(
+            ACCESSOR_SHAPE,
+            _BARE_MODULE_PATCH + "import pathlib as _p\n",
+        )
+        # Sanity: the emulated world is NOT armed under a bare module patch.
+        assert relative == "VERDICT=NO_RAISE"
+
+        probe = (
+            "import pathlib, os\n"
+            "def _try(p):\n"
+            "    try:\n"
+            "        pathlib.Path(p).resolve()\n"
+            "        return 'NO_RAISE'\n"
+            "    except OSError:\n"
+            "        return 'RAISED'\n"
+            "print('REL=%s ABS=%s' % (_try('.'), _try(os.path.abspath(os.sep) + 'probe')))\n"
+        )
+        env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
+        env.pop("AIPASS_TEST_LOG_DIR", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))",
+                "import os, os.path, pathlib\n" + _BARE_MODULE_PATCH + probe,
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(SRC_ROOT),
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr[-600:]
+        assert "REL=RAISED" in result.stdout, (
+            f"a relative path stopped reading the cwd; the reason the arming "
+            f"probe must be absolute no longer holds: {result.stdout!r}"
+        )
+        assert "ABS=NO_RAISE" in result.stdout, (
+            f"an absolute path read the cwd; the absolute arming probe would "
+            f"then be no more honest than the relative one: {result.stdout!r}"
+        )
+
+    def test_world_a_reaches_the_captured_accessor_on_the_RESOLVE_route(self):
+        """WORLD_A patches two accessor attributes; this measures the second.
+
+        ``Path.cwd()`` and ``Path.resolve()`` go through DIFFERENT captured
+        attributes before 3.11 - ``getcwd`` and ``realpath``. Arming one says
+        nothing about the other, and WORLD_A's realpath patch was unmeasured
+        until a mutant removed it and the whole suite stayed green.
+        """
+        assert _run_emulation(ACCESSOR_SHAPE, WORLD_A, call="resolve") == "VERDICT=RAISED"
+
+    def test_a_bare_module_patch_misses_the_resolve_route_too(self):
+        """The same discrimination on the resolve route.
+
+        Without this the pin above could pass because the world armed for some
+        other reason rather than because it reached the accessor.
+        """
+        bare_windows = _BARE_MODULE_PATCH + (
+            "_rr = os.path.realpath\n"
+            "def _reads(p, *a, **k):\n"
+            "    os.getcwd()\n"
+            "    return _rr(p, *a, **k)\n"
+            "os.path.realpath = _reads\n"
+        )
+        assert _run_emulation(ACCESSOR_SHAPE, bare_windows, call="resolve") == "VERDICT=NO_RAISE"

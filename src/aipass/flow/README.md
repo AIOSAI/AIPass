@@ -4,7 +4,7 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.3.0
+**Version:** 2.3.1
 **Created:** 2025-11-15
 **Last Updated:** 2026-08-31
 
@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 981 tests across 29 files
+├── tests/                       # 990 tests across 29 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -312,6 +312,29 @@ hides.
 Measured, not assumed: with the marker denied and every count-asserting test run
 in **full isolation**, **2 of 10** failed. CI had named one.
 
+### An injected world has to ARM, and the arming is version-shaped
+
+The dead-cwd pins install their world by patching `os.path.realpath` in a
+subprocess. On **Python 3.10 that patch reaches nothing**: `pathlib` still has
+`_NormalAccessor`, whose `realpath = staticmethod(os.path.realpath)`
+(`Lib/pathlib.py:358`) takes its copy when `pathlib` is first imported, and
+`Path.resolve` reads it as `self._accessor.realpath(self, strict=strict)`
+(`:1077`). Patching the module attribute afterwards rebinds a name nothing will
+read again. 3.11 removed the accessor and calls `os.path.realpath` at use —
+which is why one CI leg reddened and three stayed green.
+
+Both worlds therefore end in `_ACCESSOR_CURE`, which patches the accessor as a
+`staticmethod` behind a `hasattr` — order-independent on 3.10, inert on 3.11+.
+A plain function would arrive **bound** and eat the path into `self`.
+
+Because only 3.12 exists on a dev box, that cure would otherwise be a row nobody
+here could contradict. So `TestTheWorldArmsOnAPreCapturedAccessor` **rebuilds
+3.10's construction locally** and pins both directions — bare module patch →
+`ACCESSOR_DIES: NO` (CI's failure, reproduced), plus the cure →
+`ACCESSOR_DIES: YES` — with the three traps that make the shape vacuously green
+(lazy capture, class-level read, relative probe path) pinned as their own
+controls.
+
 ---
 
 ## Close Pipeline
@@ -439,7 +462,7 @@ aggregation untouched, plus anything auto-closed during the run.
 ## Quality
 
 - **Seedgo:** 100% (46 standards, no type errors)
-- **Tests:** 981 tests in 29 files — 1000 cases collected after parametrisation, 999 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Tests:** 990 tests in 29 files — 1009 cases collected after parametrisation, 1008 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
 - **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**

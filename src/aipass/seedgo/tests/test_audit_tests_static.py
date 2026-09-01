@@ -977,13 +977,43 @@ class TestRetirement:
         # pins that the shipped entry carries one.
         assert all(entry["ruling"] for entry in adapter.RETIRED_GROUPS)
 
+    #: The nine groups that existed when the placeholder was retired on
+    #: 2026-08-29. Frozen deliberately: this is a historical set, and a group
+    #: added later did not supersede anything.
+    SUPERSEDING_GROUPS = (
+        "static_assertion_shape",
+        "static_capture_never_read",
+        "static_coverage_slot",
+        "static_entry_point_diff",
+        "static_mock_drift",
+        "static_no_oracle",
+        "static_ruff_pt",
+        "static_self_skip",
+        "static_unentered_assert",
+    )
+
     def test_the_ruling_names_EVERY_group_that_superseded_it(self):
         # Naming two endpoints and trusting the middle is how a ruling ends up
         # accounting for less than it retired. The claim is that every species
-        # the placeholder stood in for is still published - so every live
-        # static group has to appear by name.
+        # the placeholder stood in for is still published - so every group that
+        # took over from it has to appear by name.
+        #
+        # CHECKED AGAINST THE FROZEN SET, not against STATIC_GROUPS. It read the
+        # live tuple until 2026-08-31, when adding static_empty_parametrize made
+        # it red: a group built two days later did not supersede a placeholder
+        # retired on 2026-08-29, and the only way to satisfy the old form would
+        # have been to write it into a historical ruling it had no part in. The
+        # test was asking a question about today and calling it a question about
+        # that date.
         ruling = adapter.RETIRED_GROUPS[0]["ruling"]
-        assert [group for group in adapter.STATIC_GROUPS if group not in ruling] == []
+        assert [group for group in self.SUPERSEDING_GROUPS if group not in ruling] == []
+
+    def test_every_superseding_group_is_still_live(self):
+        # The other half of the claim, and the half the frozen set could lose:
+        # "still published" is only true while each of those nine is actually
+        # declared. If one is ever retired in turn, this reds and its own
+        # ruling has to account for it.
+        assert [group for group in self.SUPERSEDING_GROUPS if group not in adapter.STATIC_GROUPS] == []
 
     def test_no_currently_declared_group_is_also_retired(self):
         retired = {entry["group"].split(".", 1)[-1] for entry in adapter.RETIRED_GROUPS}

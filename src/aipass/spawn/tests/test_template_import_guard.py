@@ -30,6 +30,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _pytest.outcomes import Failed, Skipped
 
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 
@@ -153,6 +154,32 @@ _DELETE_CWD = (
     + _CONTROL_PROBE
 )
 
+# Rebinding os.path.realpath is NOT enough on every interpreter, and the same
+# four lines are needed by the direct-call probe further down. Shared text, so
+# neither site can be armed by a friendlier instrument than the other.
+#
+# Python <=3.10: pathlib delegates Path.resolve through an accessor that did
+# ``realpath = staticmethod(os.path.realpath)`` at pathlib's FIRST IMPORT
+# (3.10 pathlib.py:358). The capture means a later rebinding of
+# os.path.realpath is a name nothing reads again, so the world is silently
+# INERT for anything reaching realpath through pathlib. 3.11+ looks realpath up
+# on the flavour module at call time (3.12: ``self._flavour.realpath(...)``) and
+# needs none of this. hasattr-guarded, so it is a no-op where the accessor does
+# not exist rather than an interpreter check that rots.
+#
+# staticmethod on the CLASS but the plain function on the INSTANCE: a plain
+# function set on the class binds and eats the path into self, which would keep
+# a raise-shaped pin green for the wrong reason. Instance attributes do not
+# bind, so the bare function is correct there.
+_ARM_PATHLIB_ACCESSOR = """
+    import pathlib as _pathlib
+
+    if hasattr(_pathlib, "_NormalAccessor"):
+        _pathlib._NormalAccessor.realpath = staticmethod(_no_realpath)
+    if hasattr(_pathlib, "_normal_accessor"):
+        _pathlib._normal_accessor.realpath = _no_realpath
+"""
+
 _DENY_REALPATH = (
     """
     import errno, os, os.path
@@ -161,9 +188,11 @@ _DENY_REALPATH = (
     def _no_realpath(*args, **kwargs):
         raise FileNotFoundError(errno.ENOENT, "No such file or directory")
 
-    # os.path IS posixpath/ntpath, so this reaches pathlib's own resolve() too.
+    # os.path IS posixpath/ntpath, so on 3.11+ this reaches pathlib's own
+    # resolve() too. On 3.10 it does not — see _ARM_PATHLIB_ACCESSOR.
     os.path.realpath = _no_realpath
 """
+    + _ARM_PATHLIB_ACCESSOR
     + _CONTROL_PROBE
 )
 
@@ -206,10 +235,29 @@ def _in_dead_cwd(root: Path, world: str, tail: str, cwd: Path):
     )
 
 
-def _require_live_world(result):
-    """Skip rather than pass when the faked world did not actually break."""
+def _require_live_world(result, world: str = "getcwd-denied"):
+    """Skip rather than pass when the faked world did not actually break.
+
+    Takes the world name because the two worlds go inert for entirely different
+    reasons and only one of them is a reason to skip. Until 2026-08-31 this
+    skipped citing the getcwd/Windows explanation no matter which world ran, and
+    that cost a real measurement: on Python 3.10 the realpath-denied world was
+    inert for a CURABLE reason (the captured pathlib accessor), and every pin
+    using it skipped quietly under a message about os.getcwd and
+    _getfullpathname. One assert-shaped pin went red on CI; the skip-shaped ones
+    said nothing at all. A skip has to name its own cause or it hides the cases
+    worth fixing.
+    """
     lines = result.stdout.split()
     if "CONTROL_DEAD" in lines:
+        if world == "realpath-denied":
+            pytest.fail(
+                "the realpath-denied world went inert, and there is no known "
+                "platform reason for that one — os.path.realpath is denied "
+                "directly and the captured-accessor route is patched for "
+                "<=3.10. This is a bug in the world, not a platform difference: "
+                f"{result.stdout!r} {result.stderr[-400:]}"
+            )
         pytest.skip(
             "world not exercised: the injected os.getcwd failure does not reach "
             "Path.resolve() on this platform (Windows resolves through "
@@ -219,6 +267,227 @@ def _require_live_world(result):
         f"the child never reported whether its world took:\n{result.stdout}\n{result.stderr}"
     )
     return lines
+
+
+# =============================================================================
+# The realpath denial has to arm on every interpreter, not just this one
+# =============================================================================
+
+# 3.10 pathlib.py:358 did `realpath = staticmethod(os.path.realpath)` on its
+# accessor, at pathlib's first import. Nothing on this machine runs 3.10, so
+# the CI leg that found this is not reproducible here by asking the
+# interpreter — it is reproducible by REBUILDING the property on 3.12, which is
+# @memory's falsifiability rule: an interpreter difference you cannot run is
+# still a difference you can construct.
+_EMULATE_310 = """
+    import os.path, pathlib, posixpath
+
+    class _NormalAccessor310:
+        # EAGER capture — the whole mechanism. Evaluated at class creation,
+        # exactly as 3.10 evaluated it at pathlib import. Make this a lazy
+        # lookup and the emulation stops emulating 3.10, which is what
+        # test_the_bare_rebinding_is_inert_under_the_emulation pins.
+        realpath = staticmethod(os.path.realpath)
+
+    pathlib._NormalAccessor = _NormalAccessor310
+    # 3.10 held an INSTANCE (Path._accessor = _normal_accessor), not the class.
+    # @devpulse's trap (b). Routing the emulation through the instance is what
+    # makes the binding question below a real one rather than a hypothetical.
+    pathlib._normal_accessor = _NormalAccessor310()
+
+    class _EagerFlavour:
+        # 3.10 routed Path.resolve through the accessor. 3.12 routes it through
+        # self._flavour.realpath, so the flavour is where the reroute goes; the
+        # accessor lookup stays dynamic (that is why patching it cures) while
+        # the value it holds was captured eagerly (that is why the bare
+        # os.path rebinding does not).
+        def __init__(self, mod):
+            self._mod = mod
+
+        def __getattr__(self, name):
+            return getattr(self._mod, name)
+
+        def realpath(self, path, strict=False):
+            return pathlib._normal_accessor.realpath(str(path))
+
+    _flav = _EagerFlavour(posixpath)
+    pathlib.PurePosixPath._flavour = _flav
+    pathlib.PosixPath._flavour = _flav
+"""
+
+_BARE_REBINDING_ONLY = """
+    import errno, os, os.path
+    from pathlib import Path as _ProbePath
+
+    def _no_realpath(*args, **kwargs):
+        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+
+    os.path.realpath = _no_realpath
+"""
+
+_PATHLIB_ROUTE_PROBE = """
+    import os
+    from pathlib import Path as _RoutePath
+
+    _abs = os.path.join(os.sep, "definitely", "not", "here")
+    try:
+        _RoutePath(_abs).resolve()
+    except OSError:
+        print("PATHLIB_ARMED")
+    else:
+        print("PATHLIB_INERT")
+"""
+
+
+class TestTheRealpathDenialArmsOnEveryInterpreter:
+    """The 3.10 CI red, reproduced and cured without a 3.10 on the machine.
+
+    FOUND BY CI, not here: the 3.10 leg of 8550ed10 failed this file's
+    direct-call pin with "os.path.realpath denial was inert in the child, so
+    this run claims nothing" — the arming probe refusing to make a claim, which
+    is the instrument working rather than breaking. 3.11-3.13 were green.
+
+    Worth stating because it is the uncomfortable half: that probe reached the
+    pathlib route because I changed it to, one session earlier, on the argument
+    that a probe should ask through the route the code under test travels. The
+    argument was right and the comment I wrote next to it named this exact
+    hazard — "if pathlib ever bound realpath eagerly instead of looking it up on
+    the module". On <=3.10 it does. The reasoning predicted the failure and the
+    implementation shipped into it anyway.
+    """
+
+    def _child(self, world: str) -> subprocess.CompletedProcess:
+        return _run(
+            f"""
+            {textwrap.indent(textwrap.dedent(_EMULATE_310).strip(), " " * 12).lstrip()}
+            {textwrap.indent(textwrap.dedent(world).strip(), " " * 12).lstrip()}
+            {textwrap.indent(textwrap.dedent(_PATHLIB_ROUTE_PROBE).strip(), " " * 12).lstrip()}
+            """,
+            cwd=Path(__file__).parent,
+        )
+
+    def test_the_bare_rebinding_is_inert_under_the_emulation(self):
+        """CI's 3.10 failure, reproduced on this interpreter.
+
+        Doubles as the eager-capture pin (@devpulse's trap (e)): a published
+        emulated shape needs something that fails when the emulation stops
+        emulating. If _NormalAccessor310 captured lazily, the rebinding would
+        reach it and this would report PATHLIB_ARMED.
+        """
+        result = self._child(_BARE_REBINDING_ONLY)
+
+        assert result.stdout.split() == ["PATHLIB_INERT"], (
+            "rebinding os.path.realpath was expected to be INERT against an "
+            "eagerly-captured accessor — if this armed, the emulation is no "
+            f"longer emulating 3.10:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_the_shipped_world_arms_the_pathlib_route_under_the_emulation(self):
+        """The cure, measured against the same emulation."""
+        result = self._child(_DENY_REALPATH)
+
+        assert "PATHLIB_ARMED" in result.stdout.split(), (
+            "the shipped realpath-denied world did not reach Path.resolve() "
+            "through an eagerly-captured accessor — the _ARM_PATHLIB_ACCESSOR "
+            f"half is what makes this work on <=3.10:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_the_patched_accessor_receives_the_path_and_not_the_accessor(self):
+        """@devpulse's trap (a), which my own denial is immune to but blind to.
+
+        A plain function assigned to the accessor CLASS binds on instance
+        access and eats the path into self. Every denial in this file raises
+        unconditionally, so it would raise just the same with the wrong
+        argument — the pin would stay green for a reason that has nothing to do
+        with what it claims. The only way to see it is to look at what the
+        patched callable was actually handed, so this one records instead of
+        raising.
+        """
+        result = _run(
+            f"""
+            {textwrap.indent(textwrap.dedent(_EMULATE_310).strip(), " " * 12).lstrip()}
+            import os
+            from pathlib import Path
+
+            _seen = []
+
+            def _recording_realpath(*args, **kwargs):
+                _seen.append(args[0] if args else None)
+                return "/recorded"
+
+            import pathlib as _pathlib
+
+            _pathlib._NormalAccessor.realpath = staticmethod(_recording_realpath)
+            _pathlib._normal_accessor.realpath = _recording_realpath
+
+            _abs = os.path.join(os.sep, "definitely", "not", "here")
+            Path(_abs).resolve()
+            print("FIRST_ARG", _seen[0])
+            """,
+            cwd=Path(__file__).parent,
+        )
+
+        lines = result.stdout.split()
+        assert lines and lines[0] == "FIRST_ARG", f"the recorder never ran:\n{result.stdout}\n{result.stderr}"
+        assert lines[1].endswith("here"), (
+            "the patched accessor was handed something other than the path — a "
+            "plain function on the class binds and eats the path into self, and "
+            f"a raise-shaped denial can never notice: {lines[1]!r}"
+        )
+
+    def test_an_inert_realpath_world_fails_rather_than_skipping(self):
+        """The gate change itself, which nothing else reaches.
+
+        Both worlds report inertness identically (CONTROL_DEAD), so the only
+        thing separating "platform difference, claim nothing" from "the world is
+        broken, say so" is which world asked. A skip that can fire for a cause
+        it does not name is how the 3.10 leg stayed quiet.
+        """
+
+        class _FakeResult:
+            stdout = "CONTROL_DEAD\n"
+            stderr = ""
+
+        # NOT pytest.raises(Failed): pytest.skip raises Skipped, which sails
+        # straight through a raises(Failed) block and retires the whole test as
+        # SKIPPED — green suite, defeat reported as a pass. Caught by mutating
+        # the gate back to its pre-fix behaviour, which this pin exists to
+        # convict and initially did not.
+        try:
+            _require_live_world(_FakeResult(), "realpath-denied")
+        except Failed as exc:
+            assert "no known platform reason" in str(exc), exc
+        except Skipped:
+            pytest.fail("the gate SKIPPED an inert realpath-denied world instead of failing it")
+        else:
+            pytest.fail("the gate accepted an inert realpath-denied world without complaint")
+
+        with pytest.raises(Skipped):
+            _require_live_world(_FakeResult(), "getcwd-denied")
+
+    def test_the_accessor_patch_is_a_no_op_where_there_is_no_accessor(self):
+        """hasattr-guarded, so 3.11+ is untouched rather than version-checked.
+
+        Without the emulation there is no _NormalAccessor on 3.11+, so the
+        guarded block must do nothing and the world must still arm through the
+        call-time lookup that those versions use.
+        """
+        result = _run(
+            f"""
+            {textwrap.indent(textwrap.dedent(_DENY_REALPATH).strip(), " " * 12).lstrip()}
+            import pathlib
+            print("ACCESSOR_ABSENT" if not hasattr(pathlib, "_NormalAccessor") else "ACCESSOR_PRESENT")
+            {textwrap.indent(textwrap.dedent(_PATHLIB_ROUTE_PROBE).strip(), " " * 12).lstrip()}
+            """,
+            cwd=Path(__file__).parent,
+        )
+
+        lines = result.stdout.split()
+        if "ACCESSOR_PRESENT" in lines:
+            pytest.skip("this interpreter has the accessor; the no-op claim is not testable here")
+        assert "PATHLIB_ARMED" in lines, (
+            f"the world stopped arming on an interpreter with no accessor:\n{result.stdout}\n{result.stderr}"
+        )
 
 
 # =============================================================================
@@ -248,7 +517,7 @@ def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, world, tm
         cwd=tmp_path / "stand_here",
     )
 
-    lines = _require_live_world(result)
+    lines = _require_live_world(result, world)
     assert result.returncode == 0, (
         f"a newborn of class '{class_name}' cannot be imported in the '{world}' world:\n{result.stderr}"
     )
@@ -279,7 +548,7 @@ def test_resolve_is_never_reached_for_a_pseudo_filename(class_name, world, tmp_p
         cwd=tmp_path / "stand_here",
     )
 
-    lines = _require_live_world(result)
+    lines = _require_live_world(result, world)
     assert result.returncode == 0, f"_find_real_caller still needs a cwd:\n{result.stderr}"
     assert lines[-1] == "NO_CRASH"
 
@@ -311,7 +580,7 @@ def test_newborn_import_survives_a_deleted_working_directory(class_name, tmp_pat
         cwd=tmp_path / "stand_here",
     )
 
-    lines = _require_live_world(result)
+    lines = _require_live_world(result, "getcwd-denied")  # _DELETE_CWD is a cwd world
     assert result.returncode == 0, (
         f"a newborn of class '{class_name}' cannot be imported from a deleted cwd:\n{result.stderr}"
     )
@@ -1010,24 +1279,42 @@ class TestTheCallerIsNoneBranchHasABehaviouralInstrumentAfterAll:
 
         os.path.realpath = _no_realpath
 
-        # Second arming probe: prove the denial bites in this child before the
-        # result is trusted. @commons' rule — a world can be spelled too
-        # realistically and end up silently inert.
+        import pathlib as _pathlib
+
+        if hasattr(_pathlib, "_NormalAccessor"):
+            _pathlib._NormalAccessor.realpath = staticmethod(_no_realpath)
+        if hasattr(_pathlib, "_normal_accessor"):
+            _pathlib._normal_accessor.realpath = _no_realpath
+
+        # Second arming probe, split by ROUTE. The guard can reach realpath two
+        # ways and they are denied by different patches, so one combined
+        # DENIAL_LIVE would hide a half-armed world:
         #
-        # Probed through Path.resolve(), NOT through a bare os.path.realpath(".")
-        # call. @seedgo's rule, relayed by @devpulse: a probe that calls the
-        # patched name directly only proves the patch took on THAT name, which
-        # is the one thing never in doubt. The guard reaches realpath through
-        # pathlib, so pathlib is what has to be shown denied — if pathlib ever
-        # bound realpath eagerly instead of looking it up on the module, the
-        # bare call would still print DENIAL_LIVE while the guard sailed through
-        # an undenied world.
+        #   direct  — inspect.stack() -> getsourcefile -> getmodule ->
+        #             os.path.realpath(f). This is the route a REGROWN walk
+        #             takes, and it is what this pin exists to catch.
+        #   pathlib — _find_real_caller's own Path(...).resolve() calls, which
+        #             on <=3.10 go through the captured accessor and are NOT
+        #             denied by the rebinding above.
+        #
+        # Both paths are ABSOLUTE. @devpulse's trap (c): a relative probe path
+        # can raise because the path is relative and the cwd is unreadable,
+        # which convicts for the path's shape rather than for the denial.
+        _abs = os.path.join(os.sep, "definitely", "not", "here")
+
         try:
-            Path("<string>").resolve()
+            os.path.realpath(_abs)
         except OSError:
-            print("DENIAL_LIVE")
+            print("DENIAL_LIVE_DIRECT")
         else:
-            print("DENIAL_DEAD")
+            print("DENIAL_DEAD_DIRECT")
+
+        try:
+            Path(_abs).resolve()
+        except OSError:
+            print("DENIAL_LIVE_PATHLIB")
+        else:
+            print("DENIAL_DEAD_PATHLIB")
 
         _guard_branch_access()
         print("GUARD_RETURNED")
@@ -1041,8 +1328,15 @@ class TestTheCallerIsNoneBranchHasABehaviouralInstrumentAfterAll:
             "the probe did not reach the caller-is-None branch — it is measuring "
             f"a different path: {result.stdout!r} {result.stderr[-400:]}"
         )
-        assert "DENIAL_DEAD" not in lines, "os.path.realpath denial was inert in the child, so this run claims nothing"
-        assert "DENIAL_LIVE" in lines, f"the child never armed: {result.stdout!r}"
+        for route in ("DIRECT", "PATHLIB"):
+            assert f"DENIAL_DEAD_{route}" not in lines, (
+                f"the {route.lower()} realpath route was inert in the child, so this run "
+                f"claims nothing. On <=3.10 the pathlib route needs the captured "
+                f"accessor patched as well as os.path.realpath: {result.stdout!r}"
+            )
+            assert f"DENIAL_LIVE_{route}" in lines, (
+                f"the child never armed the {route.lower()} route: {result.stdout!r}"
+            )
 
         assert result.returncode == 0, (
             "the caller-is-None branch needs the filesystem — a restored "

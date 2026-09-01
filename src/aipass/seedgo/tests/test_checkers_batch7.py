@@ -3010,3 +3010,97 @@ class TestTheEmptyAnswerIsAConstantWhateverItsType:
         assert "EMPTY ANSWER" in content
         assert "return set()" in content
         assert "return set(c)" in content
+
+
+class TestFunctionDocstringsReadTheSourceNotTheStrings:
+    """Caught by dogfooding: my own new nominator scored 50 on documentation
+    for ``test_every_found_item_is_valid`` — a function that does not exist. It
+    is three lines of a CODE EXAMPLE inside the module docstring.
+
+    ``check_function_docstrings`` was a line scan: ``stripped.startswith("def ")``
+    over the raw file, so any ``def`` inside a string literal was read as a real
+    function. Every branch that built a subprocess world this week embedded
+    Python in a string and got flagged for it — @api, @canary, @skills and two
+    of my own files.
+
+    The same scan had the mirror defect: it never matched ``async def`` at all,
+    so an undocumented async function was invisible. ``find_import_section_end``
+    in the same pack has handled ``async def`` since it was written.
+
+    AST reads what Python reads. MEASURED before landing: 1841 files, 7 verdicts
+    change — 5 false positives cleared, 2 genuine misses found, both of them
+    async. Scope is unchanged on purpose: nested functions still count, because
+    narrowing that would be a 40-file amnesty and a different decision.
+    """
+
+    def _check(self, source):
+        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import check_function_docstrings
+
+        return check_function_docstrings(source, source.split("\n"))
+
+    def test_a_def_inside_a_docstring_is_not_a_function(self):
+        """The exact shape that flagged my own nominator: a code example whose
+        next `def`-or-`class` sentinel arrives before the docstring closes."""
+        source = (
+            '"""Module.\n'
+            "\n"
+            '    @pytest.mark.parametrize("item", collect())\n'
+            "    def test_every_found_item_is_valid(item):\n"
+            '        assert item["ok"]\n'
+            '"""\n'
+            "\n"
+            "def real_one(x):\n"
+            '    """Documented."""\n'
+            "    return x\n"
+        )
+        # The fixture must PARSE, or this exercises the SyntaxError fallback and
+        # proves nothing about the AST path. Caught while writing it: the first
+        # version left the module docstring unterminated and went red for that.
+        import ast
+
+        ast.parse(source)
+        result = self._check(source)
+        assert result["passed"] is True, result["message"]
+
+    def test_a_def_inside_a_string_constant_is_not_a_function(self):
+        """The dead-cwd worlds' shape: a whole module built as a string and fed
+        to a child. @canary, @api and @skills all carry one."""
+        source = (
+            'WORLD = """\nimport os\ndef realpath(p, *a, **k):\n    return p\n\ndef helper(q):\n    return q\n"""\n'
+        )
+        result = self._check(source)
+        assert result["passed"] is True, result["message"]
+
+    def test_a_real_undocumented_function_still_fails(self):
+        """Negative control. Without this the fix reads as "documentation is
+        optional now"."""
+        result = self._check("def visible(x):\n    return x\n")
+        assert result["passed"] is False
+        assert "visible" in result["message"]
+
+    def test_an_undocumented_ASYNC_function_is_finally_seen(self):
+        """The line scan matched 'def ' and never 'async def', so @skills'
+        telethon_auth.main has been invisible for as long as it has existed."""
+        result = self._check("async def main() -> None:\n    return None\n")
+        assert result["passed"] is False
+        assert "main" in result["message"]
+
+    def test_a_documented_async_function_passes(self):
+        assert self._check('async def main() -> None:\n    """Does a thing."""\n')["passed"] is True
+
+    def test_a_private_function_is_still_exempt(self):
+        assert self._check("def _hidden(x):\n    return x\n")["passed"] is True
+
+    def test_an_unparseable_file_keeps_the_line_scans_answer(self):
+        """Ignorance is not evidence. A file whose AST cannot be built has not
+        been PROVEN to document everything, so it falls back rather than being
+        exempted by the failure — the direction json_structure's bootstrap
+        clause errs in."""
+        result = self._check("def visible(:\n    return 1\n")
+        assert result["passed"] is False
+
+    def test_the_reported_line_is_the_def_not_an_index(self):
+        """@memory was sent to line 40 for a violation at line 106 once. The
+        line in the message must be the line in the file."""
+        source = "\n\n\n\n\ndef visible(x):\n    return x\n"
+        assert "line 6" in self._check(source)["message"]

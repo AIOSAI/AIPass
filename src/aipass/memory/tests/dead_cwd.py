@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_cwd.py
 # Description: The one definition of the dead-cwd world used by this branch's subprocess pins
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-31
 # Modified: 2026-08-31
 # =============================================
@@ -127,4 +127,104 @@ REALPATH_DENIED_WORLD = (
     "def _denied_realpath(*a, **k):\n"
     "    raise FileNotFoundError(2, 'No such file or directory')\n"
     "os.path.realpath = _denied_realpath\n"
+)
+
+
+# ---------------------------------------------------------------------------
+# The Windows halves, and the version trap that lives in both of them
+# ---------------------------------------------------------------------------
+
+# ``ntpath.realpath`` reads ``os.getcwd()`` on its first lines, before it checks
+# whether the path is even absolute — unlike ``posixpath``. So on Windows every
+# ``Path(...).resolve()`` is a working-directory read, and that is the condition
+# to inject rather than "we are on Windows", which pins nothing runnable.
+#
+# THE ACCESSOR TRAP, AGAIN, AND THIS TIME IT SHIPPED. The getcwd world above
+# carries a long docstring about Python 3.10 capturing ``os.getcwd`` at
+# class-definition time. Its sibling — this constant — was written without that
+# cure and lived in ``test_repo_root.py``, away from the docstring explaining
+# the very trap it was walking into. CI found it on 2026-08-31, Python 3.10
+# only: the arming probe printed NO_RAISE, and every pin underneath it had been
+# vacuously green on that interpreter.
+#
+# MEASURED, NOT INFERRED — CPython 3.10 ``Lib/pathlib.py``::
+#
+#     358:  realpath = staticmethod(os.path.realpath)      # _NormalAccessor
+#     1077: s = self._accessor.realpath(self, strict=strict)  # Path.resolve
+#
+# So 3.10's pathlib DOES delegate to ``os.path.realpath``; it just took its copy
+# when pathlib was first imported. A probe that imports pathlib and then patches
+# ``os.path.realpath`` is patching a name nothing will read again. 3.11 removed
+# the accessor and calls ``os.path.realpath`` at use, which is why only one
+# version reddened — the same shape, the same version boundary, and the same
+# reason as the getcwd world.
+#
+# Cured the same way and for the same reason: patch the accessor when one
+# exists, so the world is ORDER-INDEPENDENT, and take any arguments, because a
+# plain function on a class arrives bound.
+WINDOWS_REALPATH_WORLD = (
+    "import os\n"
+    "_real_realpath = os.path.realpath\n"
+    "def _reads_the_cwd(p, *a, **k):\n"
+    "    os.getcwd()\n"
+    "    return _real_realpath(p, *a, **k)\n"
+    "os.path.realpath = _reads_the_cwd\n"
+    "import pathlib as _pathlib_rp\n"
+    "if hasattr(_pathlib_rp, '_NormalAccessor'):\n"
+    "    _pathlib_rp._NormalAccessor.realpath = staticmethod(_reads_the_cwd)\n"
+)
+
+# The PLATFORM, not just the denial. @prax's shape, adopted after CI proved this
+# branch had been asserting POSIX facts as universal.
+#
+# Emulating "the cwd is gone" is not enough to emulate Windows, because the two
+# platforms fail at DIFFERENT CALLS. ``ntpath.abspath`` goes through the Win32
+# ``_getfullpathname`` and never touches ``os.getcwd``, so it SURVIVES a getcwd
+# denial that kills ``posixpath.abspath``; and ``ntpath.realpath`` reads the cwd
+# where posixpath's does not. Both halves have to move or the world is still
+# Linux wearing a Windows label.
+#
+# With both patched, a getcwd denial sails through ``inspect.getabsfile()``
+# (which is where POSIX dies, inside inspect's own ``except``) and arrives at
+# the unprotected ``os.path.realpath`` in ``getmodule`` — which is exactly what
+# Windows CI measured.
+# A DENIAL IS NOT ONE WORLD — READ THIS BEFORE ASSERTING ANY VERDICT
+# ------------------------------------------------------------------
+# @prax's sentence, and this branch shipped the bug it describes: "a branch that
+# injects a getcwd denial is NOT building one world. On Linux it builds
+# POSIX-with-no-cwd; on Windows it builds something strictly more hostile. Any
+# pin whose expectation is derived on one and asserted on both will be wrong on
+# the other, and it will be wrong in the direction that LOOKS LIKE A PASSING
+# TEST."
+#
+# Measured, both platforms, for ``inspect.stack()``:
+#
+#     world             posix     nt
+#     realpath denied   DIES      DIES
+#     getcwd denied     SURVIVES  DIES
+#     both denied       SURVIVES  DIES
+#
+# posix rows measured live on every run; nt rows measured on the Windows runner
+# (8550ed10) AND reproducible here inside ``WINDOWS_EMULATED_WORLD``. The table
+# is enforced by ``TestTheTwoWorldsMustNotBeStacked``, keyed on ``os.name``
+# because the question is which PATH MODULE the stdlib is using — ``sys.platform``
+# would need a darwin row that behaves exactly like linux.
+#
+# So: a verdict measured under these worlds is a fact about ONE platform until
+# it has been measured on the other or reproduced under the emulation below.
+
+
+WINDOWS_EMULATED_WORLD = (
+    "import os, posixpath\n"
+    "_rp_before_emulation = os.path.realpath\n"
+    "def _win32_abspath(path, *a, **k):\n"
+    "    # _getfullpathname: resolves against the process cwd via Win32, never\n"
+    "    # through os.getcwd, so a Python-level getcwd denial cannot reach it.\n"
+    "    p = os.fspath(path)\n"
+    "    return posixpath.normpath(p if p.startswith('/') else '/emulated_cwd/' + p)\n"
+    "def _win32_realpath(path, *a, **k):\n"
+    "    os.getcwd()  # ntpath.realpath reads it before checking absoluteness\n"
+    "    return _rp_before_emulation(path, *a, **k)\n"
+    "os.path.abspath = _win32_abspath\n"
+    "os.path.realpath = _win32_realpath\n"
 )

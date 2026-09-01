@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - trigger imports without a readable cwd
 # Date: 2026-08-31
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: trigger/tests
 # =============================================
 
@@ -28,6 +28,14 @@ The injection happens in a child process before any aipass import, so no module
 has cached the real functions. In-process this property is unobservable - the
 imports already happened - which is why every world here is a subprocess.
 
+AND THE INJECTION HAS TO REACH THE CALL. Patching os.path.realpath only reaches
+sites that look the name up each time. CPython 3.10's pathlib captures a copy at
+its own first import (_NormalAccessor.realpath), so on 3.10 the order of imports
+decides whether this whole file measures anything - and 3.10 is in the CI matrix.
+_ACCESSOR_PATCH rebinds the captured copy too, so the world arms on every
+interpreter rather than on luck. Credit: @flow found it, @memory read the 3.10
+source, @devpulse relayed it.
+
 WHY THE PRELOAD LIST IS SHORT HERE. The fleet pattern preloads peer branches in
 the healthy world so a pin measures its own branch only. Trigger cannot preload
 @prax: prax's logger imports trigger, so preloading prax would import the very
@@ -41,6 +49,8 @@ healthy while its guard still walked inspect.stack(); that preload was retired
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 # Peers held constant in the healthy world, before the denial.
 #
@@ -60,6 +70,30 @@ _PRELOAD = r"""
 import rich.console  # noqa: F401
 import inspect  # noqa: F401
 import linecache  # noqa: F401
+"""
+
+# THE CAPTURED COPY (@flow's find, relayed by @devpulse 2026-08-31).
+#
+# Patching os.path.realpath only reaches call sites that LOOK IT UP each time.
+# CPython 3.10's pathlib does not: Lib/pathlib.py binds
+# `realpath = staticmethod(os.path.realpath)` onto _NormalAccessor at class
+# creation, i.e. at pathlib's FIRST import, and resolve() reads it back through
+# `self._accessor.realpath`. Rebind os.path afterwards and you rebind a name
+# nothing reads again - the world goes inert and every pin under it passes
+# measuring nothing.
+#
+# So the world rebinds the captured copy too. staticmethod is not decoration:
+# a plain function assigned to a class becomes a bound method and eats the path
+# into `self`, which fails for the wrong reason and can leave a raise-shaped pin
+# green. Guarded by hasattr because 3.11+ deleted _NormalAccessor - there the
+# rebind is a no-op and the call-time lookup is what arms the world (measured on
+# 3.12: this world arms whether pathlib is imported before or after the patch).
+_ACCESSOR_PATCH = r"""
+import pathlib
+
+_captured = getattr(pathlib, "_NormalAccessor", None)
+if _captured is not None:
+    _captured.realpath = staticmethod(os.path.realpath)
 """
 
 # The posix-shaped denial: enough to reach every module-level resolve().
@@ -84,12 +118,12 @@ def _dead_getcwd():
 
 
 os.getcwd = _dead_getcwd
-
-# Probe the instrument: does THIS interpreter's resolve() reach the denied call
-# for an absolute path? 3.11+ routes through os.path.realpath; 3.10 resolves
-# absolute paths without cwd, so the denial cannot fire there.
-import pathlib
-
+"""
+    + _ACCESSOR_PATCH
+    + r"""
+# Probe the instrument: does THIS interpreter's resolve() reach the denied call?
+# The path is ABSOLUTE on purpose - a relative one dies in abspath for its own
+# shape and would report ARMED whatever the patch did or failed to do.
 try:
     pathlib.Path(pathlib.__file__).resolve()
     print("PROBE_VACUOUS")
@@ -143,7 +177,9 @@ def _dead_getcwd():
 
 
 os.getcwd = _dead_getcwd
-
+"""
+    + _ACCESSOR_PATCH
+    + r"""
 # Probe against the defect ITSELF, not a proxy: does inspect.stack() die in this
 # world? If it does not, this pin proves nothing.
 import inspect
@@ -207,16 +243,59 @@ def _run(world: str) -> subprocess.CompletedProcess:
 
 
 def _assert_probe_armed(out: str) -> None:
-    """The instrument must be able to fire, or the pin proves nothing."""
-    if "PROBE_VACUOUS" in out:
-        # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # never routes an absolute resolve through os.path.realpath).
-        assert sys.version_info < (3, 11), (
-            "resolve() survived the denial on an interpreter that routes through "
-            f"os.path.realpath - the instrument is broken, not the world:\n{out}"
-        )
-    else:
-        assert "PROBE_ARMED" in out, f"probe printed neither outcome:\n{out}"
+    """The instrument must be able to fire, or the pin proves nothing.
+
+    This used to accept PROBE_VACUOUS on sys.version_info < (3, 11), citing
+    "pre-3.11 pathlib never routes an absolute resolve through os.path.realpath".
+    That sentence was a RETRACTED diagnosis and it is false: 3.10 routes through
+    a copy of os.path.realpath captured onto _NormalAccessor at pathlib's first
+    import. The clause therefore blessed exactly the vacuity it exists to catch,
+    on the one interpreter where the world could genuinely go inert - and 3.10 is
+    in the CI matrix. _ACCESSOR_PATCH arms that interpreter, so no version is
+    excused any more. A vacuous world is a failure everywhere.
+    """
+    assert "PROBE_ARMED" in out, (
+        "the denial did not reach resolve() - the instrument is broken, not the "
+        f"world, and every pin under it proves nothing:\n{out}"
+    )
+
+
+# The JUDGEMENT, separated from the WORLD (@commons' round-5 rule). No
+# interpreter here can produce a vacuous probe, so the branch that decides what
+# to DO about one is unreachable from any real world on this host - which is how
+# the version escape hatch survived in the first place, and how it would come
+# back. Fed synthetic strings, every interpreter case is reachable from any
+# machine, including the one no local run can create.
+
+
+def test_a_vacuous_probe_is_refused_on_the_interpreter_that_could_produce_one(monkeypatch):
+    """3.10 is the ONE interpreter that can go inert, and it gets no exemption.
+
+    The deleted clause read `assert sys.version_info < (3, 11)`, so on 3.10 it
+    returned quietly. This is the pin that convicts its return: faking the
+    version is the only way this host can stand where 3.10 stands.
+    """
+    monkeypatch.setattr(sys, "version_info", (3, 10, 4, "final", 0))
+
+    with pytest.raises(AssertionError):
+        _assert_probe_armed("PROBE_VACUOUS\nIMPORTED\n")
+
+
+def test_a_vacuous_probe_is_refused_on_this_interpreter_too():
+    """The unfaked half, so the pin above cannot pass on the monkeypatch alone."""
+    with pytest.raises(AssertionError):
+        _assert_probe_armed("PROBE_VACUOUS\nIMPORTED\n")
+
+
+def test_an_armed_probe_is_accepted():
+    """The judgement is not simply 'always raise' - it has to let a real world through."""
+    _assert_probe_armed("PROBE_ARMED\nIMPORTED\n")
+
+
+def test_a_probe_that_printed_nothing_is_refused():
+    """Silence is not consent: a world that crashed before probing proves nothing."""
+    with pytest.raises(AssertionError):
+        _assert_probe_armed("IMPORTED\n")
 
 
 def test_import_time_sites_survive_a_denied_cwd():
@@ -254,6 +333,146 @@ def test_whole_branch_imports_under_the_ntpath_shaped_denial():
 
     assert "STACK_DIES" in out, f"the ntpath world went vacuous - this pin proves nothing:\n{out}"
     assert "IMPORTED" in out, f"a trigger import died under the ntpath world:\nstdout={out}\nstderr={result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Is _ACCESSOR_PATCH load-bearing, or decoration? Falsifiable HERE, on 3.12.
+#
+# The interpreter that needs it (3.10) is in the CI matrix and is not installed
+# on this machine, so "it works on 3.10" is not something this suite can claim.
+# What it CAN do is rebuild 3.10's capture shape on whatever interpreter runs -
+# an eager staticmethod bound at class creation, read back through an instance -
+# and pin the two directions separately: the bare os.path patch is INERT against
+# it, and the shipped patch ARMS it. Drop _ACCESSOR_PATCH and the second pin
+# goes red on every interpreter, including this one.
+# ---------------------------------------------------------------------------
+
+_EMULATED_CAPTURE = r"""
+import os
+import sys
+
+_real_realpath = os.path.realpath
+
+# An ABSOLUTE path: a relative one dies in abspath for its own shape and would
+# report ARMED whatever the patch did (@devpulse's trap (c)).
+_ABS = sys.executable
+
+
+class _NormalAccessorShape:
+    # EAGER, at class creation - exactly when pathlib 3.10 binds its own copy.
+    # A lambda forwarding to os.path.realpath would be LAZY and would arm for
+    # the wrong reason, making every verdict below it a statement about a
+    # different shape (@devpulse's trap (d)/(e)).
+    realpath = staticmethod(os.path.realpath)
+
+
+_accessor = _NormalAccessorShape()
+
+# The control FOR the emulation: prove it captured, before trusting what it says.
+if _NormalAccessorShape.realpath is not _real_realpath:
+    print("EMULATION_NOT_EAGER")
+    raise SystemExit(1)
+print("EMULATION_EAGER")
+
+
+def _denied(path, **kw):
+    os.getcwd()
+    return _real_realpath(path, **kw)
+
+
+os.path.realpath = _denied
+
+
+def _dead_getcwd():
+    raise FileNotFoundError(2, "cwd deleted", "")
+
+
+os.getcwd = _dead_getcwd
+"""
+
+# Read back through the INSTANCE, the way pathlib 3.10's resolve() does
+# (`self._accessor.realpath`), never off the class (@devpulse's trap (b)).
+_EXERCISE_CAPTURE = r"""
+try:
+    result = _accessor.realpath(_ABS)
+except FileNotFoundError:
+    print("CAPTURE_ARMED")
+else:
+    # A return-value check, not just a survived/raised one: a plain-function
+    # rebind eats the path into `self` and can look like a pass.
+    print("CAPTURE_INERT", result == _real_realpath.__call__(_ABS) or result == _ABS)
+"""
+
+# The shipped fragment, aimed at the emulated holder rather than pathlib's.
+_APPLY_SHIPPED_PATCH = r"""
+_captured = _NormalAccessorShape
+if _captured is not None:
+    _captured.realpath = staticmethod(os.path.realpath)
+"""
+
+CAPTURE_INERT_WORLD = _EMULATED_CAPTURE + _EXERCISE_CAPTURE
+CAPTURE_CURED_WORLD = _EMULATED_CAPTURE + _APPLY_SHIPPED_PATCH + _EXERCISE_CAPTURE
+
+# Why the shipped patch wraps in staticmethod. Assigned bare, the function
+# becomes a bound method and the accessor instance lands in the path slot.
+CAPTURE_PLAIN_FUNCTION_WORLD = (
+    _EMULATED_CAPTURE
+    + r"""
+_NormalAccessorShape.realpath = os.path.realpath  # NO staticmethod - the trap
+
+try:
+    _accessor.realpath(_ABS)
+except FileNotFoundError:
+    print("PLAIN_RAISED_FILENOTFOUND")
+except TypeError as exc:
+    print("PLAIN_EATS_SELF", type(exc).__name__)
+else:
+    print("PLAIN_SURVIVED")
+"""
+)
+
+
+def test_the_captured_accessor_is_inert_under_a_bare_os_path_patch():
+    """3.10's defect, rebuilt: patching os.path.realpath does not reach it."""
+    result = _run(CAPTURE_INERT_WORLD)
+    out = result.stdout
+
+    assert "EMULATION_EAGER" in out, f"the emulation is not an eager capture - it describes a different shape:\n{out}"
+    assert "CAPTURE_INERT" in out, (
+        "the bare os.path patch reached the captured copy, so there is nothing "
+        f"for _ACCESSOR_PATCH to fix and this file is carrying dead weight:\n{out}"
+    )
+
+
+def test_the_shipped_accessor_patch_arms_the_captured_copy():
+    """_ACCESSOR_PATCH is load-bearing: remove it and this pin goes red."""
+    result = _run(CAPTURE_CURED_WORLD)
+    out = result.stdout
+
+    assert "EMULATION_EAGER" in out, f"the emulation went lazy - verdict is about another shape:\n{out}"
+    assert "CAPTURE_ARMED" in out, (
+        "the shipped accessor patch did not arm the captured copy - on 3.10 the "
+        f"dead-cwd worlds are inert and every pin under them is vacuous:\n{out}"
+    )
+
+
+def test_the_accessor_patch_needs_staticmethod_not_a_bare_function():
+    """Why _ACCESSOR_PATCH wraps: bare, the instance is eaten into the path slot.
+
+    Without this, someone simplifies the fragment to a plain assignment, the
+    call fails with TypeError instead of FileNotFoundError, and a pin that only
+    asks "did it raise" reports a cured world.
+    """
+    result = _run(CAPTURE_PLAIN_FUNCTION_WORLD)
+    out = result.stdout
+
+    assert "PLAIN_EATS_SELF" in out, (
+        "a bare function rebind did NOT bind as a method here - the staticmethod "
+        f"wrapper in _ACCESSOR_PATCH may no longer be doing anything:\n{out}"
+    )
+    assert "PLAIN_RAISED_FILENOTFOUND" not in out, (
+        f"the bare rebind looked like a working denial, which is the trap:\n{out}"
+    )
 
 
 def test_repo_root_fallback_is_the_source_tree_never_the_process_directory():

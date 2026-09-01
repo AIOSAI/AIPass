@@ -82,41 +82,110 @@ import aipass.cli.apps.modules  # noqa: F401
 import aipass.api  # noqa: F401
 """
 
-_WORLD_A = """
+# THE ACCESSOR PATCH, and it is the difference between a world and a costume.
+#
+# CI found this on the Python 3.10 leg of 8550ed10: the arming probe below
+# printed RESOLVE_DIES: NO and the pin REFUSED rather than passing vacuously.
+# @devpulse relayed the mechanism and @memory corrected the first diagnosis by
+# reading CPython's source, so this is the corrected version:
+#
+#     CPython 3.10 Lib/pathlib.py
+#       358:  realpath = staticmethod(os.path.realpath)       # _NormalAccessor
+#       1077: s = self._accessor.realpath(self, strict=strict)  # Path.resolve
+#
+# 3.10 DOES delegate resolve() to os.path.realpath — it simply took its COPY
+# when pathlib was first imported. So a world that rebinds ``os.path.realpath``
+# afterwards rebinds a name nothing will read again, and every pin under it is
+# green while asserting nothing. 3.11 deleted the accessor and calls
+# os.path.realpath at use, which is why exactly one interpreter reddened.
+#
+# The cure patches the captured accessor as well, which also makes the world
+# ORDER-INDEPENDENT: a child may import pathlib before or after installing it.
+# No version table and no skipif — the same text arms on every interpreter.
+#
+# TWO EDGES, both @memory's, both honoured:
+#   * ``staticmethod`` AND ``*a`` are redundant with each other on purpose. A
+#     plain function stored on a class arrives BOUND through an instance, so it
+#     would eat the accessor as its first positional argument. staticmethod
+#     prevents the binding; ``*a`` survives it if a future edit drops the
+#     staticmethod. Keeping one and deleting the other is how the remaining half
+#     silently becomes load-bearing.
+#
+# THE PATCH IS CLASS-LEVEL ONLY, AND THAT IS A MEASUREMENT RATHER THAN A COPY.
+# The first cut here also assigned ``_pathlib._normal_accessor.realpath`` on the
+# INSTANCE. It looked like harmless belt-and-braces and it was not: an instance
+# attribute is never bound, so it SHADOWED the class attribute and made the
+# class-level ``staticmethod`` unfalsifiable — mutant M24b dropped it and all 16
+# pins stayed green. Removing the instance line turns that same mutant red. 3.10
+# stores no per-instance ``realpath``, so the class patch is what its
+# ``self._accessor.realpath(...)`` actually reaches; the extra line bought
+# nothing and cost the only pin that watches the binding.
+#   * a bound wrapper that ate the path would still call os.getcwd() first and
+#     still raise, so a raise-shaped probe stays green FOR THE WRONG REASON.
+#     TestTheNtpathWrapperResolvesThePathNotTheAccessor pins the return value.
+_NTPATH_WRAPPER = """
 import os
 
 _real_realpath = os.path.realpath
 
 
-def _ntpath_condition(path, **kw):
+def _ntpath_condition(path, *a, **kw):
     os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
+    return _real_realpath(path, *a, **kw)
 
 
 os.path.realpath = _ntpath_condition
 
+import pathlib as _pathlib_rp
 
-def _dead_getcwd():
+if hasattr(_pathlib_rp, "_NormalAccessor"):
+    _pathlib_rp._NormalAccessor.realpath = staticmethod(_ntpath_condition)
+"""
+
+_DENY_GETCWD = """
+def _dead_getcwd(*a, **k):
     raise FileNotFoundError(2, "cwd deleted", "")
 
 
 os.getcwd = _dead_getcwd
 """
 
+_WORLD_A = _NTPATH_WRAPPER + _DENY_GETCWD
+
 _WORLD_B = """
 import os
 
 
-def _dead_realpath(path, **kw):
+def _dead_realpath(path, *a, **kw):
     raise FileNotFoundError(2, "realpath denied", "")
 
 
 os.path.realpath = _dead_realpath
+
+import pathlib as _pathlib_dr
+
+if hasattr(_pathlib_dr, "_NormalAccessor"):
+    _pathlib_dr._NormalAccessor.realpath = staticmethod(_dead_realpath)
+"""
+
+# 3.10's pathlib reduced to the two lines that matter, installed ON PURPOSE so
+# the accessor row is falsifiable on an interpreter that no longer has one. It
+# captures the REAL os.path.realpath BEFORE the world is installed, which is
+# exactly the ordering 3.10 produces by importing pathlib early.
+_FAKE_ACCESSOR = """
+import os
+import pathlib as _p
+
+
+class _NormalAccessor:
+    realpath = staticmethod(os.path.realpath)
+
+
+_p._NormalAccessor = _NormalAccessor
+_p._normal_accessor = _NormalAccessor()
 """
 
 # Does THIS interpreter's resolve() reach the denied call for an ABSOLUTE path?
-# 3.11+ routes through os.path.realpath; 3.10 resolves absolute paths without
-# touching the cwd, so the denial cannot fire there and the pin proves less.
 _RESOLVE_CONTROL = """
 import pathlib
 
@@ -281,13 +350,193 @@ except OSError as exc:
         )
 
 
+class TestTheWorldArmsOnEveryInterpreter:
+    """The 3.10 row, made falsifiable on an interpreter that is not 3.10.
+
+    STATED PLAINLY BECAUSE IT LIMITS WHAT THIS FILE PROVES: no Python 3.10
+    exists on this machine (3.12 only, checked). So the 3.10 row is DERIVED from
+    CI's red and REPRODUCED under the emulated accessor below — it is not a live
+    measurement on a real 3.10, and this file should not be read as one. What is
+    measured live here is the accessor SHAPE and the cure's behaviour against it,
+    which is the part a future edit can break.
+
+    CI's failure was not a bug in drone's code — it was the world failing to
+    arm, and the arming probe REFUSING instead of passing vacuously is the only
+    reason anyone found out. That is the discipline working, and it is also the
+    limit of it: a probe can only tell you the world is dead on the interpreter
+    that runs it. Nothing here could have said so from a 3.12 laptop.
+
+    So the accessor shape is BUILT rather than waited for. Each test below states
+    which half of the cure it measures, and the middle one reproduces CI's
+    failure exactly — a bare module-attribute patch, a pre-captured accessor, and
+    a denial that never lands.
+    """
+
+    PROBE = """
+import pathlib as _p
+
+try:
+    _p._normal_accessor.realpath("/tmp")
+    print("ACCESSOR_DENIED: NO")
+except OSError:
+    print("ACCESSOR_DENIED: YES")
+"""
+
+    BARE_PATCH_ONLY = """
+import os
+
+
+def _bare(path, *a, **kw):
+    raise FileNotFoundError(2, "realpath denied", "")
+
+
+os.path.realpath = _bare
+"""
+
+    @staticmethod
+    def _run(script: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+
+    def test_a_bare_module_patch_does_not_reach_a_pre_captured_accessor(self):
+        """CI's Python 3.10 failure, reproduced here. This is the red-first half.
+
+        The accessor captured the real function before the patch, so rebinding
+        ``os.path.realpath`` rebinds a name nothing reads again. If this test
+        ever goes green, the interpreter stopped being able to express the bug
+        and the two below prove less than they claim.
+        """
+        result = self._run(_FAKE_ACCESSOR + self.BARE_PATCH_ONLY + self.PROBE)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ACCESSOR_DENIED: NO" in result.stdout, (
+            "a bare os.path.realpath patch reached a pre-captured accessor — "
+            "then CI's 3.10 red is not reproducible here and this file cannot "
+            "defend the cure: " + result.stdout
+        )
+
+    def test_the_shipped_world_reaches_a_pre_captured_accessor(self):
+        """The cure, measured against the shape that defeated the bare patch."""
+        result = self._run(_FAKE_ACCESSOR + _WORLD_B + self.PROBE)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ACCESSOR_DENIED: YES" in result.stdout, (
+            "the shipped world left a pre-captured accessor holding the real "
+            "function — this is exactly the 3.10 red: " + result.stdout
+        )
+
+    def test_world_a_also_reaches_a_pre_captured_accessor(self):
+        """Both worlds carry the cure, so both are measured against the shape.
+
+        World A is the one CI actually reddened, and patching only world B would
+        leave the exact failure in place while the test named after it passed.
+        """
+        result = self._run(_FAKE_ACCESSOR + _WORLD_A + self.PROBE)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ACCESSOR_DENIED: YES" in result.stdout, (
+            "world A left a pre-captured accessor holding the real function — "
+            "this is CI's 3.10 red exactly: " + result.stdout
+        )
+
+    def test_the_shipped_world_still_arms_where_no_accessor_exists(self):
+        """3.11+ — the ``hasattr`` guard must not turn the world into a no-op."""
+        result = self._run(_WORLD_A + _RESOLVE_CONTROL)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RESOLVE_DIES: YES" in result.stdout, result.stdout
+
+    def test_the_ntpath_wrapper_resolves_the_path_not_the_accessor(self):
+        """@memory's return-value pin, and it is not decoration.
+
+        Every other assertion about world A is RAISE-shaped. A wrapper that
+        arrived bound would eat the real path into ``*a`` and resolve the
+        accessor object instead — and it would still call ``os.getcwd()`` first,
+        so it would still raise, and every raise-shaped probe would stay green
+        for entirely the wrong reason. Only the return value can tell the two
+        apart, so it is checked with the denial OFF.
+        """
+        body = """
+import pathlib as _p
+
+print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
+"""
+        result = self._run(_FAKE_ACCESSOR + _NTPATH_WRAPPER + body)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "RESOLVED: /tmp" in result.stdout, (
+            "the wrapper did not resolve the path it was handed — it is arriving "
+            "bound and resolving the accessor: " + result.stdout
+        )
+
+
+class TestTheCallerIsNoneBranchRunsAndReturns:
+    """The branch the AST ban was built for, watched BEHAVIOURALLY as well.
+
+    THE CORRECTION, @spawn's, relayed by @devpulse 2026-08-31 after this file
+    shipped. The round-4 guidance said this branch is unreachable and only a
+    parse can watch it. The true sentence is narrower: it is unreachable from
+    IMPORT-shaped pins, because ``apps/__init__.py`` always supplies a real-file
+    frame — the nine-branch reproduction stands, and drone's own M3 reproduced it
+    (restoring the walk killed exactly one test, the AST ban).
+
+    But CALLING ``_guard_branch_access()`` directly from an interpreter ``-c``
+    child reaches it: every frame is then either string-pseudo or importlib, both
+    skipped, so ``_find_real_caller`` returns None and the branch RUNS. Under a
+    realpath denial a regrown ``inspect.stack()`` walk dies there; the cured plain
+    return survives.
+
+    TWO ARMING PROBES, not one, and the second is the one that matters. Probe 1
+    proves the denial bites at all. Probe 2 proves ``_find_real_caller`` actually
+    returned None — without it the world could silently exercise a DIFFERENT path
+    (a real-file frame sneaking onto the stack sends the guard down the
+    containment check instead, where it also returns, and the pin would report
+    green having never entered the branch it names).
+
+    The AST ban below is kept rather than replaced. It needs no subprocess, it
+    names the defect precisely, and it catches reintroductions in files this probe
+    never calls into. Two instruments, one defect, different blind spots.
+    """
+
+    BODY = """
+from aipass.drone.apps.handlers import _find_real_caller, _guard_branch_access
+
+# ARMING PROBE 2: the branch under test is the one actually entered.
+caller, _line = _find_real_caller()
+print("CALLER_IS_NONE: " + ("YES" if caller is None else "NO (" + str(caller) + ")"))
+
+try:
+    _guard_branch_access()
+    print("GUARD: RETURNED")
+except OSError as exc:
+    print("GUARD DIED: " + type(exc).__name__)
+except ImportError:
+    print("GUARD: BLOCKED")
+"""
+
+    def test_the_guard_returns_from_a_string_frame_with_realpath_denied(self):
+        result = _run_world(_WORLD_B, _STACK_CONTROL, self.BODY)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "STACK_DIES: YES" in result.stdout, (
+            "world B did not arm — a regrown walk would survive this pin.\n" + result.stdout
+        )
+        assert "CALLER_IS_NONE: YES" in result.stdout, (
+            "the probe never entered the caller-is-None branch, so it proves nothing about it.\n" + result.stdout
+        )
+        assert "GUARD: RETURNED" in result.stdout, result.stdout
+
+
 class TestNoModuleLevelLocationCallSurvives:
     """The structural half, because behaviour cannot reach every reintroduction.
 
-    Proven by @hooks (M7) and reproduced here: restoring ``inspect.stack()`` in
-    ``_guard_branch_access``'s caller-is-None branch leaves EVERY behavioural pin
-    above green, because no import probe reaches that branch. A parse of the tree
-    is the only instrument that sees it.
+    @hooks (M7), reproduced here as M3: restoring ``inspect.stack()`` in
+    ``_guard_branch_access``'s caller-is-None branch left every IMPORT-shaped pin
+    green, because ``apps/__init__.py`` always supplies a real-file frame so no
+    import probe enters that branch. A parse sees it without a subprocess.
+
+    The claim was narrowed 2026-08-31 (@spawn via @devpulse) and the narrowing is
+    above: a direct call from a ``-c`` child does reach it. "Unreachable from
+    import-shaped pins" is the true sentence, not "unreachable".
 
     The ban is on the CALL — ``ast.Call`` whose func is ``inspect.stack`` — never
     on the string, because this file and the cured modules SPELL the defect in
@@ -392,7 +641,17 @@ class TestNoModuleLevelLocationCallSurvives:
         assert self._inspect_stack_calls(tree), "the reintroduction @hooks measured would land unnoticed"
 
     def test_the_stack_detector_clears_a_docstring_that_names_the_defect(self):
-        """The reason this is an AST ban and not a grep."""
+        """The reason this is an AST ban and not a grep.
+
+        The source is a SYNTHETIC literal on purpose, and it must stay one.
+        @spawn's control here asserted the whole LIVE guard file clean, which
+        made it a second copy of the ban wearing a control's name — restoring
+        the walk redded the control too, so it could never have told them the
+        detector had gone blind. This one cannot fail for the ban's reason:
+        the string it parses has no call in it at all, so it fails only if the
+        detector starts convicting prose, which is the single thing it exists
+        to rule out.
+        """
         tree = ast.parse('"""Walks sys._getframe rather than inspect.stack() — see the cure."""\n')
         assert self._inspect_stack_calls(tree) == [], (
             "a string ban convicts the explanation along with the defect, which is how a cure ends up undocumented"
