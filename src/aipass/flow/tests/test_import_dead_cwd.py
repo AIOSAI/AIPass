@@ -238,11 +238,122 @@ def _run_world(world: str, control: str, body: str) -> subprocess.CompletedProce
     )
 
 
+def _flow_modules_by_import_machinery() -> list[str]:
+    """The same set, derived through importlib's finder instead of the filesystem.
+
+    A SECOND MECHANISM, on purpose. ``_flow_modules`` globs and manipulates
+    strings to undo ``__init__`` nesting; this asks ``pkgutil`` — the machinery
+    that decides what a module IS — and imports nothing. Re-running the same
+    rglob logic twice would be the table-written-twice failure: two copies of one
+    belief agree with each other no matter how wrong they are.
+    """
+    import pkgutil
+
+    import aipass.flow.apps as flow_apps
+
+    def walk(path: Path, prefix: str) -> set[str]:
+        found = set()
+        for info in pkgutil.iter_modules([str(path)]):
+            name = f"{prefix}.{info.name}"
+            found.add(name)
+            if info.ispkg:
+                found |= walk(path / info.name, name)
+        return found
+
+    root = Path(flow_apps.__file__).parent
+    names = walk(root, "aipass.flow.apps") | {"aipass.flow.apps"}
+    return sorted(name for name in names if ".archive" not in name)
+
+
 @pytest.fixture(scope="module")
 def flow_modules() -> list[str]:
+    """Every flow module, with the count DERIVED rather than lower-bounded.
+
+    @seedgo nominated this file for the SHORT-TABLE species on 2026-08-31
+    (@trigger's find, a ruling change rather than new code): the guard here was
+    ``len(modules) > 40``, which catches a collector blinded entirely and misses
+    one that drops a SINGLE entry. The table stays non-empty, every surviving
+    module passes, and the sweep is quietly one module lighter — an empty run
+    looks odd, a short one looks normal.
+
+    Ruled on rather than inherited, which is what the nomination asks for. The
+    table is NOT legitimately variable here: the same tree is walked on every
+    host, so there is an exact answer and it is worth asserting. Both mechanisms
+    are compared as SETS rather than counts, because two collectors that disagree
+    should say WHICH module, not just how many.
+    """
     modules = _flow_modules()
-    assert len(modules) > 40, f"the module walk found only {len(modules)} — it is not measuring the tree"
+    expected = _flow_modules_by_import_machinery()
+
+    assert set(modules) == set(expected), (
+        "the filesystem walk and importlib's finder disagree about which modules exist. "
+        f"Only in the walk: {sorted(set(modules) - set(expected))}; "
+        f"only in the finder: {sorted(set(expected) - set(modules))}. One of them is "
+        "dropping entries, and a sweep built on the short list would pass while covering less."
+    )
+    assert len(modules) > 40, (
+        f"both mechanisms agree on only {len(modules)} modules — they are agreeing about a "
+        "tree that is not there, which set equality alone cannot catch"
+    )
     return modules
+
+
+class TestTheModuleCountIsDerivedFromTwoMechanisms:
+    """The short-table cure's own control, added because a mutant walked past it.
+
+    @seedgo's nomination replaced ``len(modules) > 40`` with set equality against
+    a second derivation. A mutant then pointed the fixture at ``_flow_modules``
+    for BOTH operands and every pin stayed green: two copies of one belief agree
+    with each other however wrong they are, and the equality assertion becomes a
+    tautology that reads like a cross-check. The docstring warned about exactly
+    this while nothing enforced it — a comment is not a control.
+    """
+
+    def test_the_two_derivations_are_different_code_paths(self):
+        """Asserted structurally, because behaviour cannot tell a copy from a check."""
+        import ast
+        import inspect
+
+        # The DOCSTRING AND COMMENTS ARE STRIPPED FIRST, and this is the third
+        # time in three rounds that a structural check has reddened on its own
+        # explanation: the function's docstring names ``rglob`` precisely to warn
+        # against it. A check that cannot tell the warning from the violation
+        # will always convict the most careful author. Parsing gets the executable
+        # body; comments are dropped by the tokenizer on the way.
+        tree = ast.parse(inspect.getsource(_flow_modules_by_import_machinery).strip())
+        body = tree.body[0].body
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+            body = body[1:]
+        finder_source = "\n".join(ast.unparse(node) for node in body)
+
+        assert "pkgutil" in finder_source, (
+            "the second derivation no longer goes through importlib's finder — if it "
+            "globs the filesystem like the first one, the two agree by construction"
+        )
+        assert "_flow_modules(" not in finder_source, (
+            "the second derivation calls the first — the set equality in the fixture is "
+            "then comparing a value with itself"
+        )
+        assert "rglob" not in finder_source, "the second derivation is globbing, which is the first mechanism"
+
+    def test_the_fixture_compares_one_against_the_other(self):
+        """And that the fixture actually uses both, rather than one twice."""
+        import inspect
+
+        fixture_source = inspect.getsource(flow_modules.__wrapped__)
+
+        assert "_flow_modules()" in fixture_source and "_flow_modules_by_import_machinery()" in fixture_source, (
+            "the fixture no longer derives its expectation from the second mechanism: " + fixture_source
+        )
+
+    def test_both_mechanisms_agree_on_a_known_module(self):
+        """Control for the pair: two empty collectors would also be set-equal."""
+        by_walk = set(_flow_modules())
+        by_finder = set(_flow_modules_by_import_machinery())
+
+        for expected in ("aipass.flow.apps.handlers.repo_root", "aipass.flow.apps.handlers.json.json_handler"):
+            assert expected in by_walk, f"the filesystem walk lost a module that is demonstrably there: {expected}"
+            assert expected in by_finder, f"the finder lost a module that is demonstrably there: {expected}"
 
 
 class TestEveryModuleImportsWithoutACwd:
@@ -541,6 +652,30 @@ os.sep = "\\"
 pathlib.__file__ = r"D:\a\AIPass\AIPass\.venv\Lib\pathlib.py"
 """
 
+    # The counterpart, and round 9 is why it exists. A single Windows-shaped
+    # runner fake CANNOT ARM on a Windows runner: the host already is what the
+    # fake supplies, so the faked and unfaked runs are byte-identical and every
+    # comparison built on the difference passes for free. @seedgo's one-layer
+    # rule — host == emulated is not two layers — landing in the file whose
+    # round-8 reply flagged it for everybody else.
+    #
+    # So the runner varies toward BOTH platforms. On any host at least one of
+    # these differs from it, which is @memory's "emulate both platforms or
+    # neither" applied one dimension over — to the RUNNER, where round 8 applied
+    # it only to the emulated world.
+    POSIX_RUNNER = """
+import os
+import pathlib
+import posixpath
+
+os.path = posixpath
+os.sep = "/"
+pathlib.__file__ = "/usr/lib/python3/pathlib.py"
+"""
+
+    # Both runner shapes. Keyed by name so a failure says which one moved.
+    RUNNERS = {"posix": POSIX_RUNNER, "windows": WINDOWS_RUNNER}
+
     # For compositions that install no host at all. The literal is deliberately
     # built in the HOST's dialect here: with no emulation in play, "absolute"
     # means whatever this interpreter means by it, and saying so beats a
@@ -700,6 +835,57 @@ except OSError:
         return result.stdout
 
     @staticmethod
+    def _run_or_reason(script: str) -> tuple[str, str | None]:
+        """Run a child, returning ``(stdout, None)`` or ``(stdout, reason)``.
+
+        ``_run`` asserts the child exited cleanly, which is right for a probe
+        whose world this branch controls. It is wrong for a RUNNER fake: a host
+        this file was not written on may refuse one, and failing there reports
+        somebody else's platform as a flow defect. @spawn's round-8 shape —
+        say UNAVAILABLE with the child's own reason and skip that row, never
+        fail on an interpreter you do not have.
+        """
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            return result.stdout, (result.stderr.strip().splitlines() or ["no diagnostic"])[-1]
+        return result.stdout, None
+
+    def _runner_verdicts(self, body: str, runners: dict[str, str]) -> dict[str, str]:
+        """Every verdict for *body*, once bare and once under each runner fake.
+
+        RAISES on a row that could not be measured, rather than returning a dict
+        that quietly has fewer keys than it should. That is deliberate: round 9's
+        lesson is that a row which cannot speak must not be mistaken for a row
+        that agreed, and an assertion sitting beside the collector was
+        unconvictable — no runner fake fails on this host, so deleting it changed
+        nothing. Making the refusal part of the collector's contract lets a
+        synthetic broken runner convict it here.
+
+        Args:
+            body: The composed child script whose verdict is being compared.
+            runners: Runner fakes to prepend, keyed by name.
+
+        Returns:
+            Verdicts keyed by runner name, plus ``"<no runner fake>"``.
+
+        Raises:
+            AssertionError: If any runner fake could not be installed.
+        """
+        bare, reason = self._run_or_reason(body)
+        assert reason is None, f"the unfaked run failed, so nothing here is measurable: {reason}"
+
+        verdicts = {"<no runner fake>": bare.strip()}
+        for runner in sorted(runners):
+            out, why = self._run_or_reason(runners[runner] + body)
+            assert why is None, (
+                f"the {runner!r} runner fake could not be installed, so that row was not "
+                "measured at all. A row that cannot speak is not a row that agreed — this "
+                f"is a fact about this host, not a verdict about the probes: {why}"
+            )
+            verdicts[runner] = out.strip()
+        return verdicts
+
+    @staticmethod
     def _literal_from(host: str) -> str:
         """The probe path a host publishes, read out of the constant itself.
 
@@ -847,25 +1033,27 @@ except OSError:
             f"measuring the host rather than the patch: {disagreed}"
         )
 
-    def test_no_verdict_moves_when_the_runner_itself_is_windows_shaped(self):
-        """ROUND 8's missing instrument, and the reason the round happened.
+    def test_no_verdict_moves_when_the_runner_changes_shape(self):
+        """ROUND 8's instrument, cured of ROUND 9's blindness.
 
-        Round 7's litmus varied the emulated HOST and every verdict held — then
-        three pins reddened on the real Windows runner anyway. The litmus could
-        not see it, because the thing that differed was not the world under test
-        but the platform the PROCESS runs on: ``os.sep`` and ``pathlib.__file__``
-        are the runner's, and two probes built their input out of them.
+        Round 7's litmus varied the emulated HOST and held; round 8 reddened
+        anyway because two probes read the RUNNER — ``os.sep``,
+        ``pathlib.__file__`` — to build their input. So round 8 added a
+        Windows-shaped runner fake and required no verdict to move.
 
-        So the runner is a variable now. Each direction runs twice — as-is, and
-        with the runner faked Windows-shaped — and no verdict may move. Reverting
-        the dialect-absolute probe literals reds this immediately, on Linux,
-        which is the whole point: the failure was only observable on hardware
-        nobody here has.
+        THAT FAKE CANNOT ARM ON A WINDOWS RUNNER. The host already is what it
+        supplies, so faked and unfaked runs are byte-identical and the comparison
+        passes for free — measured on the windows-setup leg of 9bd2618b, where
+        the control below reported the two outputs equal character for character.
+        The litmus was DARK on exactly the platform it was written to catch, and
+        that is worse than the red that reported it: the red was one assertion,
+        the darkness was the whole instrument.
 
-        The fake covers exactly what a probe can read to construct a path. It is
-        deliberately not a world: emulating a platform's BEHAVIOUR is what
-        ``POSIX_HOST``/``NT_HOST`` do, and conflating the two is how a probe ends
-        up measuring its own scaffolding.
+        HOST == FAKED IS ONE LAYER — @seedgo's rule, arriving in the file whose
+        round-8 reply passed it on to everyone else. The cure is @memory's
+        "emulate both platforms or neither" applied one dimension over: the
+        runner varies toward BOTH shapes, so on any host at least one fake
+        genuinely differs from it, and the bare run is compared against both.
         """
         live_shape = self.SHAPE.replace("staticmethod(_source_realpath)", "staticmethod(os.path.realpath)")
         directions = {
@@ -878,21 +1066,71 @@ except OSError:
                 "live-capture": live_shape + self.BARE_MODULE_PATCH_ONLY + self.PROBE,
             }.items()
         }
-        moved = {
-            name: (self._run(body).strip(), self._run(self.WINDOWS_RUNNER + body).strip())
-            for name, body in directions.items()
-        }
-        disagreed = {name: pair for name, pair in moved.items() if pair[0] != pair[1]}
+
+        disagreed = {}
+        for name, body in directions.items():
+            verdicts = self._runner_verdicts(body, self.RUNNERS)
+            if len(set(verdicts.values())) > 1:
+                disagreed[name] = verdicts
 
         assert disagreed == {}, (
             "a verdict changed when only the RUNNER changed. The world under test was "
-            "identical in both runs, so something in the probe is reading the host to "
+            "identical in every run, so something in the probe is reading the host to "
             "build its input — most likely a path spelled with os.sep or derived from a "
             f"module's __file__, which posixpath reads as relative on Windows: {disagreed}"
         )
 
-    def test_the_windows_runner_fake_actually_changes_what_a_probe_reads(self):
-        """Control: a fake that changes nothing passes the litmus above for free."""
+    def test_a_runner_fake_that_cannot_install_is_refused_not_skipped(self):
+        """The UNAVAILABLE row, made reachable on a host where nothing is unavailable.
+
+        No runner fake fails here, so the refusal branch is unreachable from any
+        real composition — the species that keeps recurring in this file, and a
+        mutant confirmed it: deleting the check left all 47 pins green. Cured by
+        feeding the collector a synthetic runner that cannot install, which is a
+        difference constructed rather than waited for.
+
+        The distinction being defended: SKIPPING an unmeasurable row makes it
+        indistinguishable from a row that agreed, and every verdict-comparison
+        above would then be over a smaller set than it claims.
+        """
+        broken = {"deliberately-broken": "raise RuntimeError('this runner fake cannot install here')\n"}
+
+        with pytest.raises(AssertionError, match="was not measured at all"):
+            self._runner_verdicts(self.NO_HOST + self.PUBLISHED_SHAPE + self.PROBE, broken)
+
+    def test_the_collector_reports_every_row_when_they_all_install(self):
+        """Control: a collector that always raised would pass the pin above for free."""
+        verdicts = self._runner_verdicts(self.NO_HOST + self.PUBLISHED_SHAPE + self.PROBE, self.RUNNERS)
+
+        assert set(verdicts) == {"<no runner fake>", *self.RUNNERS}, (
+            f"the collector dropped a row on a host where every fake installs: {verdicts}"
+        )
+
+    def test_at_least_one_runner_fake_changes_what_a_probe_reads(self):
+        """ROUND 9's red, cured with three states instead of a bare difference.
+
+        This is the control for the litmus above, and it used to assert that the
+        Windows fake changed something. On Linux it does; on the Windows runner
+        it changes NOTHING, because the host already supplies exactly what the
+        fake supplies — and the assertion fired, reporting "the litmus is
+        vacuous" as though the instrument were broken. The instrument was fine on
+        that host and the CONTROL was the thing that could not survive being run
+        where its subject was already true.
+
+        Three states now, and each is an OUTPUT rather than a silence:
+
+        * CHANGED — the fake altered what a probe reads;
+        * ALREADY — the host is already this shape, with the host's own
+          ``os.name``/``os.sep`` printed as the reason, so a no-op and a broken
+          fake are different results;
+        * UNAVAILABLE — the fake could not be installed here, carrying the
+          child's own diagnostic (@spawn's shape: never fail on someone else's
+          host, and never stay quiet about it either).
+
+        The assertion that cannot go dark: at least one fake must report CHANGED
+        on every host. Both fakes reporting ALREADY would mean the runner
+        dimension is unvaried, which is round 9 again in either direction.
+        """
         probe = """
 import os
 import pathlib
@@ -901,14 +1139,161 @@ print("SEP:", repr(os.sep))
 print("HOST_BUILT:", repr(os.path.join(os.sep, "x")))
 print("PATHLIB_FILE_ABS_TO_POSIX:", __import__("posixpath").isabs(str(pathlib.__file__)))
 """
-        plain = self._run(probe)
-        faked = self._run(self.WINDOWS_RUNNER + probe)
+        bare, bare_reason = self._run_or_reason(probe)
+        assert bare_reason is None, f"the unfaked probe itself failed, so nothing below is measurable: {bare_reason}"
 
-        assert plain != faked, "the runner fake changed nothing a probe can read — the litmus above is vacuous"
-        assert "SEP: '\\\\'" in faked, f"the faked runner does not report a backslash separator: {faked}"
-        assert "PATHLIB_FILE_ABS_TO_POSIX: False" in faked, (
-            "under the faked runner posixpath still calls pathlib.__file__ absolute — then "
-            f"the round-8 mechanism is not reproduced and this control is not controlling: {faked}"
+        verdicts = {}
+        for runner in sorted(self.RUNNERS):
+            out, reason = self._run_or_reason(self.RUNNERS[runner] + probe)
+            if reason is not None:
+                verdicts[runner] = f"UNAVAILABLE: {reason}"
+            elif out != bare:
+                verdicts[runner] = "CHANGED"
+            else:
+                verdicts[runner] = f"ALREADY (this host is already {runner}-shaped: {bare.strip()!r})"
+
+        changed = [runner for runner, state in verdicts.items() if state == "CHANGED"]
+
+        assert changed, (
+            "NO runner fake changed anything a probe reads, so the runner dimension is "
+            "unvaried on this host and the litmus above is passing for free. With one fake "
+            "per platform that should be impossible — unless both were refused, or both "
+            f"now supply what the host already had: {verdicts}"
+        )
+
+    @pytest.mark.parametrize("simulated_host", ["posix", "windows"])
+    def test_the_runner_set_arms_on_either_kind_of_host(self, simulated_host):
+        """Round 9's species, made falsifiable on the one machine available.
+
+        The pin above asserts that some runner fake changes something on THIS
+        host. That is necessary and it is not enough: it was true on Linux for
+        the whole of round 8, while being false on the runner that mattered. A
+        row only this host can satisfy is exactly the thing round 9 was.
+
+        So both KINDS of host are simulated here and the requirement is checked
+        against each: whatever shape the runner turns out to be, some fake in
+        ``RUNNERS`` must still differ from it. Deleting either fake reds this on
+        Linux — which is the whole point, because deleting the posix one is the
+        round-8 state and no probe on this machine could previously tell.
+
+        The simulated host is applied FIRST and the fake stacked on top, so the
+        stacked case (host == faked) is exercised deliberately rather than met by
+        accident on somebody's CI leg.
+        """
+        host_prefix = "" if simulated_host == "posix" else self.WINDOWS_RUNNER
+        probe = """
+import os
+import pathlib
+
+print("SEP:", repr(os.sep))
+print("HOST_BUILT:", repr(os.path.join(os.sep, "x")))
+print("PATHLIB_FILE_ABS_TO_POSIX:", __import__("posixpath").isabs(str(pathlib.__file__)))
+"""
+        bare, reason = self._run_or_reason(host_prefix + probe)
+        assert reason is None, f"the {simulated_host}-shaped host could not run the probe at all: {reason}"
+
+        states = {}
+        for runner in sorted(self.RUNNERS):
+            out, why = self._run_or_reason(host_prefix + self.RUNNERS[runner] + probe)
+            states[runner] = f"UNAVAILABLE: {why}" if why else ("CHANGED" if out != bare else "ALREADY")
+
+        assert "CHANGED" in states.values(), (
+            f"on a {simulated_host}-shaped runner NO fake in RUNNERS changes what a probe "
+            "reads, so the runner dimension collapses there and the litmus passes for "
+            "free. This is the round-9 failure reproduced: host == faked is one layer. "
+            f"{states}"
+        )
+
+    @pytest.mark.parametrize(
+        ("runner", "expected"),
+        [
+            ("posix", {"SEP_IS_BACKSLASH": "False", "PATH_MODULE": "posixpath", "FILE_ABS_TO_POSIX": "True"}),
+            ("windows", {"SEP_IS_BACKSLASH": "True", "PATH_MODULE": "ntpath", "FILE_ABS_TO_POSIX": "False"}),
+        ],
+    )
+    def test_each_runner_fake_overrides_every_host_read_a_probe_makes(self, runner, expected):
+        """A fake that covers SOME of the host reads is not a fake, it is a leak.
+
+        Found by mutation and it survived the coarser pins: deleting the
+        ``pathlib.__file__`` line from ``POSIX_RUNNER`` left every other pin
+        green, because that fake still changes ``os.sep`` and ``os.path``, so
+        "at least one fake CHANGED something" was satisfied while one of the
+        three host reads still came from the host. On Linux the omission is
+        invisible — ``pathlib.__file__`` is already posix — and load-bearing on
+        the Windows runner, where it is the ``D:\\...`` path that reddened round 8.
+
+        So each fake is checked ATTRIBUTE BY ATTRIBUTE, under the OPPOSITE
+        simulated host, against the three reads the probes in this file actually
+        make. Any read that still answers with the host's value is a hole the
+        coarse pins cannot see.
+        """
+        opposite = self.WINDOWS_RUNNER if runner == "posix" else ""
+        probe = """
+import os
+import pathlib
+import posixpath
+
+# A derived boolean, not repr(os.sep): a backslash crossing a string boundary
+# gets eaten by whichever quoting layer is least expected, which cost three
+# separate repairs across rounds 8 and 9. Nothing here needs the character
+# itself — only whether the fake supplied it.
+print("SEP_IS_BACKSLASH", os.sep == chr(92))
+print("PATH_MODULE", os.path.__name__)
+print("FILE_ABS_TO_POSIX", posixpath.isabs(str(pathlib.__file__)))
+"""
+        out, reason = self._run_or_reason(opposite + self.RUNNERS[runner] + probe)
+        assert reason is None, f"the {runner} fake could not be installed over the opposite host: {reason}"
+
+        reported = dict(line.split(" ", 1) for line in out.strip().splitlines())
+        leaked = {
+            key: reported.get(key) for key, want in expected.items() if reported.get(key, "").strip("'\"") != want
+        }
+
+        assert leaked == {}, (
+            f"the {runner!r} runner fake did not override every host read a probe makes, so "
+            "those reads still answer with the host's value. On this machine that is "
+            "invisible for whichever reads the host already matches — which is exactly how "
+            f"it ships and reds on the other platform: {leaked} (full: {reported})"
+        )
+
+    def test_the_host_table_covers_every_dialect_it_is_built_from(self):
+        """@seedgo's SHORT-TABLE nomination, ruled on rather than inherited.
+
+        Their checker flags five parametrisations here for reading
+        ``sorted(HOSTS)`` — a table computed at collection time whose only guard
+        is non-emptiness, which a collector dropping ONE entry still satisfies.
+        The ruling: the nomination is right about the shape and the table was
+        already guarded, just not anywhere their checker could see. Measured
+        before answering — deleting the ``nt`` row reds
+        ``test_the_two_hosts_are_genuinely_different_worlds``, which names both
+        constants directly. A guard that only a mutation run can find is not much
+        of a guard for the next reader, so it is spelled out here.
+
+        DERIVED, not restated: the expected keys come from the dialect modules the
+        constants actually import, so adding a host without a dialect or dropping
+        a dialect without its host both red. Writing ``{"posix", "nt"}`` as a
+        literal would be the table written twice.
+        """
+        named_after = {"posixpath": "posix", "ntpath": "nt"}
+        dialects = {
+            module: name
+            for name, host in self.HOSTS.items()
+            for module in ("posixpath", "ntpath")
+            if f"import {module}" in host
+        }
+
+        assert dialects == {module: named_after[module] for module in dialects}, (
+            "a host is registered under a name that does not match the dialect it is built "
+            f"from, so a parametrisation labelled posix may be emulating nt: {dialects}"
+        )
+        assert set(dialects.values()) == set(self.HOSTS), (
+            "a host in HOSTS is not built from a dialect module at all: "
+            f"{sorted(dialects.values())} vs {sorted(self.HOSTS)}"
+        )
+        assert set(dialects) == {"posixpath", "ntpath"}, (
+            "HOSTS no longer covers both path dialects. Every parametrisation over "
+            "sorted(HOSTS) silently loses a row when this shrinks, and the remaining rows "
+            f"still pass — @seedgo's SHORT-TABLE species: {sorted(dialects)}"
         )
 
     def test_the_two_hosts_are_genuinely_different_worlds(self):
@@ -1160,6 +1545,34 @@ except OSError:
         )
         assert not ntpath.splitdrive(posix_literal)[0], (
             "a posix literal carries a drive — the drive-relative asymmetry above is not real"
+        )
+
+    @pytest.mark.parametrize("host", sorted(HOSTS))
+    def test_each_host_publishes_a_literal_and_never_computes_one(self, host):
+        """@trigger's round-9 offer, taken: a literal is immune, host-derived is not.
+
+        Round 8 cured the two probe paths that were built from ``os.sep`` and
+        ``pathlib.__file__``, but nothing stopped the NEXT edit from computing one
+        from the host again — and a computed path is the round-8 defect returning
+        under a different spelling. ``_literal_from`` already refuses one, but it
+        refuses by raising out of ``ast.literal_eval`` with "malformed node",
+        which names no species and teaches the next reader nothing.
+
+        So the refusal is stated here instead: the right-hand side must be a
+        string constant. ``os.path.join(os.sep, ...)``, ``sys.executable``,
+        ``__file__`` — every host-derived spelling is a ``Call``, a ``Name`` or an
+        ``Attribute``, and every one of them reds on Linux without a Windows
+        runner to find it.
+        """
+        line = next(entry for entry in self.HOSTS[host].splitlines() if entry.startswith("ABSOLUTE = "))
+        node = ast.parse(line).body[0].value
+
+        assert isinstance(node, ast.Constant) and isinstance(node.value, str), (
+            f"the {host} host COMPUTES its probe path rather than publishing one: "
+            f"{ast.unparse(node)}. Anything read off the running host — os.sep, "
+            "sys.executable, __file__, os.getcwd() — carries the RUNNER's dialect into "
+            "an emulation that is not the runner, which is exactly the round-8 defect; "
+            "a plain literal cannot"
         )
 
     def test_the_real_route_probe_deliberately_uses_the_host_dialect(self):

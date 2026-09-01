@@ -332,42 +332,102 @@ EMULATE_NATIVE_ACCESSOR_HOST = """
 import os
 import pathlib
 
+# THE HOST MAY ALREADY BE ONE. Round 8 cured EMULATE_PY310_PATHLIB of replacing
+# a real accessor and I built its reproduction partner with the identical flaw:
+# a three-method stand-in installed over CPython 3.10's real _NormalAccessor,
+# which routes stat, listdir, open and the rest through it. On 3.12 nothing
+# reads the attribute so both arms looked right; on the real 3.10 leg of
+# 9bd2618b every pin riding this world died on
+# `AttributeError: '_NativeAccessor' object has no attribute 'stat'`.
+#
+# THE SAME DEFECT, ONE FILE OVER, IN THE WORLD BUILT TO REPRODUCE IT. The cure
+# is the same too, and it is now applied in both directions: on a host that
+# already has the shape, do nothing and say so.
+if hasattr(pathlib, "_NormalAccessor"):
+    print("NATIVE_HOST_ALREADY")
+else:
 
-class _NativeAccessor:
-    # Stands in for CPython 3.10's real _NormalAccessor. MANY methods, not two -
-    # which is the whole point of the reproduction.
+    class _NativeAccessor:
+        # Stands in for CPython 3.10's real _NormalAccessor: MANY methods, not
+        # three. Anything not named here DELEGATES to the os function of the
+        # same name, so this stand-in cannot decapitate a host by omission -
+        # which is exactly how its first version failed.
+        realpath = staticmethod(os.path.realpath)
+        getcwd = staticmethod(os.getcwd)
+        mkdir = staticmethod(os.mkdir)
+
+        def __getattr__(self, name):
+            for source in (os, os.path):
+                found = getattr(source, name, None)
+                if found is not None:
+                    return found
+            raise AttributeError(name)
+
+    def _pre_311_mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        # CPython 3.10 pathlib.py:1175, INCLUDING the parents/exist_ok handling
+        # around it. The first version called the accessor and stopped there, so
+        # mkdir(parents=True, exist_ok=True) raised the moment the directory
+        # existed - green alone, red in a full suite where a temp log dir is
+        # already there. Order-dependence hid an incomplete stand-in.
+        try:
+            self._accessor.mkdir(str(self), mode)
+        except FileNotFoundError:
+            if not parents or self.parent == self:
+                raise
+            self.parent.mkdir(parents=True, exist_ok=True)
+            self.mkdir(mode, parents=False, exist_ok=exist_ok)
+        except OSError:
+            if not exist_ok or not self.is_dir():
+                raise
+
+    pathlib._NormalAccessor = _NativeAccessor
+    pathlib._normal_accessor = _NativeAccessor()
+    pathlib.Path._accessor = pathlib._normal_accessor
+    pathlib.Path.mkdir = _pre_311_mkdir
+    print("NATIVE_HOST_SYNTHESISED")
+"""
+
+
+#: A host shaped like a real pre-3.11 interpreter: an accessor that pathlib
+#: ROUTES stat through, which is what made the round-9 3.10 red possible and
+#: what no amount of 3.12 testing could produce. Kept so the red is falsifiable
+#: here forever rather than on a leg nobody runs locally.
+EMULATE_REAL_310_ACCESSOR_HOST = """
+import os
+import pathlib
+
+
+class _RealAccessor:
     realpath = staticmethod(os.path.realpath)
     getcwd = staticmethod(os.getcwd)
     mkdir = staticmethod(os.mkdir)
+    stat = staticmethod(os.stat)
 
 
-def _pre_311_mkdir(self, mode=0o777, parents=False, exist_ok=False):
-    # CPython 3.10 pathlib.py:1175, INCLUDING the parents/exist_ok handling
-    # around it. The first version of this stand-in called the accessor and
-    # stopped there - so mkdir(parents=True, exist_ok=True) raised
-    # FileExistsError the moment the directory already existed, and the pin
-    # riding this world went red in a FULL SUITE RUN while passing alone,
-    # because a fresh temp log dir exists by then and did not before.
-    #
-    # An instrument must not remove behaviour it is not testing - the same rule
-    # this whole world exists to enforce, broken inside the reproduction of the
-    # break. Order-dependence is what exposed it: a single-test run said green.
-    try:
-        self._accessor.mkdir(str(self), mode)
-    except FileNotFoundError:
-        if not parents or self.parent == self:
-            raise
-        self.parent.mkdir(parents=True, exist_ok=True)
-        self.mkdir(mode, parents=False, exist_ok=exist_ok)
-    except OSError:
-        if not exist_ok or not self.is_dir():
-            raise
+def _pre_311_stat(self, follow_symlinks=True):
+    # CPython 3.10 pathlib.py:1097 - self._accessor.stat(self, ...)
+    return self._accessor.stat(str(self))
 
 
-pathlib._NormalAccessor = _NativeAccessor
-pathlib._normal_accessor = _NativeAccessor()
+pathlib._NormalAccessor = _RealAccessor
+pathlib._normal_accessor = _RealAccessor()
 pathlib.Path._accessor = pathlib._normal_accessor
-pathlib.Path.mkdir = _pre_311_mkdir
+pathlib.Path.stat = _pre_311_stat
+"""
+
+#: Make this child a host with NO accessor, whatever interpreter it is running
+#: on. Round 9's second red: `test_the_emulation_still_TAKES_on_a_host_without
+#: _one` asserted ACCESSOR_EMULATED unconditionally, which is only true where
+#: the host has no accessor - a 3.12 fact, and on the real 3.10 leg the host
+#: correctly reported ACCESSOR_NATIVE and the pin died for being right.
+#:
+#: Emulating the ABSENCE is what makes both arms reachable on every
+#: interpreter, rather than each leg testing whichever arm it happens to have.
+REMOVE_ANY_NATIVE_ACCESSOR = """
+import pathlib
+
+if hasattr(pathlib, "_NormalAccessor"):
+    del pathlib._NormalAccessor
 """
 
 
@@ -596,6 +656,52 @@ def _alias_discrimination_verdict(host_reads_cwd: bool, emulated_reads_cwd: bool
     return ALIAS_DISCRIMINATION_LIVE
 
 
+#: Why the alias trap can or cannot be caught on the interpreter running this.
+#: THREE answers, because there turned out to be two different ways of losing it
+#: and a verdict that could not tell them apart would hide the more interesting
+#: one (@trigger's round-8 line: a kill by string guard is indistinguishable
+#: from a kill by measurement in a summary that only counts).
+ALIAS_CATCHABLE = "ALIAS_IS_CATCHABLE_HERE"
+ALIAS_LOST_TO_PLATFORM = "ALIAS_INDISTINGUISHABLE:the alias IS this host"
+ALIAS_LOST_TO_VERSION = "ALIAS_INDISTINGUISHABLE:ntpath no longer calls a rooted literal absolute"
+
+
+def _alias_catchability(alias_reads_cwd: bool, ntpath_calls_probe_absolute: bool) -> str:
+    """Whether @flow's M3 alias trap is detectable here, and if not, why not.
+
+    THE TRAP: emulating nt by ``os.path.realpath = ntpath.realpath`` reproduces
+    nothing on a posix host, because off-Windows ``ntpath.realpath`` is just
+    ``abspath`` (ntpath.py:564) and an absolute path never reaches ``getcwd``.
+    The check that catches it is "the alias did NOT read the cwd".
+
+    ROUND 9 FOUND THE SECOND WAY TO LOSE IT, and it is a VERSION fact, not a
+    platform one. ``_abspath_fallback`` consults ``ntpath.isabs``, and through
+    3.12 that carried an explicit LEGACY BUG clause making a rooted driveless
+    path absolute (ntpath.py:99-102). 3.13 removed it: ``/tmp`` needs a drive or
+    a UNC prefix to count. So on 3.13 the alias DOES read the cwd for the probe
+    path, and answers exactly as the by-property emulation does.
+
+    Which is my own checker-pack sentence landing in my own file: the platform
+    dimension IS the version dimension. The probe was keyed on a fact only one
+    leg of the matrix could contradict, and the leg that contradicted it was an
+    interpreter, not an operating system.
+
+    Args:
+        alias_reads_cwd: Whether an ntpath-aliased realpath reads the cwd for
+            the probe path on this host.
+        ntpath_calls_probe_absolute: What ``ntpath.isabs`` says about that same
+            path - the mechanism, so the verdict names a cause and not a mood.
+
+    Returns:
+        One of the three module constants above.
+    """
+    if not alias_reads_cwd:
+        return ALIAS_CATCHABLE
+    if ntpath_calls_probe_absolute:
+        return ALIAS_LOST_TO_PLATFORM
+    return ALIAS_LOST_TO_VERSION
+
+
 class TestTheInstrumentsCanFire:
     """Positive controls: each world must still kill the code the cure deleted."""
 
@@ -664,16 +770,26 @@ class TestTheInstrumentsCanFire:
             "target.mkdir()\n"
             "print('MKDIR_WORKED')\n"
         )
-        result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + EMULATE_PY310_PATHLIB + probe)
+        world = EMULATE_REAL_310_ACCESSOR_HOST + EMULATE_NATIVE_ACCESSOR_HOST
+        result = _run(PRELOAD + world + EMULATE_PY310_PATHLIB + probe)
+        assert "NATIVE_HOST_ALREADY" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "ACCESSOR_NATIVE" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "MKDIR_WORKED" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
     def test_the_emulation_still_TAKES_on_a_host_without_one(self, tmp_path):
         """The other half. An emulation that had learned to do nothing would
         satisfy the pin above and quietly take every 3.10 claim in this file
-        dark - which is the arming-probe defect wearing a fix's clothes."""
+        dark - which is the arming-probe defect wearing a fix's clothes.
+
+        THE ABSENCE IS EMULATED rather than assumed. Round 9's red: this pin
+        asserted ACCESSOR_EMULATED unconditionally, which is only true on a host
+        that has no accessor - a 3.12 fact. On the real 3.10 leg the emulation
+        correctly reported ACCESSOR_NATIVE and the pin died for being right.
+        A pin that expects one arm must BUILD the host that produces it, or it
+        is testing whichever arm its own interpreter happens to have.
+        """
         probe = "print('BODY_RAN')\n"
-        result = _run(PRELOAD + EMULATE_PY310_PATHLIB + probe)
+        result = _run(PRELOAD + REMOVE_ANY_NATIVE_ACCESSOR + EMULATE_PY310_PATHLIB + probe)
         assert "ACCESSOR_EMULATED" in result.stdout, f"{result.stdout}\n{result.stderr}"
         assert "BODY_RAN" in result.stdout, f"{result.stdout}\n{result.stderr}"
 
@@ -696,6 +812,71 @@ class TestTheInstrumentsCanFire:
         )
         result = _run(PRELOAD + EMULATE_NATIVE_ACCESSOR_HOST + probe)
         assert "MKDIR_WENT_THROUGH_ACCESSOR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_native_world_does_not_DECAPITATE_a_real_pre_311_host(self, tmp_path):
+        """The round-9 3.10 red, held closed here forever.
+
+        Round 8 cured EMULATE_PY310_PATHLIB of replacing a real accessor, and I
+        then built its reproduction partner with the identical flaw: a
+        three-method stand-in installed over CPython 3.10's real _NormalAccessor,
+        which routes stat through it. On 3.12 nothing reads the attribute so both
+        arms looked right; on the real 3.10 leg every pin riding this world died
+        on `AttributeError: '_NativeAccessor' object has no attribute 'stat'`.
+
+        The same defect, one file over, in the world built to reproduce it.
+        """
+        probe = "import pathlib, tempfile\nd = pathlib.Path(tempfile.mkdtemp())\nprint('IS_DIR:', d.is_dir())\n"
+        world = EMULATE_REAL_310_ACCESSOR_HOST + EMULATE_NATIVE_ACCESSOR_HOST
+        result = _run(PRELOAD + world + probe)
+        assert "NATIVE_HOST_ALREADY" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "IS_DIR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_SYNTHESISED_accessor_delegates_what_it_does_not_name(self, tmp_path):
+        """Belt to the braces above, and the half a no-op guard cannot cover.
+
+        The guard stops the world installing over a real accessor. It does not
+        stop the synthetic one being incomplete on a host that genuinely has
+        none - so the stand-in delegates every unnamed attribute to the os
+        function of the same name. An accessor is a namespace, and a stand-in
+        for a namespace that answers three questions is a trap for the fourth.
+        """
+        probe = (
+            "import pathlib\n"
+            "acc = pathlib._normal_accessor\n"
+            "print('DELEGATES_STAT:', callable(getattr(acc, 'stat', None)))\n"
+            "print('DELEGATES_LISTDIR:', callable(getattr(acc, 'listdir', None)))\n"
+        )
+        result = _run(PRELOAD + REMOVE_ANY_NATIVE_ACCESSOR + EMULATE_NATIVE_ACCESSOR_HOST + probe)
+        assert "NATIVE_HOST_SYNTHESISED" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "DELEGATES_STAT: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        assert "DELEGATES_LISTDIR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_real_310_host_ROUTES_stat_and_does_not_merely_declare_it(self, tmp_path):
+        """Arming probe for the round-9 reproduction, for the same reason its
+        round-8 sibling needed one: a host that carries the attribute without
+        routing through it reproduces nothing, and the pin above would pass
+        against a world that never had the shape."""
+        probe = (
+            "import pathlib, tempfile\n"
+            "seen = []\n"
+            "_real = pathlib.Path._accessor.stat\n"
+            "pathlib.Path._accessor.stat = lambda *a, **k: (seen.append(1), _real(*a, **k))[1]\n"
+            "pathlib.Path(tempfile.mkdtemp()).is_dir()\n"
+            "print('STAT_WENT_THROUGH_ACCESSOR:', bool(seen))\n"
+        )
+        result = _run(PRELOAD + EMULATE_REAL_310_ACCESSOR_HOST + probe)
+        assert "STAT_WENT_THROUGH_ACCESSOR: True" in result.stdout, f"{result.stdout}\n{result.stderr}"
+
+    def test_the_accessor_absence_emulation_actually_REMOVES_it(self, tmp_path):
+        """Arming probe for REMOVE_ANY_NATIVE_ACCESSOR. On 3.11+ it is a no-op
+        by construction, so without this pin the world could stop working and
+        every arm expectation built on it would keep passing here while going
+        dark on exactly the leg it exists for."""
+        probe = "import pathlib\nprint('HAS_ACCESSOR:', hasattr(pathlib, '_NormalAccessor'))\n"
+        before = _run(PRELOAD + EMULATE_REAL_310_ACCESSOR_HOST + probe)
+        after = _run(PRELOAD + EMULATE_REAL_310_ACCESSOR_HOST + REMOVE_ANY_NATIVE_ACCESSOR + probe)
+        assert "HAS_ACCESSOR: True" in before.stdout, f"{before.stdout}\n{before.stderr}"
+        assert "HAS_ACCESSOR: False" in after.stdout, f"{after.stdout}\n{after.stderr}"
 
     def test_the_native_host_mkdir_honours_parents_and_exist_ok(self, tmp_path):
         """The fidelity of the stand-in, pinned rather than left to run order.
@@ -848,19 +1029,113 @@ class TestTheInstrumentsCanFire:
         assert host_reads is True
         assert _alias_discrimination_verdict(host_reads, emulated_reads) == (ALIAS_DISCRIMINATION_UNFALSIFIABLE)
 
-    def test_an_ALIAS_emulation_is_caught_where_it_can_be_caught(self, tmp_path):
-        """@flow's M3 trap, still pinned on the host that can see it.
+    NTPATH_313_ISABS = (
+        "import ntpath, os\n"
+        "\n"
+        "def _isabs_313(s):\n"
+        "    # CPython 3.13 ntpath.isabs - the LEGACY BUG clause is gone, so a\n"
+        "    # rooted driveless path needs a drive or a UNC prefix to count.\n"
+        "    s = os.fspath(s)\n"
+        "    sep, altsep, colon_sep = chr(92), '/', ':' + chr(92)\n"
+        "    s = s[:3].replace(altsep, sep)\n"
+        "    return s.startswith(colon_sep, 1) or s.startswith(sep * 2)\n"
+        "\n"
+        "ntpath.isabs = _isabs_313\n"
+    )
 
-        On posix, aliasing ntpath.realpath is just abspath again and reproduces
-        nothing - the emulation would report NOT_ARMED. This is the pin that
-        makes the by-property emulation load-bearing rather than stylistic, and
-        it is why the unfalsifiable row above is a loss worth naming: on nt this
-        check cannot run at all.
+    ALIAS_WORLD = "import ntpath, os\nos.path.realpath = ntpath.realpath\n"
+
+    ALIAS_PROBE = (
+        "import ntpath, os\n"
+        "_abs = os.path.abspath(os.sep)\n"
+        "print('NTPATH_CALLS_IT_ABSOLUTE:', ntpath.isabs(_abs))\n"
+        "_seen = []\n"
+        "_real_getcwd = os.getcwd\n"
+        "os.getcwd = lambda: (_seen.append(1), _real_getcwd())[1]\n"
+        "os.path.realpath(_abs)\n"
+        "print('ALIAS_READ_CWD:', bool(_seen))\n"
+    )
+
+    def _measure_alias(self, host: str = "") -> tuple:
+        """`(alias_reads_cwd, ntpath_calls_probe_absolute)` on this host."""
+        result = _run(PRELOAD + host + self.ALIAS_WORLD + self.ALIAS_PROBE)
+        assert "ALIAS_READ_CWD:" in result.stdout, f"{result.stdout}\n{result.stderr}"
+        return (
+            "ALIAS_READ_CWD: True" in result.stdout,
+            "NTPATH_CALLS_IT_ABSOLUTE: True" in result.stdout,
+        )
+
+    def test_the_alias_trap_is_caught_or_the_reason_is_named(self, tmp_path):
+        """@flow's M3 trap, and what this interpreter can actually say about it.
+
+        The version this replaces asserted the alias does NOT read the cwd -
+        true on 3.12 posix and false on two other legs for two different
+        reasons. On nt the alias IS the host. On 3.13 ntpath stopped calling a
+        rooted driveless path absolute (the LEGACY BUG clause at ntpath.py:99
+        is gone), so `_abspath_fallback` consults the cwd for the probe path
+        and the alias answers exactly as the real emulation does.
+
+        Measured, then reported. Where the trap is catchable this still catches
+        it; where it is not, the verdict names WHICH dimension took it away.
         """
-        alias_world = "import ntpath, os\nos.path.realpath = ntpath.realpath\n"
-        if self._reads_cwd_for_an_absolute_path():
-            pytest.skip("nt-shaped host: an alias IS the host here, so this cannot discriminate")
-        assert self._reads_cwd_for_an_absolute_path(alias_world) is False
+        alias_reads, ntpath_absolute = self._measure_alias()
+        verdict = _alias_catchability(alias_reads, ntpath_absolute)
+        if verdict == ALIAS_CATCHABLE:
+            assert alias_reads is False
+        else:
+            # Not skipped: the loss is recorded with its mechanism attached, so
+            # a future reader sees a measured boundary rather than a gap.
+            assert alias_reads is True
+
+    def test_the_alias_IS_catchable_on_a_312_shaped_ntpath(self, tmp_path):
+        """The row this file was built on, pinned as a row rather than assumed
+        as the world. Green here today; the day the local interpreter drops the
+        legacy clause this reds instead of the boundary moving in silence."""
+        alias_reads, ntpath_absolute = self._measure_alias()
+        if not ntpath_absolute:
+            pytest.skip("this interpreter's ntpath already dropped the legacy clause (3.13+)")
+        assert _alias_catchability(alias_reads, ntpath_absolute) == ALIAS_CATCHABLE
+
+    def test_the_alias_is_LOST_TO_VERSION_on_a_313_shaped_ntpath(self, tmp_path):
+        """The 3.13 red, reproduced here and held closed.
+
+        Emulated BY PROPERTY - ntpath.isabs rewritten to 3.13's rule - not by
+        asserting a version number, so the row is falsifiable on this
+        interpreter rather than only on the leg that reported it.
+        """
+        alias_reads, ntpath_absolute = self._measure_alias(self.NTPATH_313_ISABS)
+        assert alias_reads is True, "the 3.13 isabs emulation did not change the answer"
+        assert ntpath_absolute is False
+        assert _alias_catchability(alias_reads, ntpath_absolute) == ALIAS_LOST_TO_VERSION
+
+    @pytest.mark.parametrize(
+        "alias_reads,ntpath_absolute,expected",
+        [
+            (False, True, ALIAS_CATCHABLE),
+            (False, False, ALIAS_CATCHABLE),
+            (True, True, ALIAS_LOST_TO_PLATFORM),
+            (True, False, ALIAS_LOST_TO_VERSION),
+        ],
+    )
+    def test_the_catchability_table_is_reachable_on_any_host(self, alias_reads, ntpath_absolute, expected):
+        """Every row runnable anywhere, including the nt one. A literal table,
+        so it cannot vanish."""
+        assert _alias_catchability(alias_reads, ntpath_absolute) == expected
+
+    def test_the_313_emulation_changes_only_isabs(self, tmp_path):
+        """Arming probe for the reproduction. If the emulation ever stops
+        taking, the version row above passes for the wrong reason - which is
+        the failure mode this whole file exists to refuse."""
+        probe = (
+            "import ntpath, os\n"
+            "print('ROOTED_IS_ABSOLUTE:', ntpath.isabs(os.sep))\n"
+            "print('DRIVED_IS_ABSOLUTE:', ntpath.isabs('C:' + chr(92) + 'x'))\n"
+        )
+        plain = _run(PRELOAD + probe)
+        emulated = _run(PRELOAD + self.NTPATH_313_ISABS + probe)
+        assert "DRIVED_IS_ABSOLUTE: True" in plain.stdout, plain.stdout
+        assert "DRIVED_IS_ABSOLUTE: True" in emulated.stdout, emulated.stdout
+        assert "ROOTED_IS_ABSOLUTE: False" in emulated.stdout, emulated.stdout
 
     def test_world_a_ARMS_against_a_310_shaped_pathlib(self, tmp_path):
         """The cure, measured on the interpreter shape this machine does not

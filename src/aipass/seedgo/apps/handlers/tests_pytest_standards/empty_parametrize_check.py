@@ -60,16 +60,18 @@ SAFE_BUILTINS: frozenset = frozenset({"range", "sorted", "list", "tuple", "rever
 
 SPECIFICATION = {
     "rule": "TAXONOMY section 5 rule 3a - a table computed at collection time",
-    "species": ["VANISHING-TABLE"],
+    "species": ["VANISHING-TABLE", "SHORT-TABLE"],
     "flags": [
         "parametrize argvalues drawn from a function call, whose empty return "
         "pytest reports as SKIPPED while the suite summary reads green",
+        "the same table where the file's only guard asserts NON-EMPTINESS - a "
+        "collector that drops one entry still satisfies it (SHORT-TABLE)",
     ],
     "exempts": [
         "a literal list/tuple/set with elements - it cannot be empty",
         "a module-level name bound to a non-empty literal",
         "a safe builtin over a literal: range(24), sorted(LITERAL)",
-        "a file carrying an independent non-empty assertion on the same source",
+        "a file whose guard pins an expected COUNT, not merely non-emptiness",
     ],
     "fix": (
         "assert the collection is non-empty in a test of its own, and derive that "
@@ -143,6 +145,47 @@ def _cannot_be_empty(value: ast.expr, safe_names: set) -> bool:
     return False
 
 
+def _guard_pins_a_count(parsed: corpus.TestFile) -> bool:
+    """True when some assertion compares a length against a derived EXPECTED value.
+
+    @trigger's round-9 find, and the species is a notch smaller than the one
+    this file was built for: a collector that silently drops ONE entry leaves a
+    non-empty table, every surviving case still passes, and the run is two cases
+    lighter than it should be. An empty run at least looks odd; a short one
+    looks like a normal run.
+
+    A guard asserting ``len(x)`` is truthy answers "did it find anything". A
+    guard asserting ``len(x) == expected`` answers "did it find them all", and
+    only the second notices a short table.
+
+    Measured before this split shipped: of 10 files the guard clause acquits
+    fleet-wide, 7 already pin a count and 3 assert only non-emptiness - so the
+    new species nominates three sites, not a tree.
+
+    Args:
+        parsed: The test module.
+
+    Returns:
+        True if a count-pinning assertion exists anywhere in the file.
+    """
+    for node in ast.walk(parsed.tree):
+        if not isinstance(node, ast.Assert):
+            continue
+        for sub in ast.walk(node.test):
+            if not isinstance(sub, ast.Compare):
+                continue
+            if not (isinstance(sub.left, ast.Call) and corpus.dotted_name(sub.left.func).rsplit(".", 1)[-1] == "len"):
+                continue
+            for op, comparator in zip(sub.ops, sub.comparators):
+                if not isinstance(op, ast.Eq):
+                    continue
+                # `len(x) == 0` is an emptiness assertion, not a count.
+                if isinstance(comparator, ast.Constant) and comparator.value == 0:
+                    continue
+                return True
+    return False
+
+
 def _has_independent_nonempty_guard(parsed: corpus.TestFile) -> bool:
     """True when some test in this file asserts a collection is non-empty.
 
@@ -200,12 +243,27 @@ def nominate(scanned: corpus.Corpus) -> List[dict]:
     rows: List[dict] = []
 
     for parsed in scanned.files:
-        if _has_independent_nonempty_guard(parsed):
+        guarded = _has_independent_nonempty_guard(parsed)
+        counted = _guard_pins_a_count(parsed)
+        if guarded and counted:
             continue
         safe_names = _module_literal_names(parsed)
         for unit in parsed.units:
             for argvalues, lineno in _parametrize_tables(unit):
                 if _cannot_be_empty(argvalues, safe_names):
+                    continue
+                if guarded:
+                    rows.append(
+                        corpus.nomination(
+                            "SHORT-TABLE",
+                            unit,
+                            f"parametrize table computed at collection time ({ast.unparse(argvalues)[:60]}) "
+                            "- the file's guard asserts the collection is NON-EMPTY, which a collector that "
+                            "drops one entry still satisfies; pin the expected COUNT from raw data",
+                            line=lineno,
+                            evidence={"argvalues": ast.unparse(argvalues)[:120], "guard": "non-empty only"},
+                        )
+                    )
                     continue
                 rows.append(
                     corpus.nomination(

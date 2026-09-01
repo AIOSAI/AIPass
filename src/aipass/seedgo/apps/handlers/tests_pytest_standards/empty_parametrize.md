@@ -1,7 +1,7 @@
 # Empty Parametrize (static nominator)
 **Status:** Active v1
 **Tier:** STATIC — nominates, never convicts (Law M1)
-**Species:** VANISHING-TABLE
+**Species:** VANISHING-TABLE, SHORT-TABLE
 **Rule:** TAXONOMY section 5 rule 3a - a table computed at collection time
 
 ---
@@ -9,13 +9,14 @@
 ## What it flags
 
 - parametrize argvalues drawn from a function call, whose empty return pytest reports as SKIPPED while the suite summary reads green
+- the same table where the file's only guard asserts NON-EMPTINESS - a collector that drops one entry still satisfies it (SHORT-TABLE)
 
 ## What it must never flag
 
 - a literal list/tuple/set with elements - it cannot be empty
 - a module-level name bound to a non-empty literal
 - a safe builtin over a literal: range(24), sorted(LITERAL)
-- a file carrying an independent non-empty assertion on the same source
+- a file whose guard pins an expected COUNT, not merely non-emptiness
 
 ## What it cannot see
 

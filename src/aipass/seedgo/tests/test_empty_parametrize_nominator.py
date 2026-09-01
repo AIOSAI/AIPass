@@ -176,9 +176,19 @@ class TestWhatItAcquits:
         )
         assert len(rows) == 1
 
-    def test_a_file_with_an_independent_nonempty_guard_is_acquitted(self, tmp_path):
-        """@drone's cure. A file that already asserts its collection is
-        non-empty has done the thing this rule exists to ask for."""
+    def test_a_nonempty_only_guard_is_nominated_as_a_SHORT_TABLE(self, tmp_path):
+        """THE RULING CHANGED IN ROUND 9 and this pin records the change.
+
+        It used to assert a full acquittal: a file asserting its collection is
+        non-empty had done the thing this rule asks for. @trigger found the
+        hole by applying my own sentence to their own pins - a guard asserting
+        non-emptiness catches a collector blinded ENTIRELY and misses one that
+        drops a single entry. The table stays non-empty, every surviving case
+        passes, and the run is quietly short.
+
+        Measured before the split: 10 files fleet-wide are acquitted by the
+        guard clause, 7 already pin a count, 3 do not. Three sites, not a tree.
+        """
         rows = _nominate(
             """
             import pytest
@@ -195,7 +205,54 @@ class TestWhatItAcquits:
             """,
             tmp_path,
         )
+        assert [r["species"] for r in rows] == ["SHORT-TABLE"], rows
+
+    def test_a_guard_that_pins_an_expected_COUNT_is_acquitted(self, tmp_path):
+        """The full acquittal, and the shape @trigger shipped: the expected
+        number derived from the RAW DATA rather than from the collector under
+        judgement, so a dropped entry has something to fail against."""
+        rows = _nominate(
+            """
+            import json
+            import pytest
+
+            def collect():
+                return []
+
+            def test_the_collector_found_them_all():
+                raw = json.loads(RAW.read_text())["bypass"]
+                expected = sum(1 for rule in raw if rule.get("lines"))
+                assert len(collect()) == expected
+
+            @pytest.mark.parametrize("item", collect())
+            def test_each(item):
+                assert item
+            """,
+            tmp_path,
+        )
         assert rows == []
+
+    def test_len_compared_against_ZERO_is_not_a_count_guard(self, tmp_path):
+        """`len(x) == 0` is an emptiness assertion wearing a count's shape, and
+        acquitting on it would hand a full pass to the one comparison that
+        proves the table IS empty."""
+        rows = _nominate(
+            """
+            import pytest
+
+            def collect():
+                return []
+
+            def test_nothing_left_over():
+                assert len(collect()) == 0
+
+            @pytest.mark.parametrize("item", collect())
+            def test_each(item):
+                assert item
+            """,
+            tmp_path,
+        )
+        assert [r["species"] for r in rows] == ["SHORT-TABLE"], rows
 
     def test_a_safe_builtin_over_a_CALL_is_still_nominated(self, tmp_path):
         """The unwrap goes one layer and judges what it finds. sorted() of a

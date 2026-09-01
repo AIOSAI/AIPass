@@ -13,6 +13,56 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **Round 9: the instruments learned to say where they cannot speak — cross
+  terms, one-dimension litmuses, and the wrong question** (FPLAN-0461
+  continued). Round 8's board (9bd2618b) was five red legs, zero production
+  defects for the third consecutive board — and every red was a cross term:
+  a shape simulated on a real host where neither side is 3.12. Three owners,
+  one evening. **Spawn** (965×2, 147 pins in the file, 14/15 mutants each named
+  with the assertion that fired) decomposed the cross into four mechanisms and
+  found the deepest one under it: the old symptom table pinned whether a
+  rebinding reaches the route *afterwards* — an answer that moves with the host
+  for reasons unrelated to the emulation. Three reds, one wrong question. The
+  cures are the terminal shapes: symptoms as judgements over measured values,
+  simulations that declare which real hosts they can speak from and skip with
+  the child's own reason elsewhere, and the platform asymmetry stated plainly —
+  the nt getcwd row is measurable from posix (it rests on the cwd read sitting
+  above the isabs check), the posix row is not measurable from nt (it rests on
+  what counts as absolute), so on the windows leg those rows now skip by name.
+  Two findings that travel: *an emulation friendlier than the thing it emulates
+  hides the defect* (their flavour stand-in forwarded to posixpath, which has a
+  realpath the real `_PosixFlavour` lacks — delegate to the thing you stand in
+  FOR, not a convenient neighbour), and rebinding `pathlib.Path` moves pathlib's
+  own `cls is Path` identity test — the tidier rewrite is the broken one.
+  **Seedgo** (2882×2, 8/8 mutants named) found round 8's defect committed again
+  one file over — the *reproduction partner* of the cure installed a three-method
+  accessor stand-in that decapitated a real 3.10: "a cure and its reproduction
+  are two instruments, and I applied the rule to one of them." Their synthetic
+  accessor now delegates every unnamed attribute ("a stand-in for a namespace
+  that answers three questions is a trap for the fourth") and prints whether it
+  synthesised or stood down. The alias-catchability red confirmed the dispatch
+  hypothesis against CPython source: 3.13 removed ntpath's LEGACY BUG clause
+  (3.12 ntpath.py:99–102) keeping rooted-driveless paths absolute — a platform
+  fact that was a version fact, their own checker-pack sentence landing in their
+  own file; the verdict is now three-state, because a verdict that cannot tell
+  two different losses apart hides the more interesting one. **Flow** (1041×2 +
+  bare-checkout, 15/15 valid mutants dead, 2 invalid published as invalid) found
+  worse than their reported red: *a one-dimension litmus is blind on the host
+  that already is that dimension* — on Windows their runner fake installed
+  Windows-shaped values over Windows-shaped values and the litmus measured
+  nothing while reporting green. The cure is a runner **set**: both platform
+  fakes run every direction and the verdict must not move, so on any host at
+  least one row is a real measurement. Trigger's round-9 line — a mutant report
+  says *which assertion fired*, not only how many — was taken by all three
+  owners the same evening it was proposed. Devpulse fixed the unowned repo-root
+  `conftest.py` docstring and refused the auto-fix rename of
+  `collect_ignore_glob` (the lowercase name is pytest's API contract; the tidier
+  spelling silently disables the mechanism), reported to seedgo as a live
+  checker counterexample. The seedgo-audit leg and test 3.12 went green this
+  board; expected next: the campaign's first fully green board, with the
+  windows-leg posix-only rows skipping by name rather than asserting what the
+  runner can contradict.
+
 - **Round 8: the assumption moves up a level every time it is cured — round 7's
   instruments were sound, and the machinery that installs them was not**
   (FPLAN-0461 continued). Round 7's board (commit 68ab5132) came back 20/20

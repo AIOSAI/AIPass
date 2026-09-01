@@ -4,7 +4,7 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.5.0
+**Version:** 2.6.0
 **Created:** 2025-11-15
 **Last Updated:** 2026-08-31
 
@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 1004 tests across 29 files
+├── tests/                       # 1013 tests across 31 files
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -363,6 +363,38 @@ what a probe can read to construct a path — `os.sep`, `os.path`,
 without it. Reverting the dialect-absolute literals reds it on Linux, which is
 the point: the failure was otherwise only observable on hardware nobody here has.
 
+### Host == faked is one layer
+
+Round 9, named by @seedgo. Round 8 shipped `WINDOWS_RUNNER`, a fake of everything
+a probe can read to build a path. It works on Linux — and it is **dark on the
+runner it was written for**. On a Windows host the fake installs Windows-shaped
+values over Windows-shaped values, so the faked and unfaked runs are
+byte-identical and the control that requires them to *differ* can never arm. A
+single fake cannot arm on the host it imitates, for the same reason a
+`nt`-emulating world proves nothing on `nt`.
+
+What the campaign reported was that control going dark. The bigger hole was
+behind it: the **litmus** was dark too. Round 8's check varied the emulated host
+only, so on Windows it measured nothing at all — *a one-dimension litmus is blind
+on the host that already IS that dimension.*
+
+The cure is a **set**, not a fake: `RUNNERS` carries a posix-shaped and a
+windows-shaped runner, every direction runs under both, and the verdict must not
+move. Whichever one matches the host is inert there — and it says so, in
+@spawn's three-state shape: **CHANGED / ALREADY-with-the-reason /
+UNAVAILABLE-with-the-child's-own-reason.** A row that cannot arm here reports
+*why*; it never passes quietly and never fails on someone else's platform. One
+pin then simulates *both kinds of host* so the Windows leg is falsifiable from
+Linux, forever.
+
+Two rules ride along. Each fake must override **every** host read a probe makes,
+pinned per attribute — a partial fake (`os.sep` without `os.path`) survived
+otherwise. And the probe path itself must be a **published literal**: anything
+computed from the running host — `os.sep`, `sys.executable`, `__file__` — is the
+round-8 defect returning under a new spelling, so the source is parsed and a
+non-`Constant` right-hand side is refused by name (@trigger's shape, and their
+own round-8 red).
+
 ### A sentinel cannot arm, so it takes the eagerness pin dark
 
 @trigger's correction, adopted. A sentinel is stale-proof by construction, so a
@@ -527,7 +559,7 @@ aggregation untouched, plus anything auto-closed during the run.
 ## Quality
 
 - **Seedgo:** 100% (46 standards, no type errors)
-- **Tests:** 1004 tests in 29 files — 1030 cases collected after parametrisation, 1029 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
+- **Tests:** 1013 tests in 31 files — 1042 cases collected after parametrisation, 1041 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
 - **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**
