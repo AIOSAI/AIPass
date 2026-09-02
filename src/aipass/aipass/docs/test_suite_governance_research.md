@@ -98,7 +98,23 @@ authorship: **AIOSAI 15,146 tests, AIPass 3,036, humans 52**.
 
 Two findings fell out that nobody was looking for: **10 test files on disk are not in git at all**, and two
 of them — `api/tests/test_devto_driver.py` and `api/tests/test_bluesky_driver.py` — **are collected and run
-by CI with no history**. The other eight are under `.archive/` and excluded by `norecursedirs`.
+on this machine and can never run in CI**. The other eight are under `.archive/` and excluded by
+`norecursedirs`.
+
+**Corrected 2026-09-02** (@devpulse caught it; re-verified independently before editing). This paragraph
+first said those two files were "collected and run by CI with no history." **That was backwards.** They are
+gitignored *by name* at `src/aipass/api/.gitignore:15-16`, deliberately — DPLAN-0133 makes the
+private-integration driver layer gitignored, so its tests are too. A CI runner clones from git, so those
+files have never existed there and CI has never collected them.
+
+The corrected version is the more interesting finding: **25 test functions (13 + 12, counted by AST) run
+locally that no CI leg can ever run.** A local composed verify and a CI run therefore measure slightly
+different universes — the exact class of divergence worth instrumenting.
+
+**The label is what was wrong, and the fix generalises:** an UNTRACKED column has to distinguish
+**IGNORED-BY-RULE** (a deliberate local/CI divergence) from **MISSING-BY-ACCIDENT** (a lost file). The
+first is a governance signal; the second is a defect. Collapsing them is how the original error happened,
+and a ranked inventory that reports "untracked" without that split will mislead whoever acts on it.
 
 **5. Build it inside seedgo's lane — the argument is from what the lane already has, and the blocker is a
 law, not architecture.**
