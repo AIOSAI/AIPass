@@ -1,3 +1,6 @@
+"""Pins against the live .aipass/hooks.json, not a fixture — see class docstring."""
+
+
 class TestLiveProjectConfigTimeouts:
     """Pins the shipped .aipass/hooks.json, not a fixture.
 

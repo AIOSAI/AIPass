@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-09-01] — the clampdown begins: test-write gate + test inventory (DPLAN-0323 / FPLAN-0468/0469)
+
+### Added
+- **Test-write gate** (hooks): agents can no longer create new test files — a PreToolUse gate (`testwrite_gate.py`, 29th handler) behind a JSON policy switch (`.aipass/test_write_policy.json`: off now, `allow[]` for canary trials, one field flip to re-enable). Fail-closed on missing/corrupt policy, with both safety properties pinned: non-test writes never read the policy, and writing the policy file is itself always allowed. Admin seat checked before the policy read. 54 pins, 13/13 designed mutants killed, proven live through `engine.dispatch`. Not yet wired into `hooks.json` — the wire is a deliberate human checkpoint (trust re-enrollment).
+- **Admin seat rail extracted** (hooks): the 5-leg grant moved from `edit_gate` into `modules/admin_seat.py` — one home, both gates delegate. The extraction itself surfaced (and fixed) a real defect: an unimportable `admin_seat` would have fail-open exempted every seat; both gates now refuse instead.
+- **Test inventory** (seedgo, FPLAN-0468 phase A): `drone @seedgo test-inventory` — static ranking pass over all ~19k fleet tests in seconds; artifacts gitignored by family rule (`.seedgo/test_inventory*`).
+
+### Context
+Part of the test-standards campaign (DPLAN-0323): seedgo's `test_quality` v4 standard graded tests by substring pattern coverage and CI gated the average at 100, which manufactured tests-for-the-checker fleet-wide. The replacement pack (`pytest_quality_standards`, v5 as AST checks in shadow mode) lands on the next train.
+
 ## [2026-09-01] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461) · v2.8.1
 
 ### Fixed

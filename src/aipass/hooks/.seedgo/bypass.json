@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-05-18",
-    "updated": "2026-08-18",
+    "updated": "2026-09-01",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — seedgo's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1328,6 +1328,46 @@
       "file": "apps/modules/bash_writes.py",
       "standard": "modules",
       "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
+    },
+    {
+      "file": "apps/handlers/security/testwrite_gate.py",
+      "standard": "dead_code",
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.testwrite_gate.handle' — not statically imported by design. Same profile as edit_gate/rm_gate/registry_gate."
+    },
+    {
+      "file": "apps/handlers/security/testwrite_gate.py",
+      "standard": "unused_function",
+      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. NOTE: the PreToolUse.testwrite_gate entry is NOT yet in .aipass/hooks.json — adding it changes the trust hash, so it is Patrick's/@devpulse's step. No engine.jsonl firing evidence yet; this bypass is provisional until that wire lands."
+    },
+    {
+      "file": "apps/handlers/security/testwrite_gate.py",
+      "standard": "json_structure",
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler. Identical to the edit_gate/rm_gate/registry_gate bypasses above."
+    },
+    {
+      "file": "apps/modules/testwrite_targets.py",
+      "standard": "json_structure",
+      "reason": "Pure path classifier for testwrite_gate — answers 'is this a new test file' from a Path's shape and one exists() call. Touches no JSON at all. Same profile as bash_writes.py."
+    },
+    {
+      "file": "apps/modules/testwrite_targets.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: it is the test-file classifier consumed by handlers/security/testwrite_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Its residual IS reachable from the terminal — print_introspection() is surfaced through 'drone @hooks testwrite'. Same profile as bash_writes.py."
+    },
+    {
+      "file": "apps/modules/admin_seat.py",
+      "standard": "json_structure",
+      "reason": "Asks @ai_mail's verified-caller rail one boolean question and stamps/unstamps one env var. Touches no JSON at all, so there is nothing for json_handler to log."
+    },
+    {
+      "file": "apps/modules/admin_seat.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: a CLI that answered 'are you the admin seat' would stamp a caller cwd from whatever directory the operator stood in, which is exactly the name-check this module exists to refuse. Consumed by edit_gate and testwrite_gate inside PreToolUse hooks. print_introspection() reports the contract. Same profile as bash_writes.py."
+    },
+    {
+      "file": "apps/modules/testgate_policy.py",
+      "standard": "json_structure",
+      "reason": "Reads the operator-owned .aipass/test_write_policy.json with stdlib json — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
     }
   ],
   "notes": {
