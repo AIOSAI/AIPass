@@ -369,6 +369,60 @@ def test_no_bypass_run_does_not_clobber_the_normal_artifact(tmp_path):
     assert scoped_raw != audit_artifact.default_artifact_path("prax")
 
 
+def test_a_second_pack_does_not_clobber_the_aipass_fleet_record(tmp_path):
+    """A non-default pack writes its own file; last_audit.json stays the aipass record.
+
+    THE LIVE DEFECT, found by running the shadow cycle: `audit pytest_quality`
+    is a fleet run with no flags, so it took the same path as `audit aipass`
+    and overwrote last_audit.json with a 12-standard shadow score that gates
+    nothing. The file sat that way for ~25 minutes. A consumer reading it cold
+    expects the 47-standard compliance record and would have measured a pack
+    whose numbers nobody may act on.
+
+    Identical in kind to the scoped-run and no-bypass hazards pinned above, and
+    the cure is theirs: the pack is part of the name. `aipass` stays unsuffixed
+    because it IS the compliance record every existing consumer already reads.
+    """
+    fleet = audit_artifact.default_artifact_path()
+    shadow = audit_artifact.default_artifact_path(pack="pytest_quality")
+
+    assert shadow != fleet
+    assert shadow.name == "last_audit_pack_pytest_quality.json"
+    assert shadow.parent == fleet.parent
+
+
+def test_the_default_pack_keeps_the_historical_artifact_name(tmp_path):
+    """`aipass` and an unstated pack both answer last_audit.json.
+
+    The counter-arm, and it is load-bearing: CI and every saved consumer read
+    that exact name. A cure that renamed the aipass artifact would fix the
+    collision by breaking the thing the collision endangered.
+    """
+    assert audit_artifact.default_artifact_path(pack="aipass") == audit_artifact.default_artifact_path()
+    assert audit_artifact.default_artifact_path(pack=None).name == "last_audit.json"
+    assert audit_artifact.default_artifact_path(pack="aipass", specific_branch="prax").name == "last_audit_prax.json"
+
+
+def test_pack_and_branch_and_bypass_all_discriminate_together(tmp_path):
+    """Three axes, three suffixes, no pair collides.
+
+    Pinned because the defect was precisely one axis missing from a function
+    that already handled the other two: partial discrimination reads as full
+    discrimination at the call site.
+    """
+    paths = {
+        audit_artifact.default_artifact_path(),
+        audit_artifact.default_artifact_path(specific_branch="prax"),
+        audit_artifact.default_artifact_path(no_bypass=True),
+        audit_artifact.default_artifact_path(pack="pytest_quality"),
+        audit_artifact.default_artifact_path(pack="pytest_quality", specific_branch="prax"),
+        audit_artifact.default_artifact_path(pack="pytest_quality", no_bypass=True),
+        audit_artifact.default_artifact_path(pack="pytest_quality", specific_branch="prax", no_bypass=True),
+    }
+
+    assert len(paths) == 7
+
+
 def test_no_bypass_write_lands_on_its_own_path(tmp_path, monkeypatch):
     """write_audit_artifact routes a --no-bypass run away from the normal file."""
     monkeypatch.setattr(audit_artifact, "_SEEDGO_ROOT", tmp_path)
