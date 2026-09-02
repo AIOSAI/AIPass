@@ -115,9 +115,10 @@ seedgo/
 │   ├── seedgo.py                    # Entry point — thin router (326 lines)
 │   │                                #   discover_modules() loads apps/modules/*.py
 │   │                                #   route_command() dispatches to first handler returning True
-│   ├── modules/                     # 11 business logic modules
+│   ├── modules/                     # 12 business logic modules
 │   │   ├── audit_tests.py           # Execution-tier test quality (runs the suite in a copy)
 │   │   ├── inventory.py             # test-inventory verb — every test ranked for READING
+│   │   ├── shadow_cycle.py          # shadow-cycle verb — the three weekly passes, one command
 │   │   ├── standards_audit.py       # Pack-aware compliance audit orchestrator
 │   │   ├── standards_query.py       # Pack-aware content query
 │   │   ├── diagnostics_audit.py     # Pyright diagnostics via audit pipeline
@@ -164,6 +165,7 @@ seedgo/
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
 │       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, shadow mode
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
+│       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
 ├── tests/                           # 63 test files, 3070 tests
 ├── .trinity/                        # Identity + memory

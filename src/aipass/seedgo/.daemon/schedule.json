@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "branch": "@seedgo",
+  "jobs": [
+    {
+      "id": "shadow-cycle-weekly",
+      "enabled": false,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 10080
+      },
+      "wake": {
+        "fresh": true,
+        "model": "sonnet"
+      },
+      "prompt": "AIPass @daemon WEEKLY wake for @seedgo - the v5 shadow cadence. Do ONLY this, nothing else.\n1. From the repo root run: drone @seedgo shadow-cycle run\n   Measured: about 2 minutes on a warm audit cache and about 6 minutes on a cold one (the fleet pytest_quality pass is the long pole), and longer on a slower host. Start it in the BACKGROUND and poll until it exits - a foreground bash call is capped at 10 minutes and would be killed mid-audit.\n2. The verb emails its own one-screen summary to @devpulse. Do not send any other mail.\n3. Report the three headline numbers it printed - the pytest_quality shadow average, the test-function count, the consolidation-candidate count - then STOP.\nDo NOT run startup, do NOT update memories, do NOT open or close plans, do NOT fix anything, and do NOT act on any number it prints: the pytest_quality pack is SHADOW and gates nothing. If the verb fails, report the error verbatim and STOP.",
+      "_slot": "Intended slot: Sunday 03:00 local. An interval job has no time field - it fires on the first daemon tick after it is enabled and then every 10080 minutes from that moment, so the slot is set by SEEDING last_run, not by this file (drone @daemon run --help: 'No native offset field. Seed different last_run values in daemon_json/daemon_runstate.json'). Sunday 03:00 is the quiet window: no human at the keyboard, no PR train, and clear of @daemon's own 09:00 inbox-sweep. The cycle saturates the CPU for its whole run (pyright per branch, one git blame per test file) and it evicts the aipass-pack audit cache, so the next interactive 'audit aipass' is a cold full scan - both are reasons it must not land during a working session.",
+      "_note": "LANDS DISABLED ON PURPOSE, for a human or @daemon to switch on. REASON, now down to one: an enabled interval job with no runstate entry fires IMMEDIATELY on the next daemon tick - not at 03:00 Sunday - and the slot can only be set by seeding last_run in daemon_json/daemon_runstate.json, which lives in @DAEMON's tree and is not seedgo's to write (no cross-branch edits). So the chosen quiet hour cannot be honoured from this file alone. DISCHARGED 2026-09-02: the mail leg is no longer unproven - 'drone @seedgo shadow-cycle run' was executed live by seedgo, completed, and mailed @devpulse ('emailed to @devpulse'), so the one output of an unattended run now has evidence behind it. TO SWITCH ON: seed daemon_json/daemon_runstate.json with '@seedgo/shadow-cycle-weekly' last_run set to the Sunday 03:00 you want the week counted from, then set enabled true here. Order matters - enabling first fires it at the wrong hour and then locks the rhythm to that hour for good."
+    }
+  ]
+}
