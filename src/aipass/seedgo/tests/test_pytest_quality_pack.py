@@ -4796,3 +4796,67 @@ class TestTheCorpusWalkSurvivesWhereItLives:
         scanned = corpus.build(tmp_path, test_dirs=("tests", "test"), with_production=True)
 
         assert list(scanned.production_trees) == ["app.py"]
+
+
+class TestTheTeachingTemplatesStillRun:
+    """The templates claim to be worked examples. Something has to prove it.
+
+    They are deliberately invisible to both suites: seedgo's pytest.ini narrows
+    `python_files` to `test_*.py` (these are `*_test.py`) and the repo root puts
+    `templates` in `norecursedirs`. That is the right call - teaching files must
+    not inflate a branch's green count. But it leaves them run by NOTHING, and a
+    worked example nobody executes is prose claiming to be code, which is the
+    exact species this pack exists to correct. So this pin runs them out-of-band.
+    """
+
+    def test_every_teaching_template_passes_when_it_is_actually_run(self):
+        """Pins that the templates in pytest_quality_standards/templates are green.
+
+        Calls subprocess.run over pytest with the default file patterns restored.
+        If a template rots - a renamed symbol, a changed signature, a wrong
+        example that stops being wrong - this goes red and nothing else would.
+        """
+        import subprocess
+        import sys
+
+        templates = (
+            Path(__file__).resolve().parent.parent / "apps" / "handlers" / "pytest_quality_standards" / "templates"
+        )
+        assert templates.is_dir(), f"templates directory is missing: {templates}"
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(templates),
+                "-q",
+                "-o",
+                "python_files=test_*.py *_test.py",
+                "-o",
+                "addopts=",
+                "-p",
+                "no:cacheprovider",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        assert completed.returncode == 0, f"templates are not green:\n{completed.stdout}\n{completed.stderr}"
+
+    def test_the_templates_are_not_collected_by_the_branch_suite(self):
+        """Pins the other arm - teaching files must stay OUT of the branch count.
+
+        Constructed rather than borrowed: without this, the pin above passes
+        just as well after someone renames the templates to test_*.py, which
+        would quietly add worked examples to every fleet test tally and undo the
+        reason they are kept separate.
+        """
+        templates = (
+            Path(__file__).resolve().parent.parent / "apps" / "handlers" / "pytest_quality_standards" / "templates"
+        )
+
+        collected_by_branch_pattern = sorted(p.name for p in templates.glob("test_*.py"))
+
+        assert collected_by_branch_pattern == []
