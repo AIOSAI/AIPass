@@ -183,8 +183,10 @@ def _refuse_creation(targets: list[Path], policy: Any, branch: str, lane: str) -
         f'  to lift for one branch : add "{branch or "<branch>"}" to the "allow" array\n'
         '  to lift fleet-wide     : set "agent_test_writing" to "on"\n'
         f"  to read it here        : drone @hooks testwrite\n\n"
-        f"This is a human ruling, not a lint — {who} cannot flip it. Ask Patrick or @devpulse "
-        'if the test is needed: drone @ai_mail email @devpulse "Subject" "Body"'
+        f"This is a human ruling, not a lint — {who} cannot flip it. It is in the tier-1 navmap "
+        "house rules, so it is not news: a needed test goes through @devpulse NAMING THE DEFECT OR "
+        "CONTRACT IT PINS — that clause is the ask, not the mail.\n"
+        '  drone @ai_mail email @devpulse "New test needed: <file>" "<the defect or contract it pins>"'
     )
     return _block(reason)
 

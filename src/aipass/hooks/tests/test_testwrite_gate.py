@@ -160,6 +160,19 @@ class TestTheSwitch:
         assert '"agent_test_writing" to "on"' in reason
         assert "drone @hooks testwrite" in reason
 
+    def test_the_refusal_names_what_the_ask_must_CARRY(self, project: dict):
+        """Patrick's awareness ruling: blocking without teaching is half a gate.
+
+        The navmap house rule is not "mail @devpulse", it is "mail @devpulse with
+        the defect or contract the test pins". Naming the recipient and omitting
+        that clause turns a reviewable request into a re-ask.
+        """
+        _policy(project)
+        reason = _reason(_run(project["seat"], file_path=project["new_test"]))
+        assert "DEFECT OR" in reason and "PINS" in reason
+        assert "navmap" in reason
+        assert "drone @ai_mail email @devpulse" in reason
+
 
 class TestTheRulingStaysWherePatrickDrewIt:
     """Creation is blocked. Fixing a red test is legitimate work and stays open."""
@@ -252,6 +265,19 @@ class TestTheFailModeIsObservable:
         reason = _reason(_run(project["seat"], file_path=project["new_test"]))
         assert "test_write_policy.json" in reason
         assert "agent_test_writing" in reason
+
+    def test_the_missing_refusal_names_the_RULING_it_stands_in_for(self, project: dict):
+        """The message a fresh project actually hits, so it carries the most weight.
+
+        `aipass init` stamps the gate but not a policy, so most projects meet this
+        refusal and never the configured one. Without the ruling named, it reads as
+        a broken install rather than a fleet decision — and the cure looks like
+        "repair something" instead of "opt in".
+        """
+        reason = _reason(_run(project["seat"], file_path=project["new_test"]))
+        assert "DPLAN-0323" in reason
+        assert "Patrick" in reason
+        assert "EDITING an existing test is untouched" in reason
 
     @pytest.mark.parametrize(
         "body",

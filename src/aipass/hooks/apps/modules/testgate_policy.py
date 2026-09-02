@@ -140,6 +140,8 @@ def _missing(start: str | Path) -> Policy:
             f"no test-write policy found (searched upward from {start} for {expected}).\n"
             "This gate fails CLOSED on an absent policy: a switch that unlocks when its own "
             "config disappears is repealed by deleting one file.\n"
+            "The ruling it stands in for: Patrick, 2026-09-01 (DPLAN-0323) — agents do not create "
+            "tests while @seedgo's test_quality v5 pack lands. EDITING an existing test is untouched.\n"
             f'Cure: create {expected} with {{"agent_test_writing": "on"}} to permit test '
             'creation here, or "off" plus an "allow" array to enforce the fleet ruling.'
         ),

@@ -151,7 +151,7 @@ src/aipass/hooks/
 │   └── handlers/module_root.py  # Guarded __file__ resolution — the one import-time-safe spelling
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1851 tests across 53 test files (1849 pass, 2 env-skipped)
+└── tests/                       # 1857 tests across 53 test files (1855 pass, 2 env-skipped)
 ```
 
 ## How It Works
@@ -385,6 +385,18 @@ printed by `drone @hooks testwrite`, so this list and the code cannot drift apar
 - everything `bash_writes.NOT_CAUGHT` already lists, on the scripted lane
 - a file created by a process the command merely starts (a scaffolder, a generator)
 - deletion or renaming of the policy file itself — this gate does not guard its own switch
+
+**New projects inherit it.** `.aipass/project_hooks.json` — the template `aipass init` stamps —
+carries the `testwrite_gate` entry, so the ruling is fleet-wide rather than AIPass-tree-wide.
+`init` does **not** yet stamp a `test_write_policy.json`, so a freshly-created project lands on the
+fail-closed missing-policy path; that refusal names Patrick's ruling and the one-file opt-in, and
+`TestTheProjectTemplateCarriesTheTestWriteGate` in `tests/test_live_config_timeouts.py` pins the
+template entry against silent drift. Stamping a default policy is @aipass's call, not this branch's.
+
+`registry_gate` is deliberately **not** in that template. It matches on filename shape alone
+(`\w+_REGISTRY\.json$`) with no project-awareness, and its refusal hardcodes "use `drone @spawn`" —
+correct inside AIPass, wrong advice for an unrelated project that happens to own its own
+`FOO_REGISTRY.json`. That needs its own measurement, not a ride-along.
 
 ### The scripted lane — writes made through Bash
 
