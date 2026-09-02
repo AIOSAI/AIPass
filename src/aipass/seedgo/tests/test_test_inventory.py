@@ -620,9 +620,7 @@ class TestTheTwinsSwitch:
 
         THE LIVE DEFECT THIS PINS: `roots.resolve("aipass")` answers the repo
         root, but `twins.branch_dirs` reads immediate children only - so the
-        first wired run reported "0 twins over 0 branches" as a success. The
-        container is derived from the registry's own branch paths, never
-        hardcoded, so a fleet that moves is followed rather than broken.
+        first wired run reported "0 twins over 0 branches" as a success.
         """
         from aipass.seedgo.apps.handlers.test_inventory import roots
         from aipass.seedgo.apps.modules import inventory
@@ -632,6 +630,33 @@ class TestTheTwinsSwitch:
 
         assert container != fleet.path
         assert (container / "seedgo" / "tests").is_dir()
+
+    def test_the_container_is_the_same_on_a_host_with_no_registry(self) -> None:
+        """The fleet container never depends on AIPASS_REGISTRY.json existing.
+
+        THIS TEST IS WHY PR 751 WAS RED ON EVERY BOARD. The first cure took the
+        common parent of `discover_branches`, which reads a registry that is
+        gitignored and therefore ABSENT on any fresh checkout: discovery
+        answered nothing, and the container degraded to the repo root - the
+        very "0 twins as success" the pin above exists to refuse. Green here
+        and red on CI is the signature of machine-local state, so the bare
+        world is asserted rather than assumed: an empty branch map is exactly
+        what a registry-less host produces.
+        """
+        from unittest.mock import patch
+
+        from aipass.seedgo.apps.handlers.test_inventory import roots
+        from aipass.seedgo.apps.modules import inventory
+
+        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        with_registry = inventory._branch_container(fleet)
+
+        with patch.object(inventory, "_branch_paths", return_value={}):
+            without_registry = inventory._branch_container(fleet)
+
+        assert without_registry == with_registry
+        assert without_registry != fleet.path
+        assert (without_registry / "seedgo" / "tests").is_dir()
 
     def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path) -> None:
         """Only the fleet target is redirected; a named directory is not.

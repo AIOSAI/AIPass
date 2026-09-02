@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from aipass.cli import console
+import aipass
 from aipass.cli.apps.modules import error, success
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit import discovery
@@ -136,17 +137,45 @@ def _branch_container(root: roots.Root) -> Path:
 
     The fleet target resolves to the REPO root, one level above the branches,
     and `twins` reads immediate children only - so handing it the repo root
-    finds nothing. The registry knows where the branches actually live, so the
-    container is derived from their common parent rather than hardcoded.
+    finds nothing.
+
+    DERIVED FROM THE SOURCE TREE, NOT THE REGISTRY. The first cure asked
+    `discover_branches` for the branch paths and took their common parent.
+    That is green on a developer machine and RED on every fresh checkout:
+    AIPASS_REGISTRY.json is machine-local and gitignored, so on CI the
+    registry does not exist, discovery answers nothing, and the container
+    silently degraded to the repo root - publishing "0 twins over 0 branches"
+    as a success, the exact defect this verb exists to refuse. Every branch is
+    a subpackage of `aipass` by construction, so the package's own directory
+    IS the container, on any host, with or without a registry.
     """
     if root.name != roots.FLEET_ARGUMENT:
         return root.path
 
-    parents = {Path(path).resolve().parent for path in _branch_paths().values()}
-    if len(parents) == 1:
-        return parents.pop()
+    return _fleet_container()
 
-    return root.path
+
+def _fleet_container() -> Path:
+    """Where the branch packages live, read off the imported `aipass` package.
+
+    `__file__` is None for a namespace package, so `__path__` is read as a
+    fallback rather than assumed away. If neither answers there is nothing left
+    to derive from, and guessing the repo root is precisely what broke CI - so
+    it raises. `twins.branch_dirs` would refuse that result one step later
+    anyway; refusing here names the real cause instead of the symptom.
+    """
+    if aipass.__file__:
+        return Path(aipass.__file__).resolve().parent
+
+    entry = next(iter(aipass.__path__), None)
+    if entry:
+        return Path(entry).resolve()
+
+    raise RuntimeError(
+        "the imported aipass package reports neither __file__ nor __path__, so the "
+        "directory holding the branches cannot be read off the source tree - refusing "
+        "rather than guessing the repo root, which reports zero twins as a success"
+    )
 
 
 def _parse(args: List[str]) -> Tuple[str, int, bool, str]:
