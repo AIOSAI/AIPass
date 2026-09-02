@@ -44,10 +44,13 @@ the exact cross-branch chain it closes.
 # =============================================
 
 import copy
+import errno
 import importlib
 import inspect
 import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping
 
 import pytest
@@ -749,3 +752,321 @@ def test_the_divergence_tables_only_name_branches_that_still_exist():
     """
     stale = sorted((set(SAVE_JSON_MISSING_PARENT) | set(GET_JSON_PATH_TYPE)) - set(BRANCHES))
     assert not stale, f"divergence tables name branches that no longer exist: {json.dumps(stale)}"
+
+
+# ---------------------------------------------------------------------------
+# Durability discovery: every module that ships the bounded replace helper
+# ---------------------------------------------------------------------------
+
+#: The last step of every atomic write in the fleet: rename the staged file
+#: over the live document, tolerating the sharing violation a concurrent
+#: Windows reader causes, bounded so a permanently blocked target still fails.
+RETRY_HELPER = "_replace_with_retry"
+
+#: Path parts that mean "not shipped code". A suite copy names the same symbol
+#: while monkeypatching it, and an archived file is on no import path; either
+#: one would enter the parametrization as an implementation that is not one.
+UNSHIPPED_PARTS = frozenset({"tests", "test", ".archive", "__pycache__", ".sorting_unprocessed"})
+
+
+def ships_retry_helper(path: Path) -> bool:
+    """Whether a package file defines the replace helper itself.
+
+    Args:
+        path: A ``.py`` file found under :data:`PACKAGE_ROOT`.
+
+    Returns:
+        True when the file is shipped code that contains the definition.
+    """
+    if UNSHIPPED_PARTS.intersection(path.parts):
+        return False
+    return f"def {RETRY_HELPER}(" in path.read_text(encoding="utf-8", errors="ignore")
+
+
+def retry_label(relative: Path) -> str:
+    """A short, stable test id for one implementation.
+
+    Args:
+        relative: Implementation path relative to :data:`PACKAGE_ROOT`.
+
+    Returns:
+        The bare branch name for an implementation at the canonical handler
+        location, and the full relative path for one living anywhere else.
+        Deliberately verbose for the second kind rather than
+        ``branch/stem``: that shorter form renders the shared module as
+        ``aipass/json_handler``, which reads like the aipass BRANCH's handler
+        — a label that misnames its subject is worse in a failure message
+        than a long one.
+    """
+    canonical = relative.parts[1:] == ("apps", "handlers", "json", "json_handler.py")
+    return relative.parts[0] if canonical else relative.with_suffix("").as_posix()
+
+
+#: Label to dotted module path for every implementation the package ships.
+#:
+#: An ``rglob`` over the package rather than the two globs that would find the
+#: known families, and the difference is a measurement rather than a
+#: preference: globbing ``*/apps/handlers/json/json_handler.py`` plus the
+#: shared module finds thirteen and misses ``spawn/atomic_write``, a
+#: fourteenth copy of the same helper under a name no handler glob matches.
+#: Discovery narrow enough to confirm the list it was handed cannot report the
+#: implementation nobody listed.
+RETRY_IMPLEMENTATIONS = {
+    retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
+    + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
+    for path in sorted(PACKAGE_ROOT.rglob("*.py"))
+    if ships_retry_helper(path)
+}
+
+#: One param per implementation, and deliberately no divergence table beside
+#: it. All fourteen bodies were measured assertion-identical on 2026-09-02
+#: (docstring wording aside), so a disagreement discovered here is news, not a
+#: known variation to be marked down in advance.
+RETRY_PARAMS = [pytest.param(label, id=label) for label in RETRY_IMPLEMENTATIONS]
+
+
+def retry_implementation(label: str) -> Any:
+    """Import one implementation by its discovery label.
+
+    Args:
+        label: A key of :data:`RETRY_IMPLEMENTATIONS`.
+
+    Returns:
+        The imported module.
+    """
+    return importlib.import_module(RETRY_IMPLEMENTATIONS[label])
+
+
+def isolated_replace(module: Any, monkeypatch: pytest.MonkeyPatch, replace: Callable) -> list:
+    """Point ONE module's ``os.replace`` and ``time.sleep`` at test doubles.
+
+    Patches the module's own ``os`` and ``time`` bindings, never the shared
+    ``os`` and ``time`` modules. The distinction is not cosmetic and was paid
+    for once already in this fleet: patching ``sleep`` on the shared ``time``
+    module reaches every thread in the process, so a full-suite run collected
+    durations belonging to other tests and the wait pin failed intermittently
+    (spawn, 2026-08-30). Fourteen implementations import those same two
+    modules, which would make a shared-module patch a channel between
+    parameters here as well as between files.
+
+    The helper reaches nothing in ``os`` but ``replace`` and nothing in
+    ``time`` but ``sleep``, so a stub carrying one attribute each is its whole
+    reachable surface — and anything else it grew would raise
+    ``AttributeError`` here rather than silently run against the real syscall.
+
+    Args:
+        module: The implementation under test.
+        monkeypatch: Restores both bindings at teardown.
+        replace: Stands in for ``os.replace``.
+
+    Returns:
+        The list each ``time.sleep`` duration is appended to, in order.
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr(module, "os", SimpleNamespace(replace=replace))
+    monkeypatch.setattr(module, "time", SimpleNamespace(sleep=sleeps.append))
+    return sleeps
+
+
+def sharing_violation(destination: Any) -> PermissionError:
+    """The error Windows raises when a reader still holds the target open.
+
+    Args:
+        destination: The live document being replaced.
+
+    Returns:
+        A ``PermissionError`` shaped like the real one, errno 13.
+    """
+    return PermissionError(13, "sharing violation", str(destination))
+
+
+# ---------------------------------------------------------------------------
+# Contracts: durability of the bounded replace helper
+# ---------------------------------------------------------------------------
+#
+# These six ran as thirty-seven separate copies in seven branches before this
+# file existed, one set per implementation, because each copy exercised a
+# DIFFERENT module. Nothing is asserted more weakly here to make one contract
+# cover fourteen: every copy's assertions are kept verbatim, and the module
+# they run against is the parameter. Pure monkeypatch and ``tmp_path``, no
+# platform branch and no skip, so the Windows CI leg runs the same fourteen
+# cases as the POSIX legs — which matters, because the behaviour being pinned
+# only ever misbehaves on Windows.
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_the_replace_helper_is_declared_bounded_and_patient(label: str):
+    """The helper exists, retries more than once, and waits a nonzero time.
+
+    The two constants are pinned as well as the function because either one
+    alone defeats it: a single attempt is not a retry, and a zero backoff is a
+    busy spin that finishes before the reader handle it exists to outlast.
+    """
+    module = retry_implementation(label)
+    assert callable(getattr(module, RETRY_HELPER, None)), (
+        f"{label}: {RETRY_HELPER} missing — a Windows sharing violation still kills the write"
+    )
+    assert module._REPLACE_ATTEMPTS > 1, f"{label}: a single attempt is not a retry"
+    assert module._REPLACE_BACKOFF_SECONDS > 0, f"{label}: a zero backoff spins instead of waiting"
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_the_replace_helper_moves_the_staged_file_over_the_target(label: str, tmp_path: Path):
+    """The happy path is still a plain move — the retry costs nothing idle.
+
+    Runs against the real ``os.replace``: the point is that wrapping the
+    syscall in a retry loop did not change what it does when nothing blocks.
+    """
+    module = retry_implementation(label)
+    source = tmp_path / "staged.tmp"
+    source.write_text("new", encoding="utf-8")
+    destination = tmp_path / "live.json"
+    destination.write_text("old", encoding="utf-8")
+
+    getattr(module, RETRY_HELPER)(str(source), str(destination))
+
+    assert destination.read_text(encoding="utf-8") == "new", f"{label}: the staged content did not land"
+    assert not source.exists(), f"{label}: the staged file survived the move"
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_the_replace_helper_retries_through_a_transient_sharing_violation(
+    label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Two sharing violations then success — the move still lands.
+
+    The count is asserted exactly, not as "more than one": a helper that gave
+    up and swallowed the error would leave the destination stale, and a helper
+    that never engaged the retry would fail on the first call. Only three
+    attempts describe the path this pin is named for.
+    """
+    module = retry_implementation(label)
+    calls = {"count": 0}
+    real_replace = os.replace
+
+    def flaky_replace(source: str, destination: str) -> None:
+        calls["count"] += 1
+        if calls["count"] <= 2:
+            raise sharing_violation(destination)
+        real_replace(source, destination)
+
+    isolated_replace(module, monkeypatch, flaky_replace)
+    source = tmp_path / "staged.tmp"
+    source.write_text("new", encoding="utf-8")
+    destination = tmp_path / "live.json"
+    destination.write_text("old", encoding="utf-8")
+
+    getattr(module, RETRY_HELPER)(str(source), str(destination))
+
+    assert destination.read_text(encoding="utf-8") == "new", f"{label}: the retried move never landed"
+    assert calls["count"] == 3, f"{label}: retry path never engaged"
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_the_replace_retry_is_bounded_and_raises_when_exhausted(
+    label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A replace that never unblocks raises instead of retrying forever.
+
+    Asserted against the module's own declared bound rather than a literal, so
+    an implementation that tunes its attempt count stays covered and one that
+    quietly stops honouring its own constant does not.
+    """
+    module = retry_implementation(label)
+    calls = {"count": 0}
+
+    def blocked_replace(source: str, destination: str) -> None:
+        calls["count"] += 1
+        raise sharing_violation(destination)
+
+    isolated_replace(module, monkeypatch, blocked_replace)
+
+    with pytest.raises(PermissionError):
+        getattr(module, RETRY_HELPER)(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
+
+    assert calls["count"] == module._REPLACE_ATTEMPTS, f"{label}: bound not honoured"
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_the_replace_retry_waits_between_attempts(label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The backoff is used, not merely declared.
+
+    Deleting the sleep leaves a busy spin that passes every other pin above:
+    it still retries, still bounds, still raises. But forty immediate attempts
+    finish inside a microsecond and never outlast the reader handle the retry
+    exists to wait out, so the retry stops being a fix and becomes decoration,
+    and nothing else here would say so — the mutation survived a run on
+    2026-08-18. Counting the sleeps pins the wait without asserting on
+    wall-clock time, which would be flaky on a loaded runner.
+    """
+    module = retry_implementation(label)
+
+    def blocked_replace(source: str, destination: str) -> None:
+        raise sharing_violation(destination)
+
+    sleeps = isolated_replace(module, monkeypatch, blocked_replace)
+
+    with pytest.raises(PermissionError):
+        getattr(module, RETRY_HELPER)(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
+
+    # One wait between each pair of attempts — never after the last, which raises.
+    expected = [module._REPLACE_BACKOFF_SECONDS] * (module._REPLACE_ATTEMPTS - 1)
+    assert sleeps == expected, f"{label}: the declared backoff was not slept"
+
+
+@pytest.mark.parametrize("label", RETRY_PARAMS)
+def test_a_non_permission_error_propagates_without_a_retry(label: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Only a sharing violation is worth waiting out.
+
+    A cross-device rename or a full disk will not fix itself in 200ms, and
+    retrying it forty times buys nothing but a slower failure and a longer
+    wait before the caller learns what actually went wrong.
+    """
+    module = retry_implementation(label)
+    calls = {"count": 0}
+
+    def broken_replace(source: str, destination: str) -> None:
+        calls["count"] += 1
+        raise OSError(errno.EXDEV, "invalid cross-device link")
+
+    isolated_replace(module, monkeypatch, broken_replace)
+
+    with pytest.raises(OSError) as caught:
+        getattr(module, RETRY_HELPER)(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
+
+    assert caught.value.errno == errno.EXDEV, f"{label}: a different error surfaced"
+    assert calls["count"] == 1, f"{label}: a non-sharing failure was retried"
+
+
+def test_retry_discovery_finds_the_whole_package_and_names_no_module_itself():
+    """Guards the mechanism the six contracts above stand on.
+
+    If the scan silently matched nothing, all six would collect zero cases and
+    the run would be green while measuring nothing at all — the failure mode
+    that makes a consolidated suite more dangerous than the copies it
+    replaced, since there is now one place to go quiet instead of seven. Pins
+    a floor rather than a count so a new implementation does not turn this
+    red, and checks every discovered label really imports.
+    """
+    assert len(RETRY_IMPLEMENTATIONS) >= 2, f"retry discovery found {RETRY_IMPLEMENTATIONS} under {PACKAGE_ROOT}"
+    for label, dotted in RETRY_IMPLEMENTATIONS.items():
+        module = importlib.import_module(dotted)
+        assert callable(getattr(module, RETRY_HELPER, None)), f"{label}: discovered but exposes no {RETRY_HELPER}"
+
+
+def test_every_canonical_handler_that_stages_a_write_also_retries_the_replace():
+    """A handler that stages then renames must not do the rename unguarded.
+
+    Discovery is a text scan, so it answers "who has the helper" but never
+    "who should". This crosses it against the canonical handlers the rest of
+    the file already found: a branch whose handler stages a temp file and then
+    calls ``os.replace`` without the bounded helper has the exact defect the
+    helper exists to fix, and would otherwise simply be absent from the
+    parametrization above rather than reported by it.
+    """
+    unguarded = []
+    for branch in BRANCHES:
+        source = (PACKAGE_ROOT / branch / "apps" / "handlers" / "json" / "json_handler.py").read_text(encoding="utf-8")
+        if "os.replace(" in source and f"def {RETRY_HELPER}(" not in source:
+            unguarded.append(branch)
+    assert not unguarded, f"handlers calling os.replace with no bounded retry: {json.dumps(sorted(unguarded))}"
