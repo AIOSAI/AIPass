@@ -77,6 +77,10 @@ drone @seedgo audit-tests @branch                      # Execution-tier test qua
 drone @seedgo audit-tests <directory>                  # Any directory with pytest targets
 drone @seedgo audit-tests aipass                       # Every citizen
 
+# Test quality v5 (generic pack, shadow mode — scores, gates nothing)
+drone @seedgo audit pytest_quality @branch             # 11 AST rules over a project's tests
+drone @seedgo audit pytest_quality                     # Every citizen
+
 # README
 drone @seedgo readme update @flow                      # README auto-generation for a branch
 drone @seedgo readme check @seedgo                     # Marker-driven freshness check
@@ -158,9 +162,10 @@ seedgo/
 │       ├── readme/                  # README generator + branch resolution
 │       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
+│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, shadow mode
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 59 test files, 2691 tests
+├── tests/                           # 63 test files, 3070 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts

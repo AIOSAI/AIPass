@@ -179,6 +179,46 @@
       "file": "apps/handlers/tests_pytest_standards/render_spec.py",
       "standard": "unused_function",
       "reason": "render_markdown() is the GENERATOR for the pack's nine *.md triplet files, which seedgo's own triplet proof requires every standard to ship. Its output is checked byte-for-byte against the files on disk by test_every_shipped_md_is_BYTE_IDENTICAL_to_what_the_spec_renders, so a SPECIFICATION edited without regenerating fails the suite - the .md is output, not a second statement of the rule. Same shape as the format_summary() and print_branch_diagnostics() entries above: public API consumed by tests, not called in the production path."
+    },
+    {
+      "file": "apps/handlers/test_inventory/collection.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/test_inventory/exclusions.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/test_inventory/history.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/test_inventory/ranking.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/test_inventory/roots.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/test_inventory/shape.py",
+      "standard": "json_structure",
+      "reason": "Pure computation leaf of the test-inventory verb: it parses, classifies or scores and returns a value. It changes no state, so it has no operation to log. The verb's own operations ARE logged - apps/modules/inventory.py logs test_inventory_invoked and handlers/test_inventory/report.py logs test_inventory_published at the one site that writes anything. report.py is deliberately NOT bypassed, so the file that touches the disk still answers to this standard."
+    },
+    {
+      "file": "apps/handlers/pytest_quality_standards/",
+      "standard": "json_structure",
+      "reason": "GENERIC PACK - the whole reason this pack is not folded into aipass_standards is that it lifts onto any Python project (DPLAN-0323, Patrick's ruling). Importing seedgo's json_handler would make that claim false: the pack would carry AIPass with it and could not be dropped into an external repo. The checkers are stdlib-only by construction (ast, pathlib, dataclasses, typing) and the module docstrings say so, so this is a structural property of the pack, not an oversight in one file. Scoped to the pack directory - the seedgo-side glue that reports these results into the audit is NOT covered and uses json_handler normally."
+    },
+    {
+      "file": "apps/handlers/pytest_quality_standards/corpus.py",
+      "standard": "silent_catch",
+      "reason": "NOT A SILENT CATCH - a third disposition the standard does not model. `_parse` catches OSError/SyntaxError/UnicodeDecodeError/ValueError and RETURNS the reason as `(None, \"SyntaxError: ...\")`; `build` records it in `Corpus.unparseable_reasons` and `no_oracle_check` renders it as a check line naming the file as NOT measured. The error reaches the human READING THE REPORT, which is strictly louder than a log entry. The standard accepts 'log or re-raise'; a logger is exactly what a stdlib-only generic pack cannot import, and re-raising would let one broken test file abort a whole project's score. STANDARD GAP LOGGED for the v5 campaign - returning a named reason to a caller that must handle it deserves to be a recognised disposition."
     }
   ],
   "notes": {
