@@ -8,4 +8,8 @@
 !project_CLAUDE.md
 !project_AGENTS.md
 !project_hooks.json
+!test_write_policy.json
 #Do not add other exceptions here without careful consideration. Developer permissions0ns needed.
+# test_write_policy.json exception: Patrick's ruling 2026-09-01 (DPLAN-0323) — the test-write
+# gate's switch must ship with the repo so a fresh clone carries the ruling and its note,
+# not an accident of absence. Flipping it stays a JSON edit; this line only makes it travel.
