@@ -592,3 +592,56 @@ class TestPublication:
         assert summary["blind_spots"]
         assert summary["ranking"]["authorises_deletion"] is False
         assert paths["readable"].read_text().startswith("# Test inventory")
+
+
+class TestTheTwinsSwitch:
+    """`--twins` on the test-inventory verb.
+
+    The twin report is only reachable through this switch, so an unwired flag
+    is an unrunnable report. Both pins here fired red first: the container
+    derivation caught a live defect where the fleet target published a zero.
+    """
+
+    def test_the_twins_flag_is_declared_and_parsed(self) -> None:
+        """`inventory._parse` answers True for --twins and leaves the target alone.
+
+        A flag absent from FLAGS is rejected by the unrecognised-option arm
+        before it ever reaches the parser, so both halves are pinned together.
+        """
+        from aipass.seedgo.apps.modules import inventory
+
+        argument, _top, want_twins, unrecognized = inventory._parse(["aipass", "--twins"])
+
+        assert "--twins" in inventory.FLAGS
+        assert (argument, want_twins, unrecognized) == ("aipass", True, "")
+
+    def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self) -> None:
+        """`inventory._branch_container` descends from the repo root to the branches.
+
+        THE LIVE DEFECT THIS PINS: `roots.resolve("aipass")` answers the repo
+        root, but `twins.branch_dirs` reads immediate children only - so the
+        first wired run reported "0 twins over 0 branches" as a success. The
+        container is derived from the registry's own branch paths, never
+        hardcoded, so a fleet that moves is followed rather than broken.
+        """
+        from aipass.seedgo.apps.handlers.test_inventory import roots
+        from aipass.seedgo.apps.modules import inventory
+
+        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        container = inventory._branch_container(fleet)
+
+        assert container != fleet.path
+        assert (container / "seedgo" / "tests").is_dir()
+
+    def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path) -> None:
+        """Only the fleet target is redirected; a named directory is not.
+
+        The counter-arm. Silently descending under an explicit path would make
+        the verb walk somewhere the caller did not name.
+        """
+        from aipass.seedgo.apps.handlers.test_inventory import roots
+        from aipass.seedgo.apps.modules import inventory
+
+        target = roots.Root(name="local", path=tmp_path, resolved_from="a test")
+
+        assert inventory._branch_container(target) == tmp_path

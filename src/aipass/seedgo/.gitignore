@@ -32,3 +32,11 @@ build/
 # would put it in the public repo permanently. Family form — the lane will grow
 # more outputs (per-branch scoping is next) and each one inherits the rule.
 .seedgo/test_inventory*
+
+# twin-report artifacts - the cross-branch shape-identity census, regenerated
+# by every twins run. Half a megabyte per run because the RESIDUE block names
+# every stamped-family test no candidate group stands behind (1,363 of 1,411
+# on the first fleet pass), and that list is the whole point of the report.
+# Same species as test_inventory*: per-machine advisory evidence whose run
+# metadata lives inside the file, never a fact git needs to carry.
+.seedgo/test_twins*

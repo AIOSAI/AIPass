@@ -34,6 +34,7 @@ this module knows nothing about.
 """
 
 import time
+from pathlib import Path
 from typing import List, Tuple
 
 from aipass.cli import console
@@ -42,13 +43,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, report, roots, shape
+from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, report, roots, shape, twins
 
 #: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("test-inventory", "test_inventory")
 
 #: Every option this verb accepts.
-FLAGS: tuple = ("--top", "--help", "-h")
+FLAGS: tuple = ("--top", "--twins", "--help", "-h")
 
 #: How many rows the reading queue shows when nobody says otherwise.
 DEFAULT_TOP = 15
@@ -84,7 +85,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 def _run(args: List[str]) -> None:
     """Resolve the target, walk it, publish, and print what happened."""
-    argument, top, unrecognized = _parse(args)
+    argument, top, want_twins, unrecognized = _parse(args)
     if unrecognized:
         error(f"test-inventory does not know the option '{unrecognized}' - it accepts {', '.join(FLAGS)}")
         return
@@ -93,6 +94,10 @@ def _run(args: List[str]) -> None:
     json_handler.log_operation("test_inventory_invoked", {"target": argument, "root": str(root.path)})
 
     started = time.time()
+    if want_twins:
+        _run_twins(root, started)
+        return
+
     inventory = _measure(root)
     paths = report.publish(inventory)
     _report(root, inventory, paths, time.time() - started, top)
@@ -112,10 +117,43 @@ def _measure(root: roots.Root) -> report.Inventory:
     return report.build(root.path, found, statuses, blames, history.now_seconds())
 
 
-def _parse(args: List[str]) -> Tuple[str, int, str]:
-    """The target, the queue length, and the first token nobody claimed."""
+def _run_twins(root: roots.Root, started: float) -> None:
+    """Measure cross-branch twins and publish the consolidation report.
+
+    A separate pass rather than an extra column on the inventory, because it
+    answers a different question: the inventory ranks tests for READING, this
+    one names the identities a later deletion walk may safely collapse.
+    """
+    container = _branch_container(root)
+    console.print(f"[dim]walking {container} for cross-branch twins[/dim]")
+    built = twins.build(container)
+    path = twins.publish(built)
+    _report_twins(built, path, time.time() - started)
+
+
+def _branch_container(root: roots.Root) -> Path:
+    """The directory whose immediate children are branches.
+
+    The fleet target resolves to the REPO root, one level above the branches,
+    and `twins` reads immediate children only - so handing it the repo root
+    finds nothing. The registry knows where the branches actually live, so the
+    container is derived from their common parent rather than hardcoded.
+    """
+    if root.name != roots.FLEET_ARGUMENT:
+        return root.path
+
+    parents = {Path(path).resolve().parent for path in _branch_paths().values()}
+    if len(parents) == 1:
+        return parents.pop()
+
+    return root.path
+
+
+def _parse(args: List[str]) -> Tuple[str, int, bool, str]:
+    """The target, the queue length, the twins switch, and the first token nobody claimed."""
     argument = ""
     top = DEFAULT_TOP
+    want_twins = False
     index = 0
 
     while index < len(args):
@@ -124,12 +162,16 @@ def _parse(args: List[str]) -> Tuple[str, int, str]:
             top = _positive_int(args[index + 1], top)
             index += 2
             continue
+        if token == "--twins":
+            want_twins = True
+            index += 1
+            continue
         if token.startswith("-"):
-            return argument, top, token
+            return argument, top, want_twins, token
         argument = argument or token
         index += 1
 
-    return argument or roots.FLEET_ARGUMENT, top, ""
+    return argument or roots.FLEET_ARGUMENT, top, want_twins, ""
 
 
 def _positive_int(token: str, fallback: int) -> int:
@@ -184,6 +226,59 @@ def _report(root: roots.Root, inventory: report.Inventory, paths: dict, elapsed:
     console.print(f"  [dim]{summary['ranking']['means']}[/dim]")
 
 
+def _report_twins(built: dict, path, elapsed: float) -> None:
+    """Print the twin counts, the consolidation candidates, and the residue.
+
+    The residue block is the point of the whole verb: it names what a merge
+    keyed on FILENAME would destroy, so nobody reads the candidate list as
+    permission to collapse a family.
+    """
+    summary = built["summary"]
+
+    success(f"twins: {summary['tests']} test functions over {summary['branches']} branches in {elapsed:.1f}s")
+    console.print()
+    console.print("[bold cyan]Twins[/bold cyan]")
+    console.print(
+        f"  {summary['twin_groups']} identities share a name AND a shape across "
+        f"{summary['twin_group_minimum_branches']}+ branches ({summary['twin_group_tests']} tests)"
+    )
+    console.print(
+        f"  [green]{summary['consolidation_candidates']}[/green] of them span "
+        f"{summary['consolidation_minimum_branches']}+ branches "
+        f"({summary['consolidation_candidate_tests']} tests) — these and ONLY these are consolidatable"
+    )
+    console.print()
+    console.print("[bold cyan]Names that travelled without their shape[/bold cyan]")
+    console.print(
+        f"  {summary['widespread_names']} names appear in "
+        f"{summary['consolidation_minimum_branches']}+ branches; "
+        f"[green]{summary['widespread_names_identical_everywhere']}[/green] are identical everywhere, "
+        f"[yellow]{summary['widespread_names_diverged']}[/yellow] diverged"
+    )
+    console.print()
+    console.print("[bold cyan]Consolidation candidates[/bold cyan]")
+    for group in built["consolidation_candidates"]:
+        console.print(f"  [green]{group['branch_count']:>3}[/green] branches  {group['name']}")
+    console.print()
+    console.print("[bold cyan]Residue — what a filename-keyed merge would destroy[/bold cyan]")
+    for family in built["residue"]:
+        if not family["present"]:
+            console.print(f"  [dim]{family['family']:<28} absent from this tree[/dim]")
+            continue
+        console.print(
+            f"  {family['family']:<28} {family['tests']:>5} tests · [red]{family['residue']}[/red] would be lost"
+        )
+    console.print(
+        f"  [bold]{'TOTAL':<28} {summary['stamped_family_tests']:>5} tests · "
+        f"[red]{summary['stamped_family_residue']}[/red] would be lost[/bold]"
+    )
+    console.print()
+    console.print(f"[dim]report: {path}[/dim]")
+    console.print()
+    console.print("[bold cyan]What this authorises[/bold cyan]")
+    console.print("  [dim]nothing. it names candidates; a human runs the deletion walk.[/dim]")
+
+
 def _print_queue(queue: List[dict]) -> None:
     """The highest review priorities, in order."""
     console.print("[bold cyan]Read these first[/bold cyan]")
@@ -204,10 +299,13 @@ def _print_help() -> None:
     console.print("  drone @seedgo test-inventory @backup           one branch")
     console.print("  drone @seedgo test-inventory .                 any directory")
     console.print("  drone @seedgo test-inventory aipass --top 40   a longer reading queue")
+    console.print("  drone @seedgo test-inventory aipass --twins    cross-branch twins instead")
     console.print()
     console.print("[yellow]Measures[/yellow]")
     console.print("  assertion shape (NONE / MOCK_ONLY / REAL), age and author from blame,")
     console.print("  how many tests share the file and the class, and identically-shaped siblings.")
+    console.print("  with --twins: identities sharing a name AND a shape across branches, the ones")
+    console.print("  wide enough to consolidate, and the residue a filename-keyed merge would destroy.")
     console.print()
     console.print("[yellow]Refuses[/yellow]")
     console.print("  it runs no tests, measures no coverage, and issues no verdict.")
