@@ -16,8 +16,10 @@ PyPI version — not the changelog header.
 - **Admin seat rail extracted** (hooks): the 5-leg grant moved from `edit_gate` into `modules/admin_seat.py` — one home, both gates delegate. The extraction itself surfaced (and fixed) a real defect: an unimportable `admin_seat` would have fail-open exempted every seat; both gates now refuse instead.
 - **Test inventory** (seedgo, FPLAN-0468 phase A): `drone @seedgo test-inventory` — static ranking pass over all ~19k fleet tests in seconds; artifacts gitignored by family rule (`.seedgo/test_inventory*`).
 
+- **pytest_quality_standards — test_quality v5** (seedgo): a generic, stdlib-only standards pack (liftable onto any Python project) with eleven AST rules that judge what a test *proves*: no_oracle, assertion_shape, unentered_assert, capture_never_read, empty_parametrize, mock_drift, self_skip, posix_literal, entry_point_diff, coverage_slot, docstring_pin (structural — the docstring must name a symbol the test actually calls; unscored until the fleet's 89.8% miss rate comes down). Scores the whole fleet in 70s, runs in shadow mode: 1,369 flags across 18,780 units (docstring_pin excluded). v4 remains the CI gate untouched until v5 is proven over a weekly cycle. Porting the old nominators surfaced four real corpus-reader bugs (two inherited by the production audit-tests lane) — all fixed with red-first pins.
+
 ### Context
-Part of the test-standards campaign (DPLAN-0323): seedgo's `test_quality` v4 standard graded tests by substring pattern coverage and CI gated the average at 100, which manufactured tests-for-the-checker fleet-wide. The replacement pack (`pytest_quality_standards`, v5 as AST checks in shadow mode) lands on the next train.
+Part of the test-standards campaign (DPLAN-0323): seedgo's `test_quality` v4 standard graded tests by substring pattern coverage and CI gated the average at 100, which manufactured tests-for-the-checker fleet-wide. v5 above replaces the design; deletions and gating wait until the shadow cycle proves it.
 
 ## [2026-09-01] — one test universe: the night CI-red stopped being a norm (FPLAN-0460/0461) · v2.8.1
 
