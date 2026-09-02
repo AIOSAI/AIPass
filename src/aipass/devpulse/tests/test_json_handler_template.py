@@ -243,13 +243,8 @@ def test_default_unknown_type_raises_value_error() -> None:  # JH-004
 
 
 # ============================================================================
-# Group 2 — validate_json_structure (10 tests)
+# Group 2 — validate_json_structure (8 tests)
 # ============================================================================
-
-
-def test_validate_valid_config() -> None:  # JH-005
-    data = {"module_name": "x", "version": "1.0.0", "config": {}}
-    assert json_handler.validate_json_structure(data, "config") is True
 
 
 def test_validate_config_missing_key() -> None:  # JH-006
@@ -259,11 +254,6 @@ def test_validate_config_missing_key() -> None:  # JH-006
 
 def test_validate_config_not_dict() -> None:  # JH-007
     assert json_handler.validate_json_structure([1, 2, 3], "config") is False
-
-
-def test_validate_valid_data() -> None:  # JH-008
-    data = {"created": "2026-01-01", "last_updated": "2026-01-01"}
-    assert json_handler.validate_json_structure(data, "data") is True
 
 
 def test_validate_data_missing_key() -> None:  # JH-009

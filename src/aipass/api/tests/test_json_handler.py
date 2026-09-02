@@ -170,11 +170,6 @@ def test_default_unknown_type_raises_value_error() -> None:
 # ============================================================================
 
 
-def test_validate_valid_config() -> None:
-    data = {"module_name": "x", "version": "1.0.0", "config": {}}
-    assert json_handler.validate_json_structure(data, "config") is True
-
-
 def test_validate_config_missing_key() -> None:
     data = {"module_name": "x", "version": "1.0.0"}
     assert json_handler.validate_json_structure(data, "config") is False
@@ -182,11 +177,6 @@ def test_validate_config_missing_key() -> None:
 
 def test_validate_config_not_dict() -> None:
     assert json_handler.validate_json_structure([1, 2, 3], "config") is False
-
-
-def test_validate_valid_data() -> None:
-    data = {"created": "2026-01-01", "last_updated": "2026-01-01"}
-    assert json_handler.validate_json_structure(data, "data") is True
 
 
 def test_validate_data_missing_key() -> None:

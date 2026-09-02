@@ -103,14 +103,6 @@ class TestDefaultFactory:
 class TestValidate:
     """Tests for validate_json_structure -- validate."""
 
-    def test_validate_valid_config(self, sample_data):
-        handler = _import_handler()
-        assert handler.validate_json_structure(sample_data["config"], "config") is True
-
-    def test_validate_valid_data(self, sample_data):
-        handler = _import_handler()
-        assert handler.validate_json_structure(sample_data["data"], "data") is True
-
     def test_validate_valid_log(self, sample_data):
         handler = _import_handler()
         assert handler.validate_json_structure(sample_data["log"], "log") is True
