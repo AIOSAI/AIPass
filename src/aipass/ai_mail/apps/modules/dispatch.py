@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2026-02-02
-# Modified: 2026-08-12
+# Modified: 2026-09-02
 # =============================================
 
 """
@@ -269,13 +269,44 @@ def _orchestrate_wake(args: List[str]) -> bool:
         error(f"Wake refused: {refusal}")
         return True
 
+    # Admin lane, same 5-leg grant the send+wake verb runs. It was missing here,
+    # so the two verbs disagreed from ONE seat: `dispatch @vera "..." "..."` from
+    # the verified admin resolved, took the lock and spawned, while
+    # `dispatch wake @vera` answered "manager — wake skipped, caller must mail"
+    # (@devpulse, 2026-09-02). The manager gate was never the difference — this
+    # lane simply never asked whether the caller held the grant, so wake_branch
+    # received admin=False by default and took the ordinary refusal. Patrick's
+    # ruling 2026-09-02 00:23 is that the admin seat dispatches any agent in any
+    # directory; a verb that drops the grant on the floor cannot honour it.
+    #
+    # Verified HERE rather than inside wake_branch for the same reason the send
+    # path states: this is where the caller env still lives, and wake_branch only
+    # ever receives the verdict. A verifier that raises must not take the wake
+    # down with it — no grant, the wake proceeds exactly as it did before.
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    is_admin = False
+    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
+        try:
+            is_admin, admin_reason = verified_caller.verify_admin_caller()
+        except Exception as exc:
+            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
+            is_admin, admin_reason = False, f"admin verification error: {exc}"
+        if not is_admin:
+            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
     console.print(f"\n⏳ Waking {branch_email}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
     dispatch_status, success = wake_branch(
-        branch_email, custom_message, fresh=use_fresh, sender=resolve_wake_sender(use_sender), model=use_model
+        branch_email,
+        custom_message,
+        fresh=use_fresh,
+        sender=resolve_wake_sender(use_sender),
+        model=use_model,
+        admin=is_admin,
     )
 
     # Print step-by-step status
