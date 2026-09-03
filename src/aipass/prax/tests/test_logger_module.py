@@ -810,7 +810,10 @@ EXPECTED_COLD_FOOTPRINT = {
 }
 
 # Names a fresh interpreter carries that are neither stdlib nor ours.
-_INTERPRETER_NOISE = {"__main__", "sitecustomize"}
+# _distutils_hack: setuptools' distutils-precedence.pth imports it at startup
+# wherever setuptools is installed (CI's 3.10/3.11 venvs; 3.12+ venvs ship
+# without setuptools). Site noise, not a service import (devpulse, 2026-09-03).
+_INTERPRETER_NOISE = {"__main__", "sitecustomize", "_distutils_hack"}
 
 _FOOTPRINT_PROBE = """
 import json, sys
