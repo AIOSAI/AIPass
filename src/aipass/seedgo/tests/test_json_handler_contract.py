@@ -71,6 +71,33 @@ PACKAGE_ROOT = Path(aipass.__file__).resolve().parent
 BRANCHES = sorted(path.parents[3].name for path in PACKAGE_ROOT.glob("*/apps/handlers/json/json_handler.py"))
 
 
+#: The fleet's redirect seam, read by the one json service on every call. Set
+#: at the top of every branch conftest; the contract re-points it per subject.
+SERVICE_REDIRECT_ENV = "AIPASS_TEST_LOG_DIR"
+
+#: The import line that makes a handler a shim over the one service
+#: (DPLAN-0325 section 3). A file without it has not migrated yet.
+SERVICE_IMPORT_MARKER = "from aipass.prax import json_handler"
+
+#: The nine names the canonical shim binds, in the spec's order.
+SHIM_PUBLIC_NAMES = (
+    "read_json",
+    "write_json",
+    "validate_json_structure",
+    "get_json_path",
+    "ensure_json_exists",
+    "ensure_module_jsons",
+    "load_json",
+    "save_json",
+    "log_operation",
+)
+
+
+def handler_path(branch: str) -> Path:
+    """Return the canonical handler file for *branch*."""
+    return PACKAGE_ROOT / branch / "apps" / "handlers" / "json" / "json_handler.py"
+
+
 def implementation(branch: str) -> Any:
     """Import one branch's ``json_handler`` module.
 
@@ -118,10 +145,17 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: cure (dispatched off this suite's slice-3 finding) also began creating the
 #: directory. The row was removed because the strict xfail turned RED, which is
 #: the table working: a cure that lands is reported, not carried as folklore.
+#:
+#: ``prax`` left the same way on 2026-09-03, and it is the first row the
+#: migration itself removed: prax's handler became a shim over the one service
+#: (DPLAN-0325), whose ``ensure_json_exists`` creates the directory per call, so
+#: the strict xfail XPASSed. Seventeen rows across these tables are expected to
+#: go the same way as the sweep reaches their branches — each one deleted when
+#: it turns red, never pre-emptively, because a table emptied ahead of the cure
+#: asserts nothing while looking like it does.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
     "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
-    "prax": "prax's save_json returns False and writes nothing when the document directory is absent",
     "skills": "skills's save_json returns False and writes nothing when the document directory is absent",
     "cli": "cli's save_json raises FileNotFoundError from the staging file when the document directory is absent",
     "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
@@ -278,6 +312,17 @@ def redirect_documents(module: Any, target: Path, monkeypatch: pytest.MonkeyPatc
     with ``os.path.join``, so handing it a Path would test a different program
     than the one that ships.
 
+    TWO SHAPES, because the fleet is mid-migration (DPLAN-0325). A pre-migration
+    handler holds its document directory as a bound value, so it is redirected
+    by rebinding that value. A migrated shim holds NOTHING: the service computes
+    ``json_dir`` per call from the handle's ``branch_root`` and the
+    ``AIPASS_TEST_LOG_DIR`` seam, so there is no directory to rebind and the
+    old loop finds nothing to do. That is not a safe no-op — it is a suite that
+    quietly stops redirecting the branch it is about to write through, which is
+    how prax's landing turned the floor test red the same night. Both the root
+    and the env seam are pointed at ``target`` so the answer is the same whether
+    or not the environment carries a redirect.
+
     Args:
         module: The branch's imported json_handler.
         target: Directory under tmp_path to write into.
@@ -296,6 +341,13 @@ def redirect_documents(module: Any, target: Path, monkeypatch: pytest.MonkeyPatc
             if "json_dir" not in key.lower() or not isinstance(value, (str, Path)):
                 continue
             monkeypatch.setitem(vars(owner), key, str(target) if isinstance(value, str) else Path(target))
+        if isinstance(vars(owner).get("branch_root"), Path):
+            # The seam only — the handle's root stays real. The service composes
+            # ``<env>/<root.name>/<root.name>_json``, so pointing the env at
+            # ``target`` already lands the write under it, and leaving the root
+            # alone keeps the identity axis below reading the shipped value
+            # rather than one this helper wrote.
+            monkeypatch.setenv(SERVICE_REDIRECT_ENV, str(target))
 
 
 def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
@@ -331,6 +383,14 @@ def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> An
 def prepared(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Path]:
     """Redirected module plus an existing, empty document directory.
 
+    The second value is the directory the implementation ITSELF says it will
+    write to, not the one this helper asked for. The two were the same for
+    every pre-migration handler, because each held its document directory as a
+    single bound value. A migrated shim composes ``<seam>/<branch>/<branch>_json``
+    inside the service, so the requested root is the parent of a parent — and a
+    helper that kept returning the request would have made six contracts assert
+    against a directory nothing writes to.
+
     Args:
         branch: Branch to load.
         tmp_path: pytest's per-test directory.
@@ -341,7 +401,13 @@ def prepared(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tu
     """
     target = tmp_path / "documents"
     target.mkdir()
-    return redirected(branch, target, monkeypatch), target
+    module = redirected(branch, target, monkeypatch)
+    resolver = getattr(module, "get_json_path", None)
+    if resolver is None:
+        return module, target
+    documents = Path(str(resolver("contract_probe", "data"))).parent
+    documents.mkdir(parents=True, exist_ok=True)
+    return module, documents
 
 
 @pytest.fixture(autouse=True)
@@ -777,6 +843,143 @@ def test_the_divergence_tables_only_name_branches_that_still_exist():
     )
     stale = sorted(tables - set(BRANCHES))
     assert not stale, f"divergence tables name branches that no longer exist: {json.dumps(stale)}"
+
+
+# ---------------------------------------------------------------------------
+# IDENTITY: a migrated shim IS the one service, it does not merely behave like it
+# ---------------------------------------------------------------------------
+#
+# Every other contract in this file asks what a handler DOES. Behaviour cannot
+# catch the one failure the migration makes possible: a branch that quietly
+# keeps its own implementation behind a compatible signature stays green on all
+# of them. ``is`` catches it, and nothing else does.
+#
+# It also catches the hazard measured on 2026-09-03 and put in the DPLAN: the
+# service resolves the calling module at ``sys._getframe(2)``, so a shim that
+# WRAPS (``def log_operation(...): return _h.log_operation(...)``) instead of
+# BINDING (``log_operation = _h.log_operation``) adds exactly one frame and
+# silently sends every log in that branch into ``json_handler_log.json``. A
+# wrapper is a plain function with no ``__func__``, so it fails here loudly, on
+# the branch that wrote it, instead of appearing weeks later as an orphan
+# document with no config or data sibling.
+#
+# Skips are per branch and named: the sweep lands branch by branch, and a
+# handler that has not migrated yet is not a shim to be judged.
+
+
+def json_service_or_skip() -> Any:
+    """Return the one json service, or skip when prax has not published it.
+
+    Returns:
+        The ``aipass.prax.json_handler`` service module.
+    """
+    service = getattr(importlib.import_module("aipass.prax"), "json_handler", None)
+    if service is None:
+        pytest.skip(
+            "aipass.prax exposes no json_handler attribute yet — the one service "
+            "(DPLAN-0325) has not landed, so there is no identity to assert"
+        )
+    return service
+
+
+def shim_or_skip(branch: str) -> Any:
+    """Return *branch*'s handler when it has migrated, else skip naming it.
+
+    The discriminator is the file, not the module: a handler that does not
+    import the service has not migrated and asserting identity against it would
+    report the sweep's progress as a defect. A handler that DOES import it is
+    judged strictly, wrapper included — that is the whole point of the axis.
+
+    Args:
+        branch: Branch to load.
+
+    Returns:
+        The branch's imported json_handler module.
+    """
+    source = handler_path(branch).read_text(encoding="utf-8")
+    if SERVICE_IMPORT_MARKER not in source:
+        pytest.skip(f"{branch} has not migrated to the one service yet — its handler does not import it")
+    return implementation(branch)
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_every_public_name_in_a_migrated_shim_is_the_services_own_function(branch: str):
+    """Each bound name IS ``JsonHandle``'s method, not a copy that behaves like it.
+
+    ``__func__`` is the discriminator that survives everything a compatible
+    re-implementation can do: a fork with the same signature, the same return
+    type and the same measured behaviour still fails, because it is a different
+    object. A ``def`` wrapper fails on the same line for a different reason —
+    it has no ``__func__`` at all.
+    """
+    service = json_service_or_skip()
+    module = shim_or_skip(branch)
+
+    wrong = []
+    for name in SHIM_PUBLIC_NAMES:
+        bound = getattr(module, name, None)
+        if bound is None:
+            wrong.append(f"{name}: absent")
+            continue
+        own = getattr(bound, "__func__", None)
+        if own is None:
+            wrong.append(f"{name}: a plain function, so the shim WRAPS instead of binding (frame depth shifts)")
+        elif own is not getattr(service.JsonHandle, name, None):
+            wrong.append(f"{name}: bound to {own!r}, not the service's own method")
+    assert not wrong, f"{branch}'s shim does not bind the one service: {wrong}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_a_migrated_shim_binds_one_handle_rooted_at_its_own_branch(branch: str):
+    """All nine names share one handle, and its root is the shim's own branch.
+
+    Two properties in one assertion because they are one mistake: a shim that
+    builds a handle per name, or binds a handle rooted somewhere else, writes
+    another branch's documents while passing every behavioural contract above.
+    The root is checked against ``parents[3]`` of the shim's own path, which is
+    what ``for_module(__file__)`` is specified to compute.
+    """
+    json_service_or_skip()
+    module = shim_or_skip(branch)
+
+    handles = {id(getattr(module, name).__self__) for name in SHIM_PUBLIC_NAMES if hasattr(module, name)}
+    assert len(handles) == 1, f"{branch} binds {len(handles)} handles across its nine names, expected one"
+
+    handle = getattr(module, "save_json").__self__
+    expected_root = handler_path(branch).parents[3]
+    assert handle.branch_root == expected_root, (
+        f"{branch}'s handle is rooted at {handle.branch_root}, not at its own branch {expected_root}"
+    )
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_a_migrated_shim_reads_the_redirect_seam_after_import_not_at_import(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Setting the env var AFTER import redirects the NEXT call.
+
+    The property that makes the whole fleet's test isolation work, and the one
+    three of the four pre-migration shims did not have: they built the handler
+    at module scope, so the directory was captured at import and nothing that
+    ran later could move it. Measured cost of that shape elsewhere in the fleet
+    — writes into live document directories during a suite run — is why this is
+    pinned per branch rather than once on the service.
+
+    The answer is checked for the branch's OWN name under the new root, so a
+    service that honoured the seam but composed the wrong directory fails too.
+    """
+    json_service_or_skip()
+    module = shim_or_skip(branch)
+
+    resolver = getattr(module, "get_json_path", None)
+    assert resolver is not None, f"{branch}'s shim exposes no get_json_path"
+
+    elsewhere = tmp_path / "redirected_after_import"
+    monkeypatch.setenv(SERVICE_REDIRECT_ENV, str(elsewhere))
+    answer = Path(str(resolver("identity_probe", "data")))
+
+    expected = elsewhere / branch / f"{branch}_json" / "identity_probe_data.json"
+    assert answer == expected, f"{branch}: the seam set after import answered {answer}, expected {expected}"
 
 
 # ---------------------------------------------------------------------------
@@ -1397,6 +1600,15 @@ def test_an_exhausted_retry_leaves_the_original_intact_and_cleans_the_staged_tem
     splits between raising and returning False, that split is pinned
     elsewhere, and folding it in here would turn a durability contract into a
     return-value contract that skips half the fleet.
+
+    "Silent about the disposition" means the suppression has to cover every
+    disposition, and it did not: it named ``PermissionError``, the exception
+    the pre-migration raisers happen to let out. The one service raises
+    ``WriteFailed`` instead, so on 2026-09-03 the first migrated branch failed
+    this test by reporting its failure the way the spec says to. ``OSError`` is
+    the honest bound — both dispositions are subclasses of it, and inside this
+    block the only thing that can raise one is the write this test blocked on
+    purpose.
     """
     module, save, document = public_writer(branch, tmp_path, monkeypatch)
     owner = retry_owner(module)
@@ -1412,7 +1624,7 @@ def test_an_exhausted_retry_leaves_the_original_intact_and_cleans_the_staged_tem
     monkeypatch.setattr(owner, "_REPLACE_BACKOFF_SECONDS", 0, raising=False)
     monkeypatch.setattr(owner, "time", SimpleNamespace(sleep=lambda seconds: None))
 
-    with contextlib.suppress(PermissionError):
+    with contextlib.suppress(OSError):
         save({**copy.deepcopy(DATA_PAYLOAD), "counters": {"seen": 999}})
 
     assert document.read_bytes() == original, f"{branch}: the exhausted write damaged the live document"
@@ -1454,13 +1666,26 @@ def test_the_public_writer_survives_a_transient_sharing_violation(
 
 #: How the fleet REPORTS a write that could not land, measured 2026-09-02 with
 #: the rename blocked to exhaustion. A near-even split, and deliberately not
-#: written as a majority-plus-xfail table: 9 raise (backup, cli, commons,
-#: daemon, devpulse, drone, hooks, seedgo, trigger) and 8 return False (aipass,
-#: api, canary, flow, memory, prax, skills, spawn), so calling either one "the
-#: contract" would mark half the fleet as divergent from a coin toss. What
-#: every caller actually needs is pinned instead, and it holds for all 17.
-EXHAUSTED_WRITE_RAISES = 9
-EXHAUSTED_WRITE_RETURNS_FALSE = 8
+#: written as a majority-plus-xfail table: calling either one "the contract"
+#: would mark half the fleet as divergent from a coin toss. What every caller
+#: actually needs is pinned instead, and it holds for all of them.
+#:
+#: Re-measured 2026-09-03 as the sweep began. prax and spawn both migrated that
+#: night and both moved from the False column to the raise column, and the
+#: exception is the service's own ``WriteFailed`` rather than the
+#: ``PermissionError`` the other raisers let out. Measured on prax directly
+#: (rename blocked to exhaustion); spawn is asserted on identity rather than a
+#: second probe, because its handler is byte-identical to prax's — that
+#: equality is exactly what the migration buys and what the IDENTITY axis above
+#: pins. Counted here rather than left at yesterday's split because this is a
+#: measurement record, and a record two branches stale is a record that has
+#: started lying. The rest move the same way as the sweep reaches them; the
+#: split ends at 18 / 0 and the constants go with the tables.
+#:
+#: raise: backup, cli, commons, daemon, devpulse, drone, hooks, prax, seedgo,
+#: spawn, trigger. return False: aipass, api, canary, flow, memory, skills.
+EXHAUSTED_WRITE_RAISES = 11
+EXHAUSTED_WRITE_RETURNS_FALSE = 6
 
 
 @pytest.mark.parametrize("branch", parametrized(WRITER_HAS_NO_BOUNDED_RETRY))
@@ -1981,12 +2206,20 @@ def declare_log_cap(module: Any, name: str, cap: int) -> bool:
 #: edits max_log_entries gets no change and no warning. Found by declaring the
 #: cap instead of hunting for it; the stamped copies could not have seen it,
 #: because none of them ever wrote the setting.
+#:
+#: ``spawn`` left this table on 2026-09-03, the second row the migration
+#: removed: spawn's handler became the canonical shim, and the one service
+#: reads the cap out of the module's own config document instead of a class
+#: constant, so the knob spawn advertised began working. The strict xfail
+#: XPASSed and the row went, on the same rule as every other cure recorded
+#: here. aipass, canary and memory still share the retiring handler and still
+#: publish a setting that does nothing.
 DECLARED_LOG_CAP_IGNORED = {
     branch: (
         f"{branch} writes max_log_entries into its config document but rotates on the shared "
         f"JsonHandler.MAX_LOG_ENTRIES constant, so the published setting has no effect"
     )
-    for branch in ("aipass", "canary", "memory", "spawn")
+    for branch in ("aipass", "canary", "memory")
 }
 
 

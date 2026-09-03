@@ -23,6 +23,27 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+# A bare dotted name and nothing else — `_h.save_json`, `mod.InvalidDocument`.
+# Anchored on both ends so an expression that merely contains an attribute
+# access (`a.b + 1`, `a.b[0]`, `a.b if x else y`) is not read as an alias.
+_BOUND_ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+
+
+def _without_trailing_comment(value: str) -> str:
+    """Strip a trailing ``# ...`` so ``x = a.b  # noqa`` still reads as ``a.b``.
+
+    Splitting on the first ``#`` is safe for the one caller: the result is only
+    ever handed to a pattern that refuses anything but a bare dotted name, so a
+    value carrying a quoted ``#`` fails to match either way.
+
+    Args:
+        value: The right-hand side of a module-level assignment.
+
+    Returns:
+        The value with any trailing comment removed.
+    """
+    return value.split("#", 1)[0].strip()
+
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
@@ -334,6 +355,22 @@ def check_constant_naming(content: str) -> Optional[Dict]:
         # Skip if assignment is a function call or class instantiation (has parentheses)
         # Examples: logger = logging.getLogger(...), console = Console()
         if "(" in assigned_value:
+            continue
+
+        # Skip a bound alias: a bare attribute access is another object's
+        # member under a local name, not a constant. `save_json = _h.save_json`
+        # and `InvalidDocument = json_handler.InvalidDocument` name a callable
+        # and a class; PEP 8 spells both lowercase, and renaming them to
+        # UPPER_CASE would make the module lie about what they are. This is the
+        # shape DPLAN-0325 makes fleet-wide — every branch's json handler
+        # becomes nine of these — and canary, memory and spawn carried bypasses
+        # for it before the rule existed.
+        #
+        # The narrowing is only visible on a lowercase name: an UPPER_CASE one
+        # was never flagged, so `TIMEOUT = settings.DEFAULT` is unaffected. What
+        # is given up is convicting `max_entries = settings.LIMIT`, a real
+        # mis-named constant that reads identically to an alias in the text.
+        if _BOUND_ALIAS_RE.match(_without_trailing_comment(assigned_value)):
             continue
 
         # Skip if assigning an imported value to a variable

@@ -57,6 +57,15 @@ STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
             "_default_template",
             "load_template",
             "_default_config",
+            # The fleet's new spelling (DPLAN-0325 section 2): the one service
+            # builds the default in code as _default_document. Added 2026-09-03
+            # after @prax's migrated suite went 100 -> 99 while covering the
+            # default in three tests — the category greps names, so a branch
+            # that adopts the ruled spelling loses a point for obeying it.
+            # Every shim branch would drop the same way at the sweep. This
+            # category retires with part B; until then it must not convict the
+            # migration it exists alongside.
+            "_default_document",
         ],
         "validate": ["validate_json_structure"],
         "get_path": ["get_json_path"],

@@ -85,11 +85,6 @@
       "reason": "Architectural \u2014 imports PRAX_JSON_DIR from config.load (shared infrastructure). Uses module_name parameter for explicit filter context from callers."
     },
     {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "json_structure",
-      "reason": "json_handler.py IS the JSON template management system for prax. load_template() and json_templates/ are its core functionality, not a violation of the template-free standard. This file provides the template infrastructure that other files consume."
-    },
-    {
       "file": "apps/modules/monitor.py",
       "standard": "modules",
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery \u2014 routing through json_handler would add unnecessary dependency for a simple registry read."

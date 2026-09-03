@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2026-03-05
 # Modified: 2026-08-07
 # =============================================
@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import SERVICE_IMPORT_MARKER
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
@@ -514,19 +515,32 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
         )
 
     # Check 2: Uses relative path resolution
-    has_relative = bool(
+    # A shim that binds the fleet json service (DPLAN-0325) resolves nothing
+    # itself — the service derives this branch's root from the shim's own
+    # __file__, deliberately WITHOUT resolve(), so a dead cwd on Windows
+    # cannot poison it. Demanding the spelling here convicts the endpoint of
+    # the migration: measured 2026-09-03, prax's shim, spawn's shim and the
+    # citizen template each scored 75 on this check alone.
+    binds_the_json_service = SERVICE_IMPORT_MARKER in content
+    resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
         or re.search(r"\.resolve\(\)", content)
         or re.search(r"\.parent", content)
     )
+    has_relative = binds_the_json_service or resolves_here
+
+    if binds_the_json_service:
+        resolution_message = "Delegates path resolution to the one json service (no absolute path can enter)"
+    elif resolves_here:
+        resolution_message = "Uses relative path resolution (Path(__file__).parent)"
+    else:
+        resolution_message = "Missing relative path resolution — should use Path(__file__).resolve().parent"
 
     checks.append(
         {
             "name": "Relative path resolution",
             "passed": has_relative,
-            "message": "Uses relative path resolution (Path(__file__).parent)"
-            if has_relative
-            else "Missing relative path resolution — should use Path(__file__).resolve().parent",
+            "message": resolution_message,
         }
     )
 

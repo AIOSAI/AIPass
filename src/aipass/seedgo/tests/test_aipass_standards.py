@@ -598,3 +598,256 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
     result = _check_disk_triplets(branch)
     assert result["passed"] is False
     assert result["message"].startswith("2/3 modules missing triplet files")
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_handler_check accepts the one shim (DPLAN-0325 part A)
+# ---------------------------------------------------------------------------
+
+
+def _canonical_shim_bytes_or_skip():
+    """The canonical shim as the pinned spec defines it, or skip saying why.
+
+    Read from the spec block rather than from any branch copy: a constant
+    taught by a branch would learn that branch's drift and then bless it.
+
+    The spec lives under ``devpulse/docs.local/``, and ``docs.local/`` is
+    gitignored fleet-wide (.gitignore:58) — so it is ABSENT on a fresh
+    checkout and these pins cannot run there. Skipping with the path named is
+    the honest report; asserting against a file CI does not have is the exact
+    shape of the machine-local defect that turned every board red on 2026-09-02
+    (FPLAN-0474/0475), when a check derived a fleet fact from the gitignored
+    registry and degraded silently instead of failing loudly.
+
+    What survives on CI regardless: the hash constant itself, which is in the
+    checker and therefore in the repo, and every pin below that builds its own
+    input instead of reading the spec.
+    """
+    import re
+    from pathlib import Path
+
+    import aipass
+
+    # From the installed package, so the read is identical whichever rootdir
+    # pytest picks — the same discovery the contract suite uses.
+    spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
+    if not spec.is_file():
+        pytest.skip(f"pinned spec not present ({spec}) — docs.local/ is gitignored, so this pin is local-only")
+    text = spec.read_text(encoding="utf-8")
+    section = text.index("## 3. The shim")
+    block = re.search(r"```python\n(.*?)\n```", text[section:], re.S)
+    assert block is not None, "DPLAN-0325 section 3 no longer carries a python block"
+    return block.group(1) + "\n"
+
+
+def test_the_pinned_hash_is_the_hash_of_the_spec_block():
+    """The constant and the spec cannot drift apart without this turning red.
+
+    The whole accept path is one comparison against one constant, so the
+    constant IS the standard. If the spec is amended and the constant is not,
+    every migrated branch fails its own audit for a reason no message explains.
+    """
+    import hashlib
+
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+    measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
+    assert measured == CANONICAL_SHIM_SHA256, (
+        "the pinned canonical-shim hash no longer matches DPLAN-0325 section 3 — "
+        "amend the constant in the same change as the spec"
+    )
+
+
+def test_the_canonical_shim_passes_capability_by_hash():
+    """The spec's own bytes are accepted, and accepted on the identity path."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
+
+    passed, message = _capability_verdict(_canonical_shim_bytes_or_skip(), "anybranch")
+    assert passed is True
+    assert "sha256" in message
+
+
+def test_one_changed_character_is_no_longer_the_canonical_shim():
+    """Identity, not resemblance: a shim that drifts stops being the shim.
+
+    Red-first proof that the hash path is doing the work. The mutated text
+    still imports the service, so it falls through to the transitional path
+    and is still accepted overall — this pins WHICH path answered, because a
+    check that cannot say why it passed cannot be tightened in part B.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
+        _capability_verdict,
+        _is_canonical_shim,
+    )
+
+    mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
+    assert _is_canonical_shim(mutated) is False
+    passed, message = _capability_verdict(mutated, "anybranch")
+    assert passed is True
+    assert "sha256" not in message
+
+
+def test_the_service_import_alone_is_not_enough_when_a_branch_token_survives():
+    """A half-migrated shim that kept its own document directory is refused.
+
+    The failure this forbids is a branch that adopts the import, keeps its
+    captured `_JSON_DIR`, and reads as migrated while still writing through
+    its own binding.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _has_service_import
+
+    half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
+    assert _has_service_import(half, "canary") is False
+
+    clean = "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n"
+    assert _has_service_import(clean, "canary") is True
+
+
+def test_json_handler_underscore_handler_substring_does_not_refuse_the_shim():
+    """`json_handler` contains `_handler`, so banning that spelling bans the shim.
+
+    Pinned because the forbidden-token table is the obvious place to add
+    `_handler` when reading section 3's "no `_handler`" line, and doing so
+    would refuse every branch on the day the sweep lands.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
+        _FORBIDDEN_SHIM_TOKENS,
+        _has_service_import,
+    )
+
+    assert "_handler" not in _FORBIDDEN_SHIM_TOKENS
+    # Built here rather than read from the spec so this pin still runs on a
+    # fresh checkout, where docs.local/ does not exist.
+    shim = "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n"
+    assert "_handler" in shim
+    assert _has_service_import(shim, "prax") is True
+
+
+def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
+    """Seventeen branches ship no template, so the check does not appear for them."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
+
+    branch = tmp_path / "mybranch"
+    branch.mkdir()
+    assert _check_template_handler(branch) is None
+
+
+def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
+    """The file every newborn inherits is an audit subject, unrendered.
+
+    Nothing audited it before DPLAN-0325: a template stamping a log-only fork
+    would have minted eighteen non-compliant branches before any audit noticed,
+    because the audit only ever walked branches.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
+
+    branch = tmp_path / "spawnish"
+    template = branch / "templates" / "citizen" / "apps" / "handlers" / "json"
+    template.mkdir(parents=True)
+    handler = template / "json_handler.py"
+
+    handler.write_text("def log_operation(op):\n    return True\n", encoding="utf-8")
+    result = _check_template_handler(branch)
+    assert result is not None
+    assert result["passed"] is False
+    assert "Log-only fork" in result["message"]
+
+    handler.write_text(
+        "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n", encoding="utf-8"
+    )
+    result = _check_template_handler(branch)
+    assert result is not None
+    assert result["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests -- naming_check treats a bound alias as an alias, not a constant
+# ---------------------------------------------------------------------------
+
+
+def test_a_bound_alias_is_not_a_lowercase_constant():
+    """`save_json = _h.save_json` names a callable; PEP 8 spells it lowercase.
+
+    The shape DPLAN-0325 makes fleet-wide — nine per branch — and the reason
+    canary, memory and spawn carried naming bypasses before this rule existed.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    source = "save_json = _h.save_json\nInvalidDocument = json_handler.InvalidDocument\nMAX = 5\n"
+    result = check_constant_naming(source)
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_an_alias_with_a_trailing_comment_is_still_an_alias():
+    """A `# noqa` after the value must not turn the alias back into a constant."""
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    result = check_constant_naming("read_json = _h.read_json  # noqa: F401\nMAX = 5\n")
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_the_alias_rule_does_not_excuse_an_expression_that_merely_contains_a_dot():
+    """Only a BARE dotted name is an alias — the narrowing has an edge.
+
+    Red-first: without the anchors on the pattern, every lowercase module-level
+    assignment containing an attribute access would stop being checked, which
+    is a far larger exemption than the one that was asked for.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    result = check_constant_naming("total = counters.seen + 1\nfirst = items.data[0]\n")
+    assert result is not None
+    assert result["passed"] is False
+    assert "total" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_structure does not convict a shim for delegating resolution
+# ---------------------------------------------------------------------------
+
+
+def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
+    """The canonical shim has no `Path(__file__)`, no `.resolve()`, no `.parent`.
+
+    Measured 2026-09-03: prax's shim, spawn's shim and spawn's citizen template
+    each scored 75 on this check the day they migrated, because path resolution
+    moved INTO the service — which derives the branch root without `resolve()`
+    on purpose, so a dead cwd on Windows cannot poison it. A standard that
+    demands the spelling convicts the endpoint of the migration.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
+    handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text(
+        "from aipass.prax import json_handler\n\n_h = json_handler.for_module(__file__)\n\nread_json = _h.read_json\n",
+        encoding="utf-8",
+    )
+
+    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is True
+    assert "Delegates path resolution" in resolution["message"]
+
+
+def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
+    """The accept is the service import, not an amnesty on the whole check."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
+    handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text("JSON_DIR = 'documents'\n\n\ndef read_json(name):\n    return {}\n", encoding="utf-8")
+
+    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is False
+    assert "Missing relative path resolution" in resolution["message"]
+
+
+def test_the_two_standards_read_one_copy_of_the_service_import_line():
+    """Two literals of the same line is the drift this standard exists to catch."""
+    from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check, json_structure_check
+
+    assert json_structure_check.SERVICE_IMPORT_MARKER is json_handler_check.SERVICE_IMPORT_MARKER
