@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-09-02
 # =============================================
 
 """
@@ -14,6 +14,9 @@ Never manually create JSONs - they build themselves.
 """
 
 import json
+import os
+import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -124,8 +127,13 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         return False
 
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(template, f, indent=2, ensure_ascii=False)
+        # Atomic for the same reason save_json is, and arguably more urgently:
+        # this is the SELF-HEALING path, so it fires exactly when the document
+        # is already suspect. A truncating write here replaces a damaged file
+        # with a half-written one and loses the evidence with it. Beyond
+        # FPLAN-0481's brief (which named save_json) — same file, same defect,
+        # found because the source guard below refuses the SHAPE, not one line.
+        _atomic_write_json(json_path, template)
         return True
     except Exception as e:
         logger.warning("[json] Failed to write JSON template for %s: %s", module_name, e)
@@ -147,8 +155,89 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
         return None
 
 
+# Bounded retry for the rename. Same body and same constants as the other
+# fifteen copies in the fleet (drone's handler is the reference) — seedgo's
+# durability contract asserts all of them are assertion-identical, so a local
+# "improvement" here would show up as fleet divergence, not as a better handler.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Stage beside the target, fsync, then swap it into place.
+
+    THIS FILE IS THE CITIZEN MAIL STORE, which is why it is worth the syscalls.
+    Until 2026-09-02 the write was ``open(path, "w")`` + ``json.dump`` — the
+    truncation happens the moment the file is opened, so any failure during the
+    dump left the LIVE document destroyed and unparseable while ``save_json``
+    returned False. The caller heard "did not save"; the truth was "your
+    previous document is gone too". Reproduced on the real handler: a 101-byte
+    inbox became 83 bytes of unparseable text with the stored message lost, and
+    seedgo's contract observed a concurrent reader seeing an EMPTY mailbox six
+    times in one four-writer run (FPLAN-0481).
+
+    Staging removes the window entirely: readers see the old document until
+    ``os.replace`` swaps the new one in whole, and a failed write destroys only
+    the temp file. The fsync is here rather than in drone's reference because
+    ``os.replace`` orders the rename, not the DATA — without it a crash after
+    the swap can leave a renamed-but-empty file, which is the same lost mailbox
+    reached by a different route.
+
+    Raises:
+        Anything the staging, dump or replace raises, after removing the temp.
+        Never returns having failed — a caller must not read "wrote nothing" as
+        success.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".json_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _replace_with_retry(tmp_path, str(path))
+    except BaseException as exc:
+        logger.warning("[json] atomic write failed for %s: %s", path, exc)
+        # BaseException, so a KeyboardInterrupt mid-write does not strand the
+        # temp beside the live document.
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_exc:
+            logger.warning("[json] temp cleanup failed for %s: %s", tmp_path, cleanup_exc)
+        raise
+
+
 def save_json(module_name: str, json_type: str, data: Any) -> bool:
-    """Save JSON file"""
+    """Save JSON file.
+
+    The write is atomic (see :func:`_atomic_write_json`). The public contract is
+    unchanged: True only when the document landed, False otherwise. An exhausted
+    replace retry RAISES out of the helper — matching the fleet's helper
+    contract, which seedgo pins directly — and is caught here, so this function
+    still answers False rather than propagating. A write that did not land can
+    never return True.
+    """
     json_path = get_json_path(module_name, json_type)
 
     if not validate_json_structure(data, json_type):
@@ -158,8 +247,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = datetime.now().date().isoformat()
 
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(Path(json_path), data)
         return True
     except Exception as e:
         logger.warning("[json] Failed to save JSON for %s: %s", module_name, e)

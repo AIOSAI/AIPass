@@ -111,10 +111,14 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 # ---------------------------------------------------------------------------
 
 #: ``save_json`` addressed at a directory that does not exist yet. Majority
-#: (9 of 18, counting backup's path-addressed form) creates the directory and
+#: (10 of 18, counting backup's path-addressed form) creates the directory and
 #: persists. The rest split two ways, and BOTH ways lose the caller's document.
+#:
+#: ``ai_mail`` was the tenth entry here until 2026-09-02, when its atomic-write
+#: cure (dispatched off this suite's slice-3 finding) also began creating the
+#: directory. The row was removed because the strict xfail turned RED, which is
+#: the table working: a cure that lands is reported, not carried as folklore.
 SAVE_JSON_MISSING_PARENT = {
-    "ai_mail": "ai_mail's save_json returns False and writes nothing when the document directory is absent",
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
     "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
     "prax": "prax's save_json returns False and writes nothing when the document directory is absent",
@@ -157,6 +161,15 @@ VALIDATION_MATRIX = (
     (None, "data", False),
     (7, "log", False),
     ({"module_name": "m", "version": "1", "config": {}}, "no_such_type", False),
+    # Added with the template-lineage fold: five inputs the stamped copies
+    # asserted that the original ten did not reach — a LIST offered as config,
+    # a STRING offered as data, None against all three types rather than only
+    # "data", and a non-empty log.
+    ([1, 2, 3], "config", False),
+    ("not a dict", "data", False),
+    (None, "config", False),
+    (None, "log", False),
+    ([{"entry": 1}], "log", True),
 )
 
 
@@ -757,6 +770,10 @@ def test_the_divergence_tables_only_name_branches_that_still_exist():
         | set(GET_JSON_PATH_TYPE)
         | set(WRITER_HAS_NO_BOUNDED_RETRY)
         | set(TORN_DOCUMENT_OBSERVED)
+        | set(ENSURE_RETURNS_NOTHING)
+        | set(DECLARED_LOG_CAP_IGNORED)
+        | set(ENSURE_ALL_RETURNS_NOTHING)
+        | set(UNKNOWN_TYPE_NOT_REFUSED)
     )
     stale = sorted(tables - set(BRANCHES))
     assert not stale, f"divergence tables name branches that no longer exist: {json.dumps(stale)}"
@@ -1303,17 +1320,18 @@ def stray_temps(directory: Path) -> list:
     return sorted(child.name for child in directory.iterdir() if child.suffix != ".json")
 
 
-#: ``save_json`` and the bounded retry underneath it. Majority (17 of 18)
-#: reaches a bounded helper — their own, the shared module's, or trigger's
-#: public one. The exception is measured, not assumed: see the reason.
-WRITER_HAS_NO_BOUNDED_RETRY = {
-    "ai_mail": (
-        "ai_mail's save_json is a truncating in-place open(path, 'w') + json.dump with no "
-        "staging file and no rename, so no bounded retry is reachable from it at all — a "
-        "crash or a full disk mid-dump leaves the mailbox document truncated, and the "
-        "except-Exception around it reports that as a soft False"
-    ),
-}
+#: ``save_json`` and the bounded retry underneath it. ALL 18 now reach a
+#: bounded helper — their own, the shared module's, or trigger's public one.
+#:
+#: This table held one entry when slice 3 wrote it: ``ai_mail``'s save_json was
+#: a truncating in-place ``open(path, "w")`` + ``json.dump`` with no staging
+#: file and no rename, so no bounded retry was reachable from it at all, and
+#: the ``except Exception`` around it reported a mid-dump loss as a soft False.
+#: @ai_mail was dispatched off that finding and the cure landed 2026-09-02:
+#: save_json now goes through ``_atomic_write_json``, the four strict xfails
+#: turned RED as XPASS, and the row was deleted. Left empty rather than removed
+#: so the next divergence has a home and the record of why it is empty survives.
+WRITER_HAS_NO_BOUNDED_RETRY: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -1499,17 +1517,17 @@ MAX_SAMPLES = 4000
 THREAD_JOIN_SECONDS = 60
 
 
-#: The tear this contract forbids, where it is REPRODUCED rather than
-#: predicted. ai_mail's in-place truncating write was caught handing a reader
-#: an EMPTY document six times in one run of four writers — the failure mode
-#: every other branch's staging file exists to make impossible. Strict, so the
-#: day ai_mail adopts an atomic write this line turns red and gets deleted.
-TORN_DOCUMENT_OBSERVED = {
-    "ai_mail": (
-        "ai_mail's save_json truncates the live document in place, so a concurrent reader "
-        "observes an empty file mid-write — reproduced by this contract, not inferred"
-    ),
-}
+#: The tear this contract forbids. Empty: no branch in the fleet is currently
+#: known to hand a reader a half-written document.
+#:
+#: It held ``ai_mail`` when slice 3 wrote it, where the tear was REPRODUCED
+#: rather than predicted — an in-place truncating write caught handing a reader
+#: an EMPTY document six times in one run of four writers, the failure mode
+#: every other branch's staging file exists to make impossible. The entry said
+#: "the day ai_mail adopts an atomic write this line turns red and gets
+#: deleted". That day was 2026-09-02: the cure landed, the strict xfail turned
+#: red as XPASS, and the line was deleted exactly as written.
+TORN_DOCUMENT_OBSERVED: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("branch", parametrized(TORN_DOCUMENT_OBSERVED))
@@ -1597,3 +1615,443 @@ def test_concurrent_writers_never_expose_a_torn_document(branch: str, tmp_path: 
             f"{len(unreadable)} reads could not happen; "
             f"nothing was observed concurrently, so no tear could have been seen"
         )
+
+
+# ---------------------------------------------------------------------------
+# Contracts: the template lineage — defaults, ensure, log_operation, save
+# ---------------------------------------------------------------------------
+#
+# These absorb the largest stamped family in the fleet: 41 identities copied
+# across api, devpulse, drone, seedgo and spawn. Every one was read before it
+# was folded, because the fingerprint that grouped them drops names and
+# literals — and doing so turned up one group whose members assert OPPOSITE
+# things through the same statement shape, recorded below rather than averaged
+# away.
+
+
+def document_directory(module: Any, name: str, json_type: str) -> Path:
+    """Where one branch keeps a document, asked of the branch itself.
+
+    Args:
+        module: A redirected handler.
+        name: Document module name.
+        json_type: ``config``, ``data`` or ``log``.
+
+    Returns:
+        The directory the document lives in.
+    """
+    return Path(str(module.get_json_path(name, json_type))).parent
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_the_default_document_a_missing_read_materialises_passes_the_validator(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A handler must not manufacture a default its own validator rejects.
+
+    The copies this replaces asserted the default's KEYS one branch at a time
+    ("config default must have module_name"), which is the same claim written
+    against a constant. Asked of the branch's own validator instead, so a
+    branch that legitimately carries different keys is still held to the rule
+    that matters: the document it invents on a missing read has to be one it
+    would accept back.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    validate = expose(module, branch, "validate_json_structure")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    rejected = [
+        json_type
+        for json_type in ("config", "data", "log")
+        if validate(module.load_json(f"absent_{json_type}", json_type), json_type) is not True
+    ]
+    assert not rejected, f"{branch}: the default it materialises fails its own validator for {rejected}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_ensure_json_exists_creates_the_document(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The document exists afterwards.
+
+    Only the effect, deliberately. What ``ensure_json_exists`` ANSWERS is a
+    real fleet divergence with a reasoned case on both sides, so it is pinned
+    separately rather than folded in here where it would look like part of
+    the same claim.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure = expose(module, branch, "ensure_json_exists")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    ensure("fresh", "config")
+
+    assert Path(str(module.get_json_path("fresh", "config"))).exists(), f"{branch}: ensure created nothing"
+
+
+#: What ``ensure_json_exists`` ANSWERS. Seventeen return an unconditional
+#: ``True``; seedgo returns None and says why in its own docstring — a literal
+#: that is never False "advertises a failure signal that never arrives and
+#: invites ``if not ensure_json_exists(...)``, a branch that can never be
+#: taken", with failure reported by exception instead. Recorded as a
+#: divergence and NOT as a fault: the majority's success signal genuinely
+#: carries no information, and this table is the measurement, not a verdict on
+#: who is right. Strict, so whichever side moves, this line is revisited.
+ENSURE_RETURNS_NOTHING = {
+    "seedgo": (
+        "seedgo's ensure_json_exists returns None by documented decision — an unconditional True "
+        "is a failure signal that never arrives, so failure is raised instead of returned"
+    ),
+}
+
+
+@pytest.mark.parametrize("branch", parametrized(ENSURE_RETURNS_NOTHING))
+def test_ensure_json_exists_reports_true(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The success signal seventeen branches publish and callers branch on.
+
+    Worth pinning even though the value is a constant on every branch that
+    has it: callers DO write ``if ensure_json_exists(...)``, and a branch that
+    silently changed to None would send all of them down the failure path
+    while every file kept being created exactly as before.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure = expose(module, branch, "ensure_json_exists")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    assert ensure("bool_mod", "data") is True, f"{branch}: ensure_json_exists did not answer True"
+
+
+#: ``ensure_module_jsons``'s return value, same split and same reason as
+#: ``ensure_json_exists``: seedgo returns None by documented decision because
+#: the wrapper "previously discarded three booleans and then returned an
+#: unconditional True, so it reported success no matter what the three calls
+#: did".
+ENSURE_ALL_RETURNS_NOTHING = {
+    "seedgo": (
+        "seedgo's ensure_module_jsons returns None by documented decision — the True it used to "
+        "return was unconditional and survived any of the three writes failing"
+    ),
+}
+
+
+@pytest.mark.parametrize("branch", parametrized(ENSURE_ALL_RETURNS_NOTHING))
+def test_ensure_module_jsons_reports_true(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The wrapper's success signal, pinned beside the one it wraps."""
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure_all = expose(module, branch, "ensure_module_jsons")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    assert ensure_all("retmod") is True, f"{branch}: ensure_module_jsons did not answer True"
+
+
+#: The default factory's answer to a json_type it does not know. Fourteen
+#: raise ValueError; skills returns None, so a typo'd json_type is not
+#: refused — ``ensure_json_exists(name, "confgi")`` writes the literal ``null``
+#: into a document instead of failing, and the next reader gets a document
+#: that parses and means nothing. Measured, not read off the source.
+UNKNOWN_TYPE_NOT_REFUSED = {
+    "skills": (
+        "skills's _get_default returns None for an unknown json_type instead of raising, so a "
+        "misspelled type is written to disk as null rather than refused"
+    ),
+}
+
+
+@pytest.mark.parametrize("branch", parametrized(UNKNOWN_TYPE_NOT_REFUSED))
+def test_the_default_factory_refuses_a_json_type_it_does_not_know(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An unknown json_type is refused loudly, not defaulted into silently.
+
+    Reaches for a PRIVATE factory, which this suite otherwise avoids, because
+    the copies it replaces did and the claim has no public equivalent: the
+    public surface answers a container for a known type and never exposes the
+    "which template" decision. A branch without the private symbol skips by
+    name, exactly as the copies did.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    factory = next((getattr(module, name, None) for name in DEFAULT_FACTORY_NAMES if hasattr(module, name)), None)
+    if not callable(factory):
+        pytest.skip(f"{branch} has no private default factory under {DEFAULT_FACTORY_NAMES}")
+
+    with pytest.raises(ValueError):
+        factory("no_such_type", "probe")
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_ensure_json_exists_preserves_a_valid_existing_document(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Ensure is not a reset button.
+
+    The failure this forbids is the expensive one: a handler that regenerates
+    unconditionally silently discards a caller's live config every time
+    anything asks whether the file is there.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure = expose(module, branch, "ensure_json_exists")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    module.save_json("kept", "config", copy.deepcopy(CONFIG_PAYLOAD))
+    before = Path(str(module.get_json_path("kept", "config"))).read_text(encoding="utf-8")
+
+    ensure("kept", "config")
+
+    after = Path(str(module.get_json_path("kept", "config"))).read_text(encoding="utf-8")
+    assert after == before, f"{branch}: ensure_json_exists rewrote a document that was already valid"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_ensure_json_exists_regenerates_an_unreadable_document(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Unparseable bytes are replaced with something loadable.
+
+    A handler that leaves the corruption in place hands the next reader the
+    same crash forever; one that raises here makes the caller handle a
+    condition ensure exists to resolve.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure = expose(module, branch, "ensure_json_exists")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    document = Path(str(module.get_json_path("corrupt", "config")))
+    document.write_text("{not json at all", encoding="utf-8")
+
+    ensure("corrupt", "config")
+
+    assert json.loads(document.read_text(encoding="utf-8")), f"{branch}: corrupt document was not regenerated"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_ensure_json_exists_regenerates_a_structurally_invalid_document(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Parseable but wrong is still wrong.
+
+    Distinct from the corrupt case on purpose: the bytes here are valid JSON,
+    so a handler that only guards ``json.loads`` sails past this and leaves a
+    document its own validator would reject sitting on disk.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure = expose(module, branch, "ensure_json_exists")
+    validate = expose(module, branch, "validate_json_structure")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    document = Path(str(module.get_json_path("wrong", "config")))
+    document.write_text(json.dumps({"wrong": "structure"}), encoding="utf-8")
+
+    ensure("wrong", "config")
+
+    healed = json.loads(document.read_text(encoding="utf-8"))
+    assert validate(healed, "config") is True, f"{branch}: invalid structure survived ensure_json_exists"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_ensure_module_jsons_creates_all_three_documents(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The three-document convenience wrapper does all three."""
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    ensure_all = expose(module, branch, "ensure_module_jsons")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    ensure_all("triple")
+
+    missing = [
+        json_type
+        for json_type in ("config", "data", "log")
+        if not Path(str(module.get_json_path("triple", json_type))).exists()
+    ]
+    assert not missing, f"{branch}: ensure_module_jsons did not create {missing}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_log_operation_appends_a_timestamped_entry_and_reports_true(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """One call, one entry, carrying the operation and a timestamp."""
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    log_operation = expose(module, branch, "log_operation")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    answer = log_operation("deploy", module_name="logmod")
+
+    entries = json.loads(Path(str(module.get_json_path("logmod", "log"))).read_text(encoding="utf-8"))
+    assert entries, f"{branch}: log_operation appended nothing"
+    assert entries[-1]["operation"] == "deploy", f"{branch}: the operation name was not recorded"
+    assert "timestamp" in entries[-1], f"{branch}: the entry carries no timestamp"
+    assert answer is True, f"{branch}: log_operation answered {answer!r}, not True"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_log_operation_attaches_the_data_it_was_given(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A payload survives to the entry, and an empty one invents nothing.
+
+    The second half is the copies' own weaker claim made exact: they allowed
+    an absent key OR an empty one, which is two behaviours. Both are fine —
+    what is not fine is a handler that fabricates content for a caller who
+    passed nothing, so that is what is pinned.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    log_operation = expose(module, branch, "log_operation")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    document = Path(str(module.get_json_path("datamod", "log")))
+
+    log_operation("with_data", data={"count": 5}, module_name="datamod")
+    carried = json.loads(document.read_text(encoding="utf-8"))[-1]
+    assert carried.get("data", {}).get("count") == 5, f"{branch}: the data payload was lost"
+
+    log_operation("no_data", data={}, module_name="datamod")
+    empty = json.loads(document.read_text(encoding="utf-8"))[-1]
+    assert not empty.get("data"), f"{branch}: an empty payload became {empty.get('data')!r}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_log_operation_calls_accumulate_in_call_order(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Three calls leave three entries, oldest first.
+
+    Order is asserted, not just the count: a log that accumulates but reverses
+    is useless to every reader that takes ``[-1]`` as "most recent", which is
+    how the fleet reads it.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    log_operation = expose(module, branch, "log_operation")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    for operation in ("first", "second", "third"):
+        log_operation(operation, module_name="accmod")
+
+    entries = json.loads(Path(str(module.get_json_path("accmod", "log"))).read_text(encoding="utf-8"))
+    assert [entry["operation"] for entry in entries[-3:]] == ["first", "second", "third"], (
+        f"{branch}: log entries did not accumulate in call order"
+    )
+
+
+#: Cap this suite declares for the rotation contract. Small so the test writes
+#: ten entries rather than a hundred and five.
+DECLARED_LOG_CAP = 5
+
+#: Spellings the fleet uses for the private "template for this json_type"
+#: factory. A list because it IS private, so nothing obliges the branches to
+#: agree on the name, and they do not.
+DEFAULT_FACTORY_NAMES = ("_get_default_for_type", "_default_for_type", "_get_default", "_default_content")
+
+
+def declare_log_cap(module: Any, name: str, cap: int) -> bool:
+    """Write a config document declaring a rotation cap, the way the handler reads it.
+
+    Measured correction to how the stamped copies did this. They searched four
+    MODULE attribute spellings for the cap, and no branch in the fleet defines
+    any of them — it is read out of the module's own CONFIG DOCUMENT
+    (``config["config"]["max_log_entries"]``), with a literal fallback in the
+    code. So the copies' search could only ever answer "no cap": two of the
+    four skipped on every run, and the two that passed used a number they had
+    invented rather than the one the handler applies.
+
+    Declaring it instead of hunting for it also means the contract exercises
+    rotation on every branch that reads the setting, rather than only the ones
+    that happen to ship a document with the key already in it.
+
+    Args:
+        module: A redirected handler.
+        name: Document module name to configure.
+        cap: Entries to keep.
+
+    Returns:
+        True when the handler accepted the declaration.
+    """
+    settings = module.load_json(name, "config")
+    if not isinstance(settings, dict) or not isinstance(settings.get("config"), dict):
+        return False
+    settings["config"]["max_log_entries"] = cap
+    module.save_json(name, "config", settings)
+    written = module.load_json(name, "config")
+    return written.get("config", {}).get("max_log_entries") == cap
+
+
+#: Branches whose rotation ignores the ``max_log_entries`` they publish.
+#: aipass/shared/json_handler.py WRITES the setting into every config document
+#: it generates (line 188) and then rotates on ``JsonHandler.MAX_LOG_ENTRIES``
+#: (line 334), never reading the document back — so the four branches that
+#: share that handler advertise a knob that does nothing. An operator who
+#: edits max_log_entries gets no change and no warning. Found by declaring the
+#: cap instead of hunting for it; the stamped copies could not have seen it,
+#: because none of them ever wrote the setting.
+DECLARED_LOG_CAP_IGNORED = {
+    branch: (
+        f"{branch} writes max_log_entries into its config document but rotates on the shared "
+        f"JsonHandler.MAX_LOG_ENTRIES constant, so the published setting has no effect"
+    )
+    for branch in ("aipass", "canary", "memory", "spawn")
+}
+
+
+@pytest.mark.parametrize("branch", parametrized(DECLARED_LOG_CAP_IGNORED))
+def test_log_operation_rotates_to_the_modules_declared_cap(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An unbounded log is a disk-filler; the cap must actually bind.
+
+    The cap is DECLARED by this contract in the document the handler reads,
+    rather than hunted for on the module — see :func:`declare_log_cap` for why
+    the hunt could not work. A branch whose config document has no place to
+    declare it skips by name.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    log_operation = expose(module, branch, "log_operation")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    if not declare_log_cap(module, "fifomod", DECLARED_LOG_CAP):
+        pytest.skip(f"{branch}'s config document has no config mapping to declare max_log_entries in")
+
+    for index in range(DECLARED_LOG_CAP + 5):
+        log_operation(f"op_{index}", module_name="fifomod")
+
+    entries = json.loads(Path(str(module.get_json_path("fifomod", "log"))).read_text(encoding="utf-8"))
+    assert len(entries) <= DECLARED_LOG_CAP, (
+        f"{branch}: {len(entries)} entries survived a declared cap of {DECLARED_LOG_CAP}"
+    )
+    assert entries[-1]["operation"] == f"op_{DECLARED_LOG_CAP + 4}", (
+        f"{branch}: the newest entry is not last after rotation"
+    )
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_save_json_reports_true_on_a_write_that_landed(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The success signal every caller branches on.
+
+    Pinned separately from the round trip because a handler can persist
+    correctly and still answer None, and the callers that check are then
+    wrong in the safe-looking direction.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    assert module.save_json("sv", "config", copy.deepcopy(CONFIG_PAYLOAD)) is True, (
+        f"{branch}: save_json did not answer True for a write that succeeded"
+    )
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_save_json_writes_a_document_that_parses_from_disk(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Read back as BYTES, not through the handler's own loader.
+
+    The round-trip contract goes out and back through the same module, so a
+    loader that tolerates its own writer's quirk would hide them both. This
+    reads the file the way every other process on the machine will.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    module.save_json("disk", "log", copy.deepcopy(LOG_PAYLOAD))
+
+    raw = Path(str(module.get_json_path("disk", "log"))).read_bytes()
+    parsed = json.loads(raw.decode("utf-8"))
+    assert parsed == LOG_PAYLOAD, f"{branch}: the document on disk is not what was saved"

@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for JSON handler (auto-creating & self-healing JSON system)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-02
 # =============================================
 
 """Tests for json_handler -- default factory, validation, paths, load/save, ensure_module."""
 
+import ast
 import json
 import sys
 import importlib
@@ -295,3 +296,117 @@ def test_reimport_after_mock():
     reloaded = importlib.reload(jh_mod)
     assert reloaded is jh_mod
     assert hasattr(jh_mod, "get_json_path")
+
+
+# --- Durability: the write stages and swaps, it never truncates -------
+#
+# save_json wrote with open(path, "w") + json.dump until 2026-09-02. The
+# truncation happens when the file is OPENED, so any failure during the dump
+# destroyed the live document while save_json returned False — the caller heard
+# "did not save" when the truth was "your previous document is gone too". This
+# is the citizen mail store. Found by seedgo's durability contract (FPLAN-0481),
+# which observed a concurrent reader seeing an EMPTY mailbox six times in one
+# four-writer run, and reproduced here on the real handler before the cure.
+#
+# Deliberately only two pins. seedgo's contract already runs the six helper
+# behaviours and the concurrency race against every branch including this one;
+# copying them here would be a twin, not coverage.
+
+
+def _truncating_open_sites(source: str) -> list:
+    """Write-mode ``open()`` CALLS in *source*, found by shape, not by spelling.
+
+    AST, not a regex, and the reason is that the first version of this guard
+    went red on the CURED file: its regex matched the docstring EXPLAINING the
+    defect, because prose quoting ``open(path, "w")`` is indistinguishable from
+    code to a character match. Same lesson as this branch's inspect.stack() ban
+    (2026-08-31) — a ban on a spelling convicts prose.
+
+    ``os.fdopen`` is excluded by matching the callable, not by a lookbehind: it
+    receives a descriptor mkstemp already created privately, so it has no live
+    document to truncate.
+
+    Returns:
+        ``line:mode`` strings, one per offending call.
+    """
+    offenders = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name != "open":
+            continue
+        mode = None
+        if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+            mode = node.args[1].value
+        for kw in node.keywords:
+            if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                mode = kw.value.value
+        if isinstance(mode, str) and mode[:1] in ("w", "a"):
+            offenders.append(f"line {node.lineno}: open(..., {mode!r})")
+    return offenders
+
+
+def test_the_source_guard_convicts_a_truncating_write():
+    """Negative control: a guard that convicts nothing reports any file clean."""
+    assert _truncating_open_sites('open(p, "w")') == ["line 1: open(..., 'w')"]
+    assert _truncating_open_sites('open(p, mode="a")') == ["line 1: open(..., 'a')"]
+
+
+def test_the_source_guard_acquits_reads_fdopen_and_prose():
+    """Positive control, and the exact three things it must NOT convict.
+
+    The prose case is the one that already caught me: this file and the handler
+    both discuss ``open(path, "w")`` in docstrings, and a character match
+    convicts both.
+    """
+    assert _truncating_open_sites('open(p, "r")') == []
+    assert _truncating_open_sites('os.fdopen(fd, "w")') == []
+    assert _truncating_open_sites('"""Until today it used open(path, \'w\')."""') == []
+
+
+def test_no_truncating_open_survives_in_the_handler_source():
+    """No write-mode open() on a path remains in the handler.
+
+    A guard, not a style rule: one re-introduced write-mode open restores the
+    whole defect and reads as harmless in review. os.fdopen is exempt — it
+    wraps a descriptor mkstemp already created privately, so there is no live
+    document for it to truncate.
+
+    It earned its keep immediately: written against save_json, it convicted a
+    SECOND truncating write in ensure_json_exists that the brief never named.
+    That is why it bans the shape rather than a line.
+    """
+    offenders = _truncating_open_sites(Path(jh_mod.__file__).read_text(encoding="utf-8"))
+
+    assert offenders == [], f"truncating open() found in handler source: {offenders}"
+
+
+def test_save_json_routes_through_the_bounded_replace_helper(tmp_path, monkeypatch):
+    """A successful save reaches _replace_with_retry — staged, then swapped.
+
+    Counted on the HELPER rather than on os.replace on purpose: a counter on the
+    syscall stays green if someone inlines os.replace and drops the bounded
+    retry, which is exactly the refactor the source guard above cannot see and
+    this pin exists to forbid.
+    """
+    calls = []
+    real_helper = jh_mod._replace_with_retry
+
+    def counting_helper(source, destination):
+        calls.append((source, destination))
+        real_helper(source, destination)
+
+    monkeypatch.setattr(jh_mod, "_replace_with_retry", counting_helper)
+    monkeypatch.setattr(jh_mod, "get_json_path", lambda *a, **k: tmp_path / "store.json")
+
+    assert save_json("mail", "data", {"created": "2026-09-02", "last_updated": "2026-09-02"}) is True
+    assert len(calls) == 1, f"helper called {len(calls)} times, expected exactly 1"
+
+    staged, destination = calls[0]
+    # The temp is staged in the TARGET's directory — a cross-filesystem rename
+    # is not atomic, so a temp in /tmp would silently reintroduce the window.
+    assert Path(staged).parent == Path(destination).parent
+    assert not Path(staged).exists(), "staged temp survived the swap"
+    assert json.loads((tmp_path / "store.json").read_text(encoding="utf-8"))["created"] == "2026-09-02"
