@@ -85,7 +85,7 @@ import pytest
 # for real and the fan below reds with close_plan.py named, which is the honest
 # report. Widening the except would have hidden exactly that.
 _PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.api  # noqa: F401

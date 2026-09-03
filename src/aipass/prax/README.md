@@ -4,8 +4,8 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.4.0
-**Last Updated:** 2026-08-30
+**Version:** 2.5.0
+**Last Updated:** 2026-09-03
 
 ---
 
@@ -456,6 +456,51 @@ so the escape-hatch pattern is settled too.
 Callers need do nothing and should change nothing. Reported shares — @drone 7650,
 @memory 1552, @daemon 1096, @backup 778 — are prax's to fix, not theirs.
 
+## The fleet json service (DPLAN-0325)
+
+**Prax owns the fleet's one JSON handler implementation.** Boardroom
+`r/boardroom-json-service` post 8, Patrick's ruling 2026-09-03: the fleet's drift
+no longer matters — one source, every branch follows the one file.
+
+```python
+from aipass.prax import json_handler          # the entry point, the only sanctioned import
+```
+
+- `apps/handlers/json/json_service.py` — the implementation. Stdlib only, so it
+  imports without the logger graph. No `resolve()`, no `getcwd()`, no
+  `inspect.stack()`: it runs with a deleted working directory.
+- `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in all
+  18 branches (seedgo hashes it). It BINDS the service's callables and never
+  wraps them: a wrapper would add a stack frame and silently rename every entry
+  in the operations log.
+- The old handler and `json_templates/` are in
+  `apps/handlers/json/.archive/`. The default document is in code now — a
+  default that lives in a file can go missing, and a handler whose default is
+  missing stops self-healing exactly when it is needed.
+
+**The package init is lazy** (PEP 562 `__getattr__` in `aipass/prax/__init__.py`).
+`logger`, `append_jsonl` and `json_handler` resolve on first attribute access.
+Measured, `from aipass.prax import json_handler` in a fresh interpreter:
+
+| | aipass modules | third-party |
+|---|---|---|
+| eager init (before) | 30 | `watchdog` |
+| lazy init (now) | **6** | **none** |
+
+`aipass.trigger` and the whole watchdog edge stayed cold. Pinned by
+`TestLazyInitImportFootprint` in `tests/test_logger_module.py`, which measures in
+a subprocess — in-process the number is meaningless, pytest has already imported
+prax's world.
+
+**Return semantics changed with the service:** `save_json` raises `WriteFailed`
+rather than answering `False` (a lost document must not look like success) and
+`InvalidDocument` rather than `False` (a caller bug is not a disk failure).
+`write_json` still answers `bool`. `log_operation` is telemetry and still answers
+`False` on a write failure — it runs on the monitor's display and watchdog
+threads, where a raising writer is silent half-death.
+
+---
+
 **Closed 2026-08-30 — `AIPASS_TEST_LOG_DIR` is the fleet contract.**
 `json_handler.PRAX_JSON_DIR` now honours it, in @trigger's form
 (`trigger/apps/handlers/json/json_handler.py`) rather than a sixth spelling
@@ -646,8 +691,7 @@ prax/
 │       ├── dashboard/                 # Refresh, operations, template push/diff, agent status
 │       ├── discovery/                 # Module scanning, filtering, file watcher for new .py
 │       ├── cli/                       # Help-flag detection (pure predicate, no I/O)
-│       ├── json/                      # Auto-creating JSON handler (config/data/log per module)
-│       ├── json_templates/            # Default JSON templates for auto-creation
+│       ├── json/                      # The fleet json service + prax's own shim (config/data/log per module)
 │       ├── logging/                   # Setup, rotation, introspection, override, direct logger, log watchdog, jsonl writer
 │       ├── monitoring/                # Event queue, branch detector, branch scope, stream output, log watcher, rate tracker, filters, commons feed, telegram relay, instance lock, CLI-session handler, pid cache
 │       ├── registry/                  # Module registry load/save
@@ -655,7 +699,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1380 tests across 36 files
+└── tests/                             # 1488 tests across 36 files
 ```
 
 ### Design Pattern
@@ -684,7 +728,7 @@ drone @prax monitor run
 
 ## Tests
 
-1380 tests across 36 files (1379 pass, 1 skipped), covering all major components:
+1488 tests across 36 files (all pass, both rootdirs), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -697,7 +741,7 @@ drone @prax monitor run
 | test_config.py | 61 | Config loading, path resolution, log levels |
 | test_logging_handlers.py | 49 | Setup, rotation, introspection, direct logger |
 | test_logging.py | 47 | Core logging system, debug level gating |
-| test_logger_module.py | 46 | Logger init, routing, lifecycle, NullLogger fallback |
+| test_logger_module.py | 54 | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint |
 | test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
 | test_monitoring_filters.py | 39 | Event filtering rules |
 | test_commons_feed.py | 27 | Commons live feed, cursors, room filtering, full-body rendering |
@@ -706,7 +750,7 @@ drone @prax monitor run
 | test_discovery.py | 25 | Module scanning |
 | test_registry.py | 24 | Module registry |
 | test_watcher.py | 40 | File watcher behavior; dispatcher survives handler failure (real observer), liveness reporting |
-| test_json_handler.py | 18 | JSON auto-creation |
+| test_json_handler.py | 72 | The fleet json service: branch resolution, the per-call seam, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
 | test_central.py | 14 | Central reader |
 | test_log_audit.py | 13 | Log audit |
 | test_pid_cache.py | 12 | PID resolution cache |
@@ -715,7 +759,7 @@ drone @prax monitor run
 | test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
 | test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
 | test_flow_section_contract.py | 22 | `sections.flow` five-key contract; per-branch (not fleet-wide) recently_closed; total_plans carried, not derived |
-| test_json_durability.py | 10 | Atomic JSON swap; `_replace_with_retry` bounded retry (Windows sharing violation) |
+| test_json_durability.py | 4 | `AIPASS_TEST_LOG_DIR` seam, measured in subprocesses (both import orderings) |
 | test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
 | test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
 | test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
@@ -752,7 +796,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-08-30*
+*Last Updated: 2026-09-03*
 
 ---
 [← Back to AIPass](../../../README.md)

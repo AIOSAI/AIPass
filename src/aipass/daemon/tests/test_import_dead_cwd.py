@@ -97,7 +97,7 @@ import pytest
 # rollout in flight, 2026-08-31); this pin measures daemon's sites only. When
 # the fleet is cured these preloads can drop.
 PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.cli.apps.modules.display  # noqa: F401

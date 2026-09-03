@@ -36,7 +36,7 @@ WORLD = r"""
 # world, before the denial. Their dead-cwd cure is their own build (fleet
 # rollout in flight, 2026-08-31); this pin measures devpulse's sites only.
 # When the fleet is cured these preloads can drop.
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 
@@ -169,7 +169,7 @@ DIRECT_CALL_WORLD = r"""
 # <string> or importlib, both skipped, so _find_real_caller returns (None,
 # None) and the branch runs. A regrown inspect.stack() walk there dies under
 # the realpath denial; the cured plain return survives it.
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.devpulse.apps.handlers as handlers

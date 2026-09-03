@@ -19,9 +19,14 @@ All module imports happen inside test functions so that mocks are in place
 before the import chain triggers.
 """
 
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # =============================================
@@ -678,22 +683,37 @@ class TestPrintIntrospection:
 # =============================================
 
 
-def _load_fallback_logger():
-    """Execute prax/__init__.py with the real logger import forced to fail.
+def _exec_prax_init() -> dict:
+    """Execute prax/__init__.py as source and return its namespace.
 
-    Returns the NullLogger instance the package falls back to. Runs the real
-    source rather than a re-implementation — the point of the fallback is what
-    ships, not what a test can restate.
+    Runs the real source rather than a re-implementation — the point of the
+    fallback is what ships, not what a test can restate.
     """
     init_path = Path(__file__).resolve().parents[1] / "__init__.py"
     namespace: dict = {"__name__": "aipass.prax._fallback_probe", "__file__": str(init_path)}
+    exec(compile(init_path.read_text(encoding="utf-8"), str(init_path), "exec"), namespace)
+    return namespace
 
-    # A sys.modules entry of None makes `from ... import ...` raise ImportError,
-    # which is the branch under test.
+
+def _load_lazily(name: str):
+    """Resolve a prax package name with the real logger import forced to fail.
+
+    Under the lazy (PEP 562) init the name is NOT bound at exec time — the
+    fallback's moment moved from import to first attribute access. So the probe
+    execs the source and then calls the module's own ``__getattr__``, with the
+    failure installed for both steps.
+
+    A sys.modules entry of None makes the import raise ImportError, which is the
+    branch under test.
+    """
     with patch.dict(sys.modules, {"aipass.prax.apps.modules.logger": None}):
-        exec(compile(init_path.read_text(encoding="utf-8"), str(init_path), "exec"), namespace)
+        namespace = _exec_prax_init()
+        return namespace["__getattr__"](name)
 
-    return namespace["logger"]
+
+def _load_fallback_logger():
+    """The NullLogger instance the package falls back to."""
+    return _load_lazily("logger")
 
 
 class TestNullLoggerFallback:
@@ -739,3 +759,111 @@ class TestNullLoggerFallback:
         fallback.info("info via fallback")
         fallback.warning("warning via fallback")
         fallback.error("error via fallback")
+
+    def test_append_jsonl_degrades_to_none(self):
+        """The other eager fallback: a broken logger chain leaves append_jsonl
+        importable and falsy rather than raising at the import site."""
+        assert _load_lazily("append_jsonl") is None
+
+    def test_fallback_is_not_built_when_the_logger_imports(self):
+        """The fallback is the broken path only — a healthy prax hands back the
+        real SystemLogger instance, not a NullLogger."""
+        namespace = _exec_prax_init()
+
+        resolved = namespace["__getattr__"]("logger")
+
+        assert type(resolved).__name__ != "NullLogger"
+        assert resolved is sys.modules[MODULE_NAME].system_logger
+
+    def test_resolved_name_is_cached_in_globals(self):
+        """PEP 562 __getattr__ fires once per name: the second access must come
+        from the module dict, not from a second import."""
+        namespace = _exec_prax_init()
+
+        first = namespace["__getattr__"]("logger")
+
+        assert namespace["logger"] is first
+
+    def test_unknown_name_raises_attribute_error(self):
+        """__getattr__ must not answer for names the package does not export."""
+        namespace = _exec_prax_init()
+
+        with pytest.raises(AttributeError):
+            namespace["__getattr__"]("no_such_prax_name")
+
+
+# =============================================
+# Lazy package init — import footprint (aipass/prax/__init__.py)
+# =============================================
+
+# Measured, DPLAN-0325 phase 0/1: importing the json service through the lazy
+# package init pulls these aipass modules and nothing else. The eager init cost
+# 30 aipass modules plus watchdog and aipass.trigger; that graph is the logger's,
+# and no consumer of the json service should pay for it.
+EXPECTED_COLD_FOOTPRINT = {
+    "aipass",
+    "aipass.prax",
+    "aipass.prax.apps",
+    "aipass.prax.apps.handlers",
+    "aipass.prax.apps.handlers.json",
+    "aipass.prax.apps.handlers.json.json_service",
+}
+
+# Names a fresh interpreter carries that are neither stdlib nor ours.
+_INTERPRETER_NOISE = {"__main__", "sitecustomize"}
+
+_FOOTPRINT_PROBE = """
+import json, sys
+from aipass.prax import json_handler  # noqa: F401
+print(json.dumps(sorted(n for n in sys.modules if n.split(".")[0] not in sys.stdlib_module_names)))
+"""
+
+
+def _cold_import_footprint() -> set:
+    """Non-stdlib modules a fresh interpreter loads for the json service alone."""
+    result = subprocess.run(
+        [sys.executable, "-c", _FOOTPRINT_PROBE],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[3]),
+        env={**os.environ},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return set(json.loads(result.stdout.strip().splitlines()[-1])) - _INTERPRETER_NOISE
+
+
+class TestLazyInitImportFootprint:
+    """The lazy init's whole purpose, pinned in a subprocess.
+
+    In-process assertions cannot see this: pytest has already imported prax's
+    world by the time any test runs, so the measurement only exists in a fresh
+    interpreter.
+    """
+
+    def test_json_service_pulls_no_third_party(self):
+        """Stdlib guard: the json path must reach no package outside aipass."""
+        footprint = _cold_import_footprint()
+
+        third_party = {n for n in footprint if n.split(".")[0] != "aipass"}
+        assert third_party == set(), f"json service dragged in third-party modules: {sorted(third_party)}"
+
+    def test_json_service_pulls_only_prax_modules(self):
+        """Every aipass module loaded belongs to prax — no cross-branch edge."""
+        footprint = _cold_import_footprint()
+
+        strangers = {n for n in footprint if n != "aipass" and not n.startswith("aipass.prax")}
+        assert strangers == set(), f"json service reached outside prax: {sorted(strangers)}"
+
+    def test_cold_footprint_is_the_measured_set(self):
+        """The exact list. A new import on this path is a decision, not a drift."""
+        assert _cold_import_footprint() == EXPECTED_COLD_FOOTPRINT
+
+    def test_the_logger_graph_stays_cold(self):
+        """The named costs of the eager init: the logger module, watchdog and the
+        aipass.trigger edge underneath it."""
+        footprint = _cold_import_footprint()
+
+        assert "aipass.prax.apps.modules.logger" not in footprint
+        assert not any(n == "watchdog" or n.startswith("watchdog.") for n in footprint)
+        assert not any(n == "aipass.trigger" or n.startswith("aipass.trigger.") for n in footprint)

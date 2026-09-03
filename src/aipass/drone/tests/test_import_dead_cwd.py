@@ -76,7 +76,7 @@ import pytest
 # only cross-branch module-level imports, and they are TEMPORARY — delete a
 # line once that branch's own dead-cwd pin is green.
 _PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.api  # noqa: F401

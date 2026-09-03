@@ -135,7 +135,7 @@ def _no_working_tree_litter():
 
 
 PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.prax.apps.handlers.logging.setup  # noqa: F401
 import aipass.cli  # noqa: F401

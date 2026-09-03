@@ -60,7 +60,7 @@ GUARD_SOURCE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 # rollout in flight, 2026-08-31); this pin measures hooks' sites only. When the
 # fleet is cured these preloads can drop.
 _PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 """

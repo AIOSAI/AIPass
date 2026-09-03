@@ -106,7 +106,7 @@ CONTROL_ONLY = TARGET == "__control__"
 # Preloaded in the HEALTHY world: machinery the denial is not aimed at. Kept
 # deliberately small - a preload is a claim you stop testing.
 import json, linecache, importlib, inspect, pathlib  # noqa
-import aipass.prax  # noqa - another branch, not the thing measured
+from aipass.prax import logger  # noqa - another branch, not the thing measured; lazy init loads nothing bare
 
 
 def _denied():
