@@ -2938,9 +2938,8 @@ class TestImportTimeRootDerivationSurvivesADeadCwd:
 
     MY RULING, and the sweep that backs it: severity splits on WHEN it runs.
 
-    * At MODULE level it is unrecoverable and it spreads — the template's
-      json_handler derives its branch root that way, and nearly every module in
-      a newborn imports json_handler, so one dead-cwd process loses the whole
+    * At MODULE level it is unrecoverable and it spreads — nearly every module
+      in a newborn imports json_handler, so one dead-cwd process loses the whole
       branch with a traceback from inside the stdlib. These are guarded, falling
       back to the unresolved absolute path (`__file__` has been absolute since
       3.9, so only symlink normalisation is lost, and only in the world where
@@ -2949,42 +2948,15 @@ class TestImportTimeRootDerivationSurvivesADeadCwd:
       see it, and a root that is wrong-but-plausible is worse than a raise —
       "fail to errors, never fall back silently" is the branch's own rule. The
       pin below is scoped to module level for that reason, not by oversight.
+
+    The template's json_handler used to carry the derivation itself, and a test
+    here ran that exact text in a realpath-denied subprocess. Since DPLAN-0325
+    the derivation belongs to prax's json service (`for_module` -> `parents[3]`,
+    no resolve()) and prax pins it in its own suite; the template's shim only
+    hands it `__file__`. That test is in tests/.archive/. What stays is the
+    species sweep below, which is the stronger claim anyway: it reads EVERY
+    module in the template, so a newborn cannot re-inherit the idiom at any site.
     """
-
-    def test_the_json_handler_root_derivation_survives_realpath_denial(self, tmp_path):
-        """Run the template's own module-level derivation in the denied world."""
-        source = (get_template_dir("specialist") / "apps" / "handlers" / "json" / "json_handler.py").read_text(
-            encoding="utf-8"
-        )
-        derivation = source[source.index("_BRANCH_ROOT = ") : source.index("_JSON_DIR")]
-
-        probe = tmp_path / "derive.py"
-        probe.write_text(
-            textwrap.dedent(
-                """
-                import errno, os, os.path
-                from pathlib import Path
-
-                def _no_realpath(*args, **kwargs):
-                    raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-
-                os.path.realpath = _no_realpath
-
-                """
-            ).lstrip()
-            + derivation
-            + '\nprint("DERIVED", "ABSOLUTE" if _BRANCH_ROOT.is_absolute() else "RELATIVE")\n',
-            encoding="utf-8",
-        )
-
-        result = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True, cwd=str(tmp_path))
-
-        assert result.returncode == 0, f"the template's import-time root derivation needs a cwd:\n{result.stderr}"
-        assert result.stdout.split()[0] == "DERIVED"
-        assert result.stdout.split()[1] == "ABSOLUTE", (
-            "the derivation produced a relative root — __file__ has been absolute "
-            "since 3.9 and dropping resolve() relies on exactly that"
-        )
 
     def test_no_unguarded_module_level_resolve_anywhere_in_the_template(self):
         """The species, not the site — so a newborn cannot re-inherit the idiom.
@@ -3228,8 +3200,9 @@ class TestTheStackWalkCannotComeBack:
         @devpulse's warning was earned elsewhere: @commons applied this ban
         without looking first and found a LIVE stack walk the dispatch had not
         named. So this was measured before widening — spawn's json_handler is a
-        pure shim over aipass.aipass.shared.json_handler with no local walk, and
-        that shared implementation is itself already on sys._getframe(2).
+        pure shim with no local walk (over aipass.aipass.shared when this was
+        written, over prax's json service since DPLAN-0325), and the
+        implementation behind it is itself already on sys._getframe(2).
         """
         offenders = []
         swept = 0

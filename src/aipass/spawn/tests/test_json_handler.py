@@ -1,213 +1,198 @@
 # =================== AIPass ====================
-# Name: test_json_handler_template.py
-# Description: Universal JSON Handler Test Template (DPLAN-0059)
-# Version: 1.0.0
+# Name: test_json_handler.py
+# Description: Tests that spawn's shim is wired to the fleet json service
+# Version: 2.0.0
 # Created: 2026-03-25
-# Modified: 2026-03-25
+# Modified: 2026-09-03
 # =============================================
 
+"""Tests for spawn's JSON handler shim.
+
+Only the WIRING is tested here: that spawn's shim binds the fleet's one json
+service (DPLAN-0325), that it lands in spawn_json/, and that it adds nothing of
+its own. The service's BEHAVIOUR - defaults, validation, provisioning, rotation,
+durability - is pinned once for all eighteen branches by seedgo's
+tests/test_json_handler_contract.py and is deliberately not re-tested here.
+
+What this file used to be is in tests/.archive/: the DPLAN-0059 universal
+template stamp, discovering a ``_JSON_DIR`` attribute by name and patching it.
+The service computes its directory per call and the shim has no attributes at
+all, so the stamp SKIPPED itself module-wide the moment the shim landed - a file
+that reports "1 skipped" and tests nothing. It is not rewritten; seedgo's
+contract already carries every claim it made.
+
+Redirection here is the ``AIPASS_TEST_LOG_DIR`` seam the conftest sets per test.
 """
-Universal JSON Handler Test Template
 
-Copy this file to any AIPass branch's tests/ directory.
-Change BRANCH_MODULE below. Run with pytest.
-
-The template-stamp tests this file carried are pinned once for the whole fleet in
-seedgo's tests/test_json_handler_contract.py (DPLAN-0323 phase 7 slice 4, 2026-09-02).
-"""
-
-import importlib
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
 
-
-# ============ BRANCH CONFIG ============
-# Change these two lines when deploying to a branch:
-BRANCH_MODULE = "spawn"  # e.g. "prax", "drone", "backup", "cli", etc.
-# For commons: "commons" (import path is different: aipass -> just commons)
-# For skills: "skills" (import path is different: aipass -> just skills)
-# =======================================
-
-# ---------------------------------------------------------------------------
-# Dynamic import with cross-branch guard bypass
-# ---------------------------------------------------------------------------
-# Every branch has an import guard in apps/handlers/__init__.py that blocks
-# cross-branch imports. When this template lives in its target branch, the
-# guard passes naturally. When testing from devpulse (or any other branch),
-# we pre-inject an empty handlers __init__ module to skip the guard.
-
-if BRANCH_MODULE in ("commons", "skills"):
-    _handler_pkg = f"{BRANCH_MODULE}.apps.handlers"
-    _json_pkg = f"{BRANCH_MODULE}.apps.handlers.json"
-    _json_mod_path = f"{BRANCH_MODULE}.apps.handlers.json.json_handler"
-else:
-    _handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
-    _json_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers.json"
-    _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
-
-# If the handlers package is not yet loaded, inject a stub to avoid the guard.
-# The stub needs __path__ set so Python treats it as a package for sub-imports.
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
-    # Resolve the real filesystem path for the handlers package
-    if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-    else:
-        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
-
-_mod = importlib.import_module(_json_mod_path)
-json_handler = _mod
+from aipass.prax import json_handler as json_service
+from aipass.spawn.apps.handlers.json import json_handler
 
 
-# ---------------------------------------------------------------------------
-# JSON_DIR variable discovery
-# ---------------------------------------------------------------------------
-# Branches use different names: JSON_DIR, BACKUP_JSON_DIR, PRAX_JSON_DIR,
-# BRANCH_JSON_DIR, _JSON_DIR, AI_MAIL_JSON_DIR, etc.
-# We find the right one at import time so the isolation fixture can patch it.
-
-_JSON_DIR_ATTR: str | None = None
-_JSON_DIR_CANDIDATES = [
-    f"{BRANCH_MODULE.upper()}_JSON_DIR",  # SEEDGO_JSON_DIR, BACKUP_JSON_DIR, etc.
-    "JSON_DIR",  # seedgo, daemon, memory, cli, drone
-    "BRANCH_JSON_DIR",  # commons
-    f"{BRANCH_MODULE}_json",  # unlikely but covered
-    "_JSON_DIR",  # spawn
-]
-
-for _candidate in _JSON_DIR_CANDIDATES:
-    if hasattr(_mod, _candidate):
-        _JSON_DIR_ATTR = _candidate
-        break
-
-if _JSON_DIR_ATTR is None:
-    pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler — tried: {_JSON_DIR_CANDIDATES}",
-        allow_module_level=True,
-    )
+BOUND_NAMES = (
+    "read_json",
+    "write_json",
+    "validate_json_structure",
+    "get_json_path",
+    "ensure_json_exists",
+    "ensure_module_jsons",
+    "load_json",
+    "save_json",
+    "log_operation",
+)
 
 
-# ---------------------------------------------------------------------------
-# Isolation fixture
-# ---------------------------------------------------------------------------
+# =============================================================================
+# THE SEAM — where spawn's json actually lands
+# =============================================================================
 
 
-@pytest.fixture(autouse=True)
-def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect JSON operations to tmp_path for test isolation."""
-    assert _JSON_DIR_ATTR is not None
-    original_value = getattr(_mod, _JSON_DIR_ATTR)
-    # Some branches store JSON_DIR as a string (commons), others as Path
-    if isinstance(original_value, str):
-        monkeypatch.setattr(_mod, _JSON_DIR_ATTR, str(tmp_path))
-    else:
-        monkeypatch.setattr(_mod, _JSON_DIR_ATTR, tmp_path)
-    # Patch the JsonHandler instance if one exists (aipass.aipass.shared migration)
-    if hasattr(_mod, "_handler") and hasattr(_mod._handler, "_json_dir"):
-        monkeypatch.setattr(_mod._handler, "_json_dir", tmp_path)
-    return tmp_path
+class TestTheSeamRedirectsSpawnsJson:
+    """The conftest's autouse fixture is the only redirect there is."""
+
+    def test_get_json_path_lands_under_the_redirected_dir(self, tmp_path, monkeypatch):
+        """get_json_path follows AIPASS_TEST_LOG_DIR, set after import."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        result = json_handler.get_json_path("probe", "config")
+
+        assert result == tmp_path / "spawn" / "spawn_json" / "probe_config.json"
+
+    def test_the_directory_is_recomputed_on_every_call(self, tmp_path, monkeypatch):
+        """No captured directory: a redirect that arrives late still takes effect.
+
+        This is what replaced the patched ``_JSON_DIR`` — there is no attribute
+        to patch, so a test that forgets the seam writes into the real
+        spawn_json/ rather than failing loudly. The autouse fixture in
+        tests/conftest.py is what keeps that from happening.
+        """
+        first = json_handler.get_json_path("probe", "config").parent
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "moved"))
+        second = json_handler.get_json_path("probe", "config").parent
+
+        assert first != second
+        assert second == tmp_path / "moved" / "spawn" / "spawn_json"
+
+    def test_ensure_module_jsons_provisions_into_the_sandbox(self, tmp_path, monkeypatch):
+        """spawn's own modules call this; it must never touch the live branch."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        assert json_handler.ensure_module_jsons("probe") is True
+        for json_type in ("config", "data", "log"):
+            assert (tmp_path / "spawn" / "spawn_json" / f"probe_{json_type}.json").exists()
+
+    def test_load_json_reads_back_what_ensure_exists_wrote(self, tmp_path, monkeypatch):
+        """ensure_json_exists provisions, load_json parses — through the seam."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        assert json_handler.ensure_json_exists("probe", "config") is True
+        loaded = json_handler.load_json("probe", "config")
+
+        assert isinstance(loaded, dict)
+        assert loaded["module_name"] == "probe"
+
+    def test_validate_json_structure_answers_for_spawns_own_documents(self):
+        """The one call spawn makes that never touches the disk."""
+        assert json_handler.validate_json_structure({"created": "x", "last_updated": "y"}, "data") is True
+        assert json_handler.validate_json_structure({"missing": "keys"}, "data") is False
 
 
-# ---------------------------------------------------------------------------
-# Helper: resolve JSON dir as Path regardless of branch type
-# ---------------------------------------------------------------------------
+# =============================================================================
+# THE SHIM — it binds, it never wraps
+# =============================================================================
 
 
-def _json_dir_as_path(tmp_path: Path) -> Path:
-    """Return the patched JSON dir as a Path (handles str-typed branches)."""
-    assert _JSON_DIR_ATTR is not None
-    val = getattr(_mod, _JSON_DIR_ATTR)
-    if isinstance(val, str):
-        return Path(val)
-    return val
+class TestTheShimBindsAndNeverWraps:
+    """spawn's names ARE the service's callables, not calls into it."""
+
+    @pytest.mark.parametrize("name", BOUND_NAMES)
+    def test_every_public_name_is_a_bound_method_of_the_service(self, name):
+        """A wrapper would add a stack frame, and the service names the calling
+        module from frame 2 — every entry spawn logged would be attributed to
+        the wrapper's file instead of the caller's."""
+        bound = getattr(json_handler, name)
+
+        assert bound.__func__ is getattr(json_service.JsonHandle, name)
+        assert isinstance(bound.__self__, json_service.JsonHandle)
+
+    def test_the_shim_reexports_every_documented_name(self):
+        """The full service surface, not a subset."""
+        expected = BOUND_NAMES + ("InvalidDocument", "WriteFailed")
+        missing = [name for name in expected if not hasattr(json_handler, name)]
+
+        assert missing == [], f"shim is missing re-exports: {missing}"
+
+    def test_the_exceptions_are_the_services_own(self):
+        """A caller catching spawn's InvalidDocument catches the service's."""
+        assert json_handler.InvalidDocument is json_service.InvalidDocument
+        assert json_handler.WriteFailed is json_service.WriteFailed
+
+    def test_the_shim_is_bound_to_spawn(self):
+        """for_module derived spawn's root from the shim's own __file__."""
+        assert json_handler.get_json_path.__self__.branch_root.name == "spawn"
+
+    def test_the_shim_carries_nothing_else(self):
+        """Byte-identical in all eighteen branches by design — anything spawn
+        adds here is the drift DPLAN-0325 removed."""
+        public = {name for name in vars(json_handler) if not name.startswith("_")}
+
+        assert public == set(json_handler.__all__) | {"json_handler"}
+
+    def test_the_shim_is_byte_identical_to_the_template_spawn_ships(self):
+        """spawn mints every citizen from that file; if the two ever differ, a
+        newborn is born off-fleet and nothing else in the suite would say so."""
+        shim = Path(json_handler.__file__).read_bytes()
+        template = (
+            Path(__file__).resolve().parents[1]
+            / "templates"
+            / "citizen"
+            / "apps"
+            / "handlers"
+            / "json"
+            / "json_handler.py"
+        ).read_bytes()
+
+        assert shim == template
 
 
-_has_save = hasattr(json_handler, "save_json")
-
-_skip_save = pytest.mark.skipif(not _has_save, reason="No save_json")
-
-
-# ============================================================================
-# v4 sole carriers — SUBSUMED, kept for the gate (DPLAN-0323 phase 7 slice 4)
-# ============================================================================
-# Every claim below is pinned for spawn in seedgo's tests/test_json_handler_contract.py
-# (FPLAN-0483, 994465a5). They stay only because test_quality v4 keys on substrings of this
-# directory's text: after the slice 4 deletions these five were the last carriers here of the
-# json_handler validate, get_path, ensure_exists, load and ensure_module items - spawn scored
-# 90 without them. Delete the block the day v5 replaces v4 as the gate.
+# =============================================================================
+# THE CONSUMERS — the return contract spawn's own code depends on
+# =============================================================================
 
 
-def test_validate_config_missing_key() -> None:  # JH-006
-    data = {"module_name": "x", "version": "1.0.0"}  # missing config
-    assert json_handler.validate_json_structure(data, "config") is False
+class TestTheBoolPrimitiveSpawnDependsOn:
+    """write_json is the bool primitive four spawn call sites branch on.
 
+    core.py:401, registry.py:277 and :454 and repair_ops.py:165 all read the
+    return value. save_json now RAISES WriteFailed instead of answering False,
+    so a future migration of these call sites to save_json would silently turn
+    a handled failure into an escaping exception. These pin the contract they
+    were written against.
+    """
 
-def test_get_json_path_filename_pattern(tmp_path: Path) -> None:  # JH-016
-    result = json_handler.get_json_path("mymod", "config")
-    name = Path(result).name if isinstance(result, str) else result.name
-    assert name == "mymod_config.json", f"Expected mymod_config.json, got {name}"
+    def test_write_json_reports_true_and_the_document_parses_from_disk(self, tmp_path):
+        target = tmp_path / "out.json"
 
+        assert json_handler.write_json(target, {"a": 1}) is True
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 1}
 
-def test_ensure_creates_file_when_missing(tmp_path: Path) -> None:  # JH-018
-    result = json_handler.ensure_json_exists("ens_mod", "config")
-    assert result is True
-    json_dir = _json_dir_as_path(tmp_path)
-    created = json_dir / "ens_mod_config.json"
-    assert created.exists(), "ensure_json_exists must create the file"
+    def test_write_json_answers_false_and_never_raises_on_an_os_error(self, tmp_path):
+        """A file where a directory must be — the failure spawn's callers handle."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("i am a file, not a directory", encoding="utf-8")
 
+        assert json_handler.write_json(blocker / "nested" / "out.json", {"a": 1}) is False
 
-def test_load_returns_dict_for_config(tmp_path: Path) -> None:  # JH-025
-    result = json_handler.load_json("cfg_mod", "config")
-    assert isinstance(result, dict), "load_json for config must return dict"
+    def test_read_json_answers_none_for_a_missing_file(self, tmp_path):
+        """registry.py and repair_ops.py both test the result for None."""
+        assert json_handler.read_json(tmp_path / "not_here.json") is None
 
+    def test_read_json_answers_none_for_an_unparseable_file(self, tmp_path):
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{not valid json", encoding="utf-8")
 
-def test_ensure_module_jsons_returns_true(tmp_path: Path) -> None:  # JH-037
-    result = json_handler.ensure_module_jsons("retmod")
-    assert result is True, "ensure_module_jsons must return True"
-
-
-# ============================================================================
-# Group 6 — save_json (5 tests)
-# ============================================================================
-
-
-@_skip_save
-def test_save_rejects_invalid_structure(tmp_path: Path) -> None:  # JH-029
-    json_dir = _json_dir_as_path(tmp_path)
-    json_dir.mkdir(parents=True, exist_ok=True)
-    with pytest.raises(ValueError, match="[Ii]nvalid"):
-        json_handler.save_json("bad", "config", {"missing": "keys"})
-
-
-# ============================================================================
-# Group 7 — log_operation (7 tests)
-# ============================================================================
-
-
-def test_log_operation_fifo_rotation(tmp_path: Path) -> None:  # JH-040
-    # Find the max log entries constant
-    max_entries = getattr(_mod, "MAX_LOG_ENTRIES", getattr(_mod, "max_log_entries", None))
-    if max_entries is None:
-        # Try to find it by checking common names
-        for attr in ("MAX_LOG_ENTRIES", "max_log_entries", "LOG_MAX_ENTRIES", "_MAX_LOG_ENTRIES"):
-            max_entries = getattr(_mod, attr, None)
-            if max_entries is not None:
-                break
-    if max_entries is None:
-        pytest.skip("Cannot find max_log_entries constant on module")
-
-    # Fill to max + 5
-    for i in range(max_entries + 5):
-        json_handler.log_operation(f"op_{i}", module_name="fifomod")
-
-    json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads((json_dir / "fifomod_log.json").read_text(encoding="utf-8"))
-    assert len(log) <= max_entries, f"Log must not exceed {max_entries} entries after rotation"
-    # First entries should have been rotated out
-    assert log[-1]["operation"] == f"op_{max_entries + 4}", "Most recent entry must be last"
+        assert json_handler.read_json(corrupt) is None

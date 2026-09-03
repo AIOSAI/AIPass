@@ -247,8 +247,7 @@ spawn/
 │   │   ├── json_ops.py                  # JSON deep merge, backup utilities
 │   │   ├── atomic_write.py              # Atomic text write primitive (stage → fsync → os.replace)
 │   │   └── json/
-│   │       └── json_handler.py          # JSON I/O + operation logging — 9 functions over aipass.aipass.shared
-│   ├── json_templates/                  # Package marker for JSON template assets
+│   │       └── json_handler.py          # The fleet json shim — 9 bound names + 2 exceptions over prax's service
 │   └── plugins/                         # Package marker — no plugins shipped
 ├── templates/
 │   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
@@ -321,7 +320,7 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 | File | Focus |
 |------|-------|
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
-| `test_json_handler.py` | JSON I/O, operation logging, standard API |
+| `test_json_handler.py` | The shim's wiring to the fleet json service — the seam, the binding, the bool contract |
 | `test_handlers.py` | Handler function behavior and integration |
 | `test_modules_gateway.py` | The modules-package gateway other branches import through |
 | `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
@@ -358,7 +357,8 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 
 - **aipass.prax** — Logging via `system_logger`
 - **aipass.cli** — Console output (header, error, warning)
-- **aipass.aipass.shared** — `json_handler` (the real implementation behind spawn's shim), `json_ops` (`deep_merge`, `backup_json`), `registry_discovery.find_registry`
+- **aipass.prax** — `json_handler` (the fleet's one json service, DPLAN-0325; spawn's `apps/handlers/json/json_handler.py` is the byte-identical shim that binds it)
+- **aipass.aipass.shared** — `json_ops` (`deep_merge`, `backup_json`), `registry_discovery.find_registry`
 - **aipass.memory** (optional) — `tab_renderer.render_all_meta_tabs` for meta tabs at create; import is guarded and degrades to empty
 - Python stdlib (`pathlib`, `json`, `shutil`, `hashlib`, `re`, `argparse`, `uuid`)
 
