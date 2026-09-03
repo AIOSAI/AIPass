@@ -24,15 +24,14 @@ reader sees an empty or partial file. In this handler that reader is often
 template defaults over it — turning a transient race into permanent data loss.
 
 These tests pin the atomic-write helper, prove every write site routes through
-it, guard the source against a truncating ``open`` returning, and measure a
-2-writer/2-reader race for zero unusable reads.
+it, and guard the source against a truncating ``open`` returning. The
+2-writer/2-reader race is pinned once for the whole fleet in seedgo's
+tests/test_json_handler_contract.py (DPLAN-0323 phase 7, 2026-09-02).
 """
 
 import json
 import os
 import re
-import threading
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -242,95 +241,6 @@ def test_no_truncating_open_survives_in_source():
     offenders = re.findall(r"(?<!fd)open\([^)]*[\"'][wa]\+?[bt]?[\"']", source)
 
     assert offenders == [], f"truncating open() found in handler source: {offenders}"
-
-
-# ---------------------------------------------------------------------------
-# Concurrency probe — the defect itself
-# ---------------------------------------------------------------------------
-
-
-def test_concurrent_writers_never_expose_a_torn_document(json_dir):
-    """
-    Two writers and two readers on one document produce zero unusable reads.
-
-    Measured against the unfixed handler this same way: 1,297 reads, 553 empty
-    and 485 unparseable — 80.03% unusable.
-    """
-    module_name = "durability"
-    target = Path(json_handler_mod.get_json_path(module_name, "data"))
-    json_handler_mod.save_json(module_name, "data", _valid_data(filler="a"))
-
-    stop = threading.Event()
-    counts = {"ok": 0, "empty": 0, "unparseable": 0}
-    lock = threading.Lock()
-    iterations = 150
-
-    failures = []
-
-    def writer(filler):
-        # stop.set() must fire even if a write raises — a dead writer that
-        # never releases the readers hangs the whole suite, not just this
-        # test (Windows CI sat 1h45m exactly this way on 2026-08-18).
-        try:
-            for _ in range(iterations):
-                json_handler_mod.save_json(module_name, "data", _valid_data(filler=filler))
-        except Exception as error:  # noqa: BLE001 - re-raised via failures below
-            with lock:
-                failures.append(error)
-        finally:
-            stop.set()
-
-    def reader():
-        local = {"ok": 0, "empty": 0, "unparseable": 0}
-        while not stop.is_set():
-            # Yield between polls — Windows share-mode semantics, not tuning.
-            # A zero-delay spin-reader holds the target open at near-100% duty
-            # cycle, and Python opens files without FILE_SHARE_DELETE, so on
-            # Windows an os.replace onto a handle a reader holds fails with
-            # WinError 5. Two spinning readers can then collide with every one
-            # of the writer's bounded retry attempts and starve a correct retry
-            # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
-            # models a real reader — no fleet workload spin-reads a config file
-            # — and weakens no content check below. At the top of the pass so
-            # the `continue` paths yield too: a refused open means a replace is
-            # in flight, exactly when re-spinning hurts most.
-            time.sleep(0.001)
-            try:
-                raw = target.read_text(encoding="utf-8")
-            except OSError:
-                # PermissionError lands here too: on Windows a concurrent
-                # os.replace refuses the open. A refused open is share-mode
-                # semantics — not a torn document, and not a read at all.
-                continue
-            if raw.strip() == "":
-                local["empty"] += 1
-                continue
-            try:
-                json.loads(raw)
-                local["ok"] += 1
-            except json.JSONDecodeError:
-                local["unparseable"] += 1
-        with lock:
-            for key, value in local.items():
-                counts[key] += value
-
-    threads = [
-        threading.Thread(target=writer, args=("a",)),
-        threading.Thread(target=writer, args=("b",)),
-        threading.Thread(target=reader),
-        threading.Thread(target=reader),
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=60)
-    stuck = [thread.name for thread in threads if thread.is_alive()]
-    assert not stuck, f"threads never finished: {stuck}"
-
-    assert not failures, f"a writer died mid-race: {failures[0]!r}"
-    assert counts["ok"] > 0, "probe never observed a readable document"
-    assert counts["empty"] == 0, f"{counts['empty']} readers saw an empty document"
-    assert counts["unparseable"] == 0, f"{counts['unparseable']} readers saw a partial document"
 
 
 def test_replace_retries_through_a_transient_sharing_violation(json_dir, monkeypatch):
