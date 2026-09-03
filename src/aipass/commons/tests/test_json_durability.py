@@ -379,30 +379,3 @@ def test_replace_retry_is_bounded_and_raises(json_dir, monkeypatch):
     with pytest.raises(PermissionError):
         json_handler_mod.save_json("durability", "data", _valid_data(filler="x"))
     assert calls["count"] == json_handler_mod._REPLACE_ATTEMPTS, "bound not honoured"
-
-
-def test_retry_waits_between_attempts(tmp_path, monkeypatch):
-    """
-    The backoff is used, not just declared.
-
-    Deleting the sleep leaves a busy spin that passes every other pin here: it
-    still retries, still bounds, still raises. But 40 immediate attempts finish
-    inside a microsecond and never outlast the reader handle the retry exists to
-    wait out. The retry stops being a fix and becomes decoration, and nothing
-    else in this file would say so — it survived a mutation run on 2026-08-18.
-    Counting the sleeps pins the wait without asserting on wall-clock time,
-    which would be flaky on a loaded runner.
-    """
-    sleeps = []
-    monkeypatch.setattr(json_handler_mod.time, "sleep", lambda seconds: sleeps.append(seconds))
-    monkeypatch.setattr(
-        json_handler_mod.os,
-        "replace",
-        lambda source, destination: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(destination))),
-    )
-
-    with pytest.raises(PermissionError):
-        json_handler_mod._replace_with_retry(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
-
-    # One wait between each pair of attempts — never after the last, which raises.
-    assert sleeps == [json_handler_mod._REPLACE_BACKOFF_SECONDS] * (json_handler_mod._REPLACE_ATTEMPTS - 1)

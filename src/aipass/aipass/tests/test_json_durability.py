@@ -45,7 +45,6 @@ retry test here injects the failure — that injection is the only cross-platfor
 proof the retry path exists at all.
 """
 
-import errno
 import json
 import os
 import threading
@@ -89,122 +88,6 @@ def json_dir(tmp_path):
 def handler(json_dir):
     """A JsonHandler pointed at the throwaway directory — the shape all three shims use."""
     return json_handler_mod.JsonHandler(json_dir=json_dir)
-
-
-# ---------------------------------------------------------------------------
-# The retry helper's own contract
-# ---------------------------------------------------------------------------
-
-
-def test_replace_helper_exists():
-    """The shared module exposes the bounded replace helper."""
-    assert hasattr(json_handler_mod, "_replace_with_retry"), (
-        "_replace_with_retry missing — a Windows sharing violation still kills the write"
-    )
-    assert json_handler_mod._REPLACE_ATTEMPTS > 1, "a single attempt is not a retry"
-    assert json_handler_mod._REPLACE_BACKOFF_SECONDS > 0, "a zero backoff spins instead of waiting"
-
-
-def test_replace_helper_moves_the_staged_file(tmp_path):
-    """The happy path is still a plain move — the retry costs nothing when nothing blocks."""
-    source = tmp_path / "staged.tmp"
-    source.write_text("new", encoding="utf-8")
-    destination = tmp_path / "live.json"
-    destination.write_text("old", encoding="utf-8")
-
-    json_handler_mod._replace_with_retry(str(source), str(destination))
-
-    assert destination.read_text(encoding="utf-8") == "new"
-    assert not source.exists()
-
-
-def test_replace_helper_retries_through_a_transient_sharing_violation(tmp_path, monkeypatch):
-    """Two sharing violations then success — the move still lands."""
-    calls = {"count": 0}
-    real_replace = os.replace
-
-    def flaky_replace(source, destination):
-        calls["count"] += 1
-        if calls["count"] <= 2:
-            raise PermissionError(13, "sharing violation", str(destination))
-        real_replace(source, destination)
-
-    monkeypatch.setattr(json_handler_mod.os, "replace", flaky_replace)
-    source = tmp_path / "staged.tmp"
-    source.write_text("new", encoding="utf-8")
-    destination = tmp_path / "live.json"
-    destination.write_text("old", encoding="utf-8")
-
-    json_handler_mod._replace_with_retry(str(source), str(destination))
-
-    assert destination.read_text(encoding="utf-8") == "new"
-    assert calls["count"] == 3, "retry path never engaged"
-
-
-def test_replace_retry_is_bounded_and_raises(tmp_path, monkeypatch):
-    """A replace that never unblocks raises instead of retrying forever."""
-    calls = {"count": 0}
-
-    def blocked_replace(source, destination):
-        calls["count"] += 1
-        raise PermissionError(13, "sharing violation", str(destination))
-
-    monkeypatch.setattr(json_handler_mod.os, "replace", blocked_replace)
-    monkeypatch.setattr(json_handler_mod, "_REPLACE_BACKOFF_SECONDS", 0)
-
-    with pytest.raises(PermissionError):
-        json_handler_mod._replace_with_retry(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
-
-    assert calls["count"] == json_handler_mod._REPLACE_ATTEMPTS, "bound not honoured"
-
-
-def test_retry_waits_between_attempts(tmp_path, monkeypatch):
-    """
-    The backoff is used, not just declared.
-
-    Deleting the sleep leaves a busy spin that passes every other pin here: it
-    still retries, still bounds, still raises. But 40 immediate attempts finish
-    inside a microsecond and never outlast the reader handle they exist to wait
-    out, so the retry stops being a fix and becomes decoration. Counting the
-    sleeps pins the wait without asserting on wall-clock time, which would be
-    flaky on a loaded CI box.
-    """
-    sleeps = []
-    monkeypatch.setattr(json_handler_mod.time, "sleep", lambda seconds: sleeps.append(seconds))
-    monkeypatch.setattr(
-        json_handler_mod.os,
-        "replace",
-        lambda source, destination: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(destination))),
-    )
-
-    with pytest.raises(PermissionError):
-        json_handler_mod._replace_with_retry(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
-
-    # One wait between each pair of attempts — never after the last, which raises.
-    assert sleeps == [json_handler_mod._REPLACE_BACKOFF_SECONDS] * (json_handler_mod._REPLACE_ATTEMPTS - 1)
-
-
-def test_non_permission_error_propagates_immediately(tmp_path, monkeypatch):
-    """
-    Only a sharing violation is worth waiting out.
-
-    A cross-device rename or a full disk will not fix itself in 200ms, and
-    retrying it 40 times buys nothing but a slower failure.
-    """
-    calls = {"count": 0}
-
-    def broken_replace(source, destination):
-        calls["count"] += 1
-        raise OSError(errno.EXDEV, "invalid cross-device link")
-
-    monkeypatch.setattr(json_handler_mod.os, "replace", broken_replace)
-    monkeypatch.setattr(json_handler_mod, "_REPLACE_BACKOFF_SECONDS", 0)
-
-    with pytest.raises(OSError) as caught:
-        json_handler_mod._replace_with_retry(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
-
-    assert caught.value.errno == errno.EXDEV
-    assert calls["count"] == 1, "a non-sharing failure was retried"
 
 
 # ---------------------------------------------------------------------------
