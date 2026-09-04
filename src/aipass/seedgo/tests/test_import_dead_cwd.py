@@ -134,6 +134,13 @@ def _no_working_tree_litter():
     )
 
 
+#: Warmed while the cwd is still readable, so the sweep below convicts SEEDGO's
+#: modules rather than the shared infrastructure they pull in. A name belongs
+#: here only if something under _seedgo_modules() actually reaches it:
+#: aipass.aipass.shared.json_handler was dropped on 2026-09-04 because nothing
+#: in this branch imports it (json_handler_check.py holds it as an accept
+#: STRING, not an import), and @aipass retires the file under FPLAN-0489.
+#: Measured, not assumed - 83 passed, 3 skipped before and after.
 PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
@@ -144,7 +151,6 @@ import aipass.cli.apps.modules.display  # noqa: F401
 import aipass.drone.apps.modules  # noqa: F401
 import aipass.spawn.apps.modules  # noqa: F401
 import aipass.aipass.shared  # noqa: F401
-import aipass.aipass.shared.json_handler  # noqa: F401
 """
 
 # The two shapes the cure deleted, rebuilt verbatim. Written to disk and

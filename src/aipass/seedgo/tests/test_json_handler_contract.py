@@ -1061,12 +1061,16 @@ def retry_label(relative: Path) -> str:
 #: implementation nobody listed.
 #:
 #: The count is a MEASUREMENT and it is falling: sixteen on 2026-09-02,
-#: fourteen on 2026-09-03 after the second sweep pair. It did not fall when
-#: prax migrated — prax's helper MOVED into ``json_service``, it did not
-#: disappear — and it falls to about four only when the branch handlers
-#: themselves are gone: ``ai_mail/json_utils``, ``spawn/atomic_write``,
-#: ``trigger/apps/config`` and the service. No number is asserted here; the
-#: floor below is, so a sweep that removes a copy cannot turn this red.
+#: fourteen on 2026-09-03 after the second sweep pair, EIGHT on 2026-09-04
+#: with fifteen of eighteen swept. It did not fall when prax migrated —
+#: prax's helper MOVED into ``json_service``, it did not disappear — and it
+#: falls to four only when the branch handlers themselves are gone. The eight
+#: standing today are ``aipass/shared/json_handler``, ``api``, ``commons``,
+#: ``daemon``, ``hooks/apps/handlers/json/files``, the service itself,
+#: ``spawn/atomic_write`` and ``trigger/apps/config``: three are the unswept
+#: handlers, one is the file @aipass retires under FPLAN-0489, and the
+#: remaining four are the floor. No number is asserted here; the floor below
+#: is, so a sweep that removes a copy cannot turn this red.
 RETRY_IMPLEMENTATIONS = {
     retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
     + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
@@ -1155,10 +1159,23 @@ def isolated_replace(module: Any, monkeypatch: pytest.MonkeyPatch, replace: Call
     modules, which would make a shared-module patch a channel between
     parameters here as well as between files.
 
-    The helper reaches nothing in ``os`` but ``replace`` and nothing in
-    ``time`` but ``sleep``, so a stub carrying one attribute each is its whole
-    reachable surface — and anything else it grew would raise
-    ``AttributeError`` here rather than silently run against the real syscall.
+    The stub carries ``sleep`` and nothing else, and that narrowness is the
+    point. The one service names its staged files from ``os.getpid()`` and an
+    ``itertools.count()``, deliberately not from the clock, and says why in
+    ``json_service.py`` (08359ec2): a caller stubbing ``time`` to take the wait
+    out of the bounded retry is a legitimate thing to do, and a writer that
+    cannot name a file under a stubbed clock would be failing for a reason that
+    has nothing to do with writing. ``sleep`` is therefore the whole surface
+    this helper has to stand in for.
+
+    Keeping the stub strict makes it a detector. If an implementation ever
+    reaches for a second ``time`` attribute, this raises ``AttributeError``
+    where it happens instead of quietly accepting a new clock dependency the
+    contract never agreed to — which is what a delegating stub would do. I
+    briefly delegated ``time_ns`` here on 2026-09-04 after seeing exactly that
+    AttributeError across all fifteen migrated branches; the cause was an
+    intermediate state of the service being edited in parallel, not the surface
+    as it shipped, so the delegation is gone and the pin stands.
 
     Args:
         module: The implementation under test.
@@ -1713,10 +1730,21 @@ def test_the_public_writer_survives_a_transient_sharing_violation(
 #: those four was in the False column, so it crossed and the split moved by
 #: one. Six branches now carry the shim; twelve have not been swept.
 #:
-#: raise: aipass, backup, cli, commons, daemon, devpulse, drone, hooks, prax,
-#: seedgo, spawn, trigger. return False: api, canary, flow, memory, skills.
-EXHAUSTED_WRITE_RAISES = 12
-EXHAUSTED_WRITE_RETURNS_FALSE = 5
+#: Re-measured 2026-09-04 with fifteen of eighteen swept (DPLAN-0325 part B,
+#: staging measurement). The near-even split of 09-02 is gone: the rename
+#: blocked to exhaustion now raises for SEVENTEEN branches and returns False
+#: for one. Fifteen of the seventeen raise the service's own ``WriteFailed``;
+#: ``commons`` and ``daemon`` still let a bare ``PermissionError`` out of
+#: their own handlers. ``ai_mail`` joins the count for the first time — the
+#: 09-03 record listed seventeen branches, not eighteen, because ai_mail's own
+#: helper was not reached then.
+#:
+#: raise (17): ai_mail, aipass, backup, canary, cli, commons, daemon, devpulse,
+#: drone, flow, hooks, memory, prax, seedgo, skills, spawn, trigger.
+#: return False (1): api. The split ends at 18 / 0 when api sweeps, and the
+#: constants go with the tables.
+EXHAUSTED_WRITE_RAISES = 17
+EXHAUSTED_WRITE_RETURNS_FALSE = 1
 
 
 @pytest.mark.parametrize("branch", parametrized(WRITER_HAS_NO_BOUNDED_RETRY))

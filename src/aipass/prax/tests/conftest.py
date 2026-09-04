@@ -165,3 +165,22 @@ def mock_prax_infrastructure(monkeypatch):
         cli = mock_cli
 
     return Mocks
+
+
+@pytest.fixture
+def sample_test_data() -> dict:
+    """Reusable sample data shaped like a valid 'data' JSON document.
+
+    The citizen template ships this fixture and 17 of 18 branches carry it;
+    prax's conftest never had it, and the gap was invisible because
+    test_json_handler.py happened to mention the name. Restored on seedgo's
+    session-L measurement (DPLAN-0325, 2026-09-04): the next notch of the
+    test_quality subject gate charges prax exactly this one item, and the
+    fixture is the cure flow needed on pair 7.
+    """
+    return {
+        "created": "2026-09-04",
+        "last_updated": "2026-09-04",
+        "test_key": "test_value",
+        "sample_data": "example",
+    }

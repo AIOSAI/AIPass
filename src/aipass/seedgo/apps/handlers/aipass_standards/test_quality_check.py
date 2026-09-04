@@ -23,6 +23,7 @@ Scoring model:
     Score = (total_items_covered / total_items) * 100
 """
 
+import ast
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -175,6 +176,57 @@ ITEM_SUBJECT_PROBES: dict[tuple[str, str], tuple[str, ...]] = {
     ("return_type_contracts", "paths_return_path"): ("-> Path",),
     ("init_provisioning", "no_overwrite"): (".write_text(", ".mkdir("),
 }
+
+# =============================================
+# WHICH FILES MAY CARRY AN ITEM
+# =============================================
+#
+# The scan below asks "does this token appear anywhere under tests/". Twice in
+# one week that answered yes for the wrong reason, and both shapes are cured
+# here (DPLAN-0325, sessions on pairs 7 and 6a):
+#
+#   THE FILE WAS NOT ABOUT THE CATEGORY. @flow earned
+#   cli_routing/output_capture from a ``StringIO`` inside its json handler
+#   test. Archiving that file as a duplicate dropped flow to 93 and exposed a
+#   gap nothing had ever covered.
+#
+#   THE FILE DID NOT RUN. @drone's test_contracts.py skipped module-wide on a
+#   missing JSON_DIR and was still its sole carrier of command_returns_bool.
+#   A text scan cannot tell a passing assertion from a skipped one.
+#
+# Both gates below are measured against all 18 branches before their strictness
+# moves. The two constants are the dials, and each is set to the value that
+# costs no branch an item TODAY; each carries the measured cost of the next
+# notch and the precondition that makes it free.
+
+#: Discount a file whose module-level skip is CONDITIONAL, not just an
+#: unconditional one. Measured 2026-09-04: flipping this to True today costs
+#: @daemon 7 points (init_provisioning/no_overwrite and
+#: return_type_contracts/command_returns_bool, both carried by its DPLAN-0059
+#: stamp files, which skip on a missing JSON_DIR). @api carries the same shape
+#: and loses nothing. Those stamp files are archived by the branch's own sweep
+#: onto the one json service — @drone's went on 2026-09-04 — so this becomes
+#: free once daemon and api sweep, and drone's exact defect is then caught.
+DISCOUNT_CONDITIONAL_MODULE_SKIPS = False
+
+#: Scope a category's scan to files that are plausibly ABOUT it: a file carries
+#: an item only if it carries at least SUBJECT_MIN_ITEMS_PER_FILE items of that
+#: category. Applied only to categories with at least SUBJECT_SCOPED_CATEGORY_SIZE
+#: scored items — a one-item category (infrastructure_mocking) can never satisfy
+#: a two-item rule, and a two-item one (return_type_contracts) would demand a
+#: perfect score to earn anything. Measured: applying it to every category costs
+#: all 18 branches, up to -23.
+SUBJECT_SCOPED_CATEGORY_SIZE = 5
+
+#: Measured 2026-09-04, threshold by threshold. At 2 no branch moves. At 3 only
+#: @prax moves, -4: it earns conftest_fixtures/sample_data from
+#: test_json_handler.py rather than from its conftest, which carries 3 of 5 and
+#: defines no sample_test_data. One template fixture in prax/tests/conftest.py
+#: makes 3 free — the same restore @flow needed on pair 7.
+#: Honest limit of the current setting: flow's file carried TWO incidental
+#: cli_routing tokens (``is True`` and ``StringIO``), so 2 does not convict the
+#: case that produced the finding. 3 does.
+SUBJECT_MIN_ITEMS_PER_FILE = 2
 
 # Pattern-based items from STANDARD_CATEGORIES
 _PATTERN_ITEMS = sum(len(items) for items in STANDARD_CATEGORIES.values())
@@ -362,6 +414,78 @@ def _find_covering_file(
     return None
 
 
+def _module_skip_shape(tree: ast.Module) -> str | None:
+    """Name the way this module refuses to run, or None if it runs.
+
+    Two shapes, both decidable without importing anything: a module-level
+    ``pytest.skip(..., allow_module_level=True)`` (the only call that can stop
+    a module rather than a test), and a module-level ``pytestmark`` carrying
+    ``skip``. ``skipif`` is deliberately NOT one of them — it is a statement
+    about the host, and a file that runs on the fleet's interpreter is a real
+    carrier there.
+    """
+    for node in tree.body:
+        statements = node.body if isinstance(node, ast.If) else [node]
+        for statement in statements:
+            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                continue
+            called = statement.value.func
+            if isinstance(called, ast.Attribute) and called.attr == "skip":
+                if any(keyword.arg == "allow_module_level" for keyword in statement.value.keywords):
+                    return "conditional module-level skip" if isinstance(node, ast.If) else "module-level skip"
+
+        if isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "pytestmark" in names:
+                marks = ast.dump(node.value)
+                if "'skip'" in marks and "'skipif'" not in marks:
+                    return "pytestmark skip"
+    return None
+
+
+def _dead_carrier_reason(filename: str, source: str) -> str | None:
+    """Why this file executes no assertion, or None if it does.
+
+    A file that cannot run cannot be a branch's evidence for anything. Only
+    shapes that are certain from the text count: the module-level skips above,
+    and a test file with no test function in it at all. ``conftest.py`` is
+    exempt from the second — holding fixtures and no tests is its whole job.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "does not parse"
+
+    shape = _module_skip_shape(tree)
+    if shape:
+        if shape.startswith("conditional") and not DISCOUNT_CONDITIONAL_MODULE_SKIPS:
+            return None
+        return shape
+
+    if filename != "conftest.py" and not RE_TEST_FUNC.search(source):
+        return "no test functions"
+    return None
+
+
+def _live_carriers(
+    file_sources: list[tuple[str, str]],
+) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """Split the corpus into files that can carry coverage and files that cannot.
+
+    Returns:
+        (live sources, {discounted filename: why}).
+    """
+    live: list[tuple[str, str]] = []
+    discounted: dict[str, str] = {}
+    for filename, source in file_sources:
+        reason = _dead_carrier_reason(filename, source)
+        if reason:
+            discounted[filename] = reason
+        else:
+            live.append((filename, source))
+    return live, discounted
+
+
 @lru_cache(maxsize=64)
 def _branch_apps_source(branch_path: str) -> str:
     """Every line of the branch's own production code, concatenated.
@@ -391,24 +515,50 @@ def _inapplicable_items(branch_path: str) -> set[tuple[str, str]]:
 
 def _detect_all_coverage(
     file_sources: list[tuple[str, str]],
+    inapplicable: set[tuple[str, str]] | None = None,
 ) -> dict[str, dict[str, str | None]]:
     """Scan test file sources for coverage across all standard categories.
 
     For each category, for each item, checks if ANY pattern matches in ANY
-    source file. Returns the first file that covers each item.
+    ELIGIBLE source file, and returns the file that covers it. Eligibility is
+    the subject gate documented at ``SUBJECT_SCOPED_CATEGORY_SIZE``: in a large
+    category, one lone token in a file that carries nothing else of that
+    category is an accident of vocabulary, not evidence.
 
     Args:
         file_sources: List of (filename, source_text) tuples.
+        inapplicable: (category, item) pairs this branch ships no subject for.
+            They are excluded from the eligibility count as well as from the
+            score — an item nobody is charged for cannot make a file eligible.
 
     Returns:
         dict mapping category -> {item -> covering_filename or None}
     """
+    skip = inapplicable or set()
     coverage: dict[str, dict[str, str | None]] = {}
 
     for category, items in STANDARD_CATEGORIES.items():
-        coverage[category] = {}
-        for item_name, patterns in items.items():
-            coverage[category][item_name] = _find_covering_file(patterns, file_sources)
+        scored = {name: patterns for name, patterns in items.items() if (category, name) not in skip}
+
+        # What each file carries of THIS category, before any of it counts.
+        carried: dict[str, set[str]] = {}
+        for item_name, patterns in scored.items():
+            for filename, source in file_sources:
+                if any(pattern in source for pattern in patterns):
+                    carried.setdefault(filename, set()).add(item_name)
+
+        if len(scored) >= SUBJECT_SCOPED_CATEGORY_SIZE:
+            eligible = {f for f, got in carried.items() if len(got) >= SUBJECT_MIN_ITEMS_PER_FILE}
+        else:
+            eligible = set(carried)
+
+        # The scan itself is unchanged and still goes through the one helper —
+        # narrowing the corpus is the whole intervention. Kept in corpus order,
+        # so the named carrier does not depend on which item matched first.
+        eligible_sources = [(f, source) for f, source in file_sources if f in eligible]
+        coverage[category] = {
+            item_name: _find_covering_file(patterns, eligible_sources) for item_name, patterns in scored.items()
+        }
 
     return coverage
 
@@ -511,15 +661,29 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         if source:
             file_sources.append((tf.name, source))
 
-    # Phase 3: Detect coverage across all pattern categories
-    all_coverage = _detect_all_coverage(file_sources)
-
+    # Phase 3: Detect coverage across all pattern categories.
+    #
     # Drop the items this branch ships no subject for, from BOTH sides of the
     # fraction. Reported below rather than applied quietly — a denominator that
     # changes per branch has to be readable from the outside.
     inapplicable = _inapplicable_items(branch_path)
-    for gate_category, gate_item in inapplicable:
-        all_coverage.get(gate_category, {}).pop(gate_item, None)
+
+    # And drop the files that execute nothing, before anything is credited to
+    # them. Reported the same way, for the same reason.
+    live_sources, discounted = _live_carriers(file_sources)
+    if discounted:
+        checks.append(
+            {
+                "name": "Carriers",
+                "passed": True,
+                "message": (
+                    f"{len(discounted)} file(s) execute nothing and were not credited: "
+                    + ", ".join(f"{f} ({why})" for f, why in sorted(discounted.items()))
+                ),
+            }
+        )
+
+    all_coverage = _detect_all_coverage(live_sources, inapplicable)
     all_coverage = {name: items for name, items in all_coverage.items() if items}
     branch_items_total = TOTAL_ITEMS - len(inapplicable)
 
