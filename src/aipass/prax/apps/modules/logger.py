@@ -56,7 +56,7 @@ from aipass.prax.apps.handlers.logging.setup import (
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 from aipass.prax.apps.handlers.logging.override import is_override_active
 from aipass.prax.apps.handlers.discovery.watcher import (
-    start_file_watcher,
+    start_file_watcher_in_background,
     is_file_watcher_active,
     check_file_watcher_liveness,
 )
@@ -115,13 +115,16 @@ class SystemLogger:
             # Set flag FIRST to prevent recursion: trigger.fire() uses logger
             # internally, which would re-enter _ensure_watcher() before we return
             SystemLogger._watcher_started = True
-            # Start prax watcher (Python file discovery)
-            # Wrapped in try/except - inotify may be maxed by VS Code
+            # Start prax watcher (Python file discovery) WITHOUT waiting for it.
+            # Scheduling the recursive watch is one inotify syscall per directory
+            # (1605 of them here) and costs 0.119s on an idle thread but 13.9s
+            # when any other Python thread is busy — measured 2026-09-04. This is
+            # the first log line of the process, so that bill used to land on
+            # whoever logged first, which in a test suite is the suite. The
+            # background start swallows the inotify-limit OSError itself and logs
+            # it with the same words; there is no caller left to hand it to.
             if not is_file_watcher_active():
-                try:
-                    start_file_watcher()
-                except OSError as e:
-                    logger.warning("inotify limit reached, continuing without file watcher: %s", e)
+                start_file_watcher_in_background()
             # Fire startup event (trigger auto-initializes handlers)
             try:
                 from aipass.trigger.apps.modules.core import trigger
@@ -283,7 +286,10 @@ def print_introspection():
     console.print("    [dim]→ direct.py (DirectLogger — direct logger class)[/dim]")
     console.print()
     console.print("  [cyan]handlers/discovery/[/cyan]")
-    console.print("    [dim]→ watcher.py (start_file_watcher — starts filesystem watcher for module discovery)[/dim]")
+    console.print(
+        "    [dim]→ watcher.py (start_file_watcher_in_background — starts the module discovery "
+        "watcher without waiting for the inotify walk)[/dim]"
+    )
     console.print("    [dim]→ watcher.py (stop_file_watcher — stops the filesystem watcher)[/dim]")
     console.print("    [dim]→ watcher.py (is_file_watcher_active — checks watcher status)[/dim]")
     console.print()

@@ -515,15 +515,32 @@ class TestLoadBranchPaths:
         assert "CLI" not in names
 
     def test_missing_registry_returns_empty(self):
-        """Should return empty list when registry file is missing."""
+        """Should return empty list when registry file is missing.
+
+        The absence is measured by the open FAILING, not by an exists() call
+        that answered about a moment already over: the loader opens and handles
+        FileNotFoundError, so this stubs open, not exists. Stubbing exists here
+        would keep passing against a loader that had lost the guard entirely.
+        """
         mod, _, _, mock_config = _import_file_watcher_integration()
 
         mock_registry_path = MagicMock()
-        mock_registry_path.exists.return_value = False
         mock_config._find_repo_root.return_value.__truediv__ = MagicMock(return_value=mock_registry_path)
 
-        result = mod.load_branch_paths()
+        with (
+            patch("builtins.open", side_effect=FileNotFoundError(2, "No such file or directory")),
+            patch.object(mod, "logger") as mock_logger,
+        ):
+            result = mod.load_branch_paths()
+
         assert result == []
+        # The message has to be the ABSENCE one, not the catch-all: a loader
+        # that lost its guard also answers [] here, through the generic
+        # "Could not read the branch registry" clause at the bottom, so the
+        # return value alone cannot tell the two apart.
+        warnings = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        assert "No branch registry at" in warnings
+        assert mock_logger.error.call_args_list == []
 
     def test_invalid_json_returns_empty(self):
         """Should return empty list on JSON decode error."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-03
-# Modified: 2026-09-03
+# Modified: 2026-09-04
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -28,11 +28,12 @@ The json directory is computed PER CALL, never captured at import: a test that
 sets ``AIPASS_TEST_LOG_DIR`` after importing still redirects the next write.
 """
 
+import itertools
 import json
 import logging
 import os
+import stat
 import sys
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,23 @@ DEFAULT_MAX_LOG_ENTRIES = 100
 # permission problem still surfaces — just ~200ms later.
 _REPLACE_ATTEMPTS = 40
 _REPLACE_BACKOFF_SECONDS = 0.005
+
+# What a plain open(path, "w") asks the OS for. The process umask narrows it —
+# that is the whole point: a NEW document must end up with the mode this
+# process would have given it anyway, not a mode this module chose.
+_NEW_DOCUMENT_MODE = 0o666
+
+# A staged file that cannot get a free name after this many tries is a directory
+# problem, not a collision problem, and the OSError says so.
+_STAGE_NAME_ATTEMPTS = 8
+
+# Staged-file names come from pid + counter, never from the clock. count() hands
+# out a distinct value per call without a lock (its __next__ is atomic under
+# CPython), and O_EXCL settles anything the pid does not. Deliberately not
+# time.time_ns(): callers legitimately stub this module's `time` to take the
+# sleep out of the bounded retry, and a writer that cannot name a file under a
+# stubbed clock fails for a reason that has nothing to do with writing.
+_stage_serial = itertools.count()
 
 
 class InvalidDocument(ValueError):
@@ -89,23 +107,103 @@ def _default_document(json_type: str, module_name: str) -> Any:
     return []
 
 
-def _stage(directory: Path, content: str) -> str:
+def _current_mode(file_path: Path) -> Optional[int]:
+    """The document's own permission bits, or None when there is no document yet.
+
+    Asked by stat and answered by the exception, never by exists()-then-stat:
+    the answer exists() gives is already stale when it is read, and the whole
+    reward for asking is a second syscall before the same failure.
+
+    Args:
+        file_path: The document about to be rewritten.
+
+    Returns:
+        The target's mode bits, or None when it does not exist or cannot be
+        read — both mean "let _stage create a new document's mode".
+    """
+    try:
+        return stat.S_IMODE(os.stat(file_path).st_mode)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        # Not the ordinary "not there yet": a permission problem on the
+        # directory, a broken link. The write still happens, but the document
+        # comes back with a new document's mode instead of its own, so say so.
+        logger.warning(
+            "json_service: cannot read the current mode of '%s' (%s) — writing it as a new document",
+            file_path,
+            exc,
+        )
+        return None
+
+
+def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
     """Write content to a temp file beside the target and return its path.
 
     Staged beside the target on purpose: os.replace is only atomic within one
     filesystem, and a temp directory can be on another one.
+
+    Opened with os.open rather than NamedTemporaryFile because tempfile creates
+    at a hardcoded 0600 for its own good reasons, and os.replace carries the
+    STAGED file's mode onto the target. Every service write therefore narrowed
+    the document it rewrote: a 664 config came back 600, fleet-wide, and the
+    group that could read it yesterday could not today (skills, DPLAN-0325
+    pair 2).
+
+    The mode is never chosen here:
+
+    * an existing document keeps its own, read off the target and applied with
+      fchmod, which the umask does not touch;
+    * a new document is created with _NEW_DOCUMENT_MODE and the kernel narrows
+      it by the process umask — byte for byte what ``open(path, "w")`` would
+      have produced, with no umask read (os.umask both sets and returns, so
+      reading it means briefly widening it for every other thread).
+
+    Args:
+        directory: Where the target document lives.
+        content: Serialised document.
+        mode: The target's current permission bits, or None when it does not
+            exist yet.
+
+    Returns:
+        Path of the staged file.
+
+    Raises:
+        OSError: The staged file could not be created or written.
     """
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(directory),
-        suffix=".tmp",
-        delete=False,
-    ) as staged:
-        staged.write(content)
-        staged.flush()
-        os.fsync(staged.fileno())
-        return staged.name
+    fd = -1
+    temp_path = ""
+    for attempt in range(_STAGE_NAME_ATTEMPTS):
+        temp_path = str(directory / f".{os.getpid()}_{next(_stage_serial)}.tmp")
+        try:
+            fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _NEW_DOCUMENT_MODE)
+            break
+        except FileExistsError:
+            if attempt == _STAGE_NAME_ATTEMPTS - 1:
+                raise
+
+    try:
+        # fchmod, not chmod: the fd is the file we just created, so no second
+        # path lookup can be redirected between the two calls. Absent on
+        # Windows, where the mode bits this preserves do not exist either.
+        if mode is not None and hasattr(os, "fchmod"):
+            os.fchmod(fd, mode)
+        staged = open(fd, "w", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        _discard(temp_path)
+        raise
+
+    try:
+        with staged:
+            staged.write(content)
+            staged.flush()
+            os.fsync(staged.fileno())
+    except BaseException:
+        _discard(temp_path)
+        raise
+
+    return temp_path
 
 
 def _discard(temp_path: str) -> None:
@@ -247,6 +345,13 @@ class JsonHandle:
         caller bug, not a write failure, so TypeError and ValueError propagate
         while an OSError only ever answers False.
 
+        Refuses NaN and Infinity (``allow_nan=False``). Python writes them as
+        the bare tokens ``NaN``/``Infinity``, which are not JSON: the document
+        lands looking fine and every strict parser in the fleet — and every
+        other language — rejects it later, far from the branch that wrote it.
+        Refusing is the same answer the service already gives an unknown
+        json_type, and it surfaces the payload bug in the sweep that wrote it.
+
         Args:
             file_path: The document to write.
             data: The payload.
@@ -257,7 +362,9 @@ class JsonHandle:
 
         Raises:
             TypeError: The payload is not serialisable.
-            ValueError: The payload is circular.
+            ValueError: The payload is circular, or holds a NaN or an Infinity
+                (json.dumps raises ValueError for both; the message names
+                which).
         """
         file_path = Path(file_path)
 
@@ -267,11 +374,11 @@ class JsonHandle:
             logger.warning("json_service: cannot create '%s': %s", file_path.parent, exc)
             return False
 
-        content = json.dumps(data, indent=indent, ensure_ascii=False)
+        content = json.dumps(data, indent=indent, ensure_ascii=False, allow_nan=False)
 
         temp_path = ""
         try:
-            temp_path = _stage(file_path.parent, content)
+            temp_path = _stage(file_path.parent, content, _current_mode(file_path))
             _replace_with_retry(temp_path, str(file_path))
             return True
         except OSError as exc:
@@ -370,7 +477,7 @@ class JsonHandle:
             InvalidDocument: data does not match json_type.
             WriteFailed: the write could not land.
             TypeError: the payload is not serialisable.
-            ValueError: the payload is circular.
+            ValueError: the payload is circular, or holds a NaN or an Infinity.
         """
         json_path = self.get_json_path(module_name, json_type)
 

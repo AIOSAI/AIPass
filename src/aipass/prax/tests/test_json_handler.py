@@ -23,6 +23,7 @@ shim has no attributes to patch.
 
 import json
 import os
+import stat
 
 import pytest
 
@@ -204,6 +205,32 @@ class TestWriteJson:
         with pytest.raises(ValueError):
             handle.write_json(tmp_path / "doc.json", payload)
 
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+    def test_a_non_finite_number_raises_valueerror(self, handle, tmp_path, bad):
+        """NaN and Infinity are not JSON, and Python writes them anyway.
+
+        json.dumps defaults to allow_nan=True and emits the bare tokens NaN,
+        Infinity and -Infinity. The document lands, prax reads it back happily
+        (json.load accepts its own dialect), and the failure surfaces in some
+        other language's strict parser days later, nowhere near the branch that
+        wrote it. The service refuses instead — the same answer it gives an
+        unknown json_type — so the payload bug is found in the sweep that made
+        it. The class is ValueError, json's own for out-of-range floats.
+        """
+        with pytest.raises(ValueError):
+            handle.write_json(tmp_path / "doc.json", {"measure": bad})
+
+    def test_a_refused_non_finite_number_writes_nothing_at_all(self, handle, tmp_path):
+        """Refusing after landing a half-document would be worse than allowing it."""
+        target = tmp_path / "doc.json"
+        target.write_text(json.dumps({"live": True}), encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            handle.write_json(target, {"measure": float("nan")})
+
+        assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
+        assert list(tmp_path.glob("*.tmp")) == []
+
     def test_a_failed_write_answers_false_and_never_raises(self, handle, tmp_path, monkeypatch):
         """OSError anywhere on the way answers False. This is the semantics the
         six production bool consumers depend on."""
@@ -233,6 +260,67 @@ class TestWriteJson:
 def _raise_oserror(source, destination):
     """Stand-in for the bounded replace that always fails."""
     raise OSError("replace refused")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits — Windows has no mode to preserve")
+class TestTheWriteNeverChoosesTheDocumentsMode:
+    """A write must not change permissions the caller never asked it to change.
+
+    MEASURED (skills, DPLAN-0325 pair 2): the staged write went through
+    tempfile.NamedTemporaryFile, which creates at a hardcoded 0600, and
+    os.replace carries the STAGED file's mode onto the target. Every service
+    write therefore narrowed the document it rewrote — a 664 config came back
+    600 on its next write, fleet-wide, and the group that could read it
+    yesterday could not today. Nothing failed loudly; the document was simply
+    less readable than the branch that owns it intended.
+
+    The two directions are pinned separately because they are two different
+    mechanisms: an existing document is carried over with fchmod, a new one is
+    left to the kernel and the process umask.
+    """
+
+    @pytest.mark.parametrize("mode", [0o664, 0o644, 0o600, 0o640], ids=["664", "644", "600", "640"])
+    def test_an_existing_documents_mode_survives_a_rewrite(self, handle, tmp_path, mode):
+        """Preserved, not widened and not narrowed: whatever it was, it stays."""
+        target = tmp_path / "doc.json"
+        target.write_text(json.dumps({"a": 1}), encoding="utf-8")
+        os.chmod(target, mode)
+
+        assert handle.write_json(target, {"a": 2}) is True
+
+        assert stat.S_IMODE(target.stat().st_mode) == mode
+        assert json.loads(target.read_text(encoding="utf-8")) == {"a": 2}
+
+    def test_a_new_document_gets_the_mode_a_plain_open_would_give(self, handle, tmp_path):
+        """The reference is measured in the same directory, never hardcoded.
+
+        The right mode for a NEW document is not 0664 and not 0600 — it is
+        whatever this process's umask would have produced, which is what a
+        plain open(path, "w") gives. So the expectation is taken from exactly
+        that, in the same breath, rather than written down as a number that is
+        wrong under any other umask.
+        """
+        reference = tmp_path / "reference.txt"
+        with open(reference, "w", encoding="utf-8") as probe:
+            probe.write("x")
+        expected = stat.S_IMODE(reference.stat().st_mode)
+
+        target = tmp_path / "fresh.json"
+        assert handle.write_json(target, {"a": 1}) is True
+
+        assert stat.S_IMODE(target.stat().st_mode) == expected
+
+    def test_a_typed_document_the_service_creates_itself_is_no_different(self, handle, sandbox):
+        """ensure_json_exists is how most documents are born; same rule."""
+        reference = sandbox.parent / "reference.txt"
+        reference.parent.mkdir(parents=True, exist_ok=True)
+        with open(reference, "w", encoding="utf-8") as probe:
+            probe.write("x")
+        expected = stat.S_IMODE(reference.stat().st_mode)
+
+        handle.ensure_json_exists("mode_probe", "config")
+
+        assert stat.S_IMODE((sandbox / "mode_probe_config.json").stat().st_mode) == expected
 
 
 class TestTheBoundedReplaceRetry:
@@ -501,6 +589,17 @@ class TestLogOperation:
     def test_a_non_serialisable_payload_answers_false(self, handle):
         """A payload bug in telemetry still must not take the caller down."""
         assert handle.log_operation("bad", {"obj": object()}, module_name="ops") is False
+
+    def test_a_non_finite_number_in_telemetry_answers_false(self, handle):
+        """The NaN refusal must not become a raise on the monitor's threads.
+
+        write_json raises ValueError on a non-finite number — correct for a
+        caller writing a document, fatal for telemetry: log_operation is called
+        per event from the watchdog and display threads, where a raising writer
+        is silent half-death. The existing (OSError, TypeError, ValueError)
+        catch already covers it; this pins that it stays covered.
+        """
+        assert handle.log_operation("rate", {"lines_per_min": float("inf")}, module_name="ops") is False
 
     def test_names_the_calling_module_when_not_told(self, handle, sandbox):
         """Frame 2, and it is why the shim BINDS: a wrapper would add a frame and
