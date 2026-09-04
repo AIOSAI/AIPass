@@ -34,6 +34,13 @@ from rich.table import Table
 from aipass.commons.apps.handlers.rooms.room_ops import create_room, list_rooms, join_room, leave_room
 from aipass.commons.apps.handlers.json import json_handler
 
+_ROOM_USAGE = {
+    "create": "Usage: room create <name> [description...]",
+    "list": "Usage: room list",
+    "join": "Usage: room join <name>",
+    "leave": "Usage: room leave <name>",
+}
+
 
 def print_introspection():
     """Display module introspection info."""
@@ -74,6 +81,10 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     subcommand = args[0].lower()
     sub_args = args[1:]
+
+    if "--help" in sub_args or "-h" in sub_args:
+        console.print(_ROOM_USAGE.get(subcommand, "[dim]Available: create, list, join, leave[/dim]"))
+        return True
 
     if subcommand == "create":
         result = _handle_create_room(sub_args)
