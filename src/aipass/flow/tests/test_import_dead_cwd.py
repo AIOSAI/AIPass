@@ -417,24 +417,37 @@ class TestTheAuditLineSurvivesTheWorldItLogsIn:
     BODY = """
 import os
 import tempfile
+import pathlib
 
-os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp()
+seam = tempfile.mkdtemp()
+os.environ["AIPASS_TEST_LOG_DIR"] = seam
 from aipass.flow.apps.handlers.json import json_handler
 
-json_handler.FLOW_JSON_DIR = __import__("pathlib").Path(tempfile.mkdtemp())
+# Measured THROUGH log_operation, never by calling caller detection directly.
+# flow's handler is a shim that binds the one fleet json service
+# (DPLAN-0325), and the service reads sys._getframe(2) - [0] itself,
+# [1] log_operation, [2] the caller. A direct call is one frame short and
+# reads whatever happens to sit above it, so it would answer a question
+# nobody asked. The document the service WRITES carries the attribution in
+# its own filename, which is the audit trail this test exists to protect.
 
-g = {"jh": json_handler, "name": None}
+# Arm 1: a frame with a real module filename. compile() sets co_filename, so
+# this is a genuine named frame without a file on disk.
 try:
-    exec(compile("name = jh._get_caller_module_name()", "<string>", "exec"), g)
-    print("CALLER_NAME: " + str(g["name"]))
-except OSError as exc:
-    print("CALLER_NAME DIED: " + type(exc).__name__)
-
-try:
-    exec(compile("jh.log_operation('dead_cwd_probe', {'k': 1})", "<string>", "exec"), g)
+    exec(compile("jh.log_operation('dead_cwd_probe', {'k': 1})", "router_probe.py", "exec"), {"jh": json_handler})
     print("LOG_OPERATION: SURVIVED")
 except OSError as exc:
     print("LOG_OPERATION DIED: " + type(exc).__name__)
+
+# Arm 2: the <string> frame @drone's router actually produces.
+try:
+    exec(compile("jh.log_operation('dead_cwd_probe', {'k': 2})", "<string>", "exec"), {"jh": json_handler})
+    print("PSEUDO_FRAME: SURVIVED")
+except OSError as exc:
+    print("PSEUDO_FRAME DIED: " + type(exc).__name__)
+
+written = sorted(p.name for p in pathlib.Path(seam).rglob("*_log.json"))
+print("DOCUMENTS: " + ",".join(written))
 """
 
     def test_log_operation_survives_a_string_frame_with_realpath_denied(self):
@@ -445,12 +458,18 @@ except OSError as exc:
             "world B did not arm — this test would pass against the uncured call.\n" + result.stdout
         )
         assert "LOG_OPERATION: SURVIVED" in result.stdout, result.stdout
-        assert "CALLER_NAME DIED" not in result.stdout, result.stdout
-        # It must still ANSWER, not merely not-crash: returning "unknown" for
-        # every caller would satisfy the line above and destroy the audit trail.
-        assert "CALLER_NAME: <string>" in result.stdout, (
+        assert "PSEUDO_FRAME: SURVIVED" in result.stdout, result.stdout
+        # It must still ANSWER, not merely not-crash: attributing every caller
+        # to one name would satisfy the lines above and destroy the audit trail.
+        assert "router_probe_log.json" in result.stdout, (
             "the caller name stopped being read from the frame: " + result.stdout
         )
+        # And the pseudo-frame is answered "unknown" BY DESIGN, not by accident.
+        # flow's old handler wrote the literal "<string>" here; the service
+        # refuses to, because a log that attributes work to <string> asserts
+        # something false about who did it — and that name became a DIRECTORY
+        # once (2026-08-31). Pinned so the cure cannot be undone quietly.
+        assert "unknown_log.json" in result.stdout, "a pseudo-frame is no longer answered 'unknown': " + result.stdout
 
 
 def expected_route_without_cure(has_accessor: bool) -> str:

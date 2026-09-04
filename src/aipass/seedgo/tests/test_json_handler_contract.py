@@ -163,12 +163,12 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: row read "returns False and writes nothing"; the shim persists through the
 #: service, so the strict xfail XPASSed on CI and the row went. ``cli`` and
 #: ``seedgo`` left the same way with pair 4, both having read "raises
-#: FileNotFoundError from the staging file" -- each XPASSed strictly the first
-#: time its suite ran against the shim, which is the only evidence that
-#: retires a row here. Three remain, all on branches the sweep has not reached.
+#: FileNotFoundError from the staging file", and ``flow`` with pair 7 -- each
+#: XPASSed strictly the first time its suite ran against the shim, which is the
+#: only evidence that retires a row here. Two remain, both on branches the
+#: sweep has not reached.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
-    "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
     "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
 }
 
