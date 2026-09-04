@@ -63,9 +63,29 @@ def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
 
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
+    """Creates temporary directory for testing, cleans up after.
+
+    Teardown steps OUT of the sandbox before removing it. Tests chdir into it
+    with ``monkeypatch.chdir``, and ``monkeypatch`` is one shared instance per
+    test: once an autouse fixture takes it (``mock_infrastructure`` below,
+    DPLAN-0325), it is set up before this fixture and therefore torn down
+    AFTER it — so the cwd is still inside the sandbox when ``rmtree`` runs.
+    Linux deletes a cwd without complaint; Windows holds it open and fails with
+    ``WinError 32`` (Windows Test on 804ab5d9: two teardown errors in
+    test_router.py, both tests chdir'd into this directory). The chdir here is
+    to a neutral place; monkeypatch's own undo restores the real cwd afterwards.
+    """
     test_dir = Path(tempfile.mkdtemp())
     yield test_dir
+    try:
+        inside = Path.cwd().resolve().is_relative_to(test_dir.resolve())
+    except FileNotFoundError as exc:
+        # The cwd itself was deleted by the test; there is nowhere to stand, so
+        # step out regardless.
+        logging.getLogger(__name__).debug("temp_test_dir: cwd already gone (%s)", exc)
+        inside = True
+    if inside:
+        os.chdir(tempfile.gettempdir())
     if test_dir.exists():
         shutil.rmtree(test_dir)
 
@@ -187,7 +207,7 @@ def mock_json_handler() -> MagicMock:
     handler.save_json = MagicMock(return_value=True)
     handler.ensure_json_exists = MagicMock(return_value=True)
     handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
+    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler
