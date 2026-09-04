@@ -986,3 +986,84 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 
     checks = _check_code_wiring(module, source)
     assert not all(c["passed"] for c in checks)
+
+
+# ---------------------------------------------------------------------------
+# Tests -- an item is only scored where the branch ships a subject for it
+# ---------------------------------------------------------------------------
+
+
+def _branch_with(tmp_path, apps_body: str, test_body: str = "def test_x():\n    assert True\n"):
+    """A minimal branch: some production code, some tests."""
+    module = tmp_path / "apps" / "modules" / "work.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(apps_body, encoding="utf-8")
+    suite = tmp_path / "tests" / "test_work.py"
+    suite.parent.mkdir(parents=True)
+    suite.write_text(test_body, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_branch_that_parses_no_json_is_not_charged_for_corrupt_json(tmp_path):
+    """@canary's whole production surface parses no JSON and returns no Path.
+
+    Measured 2026-09-03: retiring these four fleet-wide was the obvious move and
+    the measurement refused it — 16 of 18 branches earn each of them from tests
+    with nothing to do with the handler. The defect was asking every branch for
+    coverage of something two of them do not do.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import check_branch
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    result = check_branch(str(branch))
+    overall = next(c for c in result["checks"] if c["name"] == "Overall coverage")
+    assert "not applicable to this branch" in overall["message"]
+    assert "error_resilience/corrupt_json" in overall["message"]
+
+
+def test_a_branch_that_does_parse_json_is_still_charged(tmp_path):
+    """Red-first: without the probe the gate would excuse every branch."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        _inapplicable_items,
+        check_branch,
+    )
+
+    branch = _branch_with(tmp_path, "import json\n\n\ndef work(p):\n    return json.load(p.open())\n")
+    assert ("error_resilience", "corrupt_json") not in _inapplicable_items(str(branch))
+    result = check_branch(str(branch))
+    resilience = next(c for c in result["checks"] if c["name"] == "error_resilience")
+    assert "corrupt_json" in resilience["message"]
+
+
+def test_the_shim_does_not_hand_every_branch_every_subject(tmp_path):
+    """The handler is the fleet's file, byte-identical everywhere.
+
+    Counting it would give every branch json parsing, a Path return and a write,
+    and the gate would never exclude anything again.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _inapplicable_items
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    shim = branch / "apps" / "handlers" / "json" / "json_handler.py"
+    shim.parent.mkdir(parents=True)
+    shim.write_text(
+        "import json\nfrom pathlib import Path\n\n\ndef get_json_path(n) -> Path:\n"
+        "    Path(n).mkdir()\n    return Path(json.load(open(n)))\n",
+        encoding="utf-8",
+    )
+
+    assert len(_inapplicable_items(str(branch))) == 4
+
+
+def test_an_excluded_item_leaves_the_denominator_too(tmp_path):
+    """It neither convicts nor flatters: both sides of the fraction move."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        TOTAL_ITEMS,
+        _inapplicable_items,
+        check_branch,
+    )
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    excluded = len(_inapplicable_items(str(branch)))
+    overall = next(c for c in check_branch(str(branch))["checks"] if c["name"] == "Overall coverage")
+    assert f"/{TOTAL_ITEMS - excluded} items covered" in overall["message"]

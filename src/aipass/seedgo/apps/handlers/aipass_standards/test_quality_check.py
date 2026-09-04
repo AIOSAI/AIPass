@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_quality_check.py
 # Description: Test Quality Standards Checker — 11 categories (consolidated)
-# Version: 5.0.0
+# Version: 5.1.0
 # Created: 2026-03-24
 # Modified: 2026-03-27
 # =============================================
@@ -24,6 +24,7 @@ Scoring model:
 """
 
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from aipass.prax import logger
@@ -137,6 +138,42 @@ STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
         "autouse_fixtures": ["autouse=True", "autouse"],
         # sys_modules_mock and reimport_after_mock RETIRED with the handler.
     },
+}
+
+#: Applicability probes: the SUBJECT an item measures, looked for in the
+#: branch's OWN ``apps/`` code. An item is scored only when the branch ships
+#: something for it to be about — an inapplicable item leaves the numerator AND
+#: the denominator for that branch, so it neither convicts nor flatters.
+#:
+#: Added 2026-09-03 (DPLAN-0325 pair 3). @canary's sweep left it at 87 on these
+#: four, and the four had been carried by its archived DPLAN-0059 stamp. The
+#: obvious move was to retire them with the rest, and the measurement refused
+#: it: 16 of 18 branches earn each of these four from tests that have NOTHING
+#: to do with the handler (ai_mail's test_notify, aipass's test_structure_scan,
+#: api's test_secrets). Retiring them fleet-wide would delete four live items
+#: from sixteen branches to cure one.
+#:
+#: What canary actually is, is a branch with no subject: its whole production
+#: surface is ``apps/canary.py`` plus a handlers ``__init__`` — it parses no
+#: JSON, returns no Path, writes no file. Neither does @cli, whose only
+#: file-touching code is the handler it has not swept yet; cli scores these
+#: today from its json tests and hits the identical wall on its own sweep.
+#: So the defect was never the tokens. It was asking every branch for coverage
+#: of something two of them do not do.
+#:
+#: The branch's own ``json_handler.py`` is excluded from the probe on purpose:
+#: it is the fleet's file, byte-identical everywhere, and counting it would
+#: give every branch every subject and make the gate meaningless.
+#:
+#: Known and accepted: a branch could shed an item by deleting production code.
+#: That is a visible act with its own reviewers, and the alternative — charging
+#: a branch for not testing what it does not have — is the failure that is
+#: actually happening.
+ITEM_SUBJECT_PROBES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("error_resilience", "corrupt_json"): ("json.load",),
+    ("error_resilience", "empty_file"): (".read_text(", "open("),
+    ("return_type_contracts", "paths_return_path"): ("-> Path",),
+    ("init_provisioning", "no_overwrite"): (".write_text(", ".mkdir("),
 }
 
 # Pattern-based items from STANDARD_CATEGORIES
@@ -325,6 +362,33 @@ def _find_covering_file(
     return None
 
 
+@lru_cache(maxsize=64)
+def _branch_apps_source(branch_path: str) -> str:
+    """Every line of the branch's own production code, concatenated.
+
+    The branch's ``json_handler.py`` is left out: it is the fleet's file, not
+    the branch's, and byte-identical everywhere since DPLAN-0325.
+    """
+    apps = Path(branch_path) / "apps"
+    if not apps.is_dir():
+        return ""
+    chunks: list[str] = []
+    for source_file in sorted(apps.rglob("*.py")):
+        if ".archive" in source_file.parts or source_file.name == "json_handler.py":
+            continue
+        try:
+            chunks.append(source_file.read_text(encoding="utf-8", errors="ignore"))
+        except OSError as exc:
+            logger.info("test_quality: unreadable while probing for item subjects: %s", exc)
+    return "\n".join(chunks)
+
+
+def _inapplicable_items(branch_path: str) -> set[tuple[str, str]]:
+    """The (category, item) pairs this branch ships no subject for."""
+    source = _branch_apps_source(branch_path)
+    return {key for key, probes in ITEM_SUBJECT_PROBES.items() if not any(p in source for p in probes)}
+
+
 def _detect_all_coverage(
     file_sources: list[tuple[str, str]],
 ) -> dict[str, dict[str, str | None]]:
@@ -450,6 +514,15 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     # Phase 3: Detect coverage across all pattern categories
     all_coverage = _detect_all_coverage(file_sources)
 
+    # Drop the items this branch ships no subject for, from BOTH sides of the
+    # fraction. Reported below rather than applied quietly — a denominator that
+    # changes per branch has to be readable from the outside.
+    inapplicable = _inapplicable_items(branch_path)
+    for gate_category, gate_item in inapplicable:
+        all_coverage.get(gate_category, {}).pop(gate_item, None)
+    all_coverage = {name: items for name, items in all_coverage.items() if items}
+    branch_items_total = TOTAL_ITEMS - len(inapplicable)
+
     total_items_covered = 0
 
     # Per-category summary checks (10 pattern categories)
@@ -554,10 +627,17 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         )
 
     # Score = total coverage percentage
-    score = int((total_items_covered / TOTAL_ITEMS) * 100)
+    score = int((total_items_covered / branch_items_total) * 100)
 
     # Overall pass at 75%
     overall_passed = score >= 75
+
+    inapplicable_note = (
+        f" -- {len(inapplicable)} of {TOTAL_ITEMS} not applicable to this branch "
+        f"({', '.join(sorted(f'{c}/{i}' for c, i in inapplicable))})"
+        if inapplicable
+        else ""
+    )
 
     # Total categories = 7 pattern + 1 module coverage = 8
     total_categories = len(STANDARD_CATEGORIES) + 1
@@ -569,7 +649,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 "name": "Overall coverage",
                 "passed": True,
                 "message": (
-                    f"{total_items_covered}/{TOTAL_ITEMS} items covered across {total_categories} categories ({score}%)"
+                    f"{total_items_covered}/{branch_items_total} items covered "
+                    f"across {total_categories} categories ({score}%){inapplicable_note}"
                 ),
             }
         )
@@ -579,8 +660,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 "name": "Overall coverage",
                 "passed": False,
                 "message": (
-                    f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                    f"across {total_categories} categories ({score}%) "
+                    f"{total_items_covered}/{branch_items_total} items covered "
+                    f"across {total_categories} categories ({score}%){inapplicable_note} "
                     f"-- minimum 75% required"
                 ),
             }
@@ -594,7 +675,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "test_quality",
             "test_files": len(test_files),
             "items_covered": total_items_covered,
-            "items_total": TOTAL_ITEMS,
+            "items_total": branch_items_total,
             "module_coverage": {
                 "covered_modules": covered_count,
                 "total_modules": total_modules,

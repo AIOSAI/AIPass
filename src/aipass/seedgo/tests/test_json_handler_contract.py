@@ -2243,15 +2243,12 @@ def declare_log_cap(module: Any, name: str, cap: int) -> bool:
 #: constant, so the knob spawn advertised began working. The strict xfail
 #: XPASSed and the row went, on the same rule as every other cure recorded
 #: here. ``aipass`` followed on the same day when its own sweep landed the
-#: shim. canary and memory still share the retiring handler and still publish a
-#: setting that does nothing; they are the last two rows in this table.
-DECLARED_LOG_CAP_IGNORED = {
-    branch: (
-        f"{branch} writes max_log_entries into its config document but rotates on the shared "
-        f"JsonHandler.MAX_LOG_ENTRIES constant, so the published setting has no effect"
-    )
-    for branch in ("canary", "memory")
-}
+#: shim. ``canary`` and ``memory`` — the last two rows — left with the pair-3
+#: sweep (DPLAN-0325 phase 4, devpulse): both now bind the shim, which reads the
+#: cap from the module's own config document, so the published setting works and
+#: the strict xfail XPASSed. The table is empty, and this contract now holds
+#: every branch to its declared cap.
+DECLARED_LOG_CAP_IGNORED: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("branch", parametrized(DECLARED_LOG_CAP_IGNORED))
