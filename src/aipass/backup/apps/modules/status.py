@@ -22,7 +22,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import backup_root
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.config import load_project_config
@@ -89,7 +89,7 @@ def handle_command(command: str, args: list) -> bool:
             files = entry.get("files_copied", 0)
             console.print(f"    {ts} | {mode} | {files} files")
 
-    json_handler.log_operation("status_displayed", {"project_root": project_root})
+    trail.log_operation("status_displayed", {"project_root": project_root})
     logger.info(f"[backup] Status shown for {project_root}")
     return True
 

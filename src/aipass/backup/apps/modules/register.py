@@ -22,7 +22,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.registry import lookup_project as _lookup_project
 from aipass.backup.apps.handlers.project.registry import register_project
@@ -105,9 +105,11 @@ def handle_command(command: str, args: list) -> bool:
         error(f"Failed to create .backup/ in {project_path}")
         return True
 
-    register_project(name, project_path)
+    if not register_project(name, project_path):
+        error(f"Failed to write the project registry for '{name}'")
+        return True
 
-    json_handler.log_operation("register_complete", {"name": name, "path": project_path})
+    trail.log_operation("register_complete", {"name": name, "path": project_path})
     logger.info(f"[backup] Registered project '{name}' at {project_path}")
     console.print(f"[green]Registered:[/green] {name}")
     console.print(f"  Path: {project_path}")

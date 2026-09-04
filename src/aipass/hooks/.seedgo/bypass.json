@@ -507,14 +507,6 @@
       "reason": "Shared utility module imported by handlers — not a CLI entry point. Has print_introspection() for drone discovery but no handle_command() or user-facing CLI."
     },
     {
-      "standard": "json_handler",
-      "reason": "Hooks branch has no json_handler.py — hook engine uses its own JSONL diagnostic logging and stdlib json for hook protocol I/O. Does not follow the module JSON pattern by design."
-    },
-    {
-      "standard": "test_quality",
-      "reason": "Hooks branch does not use json_handler — has its own JSONL diagnostic logging (diagnostics.py) and stdlib json for hook protocol I/O. json_handler coverage, mock_json_handler fixture, and exception_contracts (create_default_raises, save_invalid_raises, invalid_mode_raises) are all N/A for a hook dispatch engine architecture. | RETIREMENT-BOUND (@seedgo fcb16f01, 2026-08-29): test_quality is scheduled for retirement under DPLAN-0320/0321. Verified STILL LIVE and still scoring on 2026-08-30, so the rule is load-bearing today and stays. DELETE IT in the same window as the retirement merge — @seedgo mails the fleet when the date is set. Written into the rule itself because a rule that stops suppressing anything is unreadable from the outside."
-    },
-    {
       "file": "tests/conftest.py",
       "standard": "architecture",
       "reason": "Test fixtures live in tests/, not in the 3-layer apps structure."
@@ -522,12 +514,12 @@
     {
       "file": "tests/conftest.py",
       "standard": "json_handler",
-      "reason": "Hooks branch does not use json_handler — has its own JSONL logging and stdlib json for hook protocol. mock_json_handler fixture is N/A."
+      "reason": "Fixture file, not a module with JSON storage — it arms the AIPASS_TEST_LOG_DIR seam and imports the shim to measure the sandbox off it (DPLAN-0325), and does no JSON file ops of its own."
     },
     {
       "file": "tests/conftest.py",
       "standard": "exception_contracts",
-      "reason": "Hooks has no json_handler create_default/save_invalid/invalid_mode patterns — those contracts are N/A for a hook dispatch engine."
+      "reason": "The handler contracts are pinned once for the fleet by seedgo's cross-branch contract (DPLAN-0325), never per branch in a fixture file."
     },
     {
       "file": "tests/test_engine.py",
@@ -552,12 +544,12 @@
     {
       "file": "tests/test_engine.py",
       "standard": "json_handler",
-      "reason": "Hooks branch does not use json_handler — has its own JSONL logging."
+      "reason": "Engine tests exercise JSONL diagnostic logging, which is the engine's own record — no branch JSON documents to route through the handler."
     },
     {
       "file": "tests/test_engine.py",
       "standard": "exception_contracts",
-      "reason": "Hooks has no json_handler create_default/save_invalid/invalid_mode patterns."
+      "reason": "The handler contracts are pinned once for the fleet by seedgo's cross-branch contract (DPLAN-0325), never per branch in an engine test."
     },
     {
       "file": "tests/test_tool_sound.py",

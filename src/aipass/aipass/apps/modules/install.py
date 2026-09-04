@@ -212,7 +212,7 @@ def _verify_binaries(home: Path) -> Dict[str, str | None]:
 
 def _registry_user_name(home: Path) -> str:
     """Best-effort read of the user's name setup.sh stored in AIPASS_REGISTRY.json."""
-    data = json_handler.load_path(home / "AIPASS_REGISTRY.json")
+    data = json_handler.read_json(home / "AIPASS_REGISTRY.json")
     if not data:
         return ""
     return str(data.get("metadata", {}).get("user", "") or "").strip()

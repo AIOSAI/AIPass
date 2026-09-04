@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Backup test configuration -- shared pytest fixtures
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-12
-# Modified: 2026-08-08
+# Modified: 2026-09-03
 # =============================================
 
 """Backup test configuration -- ported from skills conftest pattern."""
@@ -14,7 +14,6 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import importlib  # noqa: E402
 import logging  # noqa: E402
 import sys  # noqa: E402
 import types  # noqa: E402
@@ -27,28 +26,12 @@ import pytest  # noqa: E402
 BRANCH_MODULE = "aipass.backup"
 
 HANDLER_PKG = f"{BRANCH_MODULE}.apps.handlers"
-JSON_MOD_PATH = f"{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
 if HANDLER_PKG not in sys.modules:
     _stub = types.ModuleType(HANDLER_PKG)
     _handlers_dir = Path(__file__).resolve().parents[1] / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]  # type: ignore[attr-defined]
     sys.modules[HANDLER_PKG] = _stub
-
-_json_mod = importlib.import_module(JSON_MOD_PATH)
-
-_JSON_DIR_ATTR: str | None = None
-_JSON_DIR_CANDIDATES = [
-    "BACKUP_JSON_DIR",
-    "JSON_DIR",
-    "BRANCH_JSON_DIR",
-    "_JSON_DIR",
-]
-
-for _candidate in _JSON_DIR_CANDIDATES:
-    if hasattr(_json_mod, _candidate):
-        _JSON_DIR_ATTR = _candidate
-        break
 
 
 @pytest.fixture(autouse=True)
@@ -125,26 +108,47 @@ def sample_data() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def mock_infrastructure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Autouse fixture that isolates JSON operations and silences logging.
+def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect this branch's json writes into a temp dir, and silence logging.
 
-    This fixture:
-      1. Redirects the branch's JSON_DIR to tmp_path (test isolation)
-      2. Patches the branch logger to a NullHandler (no console noise)
+    autouse on purpose: under DPLAN-0325 the shim's names write into the real
+    ``backup_json/`` unless the seam is set, so a test that forgets to redirect
+    pollutes the branch. The guard belongs on every test, not on the ones that
+    remember. The env var at the top of this file covers import time; this
+    narrows it to one directory PER TEST.
+
+    Nothing is patched on the shim -- it has no attributes to patch, and that
+    is the point. The service recomputes its directory on every call, so
+    setting the variable here, after import, still takes effect. The sandbox is
+    MEASURED off the shim rather than spelled out, so it cannot drift from what
+    the service actually does. The same seam covers backup's own audit stream
+    (``apps/handlers/audit/trail.py``), which recomputes its path per call too.
+
+    The seam gets its OWN subdirectory rather than tmp_path itself. The service
+    spells the sandbox ``<seam>/<branch>/<branch>_json``, so pointing the seam
+    straight at tmp_path creates ``tmp_path/backup/`` in every single test --
+    and this branch is NAMED backup, so a test building its own ``backup/``
+    directory under tmp_path collided with the fixture rather than with
+    anything it did (test_ignore_pathspec's mirror-cleanup pair, 2026-09-03).
+
+    Returns:
+        The sandbox directory the handler now writes into.
     """
-    if _JSON_DIR_ATTR is not None:
-        monkeypatch.setattr(_json_mod, _JSON_DIR_ATTR, tmp_path)
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
 
     logger_names = [
         BRANCH_MODULE,
-        f"{BRANCH_MODULE}.apps.handlers.json.json_handler",
+        "aipass.prax.json",
     ]
     for logger_name in logger_names:
         log = logging.getLogger(logger_name)
         monkeypatch.setattr(log, "handlers", [logging.NullHandler()])
+
+    from aipass.backup.apps.handlers.json import json_handler
+
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture()
@@ -157,36 +161,3 @@ def mock_logger() -> MagicMock:
     mock.error = MagicMock()
     mock.critical = MagicMock()
     return mock
-
-
-@pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolating from real file I/O."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler
-
-
-@pytest.fixture()
-def reimport_after_mock(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Fixture demonstrating reimport_after_mock pattern.
-
-    Patches sys.modules to inject a mock, then reimports the handler module
-    so it picks up the mocked dependency. Useful for testing import-time
-    behavior.  Uses importlib.reload to force re-execution of module-level code.
-    """
-    mock_mod = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        f"{BRANCH_MODULE}.apps.handlers.json.json_handler",
-        mock_mod,
-    )
-    reimported = importlib.import_module(JSON_MOD_PATH)
-    importlib.reload(reimported)
-    return mock_mod

@@ -127,6 +127,15 @@ def _module_names() -> list[str]:
     Discovered, never listed: a hand-written list silently stops covering the
     handler added after it was written.
 
+    Dot-prefixed directories are not packages and are skipped. ``.archive/``
+    is the fleet's disposal convention (DPLAN-0325 parked the retired json
+    handler there), and its dotted name — ``...json..archive.json_handler`` —
+    is a SyntaxError in the generated child script, which killed the probe
+    before either world could print. Both worlds then failed on the missing
+    arming line rather than on an import, which is the only reason this was
+    visible at all: a discovery sweep that silently stops covering anything is
+    the exact failure this file exists to prevent.
+
     Returns:
         Dotted module names, sorted.
     """
@@ -134,6 +143,8 @@ def _module_names() -> list[str]:
     for path in (BRANCH_ROOT / "apps").rglob("*.py"):
         relative = path.relative_to(BRANCH_ROOT.parents[1]).with_suffix("")
         parts = list(relative.parts)
+        if any(part.startswith(".") for part in parts):
+            continue
         if parts[-1] == "__init__":
             parts.pop()
         names.add(".".join(parts))

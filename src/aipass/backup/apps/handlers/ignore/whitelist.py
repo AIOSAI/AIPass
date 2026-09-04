@@ -14,7 +14,7 @@ when a matching ignore pattern would otherwise skip them.
 
 import fnmatch
 
-from ..json import json_handler
+from ..audit import trail
 from ..project import config
 
 
@@ -29,7 +29,7 @@ def load_whitelist(project_root: str) -> list[str]:
     """
     cfg = config.load_project_config(project_root)
     entries = cfg.get("whitelist", [])
-    json_handler.log_operation("load_whitelist", {"project_root": project_root, "count": len(entries)})
+    trail.log_operation("load_whitelist", {"project_root": project_root, "count": len(entries)})
     return entries
 
 

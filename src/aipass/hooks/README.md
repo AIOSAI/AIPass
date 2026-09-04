@@ -147,7 +147,8 @@ src/aipass/hooks/
 │   ├── handlers/cli/            # CLI utilities (not hooks — no handle())
 │   │   └── help_flags.py        #   Help-flag detection — did the caller ask, or instruct?
 │   ├── handlers/json/           # JSON utilities (not hooks — no handle())
-│   │   └── json_handler.py      #   Auto-creating JSON handler for hooks data files
+│   │   ├── json_handler.py      #   The fleet's one json service, bound to hooks (DPLAN-0325 shim)
+│   │   └── files.py             #   Atomic read/write for paths outside hooks_json/ — raises, never None
 │   └── handlers/module_root.py  # Guarded __file__ resolution — the one import-time-safe spelling
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)

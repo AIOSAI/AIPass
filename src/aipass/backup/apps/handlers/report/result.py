@@ -14,7 +14,7 @@ describing what the run did. Consumed by the report formatter.
 
 from dataclasses import dataclass, field
 
-from ..json import json_handler
+from ..audit import trail
 
 
 @dataclass
@@ -49,7 +49,7 @@ class BackupResult:
 
 def new_result(mode: str, project_root: str = "") -> BackupResult:
     """Construct an empty BackupResult for a given mode."""
-    json_handler.log_operation("backup_result_created", {"mode": mode})
+    trail.log_operation("backup_result_created", {"mode": mode})
     return BackupResult(mode=mode, project_root=project_root)
 
 

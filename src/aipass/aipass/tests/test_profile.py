@@ -96,7 +96,7 @@ class TestWriteDurability:
     """The two behaviours the hand-rolled writer carried, kept after the refactor.
 
     Both tests force a REAL failure inside json_handler.write_json (its retried
-    replace raises) rather than stubbing save_path to False -- stubbing the
+    replace raises) rather than stubbing write_json to False -- stubbing the
     handler would measure only this module's signalling and would pass even if
     the underlying save stopped being atomic.
     """
@@ -105,7 +105,7 @@ class TestWriteDurability:
     def _fail_the_replace():
         """Patch the handler's replace step to raise, as a full disk would."""
         return patch(
-            "aipass.aipass.shared.json_handler._replace_with_retry",
+            "aipass.prax.apps.handlers.json.json_service._replace_with_retry",
             side_effect=OSError("no space left on device"),
         )
 

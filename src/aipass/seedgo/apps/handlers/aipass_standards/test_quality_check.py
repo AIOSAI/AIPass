@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_quality_check.py
 # Description: Test Quality Standards Checker — 11 categories (consolidated)
-# Version: 4.0.0
+# Version: 5.0.0
 # Created: 2026-03-24
 # Modified: 2026-03-27
 # =============================================
@@ -48,34 +48,29 @@ RE_IMPORT_DIRECT = re.compile(r"import\s+(?:aipass\.)?\w+\.apps\.(?:modules|hand
 
 # -- Standard test categories and their detection patterns --------------------
 STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
-    # Category 1: JSON Handler (8 items)
-    "json_handler": {
-        "default_factory": [
-            "_create_default",
-            "_get_default_template",
-            "_get_default",
-            "_default_template",
-            "load_template",
-            "_default_config",
-            # The fleet's new spelling (DPLAN-0325 section 2): the one service
-            # builds the default in code as _default_document. Added 2026-09-03
-            # after @prax's migrated suite went 100 -> 99 while covering the
-            # default in three tests — the category greps names, so a branch
-            # that adopts the ruled spelling loses a point for obeying it.
-            # Every shim branch would drop the same way at the sweep. This
-            # category retires with part B; until then it must not convict the
-            # migration it exists alongside.
-            "_default_document",
-        ],
-        "validate": ["validate_json_structure"],
-        "get_path": ["get_json_path"],
-        "ensure_exists": ["ensure_json_exists"],
-        "load": ["load_json"],
-        "save": ["save_json"],
-        "log_operation": ["log_operation"],
-        "ensure_module": ["ensure_module_jsons"],
-    },
-    # Category 2: CLI Routing (9 items)
+    # RETIRED 2026-09-03, DPLAN-0325 part B section 1. Four categories and six
+    # further items left this table with the fleet's json handler. The scan is
+    # per-branch TEXT; the handler is now ONE service in prax with a byte-
+    # identical shim per branch, so the behaviour it used to grep for is tested
+    # once, by execution, over all 18 shims in
+    # seedgo/tests/test_json_handler_contract.py. A per-branch text scan cannot
+    # see fleet-owned coverage, so it must stop scoring it — measured, the four
+    # swept trees (devpulse, backup, hooks, aipass) each lost their sole carrier
+    # for these items when the DPLAN-0059 stamp files were archived, and CI
+    # gates every branch at 100.
+    #   json_handler (8)             -- the nine handler functions by name
+    #   exception_contracts (3)      -- _create_default / save_json / json_type raising
+    #   data_structure_contracts (3) -- the config/data/log document shape
+    #   conftest_fixtures/mock_json_handler   -- the fixture conftest v3.0.0 deleted
+    #   return_type_contracts/load_correct_type, ensure_returns_bool
+    #   init_provisioning/returns_dict
+    #   infrastructure_mocking/sys_modules_mock, reimport_after_mock
+    #                                -- the stamp's own technique: stub sys.modules,
+    #                                   reload the handler module. There is no shim
+    #                                   to reload.
+    # Retiring an item costs nobody: numerator and denominator move together, so
+    # a branch at 100 today is still 100 at 31/31. Verified over all 18 branches.
+    # Category 1: CLI Routing (9 items)
     "cli_routing": {
         "help_flag": ["--help"],
         "short_help": ['"-h"', "'-h'"],
@@ -87,72 +82,60 @@ STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
         "print_introspection": ["print_introspection"],
         "output_capture": ["capsys", "capfd", "StringIO"],
     },
-    # Category 3: Conftest Fixtures (6 items)
+    # Category 2: Conftest Fixtures (5 items)
     "conftest_fixtures": {
         "temp_dir": ["tmp_path", "temp_test_dir", "temp_dir"],
         "sample_data": ["sample_test_data", "sample_data"],
         "mock_infrastructure": ["mock_infrastructure", "autouse"],
         "mock_logger": ["mock_logger", "mock_log"],
-        "mock_json_handler": ["mock_json_handler", "mock_json"],
+        # mock_json_handler RETIRED with the handler (DPLAN-0325 part B): the
+        # citizen template's conftest v3.0.0 deletes that fixture — the seam is
+        # AIPASS_TEST_LOG_DIR, read by the service per call.
         "cleanup": ["rmtree", "yield", "teardown"],
     },
-    # Category 4: Error Resilience (4 items)
+    # Category 3: Error Resilience (4 items)
     "error_resilience": {
         "missing_file": ["FileNotFoundError", "missing_file", "file_not_found"],
         "corrupt_json": ["JSONDecodeError", "corrupt", "malformed"],
-        "empty_file": ["empty_file", "empty_content"],
+        # Re-scoped 2026-09-03: @aipass's only carrier was the archived json
+        # stamp, yet its live suite has test_empty_project,
+        # test_empty_branch_name_ignored and test_empty_path_flagged. The item
+        # was measuring a spelling, not the concept. Additive — no branch drops.
+        "empty_file": ["empty_file", "empty_content", "test_empty"],
         "nonexistent_dir": ["nonexistent", "missing_dir", "not_a_dir"],
     },
-    # Category 5: Return Type Contracts (4 items)
+    # Category 4: Return Type Contracts (2 items)
     "return_type_contracts": {
         "command_returns_bool": [
             "isinstance(result, bool)",
+            # Re-scoped 2026-09-03: @aipass asserts isinstance(result["ok"], bool)
+            # — a real bool return-type contract the literal token missed because
+            # the variable is subscripted. Additive; no branch drops.
+            ", bool)",
             "returns_bool",
             "return_type",
         ],
         "paths_return_path": ["isinstance(result, Path)", "pathlib.Path"],
-        "ensure_returns_bool": ["ensure_json_exists", "is True"],
-        "load_correct_type": ["isinstance(result, dict)", "isinstance(data, dict)"],
+        # ensure_returns_bool and load_correct_type RETIRED with the handler.
     },
-    # Category 6: Exception Contracts (3 items)
-    "exception_contracts": {
-        "create_default_raises": [
-            "pytest.raises(ValueError)",
-            "ValueError",
-            "_create_default",
-        ],
-        "save_invalid_raises": ["pytest.raises", "save_json"],
-        "invalid_mode_raises": [
-            "pytest.raises(ValueError)",
-            "invalid_mode",
-            "invalid_type",
-        ],
-    },
-    # Category 7: Data Structure Contracts (3 items)
-    "data_structure_contracts": {
-        "config_keys": ["module_name", "config_keys"],
-        "data_keys": ["last_updated", "data_keys"],
-        "log_entry_field": ["log_entry", "operation"],
-    },
-    # Category 8: Success/Failure Paths (4 items)
+    # Category 5: Success/Failure Paths (4 items)
     "success_failure_paths": {
         "known_routes_true": ["assert result is True", "== True"],
         "unknown_returns_false": ["assert result is False", "== False"],
         "help_preempts": ["--help"],
         "no_args_triggers": ["print_introspection"],
     },
-    # Category 9: Init/Provisioning (4 items)
+    # Category 6: Init/Provisioning (3 items)
     "init_provisioning": {
         "creates_files": [".exists()", "ensure_json_exists"],
         "auto_creates_dir": ["mkdir", "makedirs"],
         "no_overwrite": ["overwrite", "no_clobber", "already_exists"],
-        "returns_dict": ["isinstance(result, dict)", "json_type"],
+        # returns_dict RETIRED with the handler — json_type is its concept.
     },
-    # Category 10: Infrastructure Mocking (3 items)
+    # Category 7: Infrastructure Mocking (1 item)
     "infrastructure_mocking": {
         "autouse_fixtures": ["autouse=True", "autouse"],
-        "sys_modules_mock": ["sys.modules"],
-        "reimport_after_mock": ["importlib.reload", "reload("],
+        # sys_modules_mock and reimport_after_mock RETIRED with the handler.
     },
 }
 
@@ -374,8 +357,8 @@ def _detect_all_coverage(
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Run test quality analysis on a branch.
 
-    Scans all test files and evaluates coverage across 11 categories
-    (10 pattern categories + module coverage).
+    Scans all test files and evaluates coverage across 8 categories
+    (7 pattern categories + module coverage).
     Score = total items covered / total items.
 
     Args:
@@ -576,7 +559,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     # Overall pass at 75%
     overall_passed = score >= 75
 
-    # Total categories = 10 pattern + 1 module coverage = 11
+    # Total categories = 7 pattern + 1 module coverage = 8
     total_categories = len(STANDARD_CATEGORIES) + 1
 
     # Overall summary check

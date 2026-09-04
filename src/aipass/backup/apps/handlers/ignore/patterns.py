@@ -14,7 +14,7 @@ pathspec (gitwildmatch) — true gitignore semantics.
 
 import pathspec
 
-from ..json import json_handler
+from ..audit import trail
 from ..path import builder
 
 
@@ -39,7 +39,7 @@ def load_spec(project_root: str) -> pathspec.PathSpec:
             lines = f.readlines()
 
     spec = pathspec.PathSpec.from_lines("gitignore", lines)
-    json_handler.log_operation(
+    trail.log_operation(
         "load_spec",
         {"project_root": project_root, "pattern_count": len(spec.patterns)},
     )

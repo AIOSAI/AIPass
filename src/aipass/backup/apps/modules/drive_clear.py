@@ -21,7 +21,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 
 
 MODULE_NAME = "drive_clear"
@@ -67,7 +67,7 @@ def run_drive_clear(project_root: str, force: bool = False) -> bool:
     else:
         cli_error("Failed to clear Drive tracker.")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "drive_clear_complete",
         {"project_root": project_root, "success": success},
     )

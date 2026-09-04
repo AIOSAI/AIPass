@@ -19,27 +19,27 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "modules",
-      "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis \u2014 pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
+      "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis — pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
     },
     {
       "file": "tests/test_init_flow.py",
       "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in handoff_command output. String is in assertion context only \u2014 not a permission bypass in this file."
+      "reason": "Assertions verify that the CLI flag name appears/absent in handoff_command output. String is in assertion context only — not a permission bypass in this file."
     },
     {
       "file": "tests/test_handoff_platform.py",
       "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in build_cli_cmd output. String is in assertion context only \u2014 not a permission bypass in this file."
+      "reason": "Assertions verify that the CLI flag name appears/absent in build_cli_cmd output. String is in assertion context only — not a permission bypass in this file."
     },
     {
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "json_structure",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design \u2014 it must work during initial project setup before any AIPass services exist."
+      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — it must work during initial project setup before any AIPass services exist."
     },
     {
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "log_visibility",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design \u2014 stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
+      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -49,22 +49,22 @@
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "introspection",
-      "reason": "Private helper module for doctor.py \u2014 not directly invokable, no introspection needed."
+      "reason": "Private helper module for doctor.py — not directly invokable, no introspection needed."
     },
     {
       "file": "apps/modules/_doctor_wire.py",
       "standard": "introspection",
-      "reason": "Private helper module for doctor.py \u2014 not directly invokable, no introspection needed."
+      "reason": "Private helper module for doctor.py — not directly invokable, no introspection needed."
     },
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "naming",
-      "reason": "Leading underscore is intentional \u2014 hides from module discovery to pass cli_ux no_internal_modules check."
+      "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
     },
     {
       "file": "apps/modules/_doctor_wire.py",
       "standard": "naming",
-      "reason": "Leading underscore is intentional \u2014 hides from module discovery to pass cli_ux no_internal_modules check."
+      "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
     },
     {
       "file": "apps/modules/handoff.py",
@@ -89,42 +89,27 @@
     {
       "file": "apps/modules/install.py",
       "standard": "modules",
-      "reason": "Thin bootstrap orchestrator \u2014 preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
-    },
-    {
-      "file": "shared/json_handler.py",
-      "standard": "architecture",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_handler.py",
-      "standard": "log_visibility",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_handler.py",
-      "standard": "trigger",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "Thin bootstrap orchestrator — preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
     },
     {
       "file": "shared/json_ops.py",
       "standard": "architecture",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
       "standard": "log_visibility",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
       "standard": "trigger",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/registry_discovery.py",
       "standard": "architecture",
-      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
@@ -134,7 +119,7 @@
     {
       "file": "apps/modules/trust.py",
       "standard": "encapsulation",
-      "reason": "Imports frozen trust_registry interface (enroll/revoke/is_trusted/read_registry) from @hooks by DPLAN-0244 design. Cross-branch import required \u2014 the registry module lives in hooks, consumers live in aipass."
+      "reason": "Imports frozen trust_registry interface (enroll/revoke/is_trusted/read_registry) from @hooks by DPLAN-0244 design. Cross-branch import required — the registry module lives in hooks, consumers live in aipass."
     },
     {
       "file": "apps/handlers/provider_wire.py",
@@ -142,7 +127,12 @@
       "functions": [
         "refresh_provider_hooks"
       ],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) \u2014 a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
+    },
+    {
+      "file": "shared/json_handler.py",
+      "standard": "trigger",
+      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init). MEASURED LIVE 2026-09-03: checklist fails trigger on the temp-file .unlink() at :138 without this. The architecture and log_visibility twins were measured DEAD in both lanes and removed; this one goes when the file is archived (DPLAN-0325, blocked on canary/memory)."
     }
   ]
 }

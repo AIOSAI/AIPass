@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
-# Description: Tests that aipass's shim is wired to the fleet json service
+# Description: Tests that devpulse's shim is wired to the fleet json service
 # Version: 2.0.0
 # Created: 2026-09-03
 # Modified: 2026-09-03
 # =============================================
 
-"""Tests for aipass's JSON handler shim.
+"""Tests for devpulse's JSON handler shim.
 
 Only the WIRING is tested here: that this branch's shim binds the fleet's one
 json service (DPLAN-0325), that it lands in this branch's json directory, and
@@ -25,7 +25,7 @@ sets. The shim has no attributes to patch, and that is the point.
 import pytest
 
 from aipass.prax import json_handler as json_service
-from aipass.aipass.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.json import json_handler
 
 
 BOUND_NAMES = (
@@ -67,7 +67,7 @@ def test_every_public_name_is_a_bound_method_of_the_service(name):
     """It BINDS, never wraps.
 
     A wrapper would add a stack frame, and the service names the calling module
-    from frame 2 - so every entry aipass logged would be attributed to the
+    from frame 2 - so every entry devpulse logged would be attributed to the
     wrapper's own file instead of the caller's.
     """
     bound = getattr(json_handler, name)
@@ -77,14 +77,14 @@ def test_every_public_name_is_a_bound_method_of_the_service(name):
 
 
 def test_the_exceptions_are_the_services_own():
-    """A caller catching aipass's InvalidDocument catches the service's."""
+    """A caller catching devpulse's InvalidDocument catches the service's."""
     assert json_handler.InvalidDocument is json_service.InvalidDocument
     assert json_handler.WriteFailed is json_service.WriteFailed
 
 
 def test_the_shim_is_bound_to_this_branch():
-    """for_module derived aipass's root from the shim's own __file__."""
-    assert json_handler.get_json_path.__self__.branch_root.name == "aipass"
+    """for_module derived devpulse's root from the shim's own __file__."""
+    assert json_handler.get_json_path.__self__.branch_root.name == "devpulse"
 
 
 def test_the_shim_carries_nothing_else():

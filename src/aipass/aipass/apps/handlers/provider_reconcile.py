@@ -41,7 +41,7 @@ def reconcile_stale_deny(fix: bool = False) -> list:
         )
         return results
 
-    data = json_handler.load_path(settings_path)
+    data = json_handler.read_json(settings_path)
     if data is None:
         json_handler.log_operation(
             "reconcile_stale_deny",
@@ -58,7 +58,7 @@ def reconcile_stale_deny(fix: bool = False) -> list:
     elif fix:
         deny_cleaned = [r for r in deny if r not in _STALE_RM_DENY_RULES]
         data.setdefault("permissions", {})["deny"] = deny_cleaned
-        json_handler.save_path(settings_path, data)
+        json_handler.write_json(settings_path, data)
         removed = ", ".join(stale)
         results.append(("rm deny migration", GLYPH_PASS, f"removed: {removed}", ""))
         logger.info("[doctor] removed stale deny rules: %s", stale)

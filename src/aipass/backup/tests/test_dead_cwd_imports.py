@@ -140,6 +140,7 @@ PROBE_MODULES = [
     "aipass.backup.apps.handlers.project.setup",
     "aipass.backup.apps.handlers.project.registry",
     "aipass.backup.apps.handlers.json.json_handler",
+    "aipass.backup.apps.handlers.audit.trail",
     "aipass.backup.apps.handlers.drive.client",
 ]
 

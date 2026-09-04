@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 from . import upload as upload_mod
 
 if TYPE_CHECKING:
@@ -184,7 +184,7 @@ def share_file(
             "error": f"Link retrieval failed: {client.last_error or 'unknown'}",
         }
 
-    json_handler.log_operation(
+    trail.log_operation(
         "share_file",
         {
             "file": str(local_file),

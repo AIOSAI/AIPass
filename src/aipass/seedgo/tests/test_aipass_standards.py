@@ -851,3 +851,138 @@ def test_the_two_standards_read_one_copy_of_the_service_import_line():
     from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check, json_structure_check
 
     assert json_structure_check.SERVICE_IMPORT_MARKER is json_handler_check.SERVICE_IMPORT_MARKER
+
+
+# ---------------------------------------------------------------------------
+# Tests -- v4 test_quality retires the handler's items (DPLAN-0325 part B)
+# ---------------------------------------------------------------------------
+
+
+def test_the_handlers_own_categories_no_longer_score_a_branch():
+    """A per-branch TEXT scan cannot see coverage that moved to one service.
+
+    The handler's behaviour is tested once, by execution, over all 18 shims in
+    test_json_handler_contract.py. Measured 2026-09-03: the four swept trees
+    each lost their sole carrier for these items when the DPLAN-0059 stamp
+    files were archived, and CI gates every branch at 100.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import STANDARD_CATEGORIES
+
+    assert "json_handler" not in STANDARD_CATEGORIES
+    assert "exception_contracts" not in STANDARD_CATEGORIES
+    assert "data_structure_contracts" not in STANDARD_CATEGORIES
+    assert "mock_json_handler" not in STANDARD_CATEGORIES["conftest_fixtures"]
+    assert "load_correct_type" not in STANDARD_CATEGORIES["return_type_contracts"]
+    assert "ensure_returns_bool" not in STANDARD_CATEGORIES["return_type_contracts"]
+    assert "returns_dict" not in STANDARD_CATEGORIES["init_provisioning"]
+    assert "sys_modules_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
+    assert "reimport_after_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
+
+
+def test_the_total_moved_with_the_items_it_counts():
+    """Numerator and denominator move together, which is why nobody drops."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        STANDARD_CATEGORIES,
+        TOTAL_ITEMS,
+    )
+
+    assert TOTAL_ITEMS == sum(len(items) for items in STANDARD_CATEGORIES.values()) + 3
+    assert TOTAL_ITEMS == 31
+
+
+def test_a_subscripted_isinstance_is_still_a_bool_return_contract():
+    """@aipass asserts isinstance(result["ok"], bool) — real coverage, missed.
+
+    Red-first: with only the literal `isinstance(result, bool)` token the item
+    reads as uncovered, and @aipass's sweep stays below the CI gate for a
+    contract its suite actually pins.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
+
+    patterns = STANDARD_CATEGORIES["return_type_contracts"]["command_returns_bool"]
+    source = 'def test_ok():\n    assert isinstance(result["ok"], bool)\n'
+    assert _find_covering_file(patterns, [("test_sandbox_check.py", source)]) == "test_sandbox_check.py"
+
+
+def test_an_empty_input_test_counts_however_the_branch_spells_it():
+    """test_empty_project is empty-input resilience; empty_file was a spelling."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
+
+    patterns = STANDARD_CATEGORIES["error_resilience"]["empty_file"]
+    source = "def test_empty_project(tmp_path):\n    assert scan(tmp_path) == []\n"
+    assert _find_covering_file(patterns, [("test_structure_scan.py", source)]) == "test_structure_scan.py"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_structure recognises a branch-owned operation-logging seam
+# ---------------------------------------------------------------------------
+
+
+def _seam_branch(tmp_path, seam_body: str | None = None):
+    """A branch whose audit trail lives in its own module, built on prax.
+
+    Shaped like the real tree — ``<root>/aipass/<branch>/apps/...`` beside a
+    ``prax/`` directory — because the seam lookup resolves the branch from the
+    file's own path, exactly as it must on disk.
+    """
+    (tmp_path / "aipass" / "prax").mkdir(parents=True)
+    seam = tmp_path / "aipass" / "backupish" / "apps" / "handlers" / "audit" / "trail.py"
+    seam.parent.mkdir(parents=True)
+    seam.write_text(
+        seam_body
+        or (
+            "from aipass.prax import append_jsonl\n\n\n"
+            "def log_operation(operation, data):\n    append_jsonl(operation, data)\n"
+        ),
+        encoding="utf-8",
+    )
+    return seam
+
+
+def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
+    """@backup moved 67 audit calls off the shim per the spec, as ordered.
+
+    The old check was a literal substring test for 'json_handler.log_operation'
+    and convicted 41 of backup's 43 files for obeying it. Recognised, never
+    bypassed: backup will not carry a bypass for following the spec.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    seam = _seam_branch(tmp_path)
+    module = seam.parents[3] / "modules" / "snapshot.py"
+    module.parent.mkdir(parents=True)
+    source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
+    module.write_text(source, encoding="utf-8")
+
+    checks = _check_code_wiring(module, source)
+    assert all(c["passed"] for c in checks)
+    assert any("trail seam" in c["message"] for c in checks)
+
+
+def test_the_seam_itself_does_not_have_to_log_through_itself(tmp_path):
+    """The substrate is not a consumer of the substrate."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    seam = _seam_branch(tmp_path)
+    checks = _check_code_wiring(seam, seam.read_text(encoding="utf-8"))
+    assert all(c["passed"] for c in checks)
+
+
+def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp_path):
+    """The narrowing has an edge: a same-named helper is not a logging seam.
+
+    Red-first — without the two conditions (defines log_operation AND builds it
+    on aipass.prax) any module could name a local object `trail` and claim the
+    exemption, which is a far wider waiver than the one backup needs.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    fake = _seam_branch(tmp_path, "def log_operation(operation, data):\n    print(operation)\n")
+
+    module = fake.parents[3] / "modules" / "snapshot.py"
+    module.parent.mkdir(parents=True)
+    source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
+    module.write_text(source, encoding="utf-8")
+
+    checks = _check_code_wiring(module, source)
+    assert not all(c["passed"] for c in checks)

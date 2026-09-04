@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Project setup handler — scaffold .backup/ directory in target
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-23
+# Modified: 2026-09-03
 # =============================================
 
 """Project setup handler.
@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..path.module_paths import branch_root
+from ..audit import trail
 from ..json import json_handler
 from ..path import builder
 
@@ -54,11 +55,13 @@ def create_backup_dir(project_path: str) -> Path | None:
         project_path: Absolute filesystem path to the target project.
 
     Returns:
-        Path to the created ``.backup/`` directory, or None on failure.
+        Path to the created ``.backup/`` directory, or None on failure --
+        including a config that could not be written, which used to be
+        reported as a successful setup.
     """
     root = Path(project_path)
     if not root.is_dir():
-        json_handler.log_operation("setup_failed", {"project_path": project_path, "reason": "not a directory"})
+        trail.log_operation("setup_failed", {"project_path": project_path, "reason": "not a directory"})
         return None
 
     backup_dir = builder.backup_root(project_path)
@@ -78,14 +81,19 @@ def create_backup_dir(project_path: str) -> Path | None:
             "project_path": str(root),
             "created": datetime.now(timezone.utc).isoformat(),
         }
-        json_handler.save_json(str(config_path), config)
+        if not json_handler.write_json(config_path, config):
+            trail.log_operation(
+                "setup_failed",
+                {"project_path": project_path, "reason": "config write failed"},
+            )
+            return None
 
     ignore_path = builder.build_ignore_path(project_path)
     if not ignore_path.exists():
         with open(ignore_path, "w", encoding="utf-8") as f:
             f.write(_build_backupignore())
 
-    json_handler.log_operation("setup_complete", {"project_path": project_path})
+    trail.log_operation("setup_complete", {"project_path": project_path})
     return backup_dir
 
 

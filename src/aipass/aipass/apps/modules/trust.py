@@ -25,7 +25,7 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     read_registry,
     revoke,
 )
-from aipass.hooks.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -104,7 +104,15 @@ def _do_prune() -> bool:
     for path in stale:
         del projects[path]
     if stale:
-        json_handler.write_json_file(trust_registry.REGISTRY_PATH, registry)
+        # write_json answers False rather than raising; an unchecked call would
+        # report a prune that never reached disk. The trust registry is the file
+        # every hook in every enrolled project reads, so a lost write is an
+        # error, not a warning (DPLAN-0325: this used hooks' write_json_file,
+        # which raised — the loudness is kept, the import is now our own shim).
+        if not json_handler.write_json(trust_registry.REGISTRY_PATH, registry):
+            error(f"Could not write {trust_registry.REGISTRY_PATH} — the registry is unchanged.")
+            logger.error("[AIPASS] trust: prune write failed, %d entries left in place", len(stale))
+            return True
         json_handler.log_operation("prune", {"pruned_count": len(stale)}, module_name="trust")
         success(f"Pruned {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} from the trust registry.")
         logger.info("[AIPASS] trust: pruned %d stale entries", len(stale))

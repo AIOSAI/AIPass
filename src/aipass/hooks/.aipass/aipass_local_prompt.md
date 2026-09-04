@@ -78,6 +78,9 @@ apps/
       tool_sound.py        #   Sound on tool use
       telegram_response.py #   Telegram reply delivery on Stop
     module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve (dead-cwd cure)
+    json/
+      json_handler.py      #   The fleet's one json service bound to hooks (DPLAN-0325 shim, byte-identical everywhere)
+      files.py             #   read/write_json_file for the trust registry + alerts.json -- raises where the service returns None
     config/                # NOTE: under handlers/, not apps/ -- apps/config/ is an empty package
       loader.py            #   hooks.json discovery + validation, config-independent trust checks
       trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)

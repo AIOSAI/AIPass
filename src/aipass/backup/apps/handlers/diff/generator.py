@@ -14,7 +14,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 
 DIFF_IGNORE_PATTERNS = [
     "*.pyc",
@@ -136,7 +136,7 @@ def generate_diff_content(old_file: Path, new_file: Path) -> str:
         )
 
         result = "\n".join(diff_lines)
-        json_handler.log_operation("diff_generated", {"file": old_file.name})
+        trail.log_operation("diff_generated", {"file": old_file.name})
         return result
     except Exception as e:
         logger.warning(f"[diff] Failed to generate diff: {old_file} -> {new_file}: {e}")

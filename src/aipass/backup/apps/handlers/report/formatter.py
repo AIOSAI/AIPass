@@ -11,7 +11,7 @@
 Turns a BackupResult into a summary suitable for terminal display.
 """
 
-from ..json import json_handler
+from ..audit import trail
 from .result import BackupResult
 
 
@@ -49,7 +49,7 @@ def format_result(result: BackupResult) -> str:
         if len(result.errors) > 5:
             lines.append(f"    ... and {len(result.errors) - 5} more")
 
-    json_handler.log_operation("format_result", {"mode": result.mode})
+    trail.log_operation("format_result", {"mode": result.mode})
     return "\n".join(lines)
 
 

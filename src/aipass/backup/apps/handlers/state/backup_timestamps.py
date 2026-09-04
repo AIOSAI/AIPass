@@ -16,7 +16,7 @@ from datetime import datetime
 from aipass.prax import logger
 
 from ..path.module_paths import branch_root
-from ..json import json_handler
+from ..audit import trail
 
 _BACKUP_ROOT = branch_root(__file__, 3)
 TIMESTAMPS_FILE = _BACKUP_ROOT / "backup_json" / "backup_timestamps.json"
@@ -38,7 +38,7 @@ def get_timestamps() -> dict:
 
 def update_timestamp(mode: str) -> None:
     """Update the timestamp for a backup mode to now."""
-    json_handler.log_operation("timestamp_updated", {"mode": mode})
+    trail.log_operation("timestamp_updated", {"mode": mode})
 
     data = {}
     if TIMESTAMPS_FILE.exists():

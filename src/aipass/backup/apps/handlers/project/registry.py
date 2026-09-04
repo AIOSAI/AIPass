@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Project registry handler — load/register/lookup backup projects
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-23
+# Modified: 2026-09-03
 # =============================================
 
 """Project registry handler.
@@ -14,10 +14,34 @@ backup project registry stored at backup_json/project_registry.json.
 
 from pathlib import Path
 
-from ..path.module_paths import branch_root
+from ..audit import trail
 from ..json import json_handler
+from ..path.module_paths import branch_root
 
 REGISTRY_PATH = branch_root(__file__, 3) / "backup_json" / "project_registry.json"
+
+
+def _read_registry() -> dict:
+    """Read the registry document.
+
+    Returns:
+        The document, or an empty one when the registry does not exist yet.
+
+    Raises:
+        InvalidDocument: The registry is present but unreadable, or is not a
+            JSON object. This is the one read in the branch that MUST NOT
+            degrade to an empty dict: register_project writes back what it
+            read, so an empty answer here replaces every registration in the
+            file with the single project being added.
+    """
+    data = json_handler.read_json(REGISTRY_PATH)
+    if data is None:
+        if REGISTRY_PATH.exists():
+            raise json_handler.InvalidDocument(f"Project registry unreadable: {REGISTRY_PATH}")
+        return {}
+    if not isinstance(data, dict):
+        raise json_handler.InvalidDocument(f"Project registry is not a JSON object: {REGISTRY_PATH}")
+    return data
 
 
 def load_project_registry() -> dict:
@@ -26,9 +50,9 @@ def load_project_registry() -> dict:
     Returns:
         Dict mapping project name to project metadata.
     """
-    data = json_handler.load_json(str(REGISTRY_PATH))
-    json_handler.log_operation("project_registry_loaded", {"count": len(data.get("projects", {}))})
-    return data.get("projects", {})
+    projects = _read_registry().get("projects", {})
+    trail.log_operation("project_registry_loaded", {"count": len(projects)})
+    return projects
 
 
 def register_project(name: str, path: str) -> bool:
@@ -39,9 +63,10 @@ def register_project(name: str, path: str) -> bool:
         path: Absolute path to the project root.
 
     Returns:
-        True when the project was added or updated.
+        True when the project was added or updated, False when the registry
+        could not be written.
     """
-    data = json_handler.load_json(str(REGISTRY_PATH))
+    data = _read_registry()
     if "projects" not in data:
         data["projects"] = {}
 
@@ -49,8 +74,10 @@ def register_project(name: str, path: str) -> bool:
         "path": str(Path(path).resolve()),
         "name": name,
     }
-    json_handler.save_json(str(REGISTRY_PATH), data)
-    json_handler.log_operation("project_registered", {"name": name, "path": path})
+    if not json_handler.write_json(REGISTRY_PATH, data):
+        trail.log_operation("project_register_failed", {"name": name, "path": path})
+        return False
+    trail.log_operation("project_registered", {"name": name, "path": path})
     return True
 
 
@@ -67,7 +94,7 @@ def lookup_project(name: str) -> str | None:
     entry = projects.get(name)
     if entry:
         return entry.get("path")
-    json_handler.log_operation("project_lookup_miss", {"name": name})
+    trail.log_operation("project_lookup_miss", {"name": name})
     return None
 
 

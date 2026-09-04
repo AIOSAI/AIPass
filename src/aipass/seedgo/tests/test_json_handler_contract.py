@@ -153,13 +153,17 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: go the same way as the sweep reaches their branches — each one deleted when
 #: it turns red, never pre-emptively, because a table emptied ahead of the cure
 #: asserts nothing while looking like it does.
+#:
+#: ``hooks`` left on the same rule later that day, when its sweep landed the
+#: canonical shim. Its row read "raises FileNotFoundError from the staging
+#: file"; the service creates the directory, so the xfail XPASSed and the row
+#: went. Six rows remain, all on branches the sweep has not reached.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
     "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
     "skills": "skills's save_json returns False and writes nothing when the document directory is absent",
     "cli": "cli's save_json raises FileNotFoundError from the staging file when the document directory is absent",
     "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
-    "hooks": "hooks's save_json raises FileNotFoundError from the staging file when the document directory is absent",
     "seedgo": "seedgo's save_json raises FileNotFoundError from the staging file when the document directory is absent",
 }
 
@@ -687,8 +691,10 @@ def test_validate_json_structure_answers_the_measured_matrix(
 
     Ten cases — the required keys for config and data, list-ness for log, three
     non-mapping inputs and an unknown json_type — answered identically, and
-    always as a real ``bool``, by all sixteen implementations that have
-    ``validate_json_structure``. ``ai_mail`` and ``backup`` do not, and skip.
+    always as a real ``bool``, by every implementation that has
+    ``validate_json_structure``. Sixteen of eighteen when this was written;
+    seventeen on 2026-09-03, because ``backup`` swept to the shim and the
+    service exposes it. Only ``ai_mail`` still lacks it, and skips.
     Worth pinning precisely because it is the shared rule ``save_json``
     enforces: the acceptance boundary is the same everywhere even though what
     happens at the boundary is not.
@@ -1044,10 +1050,18 @@ def retry_label(relative: Path) -> str:
 #: An ``rglob`` over the package rather than the two globs that would find the
 #: known families, and the difference is a measurement rather than a
 #: preference: globbing ``*/apps/handlers/json/json_handler.py`` plus the
-#: shared module finds thirteen and misses ``spawn/atomic_write``, a
-#: fourteenth copy of the same helper under a name no handler glob matches.
+#: shared module finds most of them and misses ``spawn/atomic_write``, a copy
+#: of the same helper under a name no handler glob matches.
 #: Discovery narrow enough to confirm the list it was handed cannot report the
 #: implementation nobody listed.
+#:
+#: The count is a MEASUREMENT and it is falling: sixteen on 2026-09-02,
+#: fourteen on 2026-09-03 after the second sweep pair. It did not fall when
+#: prax migrated — prax's helper MOVED into ``json_service``, it did not
+#: disappear — and it falls to about four only when the branch handlers
+#: themselves are gone: ``ai_mail/json_utils``, ``spawn/atomic_write``,
+#: ``trigger/apps/config`` and the service. No number is asserted here; the
+#: floor below is, so a sweep that removes a copy cannot turn this red.
 RETRY_IMPLEMENTATIONS = {
     retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
     + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
@@ -1056,7 +1070,7 @@ RETRY_IMPLEMENTATIONS = {
 }
 
 #: One param per implementation, and deliberately no divergence table beside
-#: it. All fourteen bodies were measured assertion-identical on 2026-09-02
+#: it. Every body was measured assertion-identical on 2026-09-02
 #: (docstring wording aside), so a disagreement discovered here is news, not a
 #: known variation to be marked down in advance.
 RETRY_PARAMS = [pytest.param(label, id=label) for label in RETRY_IMPLEMENTATIONS]
@@ -1486,10 +1500,17 @@ def public_writer(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     """A branch's public writer, normalised across both calling conventions.
 
     The convention split is the reason these three contracts could not simply
-    be copied from one branch's suite: sixteen branches write
-    ``save_json(module_name, json_type, data)`` and resolve the path
-    themselves, ``backup`` writes ``save_json(path, data)``. Both are answered
+    be copied from one branch's suite: sixteen branches wrote
+    ``save_json(module_name, json_type, data)`` and resolved the path
+    themselves, ``backup`` wrote ``save_json(path, data)``. Both are answered
     here so the contract bodies below never branch on it.
+
+    Measured 2026-09-03: the split is GONE. backup's sweep took its
+    path-addressed form with the old handler, so all eighteen now write the
+    three-argument form. The normaliser stays — it costs one branch and it is
+    the thing that would notice a nineteenth convention arriving — but it is
+    down to one convention to serve, which is worth saying out loud rather
+    than leaving a reader to believe the fleet is still split.
 
     Args:
         branch: Branch to load.
@@ -1682,10 +1703,15 @@ def test_the_public_writer_survives_a_transient_sharing_violation(
 #: started lying. The rest move the same way as the sweep reaches them; the
 #: split ends at 18 / 0 and the constants go with the tables.
 #:
-#: raise: backup, cli, commons, daemon, devpulse, drone, hooks, prax, seedgo,
-#: spawn, trigger. return False: aipass, api, canary, flow, memory, skills.
-EXHAUSTED_WRITE_RAISES = 11
-EXHAUSTED_WRITE_RETURNS_FALSE = 6
+#: Re-measured again 2026-09-03 afternoon, after the second sweep pair landed
+#: devpulse, backup, hooks and aipass on the canonical shim. Only ``aipass`` of
+#: those four was in the False column, so it crossed and the split moved by
+#: one. Six branches now carry the shim; twelve have not been swept.
+#:
+#: raise: aipass, backup, cli, commons, daemon, devpulse, drone, hooks, prax,
+#: seedgo, spawn, trigger. return False: api, canary, flow, memory, skills.
+EXHAUSTED_WRITE_RAISES = 12
+EXHAUSTED_WRITE_RETURNS_FALSE = 5
 
 
 @pytest.mark.parametrize("branch", parametrized(WRITER_HAS_NO_BOUNDED_RETRY))
@@ -2212,14 +2238,15 @@ def declare_log_cap(module: Any, name: str, cap: int) -> bool:
 #: reads the cap out of the module's own config document instead of a class
 #: constant, so the knob spawn advertised began working. The strict xfail
 #: XPASSed and the row went, on the same rule as every other cure recorded
-#: here. aipass, canary and memory still share the retiring handler and still
-#: publish a setting that does nothing.
+#: here. ``aipass`` followed on the same day when its own sweep landed the
+#: shim. canary and memory still share the retiring handler and still publish a
+#: setting that does nothing; they are the last two rows in this table.
 DECLARED_LOG_CAP_IGNORED = {
     branch: (
         f"{branch} writes max_log_entries into its config document but rotates on the shared "
         f"JsonHandler.MAX_LOG_ENTRIES constant, so the published setting has no effect"
     )
-    for branch in ("aipass", "canary", "memory")
+    for branch in ("canary", "memory")
 }
 
 

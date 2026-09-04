@@ -71,7 +71,11 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     Returns:
         The sandbox directory the handler now writes into.
     """
-    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/<branch>/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
