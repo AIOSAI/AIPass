@@ -157,11 +157,15 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: ``hooks`` left on the same rule later that day, when its sweep landed the
 #: canonical shim. Its row read "raises FileNotFoundError from the staging
 #: file"; the service creates the directory, so the xfail XPASSed and the row
-#: went. Six rows remain, all on branches the sweep has not reached.
+#: went.
+#:
+#: ``skills`` left with the pair-2 sweep (DPLAN-0325 phase 4, devpulse): its
+#: row read "returns False and writes nothing"; the shim persists through the
+#: service, so the strict xfail XPASSed on CI and the row went. Five rows
+#: remain, all on branches the sweep has not reached.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
     "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
-    "skills": "skills's save_json returns False and writes nothing when the document directory is absent",
     "cli": "cli's save_json raises FileNotFoundError from the staging file when the document directory is absent",
     "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
     "seedgo": "seedgo's save_json raises FileNotFoundError from the staging file when the document directory is absent",
