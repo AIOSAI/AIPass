@@ -161,14 +161,15 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #:
 #: ``skills`` left with the pair-2 sweep (DPLAN-0325 phase 4, devpulse): its
 #: row read "returns False and writes nothing"; the shim persists through the
-#: service, so the strict xfail XPASSed on CI and the row went. Five rows
-#: remain, all on branches the sweep has not reached.
+#: service, so the strict xfail XPASSed on CI and the row went. ``cli`` and
+#: ``seedgo`` left the same way with pair 4, both having read "raises
+#: FileNotFoundError from the staging file" -- each XPASSed strictly the first
+#: time its suite ran against the shim, which is the only evidence that
+#: retires a row here. Three remain, all on branches the sweep has not reached.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
     "flow": "flow's save_json returns False and writes nothing when the document directory is absent",
-    "cli": "cli's save_json raises FileNotFoundError from the staging file when the document directory is absent",
     "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
-    "seedgo": "seedgo's save_json raises FileNotFoundError from the staging file when the document directory is absent",
 }
 
 #: ``get_json_path`` return type. Sixteen of seventeen answer ``pathlib.Path``.
@@ -1942,20 +1943,20 @@ def test_ensure_json_exists_creates_the_document(branch: str, tmp_path: Path, mo
     assert Path(str(module.get_json_path("fresh", "config"))).exists(), f"{branch}: ensure created nothing"
 
 
-#: What ``ensure_json_exists`` ANSWERS. Seventeen return an unconditional
-#: ``True``; seedgo returns None and says why in its own docstring — a literal
-#: that is never False "advertises a failure signal that never arrives and
-#: invites ``if not ensure_json_exists(...)``, a branch that can never be
-#: taken", with failure reported by exception instead. Recorded as a
-#: divergence and NOT as a fault: the majority's success signal genuinely
-#: carries no information, and this table is the measurement, not a verdict on
-#: who is right. Strict, so whichever side moves, this line is revisited.
-ENSURE_RETURNS_NOTHING = {
-    "seedgo": (
-        "seedgo's ensure_json_exists returns None by documented decision — an unconditional True "
-        "is a failure signal that never arrives, so failure is raised instead of returned"
-    ),
-}
+#: What ``ensure_json_exists`` ANSWERS. Every branch now returns an
+#: unconditional ``True``, so the table is empty.
+#:
+#: It held exactly one row, and it was seedgo's own: ensure_json_exists
+#: returned None by documented decision, because a literal that is never False
+#: "advertises a failure signal that never arrives and invites ``if not
+#: ensure_json_exists(...)``, a branch that can never be taken". It was
+#: recorded as a divergence and never as a fault -- the majority's success
+#: signal genuinely carries no information, and this table measures rather than
+#: judges. The pair-4 sweep settled it the way the whole plan settles things:
+#: seedgo's handler became the shim, the answer became the service's, and the
+#: strict xfail XPASSed. Kept written down because deleting the reasoning would
+#: make the fleet's uninformative True look like it was never questioned.
+ENSURE_RETURNS_NOTHING: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("branch", parametrized(ENSURE_RETURNS_NOTHING))
@@ -1975,17 +1976,13 @@ def test_ensure_json_exists_reports_true(branch: str, tmp_path: Path, monkeypatc
     assert ensure("bool_mod", "data") is True, f"{branch}: ensure_json_exists did not answer True"
 
 
-#: ``ensure_module_jsons``'s return value, same split and same reason as
-#: ``ensure_json_exists``: seedgo returns None by documented decision because
+#: ``ensure_module_jsons``'s return value, emptied by pair 4 alongside
+#: ``ensure_json_exists`` and for the same reason. Its single row was seedgo's:
 #: the wrapper "previously discarded three booleans and then returned an
 #: unconditional True, so it reported success no matter what the three calls
-#: did".
-ENSURE_ALL_RETURNS_NOTHING = {
-    "seedgo": (
-        "seedgo's ensure_module_jsons returns None by documented decision — the True it used to "
-        "return was unconditional and survived any of the three writes failing"
-    ),
-}
+#: did". The shim answers with the service's value now, and the strict xfail
+#: XPASSed.
+ENSURE_ALL_RETURNS_NOTHING: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("branch", parametrized(ENSURE_ALL_RETURNS_NOTHING))

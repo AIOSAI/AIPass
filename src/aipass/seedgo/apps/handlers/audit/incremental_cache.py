@@ -54,7 +54,12 @@ CACHE_VERSION = "1"
 # checker/bypass/version stamp so schema churn during development doesn't
 # piggyback on version bumps.
 SCHEMA_VERSION = 1
-CACHE_FILE = json_handler.JSON_DIR / "audit_cache.json"
+# Asked of the service rather than spelled out: the shim binds the fleet json
+# service (DPLAN-0325) and no longer carries a JSON_DIR of its own.
+# The directory is asked for through a bound name rather than reached for on
+# the handle: get_json_path is the only public way to name it, and the cache
+# doc is not one of the three declared json_types.
+CACHE_FILE = json_handler.get_json_path("audit", "data").parent / "audit_cache.json"
 
 # Packages that decide audit OUTPUT without living in the checker pack: bypass/
 # decides whether a violation counts, audit/ decides which files a checker ever
