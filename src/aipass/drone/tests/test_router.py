@@ -1033,9 +1033,26 @@ class TestHandleCommand:
     """Tests for handle_command() in the router module."""
 
     def test_route_no_args_returns_false(self):
-        """handle_command('route', []) returns False — not enough args."""
+        """handle_command('route', []) returns False — not enough args.
+
+        The TYPE is asserted beside the value. Every module in the fleet must
+        expose ``handle_command(command, args) -> bool``, and drone is the
+        router that reads the answer: a module returning None, an exit code or
+        a truthy result object sends drone down the wrong branch. ``is False``
+        alone pins this one path; ``isinstance(result, bool)`` pins the
+        declared contract, which is what other modules are held to.
+
+        Added with the pair-7 sweep (DPLAN-0325): the DPLAN-0059 stamp file
+        that used to carry this assertion was archived as subsumed by seedgo's
+        cross-branch contract, and it had already stopped RUNNING — it skipped
+        at module level once the handler became the shim, because it looked for
+        a JSON_DIR the shim does not have. A skipped file still reads as
+        covered to a text scan, so the assertion moved here, into a test that
+        actually runs.
+        """
         result = handle_command("route", [])
         assert result is False
+        assert isinstance(result, bool)
 
     @patch("aipass.drone.apps.modules.router.route_command")
     def test_route_with_target_and_command(self, mock_route):

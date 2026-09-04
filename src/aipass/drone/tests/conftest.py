@@ -18,6 +18,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.drone.apps.handlers.json import json_handler
+
+# Never discover out of .archive/: it holds verbatim disposal copies (the old
+# handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
+# not be collected or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
 
 @pytest.fixture(autouse=True)
 def _clean_identity_dedupe() -> Generator[None, None, None]:
@@ -226,3 +233,37 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if DELETABLE_CWD_MARKER in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect drone's json writes into a temp dir.
+
+    autouse=True on purpose: drone's handler is a shim that binds the fleet json
+    service (DPLAN-0325), whose names write into the real drone_json/ unless the
+    seam is set, so a test that forgets to redirect pollutes the branch. The
+    guard belongs on every test, not on the ones that remember. Measured before
+    this existed: 4189 of this branch's 7652 audit-tests hygiene records were
+    these writes.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. That call-time resolution is the
+    whole point, and it is what the archived test_json_dir_seam.py pinned when
+    the resolution was drone's own: a value captured at import cannot be
+    redirected by a conftest that runs afterwards. The property now belongs to
+    the service and is pinned once for the fleet by seedgo's contract.
+
+    The sandbox is MEASURED off the shim rather than spelled out, so it cannot
+    drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/drone/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
