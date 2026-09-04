@@ -2,10 +2,13 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2025-11-08
-# Version: 1.2.0
+# Version: 1.3.0
 # Category: ai_mail/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.3.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam
+#     alone — mock_infrastructure lands each test in its own sandbox and
+#     mock_json_handler retires with the handler it mocked (DPLAN-0325)
 #   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
 #   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -29,6 +32,42 @@ import shutil
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
+
+from aipass.ai_mail.apps.handlers.json import json_handler
+
+# Never collect out of an archive. apps/handlers/.archive/ and tests/.archive/
+# hold the pre-DPLAN-0325 handler and its internals tests verbatim: they import
+# a module that no longer exists, and @hooks' rglob generated a dotted name from
+# a dot-prefixed part that was a SyntaxError. pytest's own norecursedirs already
+# skips dot-directories — this states the rule rather than relying on it.
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect this branch's json writes into a temp dir.
+
+    autouse=True on purpose: after DPLAN-0325 the shim's names are the fleet
+    service's own bound methods, which write into ai_mail_json/ unless the seam
+    says otherwise. There is no singleton and no private attribute left to
+    patch, so a test that forgets to redirect pollutes the live branch — and
+    ai_mail's 80 production log_operation call sites make that near-certain.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/ai_mail/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture(autouse=True)
@@ -173,14 +212,3 @@ def mock_logger(monkeypatch):
     """Mock the prax logger to prevent real log I/O during tests."""
     mock_log = MagicMock()
     return mock_log
-
-
-@pytest.fixture
-def mock_json_handler(monkeypatch):
-    """Mock json_handler to prevent real JSON file operations during tests."""
-    mock_json = MagicMock()
-    mock_json.log_operation.return_value = True
-    mock_json.ensure_module_jsons.return_value = True
-    mock_json.load_json.return_value = None
-    mock_json.save_json.return_value = True
-    return mock_json

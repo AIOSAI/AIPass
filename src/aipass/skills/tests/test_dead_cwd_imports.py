@@ -40,7 +40,7 @@ WHY SUBPROCESSES. The defect is import-time. A module already in
 ``sys.modules`` cannot demonstrate it, and the denial has to be installed
 before the first import rather than around it.
 
-WHY ``python -c`` AND NOT STDIN. A probe piped through stdin gets cached by
+WHY A ``-c`` STRING AND NOT STDIN. A probe piped through stdin gets cached by
 linecache under the ``<stdin>`` key, and the probe then lies green. The child
 rides a string-pseudo frame instead.
 """
@@ -53,8 +53,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dead_cwd_world import (  # noqa: E402
+from aipass.skills.tests.dead_cwd_world import (
     ACCESSOR_SHAPE,
     NATIVE_PATHS,
     NT_EMULATED_PLATFORM,
@@ -336,12 +335,13 @@ _CALLER_MODULE = r"""
 from aipass.skills.apps.handlers.json import json_handler
 
 
-def log_operation():
-    return json_handler._get_caller_module_name()
+def writes_an_audit_entry():
+    json_handler.log_operation("dead_cwd_probe")
+    return json_handler.get_json_path("probe", "log").parent
 
 
 def a_named_caller():
-    return log_operation()
+    return writes_an_audit_entry()
 """
 
 # The child denies realpath, then imports the module above FROM A <string>
@@ -381,7 +381,8 @@ import inspect
 inspect.modulesbyfile.clear()
 inspect._filesbymodname.clear()
 
-print("CALLER=%s" % a_named_module.a_named_caller())
+json_dir = a_named_module.a_named_caller()
+print("WROTE=%s" % ",".join(sorted(p.name for p in json_dir.iterdir())))
 """
 
 
@@ -390,7 +391,11 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
 
     Returning "unknown" for every caller also satisfies a does-not-crash
     assertion, and it destroys the audit trail while doing so — so this
-    asserts the ANSWER, not merely the absence of a crash.
+    asserts the ANSWER, not merely the absence of a crash. The answer is read
+    off the DOCUMENT the audit trail landed in: since DPLAN-0325 the caller is
+    resolved inside the fleet service, and what this branch owns is that a
+    ``log_operation`` reached through its own shim still files the entry under
+    the calling module's name.
 
     The caller lives in a real file (a ``<string>`` frame has no module name to
     report, so the pin could not tell a working answer from a degraded one),
@@ -398,8 +403,11 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
     stack, inspect.stack() never reaches the realpath that convicts it).
     """
     (tmp_path / "a_named_module.py").write_text(_CALLER_MODULE, encoding="utf-8")
+    # The seam is SET, not inherited: the shim writes into the live skills_json/
+    # unless it is, and a probe that pollutes the branch is not a pin. Its value
+    # is this test's own tmp_path, so nothing of the suite's leaks in.
     env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
-    env.pop("AIPASS_TEST_LOG_DIR", None)
+    env["AIPASS_TEST_LOG_DIR"] = str(tmp_path / "_aipass_json_seam")
     result = subprocess.run(
         [
             sys.executable,
@@ -415,7 +423,11 @@ def test_caller_module_name_survives_and_still_answers(tmp_path):
         timeout=60,
     )
     assert result.returncode == 0, f"caller-name probe crashed: {result.stderr[-800:]}"
-    assert "CALLER=a_named_module" in result.stdout, f"caller name degraded under a dead cwd: {result.stdout!r}"
+    assert "WROTE=" in result.stdout, f"the audit entry never landed: {result.stdout!r}"
+    written = [line for line in result.stdout.splitlines() if line.startswith("WROTE=")][0]
+    assert "a_named_module_log.json" in written, (
+        f"caller name degraded under a dead cwd - the entry was filed elsewhere: {written}"
+    )
 
 
 # ---------------------------------------------------------------------------

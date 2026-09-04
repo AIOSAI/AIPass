@@ -63,13 +63,17 @@ def _switch_on(tmp_path, monkeypatch):
     machine — and with telegram off since 2026-08-18 they would all fail while
     the relay itself is perfectly correct. This file tests relay behaviour; the
     gate has its own file, test_relay_switch_gate.py.
+
+    The redirect is the AIPASS_TEST_LOG_DIR seam the fleet json service reads
+    per call (DPLAN-0325); the directory is measured off the service so it
+    cannot drift from where the switch actually looks.
     """
-    state_dir = tmp_path / "skills_json"
-    state_dir.mkdir()
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    state_dir = jh.get_json_path("switch", "data").parent
+    state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "switch_state.json").write_text(
         json.dumps({"skills": {"telegram": {"enabled": True}}}), encoding="utf-8"
     )
-    monkeypatch.setattr(jh, "SKILLS_JSON_DIR", state_dir)
 
 
 @pytest.fixture()

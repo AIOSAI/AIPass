@@ -1,6 +1,10 @@
 """Tests for miscellaneous handlers -- central_writer.update_central, dispatch status.check_pid_status,
-daemon.run_daemon, json_handler.increment_counter/update_data_metrics, delivery.deliver_to_inbox_file,
-inbox_resolve.resolve_inbox_target."""
+daemon.run_daemon, delivery.deliver_to_inbox_file, inbox_resolve.resolve_inbox_target.
+
+The increment_counter/update_data_metrics blocks left with their implementation:
+they were the only readers of ai_mail's own json_utils handler, which retired
+into apps/handlers/.archive/ when the canonical path became the fleet shim
+(DPLAN-0325). No production call site ever used either name."""
 
 import json
 import os
@@ -12,14 +16,9 @@ from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.central_writer as central_mod
 import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
-import aipass.ai_mail.apps.handlers.json_utils.json_handler as json_handler_mod
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
 from aipass.ai_mail.apps.handlers.central_writer import update_central
 from aipass.ai_mail.apps.handlers.dispatch.status import check_pid_status
-from aipass.ai_mail.apps.handlers.json_utils.json_handler import (
-    increment_counter,
-    update_data_metrics,
-)
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
 
@@ -182,104 +181,6 @@ def test_daemon_exits_if_pid_file_blocked(tmp_path, monkeypatch):
         daemon_mod.run_daemon()
 
     mock_poll.assert_not_called()
-
-
-# ==============================================================
-# increment_counter tests
-# ==============================================================
-
-
-def test_increment_counter_basic(monkeypatch):
-    """increment_counter loads data, increments, and saves."""
-    existing_data = {"created": "2026-01-01", "last_updated": "2026-01-01", "send_count": 5}
-
-    monkeypatch.setattr(json_handler_mod, "ensure_module_jsons", lambda m: True)
-    monkeypatch.setattr(json_handler_mod, "load_json", lambda m, t: existing_data.copy())
-
-    saved = {}
-
-    def mock_save(module, json_type, data):
-        """Capture saved data for assertion."""
-        saved.update(data)
-        return True
-
-    monkeypatch.setattr(json_handler_mod, "save_json", mock_save)
-
-    result = increment_counter("ai_mail", "send_count", 1)
-
-    assert result is True
-    assert saved["send_count"] == 6
-
-
-def test_increment_counter_creates_key(monkeypatch):
-    """increment_counter creates the counter key if it does not exist."""
-    existing_data = {"created": "2026-01-01", "last_updated": "2026-01-01"}
-
-    monkeypatch.setattr(json_handler_mod, "ensure_module_jsons", lambda m: True)
-    monkeypatch.setattr(json_handler_mod, "load_json", lambda m, t: existing_data.copy())
-
-    saved = {}
-
-    def mock_save(module, json_type, data):
-        """Capture saved data for assertion."""
-        saved.update(data)
-        return True
-
-    monkeypatch.setattr(json_handler_mod, "save_json", mock_save)
-
-    result = increment_counter("ai_mail", "new_counter", 3)
-
-    assert result is True
-    assert saved["new_counter"] == 3
-
-
-def test_increment_counter_returns_false_on_no_data(monkeypatch):
-    """increment_counter returns False when load_json returns None."""
-    monkeypatch.setattr(json_handler_mod, "ensure_module_jsons", lambda m: True)
-    monkeypatch.setattr(json_handler_mod, "load_json", lambda m, t: None)
-
-    result = increment_counter("ai_mail", "counter")
-
-    assert result is False
-
-
-# ==============================================================
-# update_data_metrics tests
-# ==============================================================
-
-
-def test_update_data_metrics_basic(monkeypatch):
-    """update_data_metrics updates multiple keys in data."""
-    existing_data = {"created": "2026-01-01", "last_updated": "2026-01-01", "old_key": "old_val"}
-
-    monkeypatch.setattr(json_handler_mod, "ensure_module_jsons", lambda m: True)
-    monkeypatch.setattr(json_handler_mod, "load_json", lambda m, t: existing_data.copy())
-
-    saved = {}
-
-    def mock_save(module, json_type, data):
-        """Capture saved data for assertion."""
-        saved.update(data)
-        return True
-
-    monkeypatch.setattr(json_handler_mod, "save_json", mock_save)
-
-    result = update_data_metrics("ai_mail", status="healthy", uptime=3600)
-
-    assert result is True
-    assert saved["status"] == "healthy"
-    assert saved["uptime"] == 3600
-    assert saved["old_key"] == "old_val"
-
-
-def test_update_data_metrics_returns_false_on_no_data(monkeypatch):
-    """update_data_metrics returns False when load_json returns None."""
-    monkeypatch.setattr(json_handler_mod, "ensure_module_jsons", lambda m: True)
-    monkeypatch.setattr(json_handler_mod, "load_json", lambda m, t: None)
-
-    result = update_data_metrics("ai_mail", key="value")
-
-    assert result is False
 
 
 # ==============================================================

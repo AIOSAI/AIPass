@@ -55,6 +55,7 @@ def relay_by_path():
     in the difference between the two entry paths.
     """
     spec = importlib.util.spec_from_file_location("_relay_under_test_by_path", _RELAY_PATH)
+    assert spec is not None and spec.loader is not None, f"no import spec for {_RELAY_PATH}"
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -62,10 +63,15 @@ def relay_by_path():
 
 @pytest.fixture()
 def state_dir(tmp_path, monkeypatch):
-    """Point the switch state at a temp dir — never the live skills_json/."""
-    target = tmp_path / "skills_json"
-    target.mkdir()
-    monkeypatch.setattr(jh, "SKILLS_JSON_DIR", target)
+    """Point the switch state at a temp dir — never the live skills_json/.
+
+    The redirect is the AIPASS_TEST_LOG_DIR seam the fleet json service reads
+    per call (DPLAN-0325); the directory is measured off the service so it
+    cannot drift from where the switch actually writes.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    target = jh.get_json_path("switch", "data").parent
+    target.mkdir(parents=True, exist_ok=True)
     return target
 
 
