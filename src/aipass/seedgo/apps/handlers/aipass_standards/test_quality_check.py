@@ -218,15 +218,21 @@ DISCOUNT_CONDITIONAL_MODULE_SKIPS = False
 #: all 18 branches, up to -23.
 SUBJECT_SCOPED_CATEGORY_SIZE = 5
 
-#: Measured 2026-09-04, threshold by threshold. At 2 no branch moves. At 3 only
-#: @prax moves, -4: it earns conftest_fixtures/sample_data from
-#: test_json_handler.py rather than from its conftest, which carries 3 of 5 and
-#: defines no sample_test_data. One template fixture in prax/tests/conftest.py
-#: makes 3 free — the same restore @flow needed on pair 7.
-#: Honest limit of the current setting: flow's file carried TWO incidental
-#: cli_routing tokens (``is True`` and ``StringIO``), so 2 does not convict the
-#: case that produced the finding. 3 does.
-SUBJECT_MIN_ITEMS_PER_FILE = 2
+#: Measured 2026-09-04, threshold by threshold. It shipped at 2 first, and 2
+#: was known at the time to be too weak to convict the case that produced the
+#: finding: @flow's archived json test carried TWO incidental cli_routing
+#: tokens (``is True`` and ``StringIO``), so a two-item rule accepted exactly
+#: the file the defect was reported from. 3 refuses it.
+#:
+#: Held at 2 for one session because 3 charged @prax 4 points: prax earned
+#: conftest_fixtures/sample_data from its test_json_handler.py rather than from
+#: its conftest, which carried 3 of 5 and defined no sample_test_data. @prax
+#: took the template fixture in 3c200c4e — the same restore @flow needed on
+#: pair 7 — so the item is earned where it belongs and the notch came free.
+#: Re-measured over all 18 branches after that landed: no branch moves from 2
+#: to 3. Do not go past 3; at 4 the rule stops describing anything real
+#: (@prax -20, @commons -4, @daemon -4).
+SUBJECT_MIN_ITEMS_PER_FILE = 3
 
 # Pattern-based items from STANDARD_CATEGORIES
 _PATTERN_ITEMS = sum(len(items) for items in STANDARD_CATEGORIES.values())

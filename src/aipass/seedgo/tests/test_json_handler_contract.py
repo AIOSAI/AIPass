@@ -2025,16 +2025,31 @@ def test_ensure_module_jsons_reports_true(branch: str, tmp_path: Path, monkeypat
 
 
 #: The default factory's answer to a json_type it does not know. Fourteen
-#: raise ValueError; skills returns None, so a typo'd json_type is not
-#: refused — ``ensure_json_exists(name, "confgi")`` writes the literal ``null``
-#: into a document instead of failing, and the next reader gets a document
-#: that parses and means nothing. Measured, not read off the source.
-UNKNOWN_TYPE_NOT_REFUSED = {
-    "skills": (
-        "skills's _get_default returns None for an unknown json_type instead of raising, so a "
-        "misspelled type is written to disk as null rather than refused"
-    ),
-}
+#: raised ValueError; skills returned None, so a typo'd json_type was not
+#: refused — ``ensure_json_exists(name, "confgi")`` wrote the literal ``null``
+#: into a document instead of failing, and the next reader got a document that
+#: parsed and meant nothing. Measured, not read off the source.
+#:
+#: RETIRED 2026-09-04 (DPLAN-0325 part B section 2) BY SUBJECT GONE, which is
+#: NOT the usual retirement and is the reason this comment is longer than the
+#: row it replaces. Every other row here waits for its strict xfail to XPASS —
+#: the divergence is cured, the test goes red, the row comes out. This one
+#: could never go red. skills swept to the canonical shim in 6cdb3d7f and the
+#: shim exposes no private default factory at all, so the probe stopped
+#: RUNNING: it skips by name, and a skip is not a cure detector. Waiting for an
+#: XPASS that cannot fire would have kept a dead row here indefinitely.
+#:
+#: Verified before removal rather than assumed: probed all eighteen handlers
+#: for a factory under DEFAULT_FACTORY_NAMES. Seventeen expose none — skills
+#: included, so the divergence has no surface left to live on. The one that
+#: does, @commons, RAISES ValueError and is conformant. There is no branch left
+#: to mark down.
+#:
+#: Worth saying plainly, since it is what the numbers now mean: the test below
+#: measures exactly one branch and skips seventeen. It is kept because commons
+#: is unswept and the claim is real where it can still be made, not because the
+#: coverage is broad.
+UNKNOWN_TYPE_NOT_REFUSED: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("branch", parametrized(UNKNOWN_TYPE_NOT_REFUSED))
