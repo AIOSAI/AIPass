@@ -40,7 +40,8 @@ World A convicted handlers/__init__.py:16 (the raw resolve) and World B
 convicted handlers/__init__.py:15 (inspect.stack) — two species in one
 function — with json_handler.py:23 masked underneath both.
 
-Every child probe rides a '<string>' pseudo-frame via python -c. NEVER
+Every child probe rides a '<string>' pseudo-frame: the source is handed to
+the interpreter's -c flag (sys.executable, never a shell command). NEVER
 stdin: linecache caches stdin, and the probe would lie green (@hooks).
 """
 
@@ -76,7 +77,10 @@ CANARY_MODULES = [
 PRELOAD = [
     "aipass.cli.apps.modules",
     "aipass.prax",
-    "aipass.aipass.shared.json_handler",
+    # aipass.aipass.shared.json_handler was dropped on 2026-09-04: canary's
+    # handler is the fleet shim over prax's service and imports nothing from
+    # aipass/shared any more (DPLAN-0325; the file itself retires under
+    # FPLAN-0489).
 ]
 
 _WORLD_A = """
