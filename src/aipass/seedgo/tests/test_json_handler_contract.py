@@ -165,17 +165,27 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: ``seedgo`` left the same way with pair 4, both having read "raises
 #: FileNotFoundError from the staging file", and ``flow`` with pair 7 -- each
 #: XPASSed strictly the first time its suite ran against the shim, which is the
-#: only evidence that retires a row here. Two remain, both on branches the
-#: sweep has not reached.
+#: only evidence that retires a row here.
+#:
+#: ``commons`` left with pair 5 on 2026-09-04. Its row read "raises
+#: FileNotFoundError from the staging file"; the service creates the directory,
+#: and the strict xfail reported XPASS(strict) on the first run against the
+#: shim. ONE remains, on the last branch the sweep has not reached.
 SAVE_JSON_MISSING_PARENT = {
     "api": "api's save_json returns False and writes nothing when the document directory is absent",
-    "commons": "commons save_json raises FileNotFoundError from the staging file when the directory is absent",
 }
 
-#: ``get_json_path`` return type. Sixteen of seventeen answer ``pathlib.Path``.
-GET_JSON_PATH_TYPE = {
-    "commons": "commons's get_json_path returns str (os.path.join), not Path — callers doing .parent or / break",
-}
+#: ``get_json_path`` return type. Every branch answers ``pathlib.Path``.
+#:
+#: RETIRED 2026-09-04 (pair 5). The single row was commons's: it built its path
+#: with ``os.path.join`` and answered a ``str``, so a caller doing ``.parent``
+#: or ``/`` broke on that one branch and nowhere else. commons swept to the
+#: canonical shim, which binds the one service, and the strict xfail reported
+#: XPASS(strict) — the cure, measured rather than assumed. commons's own
+#: ``test_json_path_returns_path_like`` had asserted ``result.endswith(".json")``,
+#: which only a str can satisfy; it now asserts the Path, so the divergence is
+#: gone from both sides of the fleet.
+GET_JSON_PATH_TYPE: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -1061,16 +1071,17 @@ def retry_label(relative: Path) -> str:
 #: implementation nobody listed.
 #:
 #: The count is a MEASUREMENT and it is falling: sixteen on 2026-09-02,
-#: fourteen on 2026-09-03 after the second sweep pair, EIGHT on 2026-09-04
-#: with fifteen of eighteen swept. It did not fall when prax migrated —
-#: prax's helper MOVED into ``json_service``, it did not disappear — and it
-#: falls to four only when the branch handlers themselves are gone. The eight
-#: standing today are ``aipass/shared/json_handler``, ``api``, ``commons``,
-#: ``daemon``, ``hooks/apps/handlers/json/files``, the service itself,
-#: ``spawn/atomic_write`` and ``trigger/apps/config``: three are the unswept
-#: handlers, one is the file @aipass retires under FPLAN-0489, and the
-#: remaining four are the floor. No number is asserted here; the floor below
-#: is, so a sweep that removes a copy cannot turn this red.
+#: fourteen on 2026-09-03 after the second sweep pair, eight on 2026-09-04
+#: with fifteen of eighteen swept, and SIX after pair 5 took commons and
+#: daemon. It did not fall when prax migrated — prax's helper MOVED into
+#: ``json_service``, it did not disappear — and it falls to four only when the
+#: branch handlers themselves are gone. The six standing today are
+#: ``aipass/shared/json_handler``, ``api``, ``hooks/apps/handlers/json/files``,
+#: the service itself, ``spawn/atomic_write`` and ``trigger/apps/config``: one
+#: is the last unswept handler, one is the file @aipass retires under
+#: FPLAN-0489, and the remaining four are the floor. No number is asserted
+#: here; the floor below is, so a sweep that removes a copy cannot turn this
+#: red.
 RETRY_IMPLEMENTATIONS = {
     retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
     + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
@@ -1739,6 +1750,12 @@ def test_the_public_writer_survives_a_transient_sharing_violation(
 #: 09-03 record listed seventeen branches, not eighteen, because ai_mail's own
 #: helper was not reached then.
 #:
+#: Pair 5 the same day swept commons and daemon, so the SPLIT is unchanged at
+#: 17 / 1 while its composition is not: all seventeen raisers now raise the
+#: service's ``WriteFailed``, and the last bare ``PermissionError`` in the
+#: fleet is gone. Recorded rather than left implied — the numbers below would
+#: otherwise still read as two branches disagreeing about the exception type.
+#:
 #: raise (17): ai_mail, aipass, backup, canary, cli, commons, daemon, devpulse,
 #: drone, flow, hooks, memory, prax, seedgo, skills, spawn, trigger.
 #: return False (1): api. The split ends at 18 / 0 when api sweeps, and the
@@ -2045,33 +2062,26 @@ def test_ensure_module_jsons_reports_true(branch: str, tmp_path: Path, monkeypat
 #: does, @commons, RAISES ValueError and is conformant. There is no branch left
 #: to mark down.
 #:
-#: Worth saying plainly, since it is what the numbers now mean: the test below
-#: measures exactly one branch and skips seventeen. It is kept because commons
-#: is unswept and the claim is real where it can still be made, not because the
-#: coverage is broad.
+#: THE TEST WENT TOO, with pair 5 on 2026-09-04, and by the same rule that
+#: took the row: no subject left anywhere. Session M recorded it measuring
+#: exactly ONE branch (commons) and skipping seventeen, and kept it because
+#: that one claim was still real. commons then swept, so the count is now
+#: eighteen skips and zero measurements — a parametrized test that cannot
+#: execute a single assertion on any branch in the fleet. Measured on the day:
+#: `pytest -k default_factory_refuses` -> 18 skipped.
+#:
+#: The concept survives on a PUBLIC surface, which is why removing the private
+#: probe costs nothing. The claim was about a private default factory, and the
+#: shim deliberately publishes no private surface at all — the one service
+#: decides templates internally. What a caller can still reach is
+#: ``validate_json_structure``, and ``VALIDATION_MATRIX`` above carries the
+#: unknown-type case verbatim — ``({"module_name": ..., "config": {}},
+#: "no_such_type", False)`` — asserted by
+#: ``test_validate_json_structure_answers_the_measured_matrix`` on every branch
+#: that has the function. Keeping the private probe on top of that would have
+#: kept an empty ritual that still reads as coverage to a text scan — the exact
+#: defect seedgo's own checker gained a live-file gate for this week.
 UNKNOWN_TYPE_NOT_REFUSED: dict[str, str] = {}
-
-
-@pytest.mark.parametrize("branch", parametrized(UNKNOWN_TYPE_NOT_REFUSED))
-def test_the_default_factory_refuses_a_json_type_it_does_not_know(
-    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """An unknown json_type is refused loudly, not defaulted into silently.
-
-    Reaches for a PRIVATE factory, which this suite otherwise avoids, because
-    the copies it replaces did and the claim has no public equivalent: the
-    public surface answers a container for a known type and never exposes the
-    "which template" decision. A branch without the private symbol skips by
-    name, exactly as the copies did.
-    """
-    module = implementation(branch)
-    require_document_addressing(module, branch)
-    factory = next((getattr(module, name, None) for name in DEFAULT_FACTORY_NAMES if hasattr(module, name)), None)
-    if not callable(factory):
-        pytest.skip(f"{branch} has no private default factory under {DEFAULT_FACTORY_NAMES}")
-
-    with pytest.raises(ValueError):
-        factory("no_such_type", "probe")
 
 
 @pytest.mark.parametrize("branch", parametrized())

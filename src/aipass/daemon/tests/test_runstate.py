@@ -107,6 +107,38 @@ class TestRunstateIO:
         data = load_runstate()
         assert data == {"version": 1, "jobs": {}}
 
+    def test_a_read_modify_write_cycle_does_not_overwrite_the_other_jobs(self, tmp_runstate):
+        """Recording one job's run must leave every other job's history alone.
+
+        The no_overwrite claim daemon actually owns. load_runstate() returns
+        the empty default when the file is absent, and the whole runstate is
+        rewritten on every save — so if the load handed back that default for
+        a file that already_exists, the next save would silently erase every
+        other job's last_run. Nothing else would notice: the file would still
+        parse, the scheduler would just re-fire jobs it had already run.
+
+        Written here after the sweep (DPLAN-0325). The item used to be scored
+        off tests/test_json_handler.py, a DPLAN-0059 stamp file that had
+        stopped RUNNING — it skipped module-wide on a JSON_DIR the shim does
+        not have — so daemon was credited for a no-clobber claim nothing was
+        executing. This one executes, and it is about daemon's own state.
+        """
+        first = {"version": 1, "jobs": {"@commons/wake": {"last_run": "2026-01-01T00:00:00"}}}
+        assert save_runstate(first) is True
+
+        # The cycle a caller performs: load what already_exists, add one job,
+        # write the whole structure back.
+        current = load_runstate()
+        current["jobs"]["@memory/sweep"] = {"last_run": "2026-02-02T00:00:00"}
+        assert save_runstate(current) is True
+
+        after = load_runstate()
+        assert after["jobs"]["@memory/sweep"]["last_run"] == "2026-02-02T00:00:00"
+        assert after["jobs"]["@commons/wake"]["last_run"] == "2026-01-01T00:00:00", (
+            "the earlier job's history was overwritten by a later save - "
+            "every job would re-fire once its record was lost"
+        )
+
 
 # ── Due-logic: _already_ran_today / _already_ran_this_hour
 

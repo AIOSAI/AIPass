@@ -35,6 +35,40 @@ try:
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 
+from pathlib import Path  # noqa: E402
+
+from aipass.commons.apps.handlers.json import json_handler  # noqa: E402
+
+# Never discover out of .archive/: it holds verbatim disposal copies of the
+# suites the one json service subsumed, and rglobbing into a dot-directory
+# generates the dotted module name ...json..archive.json_handler, a SyntaxError
+# that kills the file that walked there (DPLAN-0325, hooks' finding).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect commons's json writes into a temp dir.
+
+    autouse on purpose: since DPLAN-0325 the handler is a shim over the one
+    prax service, and the service resolves its directory from
+    AIPASS_TEST_LOG_DIR on EVERY call. Unset, the nine names write into the
+    real commons_json/, so a test that forgets to redirect pollutes the branch.
+    The guard belongs on every test, not on the ones that remember.
+
+    Own subdirectory on purpose: the service spells the sandbox
+    <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    tmp_path/commons/ in every test and collide with a test that builds a
+    directory of its own branch's name.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
+
 
 @pytest.fixture(scope="session")
 def _template_db_path(tmp_path_factory):

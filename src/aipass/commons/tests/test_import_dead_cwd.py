@@ -599,13 +599,26 @@ import sys
 
 probe_dir = {probe_dir!r}
 
+# Every write this world makes lands under probe_dir, never in the real tree.
+os.environ["AIPASS_TEST_LOG_DIR"] = probe_dir
+
 # Written BEFORE the denial: a genuine module on disk, so the frame the lookup
 # reads is compiled source and not a "<string>" pseudo-name.
+#
+# Measured THROUGH log_operation rather than by calling the detector, because
+# after DPLAN-0325 there is no detector to call: the shim binds the one prax
+# service and publishes nine names, none of them private. A direct call would
+# also be one frame short — the service resolves the caller at _getframe(2),
+# counting on log_operation's own frame sitting between — so the honest probe
+# is the public one, and the ANSWER is read off the document it wrote.
 with open(os.path.join(probe_dir, "probe_caller.py"), "w", encoding="utf-8") as fh:
     fh.write(
         "from aipass.commons.apps.handlers.json import json_handler\n"
         "def _inner():\n"
-        "    return json_handler._get_caller_module_name()\n"
+        "    json_handler.log_operation('probe', {{'ok': True}})\n"
+        "    directory = json_handler.get_json_path('probe', 'log').parent\n"
+        "    written = sorted(p.name for p in directory.glob('*_log.json'))\n"
+        "    return ','.join(n[: -len('_log.json')] for n in written)\n"
         "def ask():\n"
         "    return _inner()\n"
     )
