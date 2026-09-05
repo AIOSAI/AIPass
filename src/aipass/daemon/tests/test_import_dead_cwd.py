@@ -75,13 +75,17 @@ has cached the real functions, and the child rides a <string> frame (python -c).
 <stdin> content, so a <stdin> probe can resolve names the real defect cannot and
 report green on unfixed code (@hooks' finding).
 
-STACK_DIES / PROBE_ARMED runs before any assertion. Where the interpreter's own
-pathlib never routes resolve() through os.path.realpath (3.10 resolves absolute
-paths without touching the working directory), the denial cannot fire and the
-probe says so - the pin still asserts the imports succeed there, it just proves
-less. Pinned as a probe with both outcomes, never a skipif: the vacuous world is
-named in the output, and vacuity is asserted to occur only on interpreters where
-it is the truth.
+STACK_DIES / PROBE_ARMED runs before any assertion. The probe earns its keep
+because a denial can be BLIND rather than vacuous and the two are
+indistinguishable from outside: on <=3.10 pathlib captured os.path.realpath at
+import time (_NormalAccessor, 3.10 pathlib.py:358), so rebinding
+os.path.realpath never reached Path.resolve() there - the world reported itself
+harmless while convicting nothing. Measured 2026-09-03 in python:3.10-slim:
+VACUOUS on the rebind alone, ARMED once the accessor is rebound too;
+3.11/3.12/3.13 carry no accessor and arm on the rebind (@spawn's find,
+FPLAN-0461 family). Both worlds now rebind the accessor where it exists, so
+every interpreter this fleet runs on convicts and PROBE_VACUOUS is a failure
+everywhere rather than an excused outcome.
 """
 
 import ast
@@ -137,9 +141,26 @@ def _denied_realpath(*args, **kwargs):
 os.path.realpath = _denied_realpath
 """
 
+# Appended to BOTH worlds. <=3.10 pathlib holds its own reference to
+# os.path.realpath, captured at import (_NormalAccessor, 3.10 pathlib.py:358),
+# so the rebinding above cannot reach Path.resolve() there. Rebinding the
+# accessor too is what makes the 3.10 denial real; hasattr-guarded because
+# 3.11+ deleted the class. staticmethod on the class - the singleton instance
+# has no own attribute, so the class binding is the one resolve() reads.
+ARM_PATHLIB_ACCESSOR = """
+import os
+import pathlib
+
+_accessor = getattr(pathlib, "_NormalAccessor", None)
+if _accessor is not None:
+    _accessor.realpath = staticmethod(os.path.realpath)
+"""
+
 # Does THIS interpreter's resolve() reach the denied call for an absolute path?
-# 3.11+ routes through os.path.realpath; 3.10 resolves absolute paths without
-# the working directory, so the denial cannot fire there.
+# Every interpreter this fleet runs on must: 3.11+ through the live
+# os.path.realpath, 3.10 through the accessor the block above rebinds.
+# VACUOUS therefore means the instrument went blind, never that the world is
+# safe - which is why it is asserted against rather than excused.
 PROBE = """
 import pathlib
 import sys
@@ -250,7 +271,7 @@ def _sweepable(root: Path):
 
 def _run_world(denial: str) -> subprocess.CompletedProcess:
     """Run the import set in a child whose frame is <string>, never <stdin>."""
-    source = PRELOAD + denial + PROBE + STACK_DIES + IMPORTS
+    source = PRELOAD + denial + ARM_PATHLIB_ACCESSOR + PROBE + STACK_DIES + IMPORTS
     return subprocess.run(
         [sys.executable, "-c", source],
         capture_output=True,
@@ -284,14 +305,12 @@ def _assert_world(result: subprocess.CompletedProcess, label: str, *, expect_sta
         f"world {label}: import died under the dead-cwd world:\nstdout={out}\nstderr={result.stderr}"
     )
 
-    if "PROBE_VACUOUS" in out:
-        # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # never routes an absolute resolve through os.path.realpath).
-        assert sys.version_info < (3, 11), (
-            f"world {label}: resolve() survived the denial on an interpreter that "
-            "routes through os.path.realpath - the instrument is broken, not the world"
-        )
-        return out
+    assert "PROBE_VACUOUS" not in out, (
+        f"world {label}: resolve() survived the denial - the instrument went blind, "
+        "not the world safe. Every interpreter this fleet runs on reaches realpath "
+        "from resolve(): 3.11+ through the live os.path.realpath, 3.10 through "
+        "_NormalAccessor, and both worlds rebind each. Measured 2026-09-03."
+    )
 
     assert "PROBE_ARMED" in out, f"world {label}: probe reported neither outcome: {out}"
 

@@ -18,17 +18,21 @@ plus the handlers guard, which reached the same call through inspect.stack()).
 
 The world injects ntpath's behaviour as a CONDITION rather than a platform:
 os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is
-denied. The injection happens in a child process before any aipass import, so
-no module has cached the real functions. Other branches' import-time code is
-held CONSTANT by preloading it in the healthy world - this pin measures
-commons' own sites, not the fleet's rollout state.
+denied. Other branches' import-time code is held CONSTANT by preloading it in
+the healthy world - this pin measures commons' own sites, not the fleet's
+rollout state.
 
-Where the interpreter's own pathlib never routes resolve() through
-os.path.realpath (3.10 resolves absolute paths without touching cwd), the
-denial cannot fire and the probe says so - the pin still asserts the imports
-succeed there, it just proves less. Pinned as a probe with both outcomes,
-never a skipif: the vacuous world is named in the output, and vacuity is
-asserted to occur only on interpreters where it is the truth.
+Pre-3.11, pathlib itself has already cached the real function by the time the
+rebind below runs: _NormalAccessor.realpath is `staticmethod(os.path.realpath)`
+bound at pathlib's OWN import (which the preceding aipass/rich imports trigger
+transitively), and Path.resolve() calls that cached staticmethod - never a live
+`os.path.realpath` lookup - so the rebind cannot reach it, for an absolute path
+or a relative one. 3.11 rewrote resolve() to call `os.path.realpath(...)`
+directly each time, a live attribute lookup the rebind does reach. So the
+denial cannot fire below 3.11 and the probe says so - the pin still asserts the
+imports succeed there, it just proves less. Pinned as a probe with both
+outcomes, never a skipif: the vacuous world is named in the output, and
+vacuity is asserted to occur only on interpreters where it is the truth.
 """
 
 import ast
@@ -71,8 +75,9 @@ def _dead_getcwd():
 os.getcwd = _dead_getcwd
 
 # Probe the instrument: does THIS interpreter's resolve() reach the denied
-# call for an absolute path? 3.11+ routes through os.path.realpath; 3.10
-# resolves absolute paths without cwd, so the denial cannot fire there.
+# call at all? 3.11+ looks up os.path.realpath live; pre-3.11 pathlib already
+# cached the original in _NormalAccessor.realpath at its own import, so the
+# rebind above cannot reach it and the denial cannot fire there.
 import pathlib
 
 try:
@@ -198,7 +203,7 @@ def _assert_probe_armed(out: str) -> None:
     """The instrument must be able to fire, or the pin proves nothing."""
     if "PROBE_VACUOUS" in out:
         # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # never routes an absolute resolve through os.path.realpath).
+        # cached os.path.realpath in its own accessor before this rebind ran).
         assert sys.version_info < (3, 11), (
             "resolve() survived the denial on an interpreter that routes "
             "through os.path.realpath - the instrument is broken, not the world"

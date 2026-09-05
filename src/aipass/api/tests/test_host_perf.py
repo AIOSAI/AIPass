@@ -51,6 +51,7 @@ import contextlib
 import json
 import signal
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -735,8 +736,11 @@ sighup_required = pytest.mark.skipif(
 # The filename a stand-in for log_operation is compiled under. It only has to
 # differ from this file's, so frame 1 and frame 2 name different modules and an
 # off-by-one in the depth is visible. No such file needs to exist — the detector
-# reads a frame's co_filename, which compile() sets from this string.
-ELSEWHERE = "elsewhere_than_this_test/stands_in_for_log_operation.py"
+# reads a frame's co_filename, which compile() sets from this string. Absolute
+# and under the system temp dir so coverage.py's relative-path resolution can
+# never land it inside the source filter (measured: a relative name here
+# resolves against cwd at trace time and mints a phantom file under src/).
+ELSEWHERE = str(Path(tempfile.gettempdir()) / "elsewhere_than_this_test" / "stands_in_for_log_operation.py")
 
 # A `sys` with no _getframe, for driving the non-CPython fallback FROM CPython.
 # Nulling the real sys._getframe cannot be used: inspect.stack() calls it to
