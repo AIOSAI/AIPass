@@ -408,11 +408,11 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-- **559 tests** across 23 test files
+- **473 tests** across 19 test files (DPLAN-0325 pair 5, 2026-09-04: five DPLAN-0059 json-handler stamp files moved to `tests/.archive/`; the json handler is now the fleet's one shim over prax's service)
 - 10/10 modules covered, 46/50 public functions tested
 - Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-30*
+*Last Updated: 2026-09-04*
 
 ---
 [← Back to AIPass](../../../README.md)

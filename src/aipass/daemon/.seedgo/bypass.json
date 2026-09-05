@@ -12,6 +12,12 @@
       "pattern": "send_email_direct"
     },
     {
+      "file": "apps/daemon_wakeup.py",
+      "standard": "encapsulation",
+      "reason": "Same-branch import of module_root (the fleet-ratified dead-cwd cure, a handler by construction) from the entry-point script. Passed until DPLAN-0325 pair 5 (2026-09-04): seedgo's encapsulation_check derives the allowed handler set from what the branch's OWN json_handler imports, and the one fleet shim imports nothing under handlers, so the derivation went empty fleet-wide; daemon is the only branch whose entry-point script imports module_root directly. Checker cure requested from @seedgo (devpulse email 2026-09-04 19:40); remove this row when it lands.",
+      "pattern": "Handler imported directly"
+    },
+    {
       "file": "apps/handlers/monitoring/memory_health.py",
       "standard": "naming",
       "reason": "False positive: trinity_dir, required_checks, optional_checks are local variables inside functions, not module-level constants",
