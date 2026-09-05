@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import SERVICE_IMPORT_MARKER
+from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
@@ -648,7 +648,13 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
     # cannot poison it. Demanding the spelling here convicts the endpoint of
     # the migration: measured 2026-09-03, prax's shim, spawn's shim and the
     # citizen template each scored 75 on this check alone.
-    binds_the_json_service = SERVICE_IMPORT_MARKER in content
+    # THE TEST MOVED WITH PART B, it was not deleted (2026-09-04, finding (a)).
+    # This line used to read `SERVICE_IMPORT_MARKER in content`. Measured before
+    # the change: removing the marker without substituting the hash test costs
+    # EVERY migrated branch 25 points on its handler file — all eighteen, plus
+    # the citizen template, 100 -> 75 on "Missing relative path resolution".
+    # That is the endpoint of the migration convicted for being the endpoint.
+    binds_the_json_service = _is_canonical_shim(content)
     resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
         or re.search(r"\.resolve\(\)", content)

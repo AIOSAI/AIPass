@@ -50,6 +50,7 @@ import importlib
 import inspect
 import json
 import os
+import tempfile
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -170,10 +171,17 @@ def parametrized(divergences: Mapping[str, str] | None = None) -> list:
 #: ``commons`` left with pair 5 on 2026-09-04. Its row read "raises
 #: FileNotFoundError from the staging file"; the service creates the directory,
 #: and the strict xfail reported XPASS(strict) on the first run against the
-#: shim. ONE remains, on the last branch the sweep has not reached.
-SAVE_JSON_MISSING_PARENT = {
-    "api": "api's save_json returns False and writes nothing when the document directory is absent",
-}
+#: shim.
+#:
+#: RETIRED 2026-09-04 (pair 6), and with it the LAST live xfail in this file.
+#: The final row was api's: "returns False and writes nothing when the document
+#: directory is absent". api swept to the canonical shim, the strict xfail
+#: reported XPASS(strict) on the first run against it, and the table is empty.
+#: Eighteen of eighteen branches now persist through the one service, which
+#: creates the document directory per call — so there is no longer a fleet on
+#: which this divergence can exist. The table stays, empty and named, because
+#: the next divergence that appears belongs in it rather than in a new one.
+SAVE_JSON_MISSING_PARENT: dict[str, str] = {}
 
 #: ``get_json_path`` return type. Every branch answers ``pathlib.Path``.
 #:
@@ -727,52 +735,30 @@ def test_validate_json_structure_answers_the_measured_matrix(
 
 
 # ---------------------------------------------------------------------------
-# Contracts: the metrics surface only a third of the fleet carries
+# Contracts: the metrics surface (RETIRED 2026-09-04, pair 6 — subject gone)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("branch", parametrized())
-def test_increment_counter_accumulates_into_the_modules_data_document(
-    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """increment_counter adds to what is already stored, and persists it.
-
-    Six branches expose it; the other twelve skip with that named. The pin is
-    accumulation, not assignment: a counter that overwrites instead of adding
-    reads as "1" forever, and the default ``amount`` of 1 plus an explicit 4
-    must land as 5 in the module's own data document — which is also where the
-    contract says the value lives, so a caller can read it back with load_json
-    instead of a second API.
-    """
-    module = implementation(branch)
-    require_document_addressing(module, branch)
-    increment = expose(module, branch, "increment_counter")
-    module, _ = prepared(branch, tmp_path, monkeypatch)
-    increment("metered", "requests")
-    increment("metered", "requests", 4)
-    assert module.load_json("metered", "data")["requests"] == 5
-
-
-@pytest.mark.parametrize("branch", parametrized())
-def test_update_data_metrics_persists_arbitrary_metric_keys(
-    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """update_data_metrics writes caller-named keys into the data document.
-
-    Same six branches. The pin is that the keyword names are the stored names —
-    no namespacing, no coercion — because callers read them straight back out
-    of the data document with load_json, and it must not disturb the keys the
-    document already carries.
-    """
-    module = implementation(branch)
-    require_document_addressing(module, branch)
-    update = expose(module, branch, "update_data_metrics")
-    module, _ = prepared(branch, tmp_path, monkeypatch)
-    update("metered", widgets=9, label="green")
-    stored = module.load_json("metered", "data")
-    assert stored["widgets"] == 9
-    assert stored["label"] == "green"
-    assert "created" in stored, f"{branch}: update_data_metrics dropped the document's own keys"
+#
+# ``test_increment_counter_accumulates_into_the_modules_data_document`` and
+# ``test_update_data_metrics_persists_arbitrary_metric_keys`` lived here. Both
+# are gone, by the same subject-gone rule that retired
+# ``UNKNOWN_TYPE_NOT_REFUSED``: they were the last two tests in this file that
+# measured NOTHING. Standing on the finished sweep they reported 18 skipped and
+# 0 measurements each — every skip reading "<branch> does not expose ... — its
+# json_handler has no such entry point" — which is a pair of tests announcing a
+# surface no longer in the fleet.
+#
+# Measured 2026-09-04 across the whole tree, excluding .archive: zero
+# definitions and zero production callers of either name. The one service binds
+# nine names and neither is among them; the six handlers that used to carry
+# them were archived branch by branch as the sweep reached them, the last two
+# (commons, daemon) on pair 5, api's on this one.
+#
+# Retired rather than kept skipping on purpose. A test that can only skip reads
+# like coverage from the outside — it is a row in the report and a green tick —
+# while asserting nothing at all about anything that ships. If a metrics
+# surface is ever wanted again it will be one implementation in the service,
+# and its contract belongs where the other service contracts in this file are,
+# not resurrected here.
 
 
 # ---------------------------------------------------------------------------
@@ -1072,16 +1058,19 @@ def retry_label(relative: Path) -> str:
 #:
 #: The count is a MEASUREMENT and it is falling: sixteen on 2026-09-02,
 #: fourteen on 2026-09-03 after the second sweep pair, eight on 2026-09-04
-#: with fifteen of eighteen swept, and SIX after pair 5 took commons and
-#: daemon. It did not fall when prax migrated — prax's helper MOVED into
-#: ``json_service``, it did not disappear — and it falls to four only when the
-#: branch handlers themselves are gone. The six standing today are
-#: ``aipass/shared/json_handler``, ``api``, ``hooks/apps/handlers/json/files``,
-#: the service itself, ``spawn/atomic_write`` and ``trigger/apps/config``: one
-#: is the last unswept handler, one is the file @aipass retires under
-#: FPLAN-0489, and the remaining four are the floor. No number is asserted
-#: here; the floor below is, so a sweep that removes a copy cannot turn this
-#: red.
+#: with fifteen of eighteen swept, six after pair 5 took commons and daemon,
+#: and FIVE after pair 6 took api — the last branch handler with a retry helper
+#: of its own. It did not fall when prax migrated — prax's helper MOVED into
+#: ``json_service``, it did not disappear.
+#:
+#: NO BRANCH HANDLER IS ON THIS LIST ANY MORE. The five standing are
+#: ``aipass/shared/json_handler`` (the file @aipass retires under FPLAN-0489),
+#: ``hooks/apps/handlers/json/files``, the service itself,
+#: ``spawn/atomic_write`` and ``trigger/apps/config``. Four of those are the
+#: floor: modules that own a bounded rename for their own reasons and are not
+#: json handlers. The number falls to four when FPLAN-0489 lands. No number is
+#: asserted here; the floor below is, so a sweep that removes a copy cannot
+#: turn this red.
 RETRY_IMPLEMENTATIONS = {
     retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
     + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
@@ -1756,12 +1745,26 @@ def test_the_public_writer_survives_a_transient_sharing_violation(
 #: fleet is gone. Recorded rather than left implied — the numbers below would
 #: otherwise still read as two branches disagreeing about the exception type.
 #:
-#: raise (17): ai_mail, aipass, backup, canary, cli, commons, daemon, devpulse,
-#: drone, flow, hooks, memory, prax, seedgo, skills, spawn, trigger.
-#: return False (1): api. The split ends at 18 / 0 when api sweeps, and the
-#: constants go with the tables.
-EXHAUSTED_WRITE_RAISES = 17
-EXHAUSTED_WRITE_RETURNS_FALSE = 1
+#: THE SPLIT IS OVER. Re-measured 2026-09-04 after pair 6 swept api, the
+#: eighteenth and last: with the rename blocked to exhaustion, all EIGHTEEN
+#: branches raise, and every one of them raises the service's own
+#: ``WriteFailed``. Not one returns False. The near-even split of 09-02 — the
+#: reason this record exists and the reason the test below refuses to pick a
+#: side — was eighteen implementations disagreeing, and there is one
+#: implementation now.
+#:
+#: raise (18): every branch. return False (0): none.
+#:
+#: The constants are kept at their final values rather than deleted. They are a
+#: measurement record, and the whole point of the record is that it ends
+#: somewhere; a reader who finds the test below tolerating two dispositions
+#: needs to be able to see that the tolerance was earned and is now historical.
+#: The test itself is deliberately NOT narrowed to "must raise": the claim a
+#: caller depends on is that a write that never landed never reports success,
+#: and that claim should not go red the day a branch legitimately chooses the
+#: other disposition again.
+EXHAUSTED_WRITE_RAISES = 18
+EXHAUSTED_WRITE_RETURNS_FALSE = 0
 
 
 @pytest.mark.parametrize("branch", parametrized(WRITER_HAS_NO_BOUNDED_RETRY))
@@ -2366,3 +2369,59 @@ def test_save_json_writes_a_document_that_parses_from_disk(
     raw = Path(str(module.get_json_path("disk", "log"))).read_bytes()
     parsed = json.loads(raw.decode("utf-8"))
     assert parsed == LOG_PAYLOAD, f"{branch}: the document on disk is not what was saved"
+
+
+# ===========================================================================
+# The audit trail names who it can, and says so when it cannot
+# ===========================================================================
+#
+# INHERITED 2026-09-04, DPLAN-0325 pair 6. These two claims lived in
+# api/tests/test_host_perf.py and nowhere else in the fleet — measured before
+# api swept. They were written against api's own ``_get_caller_module_name``;
+# there is one implementation now, so they belong here, run once, against it.
+#
+# The three cases that did NOT come with them compared a ``sys._getframe(2)``
+# fetch against an ``inspect.stack()`` walk. The service has no walk — it never
+# had two implementations — so those had no subject to test and are archived
+# with the record in api's tree, not silently dropped.
+#
+# Depth and pseudo-frames are already pinned upstream in
+# prax/tests/test_repo_root.py and are deliberately not duplicated here.
+
+
+class TestTheAuditTrailNamesWhoItCan:
+    """``_get_caller_module_name`` answers "unknown" rather than guessing or dying."""
+
+    def test_an_underscore_private_caller_is_not_named(self, monkeypatch: pytest.MonkeyPatch):
+        """A module whose name starts with ``_`` is somebody's implementation detail.
+
+        The log records who did the work so a human can go and read them. A
+        private module is not an answer to that question, so the honest value
+        is "unknown" — and a log that names one asserts a caller that no
+        importer of this system is allowed to reach for.
+        """
+        service = json_service_or_skip()
+        frame = SimpleNamespace(f_code=SimpleNamespace(co_filename=str(Path(tempfile.gettempdir()) / "_private.py")))
+
+        monkeypatch.setattr(service, "sys", SimpleNamespace(_getframe=lambda _depth: frame))
+        assert service._get_caller_module_name() == "unknown", (
+            "the operations log named an underscore-private module as the caller"
+        )
+
+    def test_a_frame_that_cannot_be_fetched_is_unknown_and_not_a_crash(self, monkeypatch: pytest.MonkeyPatch):
+        """The audit trail must never be the reason an operation fails.
+
+        ``log_operation`` runs on the write path of every branch in the fleet.
+        If naming the caller can raise, then a saved document depends on the
+        interpreter's willingness to hand back a frame — which is exactly
+        backwards. Anything the frame fetch throws is an "unknown", logged.
+        """
+        service = json_service_or_skip()
+
+        def _no_such_frame(_depth: int):
+            raise ValueError("no such frame")
+
+        monkeypatch.setattr(service, "sys", SimpleNamespace(_getframe=_no_such_frame))
+        assert service._get_caller_module_name() == "unknown", (
+            "a frame fetch that raised took the operation down with it"
+        )

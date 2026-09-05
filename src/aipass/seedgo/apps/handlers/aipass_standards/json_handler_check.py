@@ -57,18 +57,6 @@ _TRIPLET_KINDS = ("config", "data", "log")
 
 _TRIPLET_RE = re.compile(r"^(?P<stem>.+)_(?P<kind>config|data|log)\.json$")
 
-_SHARED_IMPORT_MARKERS = (
-    "from aipass.aipass.shared.json_handler import",
-    "from aipass.aipass.shared import",
-)
-
-_TRIPLET_SURFACE_MARKERS = (
-    "def ensure_module_jsons",
-    "def ensure_json_exists",
-    "ensure_json_exists",
-    "ensure_module_jsons",
-)
-
 # sha256 of the canonical shim, section 3 of the pinned spec:
 # src/aipass/devpulse/docs.local/DPLAN-0325_spec.md — 1724 bytes, UTF-8,
 # one trailing newline. Computed from the spec block, not from any branch
@@ -77,21 +65,12 @@ _TRIPLET_SURFACE_MARKERS = (
 # from it, and it is checked by identity rather than by matching text.
 CANONICAL_SHIM_SHA256 = "3456b7660698fa9d2a1f9352523f3a0aa75c3d862bcf6222ce4be280513cf0b7"
 
-# Transitional accept path, live only until the sweep completes (part B
-# removes it): the file imports the one service and carries nothing of its
-# own branch. `_handler` is deliberately NOT in this table — "json_handler"
-# contains it as a substring, so banning it would refuse the canonical shim.
-# Public because json_structure_check reads the same line: a shim that binds
-# the service resolves no paths of its own, and two copies of this string
-# would be exactly the drift this standard exists to catch.
+# The line a branch that has not migrated has to write. GUIDANCE ONLY since
+# part B (2026-09-04): it is quoted in the refusal message and nothing accepts
+# on it any more. json_structure_check no longer reads it either — it imports
+# `_is_canonical_shim`, so the two standards share the TEST rather than a
+# string that each could drift from independently.
 SERVICE_IMPORT_MARKER = "from aipass.prax import json_handler"
-
-_FORBIDDEN_SHIM_TOKENS = (
-    "_JSON_DIR",
-    "MAX_LOG_ENTRIES",
-    "_create_default",
-    "JsonHandler(",
-)
 
 # The citizen template — the handler every future branch is born with.
 _TEMPLATE_HANDLER_PARTS = ("templates", "citizen", "apps", "handlers", "json", "json_handler.py")
@@ -119,62 +98,45 @@ def _is_canonical_shim(content: str) -> bool:
     return hashlib.sha256(content.encode("utf-8")).hexdigest() == CANONICAL_SHIM_SHA256
 
 
-def _has_service_import(content: str, branch_name: str) -> bool:
-    """Return True for a file that imports the one service and owns nothing.
-
-    Transitional: it accepts a shim whose bytes differ from the canonical
-    ones (a header date, a re-wrapped docstring) while the sweep is in
-    flight, but refuses one that has kept a branch of its own — its
-    {branch}_json directory name, a captured handler instance, a local
-    default factory or log cap.
-    """
-    if SERVICE_IMPORT_MARKER not in content:
-        return False
-    if f"{branch_name}_json" in content:
-        return False
-    return not any(token in content for token in _FORBIDDEN_SHIM_TOKENS)
-
-
-def _has_shared_import(content: str) -> bool:
-    for marker in _SHARED_IMPORT_MARKERS:
-        if marker in content:
-            return True
-    return False
-
-
-def _has_triplet_surface(content: str) -> bool:
-    has_ensure_module = False
-    has_ensure_exists = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        if "ensure_module_jsons" in stripped:
-            has_ensure_module = True
-        if "ensure_json_exists" in stripped:
-            has_ensure_exists = True
-    return has_ensure_module or has_ensure_exists
-
-
 def _capability_verdict(content: str, branch_name: str) -> tuple[bool, str]:
-    """Judge one handler file, best evidence first.
+    """Judge one handler file. One accept path: the bytes ARE the canonical shim.
 
-    The order is the strength of the evidence, not the order the paths
-    were written: identity, then a structural read, then two substring
-    reads that survive only until the sweep completes.
+    NARROWED 2026-09-04 (DPLAN-0325 part B section 4), the day the sweep
+    finished. Three accept paths went with this change:
+
+      ``_has_service_import``  the transitional read — imports the service and
+          carries no branch token. Measured before removal: all eighteen
+          branches and the citizen template are accepted by HASH, so not one
+          of them was relying on it.
+      ``_has_shared_import``   ``aipass.aipass.shared``, retiring under
+          FPLAN-0489 and matched by nothing in the fleet.
+      ``_has_triplet_surface`` presence of ``ensure_json_exists`` /
+          ``ensure_module_jsons`` anywhere in the text — the weakest of the
+          four by a distance. It read a SPELLING, so a docstring naming either
+          function satisfied it, and it was what let eighteen private
+          implementations pass this standard for as long as they existed.
+
+    Substring evidence is why a fleet can drift while every branch reports
+    100. A hash cannot: the file either IS the one shim or it is not, and the
+    message says which. The cost of being wrong is also now visible — a branch
+    that edits a byte goes red immediately, rather than quietly falling through
+    to a weaker path and looking migrated.
+
+    Args:
+        content: The handler file's text.
+        branch_name: The branch the file belongs to, for the refusal message.
+
+    Returns:
+        (passed, message).
     """
     if _is_canonical_shim(content):
         return True, "Canonical shim — sha256 matches the pinned spec (DPLAN-0325 section 3)"
-    if _has_service_import(content, branch_name):
-        return True, "Binds the one json service and carries no branch tokens (transitional)"
-    if _has_shared_import(content):
-        return True, "Wires shared JsonHandler (canonical shim)"
-    if _has_triplet_surface(content):
-        return True, "Standalone with triplet surface (ensure_module_jsons / ensure_json_exists)"
     return False, (
-        "Log-only fork — missing ensure_module_jsons and ensure_json_exists. "
-        "Cannot create config/data triplet files. Migrate to the fleet shim: "
-        "'from aipass.prax import json_handler' (DPLAN-0325 section 3, byte-identical)"
+        f"Not the canonical json shim — {branch_name}'s handler does not match the pinned "
+        f"sha256 (DPLAN-0325 section 3). The fleet has ONE json implementation; a branch "
+        f"handler is its byte-identical binding, {len(content.encode('utf-8'))} bytes here. "
+        f"Replace the file with the spec's bytes: '{SERVICE_IMPORT_MARKER}' and the nine "
+        f"bound names, nothing of its own"
     )
 
 
@@ -286,12 +248,10 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """
     Check that a branch's json_handler.py is canonical.
 
-    Verifies the handler is the canonical shim by hash, or binds the one
-    json service with no branch tokens, or wires the retiring shared
-    JsonHandler, or exposes the full triplet-creating surface
-    (ensure_module_jsons / ensure_json_exists). A branch that ships the
-    citizen template has its template handler judged by the same rule.
-    Also checks on-disk triplet completeness.
+    Verifies the handler IS the canonical shim, by sha256 — the only accept
+    path since part B section 4 (2026-09-04). A branch that ships the citizen
+    template has its template handler judged by the same rule. Also checks
+    on-disk triplet completeness.
     """
     bp = Path(branch_path)
 

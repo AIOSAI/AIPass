@@ -658,6 +658,46 @@ def test_the_pinned_hash_is_the_hash_of_the_spec_block():
     )
 
 
+def _canonical_shim_bytes_on_disk():
+    """The canonical shim from the citizen template, verified against the pin.
+
+    A second source, and deliberately a different one from
+    :func:`_canonical_shim_bytes_or_skip`. That one reads the spec, which is
+    gitignored and therefore absent on CI. This one reads the file every
+    newborn branch is stamped from, which ships in the repo — so the pins that
+    need REAL canonical bytes still run on a fresh checkout.
+
+    Reading a branch copy would teach a test that branch's drift, so the bytes
+    are checked against ``CANONICAL_SHIM_SHA256`` before being handed back:
+    if the template ever drifts, these pins say so instead of blessing it.
+    """
+    import hashlib
+    from pathlib import Path as _Path
+
+    import aipass
+
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+    template = (
+        _Path(aipass.__file__).resolve().parent
+        / "spawn"
+        / "templates"
+        / "citizen"
+        / "apps"
+        / "handlers"
+        / "json"
+        / "json_handler.py"
+    )
+    if not template.is_file():
+        pytest.skip(f"citizen template not present ({template})")
+    content = template.read_text(encoding="utf-8")
+    assert hashlib.sha256(content.encode("utf-8")).hexdigest() == CANONICAL_SHIM_SHA256, (
+        "the citizen template is no longer the canonical shim — every branch spawned from it "
+        "would be born failing the json_handler standard"
+    )
+    return content
+
+
 def test_the_canonical_shim_passes_capability_by_hash():
     """The spec's own bytes are accepted, and accepted on the identity path."""
     from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
@@ -670,10 +710,12 @@ def test_the_canonical_shim_passes_capability_by_hash():
 def test_one_changed_character_is_no_longer_the_canonical_shim():
     """Identity, not resemblance: a shim that drifts stops being the shim.
 
-    Red-first proof that the hash path is doing the work. The mutated text
-    still imports the service, so it falls through to the transitional path
-    and is still accepted overall — this pins WHICH path answered, because a
-    check that cannot say why it passed cannot be tightened in part B.
+    Red-first proof that the hash path is doing the work — one extra space,
+    nothing else. Until part B this only pinned WHICH path answered, because
+    the mutated text still imported the service and fell through to the
+    transitional read. That read is gone (2026-09-04, section 4), so the
+    mutation is now REFUSED outright, which is the whole point of narrowing:
+    a byte of drift is a red, not a quieter green.
     """
     from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
         _capability_verdict,
@@ -683,44 +725,45 @@ def test_one_changed_character_is_no_longer_the_canonical_shim():
     mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
     assert _is_canonical_shim(mutated) is False
     passed, message = _capability_verdict(mutated, "anybranch")
-    assert passed is True
-    assert "sha256" not in message
+    assert passed is False
+    assert "sha256" in message
 
 
-def test_the_service_import_alone_is_not_enough_when_a_branch_token_survives():
-    """A half-migrated shim that kept its own document directory is refused.
+def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused():
+    """A branch that adopts the import and keeps its own directory is not migrated.
 
-    The failure this forbids is a branch that adopts the import, keeps its
-    captured `_JSON_DIR`, and reads as migrated while still writing through
-    its own binding.
+    The failure this forbids is a file that reads as migrated — it has the
+    import line at the top — while still writing through a binding of its own.
+    It used to be caught by a table of forbidden tokens consulted on the
+    transitional accept path. That path and that table are gone (part B
+    section 4); the hash refuses this text for the simpler reason that it is
+    not the shim's bytes, and cannot be argued with about which tokens count.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _has_service_import
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
 
     half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
-    assert _has_service_import(half, "canary") is False
+    passed, message = _capability_verdict(half, "canary")
+    assert passed is False
+    assert "canary" in message
 
-    clean = "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n"
-    assert _has_service_import(clean, "canary") is True
 
+def test_the_refusal_message_names_the_branch_and_the_line_to_write():
+    """A red a branch cannot act on is a red that stays.
 
-def test_json_handler_underscore_handler_substring_does_not_refuse_the_shim():
-    """`json_handler` contains `_handler`, so banning that spelling bans the shim.
-
-    Pinned because the forbidden-token table is the obvious place to add
-    `_handler` when reading section 3's "no `_handler`" line, and doing so
-    would refuse every branch on the day the sweep lands.
+    The hash says nothing on its own — "sha256 mismatch" tells a reader
+    nothing about what to do. The refusal has to carry the branch, the fact
+    that there is ONE implementation, and the import line the replacement
+    starts with, because that is the entire remedy.
     """
     from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
-        _FORBIDDEN_SHIM_TOKENS,
-        _has_service_import,
+        SERVICE_IMPORT_MARKER,
+        _capability_verdict,
     )
 
-    assert "_handler" not in _FORBIDDEN_SHIM_TOKENS
-    # Built here rather than read from the spec so this pin still runs on a
-    # fresh checkout, where docs.local/ does not exist.
-    shim = "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n"
-    assert "_handler" in shim
-    assert _has_service_import(shim, "prax") is True
+    passed, message = _capability_verdict("def load_json(name):\n    return {}\n", "canary")
+    assert passed is False
+    assert "canary" in message
+    assert SERVICE_IMPORT_MARKER in message
 
 
 def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
@@ -750,11 +793,12 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     result = _check_template_handler(branch)
     assert result is not None
     assert result["passed"] is False
-    assert "Log-only fork" in result["message"]
+    assert "Not the canonical json shim" in result["message"]
 
-    handler.write_text(
-        "from aipass.prax import json_handler\n_h = json_handler.for_module(__file__)\n", encoding="utf-8"
-    )
+    # The REAL bytes, not a hand-written lookalike. Since part B section 4 the
+    # only accept path is the hash, so a two-line stand-in that merely imports
+    # the service is refused here exactly as it would be in a branch.
+    handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
     result = _check_template_handler(branch)
     assert result is not None
     assert result["passed"] is True
@@ -821,10 +865,10 @@ def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
 
     handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
     handler.parent.mkdir(parents=True)
-    handler.write_text(
-        "from aipass.prax import json_handler\n\n_h = json_handler.for_module(__file__)\n\nread_json = _h.read_json\n",
-        encoding="utf-8",
-    )
+    # The REAL bytes. This used to be a hand-written four-line stand-in, which
+    # the marker read accepted; part B section 4 moved the exemption onto the
+    # hash test (finding (a)), so only the shim itself earns it now.
+    handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
 
     checks = check_module(str(handler), bypass_rules=None)["checks"]
     resolution = next(c for c in checks if c["name"] == "Relative path resolution")
@@ -846,11 +890,24 @@ def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
     assert "Missing relative path resolution" in resolution["message"]
 
 
-def test_the_two_standards_read_one_copy_of_the_service_import_line():
-    """Two literals of the same line is the drift this standard exists to catch."""
+def test_the_two_standards_share_the_shim_TEST_not_a_copy_of_a_string():
+    """Both standards must agree on what a shim IS, by running the same function.
+
+    json_structure_check excuses a shim from "resolves its own path" — the
+    service derives the branch root from the shim's __file__ and the shim
+    resolves nothing. Until part B the two standards agreed by importing one
+    copy of a marker STRING. They now import one copy of the hash TEST, which
+    is strictly stronger: a string can be true of a file that is not the shim.
+
+    Measured 2026-09-04 (finding (a)): if part B had removed the marker
+    without giving structure the hash test in its place, all eighteen branches
+    and the citizen template would have dropped 100 -> 75 on their handler
+    file. The identity assertion below is what makes that impossible to redo
+    by accident.
+    """
     from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check, json_structure_check
 
-    assert json_structure_check.SERVICE_IMPORT_MARKER is json_handler_check.SERVICE_IMPORT_MARKER
+    assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
 
 
 # ---------------------------------------------------------------------------

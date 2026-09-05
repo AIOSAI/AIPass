@@ -50,8 +50,6 @@ every exec is a counted fake.
 import contextlib
 import json
 import signal
-import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -60,7 +58,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
@@ -720,8 +717,21 @@ class TestTheRegistryIsPinnedAtBoot:
 
 
 # ==============================================
-# 4. THE AUDIT TRAIL FETCHES ONE FRAME, NOT THE STACK
+# 4. (RETIRED 2026-09-04) THE AUDIT TRAIL FETCHES ONE FRAME, NOT THE STACK
 # ==============================================
+#
+# Section 4 tested api's own _get_caller_module_name. DPLAN-0325 replaced this
+# branch's handler with the fleet shim, so there is no detector here to test
+# and no module `sys` on the shim to patch. The comparison three of its cases
+# made - one-frame fetch versus inspect.stack() walk - has no subject at all
+# any more: the one service never had the walk.
+#
+# The claims did not evaporate. Depth and pseudo-frames are pinned in
+# prax/tests/test_repo_root.py; the two that lived only here - a private
+# caller is "unknown", a frame that cannot be fetched is "unknown" and not a
+# crash - moved to seedgo's fleet contract, which runs them against the one
+# implementation instead of against eighteen copies of it. Disposal copy with
+# the full reasoning: tests/.archive/deleted_2026-09-04_test_host_perf_caller_detection.py
 
 
 # hangup() sends SIGHUP, which POSIX has and Windows does not. The attach lane
@@ -732,149 +742,6 @@ sighup_required = pytest.mark.skipif(
     not hasattr(signal, "SIGHUP"),
     reason="hangup detaches with SIGHUP, which this platform does not have",
 )
-
-# The filename a stand-in for log_operation is compiled under. It only has to
-# differ from this file's, so frame 1 and frame 2 name different modules and an
-# off-by-one in the depth is visible. No such file needs to exist — the detector
-# reads a frame's co_filename, which compile() sets from this string. Absolute
-# and under the system temp dir so coverage.py's relative-path resolution can
-# never land it inside the source filter (measured: a relative name here
-# resolves against cwd at trace time and mints a phantom file under src/).
-ELSEWHERE = str(Path(tempfile.gettempdir()) / "elsewhere_than_this_test" / "stands_in_for_log_operation.py")
-
-# A `sys` with no _getframe, for driving the non-CPython fallback FROM CPython.
-# Nulling the real sys._getframe cannot be used: inspect.stack() calls it to
-# find the current frame, so the fallback would die on the way in.
-_NO_GETFRAME = SimpleNamespace(platform=sys.platform)
-
-
-class TestCallerDetectionFetchesOneFrame:
-    """
-    Same answer, two orders of magnitude cheaper.
-
-    log_operation auto-detects its caller, and every one of the 37 audit calls
-    in the host lane leaves the module name off. Measured 2026-08-18: the old
-    inspect.stack() walk cost 0.21ms called two frames down and 1.77ms called
-    fifty down — and fifty is ordinary depth inside a FastAPI request, so the
-    cost was smallest exactly where it was measured and largest where it ran.
-    """
-
-    def test_the_detector_names_log_operations_caller_not_log_operation(self) -> None:
-        """The DEPTH, pinned hermetically — and the stand-in must live ELSEWHERE.
-
-        _getframe(2) and stack()[2] have to mean the same frame, and both have
-        to mean the caller of log_operation rather than log_operation itself.
-        Pinned through a stand-in rather than the real log_operation, because
-        the real one may be wrapped by whatever runs the suite and then frame 2
-        is the wrapper — correctly, which hides the arithmetic under test.
-
-        THE STAND-IN IS COMPILED UNDER ANOTHER FILENAME, and that is the whole
-        trick. A shim defined in this file put frames 1 and 2 in the same
-        module, so _getframe(1) and _getframe(2) answered identically and an
-        off-by-one mutation SURVIVED — measured, not guessed. Compiling under a
-        different name makes the two frames distinguishable, which is exactly
-        the situation in production (log_operation lives in json_handler.py).
-        """
-        namespace: dict = {"detector": json_handler._get_caller_module_name}
-        exec(  # noqa: S102 - a two-line module whose only variable is its FILENAME
-            compile("def stands_in_for_log_operation():\n    return detector()\n", ELSEWHERE, "exec"),
-            namespace,
-        )
-        stands_in_for_log_operation = namespace["stands_in_for_log_operation"]
-
-        fast = stands_in_for_log_operation()
-
-        with patch.object(json_handler, "sys", _NO_GETFRAME):
-            walked = stands_in_for_log_operation()
-
-        assert fast == walked == "test_host_perf", (
-            "the detector named the stand-in itself, not its caller — the frame arithmetic is off"
-        )
-
-    def test_both_paths_agree_on_whoever_the_caller_turns_out_to_be(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """End to end through the real log_operation, asserting AGREEMENT.
-
-        WHICH module gets named is deliberately not asserted here, and that is
-        this test's whole finding. CI was red on an earlier version that
-        demanded 'test_host_perf': the repo-root conftest wraps log_operation
-        on every branch's json_handler to keep parallel runs off shared files,
-        so under the full-repo invocation the caller of log_operation IS that
-        wrapper and the trail is attributed to 'conftest'.
-
-        MEASURED, because the obvious reading is that the _getframe change
-        caused it: inspect.stack()[2] and sys._getframe(2) return the same
-        frame wrapped and unwrapped alike, so the old implementation named
-        'conftest' too. This test is simply the first thing in the tree that
-        ever looked. What it can honestly pin is that the two implementations
-        never disagree — which is the risk the change actually carries.
-
-        The production hazard it leaves on the record: ANY decorator placed
-        around log_operation silently re-attributes the entire audit trail to
-        the decorator's own file.
-        """
-        monkeypatch.setattr(json_handler, "API_JSON_DIR", tmp_path)
-
-        assert json_handler.log_operation("probe_fast") is True
-
-        with patch.object(json_handler, "sys", _NO_GETFRAME):
-            assert json_handler.log_operation("probe_walked") is True
-
-        written = sorted(path.name for path in tmp_path.glob("*_log.json"))
-        assert len(written) == 1, f"the two paths named different modules: {written}"
-
-        entries = json.loads((tmp_path / written[0]).read_text(encoding="utf-8"))
-        assert [entry["operation"] for entry in entries] == ["probe_fast", "probe_walked"]
-
-    def test_the_detection_is_actually_cheaper(self) -> None:
-        """A performance claim with no measurement is a hope.
-
-        Deliberately loose (5x against a measured 38x): this asserts the walk
-        was really removed, not a millisecond budget that would go red on a
-        loaded CI box.
-        """
-        depth = 30
-
-        def _call_at_depth(remaining: int) -> str:
-            if remaining:
-                return _call_at_depth(remaining - 1)
-            return json_handler._get_caller_module_name()
-
-        def _time(iterations: int = 40) -> float:
-            start = time.perf_counter()
-            for _ in range(iterations):
-                _call_at_depth(depth)
-            return time.perf_counter() - start
-
-        _time(5)
-        fast = _time()
-        with patch.object(json_handler, "sys", _NO_GETFRAME):
-            _time(5)
-            walked = _time()
-
-        assert fast * 5 < walked, f"one-frame fetch ({fast:.4f}s) is not clearly cheaper than the walk ({walked:.4f}s)"
-
-    def test_a_private_caller_is_still_unknown(self) -> None:
-        """Unchanged contract: an underscore-prefixed module does not name it."""
-        frame = MagicMock()
-        frame.f_code.co_filename = "/somewhere/_private.py"
-
-        with patch.object(json_handler, "sys", SimpleNamespace(_getframe=lambda _depth: frame)):
-            assert json_handler._get_caller_module_name() == "unknown"
-
-    def test_a_broken_frame_fetch_is_unknown_not_a_crash(self) -> None:
-        """The audit trail must never be the reason an operation fails."""
-
-        def _boom(_depth: int):
-            raise ValueError("no such frame")
-
-        with patch.object(json_handler, "sys", SimpleNamespace(_getframe=_boom)):
-            with patch.object(json_handler, "logger", MagicMock()):
-                assert json_handler._get_caller_module_name() == "unknown"
-
 
 # ==============================================
 # 5. THE PUMP'S THREADS ARE ITS OWN, AND ITS CAP SPEAKS
