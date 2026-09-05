@@ -8,179 +8,179 @@
     {
       "file": "lib/telegram/tests/conftest.py",
       "standard": "architecture",
-      "reason": "Test infrastructure \u2014 conftest.py lives in tests/ by pytest convention, not the 3-layer app structure. Test support files are exempt."
+      "reason": "Test infrastructure — conftest.py lives in tests/ by pytest convention, not the 3-layer app structure. Test support files are exempt."
     },
     {
       "file": "lib/telegram/tests/conftest.py",
       "standard": "encapsulation",
-      "reason": "Test infrastructure \u2014 imports aipass.prax.apps.handlers.logging.direct to redirect log output during tests. Necessary to clear cached logger state; no module entry point exists for this internal reset."
+      "reason": "Test infrastructure — imports aipass.prax.apps.handlers.logging.direct to redirect log output during tests. Necessary to clear cached logger state; no module entry point exists for this internal reset."
     },
     {
       "file": "lib/telegram/tests/conftest.py",
       "standard": "imports",
-      "reason": "Test infrastructure \u2014 sys.path manipulation is intentional: adds src/ root for aipass.* imports and skill root for local apps.handlers.* imports. Required because tests run without a full pip install of the skill."
+      "reason": "Test infrastructure — sys.path manipulation is intentional: adds src/ root for aipass.* imports and skill root for local apps.handlers.* imports. Required because tests run without a full pip install of the skill."
     },
     {
       "file": "lib/telegram/tests/test_response_router.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_response_router.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler module directly for unit testing. Tests need direct access to monkeypatch module-level attributes and verify handler behavior."
+      "reason": "Test file — imports handler module directly for unit testing. Tests need direct access to monkeypatch module-level attributes and verify handler behavior."
     },
     {
       "file": "lib/telegram/tests/test_monitor.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_monitor.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing. Tests need direct access to patch module-level state and verify handler internals."
+      "reason": "Test file — imports handler directly for unit testing. Tests need direct access to patch module-level state and verify handler internals."
     },
     {
       "file": "lib/telegram/tests/test_monitor.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 public functions are pytest test methods; docstrings on individual test methods are optional when class docstring and test name are self-documenting."
+      "reason": "Test file — public functions are pytest test methods; docstrings on individual test methods are optional when class docstring and test name are self-documenting."
     },
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing. Tests need direct access to patch module-level state."
+      "reason": "Test file — imports handler directly for unit testing. Tests need direct access to patch module-level state."
     },
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 pytest test methods are self-documenting via class/method names; docstrings on individual test cases are optional."
+      "reason": "Test file — pytest test methods are self-documenting via class/method names; docstrings on individual test cases are optional."
     },
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "hardcoded_path",
-      "reason": "Test data \u2014 /home/aipass/* paths are mock return values passed to validate_branch() and create_bot() mocks, not real filesystem paths. They represent synthetic registry entries in test fixtures."
+      "reason": "Test data — /home/aipass/* paths are mock return values passed to validate_branch() and create_bot() mocks, not real filesystem paths. They represent synthetic registry entries in test fixtures."
     },
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "trigger",
       "pattern": "base_bot.pending_file.unlink()",
-      "reason": "Test-only teardown \u2014 base_bot.pending_file.unlink() (line 397 as of 2026-08-09) simulates file absence to verify heartbeat backward-compat behavior. No trigger event is appropriate for test fixture manipulation. FILE-WIDE BY NECESSITY, not scope drift: trigger_check.py:112 is the standard's only bypass gate and passes line=None, so a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09 \u2014 the old lines:[409] had also drifted from the real line 397). Re-scope to lines:[397] the moment that gate threads a line number through."
+      "reason": "Test-only teardown — base_bot.pending_file.unlink() (line 397 as of 2026-08-09) simulates file absence to verify heartbeat backward-compat behavior. No trigger event is appropriate for test fixture manipulation. FILE-WIDE BY NECESSITY, not scope drift: trigger_check.py:112 is the standard's only bypass gate and passes line=None, so a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09 — the old lines:[409] had also drifted from the real line 397). Re-scope to lines:[397] the moment that gate threads a line number through."
     },
     {
       "file": "lib/telegram/tests/test_attach_only.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_attach_only.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing."
+      "reason": "Test file — imports handler directly for unit testing."
     },
     {
       "file": "lib/telegram/tests/test_attach_only.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 pytest test methods are self-documenting via class/method names."
+      "reason": "Test file — pytest test methods are self-documenting via class/method names."
     },
     {
       "file": "lib/telegram/tests/test_presence_pointer.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_presence_pointer.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing. Same pattern as test_multi_bot.py and test_attach_only.py."
+      "reason": "Test file — imports handler directly for unit testing. Same pattern as test_multi_bot.py and test_attach_only.py."
     },
     {
       "file": "lib/telegram/tests/test_streaming.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_streaming.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing. Same pattern as all other TG test files."
+      "reason": "Test file — imports handler directly for unit testing. Same pattern as all other TG test files."
     },
     {
       "file": "lib/telegram/tests/test_streaming.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 pytest test methods are self-documenting via class/method names."
+      "reason": "Test file — pytest test methods are self-documenting via class/method names."
     },
     {
       "file": "lib/telegram/tests/test_heartbeat_delivered.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_heartbeat_delivered.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing."
+      "reason": "Test file — imports handler directly for unit testing."
     },
     {
       "file": "lib/telegram/tests/test_heartbeat_delivered.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 pytest test methods are self-documenting via class/method names."
+      "reason": "Test file — pytest test methods are self-documenting via class/method names."
     },
     {
       "file": "lib/telegram/tests/test_status_reset.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_status_reset.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing."
+      "reason": "Test file — imports handler directly for unit testing."
     },
     {
       "file": "lib/telegram/tests/test_status_reset.py",
       "standard": "documentation",
-      "reason": "Test file \u2014 pytest test methods are self-documenting via class/method names."
+      "reason": "Test file — pytest test methods are self-documenting via class/method names."
     },
     {
       "file": "lib/telegram/tests/test_mirror_session.py",
       "standard": "architecture",
-      "reason": "Test file \u2014 lives in tests/ by convention. Test files are exempt from layer architecture standard."
+      "reason": "Test file — lives in tests/ by convention. Test files are exempt from layer architecture standard."
     },
     {
       "file": "lib/telegram/tests/test_mirror_session.py",
       "standard": "encapsulation",
-      "reason": "Test file \u2014 imports handler directly for unit testing."
+      "reason": "Test file — imports handler directly for unit testing."
     },
     {
       "file": "lib/telegram/tests/test_mirror_session.py",
       "standard": "hardcoded_path",
-      "reason": "Test data \u2014 /home/test/api is a mock return value for validate_branch(), not a real filesystem path."
+      "reason": "Test data — /home/test/api is a mock return value for validate_branch(), not a real filesystem path."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_factory.py",
       "standard": "handlers",
-      "reason": "DPLAN-0220 incomplete port \u2014 bot_factory imports _api_set_secret from aipass.api.apps.modules.secrets for config persistence. Same pattern as config.py."
+      "reason": "DPLAN-0220 incomplete port — bot_factory imports _api_set_secret from aipass.api.apps.modules.secrets for config persistence. Same pattern as config.py."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_factory.py",
       "standard": "json_structure",
-      "reason": "DPLAN-0220 incomplete port \u2014 factory functions predate json_handler.log_operation convention. Adding log_operation to every function is a separate cleanup task."
+      "reason": "DPLAN-0220 incomplete port — factory functions predate json_handler.log_operation convention. Adding log_operation to every function is a separate cleanup task."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_factory.py",
       "standard": "meta",
-      "reason": "DPLAN-0220 incomplete port \u2014 file uses legacy header format from Dev-Pass port, not the META block format."
+      "reason": "DPLAN-0220 incomplete port — file uses legacy header format from Dev-Pass port, not the META block format."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_factory.py",
       "standard": "permission_flags",
-      "reason": "TDPLAN-0009 \u2014 launch_mirror_session() intentionally uses --dangerously-skip-permissions. Detached tmux mirror sessions have no operator to approve prompts; without it the session hangs forever. Patrick's explicit ask."
+      "reason": "TDPLAN-0009 — launch_mirror_session() intentionally uses --dangerously-skip-permissions. Detached tmux mirror sessions have no operator to approve prompts; without it the session hangs forever. Patrick's explicit ask."
     },
     {
       "file": "apps/handlers/discovery_handler.py",
       "standard": "naming",
       "pattern": "yaml = None",
-      "reason": "Conditional import holder \u2014 'yaml = None' (line 26 as of 2026-08-09) is reassigned by 'import yaml' on success or stays None. Not a constant, just a module reference variable. FILE-WIDE BY NECESSITY, not scope drift: the constant check emits one file-level verdict listing every offender (here only 'yaml') and naming_check.py:56 is the standard's only bypass gate, passing line=None \u2014 a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09). Re-scope to lines:[26] the moment that gate threads a line number through."
+      "reason": "Conditional import holder — 'yaml = None' (line 26 as of 2026-08-09) is reassigned by 'import yaml' on success or stays None. Not a constant, just a module reference variable. FILE-WIDE BY NECESSITY, not scope drift: the constant check emits one file-level verdict listing every offender (here only 'yaml') and naming_check.py:56 is the standard's only bypass gate, passing line=None — a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09). Re-scope to lines:[26] the moment that gate threads a line number through."
     },
     {
       "file": "apps/handlers/registry.py",
@@ -189,7 +189,7 @@
         "get_skill",
         "get_skill_names"
       ],
-      "reason": "Public API functions \u2014 used by test_registry.py and available for external callers; part of the registry module's contract"
+      "reason": "Public API functions — used by test_registry.py and available for external callers; part of the registry module's contract"
     },
     {
       "file": "lib/telegram/apps/handlers/base_bot.py",
@@ -198,7 +198,7 @@
         "on_response",
         "_read_transcript_tail"
       ],
-      "reason": "DPLAN-0220/DPLAN-0226 \u2014 on_response is ported-but-unwired (Dev-Pass, Wave-2 design call). _read_transcript_tail is DPLAN-0226 OUT relay infrastructure: built and tested, wiring pending end-to-end integration. chunk_text and _extract_assistant_text removed from this bypass \u2014 both now wired (chunk_text: scheduler_bot.py; _extract_assistant_text: base_bot.py)."
+      "reason": "DPLAN-0220/DPLAN-0226 — on_response is ported-but-unwired (Dev-Pass, Wave-2 design call). _read_transcript_tail is DPLAN-0226 OUT relay infrastructure: built and tested, wiring pending end-to-end integration. chunk_text and _extract_assistant_text removed from this bypass — both now wired (chunk_text: scheduler_bot.py; _extract_assistant_text: base_bot.py)."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_operations.py",
@@ -206,7 +206,7 @@
       "functions": [
         "get_all_bots"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 multi-bot listing helper, ported-but-unwired pending multi-bot wiring. See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — multi-bot listing helper, ported-but-unwired pending multi-bot wiring. See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_registry.py",
@@ -214,7 +214,7 @@
       "functions": [
         "get_bot_by_work_dir"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 used by the response router to match CWD\u2192bot; awaits the response_router wiring (td-38 import-vs-delete). See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — used by the response router to match CWD→bot; awaits the response_router wiring (td-38 import-vs-delete). See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/branch_plugin.py",
@@ -222,7 +222,7 @@
       "functions": [
         "on_response"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 branch-plugin response hook, ported-but-unwired; pending Wave-2 on_response design call (td-38). See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — branch-plugin response hook, ported-but-unwired; pending Wave-2 on_response design call (td-38). See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/config.py",
@@ -231,7 +231,7 @@
         "get_allowed_user_ids",
         "validate_config"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 config accessors/validator ported-but-unwired, pending wiring. See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — config accessors/validator ported-but-unwired, pending wiring. See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/file_handler.py",
@@ -240,7 +240,7 @@
         "download_telegram_file",
         "cleanup_file"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 file up/download feature ported-but-unwired, pending wiring. See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — file up/download feature ported-but-unwired, pending wiring. See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/response_router.py",
@@ -249,7 +249,7 @@
         "find_pending_bot",
         "clean_expired_pending"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 response-router helpers, pending the response_router import-vs-delete design call (td-38). See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — response-router helpers, pending the response_router import-vs-delete design call (td-38). See README → Ported-but-unwired."
     },
     {
       "file": "lib/telegram/apps/handlers/tmux_manager.py",
@@ -261,7 +261,12 @@
         "list_sessions",
         "get_session_pane"
       ],
-      "reason": "DPLAN-0220 incomplete port \u2014 interactive tmux session management, ported-but-unwired pending wiring (td-38 tmux). See README \u2192 Ported-but-unwired."
+      "reason": "DPLAN-0220 incomplete port — interactive tmux session management, ported-but-unwired pending wiring (td-38 tmux). See README → Ported-but-unwired."
+    },
+    {
+      "file": "apps/handlers/module_paths.py",
+      "standard": "json_structure",
+      "reason": "DPLAN-0325 - this is the branch's stdlib-only dead-cwd helper and MUST NOT carry the json seam: importing prax puts the logger's own construction (which reads the cwd) onto the very path the helper exists to protect, and log_operation() writes, so wiring it here would put a file write on the import path of every skills module. seedgo's own _is_prelogging_bootstrap names this class and exempted this file until 2026-09-03. Clause 1 (holds no aipass import) still passes. Clause 2 (the logging substrate's imports reach it) passed only because the OLD apps/handlers/json/json_handler.py imported module_file, and _bootstrap_chain is seeded from every branch's json_handler. The canonical shim imports 'from aipass.prax import json_handler' and nothing branch-local, so the chain now reaches the shim and stops - measured 2026-09-03: the chain holds 128 modules and skills' only member is the shim itself. skills is the ONLY branch in the fleet carrying apps/handlers/module_paths.py, so no other sweep leg hits this. Remove the moment clause 2 learns a module-scope importer that is itself in the corpus - reported to @devpulse and @seedgo on 2026-09-03."
     }
   ],
   "notes": {

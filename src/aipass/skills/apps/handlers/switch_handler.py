@@ -71,10 +71,15 @@ def get_state_path() -> Path:
     be relocated (and isolated in tests) without this handler holding a stale
     copy of where it used to be.
 
+    The directory is MEASURED off the fleet service rather than spelled out
+    here: the service recomputes it on every call (AIPASS_TEST_LOG_DIR is read
+    there), so asking it where a document lands cannot drift from where it
+    actually lands.
+
     Returns:
         Path: Location of switch_state.json.
     """
-    return Path(json_handler.SKILLS_JSON_DIR) / STATE_FILENAME
+    return json_handler.get_json_path("switch", "data").parent / STATE_FILENAME
 
 
 def read_state() -> Dict[str, Any]:
@@ -128,7 +133,14 @@ def read_state() -> Dict[str, Any]:
 
 
 def write_state(skills: Dict[str, Any]) -> bool:
-    """Persist the switch state through the branch's atomic writer.
+    """Persist the switch state through the fleet's atomic writer.
+
+    write_json is the service's path primitive for a bespoke document - one
+    outside the config/data/log trio - so the switch keeps the same durability
+    (staged temp file in the target directory, fsync, os.replace with the
+    Windows sharing-violation retry) without this branch owning a second
+    writer. It reports a failed write as False rather than raising, which is
+    exactly the answer this function already gave.
 
     Args:
         skills: Mapping of skill name -> entry dict.
@@ -157,13 +169,11 @@ def write_state(skills: Dict[str, Any]) -> bool:
         "skills": skills,
     }
 
-    try:
-        Path(json_handler.SKILLS_JSON_DIR).mkdir(parents=True, exist_ok=True)
-        json_handler.atomic_write_json(state_path, document)
-        return True
-    except OSError as exc:
-        logger.error("Failed to write the skill switch state to %s: %s", state_path, exc)
+    if not json_handler.write_json(state_path, document):
+        logger.error("Failed to write the skill switch state to %s", state_path)
         return False
+
+    return True
 
 
 def is_enabled(skill_name: str) -> bool:

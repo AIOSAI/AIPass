@@ -1,11 +1,14 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: tests/conftest.py
-# Date: 2026-08-22
-# Version: 2.0.0
+# Date: 2026-09-03
+# Version: 3.0.0
 # Category: canary/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam — the
+#     fleet service resolves its directory per call, so there is no singleton
+#     and no private attribute left to patch (DPLAN-0325)
 #   - v2.0.0 (2026-08-22): Real fixtures — temp dirs, captured logger, sandboxed
 #     json handler, and an autouse guard that keeps tests out of canary_json/
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -16,10 +19,10 @@
 
 """Shared pytest fixtures for canary tests.
 
-The autouse fixture here is the load-bearing one: canary's json_handler is a
-module-level singleton pointed at canary_json/, so without redirection every
-test that touches it would write real files into the branch. mock_infrastructure
-repoints that singleton at a tmp_path for the duration of each test.
+The autouse fixture here is the load-bearing one: canary's json_handler binds
+the fleet's one json service, which writes into canary_json/ unless
+AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that variable per
+test, so every test lands in its own tmp_path without knowing it.
 """
 
 import shutil
@@ -29,8 +32,12 @@ from typing import Generator, List, Tuple
 
 import pytest
 
-from aipass.aipass.shared.json_handler import JsonHandler
 from aipass.canary.apps.handlers.json import json_handler
+
+# Never discover out of .archive/: it holds verbatim disposal copies (old
+# handler tests, the archived json_dir pin) that must not be collected or
+# rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
 @pytest.fixture
@@ -46,8 +53,8 @@ def temp_test_dir() -> Generator[Path, None, None]:
 def sample_test_data() -> dict:
     """Provides sample test data shaped like a valid 'data' JSON document."""
     return {
-        "created": "2026-08-22",
-        "last_updated": "2026-08-22",
+        "created": "2026-09-03",
+        "last_updated": "2026-09-03",
         "test_key": "test_value",
         "sample_data": "example",
     }
@@ -55,19 +62,26 @@ def sample_test_data() -> dict:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect the branch json_handler singleton at a temp dir.
+    """Redirect canary's json writes into a temp dir.
 
-    autouse=True on purpose: canary's re-exported handler functions are bound
-    methods of one module-level instance, so a test that forgets to redirect
-    writes into the real canary_json/. The guard belongs on every test, not on
-    the ones that remember.
+    autouse=True on purpose: the shim's names write into the real canary_json/
+    unless the seam is set, so a test that forgets to redirect pollutes the
+    branch. The guard belongs on every test, not on the ones that remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
 
     Returns:
         The sandbox directory the handler now writes into.
     """
-    sandbox = tmp_path / "canary_json"
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/canary/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(json_handler._handler, "_json_dir", sandbox)
     return sandbox
 
 
@@ -94,13 +108,3 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
     monkeypatch.setattr(canary_entry, "logger", _CapturingLogger())
     return captured
-
-
-@pytest.fixture
-def mock_json_handler(tmp_path) -> JsonHandler:
-    """A throwaway JsonHandler writing into an isolated directory.
-
-    Returns:
-        JsonHandler bound to a fresh tmp directory.
-    """
-    return JsonHandler(json_dir=tmp_path / "isolated_json")

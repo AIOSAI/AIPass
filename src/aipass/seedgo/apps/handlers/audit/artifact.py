@@ -66,13 +66,22 @@ _SEEDGO_ROOT = module_file(__file__).parents[3]
 ARTIFACT_DIR_NAME = ".seedgo"
 ARTIFACT_FILE_NAME = "last_audit.json"
 
+#: The pack whose artifact keeps the bare historical name - the compliance
+#: record CI and every saved consumer already read. Every other pack is
+#: suffixed so it can never be mistaken for this one.
+DEFAULT_PACK_NAME = "aipass"
+
 
 # =============================================================================
 # PATHS
 # =============================================================================
 
 
-def default_artifact_path(specific_branch: Optional[str] = None, no_bypass: bool = False) -> Path:
+def default_artifact_path(
+    specific_branch: Optional[str] = None,
+    no_bypass: bool = False,
+    pack: Optional[str] = None,
+) -> Path:
     """Default destination for an audit artifact.
 
     Derived from this file's location, so it follows the checkout wherever it
@@ -90,14 +99,26 @@ def default_artifact_path(specific_branch: Optional[str] = None, no_bypass: bool
     same fleet, same tree, deliberately lower numbers. Overwriting the normal
     artifact with it would hand the next cold reader a confident wrong answer.
 
+    A non-default PACK gets ``_pack_{name}`` for the same reason, and it was
+    added last because the gap was live: ``audit pytest_quality`` is a fleet
+    run with no flags, so it wrote ``last_audit.json`` -- replacing the
+    47-standard compliance record with a 12-standard shadow score that gates
+    nothing. ``aipass`` and an unstated pack keep the historical bare name,
+    because that name IS the compliance record every existing consumer reads;
+    renaming it would fix the collision by breaking what the collision put at
+    risk.
+
     Args:
         specific_branch: Branch name for a single-branch run, else None.
         no_bypass: True when the run had every bypass rule switched off.
+        pack: Checker pack name. None or ``aipass`` keeps the bare name.
 
     Returns:
         Path to write the artifact to.
     """
     stem = ARTIFACT_FILE_NAME.removesuffix(".json")
+    if pack and pack != DEFAULT_PACK_NAME:
+        stem = f"{stem}_pack_{pack}"
     if specific_branch:
         stem = f"{stem}_{specific_branch}"
     if no_bypass:
@@ -329,7 +350,7 @@ def write_audit_artifact(
     Returns:
         Path the artifact was written to.
     """
-    path = Path(output_path) if output_path else default_artifact_path(specific_branch, no_bypass)
+    path = Path(output_path) if output_path else default_artifact_path(specific_branch, no_bypass, pack=pack)
     document = build_artifact(audit_results, pack=pack, specific_branch=specific_branch, no_bypass=no_bypass)
 
     path.parent.mkdir(parents=True, exist_ok=True)

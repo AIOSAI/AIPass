@@ -1,14 +1,13 @@
+# DPLAN-0323 phase 6 (Patrick's ruling 2026-09-01): no coverage percentage
+# targets - "I don't think our framework is built that way." The coverage CI
+# job keeps running and uploading, so the codecov dashboard stays available as
+# an INSTRUMENT; nothing here gates or comments on a PR. The patch status used
+# to paint a red X on every PR (even when it passed - the glyph meant "lines
+# missing"), which incentivised coverage-chasing tests. That is the bloat the
+# campaign exists to kill.
 coverage:
   status:
-    project:
-      default:
-        target: 75%
-        threshold: 2%
-    patch:
-      default:
-        target: 50%
+    project: off
+    patch: off
 
-comment:
-  layout: "reach,diff,flags,files"
-  behavior: default
-  require_changes: false
+comment: false

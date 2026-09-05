@@ -115,3 +115,4 @@ Your continuity across sessions. Save proactively — after milestones, decision
  - Public repo — write as if it ships, because it does. No secrets in the tree, no hardcoded paths (`pathlib`, never `/home/...`), cross-platform.
  - No bare imports — always `from aipass.<agent>.apps...`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
+ - Creating NEW test files requires permission — a hook gate refuses it by policy (`.aipass/test_write_policy.json`, Patrick's ruling). Editing or fixing an existing test is fine. Need a new test? Mail @devpulse with the defect or contract it pins — no test without one. Don't route around the gate; a refusal names the policy and the cure.

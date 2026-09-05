@@ -21,7 +21,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 
 
 MODULE_NAME = "drive_check"
@@ -64,7 +64,7 @@ def run_drive_check() -> bool:
         cli_error(f"Drive connectivity test FAILED: {result['error']}")
         logger.warning(f"[backup] Drive test failed: {result['error']}")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "drive_check_complete",
         {"success": result["success"]},
     )

@@ -199,7 +199,14 @@ def _save_state() -> None:
         "last_updated": today,
         "files": files,
     }
-    json_handler.save_json(_DATA_FILE, "data", data)
+    # save_json raises rather than answering False since DPLAN-0325 — a lost
+    # document must not look like success. This is called from scan_rates(),
+    # which runs on the monitor's threads, so the raise is caught here: a
+    # writer that kills the thread it reports on is worse than a missed save.
+    try:
+        json_handler.save_json(_DATA_FILE, "data", data)
+    except (json_handler.WriteFailed, json_handler.InvalidDocument) as exc:
+        logger.warning("[rate_tracker] could not persist file states: %s", exc)
 
 
 def scan_rates() -> list:

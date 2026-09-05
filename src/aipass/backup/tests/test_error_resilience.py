@@ -56,56 +56,6 @@ class TestVanishedFileRace:
         assert _build_current_timestamps(filtered) is None
 
 
-class TestFileErrors:
-    """FileNotFoundError, missing_file, file_not_found handling."""
-
-    def test_load_missing_file(self, tmp_path: Path) -> None:
-        """FileNotFoundError -- missing_file / file_not_found returns empty dict."""
-        result = json_handler.load_json(str(tmp_path / "does_not_exist.json"))
-        assert result == {}
-
-    def test_load_nonexistent_dir(self, tmp_path: Path) -> None:
-        """nonexistent / missing_dir path -- load handles gracefully."""
-        result = json_handler.load_json(str(tmp_path / "not_a_dir" / "file.json"))
-        assert result == {}
-
-
-class TestCorruptData:
-    """JSONDecodeError, corrupt, malformed handling."""
-
-    def test_corrupt_json_self_heals(self, tmp_path: Path) -> None:
-        """JSONDecodeError -- corrupt file renamed to .corrupt."""
-        p = tmp_path / "bad.json"
-        p.write_text("not valid json {{{", encoding="utf-8")
-        result = json_handler.load_json(str(p))
-        assert result == {}
-
-    def test_malformed_json(self, tmp_path: Path) -> None:
-        """malformed JSON with trailing comma."""
-        p = tmp_path / "malformed.json"
-        p.write_text('{"key": "value",}', encoding="utf-8")
-        result = json_handler.load_json(str(p))
-        assert result == {}
-
-
-class TestEmptyContent:
-    """empty_file, empty_content handling."""
-
-    def test_empty_file(self, tmp_path: Path) -> None:
-        """empty_file / empty_content -- empty file returns empty dict."""
-        p = tmp_path / "empty.json"
-        p.write_text("", encoding="utf-8")
-        result = json_handler.load_json(str(p))
-        assert result == {}
-
-    def test_whitespace_only(self, tmp_path: Path) -> None:
-        """File with only whitespace treated as empty."""
-        p = tmp_path / "whitespace.json"
-        p.write_text("   \n  \n  ", encoding="utf-8")
-        result = json_handler.load_json(str(p))
-        assert result == {}
-
-
 class TestMissingProjectRoot:
     """A project path that does not exist must be refused, never scaffolded.
 
@@ -166,23 +116,190 @@ class TestMissingProjectRoot:
         assert result.files_copied >= 1
 
 
-class TestSaveErrors:
-    """Error paths for save operations -- pytest.raises tokens."""
+class TestUnreadableDocumentsAreLoud:
+    """A present-but-unreadable document is an error, never an empty one.
 
-    def test_save_non_serializable(self, tmp_path: Path) -> None:
-        """pytest.raises -- save_json with circular reference data."""
-        p = tmp_path / "fail.json"
-        circular: dict = {}
-        circular["self"] = circular
-        with pytest.raises((TypeError, ValueError)):
-            json_handler.save_json(str(p), circular)
+    Under the old handler ``load_json`` answered ``{}`` for a missing file AND
+    for a corrupt one, so no caller could tell them apart. The registry is the
+    sharpest case: ``register_project`` writes back what it read, so the empty
+    answer replaced every registration in the file with the one being added.
+    The fleet's ``read_json`` answers None for both; backup separates them
+    here, once per document, and refuses to write over what it could not read.
+    """
 
-    def test_create_default_raises_concept(self) -> None:
-        """_create_default / _get_default_template raises ValueError for unknown module.
+    def _corrupt(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not valid json", encoding="utf-8")
 
-        Backup's json_handler doesn't have _create_default, but the standard
-        requires the token. The mock_json_handler in conftest covers it.
-        pytest.raises(ValueError) -- _create_default token coverage.
+    def test_missing_config_still_falls_back_to_defaults(self, tmp_path: Path) -> None:
+        """A project with no config yet is not an error -- absence is absence."""
+        from aipass.backup.apps.handlers.project.config import DEFAULTS, load_project_config
+
+        config = load_project_config(str(tmp_path))
+
+        assert config["backup_mode"] == DEFAULTS["backup_mode"]
+
+    def test_corrupt_config_raises(self, tmp_path: Path) -> None:
+        """A corrupt config must not silently become DEFAULTS mid-backup."""
+        from aipass.backup.apps.handlers.project.config import load_project_config
+
+        self._corrupt(tmp_path / ".backup" / "config.json")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            load_project_config(str(tmp_path))
+
+    def test_corrupt_registry_raises_and_survives_on_disk(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The data-loss path: a corrupt registry must never read as empty.
+
+        Answering {} here and carrying on would have register_project write a
+        one-project registry over every other registration, with no copy left.
         """
-        with pytest.raises(ValueError):
-            raise ValueError("unknown module type")
+        from aipass.backup.apps.handlers.project import registry
+
+        corrupt = tmp_path / "project_registry.json"
+        self._corrupt(corrupt)
+        monkeypatch.setattr(registry, "REGISTRY_PATH", corrupt)
+
+        with pytest.raises(json_handler.InvalidDocument):
+            registry.register_project("newproject", str(tmp_path))
+
+        assert corrupt.read_text(encoding="utf-8") == "{not valid json"
+
+    def test_corrupt_changelog_raises(self, tmp_path: Path) -> None:
+        """A corrupt changelog must not be overwritten with a one-entry one."""
+        from aipass.backup.apps.handlers.state.changelog import append_changelog
+
+        self._corrupt(tmp_path / ".backup" / "changelog.json")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            append_changelog(str(tmp_path), {"mode": "snapshot"})
+
+    def test_corrupt_timestamps_raises(self, tmp_path: Path) -> None:
+        """A corrupt timestamp map is an error, not 'every file changed'."""
+        from aipass.backup.apps.handlers.state.timestamps import load_timestamps
+
+        self._corrupt(tmp_path / ".backup" / "timestamps.json")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            load_timestamps(str(tmp_path))
+
+    def test_corrupt_tracker_raises(self, tmp_path: Path) -> None:
+        """A corrupt drive tracker is an error, not 'nothing uploaded yet'."""
+        from aipass.backup.apps.handlers.drive.tracker import load_tracker
+
+        self._corrupt(tmp_path / ".backup" / "drive_tracker.json")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            load_tracker(str(tmp_path))
+
+    def test_empty_file_is_unreadable_not_empty(self, tmp_path: Path) -> None:
+        """empty_file / empty_content -- zero bytes is not a valid document.
+
+        The old handler answered {} here, indistinguishable from "no config
+        yet". A truncated write leaves exactly this state, so it is the one
+        corruption most likely to be real.
+        """
+        from aipass.backup.apps.handlers.project.config import load_project_config
+
+        empty = tmp_path / ".backup" / "config.json"
+        empty.parent.mkdir(parents=True, exist_ok=True)
+        empty.write_text("", encoding="utf-8")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            load_project_config(str(tmp_path))
+
+    def test_readable_but_not_an_object_raises(self, tmp_path: Path) -> None:
+        """Valid JSON of the wrong shape used to reach an AttributeError."""
+        from aipass.backup.apps.handlers.state.timestamps import load_timestamps
+
+        ts = tmp_path / ".backup" / "timestamps.json"
+        ts.parent.mkdir(parents=True, exist_ok=True)
+        ts.write_text('["not", "an", "object"]', encoding="utf-8")
+
+        with pytest.raises(json_handler.InvalidDocument):
+            load_timestamps(str(tmp_path))
+
+
+class TestWriteResultsAreChecked:
+    """``write_json`` answers a bool; every backup caller reads it."""
+
+    def test_save_project_config_reports_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """False from the primitive is False from the handler, not True."""
+        from aipass.backup.apps.handlers.project import config
+
+        monkeypatch.setattr(config.json_handler, "write_json", lambda *a, **k: False)
+
+        assert config.save_project_config(str(tmp_path), {"backup_mode": "snapshot"}) is False
+
+    def test_save_timestamps_raises_on_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """A versioned run whose timestamps never landed is not a success."""
+        from aipass.backup.apps.handlers.state import timestamps
+
+        monkeypatch.setattr(timestamps.json_handler, "write_json", lambda *a, **k: False)
+
+        with pytest.raises(json_handler.WriteFailed):
+            timestamps.save_timestamps(str(tmp_path), {"a.txt": 1.0})
+
+    def test_setup_reports_a_config_it_could_not_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """create_backup_dir used to answer a path after a failed config write."""
+        from aipass.backup.apps.handlers.project import setup
+
+        monkeypatch.setattr(setup.json_handler, "write_json", lambda *a, **k: False)
+
+        assert setup.create_backup_dir(str(tmp_path)) is None
+
+
+class TestAuditLog:
+    """backup's own audit trail -- JSONL, not the fleet's per-module json log."""
+
+    def test_record_shape_flattens_the_payload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """timestamp + operation + the operation's own fields, one line."""
+        import json
+
+        from aipass.backup.apps.handlers.audit import trail
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        trail.log_operation("probe_op", {"project_root": "/some/project"})
+
+        stream = tmp_path / "backup" / "logs" / "operations.jsonl"
+        entry = json.loads(stream.read_text(encoding="utf-8").strip())
+        assert entry["operation"] == "probe_op"
+        assert entry["project_root"] == "/some/project"
+        assert entry["timestamp"]
+
+    def test_the_path_is_recomputed_per_call(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The seam is read on every call, never captured at import.
+
+        This is what keeps the suite off the branch's live
+        logs/operations.jsonl -- the reason 37 real writes used to land there.
+        """
+        from aipass.backup.apps.handlers.audit import trail
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "first"))
+        first = trail.log_path()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "second"))
+
+        assert trail.log_path() != first
+
+    def test_an_empty_seam_is_absence_not_a_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An empty env value must not redirect the stream to the cwd."""
+        from aipass.backup.apps.handlers.audit import trail
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
+
+        assert trail.log_path().name == "operations.jsonl"
+        assert trail.log_path().parent.parent.name == "backup"
+
+    def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The audit trail is a record of work, not the work."""
+        from aipass.backup.apps.handlers.audit import trail
+
+        def _refuse(*args: object, **kwargs: object) -> None:
+            raise OSError("audit stream unwritable")
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        monkeypatch.setattr(trail, "append_jsonl", _refuse)
+
+        assert trail.log_operation("probe_op", {}) is None

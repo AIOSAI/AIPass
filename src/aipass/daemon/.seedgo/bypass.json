@@ -144,7 +144,10 @@
       "file": "apps/modules/logger.py",
       "standard": "cli",
       "reason": "Circular dependency - logger cannot import CLI",
-      "lines": [146, 177],
+      "lines": [
+        146,
+        177
+      ],
       "pattern": "if __name__ == '__main__'"
     },
     "fields": {

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 from . import tracker as tracker_mod
 
 try:
@@ -140,7 +140,7 @@ def upload_single_file(
                 backup_root,
                 drive_file_id,
             )
-            json_handler.log_operation(
+            trail.log_operation(
                 "upload_file",
                 {
                     "file": str(local_file),
@@ -151,7 +151,7 @@ def upload_single_file(
             return True
     except Exception as exc:
         logger.warning(f"Failed to upload {local_file}: {exc}")
-        json_handler.log_operation(
+        trail.log_operation(
             "upload_file_error",
             {"file": str(local_file), "error": str(exc)},
         )
@@ -251,7 +251,7 @@ def upload_batch(
 
             _maybe_batch_save(completed)
 
-    json_handler.log_operation(
+    trail.log_operation(
         "upload_batch_complete",
         {"uploaded": uploaded, "failed": failed, "total": len(files)},
     )

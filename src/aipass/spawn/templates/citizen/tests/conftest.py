@@ -2,10 +2,13 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: {{DATE}}
-# Version: 2.0.0
+# Version: 3.0.0
 # Category: {{BRANCH}}/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.0.0 ({{DATE}}): The json redirect is the AIPASS_TEST_LOG_DIR seam - the
+#     fleet service resolves its directory per call, so there is no singleton
+#     and no private attribute left to patch (DPLAN-0325)
 #   - v2.0.0 ({{DATE}}): Real fixtures - temp dirs, captured logger, sandboxed
 #     json handler, and an autouse guard that keeps tests out of {{BRANCH}}_json/
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -16,10 +19,10 @@
 
 """Shared pytest fixtures for {{BRANCH}} tests.
 
-The autouse fixture here is the load-bearing one: this branch's json_handler is
-a module-level singleton pointed at {{BRANCH}}_json/, so without redirection
-every test that touches it would write real files into the branch.
-mock_infrastructure repoints that singleton at a tmp_path for each test.
+The autouse fixture here is the load-bearing one: this branch's json_handler
+binds the fleet's one json service, which writes into {{BRANCH}}_json/ unless
+AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that variable per
+test, so every test lands in its own tmp_path without knowing it.
 """
 
 import shutil
@@ -29,7 +32,6 @@ from typing import Generator, List, Tuple
 
 import pytest
 
-from aipass.aipass.shared.json_handler import JsonHandler
 from aipass.{{BRANCH}}.apps.handlers.json import json_handler
 
 
@@ -55,19 +57,27 @@ def sample_test_data() -> dict:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect the branch json_handler singleton at a temp dir.
+    """Redirect this branch's json writes into a temp dir.
 
-    autouse=True on purpose: the re-exported handler functions are bound methods
-    of one module-level instance, so a test that forgets to redirect writes into
-    the real {{BRANCH}}_json/. The guard belongs on every test, not on the ones
-    that remember.
+    autouse=True on purpose: the shim's names write into the real
+    {{BRANCH}}_json/ unless the seam is set, so a test that forgets to redirect
+    pollutes the branch. The guard belongs on every test, not on the ones that
+    remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here - after import - still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
 
     Returns:
         The sandbox directory the handler now writes into.
     """
-    sandbox = tmp_path / "{{BRANCH}}_json"
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/<branch>/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(json_handler._handler, "_json_dir", sandbox)
     return sandbox
 
 
@@ -94,13 +104,3 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
     monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
     return captured
-
-
-@pytest.fixture
-def mock_json_handler(tmp_path) -> JsonHandler:
-    """A throwaway JsonHandler writing into an isolated directory.
-
-    Returns:
-        JsonHandler bound to a fresh tmp directory.
-    """
-    return JsonHandler(json_dir=tmp_path / "isolated_json")

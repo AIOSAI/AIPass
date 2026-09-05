@@ -1,24 +1,65 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 1.0.0
+# Version: 2.0.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-05-18
+# Modified: 2026-09-03
 # =============================================
 
-"""Shared pytest fixtures for hooks tests."""
+"""Shared pytest fixtures for hooks tests.
+
+The json redirect is the ``AIPASS_TEST_LOG_DIR`` seam (DPLAN-0325). This
+branch's ``json_handler`` binds the fleet's one json service, which resolves
+this branch's document directory PER CALL and honours that variable itself —
+there is no singleton and no private attribute left to patch.
+
+The variable is armed twice, on purpose. At import, so it is set before any
+test runs: the repo-root conftest REFUSES a run that reaches a shim-bound
+``log_operation`` with the seam unset, because such a run would write into live
+``<branch>_json`` directories, and its autouse fixture runs before this file's.
+Then per test by ``mock_infrastructure``, so each test gets its own tmp_path.
+"""
 
 import importlib
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
 from unittest.mock import patch
 
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
+
 import pytest
+
+from aipass.hooks.apps.handlers.json import json_handler
+
+collect_ignore_glob = [".archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect this branch's json writes into a temp dir.
+
+    autouse=True on purpose: the shim's names write into the real hooks_json/
+    unless the seam is set, so a test that forgets to redirect pollutes the
+    branch. The guard belongs on every test, not on the ones that remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture

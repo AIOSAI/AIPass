@@ -36,7 +36,7 @@ class TestCheckCeiling:
 
     def test_under_both_limits_returns_none(self, tmp_path: Path) -> None:
         """A normal project passes and the run proceeds."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, ["src/a.py", "src/b.py"])
@@ -44,7 +44,7 @@ class TestCheckCeiling:
 
     def test_file_count_breach(self, tmp_path: Path) -> None:
         """More files than the ceiling refuses the run."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, [f"t/{i}.o" for i in range(6)])
@@ -57,7 +57,7 @@ class TestCheckCeiling:
 
     def test_equal_to_limit_is_allowed(self, tmp_path: Path) -> None:
         """The ceiling is a maximum, not an exclusive bound."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, [f"t/{i}.o" for i in range(5)])
@@ -65,7 +65,7 @@ class TestCheckCeiling:
 
     def test_total_size_breach(self, tmp_path: Path) -> None:
         """Total bytes over the ceiling refuses even when the file count is small."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, ["big/blob.bin"], size=4096)
@@ -79,7 +79,7 @@ class TestCheckCeiling:
 
     def test_zero_disables_file_ceiling(self, tmp_path: Path) -> None:
         """max_backup_files=0 means unlimited, for a project that really is huge."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, [f"t/{i}.o" for i in range(20)])
@@ -87,7 +87,7 @@ class TestCheckCeiling:
 
     def test_zero_disables_size_ceiling(self, tmp_path: Path) -> None:
         """max_backup_size_gb=0 skips the byte pass entirely."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, ["big/blob.bin"], size=4096)
@@ -99,7 +99,7 @@ class TestCheckCeiling:
         The whole point is to fail fast: statting 300k files to confirm a
         refusal already decided is the grind we are preventing.
         """
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan import ceiling
 
             files = _files(tmp_path, [f"t/{i}.o" for i in range(6)])
@@ -109,7 +109,7 @@ class TestCheckCeiling:
 
     def test_vanished_file_does_not_abort_measurement(self, tmp_path: Path) -> None:
         """A file gone between filter and measure contributes nothing, never raises."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             files = _files(tmp_path, ["src/a.py"])
@@ -118,7 +118,7 @@ class TestCheckCeiling:
 
     def test_defaults_apply_when_config_is_empty(self, tmp_path: Path) -> None:
         """A config with no ceiling keys still gets the default ceilings."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import DEFAULT_MAX_FILES, check_ceiling
 
             assert DEFAULT_MAX_FILES > 0
@@ -134,7 +134,7 @@ class TestOffenderReporting:
 
     def test_names_the_rust_target_dir(self, tmp_path: Path) -> None:
         """baud's shape: the offender is app/src-tauri/target, not the deps leaf."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             rels = [f"app/src-tauri/target/debug/deps/o{i}.rcgu.o" for i in range(10)]
@@ -146,7 +146,7 @@ class TestOffenderReporting:
 
     def test_offender_counts_are_real(self, tmp_path: Path) -> None:
         """The reported count matches the files under that directory."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             rels = [f"target/debug/o{i}.o" for i in range(7)]
@@ -156,7 +156,7 @@ class TestOffenderReporting:
 
     def test_root_level_files_group_under_dot(self, tmp_path: Path) -> None:
         """Files at the project root have no directory to blame."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             breach = check_ceiling(_files(tmp_path, ["a.txt", "b.txt", "c.txt"]), {"max_backup_files": 2})
@@ -165,7 +165,7 @@ class TestOffenderReporting:
 
     def test_detail_lines_name_the_config_escape_hatch(self, tmp_path: Path) -> None:
         """The operator is told how to raise the ceiling deliberately."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})
@@ -176,7 +176,7 @@ class TestOffenderReporting:
 
     def test_summary_reads_as_a_refusal(self, tmp_path: Path) -> None:
         """summary() states the measurement and the ceiling."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
 
             breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})

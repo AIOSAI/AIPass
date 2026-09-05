@@ -295,8 +295,15 @@ class TestNobodyEvictsThePackageOneWay:
         stale = self.KNOWN_BARE_PACKAGE_STAND_INS - self._bare_package_stand_ins()
         assert not stale, "fixed — remove from KNOWN_BARE_PACKAGE_STAND_INS:\n  " + "\n  ".join(sorted(stale))
 
-    @pytest.mark.parametrize("name", ["test_json_handler", "test_tab_renderer", "test_config_loader"])
-    def test_the_three_converted_fixtures_still_use_delitem(self, name):
-        """Named one by one: a fixture reverting to a bare pop is a silent relapse."""
+    @pytest.mark.parametrize("name", ["test_tab_renderer", "test_config_loader"])
+    def test_the_converted_fixtures_still_use_delitem(self, name):
+        """Named one by one: a fixture reverting to a bare pop is a silent relapse.
+
+        test_json_handler was a third here until DPLAN-0325: its old fixture
+        evicted the json package to reimport the shared handler. The shim wiring
+        test that replaced it evicts nothing - it measures the live service off
+        the AIPASS_TEST_LOG_DIR seam - so there is nothing left to restore, and
+        it dropped off this list rather than carrying a delitem it does not use.
+        """
         source = (_TESTS / f"{name}.py").read_text(encoding="utf-8")
         assert "monkeypatch.delitem(sys.modules" in source, f"{name}.py no longer restores what it evicts"

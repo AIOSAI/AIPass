@@ -29,7 +29,7 @@ from typing import Any
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 
 try:
     from aipass.api.apps.modules.google_client import (
@@ -79,7 +79,7 @@ class DriveClient:
                 "failed to import. Install: pip install google-auth "
                 "google-auth-oauthlib google-api-python-client"
             )
-            json_handler.log_operation(
+            trail.log_operation(
                 "drive_authenticate",
                 {"success": False, "reason": self.last_error},
             )
@@ -89,12 +89,12 @@ class DriveClient:
             self._drive_service = get_drive_service(thread_safe=False)  # type: ignore[misc]
             if self._drive_service is None:
                 self.last_error = "get_drive_service returned None"
-                json_handler.log_operation(
+                trail.log_operation(
                     "drive_authenticate",
                     {"success": False, "reason": self.last_error},
                 )
                 return False
-            json_handler.log_operation("drive_authenticate", {"success": True})
+            trail.log_operation("drive_authenticate", {"success": True})
             return True
         except Exception as exc:
             self.last_error = str(exc)
@@ -105,7 +105,7 @@ class DriveClient:
                 logger.error(f"[backup] Drive sync unavailable: {exc}")
             else:
                 logger.warning(f"Drive authentication failed: {exc}")
-            json_handler.log_operation(
+            trail.log_operation(
                 "drive_authenticate",
                 {"success": False, "error": self.last_error},
             )
@@ -173,7 +173,7 @@ class DriveClient:
             result = self._api_call(request)
             if result and result.get("files"):
                 self.backup_folder_id = result["files"][0]["id"]
-                json_handler.log_operation(
+                trail.log_operation(
                     "get_backup_folder",
                     {"action": "found_existing", "folder_id": self.backup_folder_id},
                 )
@@ -200,7 +200,7 @@ class DriveClient:
             if old_count > 0:
                 self.file_tracker.clear()
                 self.project_folder_cache.clear()
-                json_handler.log_operation(
+                trail.log_operation(
                     "tracker_reset",
                     {
                         "message": f"New backup folder - reset {old_count} tracker entries",
@@ -215,7 +215,7 @@ class DriveClient:
                 self.backup_folder_id = None
                 return None
 
-            json_handler.log_operation(
+            trail.log_operation(
                 "get_backup_folder",
                 {"action": "created_new", "folder_id": new_id},
             )

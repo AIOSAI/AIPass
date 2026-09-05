@@ -77,6 +77,10 @@ drone @seedgo audit-tests @branch                      # Execution-tier test qua
 drone @seedgo audit-tests <directory>                  # Any directory with pytest targets
 drone @seedgo audit-tests aipass                       # Every citizen
 
+# Test quality v5 (generic pack, shadow mode — scores, gates nothing)
+drone @seedgo audit pytest_quality @branch             # 11 AST rules over a project's tests
+drone @seedgo audit pytest_quality                     # Every citizen
+
 # README
 drone @seedgo readme update @flow                      # README auto-generation for a branch
 drone @seedgo readme check @seedgo                     # Marker-driven freshness check
@@ -111,8 +115,10 @@ seedgo/
 │   ├── seedgo.py                    # Entry point — thin router (326 lines)
 │   │                                #   discover_modules() loads apps/modules/*.py
 │   │                                #   route_command() dispatches to first handler returning True
-│   ├── modules/                     # 10 business logic modules
+│   ├── modules/                     # 12 business logic modules
 │   │   ├── audit_tests.py           # Execution-tier test quality (runs the suite in a copy)
+│   │   ├── inventory.py             # test-inventory verb — every test ranked for READING
+│   │   ├── shadow_cycle.py          # shadow-cycle verb — the three weekly passes, one command
 │   │   ├── standards_audit.py       # Pack-aware compliance audit orchestrator
 │   │   ├── standards_query.py       # Pack-aware content query
 │   │   ├── diagnostics_audit.py     # Pyright diagnostics via audit pipeline
@@ -123,7 +129,7 @@ seedgo/
 │   │   ├── permissions.py           # TRUSTED_CROSS_WRITERS list for hook + drone auth
 │   │   ├── readme_update.py         # README generation module
 │   │   └── test_map.py              # Custom function test coverage mapping
-│   └── handlers/                    # 12 handler directories + 2 shared modules
+│   └── handlers/                    # 13 handler directories + 2 shared modules
 │       ├── module_root.py           # Guarded module_file() — the one import-time __file__ resolve
 │       ├── registry_scan.py         # Case-EXACT registry discovery — the one reader every lane uses
 │       ├── aipass_standards/        # 45 checker standards (132 files: 45 check + 45 content
@@ -157,8 +163,11 @@ seedgo/
 │       ├── readme/                  # README generator + branch resolution
 │       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
+│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, shadow mode
+│       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
+│       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 59 test files, 2691 tests
+├── tests/                           # 63 test files, 3070 tests
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts

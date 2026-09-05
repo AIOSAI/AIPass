@@ -23,7 +23,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, header, success, warning
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.ceiling import CeilingBreach
@@ -54,7 +54,7 @@ def refuse_missing_root(mode: str, project_root: str, show_panels: bool = True) 
     logger.error(f"[backup] {mode} refused — {message}")
     if show_panels:
         error(message)
-    json_handler.log_operation(
+    trail.log_operation(
         f"{mode}_refused",
         {"project_root": project_root, "reason": "not a directory"},
     )
@@ -81,7 +81,7 @@ def refuse_oversized_run(
         error(message)
         for line in breach.detail_lines():
             console.print(f"[dim]{line}[/dim]")
-    json_handler.log_operation(
+    trail.log_operation(
         f"{mode}_refused",
         {
             "project_root": project_root,
@@ -164,7 +164,7 @@ def show_result_summary(result: BackupResult) -> None:
     location = result.backup_path if result.backup_path else result.project_root
     console.print(f"  [dim]Duration: {result.duration_seconds:.1f}s | Location: {location}[/dim]")
 
-    json_handler.log_operation("render_result", {"mode": result.mode})
+    trail.log_operation("render_result", {"mode": result.mode})
     logger.info(f"[backup] Rendered {result.mode} result: {result.files_copied} files")
 
 
@@ -220,7 +220,7 @@ def show_drive_result(result: dict) -> None:
     if not failed:
         show_backups_now("drive_sync")
 
-    json_handler.log_operation("render_drive_result", {"uploaded": uploaded})
+    trail.log_operation("render_drive_result", {"uploaded": uploaded})
     logger.info(f"[backup] Rendered drive_sync result: {uploaded} uploaded")
 
 

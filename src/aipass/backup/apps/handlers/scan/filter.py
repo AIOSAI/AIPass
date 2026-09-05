@@ -20,7 +20,7 @@ from aipass.prax import logger
 
 from ..ignore.patterns import is_ignored
 from ..ignore.whitelist import is_whitelisted
-from ..json import json_handler
+from ..audit import trail
 
 
 def filter_paths(
@@ -66,7 +66,7 @@ def filter_paths(
 
         result.append((abs_path, rel_path))
 
-    json_handler.log_operation(
+    trail.log_operation(
         "filter_paths",
         {"total": len(paths), "included": len(result), "skipped": skipped},
     )

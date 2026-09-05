@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 
 DEFAULT_MAX_FILES = 25_000
 DEFAULT_MAX_TOTAL_GB = 10
@@ -167,7 +167,7 @@ def check_ceiling(
 
 def _log_breach(breach: CeilingBreach) -> None:
     """Record a refusal in the ops log and the branch log."""
-    json_handler.log_operation(
+    trail.log_operation(
         "ceiling_breach",
         {
             "reason": breach.reason,

@@ -24,7 +24,7 @@ from aipass.cli.apps.modules import console
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.scan.ceiling import check_ceiling
@@ -132,7 +132,7 @@ def handle_command(command: str, args: list) -> bool:
         logger.warning(f"Drive sync failed: {exc}")
         console.print(f"[bold]Drive sync failed: {exc}[/bold]")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "all_complete",
         {
             "project_root": project_root,

@@ -24,6 +24,24 @@ from types import ModuleType
 from typing import Generator
 from unittest.mock import MagicMock
 
+# The fleet's one json service (prax-owned), captured once at collection while
+# AIPASS_TEST_LOG_DIR is already set above. The branch shim binds this - it does
+# `from aipass.prax import json_handler` - so the prax stand-in in the autouse
+# fixture below must carry it, or any test that reimports the json package (the
+# _fresh_module pattern) would hit ImportError on a mocked prax (DPLAN-0325).
+# It is stdlib-only and resolves its directory per call, so holding it here is
+# safe and lets mock_infrastructure measure the true sandbox off the live service.
+from aipass.prax import json_handler as _prax_json_service
+
+# The branch shim's own file, so the service can resolve memory's json directory
+# the way the shim does, without importing (and caching) the memory json package
+# at collection.
+_SHIM_FILE = str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "json" / "json_handler.py")
+
+# Nothing under .archive/ is a test: the old handler and the subsumed tests live
+# there as gitignored disposal (DPLAN-0325). Keep pytest from discovering them.
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
@@ -38,7 +56,11 @@ def _mock_infrastructure(monkeypatch):
     # instead of a shape — see test_import_isolation.py.
     prax_mod = ModuleType("aipass.prax")
     prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
-    prax_mod.logger = mock_logger
+    prax_mod.logger = mock_logger  # type: ignore[attr-defined]
+    # The branch json shim binds `from aipass.prax import json_handler`; the
+    # stand-in must carry it so a fresh shim import under this mock resolves the
+    # real, stdlib-only service instead of failing (DPLAN-0325).
+    prax_mod.json_handler = _prax_json_service  # type: ignore[attr-defined]
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()
     prax_modules_mod.logger.get_system_logger = MagicMock(return_value=mock_logger)
@@ -81,6 +103,32 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+
+
+@pytest.fixture
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect the shim's json writes into a temp dir, and return that dir.
+
+    The DPLAN-0325 shim wiring test (test_json_handler.py) requests this to pin
+    that get_json_path lands in the branch's redirected sandbox. Deliberately
+    NOT autouse: the whole memory suite runs against the wholesale json_handler
+    mock in ``_mock_infrastructure`` above, and only the wiring test wants the
+    live service. The service recomputes its directory per call, so setting the
+    seam here - after import - still takes effect, and the sandbox is measured
+    off the real shim so it cannot drift from what the service does.
+
+    The service spells the sandbox <seam>/<branch>/<branch>_json, so the seam is
+    its own subdir of tmp_path rather than tmp_path itself, to avoid colliding
+    with a test that builds a directory of the branch's own name.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    handle = _prax_json_service.for_module(_SHIM_FILE)
+    sandbox = handle.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture

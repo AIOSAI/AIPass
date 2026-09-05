@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_shared_bootstrap_safety.py
-# Description: Guard test — shared/ must stay stdlib-only (loads pre-drone)
+# Description: Guard test — shared/'s four modules must stay stdlib-only (pre-drone)
 # Version: 1.0.0
 # Created: 2026-06-10
-# Modified: 2026-06-10
+# Modified: 2026-09-04
 # =============================================
 
 """Guard test: importing aipass.aipass.shared must NOT pull in branch dependencies.
@@ -11,6 +11,12 @@
 The shared/ package is used by bootstrap.py during `aipass init` on fresh machines
 where drone/prax/trigger don't exist yet. If shared/ ever imports a branch
 dependency, init breaks. This test enforces the invariant via subprocess isolation.
+
+Four modules, not five: ``shared/json_handler.py`` retired to ``shared/.archive/``
+on 2026-09-04 (DPLAN-0325 / FPLAN-0489) once the fleet moved to the one shim over
+prax's service. Its stdlib-only scan lives in prax's suite now, where the service
+does — a leg for it here would import a file that no longer exists. The remaining
+four stay: bootstrap has 22 production imports of them and no drone to fall back on.
 """
 
 import subprocess
@@ -22,7 +28,6 @@ ALLOWED_EXACT = {"aipass", "aipass.aipass"}
 SCRIPT = """\
 import sys
 
-import aipass.aipass.shared.json_handler
 import aipass.aipass.shared.json_ops
 import aipass.aipass.shared.project_home
 import aipass.aipass.shared.registry_discovery

@@ -620,6 +620,18 @@ def deliver_email_to_branch(
             branches.update(get_project_tree_branches(_REPO_ROOT))
 
     if to_branch not in branches:
+        # The declared-roots external tier - last, so every local source has
+        # already missed, exactly as wake.resolve_branch orders it. Ungated like
+        # the wake tier (declaration IS the credential); the cross-project
+        # boundary check downstream still refuses an unverified sender, so this
+        # widens DISCOVERY, not policy. Before 2026-09-02 an admin dispatch to
+        # @vera (Vera-Studio) died here as "Unknown branch email" while the wake
+        # already knew the address.
+        from aipass.ai_mail.apps.handlers.registry.read import get_external_branches
+
+        branches.update(get_external_branches(_REPO_ROOT))
+
+    if to_branch not in branches:
         # Refusal is correct here; the STATED REASON is what was wrong. Explain
         # the wall instead of denying the address — the map is not widened.
         return False, _describe_unresolved_address(to_branch, len(branches))

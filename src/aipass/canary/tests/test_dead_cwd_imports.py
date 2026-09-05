@@ -40,7 +40,8 @@ World A convicted handlers/__init__.py:16 (the raw resolve) and World B
 convicted handlers/__init__.py:15 (inspect.stack) — two species in one
 function — with json_handler.py:23 masked underneath both.
 
-Every child probe rides a '<string>' pseudo-frame via python -c. NEVER
+Every child probe rides a '<string>' pseudo-frame: the source is handed to
+the interpreter's -c flag (sys.executable, never a shell command). NEVER
 stdin: linecache caches stdin, and the probe would lie green (@hooks).
 """
 
@@ -48,7 +49,6 @@ import ast
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -63,7 +63,6 @@ CANARY_MODULES = [
     "aipass.canary.apps",
     "aipass.canary.apps.canary",
     "aipass.canary.apps.handlers",
-    "aipass.canary.apps.handlers.paths",
     "aipass.canary.apps.handlers.json",
     "aipass.canary.apps.handlers.json.json_handler",
     "aipass.canary.apps.modules",
@@ -78,7 +77,10 @@ CANARY_MODULES = [
 PRELOAD = [
     "aipass.cli.apps.modules",
     "aipass.prax",
-    "aipass.aipass.shared.json_handler",
+    # aipass.aipass.shared.json_handler was dropped on 2026-09-04: canary's
+    # handler is the fleet shim over prax's service and imports nothing from
+    # aipass/shared any more (DPLAN-0325; the file itself retires under
+    # FPLAN-0489).
 ]
 
 _WORLD_A = """
@@ -374,62 +376,23 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
 
 
 # ---------------------------------------------------------------------------
-# THE QUIET SPECIES (live-cwd pins)
+# THE QUIET SPECIES (live-cwd pins) — RETIRED under DPLAN-0325
 # ---------------------------------------------------------------------------
-# A crash is the loud half. The quiet half is a path that resolves FINE to the
-# WRONG place: the import succeeds, every not-crash assertion above passes, and
-# the branch writes wherever the shell happened to stand. Mutant M6 (helper
-# returns Path.cwd() instead of the raw spelling) is killed by world A but
-# SURVIVES world B, where getcwd still works — so the loud pins alone would
-# have shipped it. These pins run from a foreign cwd and check the VALUE.
-#
-# This matters more here than elsewhere: _CANARY_ROOT feeds _JSON_DIR, which is
-# the directory canary WRITES into. A cwd-derived value there means probe
-# output lands wherever the caller stood, not in the branch.
-
-
-@pytest.mark.parametrize("foreign_cwd", [tempfile.gettempdir(), str(Path.home())])
-def test_json_dir_is_branch_derived_not_cwd_derived(foreign_cwd):
-    """The handler's write destination must not follow the caller's cwd."""
-    body = (
-        "import aipass.canary.apps.handlers.json.json_handler as jh\n"
-        "print('JSON_DIR=' + str(jh._JSON_DIR))\n"
-        "print('ROOT=' + str(jh._CANARY_ROOT))\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", body],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        cwd=foreign_cwd,
-    )
-    assert result.returncode == 0, result.stderr[-1500:]
-    reported = dict(line.split("=", 1) for line in result.stdout.strip().splitlines() if "=" in line)
-    assert reported["ROOT"] == str(BRANCH_ROOT), (
-        f"_CANARY_ROOT followed the caller's cwd ({foreign_cwd}): got {reported['ROOT']}, expected {BRANCH_ROOT}"
-    )
-    assert reported["JSON_DIR"] == str(BRANCH_ROOT / "canary_json"), (
-        f"_JSON_DIR followed the caller's cwd ({foreign_cwd}): "
-        f"got {reported['JSON_DIR']} — canary would write its test data there"
-    )
-
-
-def test_module_file_returns_an_absolute_path_when_resolve_fails():
-    """The fallback spelling is absolute, so callers can still take .parents.
-
-    Since Python 3.9 __file__ is absolute, which is what makes returning the
-    raw spelling a correct answer rather than a degraded one. If that ever
-    stops holding, parents[3] silently indexes a shorter path.
-    """
-    body = _WORLD_B + (
-        "import aipass.canary.apps.handlers.paths as P\n"
-        "p = P.module_file(r'" + str(GUARD_FILE) + "')\n"
-        "print('ABS=' + str(p.is_absolute()))\n"
-        "print('VAL=' + str(p))\n"
-    )
-    result = _run_child(body)
-    assert "ABS=True" in result.stdout, result.stdout + result.stderr[-1000:]
-    assert f"VAL={GUARD_FILE}" in result.stdout, result.stdout
+# The quiet half of the defect is a path that resolves FINE to the WRONG place
+# (mutant M6: a helper returns Path.cwd() instead of the raw spelling — killed
+# by world A, survives world B where getcwd still works). Both pins that lived
+# here read canary-owned, module-level path machinery that the json sweep
+# retired:
+#   - the json_dir pin read the old handler's _CANARY_ROOT/_JSON_DIR constants;
+#   - the module_file pin exercised apps/handlers/paths.py's guarded resolve.
+# The handler is now the byte-identical fleet shim (prax's cwd-free service, no
+# module-level resolve), and paths.py — whose only importer was that handler —
+# is archived alongside it (apps/handlers/.archive/paths.py). canary no longer
+# computes a cwd-sensitive module-level path constant, so the species is not
+# present to pin. The verbatim tests live in
+# tests/.archive/deleted_2026-09-03_test_dead_cwd_imports_{jsondir,modulefile}.py;
+# the write-destination identity is pinned centrally by seedgo's cross-branch
+# contract (IDENTITY axis).
 
 
 # ---------------------------------------------------------------------------

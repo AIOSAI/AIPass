@@ -25,7 +25,7 @@ from aipass.cli.apps.modules import console
 from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import build_versioned_store
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -135,7 +135,7 @@ def run_versioned(
     metadata = build_metadata(result)
     append_changelog(project_root, metadata)
 
-    json_handler.log_operation(
+    trail.log_operation(
         "versioned_complete",
         {
             "project_root": project_root,

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_quality_check.py
 # Description: Test Quality Standards Checker — 11 categories (consolidated)
-# Version: 4.0.0
+# Version: 5.1.0
 # Created: 2026-03-24
 # Modified: 2026-03-27
 # =============================================
@@ -23,7 +23,9 @@ Scoring model:
     Score = (total_items_covered / total_items) * 100
 """
 
+import ast
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from aipass.prax import logger
@@ -48,25 +50,29 @@ RE_IMPORT_DIRECT = re.compile(r"import\s+(?:aipass\.)?\w+\.apps\.(?:modules|hand
 
 # -- Standard test categories and their detection patterns --------------------
 STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
-    # Category 1: JSON Handler (8 items)
-    "json_handler": {
-        "default_factory": [
-            "_create_default",
-            "_get_default_template",
-            "_get_default",
-            "_default_template",
-            "load_template",
-            "_default_config",
-        ],
-        "validate": ["validate_json_structure"],
-        "get_path": ["get_json_path"],
-        "ensure_exists": ["ensure_json_exists"],
-        "load": ["load_json"],
-        "save": ["save_json"],
-        "log_operation": ["log_operation"],
-        "ensure_module": ["ensure_module_jsons"],
-    },
-    # Category 2: CLI Routing (9 items)
+    # RETIRED 2026-09-03, DPLAN-0325 part B section 1. Four categories and six
+    # further items left this table with the fleet's json handler. The scan is
+    # per-branch TEXT; the handler is now ONE service in prax with a byte-
+    # identical shim per branch, so the behaviour it used to grep for is tested
+    # once, by execution, over all 18 shims in
+    # seedgo/tests/test_json_handler_contract.py. A per-branch text scan cannot
+    # see fleet-owned coverage, so it must stop scoring it — measured, the four
+    # swept trees (devpulse, backup, hooks, aipass) each lost their sole carrier
+    # for these items when the DPLAN-0059 stamp files were archived, and CI
+    # gates every branch at 100.
+    #   json_handler (8)             -- the nine handler functions by name
+    #   exception_contracts (3)      -- _create_default / save_json / json_type raising
+    #   data_structure_contracts (3) -- the config/data/log document shape
+    #   conftest_fixtures/mock_json_handler   -- the fixture conftest v3.0.0 deleted
+    #   return_type_contracts/load_correct_type, ensure_returns_bool
+    #   init_provisioning/returns_dict
+    #   infrastructure_mocking/sys_modules_mock, reimport_after_mock
+    #                                -- the stamp's own technique: stub sys.modules,
+    #                                   reload the handler module. There is no shim
+    #                                   to reload.
+    # Retiring an item costs nobody: numerator and denominator move together, so
+    # a branch at 100 today is still 100 at 31/31. Verified over all 18 branches.
+    # Category 1: CLI Routing (9 items)
     "cli_routing": {
         "help_flag": ["--help"],
         "short_help": ['"-h"', "'-h'"],
@@ -78,74 +84,155 @@ STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
         "print_introspection": ["print_introspection"],
         "output_capture": ["capsys", "capfd", "StringIO"],
     },
-    # Category 3: Conftest Fixtures (6 items)
+    # Category 2: Conftest Fixtures (5 items)
     "conftest_fixtures": {
         "temp_dir": ["tmp_path", "temp_test_dir", "temp_dir"],
         "sample_data": ["sample_test_data", "sample_data"],
         "mock_infrastructure": ["mock_infrastructure", "autouse"],
         "mock_logger": ["mock_logger", "mock_log"],
-        "mock_json_handler": ["mock_json_handler", "mock_json"],
+        # mock_json_handler RETIRED with the handler (DPLAN-0325 part B): the
+        # citizen template's conftest v3.0.0 deletes that fixture — the seam is
+        # AIPASS_TEST_LOG_DIR, read by the service per call.
         "cleanup": ["rmtree", "yield", "teardown"],
     },
-    # Category 4: Error Resilience (4 items)
+    # Category 3: Error Resilience (4 items)
     "error_resilience": {
         "missing_file": ["FileNotFoundError", "missing_file", "file_not_found"],
         "corrupt_json": ["JSONDecodeError", "corrupt", "malformed"],
-        "empty_file": ["empty_file", "empty_content"],
+        # Re-scoped 2026-09-03: @aipass's only carrier was the archived json
+        # stamp, yet its live suite has test_empty_project,
+        # test_empty_branch_name_ignored and test_empty_path_flagged. The item
+        # was measuring a spelling, not the concept. Additive — no branch drops.
+        "empty_file": ["empty_file", "empty_content", "test_empty"],
         "nonexistent_dir": ["nonexistent", "missing_dir", "not_a_dir"],
     },
-    # Category 5: Return Type Contracts (4 items)
+    # Category 4: Return Type Contracts (2 items)
     "return_type_contracts": {
         "command_returns_bool": [
             "isinstance(result, bool)",
+            # Re-scoped 2026-09-03: @aipass asserts isinstance(result["ok"], bool)
+            # — a real bool return-type contract the literal token missed because
+            # the variable is subscripted. Additive; no branch drops.
+            ", bool)",
             "returns_bool",
             "return_type",
         ],
         "paths_return_path": ["isinstance(result, Path)", "pathlib.Path"],
-        "ensure_returns_bool": ["ensure_json_exists", "is True"],
-        "load_correct_type": ["isinstance(result, dict)", "isinstance(data, dict)"],
+        # ensure_returns_bool and load_correct_type RETIRED with the handler.
     },
-    # Category 6: Exception Contracts (3 items)
-    "exception_contracts": {
-        "create_default_raises": [
-            "pytest.raises(ValueError)",
-            "ValueError",
-            "_create_default",
-        ],
-        "save_invalid_raises": ["pytest.raises", "save_json"],
-        "invalid_mode_raises": [
-            "pytest.raises(ValueError)",
-            "invalid_mode",
-            "invalid_type",
-        ],
-    },
-    # Category 7: Data Structure Contracts (3 items)
-    "data_structure_contracts": {
-        "config_keys": ["module_name", "config_keys"],
-        "data_keys": ["last_updated", "data_keys"],
-        "log_entry_field": ["log_entry", "operation"],
-    },
-    # Category 8: Success/Failure Paths (4 items)
+    # Category 5: Success/Failure Paths (4 items)
     "success_failure_paths": {
         "known_routes_true": ["assert result is True", "== True"],
         "unknown_returns_false": ["assert result is False", "== False"],
         "help_preempts": ["--help"],
         "no_args_triggers": ["print_introspection"],
     },
-    # Category 9: Init/Provisioning (4 items)
+    # Category 6: Init/Provisioning (3 items)
     "init_provisioning": {
         "creates_files": [".exists()", "ensure_json_exists"],
         "auto_creates_dir": ["mkdir", "makedirs"],
         "no_overwrite": ["overwrite", "no_clobber", "already_exists"],
-        "returns_dict": ["isinstance(result, dict)", "json_type"],
+        # returns_dict RETIRED with the handler — json_type is its concept.
     },
-    # Category 10: Infrastructure Mocking (3 items)
+    # Category 7: Infrastructure Mocking (1 item)
     "infrastructure_mocking": {
         "autouse_fixtures": ["autouse=True", "autouse"],
-        "sys_modules_mock": ["sys.modules"],
-        "reimport_after_mock": ["importlib.reload", "reload("],
+        # sys_modules_mock and reimport_after_mock RETIRED with the handler.
     },
 }
+
+#: Applicability probes: the SUBJECT an item measures, looked for in the
+#: branch's OWN ``apps/`` code. An item is scored only when the branch ships
+#: something for it to be about — an inapplicable item leaves the numerator AND
+#: the denominator for that branch, so it neither convicts nor flatters.
+#:
+#: Added 2026-09-03 (DPLAN-0325 pair 3). @canary's sweep left it at 87 on these
+#: four, and the four had been carried by its archived DPLAN-0059 stamp. The
+#: obvious move was to retire them with the rest, and the measurement refused
+#: it: 16 of 18 branches earn each of these four from tests that have NOTHING
+#: to do with the handler (ai_mail's test_notify, aipass's test_structure_scan,
+#: api's test_secrets). Retiring them fleet-wide would delete four live items
+#: from sixteen branches to cure one.
+#:
+#: What canary actually is, is a branch with no subject: its whole production
+#: surface is ``apps/canary.py`` plus a handlers ``__init__`` — it parses no
+#: JSON, returns no Path, writes no file. Neither does @cli, whose only
+#: file-touching code is the handler it has not swept yet; cli scores these
+#: today from its json tests and hits the identical wall on its own sweep.
+#: So the defect was never the tokens. It was asking every branch for coverage
+#: of something two of them do not do.
+#:
+#: The branch's own ``json_handler.py`` is excluded from the probe on purpose:
+#: it is the fleet's file, byte-identical everywhere, and counting it would
+#: give every branch every subject and make the gate meaningless.
+#:
+#: Known and accepted: a branch could shed an item by deleting production code.
+#: That is a visible act with its own reviewers, and the alternative — charging
+#: a branch for not testing what it does not have — is the failure that is
+#: actually happening.
+ITEM_SUBJECT_PROBES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("error_resilience", "corrupt_json"): ("json.load",),
+    ("error_resilience", "empty_file"): (".read_text(", "open("),
+    ("return_type_contracts", "paths_return_path"): ("-> Path",),
+    ("init_provisioning", "no_overwrite"): (".write_text(", ".mkdir("),
+}
+
+# =============================================
+# WHICH FILES MAY CARRY AN ITEM
+# =============================================
+#
+# The scan below asks "does this token appear anywhere under tests/". Twice in
+# one week that answered yes for the wrong reason, and both shapes are cured
+# here (DPLAN-0325, sessions on pairs 7 and 6a):
+#
+#   THE FILE WAS NOT ABOUT THE CATEGORY. @flow earned
+#   cli_routing/output_capture from a ``StringIO`` inside its json handler
+#   test. Archiving that file as a duplicate dropped flow to 93 and exposed a
+#   gap nothing had ever covered.
+#
+#   THE FILE DID NOT RUN. @drone's test_contracts.py skipped module-wide on a
+#   missing JSON_DIR and was still its sole carrier of command_returns_bool.
+#   A text scan cannot tell a passing assertion from a skipped one.
+#
+# Both gates below are measured against all 18 branches before their strictness
+# moves. The two constants are the dials, and each is set to the value that
+# costs no branch an item TODAY; each carries the measured cost of the next
+# notch and the precondition that makes it free.
+
+#: Discount a file whose module-level skip is CONDITIONAL, not just an
+#: unconditional one. Measured 2026-09-04: flipping this to True today costs
+#: @daemon 7 points (init_provisioning/no_overwrite and
+#: return_type_contracts/command_returns_bool, both carried by its DPLAN-0059
+#: stamp files, which skip on a missing JSON_DIR). @api carries the same shape
+#: and loses nothing. Those stamp files are archived by the branch's own sweep
+#: onto the one json service — @drone's went on 2026-09-04 — so this becomes
+#: free once daemon and api sweep, and drone's exact defect is then caught.
+DISCOUNT_CONDITIONAL_MODULE_SKIPS = False
+
+#: Scope a category's scan to files that are plausibly ABOUT it: a file carries
+#: an item only if it carries at least SUBJECT_MIN_ITEMS_PER_FILE items of that
+#: category. Applied only to categories with at least SUBJECT_SCOPED_CATEGORY_SIZE
+#: scored items — a one-item category (infrastructure_mocking) can never satisfy
+#: a two-item rule, and a two-item one (return_type_contracts) would demand a
+#: perfect score to earn anything. Measured: applying it to every category costs
+#: all 18 branches, up to -23.
+SUBJECT_SCOPED_CATEGORY_SIZE = 5
+
+#: Measured 2026-09-04, threshold by threshold. It shipped at 2 first, and 2
+#: was known at the time to be too weak to convict the case that produced the
+#: finding: @flow's archived json test carried TWO incidental cli_routing
+#: tokens (``is True`` and ``StringIO``), so a two-item rule accepted exactly
+#: the file the defect was reported from. 3 refuses it.
+#:
+#: Held at 2 for one session because 3 charged @prax 4 points: prax earned
+#: conftest_fixtures/sample_data from its test_json_handler.py rather than from
+#: its conftest, which carried 3 of 5 and defined no sample_test_data. @prax
+#: took the template fixture in 3c200c4e — the same restore @flow needed on
+#: pair 7 — so the item is earned where it belongs and the notch came free.
+#: Re-measured over all 18 branches after that landed: no branch moves from 2
+#: to 3. Do not go past 3; at 4 the rule stops describing anything real
+#: (@prax -20, @commons -4, @daemon -4).
+SUBJECT_MIN_ITEMS_PER_FILE = 3
 
 # Pattern-based items from STANDARD_CATEGORIES
 _PATTERN_ITEMS = sum(len(items) for items in STANDARD_CATEGORIES.values())
@@ -333,26 +420,151 @@ def _find_covering_file(
     return None
 
 
+def _module_skip_shape(tree: ast.Module) -> str | None:
+    """Name the way this module refuses to run, or None if it runs.
+
+    Two shapes, both decidable without importing anything: a module-level
+    ``pytest.skip(..., allow_module_level=True)`` (the only call that can stop
+    a module rather than a test), and a module-level ``pytestmark`` carrying
+    ``skip``. ``skipif`` is deliberately NOT one of them — it is a statement
+    about the host, and a file that runs on the fleet's interpreter is a real
+    carrier there.
+    """
+    for node in tree.body:
+        statements = node.body if isinstance(node, ast.If) else [node]
+        for statement in statements:
+            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                continue
+            called = statement.value.func
+            if isinstance(called, ast.Attribute) and called.attr == "skip":
+                if any(keyword.arg == "allow_module_level" for keyword in statement.value.keywords):
+                    return "conditional module-level skip" if isinstance(node, ast.If) else "module-level skip"
+
+        if isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "pytestmark" in names:
+                marks = ast.dump(node.value)
+                if "'skip'" in marks and "'skipif'" not in marks:
+                    return "pytestmark skip"
+    return None
+
+
+def _dead_carrier_reason(filename: str, source: str) -> str | None:
+    """Why this file executes no assertion, or None if it does.
+
+    A file that cannot run cannot be a branch's evidence for anything. Only
+    shapes that are certain from the text count: the module-level skips above,
+    and a test file with no test function in it at all. ``conftest.py`` is
+    exempt from the second — holding fixtures and no tests is its whole job.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "does not parse"
+
+    shape = _module_skip_shape(tree)
+    if shape:
+        if shape.startswith("conditional") and not DISCOUNT_CONDITIONAL_MODULE_SKIPS:
+            return None
+        return shape
+
+    if filename != "conftest.py" and not RE_TEST_FUNC.search(source):
+        return "no test functions"
+    return None
+
+
+def _live_carriers(
+    file_sources: list[tuple[str, str]],
+) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """Split the corpus into files that can carry coverage and files that cannot.
+
+    Returns:
+        (live sources, {discounted filename: why}).
+    """
+    live: list[tuple[str, str]] = []
+    discounted: dict[str, str] = {}
+    for filename, source in file_sources:
+        reason = _dead_carrier_reason(filename, source)
+        if reason:
+            discounted[filename] = reason
+        else:
+            live.append((filename, source))
+    return live, discounted
+
+
+@lru_cache(maxsize=64)
+def _branch_apps_source(branch_path: str) -> str:
+    """Every line of the branch's own production code, concatenated.
+
+    The branch's ``json_handler.py`` is left out: it is the fleet's file, not
+    the branch's, and byte-identical everywhere since DPLAN-0325.
+    """
+    apps = Path(branch_path) / "apps"
+    if not apps.is_dir():
+        return ""
+    chunks: list[str] = []
+    for source_file in sorted(apps.rglob("*.py")):
+        if ".archive" in source_file.parts or source_file.name == "json_handler.py":
+            continue
+        try:
+            chunks.append(source_file.read_text(encoding="utf-8", errors="ignore"))
+        except OSError as exc:
+            logger.info("test_quality: unreadable while probing for item subjects: %s", exc)
+    return "\n".join(chunks)
+
+
+def _inapplicable_items(branch_path: str) -> set[tuple[str, str]]:
+    """The (category, item) pairs this branch ships no subject for."""
+    source = _branch_apps_source(branch_path)
+    return {key for key, probes in ITEM_SUBJECT_PROBES.items() if not any(p in source for p in probes)}
+
+
 def _detect_all_coverage(
     file_sources: list[tuple[str, str]],
+    inapplicable: set[tuple[str, str]] | None = None,
 ) -> dict[str, dict[str, str | None]]:
     """Scan test file sources for coverage across all standard categories.
 
     For each category, for each item, checks if ANY pattern matches in ANY
-    source file. Returns the first file that covers each item.
+    ELIGIBLE source file, and returns the file that covers it. Eligibility is
+    the subject gate documented at ``SUBJECT_SCOPED_CATEGORY_SIZE``: in a large
+    category, one lone token in a file that carries nothing else of that
+    category is an accident of vocabulary, not evidence.
 
     Args:
         file_sources: List of (filename, source_text) tuples.
+        inapplicable: (category, item) pairs this branch ships no subject for.
+            They are excluded from the eligibility count as well as from the
+            score — an item nobody is charged for cannot make a file eligible.
 
     Returns:
         dict mapping category -> {item -> covering_filename or None}
     """
+    skip = inapplicable or set()
     coverage: dict[str, dict[str, str | None]] = {}
 
     for category, items in STANDARD_CATEGORIES.items():
-        coverage[category] = {}
-        for item_name, patterns in items.items():
-            coverage[category][item_name] = _find_covering_file(patterns, file_sources)
+        scored = {name: patterns for name, patterns in items.items() if (category, name) not in skip}
+
+        # What each file carries of THIS category, before any of it counts.
+        carried: dict[str, set[str]] = {}
+        for item_name, patterns in scored.items():
+            for filename, source in file_sources:
+                if any(pattern in source for pattern in patterns):
+                    carried.setdefault(filename, set()).add(item_name)
+
+        if len(scored) >= SUBJECT_SCOPED_CATEGORY_SIZE:
+            eligible = {f for f, got in carried.items() if len(got) >= SUBJECT_MIN_ITEMS_PER_FILE}
+        else:
+            eligible = set(carried)
+
+        # The scan itself is unchanged and still goes through the one helper —
+        # narrowing the corpus is the whole intervention. Kept in corpus order,
+        # so the named carrier does not depend on which item matched first.
+        eligible_sources = [(f, source) for f, source in file_sources if f in eligible]
+        coverage[category] = {
+            item_name: _find_covering_file(patterns, eligible_sources) for item_name, patterns in scored.items()
+        }
 
     return coverage
 
@@ -365,8 +577,8 @@ def _detect_all_coverage(
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Run test quality analysis on a branch.
 
-    Scans all test files and evaluates coverage across 11 categories
-    (10 pattern categories + module coverage).
+    Scans all test files and evaluates coverage across 8 categories
+    (7 pattern categories + module coverage).
     Score = total items covered / total items.
 
     Args:
@@ -455,8 +667,31 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         if source:
             file_sources.append((tf.name, source))
 
-    # Phase 3: Detect coverage across all pattern categories
-    all_coverage = _detect_all_coverage(file_sources)
+    # Phase 3: Detect coverage across all pattern categories.
+    #
+    # Drop the items this branch ships no subject for, from BOTH sides of the
+    # fraction. Reported below rather than applied quietly — a denominator that
+    # changes per branch has to be readable from the outside.
+    inapplicable = _inapplicable_items(branch_path)
+
+    # And drop the files that execute nothing, before anything is credited to
+    # them. Reported the same way, for the same reason.
+    live_sources, discounted = _live_carriers(file_sources)
+    if discounted:
+        checks.append(
+            {
+                "name": "Carriers",
+                "passed": True,
+                "message": (
+                    f"{len(discounted)} file(s) execute nothing and were not credited: "
+                    + ", ".join(f"{f} ({why})" for f, why in sorted(discounted.items()))
+                ),
+            }
+        )
+
+    all_coverage = _detect_all_coverage(live_sources, inapplicable)
+    all_coverage = {name: items for name, items in all_coverage.items() if items}
+    branch_items_total = TOTAL_ITEMS - len(inapplicable)
 
     total_items_covered = 0
 
@@ -562,12 +797,19 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         )
 
     # Score = total coverage percentage
-    score = int((total_items_covered / TOTAL_ITEMS) * 100)
+    score = int((total_items_covered / branch_items_total) * 100)
 
     # Overall pass at 75%
     overall_passed = score >= 75
 
-    # Total categories = 10 pattern + 1 module coverage = 11
+    inapplicable_note = (
+        f" -- {len(inapplicable)} of {TOTAL_ITEMS} not applicable to this branch "
+        f"({', '.join(sorted(f'{c}/{i}' for c, i in inapplicable))})"
+        if inapplicable
+        else ""
+    )
+
+    # Total categories = 7 pattern + 1 module coverage = 8
     total_categories = len(STANDARD_CATEGORIES) + 1
 
     # Overall summary check
@@ -577,7 +819,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 "name": "Overall coverage",
                 "passed": True,
                 "message": (
-                    f"{total_items_covered}/{TOTAL_ITEMS} items covered across {total_categories} categories ({score}%)"
+                    f"{total_items_covered}/{branch_items_total} items covered "
+                    f"across {total_categories} categories ({score}%){inapplicable_note}"
                 ),
             }
         )
@@ -587,8 +830,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 "name": "Overall coverage",
                 "passed": False,
                 "message": (
-                    f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                    f"across {total_categories} categories ({score}%) "
+                    f"{total_items_covered}/{branch_items_total} items covered "
+                    f"across {total_categories} categories ({score}%){inapplicable_note} "
                     f"-- minimum 75% required"
                 ),
             }
@@ -602,7 +845,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "test_quality",
             "test_files": len(test_files),
             "items_covered": total_items_covered,
-            "items_total": TOTAL_ITEMS,
+            "items_total": branch_items_total,
             "module_coverage": {
                 "covered_modules": covered_count,
                 "total_modules": total_modules,

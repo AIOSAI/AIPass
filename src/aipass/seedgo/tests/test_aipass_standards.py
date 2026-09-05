@@ -598,3 +598,529 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
     result = _check_disk_triplets(branch)
     assert result["passed"] is False
     assert result["message"].startswith("2/3 modules missing triplet files")
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_handler_check accepts the one shim (DPLAN-0325 part A)
+# ---------------------------------------------------------------------------
+
+
+def _canonical_shim_bytes_or_skip():
+    """The canonical shim as the pinned spec defines it, or skip saying why.
+
+    Read from the spec block rather than from any branch copy: a constant
+    taught by a branch would learn that branch's drift and then bless it.
+
+    The spec lives under ``devpulse/docs.local/``, and ``docs.local/`` is
+    gitignored fleet-wide (.gitignore:58) — so it is ABSENT on a fresh
+    checkout and these pins cannot run there. Skipping with the path named is
+    the honest report; asserting against a file CI does not have is the exact
+    shape of the machine-local defect that turned every board red on 2026-09-02
+    (FPLAN-0474/0475), when a check derived a fleet fact from the gitignored
+    registry and degraded silently instead of failing loudly.
+
+    What survives on CI regardless: the hash constant itself, which is in the
+    checker and therefore in the repo, and every pin below that builds its own
+    input instead of reading the spec.
+    """
+    import re
+    from pathlib import Path
+
+    import aipass
+
+    # From the installed package, so the read is identical whichever rootdir
+    # pytest picks — the same discovery the contract suite uses.
+    spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
+    if not spec.is_file():
+        pytest.skip(f"pinned spec not present ({spec}) — docs.local/ is gitignored, so this pin is local-only")
+    text = spec.read_text(encoding="utf-8")
+    section = text.index("## 3. The shim")
+    block = re.search(r"```python\n(.*?)\n```", text[section:], re.S)
+    assert block is not None, "DPLAN-0325 section 3 no longer carries a python block"
+    return block.group(1) + "\n"
+
+
+def test_the_pinned_hash_is_the_hash_of_the_spec_block():
+    """The constant and the spec cannot drift apart without this turning red.
+
+    The whole accept path is one comparison against one constant, so the
+    constant IS the standard. If the spec is amended and the constant is not,
+    every migrated branch fails its own audit for a reason no message explains.
+    """
+    import hashlib
+
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+    measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
+    assert measured == CANONICAL_SHIM_SHA256, (
+        "the pinned canonical-shim hash no longer matches DPLAN-0325 section 3 — "
+        "amend the constant in the same change as the spec"
+    )
+
+
+def _canonical_shim_bytes_on_disk():
+    """The canonical shim from the citizen template, verified against the pin.
+
+    A second source, and deliberately a different one from
+    :func:`_canonical_shim_bytes_or_skip`. That one reads the spec, which is
+    gitignored and therefore absent on CI. This one reads the file every
+    newborn branch is stamped from, which ships in the repo — so the pins that
+    need REAL canonical bytes still run on a fresh checkout.
+
+    Reading a branch copy would teach a test that branch's drift, so the bytes
+    are checked against ``CANONICAL_SHIM_SHA256`` before being handed back:
+    if the template ever drifts, these pins say so instead of blessing it.
+    """
+    import hashlib
+    from pathlib import Path as _Path
+
+    import aipass
+
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+    template = (
+        _Path(aipass.__file__).resolve().parent
+        / "spawn"
+        / "templates"
+        / "citizen"
+        / "apps"
+        / "handlers"
+        / "json"
+        / "json_handler.py"
+    )
+    if not template.is_file():
+        pytest.skip(f"citizen template not present ({template})")
+    content = template.read_text(encoding="utf-8")
+    assert hashlib.sha256(content.encode("utf-8")).hexdigest() == CANONICAL_SHIM_SHA256, (
+        "the citizen template is no longer the canonical shim — every branch spawned from it "
+        "would be born failing the json_handler standard"
+    )
+    return content
+
+
+def test_the_canonical_shim_passes_capability_by_hash():
+    """The spec's own bytes are accepted, and accepted on the identity path."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
+
+    passed, message = _capability_verdict(_canonical_shim_bytes_or_skip(), "anybranch")
+    assert passed is True
+    assert "sha256" in message
+
+
+def test_one_changed_character_is_no_longer_the_canonical_shim():
+    """Identity, not resemblance: a shim that drifts stops being the shim.
+
+    Red-first proof that the hash path is doing the work — one extra space,
+    nothing else. Until part B this only pinned WHICH path answered, because
+    the mutated text still imported the service and fell through to the
+    transitional read. That read is gone (2026-09-04, section 4), so the
+    mutation is now REFUSED outright, which is the whole point of narrowing:
+    a byte of drift is a red, not a quieter green.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
+        _capability_verdict,
+        _is_canonical_shim,
+    )
+
+    mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
+    assert _is_canonical_shim(mutated) is False
+    passed, message = _capability_verdict(mutated, "anybranch")
+    assert passed is False
+    assert "sha256" in message
+
+
+def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused():
+    """A branch that adopts the import and keeps its own directory is not migrated.
+
+    The failure this forbids is a file that reads as migrated — it has the
+    import line at the top — while still writing through a binding of its own.
+    It used to be caught by a table of forbidden tokens consulted on the
+    transitional accept path. That path and that table are gone (part B
+    section 4); the hash refuses this text for the simpler reason that it is
+    not the shim's bytes, and cannot be argued with about which tokens count.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
+
+    half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
+    passed, message = _capability_verdict(half, "canary")
+    assert passed is False
+    assert "canary" in message
+
+
+def test_the_refusal_message_names_the_branch_and_the_line_to_write():
+    """A red a branch cannot act on is a red that stays.
+
+    The hash says nothing on its own — "sha256 mismatch" tells a reader
+    nothing about what to do. The refusal has to carry the branch, the fact
+    that there is ONE implementation, and the import line the replacement
+    starts with, because that is the entire remedy.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
+        SERVICE_IMPORT_MARKER,
+        _capability_verdict,
+    )
+
+    passed, message = _capability_verdict("def load_json(name):\n    return {}\n", "canary")
+    assert passed is False
+    assert "canary" in message
+    assert SERVICE_IMPORT_MARKER in message
+
+
+def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
+    """Seventeen branches ship no template, so the check does not appear for them."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
+
+    branch = tmp_path / "mybranch"
+    branch.mkdir()
+    assert _check_template_handler(branch) is None
+
+
+def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
+    """The file every newborn inherits is an audit subject, unrendered.
+
+    Nothing audited it before DPLAN-0325: a template stamping a log-only fork
+    would have minted eighteen non-compliant branches before any audit noticed,
+    because the audit only ever walked branches.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
+
+    branch = tmp_path / "spawnish"
+    template = branch / "templates" / "citizen" / "apps" / "handlers" / "json"
+    template.mkdir(parents=True)
+    handler = template / "json_handler.py"
+
+    handler.write_text("def log_operation(op):\n    return True\n", encoding="utf-8")
+    result = _check_template_handler(branch)
+    assert result is not None
+    assert result["passed"] is False
+    assert "Not the canonical json shim" in result["message"]
+
+    # The REAL bytes, not a hand-written lookalike. Since part B section 4 the
+    # only accept path is the hash, so a two-line stand-in that merely imports
+    # the service is refused here exactly as it would be in a branch.
+    handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
+    result = _check_template_handler(branch)
+    assert result is not None
+    assert result["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests -- naming_check treats a bound alias as an alias, not a constant
+# ---------------------------------------------------------------------------
+
+
+def test_a_bound_alias_is_not_a_lowercase_constant():
+    """`save_json = _h.save_json` names a callable; PEP 8 spells it lowercase.
+
+    The shape DPLAN-0325 makes fleet-wide — nine per branch — and the reason
+    canary, memory and spawn carried naming bypasses before this rule existed.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    source = "save_json = _h.save_json\nInvalidDocument = json_handler.InvalidDocument\nMAX = 5\n"
+    result = check_constant_naming(source)
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_an_alias_with_a_trailing_comment_is_still_an_alias():
+    """A `# noqa` after the value must not turn the alias back into a constant."""
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    result = check_constant_naming("read_json = _h.read_json  # noqa: F401\nMAX = 5\n")
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_the_alias_rule_does_not_excuse_an_expression_that_merely_contains_a_dot():
+    """Only a BARE dotted name is an alias — the narrowing has an edge.
+
+    Red-first: without the anchors on the pattern, every lowercase module-level
+    assignment containing an attribute access would stop being checked, which
+    is a far larger exemption than the one that was asked for.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
+
+    result = check_constant_naming("total = counters.seen + 1\nfirst = items.data[0]\n")
+    assert result is not None
+    assert result["passed"] is False
+    assert "total" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_structure does not convict a shim for delegating resolution
+# ---------------------------------------------------------------------------
+
+
+def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
+    """The canonical shim has no `Path(__file__)`, no `.resolve()`, no `.parent`.
+
+    Measured 2026-09-03: prax's shim, spawn's shim and spawn's citizen template
+    each scored 75 on this check the day they migrated, because path resolution
+    moved INTO the service — which derives the branch root without `resolve()`
+    on purpose, so a dead cwd on Windows cannot poison it. A standard that
+    demands the spelling convicts the endpoint of the migration.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
+    handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    # The REAL bytes. This used to be a hand-written four-line stand-in, which
+    # the marker read accepted; part B section 4 moved the exemption onto the
+    # hash test (finding (a)), so only the shim itself earns it now.
+    handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
+
+    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is True
+    assert "Delegates path resolution" in resolution["message"]
+
+
+def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
+    """The accept is the service import, not an amnesty on the whole check."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
+    handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text("JSON_DIR = 'documents'\n\n\ndef read_json(name):\n    return {}\n", encoding="utf-8")
+
+    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is False
+    assert "Missing relative path resolution" in resolution["message"]
+
+
+def test_the_two_standards_share_the_shim_TEST_not_a_copy_of_a_string():
+    """Both standards must agree on what a shim IS, by running the same function.
+
+    json_structure_check excuses a shim from "resolves its own path" — the
+    service derives the branch root from the shim's __file__ and the shim
+    resolves nothing. Until part B the two standards agreed by importing one
+    copy of a marker STRING. They now import one copy of the hash TEST, which
+    is strictly stronger: a string can be true of a file that is not the shim.
+
+    Measured 2026-09-04 (finding (a)): if part B had removed the marker
+    without giving structure the hash test in its place, all eighteen branches
+    and the citizen template would have dropped 100 -> 75 on their handler
+    file. The identity assertion below is what makes that impossible to redo
+    by accident.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check, json_structure_check
+
+    assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
+
+
+# ---------------------------------------------------------------------------
+# Tests -- v4 test_quality retires the handler's items (DPLAN-0325 part B)
+# ---------------------------------------------------------------------------
+
+
+def test_the_handlers_own_categories_no_longer_score_a_branch():
+    """A per-branch TEXT scan cannot see coverage that moved to one service.
+
+    The handler's behaviour is tested once, by execution, over all 18 shims in
+    test_json_handler_contract.py. Measured 2026-09-03: the four swept trees
+    each lost their sole carrier for these items when the DPLAN-0059 stamp
+    files were archived, and CI gates every branch at 100.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import STANDARD_CATEGORIES
+
+    assert "json_handler" not in STANDARD_CATEGORIES
+    assert "exception_contracts" not in STANDARD_CATEGORIES
+    assert "data_structure_contracts" not in STANDARD_CATEGORIES
+    assert "mock_json_handler" not in STANDARD_CATEGORIES["conftest_fixtures"]
+    assert "load_correct_type" not in STANDARD_CATEGORIES["return_type_contracts"]
+    assert "ensure_returns_bool" not in STANDARD_CATEGORIES["return_type_contracts"]
+    assert "returns_dict" not in STANDARD_CATEGORIES["init_provisioning"]
+    assert "sys_modules_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
+    assert "reimport_after_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
+
+
+def test_the_total_moved_with_the_items_it_counts():
+    """Numerator and denominator move together, which is why nobody drops."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        STANDARD_CATEGORIES,
+        TOTAL_ITEMS,
+    )
+
+    assert TOTAL_ITEMS == sum(len(items) for items in STANDARD_CATEGORIES.values()) + 3
+    assert TOTAL_ITEMS == 31
+
+
+def test_a_subscripted_isinstance_is_still_a_bool_return_contract():
+    """@aipass asserts isinstance(result["ok"], bool) — real coverage, missed.
+
+    Red-first: with only the literal `isinstance(result, bool)` token the item
+    reads as uncovered, and @aipass's sweep stays below the CI gate for a
+    contract its suite actually pins.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
+
+    patterns = STANDARD_CATEGORIES["return_type_contracts"]["command_returns_bool"]
+    source = 'def test_ok():\n    assert isinstance(result["ok"], bool)\n'
+    assert _find_covering_file(patterns, [("test_sandbox_check.py", source)]) == "test_sandbox_check.py"
+
+
+def test_an_empty_input_test_counts_however_the_branch_spells_it():
+    """test_empty_project is empty-input resilience; empty_file was a spelling."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
+
+    patterns = STANDARD_CATEGORIES["error_resilience"]["empty_file"]
+    source = "def test_empty_project(tmp_path):\n    assert scan(tmp_path) == []\n"
+    assert _find_covering_file(patterns, [("test_structure_scan.py", source)]) == "test_structure_scan.py"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- json_structure recognises a branch-owned operation-logging seam
+# ---------------------------------------------------------------------------
+
+
+def _seam_branch(tmp_path, seam_body: str | None = None):
+    """A branch whose audit trail lives in its own module, built on prax.
+
+    Shaped like the real tree — ``<root>/aipass/<branch>/apps/...`` beside a
+    ``prax/`` directory — because the seam lookup resolves the branch from the
+    file's own path, exactly as it must on disk.
+    """
+    (tmp_path / "aipass" / "prax").mkdir(parents=True)
+    seam = tmp_path / "aipass" / "backupish" / "apps" / "handlers" / "audit" / "trail.py"
+    seam.parent.mkdir(parents=True)
+    seam.write_text(
+        seam_body
+        or (
+            "from aipass.prax import append_jsonl\n\n\n"
+            "def log_operation(operation, data):\n    append_jsonl(operation, data)\n"
+        ),
+        encoding="utf-8",
+    )
+    return seam
+
+
+def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
+    """@backup moved 67 audit calls off the shim per the spec, as ordered.
+
+    The old check was a literal substring test for 'json_handler.log_operation'
+    and convicted 41 of backup's 43 files for obeying it. Recognised, never
+    bypassed: backup will not carry a bypass for following the spec.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    seam = _seam_branch(tmp_path)
+    module = seam.parents[3] / "modules" / "snapshot.py"
+    module.parent.mkdir(parents=True)
+    source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
+    module.write_text(source, encoding="utf-8")
+
+    checks = _check_code_wiring(module, source)
+    assert all(c["passed"] for c in checks)
+    assert any("trail seam" in c["message"] for c in checks)
+
+
+def test_the_seam_itself_does_not_have_to_log_through_itself(tmp_path):
+    """The substrate is not a consumer of the substrate."""
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    seam = _seam_branch(tmp_path)
+    checks = _check_code_wiring(seam, seam.read_text(encoding="utf-8"))
+    assert all(c["passed"] for c in checks)
+
+
+def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp_path):
+    """The narrowing has an edge: a same-named helper is not a logging seam.
+
+    Red-first — without the two conditions (defines log_operation AND builds it
+    on aipass.prax) any module could name a local object `trail` and claim the
+    exemption, which is a far wider waiver than the one backup needs.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
+
+    fake = _seam_branch(tmp_path, "def log_operation(operation, data):\n    print(operation)\n")
+
+    module = fake.parents[3] / "modules" / "snapshot.py"
+    module.parent.mkdir(parents=True)
+    source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
+    module.write_text(source, encoding="utf-8")
+
+    checks = _check_code_wiring(module, source)
+    assert not all(c["passed"] for c in checks)
+
+
+# ---------------------------------------------------------------------------
+# Tests -- an item is only scored where the branch ships a subject for it
+# ---------------------------------------------------------------------------
+
+
+def _branch_with(tmp_path, apps_body: str, test_body: str = "def test_x():\n    assert True\n"):
+    """A minimal branch: some production code, some tests."""
+    module = tmp_path / "apps" / "modules" / "work.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(apps_body, encoding="utf-8")
+    suite = tmp_path / "tests" / "test_work.py"
+    suite.parent.mkdir(parents=True)
+    suite.write_text(test_body, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_branch_that_parses_no_json_is_not_charged_for_corrupt_json(tmp_path):
+    """@canary's whole production surface parses no JSON and returns no Path.
+
+    Measured 2026-09-03: retiring these four fleet-wide was the obvious move and
+    the measurement refused it — 16 of 18 branches earn each of them from tests
+    with nothing to do with the handler. The defect was asking every branch for
+    coverage of something two of them do not do.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import check_branch
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    result = check_branch(str(branch))
+    overall = next(c for c in result["checks"] if c["name"] == "Overall coverage")
+    assert "not applicable to this branch" in overall["message"]
+    assert "error_resilience/corrupt_json" in overall["message"]
+
+
+def test_a_branch_that_does_parse_json_is_still_charged(tmp_path):
+    """Red-first: without the probe the gate would excuse every branch."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        _inapplicable_items,
+        check_branch,
+    )
+
+    branch = _branch_with(tmp_path, "import json\n\n\ndef work(p):\n    return json.load(p.open())\n")
+    assert ("error_resilience", "corrupt_json") not in _inapplicable_items(str(branch))
+    result = check_branch(str(branch))
+    resilience = next(c for c in result["checks"] if c["name"] == "error_resilience")
+    assert "corrupt_json" in resilience["message"]
+
+
+def test_the_shim_does_not_hand_every_branch_every_subject(tmp_path):
+    """The handler is the fleet's file, byte-identical everywhere.
+
+    Counting it would give every branch json parsing, a Path return and a write,
+    and the gate would never exclude anything again.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _inapplicable_items
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    shim = branch / "apps" / "handlers" / "json" / "json_handler.py"
+    shim.parent.mkdir(parents=True)
+    shim.write_text(
+        "import json\nfrom pathlib import Path\n\n\ndef get_json_path(n) -> Path:\n"
+        "    Path(n).mkdir()\n    return Path(json.load(open(n)))\n",
+        encoding="utf-8",
+    )
+
+    assert len(_inapplicable_items(str(branch))) == 4
+
+
+def test_an_excluded_item_leaves_the_denominator_too(tmp_path):
+    """It neither convicts nor flatters: both sides of the fraction move."""
+    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
+        TOTAL_ITEMS,
+        _inapplicable_items,
+        check_branch,
+    )
+
+    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
+    excluded = len(_inapplicable_items(str(branch)))
+    overall = next(c for c in check_branch(str(branch))["checks"] if c["name"] == "Overall coverage")
+    assert f"/{TOTAL_ITEMS - excluded} items covered" in overall["message"]

@@ -59,7 +59,7 @@ def _read_json_file(path: Path) -> dict:
     """Load a JSON object from path; {} when absent, unreadable or not a dict."""
     if not path.exists():
         return {}
-    result = json_handler.load_path(path)
+    result = json_handler.read_json(path)
     if not isinstance(result, dict):
         return {}
     return result
@@ -104,7 +104,7 @@ def _write_profile_json(data: dict) -> None:
     OSError the callers were already written against. A profile that quietly
     failed to save is worse than one that says so.
     """
-    if json_handler.save_path(_PROFILE_JSON, data):
+    if json_handler.write_json(_PROFILE_JSON, data):
         return
     logger.warning("[profile] user_profile.json write failed: %s", _PROFILE_JSON)
     _fire_file_deleted(str(_PROFILE_JSON))

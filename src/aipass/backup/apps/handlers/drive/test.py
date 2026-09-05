@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..json import json_handler
+from ..audit import trail
 
 if TYPE_CHECKING:
     from .client import DriveClient
@@ -40,7 +40,7 @@ def test_connectivity(client: DriveClient) -> dict:
     # Step 1: authenticate
     if not client.authenticate():
         result["error"] = client.last_error or "Authentication failed"
-        json_handler.log_operation(
+        trail.log_operation(
             "test_connectivity",
             {"success": False, "step": "auth", "error": result["error"]},
         )
@@ -50,7 +50,7 @@ def test_connectivity(client: DriveClient) -> dict:
     folder_id = client.get_or_create_backup_folder()
     if not folder_id:
         result["error"] = client.last_error or "Failed to access backup folder"
-        json_handler.log_operation(
+        trail.log_operation(
             "test_connectivity",
             {"success": False, "step": "folder", "error": result["error"]},
         )
@@ -58,7 +58,7 @@ def test_connectivity(client: DriveClient) -> dict:
 
     result["success"] = True
     result["folder_id"] = folder_id
-    json_handler.log_operation(
+    trail.log_operation(
         "test_connectivity",
         {"success": True, "folder_id": folder_id},
     )

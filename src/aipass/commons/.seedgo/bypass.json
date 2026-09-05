@@ -356,11 +356,6 @@
       "reason": "write_commons_activity() — low-level dashboard write API used by notification pipeline and external branches pushing activity data"
     },
     {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "unused_function",
-      "reason": "increment_counter() and update_data_metrics() — JSON data utilities available to all commons handler modules for metric tracking"
-    },
-    {
       "file": "apps/handlers/notifications/dashboard_pipeline.py",
       "standard": "unused_function",
       "reason": "update_dashboards_for_event() — event-driven pipeline entry point called by post_ops and comment_ops after new content creation"

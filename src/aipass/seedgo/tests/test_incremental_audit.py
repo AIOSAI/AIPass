@@ -409,7 +409,10 @@ class TestEquivalence:
         assert incremental_result["files_checked"] == 2  # main.py + good.py
 
         doc = cache.load_cache()
-        cached_files = doc["branches"]["mybranch"]["files"]
+        # Derived, not hardcoded: the slot is keyed by (branch, pack, bypass mode),
+        # and this fixture's pack is a synthetic one, so it gets its own slot.
+        key = branch_audit.cache_key_for("mybranch", pack_dir, no_bypass=False)
+        cached_files = doc["branches"][key]["files"]
         assert "apps/doomed.py" not in cached_files
 
     def test_checker_pack_edit_busts_full_rescan(self, tmp_path, monkeypatch):
@@ -782,6 +785,57 @@ class TestDiffFileset:
         assert changed == {"b.py"}
         assert deleted == {"c.py"}
         assert unchanged == {"a.py"}
+
+
+class TestTheCacheKeyDiscriminatesThePack:
+    """One slot per (branch, pack, bypass mode) — never one slot per branch.
+
+    THE LIVE DEFECT: the key was `branch_name` while `current_stamp` folds the
+    pack in. Two packs therefore shared one slot per branch: the stamp caught
+    the mismatch so the OUTPUT was never wrong, but each run evicted the
+    other's entry, making every alternating `audit aipass` / `audit
+    pytest_quality` a cold full fleet scan. Measured live — restoring
+    last_audit.json after a shadow cycle took a full cold scan.
+
+    `no_bypass` had already solved exactly this by putting the mode in the key;
+    the pack never got the same treatment.
+    """
+
+    def test_two_packs_do_not_share_one_slot(self, tmp_path):
+        """The key differs by pack for the same branch, so neither evicts the other."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        aipass_pack = tmp_path / "aipass_standards"
+        shadow_pack = tmp_path / "pytest_quality_standards"
+
+        assert branch_audit.cache_key_for("prax", aipass_pack, no_bypass=False) != branch_audit.cache_key_for(
+            "prax", shadow_pack, no_bypass=False
+        )
+
+    def test_the_default_pack_keeps_the_bare_branch_key(self, tmp_path):
+        """`aipass` and an unstated pack both answer the plain branch name.
+
+        The counter-arm: suffixing every key would orphan every cached entry in
+        the fleet and buy one guaranteed cold scan for nothing.
+        """
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        assert branch_audit.cache_key_for("prax", None, no_bypass=False) == "prax"
+        assert branch_audit.cache_key_for("prax", tmp_path / "aipass_standards", no_bypass=False) == "prax"
+
+    def test_bypass_mode_still_discriminates_alongside_the_pack(self, tmp_path):
+        """The pack axis is added to the bypass axis, not swapped for it."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        shadow = tmp_path / "pytest_quality_standards"
+        keys = {
+            branch_audit.cache_key_for("prax", None, no_bypass=False),
+            branch_audit.cache_key_for("prax", None, no_bypass=True),
+            branch_audit.cache_key_for("prax", shadow, no_bypass=False),
+            branch_audit.cache_key_for("prax", shadow, no_bypass=True),
+        }
+
+        assert len(keys) == 4
 
 
 class TestStamps:

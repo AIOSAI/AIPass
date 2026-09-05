@@ -160,7 +160,14 @@ def _walk(root: Path, patterns: Sequence[str]) -> List[Path]:
     """Every file under `root` matching any pattern, skipping SKIP_DIRS."""
     found: List[Path] = []
     for path in sorted(root.rglob("*.py")):
-        if any(part in SKIP_DIRS for part in path.parts):
+        # PRUNE RELATIVE TO THE WALK ROOT, NOT ABSOLUTELY. Reading `path.parts`
+        # tests the whole absolute path, so a target that merely LIVES under a
+        # directory named `.venv`, `node_modules`, `.git` etc. had every test
+        # file skipped - and the result was a silent, plausible empty corpus
+        # rather than an error. This lane copies targets into temporary trees,
+        # so the parent directories are not the target's own business.
+        # Measured before the fix: a project under node_modules/ collected 0 units.
+        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         if any(path.match(pattern) for pattern in patterns):
             found.append(path)
@@ -226,7 +233,12 @@ def build(root: Path, test_dirs: Optional[Sequence[str]] = None) -> Corpus:
     root = Path(root)
     corpus = Corpus(root=root)
 
-    roots = [root / name for name in (test_dirs or [])] or [root]
+    # FILTER BY EXISTENCE, THEN FALL BACK. The obvious spelling can never reach
+    # the fallback: a non-empty `test_dirs` yields a non-empty list whether or
+    # not any of those directories EXIST, so the walk finds nothing and the
+    # target reads as having no tests at all. Measured before the fix: a project
+    # keeping tests at src/tests/ collected 0 files, 0 units.
+    roots = [root / name for name in (test_dirs or []) if (root / name).is_dir()] or [root]
     seen: Set[Path] = set()
     for search_root in roots:
         if not search_root.is_dir():

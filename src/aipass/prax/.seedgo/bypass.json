@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-08-31T05:00:00.000000"
+    "last_updated": "2026-09-03T02:45:00.000000"
   },
   "bypass": [
     {
@@ -19,10 +19,10 @@
       "reason": "Prax import chain \u2014 transitively imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
     },
     {
-      "file": "apps/handlers/json/json_handler.py",
+      "file": "apps/handlers/json/json_service.py",
       "standard": "log_visibility",
       "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+      "reason": "The fleet json service (DPLAN-0325) is stdlib-only by contract: it must import without pulling the prax logger graph (30 modules, watchdog, the aipass.trigger edge), which is the entire point of the lazy package init. A test pins the cold import footprint at 6 aipass modules and zero third-party."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",
@@ -83,11 +83,6 @@
       "file": "apps/handlers/logging/terminal/filtering.py",
       "standard": "handlers",
       "reason": "Architectural \u2014 imports PRAX_JSON_DIR from config.load (shared infrastructure). Uses module_name parameter for explicit filter context from callers."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "json_structure",
-      "reason": "json_handler.py IS the JSON template management system for prax. load_template() and json_templates/ are its core functionality, not a violation of the template-free standard. This file provides the template infrastructure that other files consume."
     },
     {
       "file": "apps/modules/monitor.py",
@@ -184,6 +179,21 @@
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure argument-inspection predicate \u2014 no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log prax itself is meant to keep readable. Same rule and same measured reason adopted by @memory, @trigger, @drone and @ai_mail for their help_flags handlers (convention settled 2026-08-13, DPLAN-0291 rule E)."
+    },
+    {
+      "file": "apps/handlers/json/json_service.py",
+      "standard": "naming",
+      "reason": "The path is pinned by the DPLAN-0325 spec (section 1) and hashed by seedgo's acceptance: 'src/aipass/prax/apps/handlers/json/json_service.py'. Renaming it to service.py forks the one contract file the whole fleet reads. The prefix is not redundant either \u2014 json_service.py and json_handler.py (the shim) sit in the same directory and 'service.py' would not say which service."
+    },
+    {
+      "file": "handlers/json/json_service.py",
+      "standard": "dead_code",
+      "reason": "Reached by string, not by an import statement: aipass/prax/__init__.py resolves it with importlib.import_module inside its PEP 562 __getattr__, which is what keeps the module out of every consumer's import graph until it is asked for. A scan keyed on import statements cannot see that edge. The entry point 'from aipass.prax import json_handler' is the fleet's only sanctioned import."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "naming",
+      "reason": "Shim pattern \u2014 module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by Patrick's ruling (2026-09-03), hashed by seedgo. Matches the identical bypass in spawn/, canary/ and memory/."
     }
   ],
   "notes": {

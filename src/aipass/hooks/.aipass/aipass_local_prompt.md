@@ -10,7 +10,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ## What I Do
 
 - Own the hook engine -- receives events from platform bridges, routes to handlers, logs everything
-- Maintain 28 native handlers across 4 categories (prompt, security, lifecycle, notification)
+- Maintain 29 native handlers across 4 categories (prompt, security, lifecycle, notification)
 - Bridge platforms -- thin normalization layer per provider (Claude + Codex, both shipping)
 - Per-project config -- `.aipass/hooks.json` controls what fires per project
 - Log everything -- prax integration + JSONL diagnostics for every hook execution
@@ -60,6 +60,7 @@ apps/
       rm_gate.py           #   Guards destructive rm commands
       registry_gate.py     #   Guards registry-modifying commands
       subagent_gate.py     #   Blocks sub-agent stop until clean
+      testwrite_gate.py    #   Blocks CREATION of new test files (JSON switch: drone @hooks testwrite)
     lifecycle/             # Session management hooks
       auto_fix.py          #   Post-edit diagnostics (ruff, pyright, py_compile)
       auto_watchdog.py     #   Watchdog arming after dispatch
@@ -77,13 +78,16 @@ apps/
       tool_sound.py        #   Sound on tool use
       telegram_response.py #   Telegram reply delivery on Stop
     module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve (dead-cwd cure)
+    json/
+      json_handler.py      #   The fleet's one json service bound to hooks (DPLAN-0325 shim, byte-identical everywhere)
+      files.py             #   read/write_json_file for the trust registry + alerts.json -- raises where the service returns None
     config/                # NOTE: under handlers/, not apps/ -- apps/config/ is an empty package
       loader.py            #   hooks.json discovery + validation, config-independent trust checks
       trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
       diagnostics.py       #   JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 52 test files, 1798 tests
+tests/                     # 53 test files, 1857 tests
 ```
 
 ## Handler Categories
@@ -91,7 +95,7 @@ tests/                     # 52 test files, 1798 tests
 | Category | Count | Handlers |
 |----------|-------|----------|
 | prompt | 9 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, temporal, persistent_alert |
-| security | 6 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate |
+| security | 7 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate, testwrite_gate |
 | lifecycle | 8 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, post_compact_regrounding, session_start |
 | notification | 5 | announce, email, stop_sound, tool_sound, telegram_response |
 

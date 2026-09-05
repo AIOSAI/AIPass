@@ -65,6 +65,18 @@ except (ImportError, OSError) as e:
 # Global observer instance
 _observer: Any = None
 
+# The thread that is currently scheduling a watch, if any. Only one at a time:
+# a second scheduler would walk the same tree for a watch the first is about to
+# install. See start_file_watcher_in_background for what the walk costs.
+_start_thread: Any = None
+
+# Two locks, two jobs. _START_LOCK serialises the walk itself, so a synchronous
+# caller and a background one cannot both install a watch. _SPAWN_LOCK only
+# guards the decision to spawn, and is never held while the walk runs — holding
+# one lock for both would make every caller of the "do not wait" door wait.
+_START_LOCK = threading.Lock()
+_SPAWN_LOCK = threading.Lock()
+
 # Liveness state. The dispatcher dying is silent by construction (watchdog lets
 # the thread die and logs nothing to us), so the only way anyone learns about it
 # is if we look. `_LIVENESS.death_reported` makes the report fire ONCE per death
@@ -186,26 +198,93 @@ class PythonFileWatcher(FileSystemEventHandler):
 
 
 def start_file_watcher():
-    """Start watching for new Python files
+    """Start watching for new Python files, and WAIT for the watch to be in place.
 
     Starts watchdog observer to monitor ECOSYSTEM_ROOT for new Python modules.
+
+    The caller pays for the inotify walk — one syscall per directory under the
+    root, seconds of it under thread contention (see
+    start_file_watcher_in_background for the measurement). That is the right
+    trade for an explicit "initialise the logging system" call, which is what
+    reaches this function now; the fleet's first-log-line path takes the
+    background door instead.
+
+    Serialised on _START_LOCK: without it a caller here and a background start
+    both find no observer, both walk the tree, and the second assignment orphans
+    the first observer — two watches on every directory and every event
+    delivered twice.
     """
     global _observer
 
-    if _observer and _observer.is_alive():
-        return
+    with _START_LOCK:
+        if _observer and _observer.is_alive():
+            return
 
-    # Create watcher instance
-    watcher = PythonFileWatcher()
+        # Create watcher instance
+        watcher = PythonFileWatcher()
 
-    new_observer = WatchdogObserver()
-    # Watch ecosystem root for Python files (recursive)
-    new_observer.schedule(watcher, str(ECOSYSTEM_ROOT), recursive=True)
+        new_observer = WatchdogObserver()
+        # Watch ecosystem root for Python files (recursive)
+        new_observer.schedule(watcher, str(ECOSYSTEM_ROOT), recursive=True)
 
-    new_observer.start()
-    _observer = new_observer
-    _LIVENESS.death_reported = False  # New observer: a previous death is no longer the current state.
+        new_observer.start()
+        _observer = new_observer
+        _LIVENESS.death_reported = False  # New observer: a previous death is no longer the current state.
+
     json_handler.log_operation("discovery_watcher_event", {"action": "started", "watch_root": str(ECOSYSTEM_ROOT)})
+
+
+def start_file_watcher_in_background() -> None:
+    """Start the watcher without making the caller wait for the inotify walk.
+
+    MEASURED 2026-09-04, this repo, 1605 directories under ECOSYSTEM_ROOT:
+    scheduling the recursive watch costs 0.119s in the CALLING thread when that
+    thread is alone, and 13.9s — 117x — when one other Python thread is busy.
+    watchdog installs one inotify watch per directory, and every one of those
+    syscalls drops the GIL and then has to win it back from a thread that never
+    blocks, so the walk pays up to a full switch interval (5ms, the default) per
+    directory. Nothing is wrong with the walk; it is simply the wrong thing to
+    do on a thread someone is waiting on.
+
+    Who waits: prax's own logger, on the FIRST log line of the process
+    (SystemLogger._ensure_watcher). That is how a test suite whose only crime
+    was to log something ends up stalled for seconds on a watcher it never
+    asked for.
+
+    Neither cure suggested in the report applies here. Yielding between
+    directories adds GIL handoffs to a walk that is already starving on them.
+    Bounding the walk to apps/ — what the live monitor does, monitor.py
+    _get_watch_directories — would stop discovering the 112 of 195 currently
+    registered modules that live in tests/ and elsewhere, which is a change to
+    what discovery MEANS, not a change to what it costs. What is left is to
+    stop making anyone wait: same walk, same watches, on a thread nobody joins.
+
+    Never raises. An inotify limit reached here used to reach the caller as an
+    OSError; on a thread nobody joins there is no caller to tell, so it is
+    logged with the same words instead.
+    """
+    global _start_thread
+
+    def _schedule() -> None:
+        try:
+            start_file_watcher()
+        except OSError as e:
+            logger.warning("inotify limit reached, continuing without file watcher: %s", e)
+        except Exception as e:  # noqa: BLE001 - a start failure must not kill an unjoined thread silently
+            logger.error(f"[watcher] could not start the discovery watcher ({type(e).__name__}: {e})")
+
+    with _SPAWN_LOCK:
+        if _observer is not None and _observer.is_alive():
+            return
+        if _start_thread is not None and _start_thread.is_alive():
+            return  # A walk is already under way; a second one installs nothing.
+
+        _start_thread = threading.Thread(target=_schedule, name="prax-watcher-start", daemon=True)
+        started = _start_thread
+
+    # Outside the spawn lock, and never holding _START_LOCK: the thread's first
+    # act is to take _START_LOCK inside start_file_watcher.
+    started.start()
 
 
 def stop_file_watcher():

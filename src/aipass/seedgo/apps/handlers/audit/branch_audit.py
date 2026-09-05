@@ -10,12 +10,13 @@
 import copy
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass import ignore_handler, inert
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
+from aipass.seedgo.apps.handlers.audit.artifact import DEFAULT_PACK_NAME
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
@@ -396,6 +397,41 @@ def _deprecated_patterns(branch_path: Path) -> list:
     ]
 
 
+def cache_key_for(branch_name: str, pack_path: Optional[Path], no_bypass: bool = False) -> str:
+    """The incremental-cache slot for one (branch, pack, bypass mode).
+
+    Every axis the STAMP folds in must also discriminate the KEY, or the two
+    runs share a slot: the stamp still catches the mismatch so the score is
+    never wrong, but each run evicts the other and both go cold. That is
+    exactly what happened - the key was the bare branch name while
+    `current_stamp` already included the pack, so alternating `audit aipass`
+    and `audit pytest_quality` meant a full fleet re-scan every time. Measured:
+    restoring last_audit.json after one shadow cycle cost a cold scan.
+
+    `no_bypass` had solved this shape already by putting the mode in the key.
+    The pack simply never got the same treatment.
+
+    The default pack keeps the BARE branch name so existing cache entries stay
+    valid; suffixing everything would orphan the whole fleet's cache once, for
+    no gain.
+
+    Args:
+        branch_name: The branch being audited.
+        pack_path: Checker pack directory, or None for the default pack.
+        no_bypass: True when the run had every bypass rule switched off.
+
+    Returns:
+        The cache key.
+    """
+    key = branch_name
+    pack_name = pack_path.name.removesuffix("_standards") if pack_path is not None else DEFAULT_PACK_NAME
+    if pack_name != DEFAULT_PACK_NAME:
+        key = f"{key}::pack={pack_name}"
+    if no_bypass:
+        key = f"{key}::no-bypass"
+    return key
+
+
 def audit_branch(
     branch: Dict[str, str],
     bypass_rules: list,
@@ -639,10 +675,10 @@ def audit_branch_incremental(
     if no_bypass:
         bypass_rules = []
     branch_name, branch_path = branch["name"], Path(branch["path"])
-    cache_key = f"{branch_name}::no-bypass" if no_bypass else branch_name
     resolved_pack_path = (
         pack_path if pack_path is not None else Path(__file__).resolve().parent.parent / "aipass_standards"
     )
+    cache_key = cache_key_for(branch_name, pack_path, no_bypass=no_bypass)
     diag_path = Path(__file__).resolve().parent.parent / "diagnostics" / "diagnostics_check.py"
 
     cache = incremental_cache.load_cache()

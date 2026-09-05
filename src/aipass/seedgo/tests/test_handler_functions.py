@@ -211,100 +211,28 @@ def test_check_directory_with_errors(tmp_path):
 
 
 # ===========================================================================
-# 3. json_handler -- increment_counter
+# 3-4. json_handler -- increment_counter, update_data_metrics: SUBJECT GONE
 # ===========================================================================
+#
+# Both sections were removed with the pair-4 sweep (DPLAN-0325). seedgo's
+# handler is now the fleet's canonical shim, which binds nine names, and
+# neither of these is among them -- the one json service never had them.
+#
+# Deleted rather than re-pointed because there is nothing left to point at,
+# and NOT quietly: a sweep that drops a public entry point should say so.
+# Measured before removing, across every branch: outside the five handlers
+# that still define them (flow, daemon, commons, drone, trigger, all
+# unmigrated), the fleet has no caller of either function. They were handler
+# surface nobody used, so the sweep retired dead code rather than breaking a
+# consumer -- but the same two names will disappear from those five branches
+# when their sweep lands, and each should check its own callers first.
+#
+# The helper these two sections shared, _get_real_json_handler, went with
+# them: it existed to import the real module past this file's mock and then
+# monkeypatch _BRANCH_ROOT / _BRANCH_NAME / JSON_DIR onto it. The shim has
+# none of those three -- the service resolves its directory per call through
+# the AIPASS_TEST_LOG_DIR seam that conftest's mock_infrastructure sets.
 
-
-def _get_real_json_handler(tmp_path, monkeypatch):
-    """Import the real json_handler module with a tmp_path JSON directory."""
-    import importlib
-    import sys
-
-    # Evict seedgo's own json_handler entries (mock or cached) so a fresh
-    # import is forced. Must stay scoped to aipass.seedgo and go through
-    # monkeypatch: the old version popped every "json_handler"-ish key
-    # suite-wide with no restore, emptying OTHER branches' json_handler
-    # modules for the rest of the xdist worker.
-    keys_to_remove = [
-        k for k in sys.modules if k.startswith("aipass.seedgo") and ("json_handler" in k or "handlers.json" in k)
-    ]
-    for key in keys_to_remove:
-        monkeypatch.delitem(sys.modules, key, raising=False)
-
-    # The real module wants a prax logger — pin a mock, restored on teardown
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-
-    # Fresh import of the real module
-    jh_mod = importlib.import_module("aipass.seedgo.apps.handlers.json.json_handler")
-
-    monkeypatch.setattr(jh_mod, "_BRANCH_ROOT", tmp_path)
-    monkeypatch.setattr(jh_mod, "_BRANCH_NAME", "test")
-    monkeypatch.setattr(jh_mod, "JSON_DIR", tmp_path / "test_json")
-    return jh_mod
-
-
-def test_increment_counter(tmp_path, monkeypatch):
-    """increment_counter increments a named counter in data JSON."""
-    jh = _get_real_json_handler(tmp_path, monkeypatch)
-
-    result = jh.increment_counter("testmod", "runs", 1)
-    assert result is True
-
-    # Verify counter was set
-    data = jh.load_json("testmod", "data")
-    assert data is not None
-    assert data["runs"] == 1
-
-    # Increment again
-    jh.increment_counter("testmod", "runs", 5)
-    data = jh.load_json("testmod", "data")
-    assert data is not None
-    assert data["runs"] == 6
-
-
-def test_increment_counter_new_counter(tmp_path, monkeypatch):
-    """increment_counter creates a new counter if it does not exist."""
-    jh = _get_real_json_handler(tmp_path, monkeypatch)
-
-    result = jh.increment_counter("testmod", "new_counter", 10)
-    assert result is True
-
-    data = jh.load_json("testmod", "data")
-    assert data is not None
-    assert data["new_counter"] == 10
-
-
-# ===========================================================================
-# 4. json_handler -- update_data_metrics
-# ===========================================================================
-
-
-def test_update_data_metrics(tmp_path, monkeypatch):
-    """update_data_metrics sets arbitrary metrics in data JSON."""
-    jh = _get_real_json_handler(tmp_path, monkeypatch)
-
-    result = jh.update_data_metrics("testmod", score=95, status="ok")
-    assert result is True
-
-    data = jh.load_json("testmod", "data")
-    assert data is not None
-    assert data["score"] == 95
-    assert data["status"] == "ok"
-
-
-def test_update_data_metrics_overwrites(tmp_path, monkeypatch):
-    """update_data_metrics overwrites existing metrics."""
-    jh = _get_real_json_handler(tmp_path, monkeypatch)
-
-    jh.update_data_metrics("testmod", score=50)
-    jh.update_data_metrics("testmod", score=99)
-
-    data = jh.load_json("testmod", "data")
-    assert data is not None
-    assert data["score"] == 99
-
-
-# ===========================================================================
 # 5. readme_ops -- resolve_branch
 # ===========================================================================
 

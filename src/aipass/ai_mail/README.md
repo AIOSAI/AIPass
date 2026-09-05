@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-03
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1446 pass across 49 files, 0 skipped, both rootdirs (on a fresh checkout 4 live-hygiene tests skip instead — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1433 pass across 49 files, 0 skipped, both rootdirs (on a fresh checkout 4 live-hygiene tests skip instead — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -1088,16 +1088,15 @@ ai_mail/
 │       │   ├── branch_detection.py # CWD/env-based branch identity detection
 │       │   ├── verified_caller.py  # Verified-caller rail + 5-leg admin verdict
 │       │   └── user.py         # Current user detection (get_current_user)
-│       ├── json_utils/
-│       │   └── json_handler.py # Auto-creating JSON system (the implementation)
 │       ├── json/
-│       │   └── json_handler.py # Re-export shim — seedgo's architecture standard
-│       │                       # requires apps/handlers/json/json_handler.py by name
+│       │   └── json_handler.py # The fleet's ONE json service, bound to ai_mail
+│       │                       # (DPLAN-0325). Byte-identical in every branch;
+│       │                       # seedgo checks it by hash. Adds nothing.
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1326 tests across 46 test files (selection below)
-    ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
+└── tests/                      # 1433 tests across 49 test files (selection below)
+    ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
     ├── test_dispatch_status.py # Log I/O, age calculation
@@ -1113,7 +1112,7 @@ ai_mail/
     ├── test_upsert.py          # upsert_key repeat-signal collapsing (40 tests)
     ├── test_central_writer.py  # Central stats aggregation
     ├── test_cli_routing.py     # CLI routing + help/version
-    ├── test_json_handler.py    # JSON I/O helpers
+    ├── test_json_handler.py    # Shim WIRING only — behaviour is seedgo's contract
     ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)

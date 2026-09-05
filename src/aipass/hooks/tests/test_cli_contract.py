@@ -74,15 +74,56 @@ class TestClaudeAgentsFlags:
         assert "stop" not in h.lower() or "agents stop" not in h.lower()
 
 
+_DAEMON_SWITCH = "CLAUDE_CODE_DISABLE_AGENT_VIEW"
+
+
+def _daemon_surface_accounted_for(help_text: str, token: str) -> bool:
+    """True when `token` is offered by the daemon CLI, or refused by the switch.
+
+    Args:
+        help_text: Output of `claude daemon --help`.
+        token: The flag or subcommand session_boot invokes.
+
+    Returns:
+        Whether the surface is accounted for — present, or absent for the one
+        documented reason. An unexplained absence answers False.
+    """
+    return token in help_text or _DAEMON_SWITCH in help_text
+
+
 @_SKIP
 class TestClaudeDaemonFlags:
-    """Flags from `claude daemon --help` that session_boot invokes."""
+    """Flags from `claude daemon --help` that session_boot invokes.
+
+    Two worlds since 2026-09-01. @devpulse set CLAUDE_CODE_DISABLE_AGENT_VIEW=1
+    fleet-wide (commit b22af969) to close the second-brain incident, and that
+    switch disables the whole `daemon` subcommand — the settings value beats a
+    shell override, measured. So session_boot's `claude daemon stop --any` is
+    dead code under the switch (devpulse's hardening item 2, plan-only until
+    Patrick asks) and live without it.
+
+    The invariant across both: the surface session_boot invokes is either
+    THERE, or refused by name. What must never happen is a flag going missing
+    with no explanation — that is the phantom-subcommand class this file was
+    written to catch, and asserting the flag unconditionally would have
+    reported exactly that when the truth was a deliberate switch.
+    """
 
     def test_stop_subcommand(self):
-        assert "stop" in _get_daemon_help()
+        assert _daemon_surface_accounted_for(_get_daemon_help(), "stop")
 
     def test_any_flag(self):
-        assert "--any" in _get_daemon_help()
+        assert _daemon_surface_accounted_for(_get_daemon_help(), "--any")
+
+    @pytest.mark.parametrize("token", ["stop", "--any"])
+    def test_unexplained_absence_still_fails(self, token: str):
+        """MUTATION-CHECK: the two tests above must not pass on ANY absence.
+
+        A daemon help text that simply stopped listing the flags — a rename, an
+        upstream removal — has to fail, or the pair above degrades into a test
+        that asserts nothing.
+        """
+        assert not _daemon_surface_accounted_for("Usage: claude daemon [options]\n  --verbose\n", token)
 
 
 @_SKIP

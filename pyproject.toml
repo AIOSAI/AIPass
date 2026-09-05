@@ -92,6 +92,12 @@ dev = [
     # exactly the env-inherited-test-deps species from 1b56b5ce. Declared here
     # because it is a test-time dependency, not a server runtime one.
     "httpx>=0.28",
+    # Mutation sampling is the test-quality pyramid's ground truth (DPLAN-0323
+    # phase 6): a surviving mutant means the test lied about what it pins.
+    # mutmut 3 refuses to run without a [tool.mutmut] block or a src/ layout in
+    # cwd, so it is invoked from the repo root; the sampling instrument that
+    # drives it is seedgo's.
+    "mutmut>=3.7",
 ]
 
 [project.scripts]

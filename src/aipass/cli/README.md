@@ -6,8 +6,8 @@
 **Module:** `aipass.cli`
 **Version:** 2.1.0
 **Seedgo:** 100%
-**Tests:** 201 tests across 11 files — 210 passing, 0 skipped (parametrized cases expand at runtime)
-**Last Updated:** 2026-08-31
+**Tests:** 166 tests across 10 files — 186 passing, 0 skipped (parametrized cases expand at runtime)
+**Last Updated:** 2026-09-03
 
 ## Quick Start
 
@@ -116,23 +116,23 @@ cli/
 │   │   ├── cli/
 │   │   │   └── help_flags.py   # wants_help() — whole-sequence help detection
 │   │   ├── json/
-│   │   │   └── json_handler.py # JSON lifecycle (CRUD, validation, rotation)
+│   │   │   └── json_handler.py # Shim — binds the ONE fleet json service in @prax
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 201 tests across 11 files (210 pass, 0 skip)
+├── tests/                      # 166 tests across 10 files (186 pass, 0 skip)
 │   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
 │   ├── test_display.py         # 60 tests — display functions + routing + exit codes + help flags
-│   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
 │   ├── test_templates.py       # 31 tests — operation templates + routing + help flags
-│   ├── test_help_flags.py      # 11 tests — whole-sequence help detection
-│   ├── test_json_durability.py # 10 tests — atomic writes, torn-read race
-│   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
 │   ├── test_handler_guard.py   # 19 tests — cross-branch import guard contract
+│   ├── test_cli_routing.py     # 13 tests — entry point routing, help, version, refusals
+│   ├── test_json_handler.py    # 6 tests — shim WIRING only; behaviour is @seedgo's fleet contract
+│   ├── test_help_flags.py      # 11 tests — whole-sequence help detection
+│   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
 │   ├── test_integration.py     # 6 tests — main() flow, entry points
-│   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
 │   ├── test_parked_is_not_collected.py # 4 tests — collection barrier over tests/parked/ holds
 │   ├── test_import_dead_cwd.py # 9 tests — imports survive a deleted cwd + AST ban on inspect.stack()
+│   ├── .archive/               # NOT collected — the pre-service handler suites (DPLAN-0325)
 │   └── parked/                 # TRACKED, not run — collect_ignore_glob barrier (archive doctrine, 2026-08-18)
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
@@ -158,13 +158,22 @@ human reads as correct. Assert what is VISIBLE.
 
 ## JSON Handler
 
-Manages the three-file JSON pattern (config, data, log) for any module:
+`apps/handlers/json/json_handler.py` is a **shim**, not an implementation. It binds the
+one fleet json service published by `@prax` (DPLAN-0325) — nine names plus
+`InvalidDocument` and `WriteFailed` — and is byte-identical in every migrated branch.
+Anything added to it is drift.
 
-Every write goes through `_atomic_write_json()` — staged in the target directory, then
-`os.replace()`d into place. A reader always sees the whole old document or the whole new
-one, never a truncated file. This matters because `ensure_json_exists()` answers an
-unreadable file by regenerating a template over it, so a torn read would have become
-data loss.
+It BINDS (`log_operation = _handle.log_operation`) and never wraps. The service names the
+calling module from `sys._getframe(2)`, so a `def` wrapper would add exactly one frame and
+send every log cli writes into `json_handler_log.json` instead of the caller's document.
+
+The three-file pattern (config, data, log), atomic writes, validation, provisioning and
+rotation all live in the service now, and are pinned once for the whole fleet by seedgo's
+cross-branch contract rather than re-tested per branch. Under pytest the writes are
+redirected by the `AIPASS_TEST_LOG_DIR` seam that `conftest.mock_infrastructure` sets;
+the shim has no attribute to patch, and that is the point.
+
+The call sites are unchanged:
 
 ```python
 from aipass.cli.apps.handlers.json import json_handler
@@ -185,6 +194,14 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 ### Cannot Import (in modules/)
 - `aipass.prax` — Circular dependency (prax depends on cli). Bypassed in `.seedgo/bypass.json`.
 
+`handlers/json/json_handler.py` is the exception, and it is not a loophole: prax's
+`__init__` is lazy (PEP 562), so `from aipass.prax import json_handler` resolves the
+service without importing `cli.display`. The cycle is real — archiving cli's old handler
+mid-sweep took `drone` itself down through
+`drone → cli.apps.modules.display → cli json_handler` — and laziness is what breaks it.
+The two bypasses that read "json_handler cannot import prax (circular)" were retired on
+2026-09-03 because the shim demonstrably does.
+
 ### Provides To
 - **All branches** — Display formatting (header, success, error, warning, fatal, section)
 - **All branches** — Operation templates (operation_start, operation_complete)
@@ -201,7 +218,7 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 
 ---
 
-*Last Updated: 2026-08-31*
+*Last Updated: 2026-09-03*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -44,12 +44,13 @@ apps/
 │   ├── status.py          # Backup status display
 │   └── versioned.py       # Incremental timestamped backup
 └── handlers/
+    ├── audit/             # backup's own operation trail (JSONL -> logs/operations.jsonl)
     ├── cleanup/           # Mirror cleanup — removes snapshot files whose source is gone
     ├── copy/              # File copying (snapshot + versioned)
     ├── diff/              # Diff generation + restore from the versioned store
     ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
     ├── ignore/            # .backupignore patterns + whitelist
-    ├── json/              # JSON persistence, atomic writes, ops log
+    ├── json/              # The fleet's json shim (prax-owned service, DPLAN-0325)
     ├── path/              # Backup path building, caller-CWD resolution,
     │                      #   and module_paths.py (the safe-resolve helper)
     ├── project/           # Config, registry, setup (.backup/)

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 
 
 def list_versions(file_folder: Path) -> list[dict]:
@@ -52,7 +52,7 @@ def list_versions(file_folder: Path) -> list[dict]:
                     }
                 )
 
-    json_handler.log_operation("list_versions", {"folder": str(file_folder), "count": len(versions)})
+    trail.log_operation("list_versions", {"folder": str(file_folder), "count": len(versions)})
     return versions
 
 
@@ -75,7 +75,7 @@ def restore_file(file_folder: Path, output_path: Path) -> bool:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(str(current), str(output_path))
-    json_handler.log_operation("restore_file", {"source": str(current), "output": str(output_path)})
+    trail.log_operation("restore_file", {"source": str(current), "output": str(output_path)})
     logger.info(f"[restore] Restored {name} to {output_path}")
     return True
 

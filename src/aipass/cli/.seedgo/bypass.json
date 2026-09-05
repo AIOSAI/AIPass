@@ -8,48 +8,38 @@
     {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure predicate — no I/O, no state, no logging. It runs before EVERY cli command, so json_handler logging here would write 'a help flag was looked for' on every invocation and bury the operation log it is meant to serve. Same bypass @seedgo carries on its own reference implementation of this helper."
+      "reason": "Pure predicate \u2014 no I/O, no state, no logging. It runs before EVERY cli command, so json_handler logging here would write 'a help flag was looked for' on every invocation and bury the operation log it is meant to serve. Same bypass @seedgo carries on its own reference implementation of this helper."
     },
     {
       "file": "apps/modules/display.py",
       "standard": "silent_catch",
-      "reason": "Circular import — display.py cannot import prax (prax depends on cli). Silent catches are ImportError guard for optional trigger and __main__ error handler."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "silent_catch",
-      "reason": "Dependency-free by design — json_handler cannot import prax (circular: json_handler → prax → cli.display → json_handler). Catch regenerates corrupted JSON silently."
+      "reason": "Circular import \u2014 display.py cannot import prax (prax depends on cli). Silent catches are ImportError guard for optional trigger and __main__ error handler."
     },
     {
       "file": "apps/modules/display.py",
       "standard": "naming",
       "pattern": "__all__",
-      "reason": "Python dunder convention — __all__ controls public API exports, not a constant to uppercase"
+      "reason": "Python dunder convention \u2014 __all__ controls public API exports, not a constant to uppercase"
     },
     {
       "file": "apps/modules/display.py",
       "standard": "error_handling",
-      "reason": "Testing flags same silent catch as silent_catch standard — already bypassed (circular import prevents prax logger)"
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "error_handling",
-      "reason": "Testing flags same silent catch as silent_catch standard — already bypassed (dependency-free by design)"
+      "reason": "Testing flags same silent catch as silent_catch standard \u2014 already bypassed (circular import prevents prax logger)"
     },
     {
       "file": "apps/modules/display.py",
       "standard": "imports",
-      "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
+      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
     },
     {
       "file": "apps/modules/templates.py",
       "standard": "imports",
-      "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
+      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
     },
     {
       "file": "__init__.py",
       "standard": "unused_function",
-      "reason": "cli_entry() is a legacy console_scripts entry point. pyproject.toml now maps `aipass` to aipass.aipass.apps.aipass:main, so nothing in-tree calls it — retained as published API pending a keep-or-retire decision (APLAN-0002)."
+      "reason": "cli_entry() is a legacy console_scripts entry point. pyproject.toml now maps `aipass` to aipass.aipass.apps.aipass:main, so nothing in-tree calls it \u2014 retained as published API pending a keep-or-retire decision (APLAN-0002)."
     }
   ],
   "notes": {
@@ -58,7 +48,10 @@
       "file": "apps/modules/logger.py",
       "standard": "cli",
       "reason": "Circular dependency - logger cannot import CLI",
-      "lines": [146, 177],
+      "lines": [
+        146,
+        177
+      ],
       "pattern": "if __name__ == '__main__'"
     },
     "fields": {

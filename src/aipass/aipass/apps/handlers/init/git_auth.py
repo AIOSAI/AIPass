@@ -79,7 +79,7 @@ class GitAuthRefusal(ValueError):
 
 def _read_json(path: Path) -> Dict[str, Any]:
     """Read a JSON object from *path*, raising GitAuthRefusal on bad content."""
-    data = json_handler.load_path(path)
+    data = json_handler.read_json(path)
     if not isinstance(data, dict):
         raise GitAuthRefusal(f"{path} could not be read as a JSON object — fix or restore the file, then re-run")
     return data
@@ -93,7 +93,7 @@ def _read_passport(path: Path) -> Optional[Dict[str, Any]]:
     """
     if not path.is_file():
         return None
-    data = json_handler.load_path(path)
+    data = json_handler.read_json(path)
     if not isinstance(data, dict):
         logger.warning("[git-auth] Passport at %s is not readable JSON — skipping", path)
         return None
@@ -107,7 +107,7 @@ def _write_json(path: Path, data: Dict[str, Any]) -> None:
     file is only ever swapped in complete — and a failed write is never
     reported as a repair.
     """
-    if not json_handler.save_path(path, data):
+    if not json_handler.write_json(path, data):
         raise GitAuthRefusal(f"{path} could not be written — check file permissions, then re-run")
 
 

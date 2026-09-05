@@ -49,7 +49,7 @@ aipass/
 │   │   ├── init/                          # bootstrap.py, git_auth.py (re-exports shared/scaffold_content.py)
 │   │   ├── new_project/                   # Project creation logic (registry, template, scaffold, repo init)
 │   │   │   └── adopt.py                   # Project adoption logic (additive scaffold onto an existing dir)
-│   │   ├── json/                          # Branch-local shim — delegates to shared/json_handler.py
+│   │   ├── json/                          # Branch-local shim — binds the fleet json service (prax-owned)
 │   │   ├── help_flag.py                   # wants_help() — --help detection in any argv position
 │   │   ├── ping_sweep/                    # Branch reachability verification
 │   │   ├── provider_reconcile.py          # Stale deny-rule detection + fix
@@ -61,9 +61,10 @@ aipass/
 │   │   └── ui/                            # Rich progress bars, spinners, check glyphs, step headers
 │   ├── integrations/                      # Placeholder — no code yet
 │   └── plugins/                           # Placeholder — no code yet
-├── shared/                                # Cross-handler code — json_handler, json_ops,
-│                                          #   project_home, registry_discovery, scaffold_content
-├── tests/                                 # 1078 passing
+├── shared/                                # Cross-handler code, stdlib-only (loads pre-drone) — json_ops,
+│                                          #   project_home, registry_discovery, scaffold_content. Four modules:
+│                                          #   json_handler retired to shared/.archive/ 2026-09-04 (DPLAN-0325)
+├── tests/                                 # 1081 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -170,7 +171,7 @@ Humans only. No `.py` source elsewhere in AIPass imports this branch.
 
 ## Tests
 
-1078 passing — `pytest src/aipass/aipass/tests/`
+1081 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 

@@ -21,6 +21,7 @@ json_handler unit tests keep their full behavior. Mock modules and
 mock-replaced functions are left untouched.
 """
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -28,6 +29,27 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent
+_FLEET_SERVICE_MODULE = "aipass.prax.apps.handlers.json.json_service"
+
+
+def _binds_the_fleet_service(function) -> bool:
+    """True when ``log_operation`` is a bound method of prax's ``JsonHandle``.
+
+    DPLAN-0325 (2026-09-03): the fleet has ONE json handler source. A branch's
+    ``json_handler.py`` is a zero-token shim that BINDS the service's methods
+    and never wraps them — the service resolves the calling module at frame 2
+    and the branch's document directory PER CALL, honouring
+    ``AIPASS_TEST_LOG_DIR`` itself. Wrapping such a name here would put a
+    frame between caller and service (every log entry attributed to this
+    conftest) and break the shim's own bind-not-wrap pin, which is exactly
+    what happened on the first repo-root CI run after prax landed. The
+    redirect the wrapper exists to enforce is the service's job for these
+    modules; ``_no_shared_json_log_writes`` checks the seam is armed instead.
+    """
+    owner = getattr(function, "__self__", None)
+    if owner is None:
+        return False
+    return type(owner).__name__ == "JsonHandle" and type(owner).__module__ == _FLEET_SERVICE_MODULE
 
 
 def _points_into_repo(mod: types.ModuleType) -> bool:
@@ -100,6 +122,17 @@ def _no_shared_json_log_writes():
         real = getattr(mod, "log_operation", None)
         if real is None or not callable(real) or hasattr(real, "reset_mock"):
             continue  # absent, or already replaced by a test's mock
+        if _binds_the_fleet_service(real):
+            # One-source shim: the service redirects per call. A repo-root run
+            # without the seam armed would write into live trees, so that is
+            # an error here, not a silently skipped write.
+            if not os.environ.get("AIPASS_TEST_LOG_DIR"):
+                raise RuntimeError(
+                    f"{mod.__name__} binds the fleet json service but AIPASS_TEST_LOG_DIR is not set — "
+                    "every branch conftest sets it at import; a repo-root run reaching this point "
+                    "without it would write into live <branch>_json directories"
+                )
+            continue
         wrapper = _guarded(mod, real)
         setattr(mod, "log_operation", wrapper)
         wrapped.append((mod, wrapper, real))

@@ -60,8 +60,8 @@ apps/
     users/
       user.py             # Current user detection (get_current_user)
       branch_detection.py # CWD/env-based branch identity detection
-    json_utils/
-      json_handler.py     # Auto-creating JSON system
+    json/
+      json_handler.py     # The fleet's one json service, bound to ai_mail (DPLAN-0325)
 ```
 
 ## Critical Rules

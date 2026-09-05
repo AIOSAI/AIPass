@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-03-05
 # Modified: 2026-08-08
 # =============================================
@@ -84,20 +84,33 @@ def get_json_structure_standards() -> str:
         "",
         "[bold cyan]json_handler.py SETUP:[/bold cyan]",
         "",
-        "  Auto-detects branch via [dim]Path(__file__)[/dim]. Universal across branches:",
+        "  [bold]DPLAN-0325:[/bold] there is ONE implementation, and it lives in prax.",
+        "  This file BINDS its names to a handle for this branch and adds nothing:",
         "",
-        "  [dim]_BRANCH_ROOT = Path(__file__).resolve().parents[3][/dim]",
-        "  [dim]_BRANCH_NAME = _BRANCH_ROOT.name[/dim]",
-        '  [dim]JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"[/dim]',
+        "  [dim]from aipass.prax import json_handler[/dim]",
+        "  [dim]_h = json_handler.for_module(__file__)[/dim]",
+        "  [dim]read_json = _h.read_json[/dim]  [dim]# ... and the rest[/dim]",
         "",
-        "  [green]No per-branch customization needed.[/green]",
-        "  Spawn ships the template, branches just copy it.",
+        "  [green]Byte-identical in every branch — seedgo checks it by sha256.[/green]",
+        "  Copy the block from DPLAN-0325 section 3. Do not retype it.",
         "",
-        "  [yellow]CRITICAL:[/yellow] json_handler.py must be [bold]dependency-free[/bold].",
-        "  Only stdlib imports (json, pathlib, datetime, inspect).",
-        "  [red]No prax.[/red] [red]No branch imports.[/red] [red]No cli.[/red]",
+        "  The shim resolves NO paths of its own: the service derives this",
+        "  branch's root from the shim's [dim]__file__[/dim], deliberately without",
+        "  [dim]resolve()[/dim] so a dead cwd on Windows cannot poison it. That is why",
+        "  the check above accepts a shim with no [dim]Path(__file__)[/dim] in it.",
+        "",
+        "  [yellow]Bind, never wrap.[/yellow] The service reads the calling module at",
+        "  [dim]sys._getframe(2)[/dim]; a [dim]def[/dim] wrapper adds one frame and sends every",
+        "  log into [dim]json_handler_log.json[/dim] instead of the caller's document.",
+        "",
+        "  [yellow]RETIRING:[/yellow] the old standalone shape — [dim]_BRANCH_ROOT =[/dim]",
+        "  [dim]Path(__file__).resolve().parents[3][/dim] with its own [dim]JSON_DIR[/dim] and",
+        "  [dim]MAX_LOG_ENTRIES[/dim] — still passes while the fleet sweep is in flight.",
+        "  [red]No branch imports.[/red] [red]No cli.[/red] Nothing but the bound names.",
         "  If a module needs to log the JSON write, the CALLER logs via prax —",
-        "  not the handler. This prevents circular imports (e.g. prax → cli → json_handler → prax).",
+        "  not the handler. The shim imports prax and the cycle prax → cli →",
+        "  json_handler → prax stays broken because [dim]aipass/prax/__init__.py[/dim] is",
+        "  lazy (PEP 562): importing the name loads the service and nothing else.",
         "",
         "─" * 70,
         "",
