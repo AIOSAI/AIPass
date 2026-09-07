@@ -338,7 +338,7 @@ class TestCheckResumeSignal:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,
             ),
             patch("subprocess.run") as mock_run,
@@ -365,7 +365,7 @@ class TestCheckResumeSignal:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,
             ),
             patch("subprocess.run") as mock_run,
@@ -390,7 +390,7 @@ class TestCheckResumeSignal:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + 10,  # well inside the grace window
             ),
             patch("subprocess.run") as mock_run,
@@ -418,7 +418,7 @@ class TestWallClockJumpResumeDetection:
         clock = _SteppedClock(1000.0, 1000.0 + 30)  # a normal long-poll iteration
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
         ):
             bot._check_resume_signal()  # establishes the baseline loop mark
             clock.advance()
@@ -435,7 +435,7 @@ class TestWallClockJumpResumeDetection:
         clock = _SteppedClock(1000.0, 1000.0 + RESUME_WALLCLOCK_JUMP_SECONDS + 1)
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
         ):
             bot._check_resume_signal()  # baseline mark
             clock.advance()
@@ -447,7 +447,7 @@ class TestWallClockJumpResumeDetection:
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         assert bot._suspend_heartbeat_active is False
 
-        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1234.0):
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=1234.0):
             bot._check_resume_signal()
 
         assert bot._suspend_last_loop_mark == 1234.0
@@ -476,7 +476,7 @@ class TestStaleStampBaseline:
 
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=600.0),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=600.0),
         ):
             bot._check_resume_signal()
 
@@ -505,7 +505,7 @@ class TestSpuriousWakeAbsorption:
 
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
             patch("subprocess.run") as mock_run,
         ):
             bot._check_resume_signal()  # baseline mark before the (spurious) suspend
@@ -532,7 +532,7 @@ class TestSpuriousWakeAbsorption:
         clock = _SteppedClock(1000.0, 1000.0 + RESUME_WALLCLOCK_JUMP_SECONDS + 5)
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
         ):
             bot._check_resume_signal()  # sets the loop mark mid-grace-window
             clock.advance()
@@ -591,7 +591,7 @@ class TestCrossProcessHumanPresence:
         with (
             patch.object(bot, "_write_mirror_mapping"),
             patch.object(bot, "handle_message"),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=9000.0),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=9000.0),
         ):
             bot.process_update({"message": {"chat": {"id": 1}, "from": {"id": 111}, "text": "hi"}})
 
@@ -659,7 +659,7 @@ class TestCrossProcessHumanPresence:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,
             ),
             patch("subprocess.run") as mock_run,
@@ -684,7 +684,7 @@ class TestWakeCauseClassification:
 
         with (
             patch("subprocess.run"),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1000.0),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=1000.0),
         ):
             bot._handle_control_suspend(chat_id=42, arg="")
 
@@ -709,7 +709,7 @@ class TestWakeCauseClassification:
         clock = _SteppedClock(1000.0, 1014.0)  # a 14s gap — far under RESUME_WALLCLOCK_JUMP_SECONDS
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
         ):
             bot._check_resume_signal()  # baseline, alarm not yet due
             clock.advance()
@@ -729,7 +729,7 @@ class TestWakeCauseClassification:
         clock = _SteppedClock(1000.0, 1200.0)  # lid opened 1300s before the alarm was due
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
             patch("subprocess.run") as mock_run,
         ):
             bot._check_resume_signal()
@@ -751,7 +751,7 @@ class TestWakeCauseClassification:
         clock = _SteppedClock(1000.0, 2500.0)
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
             patch("subprocess.run"),
         ):
             bot._check_resume_signal()
@@ -773,7 +773,7 @@ class TestWakeCauseClassification:
         clock = _SteppedClock(1000.0, wake_at)
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=clock),
             patch("subprocess.run"),
         ):
             bot._check_resume_signal()
@@ -803,7 +803,7 @@ class TestPostResumeGraceAnchor:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS * 3,
             ),
             patch("subprocess.run") as mock_run,
@@ -823,7 +823,7 @@ class TestPostResumeGraceAnchor:
         missing = tmp_path / "no_signal.json"
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1056.0),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=1056.0),
             patch("subprocess.run") as mock_run,
         ):
             bot._check_resume_signal()
@@ -843,7 +843,7 @@ class TestPostResumeGraceAnchor:
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
             patch(
-                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                "aipass.skills.lib.telegram.apps.handlers.base_bot._now",
                 return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,  # old anchor would re-arm here
             ),
             patch("subprocess.run") as mock_run,
@@ -871,7 +871,7 @@ class TestPostResumeGraceAnchor:
             patch.object(bot, "clean_stale_pending"),
             patch.object(bot, "_load_offset", return_value=0),
             patch.object(bot, "poll_updates", side_effect=_one_poll),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=7777.0),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=7777.0),
         ):
             bot.run()
 
@@ -933,7 +933,7 @@ class TestTurnInFlightHold:
         missing = tmp_path / "no_signal.json"
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=now),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=now),
             patch("subprocess.run") as mock_run,
         ):
             bot._check_resume_signal()
@@ -953,7 +953,7 @@ class TestTurnInFlightHold:
         missing = tmp_path / "no_signal.json"
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=now),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", return_value=now),
             patch("subprocess.run") as mock_run,
         ):
             bot._check_resume_signal()

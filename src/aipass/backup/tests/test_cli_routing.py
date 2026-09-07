@@ -53,13 +53,20 @@ def _load_module_fresh(module_path: str, extra_mocks: dict | None = None):
     setattr(prax_mod, "logger", MagicMock())
     cli_mocks["aipass.prax"] = prax_mod
 
+    audit_pkg = types.ModuleType("aipass.backup.apps.handlers.audit")
+    trail_mod = types.ModuleType("aipass.backup.apps.handlers.audit.trail")
+    setattr(trail_mod, "log_operation", MagicMock())
+    cli_mocks["aipass.backup.apps.handlers.audit"] = audit_pkg
+    cli_mocks["aipass.backup.apps.handlers.audit.trail"] = trail_mod
+
     json_mod = types.ModuleType("aipass.backup.apps.handlers.json")
     json_handler_mod = types.ModuleType(
         "aipass.backup.apps.handlers.json.json_handler",
     )
-    setattr(json_handler_mod, "log_operation", MagicMock())
-    setattr(json_handler_mod, "load_json", MagicMock(return_value={}))
-    setattr(json_handler_mod, "save_json", MagicMock())
+    setattr(json_handler_mod, "read_json", MagicMock(return_value={}))
+    setattr(json_handler_mod, "write_json", MagicMock(return_value=True))
+    setattr(json_handler_mod, "InvalidDocument", ValueError)
+    setattr(json_handler_mod, "WriteFailed", OSError)
     cli_mocks["aipass.backup.apps.handlers.json"] = json_mod
     cli_mocks["aipass.backup.apps.handlers.json.json_handler"] = json_handler_mod
 

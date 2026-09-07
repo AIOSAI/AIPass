@@ -6,10 +6,6 @@
   },
   "bypass": [
     {
-      "standard": "json_handler",
-      "reason": "Backup has a log-only json_handler fork (JSONL append to logs/operations.jsonl). Architecture does not use module JSON pattern \u2014 backup manages files, not branch state. Pending migration decision."
-    },
-    {
       "file": "apps/handlers/drive/client.py",
       "standard": "handlers",
       "reason": "Auth routing requires importing @api gateway module -- per Phase 4 spec",

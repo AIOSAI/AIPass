@@ -469,15 +469,22 @@ def check_cross_branch_imports(
 _DEFAULT_HANDLERS = frozenset({"json_handler", "file_handler"})
 
 
+#: The fleet-ratified spellings of the guarded ``__file__`` / repo-root
+#: resolution shim. A module that DEFINES one of these at module level IS that
+#: shim; a module that merely calls it is not. Names, not files, because the
+#: file name varies by branch (module_root.py, paths.py, repo_root.py,
+#: module_paths.py) while the function it publishes does not.
+_RESOLUTION_SHIM_FUNCTIONS = frozenset({"module_file", "find_repo_root", "source_root", "resolved_file"})
+
+
 @lru_cache(maxsize=32)
 def _infrastructure_handlers(branch_root_str: str) -> frozenset:
-    """Handler modules the branch's OWN json_handler depends on.
+    """Handler modules that sit BENEATH everything else in the branch.
 
-    THE ARGUMENT, and it is why this is not just a longer allow-list: if
-    json_handler may be imported anywhere — which this checker has always said —
-    then so may anything json_handler itself imports, because that module is
-    BENEATH json_handler in the branch's own import order. Nothing can use
-    json_handler without already having loaded it.
+    THE ARGUMENT, and it is why this is not just a longer allow-list: a module
+    every other module stands on cannot be encapsulated behind one of them.
+    Nothing can import it "through" a module entry point, because the entry
+    point needs it first.
 
     WHERE IT CAME FROM. @daemon, 2026-08-31, two adjacent lines in their entry
     point: the json_handler import passed and the module_root import scored the
@@ -486,12 +493,34 @@ def _infrastructure_handlers(branch_root_str: str) -> frozenset:
     CROSS-branch imports. The checker was exempting json_handler by NAME rather
     than by the property that makes it fine.
 
-    module_root (spellings vary: paths.py, module_paths.py, repo_root.py) is the
-    fleet-ratified cure for the Windows dead-cwd defect, adopted by ten-plus
-    branches this round, and it is a handler BY CONSTRUCTION — it has to sit
-    under handlers/ to be the one guarded spelling. Measured 2026-08-31: 8 of 9
-    branches carrying the cure have their json_handler importing it, so the
-    derived set finds it without anyone naming a file.
+    HOW IT USED TO BE DERIVED, AND WHY THAT STOPPED WORKING. The original read
+    the branch's own ``json_handler.py`` and took whatever it imported from
+    under ``handlers/``: measured 2026-08-31, 8 of 9 branches carrying the
+    resolution cure had json_handler importing it, so the set found it without
+    anyone naming a file. DPLAN-0325 removed that basis. Every branch's handler
+    is now the one canonical shim, which imports ``aipass.prax`` and nothing
+    else — measured 2026-09-04 across all eighteen branches, the old derivation
+    returns the EMPTY SET for every one of them. It did not become wrong, it
+    became blind, and blind in the silent direction: @daemon reddened on CI
+    (f8d7867f) because its entry point is the only one importing the shim
+    directly, and the other seventeen were one edit away from the same red.
+
+    WHAT REPLACED IT. The resolution shim is identified by what it PUBLISHES,
+    which is the property that made it infrastructure in the first place: it
+    has to live under ``handlers/`` to be the one guarded spelling for
+    ``Path(__file__)`` on a machine with no readable working directory, and
+    every module in the branch resolves through it. A top-level module under
+    ``apps/handlers/`` that defines one of :data:`_RESOLUTION_SHIM_FUNCTIONS`
+    at module level is that file. Measured 2026-09-04 over the fleet: fifteen
+    branches carry one and are found; ``spawn/passport_migration.py`` defines a
+    ``repo_root`` of its own and is correctly NOT found, because it publishes
+    none of the ratified spellings.
+
+    Deliberately NOT a leaf test ("imports nothing from its own apps/"), which
+    was measured first: it blesses ``json_flags.py``, ``metadata.py``,
+    ``class_registry.py`` and six others that are ordinary handlers which
+    happen to have no local dependencies. Being at the bottom of the import
+    graph is not the same as being the thing everything stands on.
 
     Args:
         branch_root_str: The branch directory, e.g. ``.../src/aipass/daemon``.
@@ -499,25 +528,20 @@ def _infrastructure_handlers(branch_root_str: str) -> frozenset:
     Returns:
         Module basenames (no extension) importable anywhere in the branch.
     """
-    branch_root = Path(branch_root_str)
-    handlers_root = branch_root / "apps" / "handlers"
-    sources = list(handlers_root.glob("*/json_handler.py"))
+    handlers_root = Path(branch_root_str) / "apps" / "handlers"
     names: set = set()
-    for source in sources:
+    for source in sorted(handlers_root.glob("*.py")):
+        if source.name == "__init__.py":
+            continue
         try:
             tree = ast.parse(source.read_text(encoding="utf-8"))
         except (OSError, SyntaxError) as exc:
             # Unreadable is not evidence: the branch keeps the ordinary rule.
             logger.info("encapsulation: cannot read %s for the infrastructure set: %s", source, exc)
             continue
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                # Relative and absolute alike — @canary reaches theirs with
-                # ``from ..paths import module_file`` and it counts the same.
-                module = node.module or ""
-                candidates = [module.rsplit(".", 1)[-1]] if module else []
-                candidates += [alias.name for alias in node.names]
-                names.update(c for c in candidates if c and (handlers_root / f"{c}.py").is_file())
+        published = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        if published & _RESOLUTION_SHIM_FUNCTIONS:
+            names.add(source.stem)
     return frozenset(names)
 
 

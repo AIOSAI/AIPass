@@ -37,38 +37,32 @@ _mod = importlib.import_module(_json_mod_path)
 json_handler = _mod
 
 
-_JSON_DIR_ATTR: str | None = None
-_JSON_DIR_CANDIDATES = [
-    f"{BRANCH_MODULE.upper()}_JSON_DIR",
-    "JSON_DIR",
-    "BRANCH_JSON_DIR",
-    "_JSON_DIR",
-]
-
-for _candidate in _JSON_DIR_CANDIDATES:
-    if hasattr(_mod, _candidate):
-        _JSON_DIR_ATTR = _candidate
-        break
-
-if _JSON_DIR_ATTR is None:
-    pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler",
-        allow_module_level=True,
-    )
+#: Isolation goes through the fleet seam, not a module attribute.
+#:
+#: This file used to hunt the handler for API_JSON_DIR / JSON_DIR /
+#: BRANCH_JSON_DIR / _JSON_DIR and, finding none, skip ITSELF at module level.
+#: Since DPLAN-0325 the handler is a shim over the one prax service, which
+#: holds no directory constant at all — so the hunt would have found nothing
+#: and this whole suite would have gone quietly dormant, reporting skipped and
+#: measuring nothing. The service reads AIPASS_TEST_LOG_DIR on every call, so
+#: the redirect is an env var and the suite keeps running.
 
 
 @pytest.fixture(autouse=True)
 def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect JSON operations to tmp_path for test isolation."""
-    assert _JSON_DIR_ATTR is not None
-    monkeypatch.setattr(_mod, _JSON_DIR_ATTR, tmp_path)
-    return tmp_path
+    """Redirect JSON operations into a temp sandbox for test isolation."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    return _json_dir_as_path(tmp_path)
 
 
 def _json_dir_as_path(tmp_path: Path) -> Path:
-    assert _JSON_DIR_ATTR is not None
-    val = getattr(_mod, _JSON_DIR_ATTR)
-    return Path(val) if isinstance(val, str) else val
+    """The directory the handler writes into right now.
+
+    MEASURED off the handler rather than spelled out: the one service spells
+    the sandbox <seam>/<branch>/<branch>_json, so a literal here would drift
+    the first time that spelling changes.
+    """
+    return _mod.get_json_path("probe", "config").parent
 
 
 # ============================================================================
@@ -92,13 +86,20 @@ def test_creates_expected_files(tmp_path: Path) -> None:
         assert parsed is not None
 
 
-def test_auto_creates_directory(tmp_path: Path) -> None:
-    """ensure_json_exists auto-creates parent directory when missing."""
-    nested_dir = tmp_path / "auto_created" / "subdir"
-    assert not nested_dir.exists()
+def test_auto_creates_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ensure_json_exists auto-creates parent directory when missing.
 
-    assert _JSON_DIR_ATTR is not None
-    setattr(_mod, _JSON_DIR_ATTR, nested_dir)
+    Pointed at a seam two levels below anything that exists, so the handler
+    has to build the whole chain. The redirect is monkeypatched, not a bare
+    setattr: the old form assigned the module attribute permanently and left
+    the next test in this process pointing at a deleted tmp_path.
+    """
+    seam = tmp_path / "auto_created" / "subdir"
+    assert not seam.exists()
+
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(seam))
+    nested_dir = _json_dir_as_path(tmp_path)
+    assert not nested_dir.exists()
 
     try:
         result = json_handler.ensure_json_exists("autodir", "config")

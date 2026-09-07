@@ -120,18 +120,18 @@ def refresh_provider_hooks(manifest_path: Path) -> List[str]:
     Fails honestly: raises if the manifest can't be read/parsed rather than silently
     leaving stale wiring in place.
     """
-    manifest = json_handler.load_path(manifest_path)
+    manifest = json_handler.read_json(manifest_path)
     if manifest is None:
         raise FileNotFoundError(f"provider manifest unreadable: {manifest_path}")
     manifest_hooks = manifest.get("cli", {}).get("claude", {}).get("hooks", [])
 
     settings_path = Path.home() / ".claude" / "settings.json"
-    settings = (json_handler.load_path(settings_path) if settings_path.exists() else {}) or {}
+    settings = (json_handler.read_json(settings_path) if settings_path.exists() else {}) or {}
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
     settings["hooks"] = merged_hooks
 
-    json_handler.save_path(settings_path, settings)
+    json_handler.write_json(settings_path, settings)
     actions.append("Updated ~/.claude/settings.json (hooks)")
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions
@@ -146,7 +146,7 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
     """
     actions: List[str] = []
 
-    manifest = json_handler.load_path(manifest_path)
+    manifest = json_handler.read_json(manifest_path)
     if manifest is None:
         return actions
     claude_section = manifest.get("cli", {}).get("claude", {})
@@ -155,7 +155,7 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
 
     settings_path = Path.home() / ".claude" / "settings.json"
     if settings_path.exists():
-        settings = json_handler.load_path(settings_path) or {}
+        settings = json_handler.read_json(settings_path) or {}
     else:
         settings = {}
 
@@ -207,7 +207,7 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
                 settings["permissions"]["ask"].append(rule)
                 actions.append(f"Added ask rule: {rule}")
 
-    json_handler.save_path(settings_path, settings)
+    json_handler.write_json(settings_path, settings)
     actions.append("Updated ~/.claude/settings.json")
 
     json_handler.log_operation("auto_wire_provider", {"actions": len(actions)})

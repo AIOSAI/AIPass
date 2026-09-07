@@ -156,19 +156,27 @@ class TestTheBareWorldIsStatedNotInherited:
         monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
         assert repo_root.find_repo_root(tmp_path) == repo_root.SOURCE_ROOT
 
-    def test_the_fallback_records_without_ever_raising(self, monkeypatch):
+    def test_the_fallback_records_without_ever_raising(self, mock_json_handler):
         """Six callers reach _record_fallback at IMPORT time.
 
         A diagnostic write that fails in a bare world must not become the import
         crash the module exists to prevent, so the real recorder is exercised
         here with its json_handler dead.
+
+        The dead handler is the autouse spy told to raise, NOT a second
+        monkeypatch on the same attribute: monkeypatch is one shared instance
+        that mock_logger already took, so it is torn down AFTER the spy's
+        patch exits and would put the spy's MagicMock back onto the shim for
+        good. That leak was invisible while flow ran alone and reddened
+        seedgo's contract for [flow] the moment both shared one process
+        (CI coverage leg, DPLAN-0325 pair 7).
         """
         from aipass.flow.apps.handlers import repo_root
 
         def explode(*args, **kwargs):
             raise OSError("no writable tree")
 
-        monkeypatch.setattr("aipass.flow.apps.handlers.json.json_handler.log_operation", explode)
+        mock_json_handler.side_effect = explode
 
         # Must not raise.
         repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, Path("/nowhere"))

@@ -56,11 +56,6 @@
       "reason": "_print_branch_summary() depth 6 \u2014 nested formatting of reconciliation results with per-category output. Display logic requires nested iteration."
     },
     {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "naming",
-      "reason": "Module-level names are function re-exports from aipass.aipass.shared.json_handler.JsonHandler, not constants. Lowercase is correct for callable bindings."
-    },
-    {
       "file": "apps/handlers/regenerate_registry_ops.py",
       "standard": "json_structure",
       "reason": "Pure registry generation \u2014 walks template, hashes files, builds registry. Uses meta_ops.compute_file_hash and json.dumps directly. Not an operational handler."

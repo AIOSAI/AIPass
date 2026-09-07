@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.8.0
+# Version: 1.9.0
 # Description: Cross-project (tool + scripted), cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-30
+# Modified: 2026-09-01
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -24,8 +24,11 @@ TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 # The one seat that reaches outwards. Patrick, 2026-08-30, compassed as devpulse
 # entry 322: "It is only you who can reach outwards. Nobody else." The cross-
 # project fence stays for every other agent, tool lane and scripted lane alike.
-# Named here for the log line only — WHO is decided by the verified rail below,
-# never by this string matching a directory.
+# Named here for the log line only — WHO is decided by modules/admin_seat's
+# verified rail, never by this string matching a directory. Spelled rather than
+# imported because a handler reaches modules through importlib at call time, not
+# at import time (the branch's own architecture rule); modules/admin_seat holds
+# the same literal and admin_seat_name() below is what keeps the two honest.
 ADMIN_SEAT = "devpulse"
 # A project root is the directory holding a *_REGISTRY.json — the same marker
 # @ai_mail's find_project_root uses (handlers/paths.py). Deliberately identical:
@@ -79,57 +82,27 @@ def _find_project_root(start: Path) -> Path | None:
 def _is_admin_seat(cwd: str) -> bool:
     """True only when the 5-leg admin grant verifies for this session.
 
-    Consumes @ai_mail's ``is_verified_admin_caller`` — the same boolean their
-    projects sweep gates on — rather than mirroring it. The contract has one
-    home (@devpulse's ``admin_grant``, FPLAN-0401) and a second reading of it
-    here could silently disagree with the lane that already enforces it.
+    Delegates to ``modules/admin_seat.is_admin_seat`` — the implementation and
+    its full reasoning moved there on 2026-09-01 when ``testwrite_gate`` needed
+    the same answer. It stays spelled here as a name because a security
+    exemption read two ways can disagree with itself, and the whole point of
+    consuming @ai_mail's rail instead of mirroring it was to have one reading.
 
-    THE ONE THING A HOOK MUST SUPPLY. That rail reads identity from the env
-    drone's router stamps (``AIPASS_CALLER_BRANCH`` / ``AIPASS_CALLER_CWD``),
-    and a PreToolUse hook is not drone-invoked: neither variable exists in the
-    hook process, so the rail would answer "unprovable" for devpulse and every
-    other seat alike and the exemption would never open. What the hook does
-    have is the platform's own record of the session directory, handed to it in
-    the hook payload — the same species of evidence drone stamps, from the same
-    kind of source: the process that launched the session, not the agent
-    running inside it. So the caller cwd is stamped here and the rail does the
-    rest: the passport walk, the registry-resolved certificate, the HMAC, the
-    admin flag. An existing stamp is never overwritten — a drone-invoked caller
-    keeps the identity drone gave it.
+    Args:
+        cwd: The session working directory from the hook payload.
 
-    Deliberately NOT a name check. ``ADMIN_SEAT`` never decides anything: a
-    session standing in a directory called devpulse with no valid grant on the
-    machine is refused, which is the defect ``drone rm`` fell to and the reason
-    the dispatch named it.
-
-    Residual, stated rather than discovered: leg 1 resolves through the session
-    directory, so a session whose cwd is devpulse's tree AND a validly signed
-    grant on this machine together satisfy it. That is the grant's own stated
-    threat model — every agent here shares one OS user, and the signature buys
-    tamper-EVIDENCE, not attack-proofing (admin_grant.py, "Security note"). It
-    is also no new reach: a session standing in devpulse's tree already writes
-    devpulse's tree under the cross-branch fence, which keys on the same cwd.
-
-    Fails closed at every edge: an unimportable rail, a raise, or an unprovable
-    caller all return False.
+    Returns:
+        True when the grant verifies, False on every doubt.
     """
     try:
-        vc = importlib.import_module("aipass.ai_mail.apps.handlers.users.verified_caller")
+        admin = importlib.import_module("aipass.hooks.apps.modules.admin_seat")
     except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: admin lane dark — verified-caller rail unavailable: %s", exc)
+        # The delegation must not become a way IN. Reaching the rail through a
+        # second module adds a second import that can fail, and an exemption
+        # that opens because a module was missing is worse than no exemption.
+        logger.warning("[HOOKS] edit_gate: admin lane dark — admin_seat unavailable: %s", exc)
         return False
-
-    stamped = not os.environ.get("AIPASS_CALLER_CWD") and bool(cwd)
-    if stamped:
-        os.environ["AIPASS_CALLER_CWD"] = cwd
-    try:
-        return bool(vc.is_verified_admin_caller())
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate: admin verification raised (refusing): %s", exc)
-        return False
-    finally:
-        if stamped:
-            os.environ.pop("AIPASS_CALLER_CWD", None)
+    return bool(admin.is_admin_seat(cwd))
 
 
 def _check_project_boundary(cwd: str, target: Path) -> dict | None:

@@ -14,12 +14,24 @@
 
 """Shared pytest fixtures for aipass tests."""
 
-import pytest
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
+
+# The seam must exist at IMPORT time, not only inside the autouse fixture: the
+# repo-root conftest guard refuses to import a branch's json shim while
+# AIPASS_TEST_LOG_DIR is unset (1081 errors under `-c pyproject.toml --rootdir=.`
+# on 2026-09-06). Sixteen branches set it here; this one set it per-test only
+# and passed in CI solely because a sibling conftest had already set it.
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
+
+import pytest
+
+from aipass.aipass.apps.handlers.json import json_handler
 
 
 @pytest.fixture
@@ -29,6 +41,31 @@ def temp_test_dir() -> Generator[Path, None, None]:
     yield test_dir
     if test_dir.exists():
         shutil.rmtree(test_dir)
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect this branch's json writes into a temp dir.
+
+    autouse=True on purpose: the shim's names write into the real ``aipass_json/``
+    unless the seam is set, so a test that forgets to redirect pollutes the
+    branch. The guard belongs on every test, not on the ones that remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here -- after import -- still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/aipass/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture(autouse=True)
@@ -67,9 +104,9 @@ def sample_test_data() -> dict:
 
 @pytest.fixture
 def mock_json_handler():
-    """Mock json_handler with functional load_path but stubbed logging.
+    """Mock json_handler with functional read_json but stubbed logging.
 
-    Use when tests need real file I/O via load_path but want to
+    Use when tests need real file I/O via read_json but want to
     suppress log_operation and ensure_module_jsons side effects.
     """
     with (

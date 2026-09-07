@@ -96,10 +96,16 @@ class FakeSystemctl:
 
 @pytest.fixture
 def state_dir(tmp_path, monkeypatch):
-    """Point the switch's state document at a throwaway directory."""
-    target = tmp_path / "skills_json"
-    target.mkdir()
-    monkeypatch.setattr(jh, "SKILLS_JSON_DIR", target)
+    """Point the switch's state document at a throwaway directory.
+
+    The redirect is the AIPASS_TEST_LOG_DIR seam the fleet json service reads
+    per call (DPLAN-0325) - the shim has no attribute left to patch. The
+    directory is then MEASURED off the service rather than spelled out, so this
+    fixture cannot claim a sandbox the switch does not actually write into.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    target = jh.get_json_path("switch", "data").parent
+    target.mkdir(parents=True, exist_ok=True)
     return target
 
 
@@ -135,23 +141,34 @@ class TestStatePersistence:
         # class object while runner.py still holds the old one by value, and a
         # LATER test in the same session stopped catching it. A restart test
         # that corrupts the session it runs in is not modelling a restart.
+        #
+        # The child is aimed at the same disk through the seam, spelled out in
+        # its env rather than inherited: a pin that relies on inheritance is
+        # green for a reason it never states, and would stay green if the
+        # fixture stopped redirecting at all.
         probe = (
             "import sys;"
-            "from aipass.skills.apps.handlers.json import json_handler as jh;"
-            f"jh.SKILLS_JSON_DIR = r'{state_dir}';"
             "from aipass.skills.apps.handlers import switch_handler as s;"
-            "sys.stdout.write(repr(s.is_enabled('telegram')))"
+            "sys.stdout.write(str(s.get_state_path()) + '|' + repr(s.is_enabled('telegram')))"
         )
         completed = subprocess.run(
             [sys.executable, "-c", probe],
             capture_output=True,
             text=True,
             timeout=60,
-            env={**os.environ, "PYTHONPATH": str(Path(sh.__file__).resolve().parents[4])},
+            env={
+                **os.environ,
+                "PYTHONPATH": str(Path(sh.__file__).resolve().parents[4]),
+                "AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"],
+            },
         )
 
         assert completed.returncode == 0, completed.stderr
-        assert completed.stdout.strip() == "False"
+        where, answer = completed.stdout.strip().split("|")
+        assert Path(where) == state_dir / "switch_state.json", (
+            f"the fresh interpreter read a different document than the one written: {where}"
+        )
+        assert answer == "False"
 
     def test_the_value_is_on_disk_not_in_memory(self, state_dir):
         sh.set_enabled("telegram", False, reason="retired 08-18")

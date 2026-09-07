@@ -14,7 +14,7 @@ target project's .backup/ directory.
 
 from pathlib import Path
 
-from ..json import json_handler
+from ..audit import trail
 
 BACKUP_DIR = ".backup"
 
@@ -26,7 +26,7 @@ def backup_root(project_root: str) -> Path:
 
 def build_snapshot_path(project_root: str) -> Path:
     """Snapshot destination: <project>/.backup/snapshots/"""
-    json_handler.log_operation("build_snapshot_path", {"project_root": project_root})
+    trail.log_operation("build_snapshot_path", {"project_root": project_root})
     return backup_root(project_root) / "snapshots"
 
 
@@ -57,7 +57,7 @@ def build_log_dir(project_root: str) -> Path:
 
 def build_versioned_store(project_root: str) -> Path:
     """Persistent versioned store: <project>/.backup/versioned/"""
-    json_handler.log_operation("build_versioned_store", {"project_root": project_root})
+    trail.log_operation("build_versioned_store", {"project_root": project_root})
     return backup_root(project_root) / "versioned"
 
 

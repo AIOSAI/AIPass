@@ -19,7 +19,7 @@ from aipass.prax import logger
 
 from ..cleanup.mirror import cleanup_deleted_files
 from ..ignore.patterns import is_ignored
-from ..json import json_handler
+from ..audit import trail
 from ..report.result import BackupResult
 
 
@@ -147,7 +147,7 @@ def copy_snapshot(
         "errors": errors,
         "files_deleted": files_deleted,
     }
-    json_handler.log_operation(
+    trail.log_operation(
         "copy_snapshot",
         {
             "project_root": project_root,

@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -38,7 +39,7 @@ def read_registry() -> dict:
     if not REGISTRY_PATH.exists():
         return {"version": 1, "projects": {}}
     try:
-        data = json_handler.read_json_file(REGISTRY_PATH)
+        data = json_files.read_json_file(REGISTRY_PATH)
         if not isinstance(data.get("projects"), dict):
             return {"version": 1, "projects": {}}
         return data
@@ -50,7 +51,7 @@ def read_registry() -> dict:
 def _write_registry(registry: dict) -> None:
     """Write the registry to disk, creating parent dirs if needed."""
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    json_handler.write_json_file(REGISTRY_PATH, registry)
+    json_files.write_json_file(REGISTRY_PATH, registry)
 
 
 def enroll(project_dir: str) -> bool:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auto_process.py
 # Description: Automated pool + rollover entry point
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-06-06
+# Modified: 2026-09-05
 # =============================================
 
 """
@@ -27,6 +27,15 @@ HOOK ENGINE CONTRACT:
   wait. It must NOT be called from a UserPromptSubmit hook: measured 78.5-120.5s
   with a backlog, while its stdout is always empty -- so by Patrick's test
   (compass #272) it was blocking a prompt it never fed. DPLAN-0295 item 1.
+
+COMPLETION EVENT (1.1.0, 2026-09-05):
+  run_once() fires @trigger's `memory_pool_auto_processed` on both outcomes.
+  The fire used to live in @hooks' inline call; DPLAN-0294 phase 1b detached the
+  work and it went with it, leaving @trigger's handler registered and
+  unreachable — so a failure inside the child was visible only as counters
+  nothing reads for failure. The spawn site cannot fire it truthfully (a PID is
+  not a completion), so it belongs here, in the only process present when the
+  work ends. A declined run does NOT fire: the lock holder announces its own.
 
 WHY A DETACHED CHILD rather than a @daemon schedule:
   The work must still happen promptly when a file is dropped into the pool, and
@@ -186,6 +195,66 @@ def spawn_background() -> Dict[str, Any]:
     return {"success": True, "skipped": False, "pid": child.pid}
 
 
+def _completion_status(section: Dict[str, Any] | None) -> str:
+    """Map one section of the result onto @trigger's ``status`` vocabulary."""
+    section = section or {}
+    if section.get("skipped"):
+        return "skipped"
+    if section.get("success") is False:
+        return "failed"
+    return "ok"
+
+
+def _fire_completion(result: Dict[str, Any]) -> None:
+    """Announce a finished auto-process run on @trigger's bus.
+
+    DPLAN-0294 phase 1b detached this work into a child process, and the
+    ``memory_pool_auto_processed`` fire went with the inline call it replaced —
+    @hooks' handler returns the instant a PID exists, so it cannot truthfully
+    announce a completion. Only this process is present when the work ends, so
+    the fire belongs here. Found by @trigger 2026-09-05, confirmed by @hooks,
+    measured again here: zero fire sites fleet-wide.
+
+    Fired on BOTH outcomes. The failure leg is the point: @trigger's handler
+    turns ``success: False`` into ``error_detected``, which is the medic
+    dispatch path. Without it a vectorize or rollover failure inside the
+    detached child is visible only as counters nothing reads for failure.
+
+    The payload is @trigger's published contract
+    (``handlers/events/memory_pool.py``), not this module's internal shape —
+    their handler reads ``status`` on both sections, which the internal dicts
+    do not carry. ``branch`` is this branch rather than ``__global__`` on
+    purpose: the handler passes it straight into ``error_detected``, and the
+    citizen to wake for a fault in this code is its owner.
+
+    Never raises. An observability fire that breaks the work it observes is
+    worse than the silence it was added to cure.
+    """
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        pool = result.get("pool") or {}
+        rollover = result.get("rollover") or {}
+        trigger.fire(
+            "memory_pool_auto_processed",
+            success=bool(result.get("success")),
+            branch="memory",
+            pool={
+                "status": _completion_status(pool),
+                "files_processed": pool.get("files_processed", 0),
+                "total_chunks": pool.get("total_chunks", 0),
+            },
+            rollover={
+                "status": _completion_status(rollover),
+                "triggers": rollover.get("triggers", 0),
+                "processed": rollover.get("processed", 0),
+            },
+            error=result.get("error"),
+        )
+    except Exception as e:
+        logger.warning(f"[auto_process] memory_pool_auto_processed fire failed: {e}")
+
+
 def run_once() -> Dict[str, Any]:
     """
     Child entry point: take the lock, do the work, always give the lock back.
@@ -194,6 +263,10 @@ def run_once() -> Dict[str, Any]:
         dict with the auto_process result, or skipped when another run holds it.
     """
     if not _acquire_lock():
+        # NOT a completion, so nothing is announced: the run that HOLDS the lock
+        # is still working and will fire its own. Announcing here would report a
+        # completion that has not happened — the same untruth that made @hooks'
+        # spawn site the wrong place to fire from.
         logger.info("[auto_process] Another run holds the lock -- declining")
         return {"success": True, "skipped": True, "reason": "another run holds the lock"}
 
@@ -202,11 +275,14 @@ def run_once() -> Dict[str, Any]:
         result = auto_process()
         result["duration_s"] = round(time.time() - started, 2)
         logger.info(f"[auto_process] Background run finished in {result['duration_s']}s")
+        _fire_completion(result)
         return result
     except Exception as e:
         logger.error(f"[auto_process] Background run failed: {e}")
         json_handler.log_operation("run_once", {"success": False, "error": str(e)})
-        return {"success": False, "error": str(e)}
+        failed = {"success": False, "error": str(e)}
+        _fire_completion(failed)
+        return failed
     finally:
         _release_lock()
 

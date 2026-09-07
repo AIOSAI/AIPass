@@ -21,7 +21,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 
 
 MODULE_NAME = "drive_stats"
@@ -70,7 +70,7 @@ def run_drive_stats(project_root: str) -> bool:
                 drive_id = entry.get("drive_id", "?")
                 console.print(f"    {key}: {drive_id}")
 
-        json_handler.log_operation(
+        trail.log_operation(
             "drive_stats_displayed",
             {"project_root": project_root, "total": stats["total"]},
         )

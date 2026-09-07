@@ -1,0 +1,8 @@
+{
+  "_comment": "Test-write policy — read by aipass.hooks handlers/security/testwrite_gate.py. Deliberately NOT a key in hooks.json: that file is hash-enrolled in the trust registry, so every edit to it darks every hook until a human re-runs 'aipass trust'. A switch meant to be flipped cannot live in a file whose every edit disables the engine that reads it.",
+  "version": "1.0.0",
+  "agent_test_writing": "off",
+  "allow": [],
+  "block_test_edits": false,
+  "note": "Patrick ruled 2026-09-01 (devpulse DPLAN-0323): agents are stripped of self-directed test creation while @seedgo's test_quality v5 pack lands, because the corpus being culled (tests written to satisfy a checker rather than to pin a defect) regrows faster than a standards pack can cull it. OFF blocks CREATION of new test files under any tests/ directory; edits to existing tests stay allowed so a red test can still be fixed. Canary trial = add one branch name to allow[]. Fleet back on = agent_test_writing: on. Read it live with: drone @hooks testwrite"
+}

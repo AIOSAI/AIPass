@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracker.py
 # Description: Drive upload tracker — mtime+size dedup for file sync
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-09-03
 # =============================================
 
 """Drive upload tracker.
@@ -20,6 +20,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
+from ..audit import trail
 from ..json import json_handler
 
 TRACKER_FILENAME = "drive_tracker.json"
@@ -37,10 +38,21 @@ def load_tracker(project_root: str) -> dict:
 
     Returns:
         Dict keyed by relative file path with metadata values.
+
+    Raises:
+        InvalidDocument: The tracker exists but cannot be read as a JSON
+            object. An empty tracker would re-upload the whole store AND let
+            the next save_tracker overwrite the unreadable document.
     """
     path = _tracker_path(project_root)
-    data = json_handler.load_json(str(path))
-    json_handler.log_operation(
+    data = json_handler.read_json(path)
+    if data is None:
+        if path.exists():
+            raise json_handler.InvalidDocument(f"Drive tracker unreadable: {path}")
+        data = {}
+    if not isinstance(data, dict):
+        raise json_handler.InvalidDocument(f"Drive tracker is not a JSON object: {path}")
+    trail.log_operation(
         "load_tracker",
         {"project_root": project_root, "entries": len(data)},
     )
@@ -48,10 +60,17 @@ def load_tracker(project_root: str) -> dict:
 
 
 def save_tracker(project_root: str, tracker: dict) -> None:
-    """Save tracker to .backup/drive_tracker.json."""
+    """Save tracker to .backup/drive_tracker.json.
+
+    Raises:
+        WriteFailed: The tracker could not be written. A sync whose tracker
+            never landed re-uploads every file next run, so it is surfaced
+            rather than counted as a success.
+    """
     path = _tracker_path(project_root)
-    json_handler.save_json(str(path), tracker)
-    json_handler.log_operation(
+    if not json_handler.write_json(path, tracker):
+        raise json_handler.WriteFailed(f"Drive tracker write failed: {path}")
+    trail.log_operation(
         "save_tracker",
         {"project_root": project_root, "entries": len(tracker)},
     )
@@ -149,7 +168,7 @@ def clean_tracker(tracker: dict, existing_files: set) -> list[str]:
     for key in stale:
         del tracker[key]
     if stale:
-        json_handler.log_operation(
+        trail.log_operation(
             "clean_tracker",
             {"removed": len(stale)},
         )
@@ -177,16 +196,14 @@ def clear_all(project_root: str) -> bool:
         True if cleared successfully.
     """
     path = _tracker_path(project_root)
-    try:
-        json_handler.save_json(str(path), {})
-        json_handler.log_operation(
-            "clear_tracker",
-            {"project_root": project_root},
-        )
-        return True
-    except Exception as exc:
-        logger.warning(f"Failed to clear tracker: {exc}")
+    if not json_handler.write_json(path, {}):
+        logger.warning(f"Failed to clear tracker at {path}")
         return False
+    trail.log_operation(
+        "clear_tracker",
+        {"project_root": project_root},
+    )
+    return True
 
 
 # =============================================

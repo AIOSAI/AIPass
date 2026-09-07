@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-06-19
+# Modified: 2026-09-06
 # =============================================
 
 """Tests for handlers/lifecycle/rollover.py."""
@@ -167,3 +167,58 @@ class TestFindRepoRootFailLoud:
         assert result is None
         assert "_find_repo_root failed" in caplog.text
         assert repr(bad_home) in caplog.text
+
+
+class TestProbeSuppression:
+    """The test runner must not trigger a fleet-wide memory trim (DPLAN-0323 tie-up).
+
+    @memory resolves its own roots — AIPASS_HOME appears nowhere in its tree
+    (measured 2026-09-06) — so pointing cwd or the environment at a tempdir
+    cannot confine `drone @memory rollover run`. The refusal lives at the call.
+    """
+
+    def _patched(self, monkeypatch):
+        from aipass.hooks.apps.handlers.lifecycle import rollover
+
+        ran = []
+        monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
+        monkeypatch.setattr(rollover, "_run_check", lambda root: (True, CHECK_OVERDUE_OUTPUT))
+        monkeypatch.setattr(rollover, "_run_rollover", lambda root: (ran.append("ran"), (True, ""))[1])
+        return rollover, ran
+
+    def test_probe_run_suppresses_the_fleet_rollover(self, monkeypatch):
+        rollover, ran = self._patched(monkeypatch)
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
+        result = rollover.handle({})
+        assert ran == []
+        assert result["exit_code"] == 0
+
+    def test_real_run_still_rolls_over(self, monkeypatch):
+        """CAUSATION: a guard that suppresses everything proves nothing."""
+        rollover, ran = self._patched(monkeypatch)
+        monkeypatch.delenv("AIPASS_HOOK_PROBE", raising=False)
+        rollover.handle({})
+        assert ran == ["ran"]
+
+    def test_the_read_only_check_still_runs_under_a_probe(self, monkeypatch):
+        """Suppression is at the mutation, not at the entry — the handler must still work."""
+        from aipass.hooks.apps.handlers.lifecycle import rollover
+
+        checked = []
+        monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
+        monkeypatch.setattr(
+            rollover,
+            "_run_check",
+            lambda root: (checked.append("checked"), (True, CHECK_OVERDUE_OUTPUT))[1],
+        )
+        monkeypatch.setattr(rollover, "_run_rollover", lambda root: (True, ""))
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
+        rollover.handle({})
+        assert checked == ["checked"]
+
+    def test_only_the_exact_flag_value_suppresses(self, monkeypatch):
+        """An unset-but-present variable must not silently dark the handler."""
+        rollover, ran = self._patched(monkeypatch)
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "0")
+        rollover.handle({})
+        assert ran == ["ran"]

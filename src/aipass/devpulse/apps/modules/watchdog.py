@@ -515,5 +515,10 @@ def _handle_cancel(sub_args: List[str]) -> bool:
     result = registry_mod.kill_watch(handle)
     presenter.print_kill_result(result)
     if not result.get("killed", False):
+        # error, not a bare log line: a FAILED cancel that exits 0 lets
+        # `watchdog cancel <h> && <next>` run the next step believing the watch
+        # is gone. Found 2026-09-06 (FPLAN-0490) - the one refusal in this
+        # branch that still exited 0 after 32349742 cured the others.
         logger.info("[watchdog] cancel failed handle=%s", handle)
+        error(f"cancel failed for {handle}: {result.get('reason', 'unknown')}")
     return True

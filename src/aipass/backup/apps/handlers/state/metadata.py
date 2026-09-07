@@ -15,7 +15,7 @@ and backup artifacts.
 import platform
 from datetime import datetime, timezone
 
-from ..json import json_handler
+from ..audit import trail
 from ..report.result import BackupResult
 
 
@@ -38,7 +38,7 @@ def build_metadata(result: BackupResult) -> dict:
         "hostname": platform.node(),
         "platform": platform.system(),
     }
-    json_handler.log_operation("build_metadata", {"mode": result.mode})
+    trail.log_operation("build_metadata", {"mode": result.mode})
     return meta
 
 

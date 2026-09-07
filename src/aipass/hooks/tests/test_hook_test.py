@@ -1,5 +1,8 @@
 """Tests for the portable hook test runner (modules/hook_test.py)."""
 
+import json
+import os
+from pathlib import Path
 from unittest.mock import patch
 
 from aipass.hooks.apps.modules import hook_test
@@ -133,3 +136,158 @@ class TestHandleCommand:
             result = hook_test.handle_command("test", ["run"])
         assert result is True
         mock_run.assert_called_once()
+
+
+class TestProbeIsolation:
+    """The probe must not write the branch it is probing (DPLAN-0323 tie-up).
+
+    Before the fix, run_test() fired the REAL PreCompact handlers against the
+    real cwd, so pre_compact_prep stamped a genuine AUTO-COMPACT session into
+    hooks' live .trinity/local.json — a probe indistinguishable from a real
+    compaction afterwards.
+    """
+
+    def _prep_config(self):
+        return {
+            "hooks_enabled": True,
+            "PreCompact": {
+                "pre_compact_prep": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep.handle",
+                },
+            },
+        }
+
+    def test_live_trinity_is_not_written(self, tmp_path, monkeypatch):
+        """The whole point: fire the real stamping handler, real memory untouched."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        local = branch / ".trinity" / "local.json"
+        local.write_text('{"sessions": [], "key_learnings": [], "todos": []}\n', encoding="utf-8")
+        before = local.read_text(encoding="utf-8")
+
+        monkeypatch.chdir(branch)
+        with patch(f"{_MOD}.find_project_config", return_value=self._prep_config()):
+            result = hook_test.run_test()
+
+        assert result["PreCompact"][0]["status"].startswith("fired")
+        assert local.read_text(encoding="utf-8") == before
+
+    def test_handler_still_ran_against_the_skeleton(self, tmp_path, monkeypatch):
+        """VACUITY GUARD: 'nothing was written' must not mean 'nothing ran'."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "local.json").write_text(
+            '{"sessions": [], "key_learnings": [], "todos": []}\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(branch)
+
+        seen = {}
+        real_stamp = hook_test.dispatch
+
+        def spy(event_type, stdin_data, config):
+            seen["cwd"] = json.loads(stdin_data).get("cwd")
+            return real_stamp(event_type, stdin_data, config)
+
+        with (
+            patch(f"{_MOD}.find_project_config", return_value=self._prep_config()),
+            patch(f"{_MOD}.dispatch", side_effect=spy),
+        ):
+            hook_test.run_test()
+
+        assert seen["cwd"] is not None
+        assert seen["cwd"] != str(branch)
+
+    def test_cwd_and_env_are_restored(self, tmp_path, monkeypatch):
+        """A probe that leaves the caller in a deleted tempdir is its own defect."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(branch)
+        monkeypatch.setenv("AIPASS_HOME", "/sentinel/home")
+        monkeypatch.delenv(hook_test.PROBE_ENV_VAR, raising=False)
+
+        with patch(f"{_MOD}.find_project_config", return_value=self._prep_config()):
+            hook_test.run_test()
+
+        assert Path.cwd() == branch
+        assert os.environ["AIPASS_HOME"] == "/sentinel/home"
+        assert hook_test.PROBE_ENV_VAR not in os.environ
+
+    def test_workspace_is_removed(self, tmp_path, monkeypatch):
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(branch)
+
+        captured = {}
+        real_build = hook_test._build_skeleton
+
+        def spy(real_branch, destination):
+            captured["workspace"] = destination
+            return real_build(real_branch, destination)
+
+        with (
+            patch(f"{_MOD}.find_project_config", return_value=self._prep_config()),
+            patch(f"{_MOD}._build_skeleton", side_effect=spy),
+        ):
+            hook_test.run_test()
+
+        assert not captured["workspace"].exists()
+
+    def test_probe_flag_is_set_while_hooks_run(self, tmp_path, monkeypatch):
+        """The flag the two mutation refusals read — proven live, not assumed."""
+        branch = tmp_path / "hooks"
+        (branch / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(branch)
+
+        seen = {}
+
+        def spy(event_type, stdin_data, config):
+            seen["flag"] = os.environ.get(hook_test.PROBE_ENV_VAR)
+            return ("", 0)
+
+        with (
+            patch(f"{_MOD}.find_project_config", return_value=self._prep_config()),
+            patch(f"{_MOD}.dispatch", side_effect=spy),
+        ):
+            hook_test.run_test()
+
+        assert seen["flag"] == "1"
+
+
+class TestBuildSkeleton:
+    def test_copies_the_memory_files(self, tmp_path):
+        real = tmp_path / "hooks"
+        (real / ".trinity").mkdir(parents=True)
+        for name in hook_test._SKELETON_MEMORY_FILES:
+            (real / ".trinity" / name).write_text('{"a": 1}', encoding="utf-8")
+
+        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
+        for name in hook_test._SKELETON_MEMORY_FILES:
+            assert (skeleton / ".trinity" / name).read_text(encoding="utf-8") == '{"a": 1}'
+
+    def test_tolerates_a_branch_with_no_memory_files(self, tmp_path):
+        real = tmp_path / "bare"
+        real.mkdir()
+        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
+        assert (skeleton / ".trinity").is_dir()
+
+    def test_skeleton_carries_no_registry(self, tmp_path):
+        """A temp repo root would not confine @memory's subprocess — see the module docstring."""
+        real = tmp_path / "hooks"
+        (real / ".trinity").mkdir(parents=True)
+        skeleton = hook_test._build_skeleton(real, tmp_path / "work")
+        assert not (skeleton / "AIPASS_REGISTRY.json").exists()
+        assert not (skeleton.parent / "AIPASS_REGISTRY.json").exists()
+
+
+class TestRestoreEnv:
+    def test_unset_stays_unset(self, monkeypatch):
+        monkeypatch.delenv("AIPASS_PROBE_SENTINEL", raising=False)
+        os.environ["AIPASS_PROBE_SENTINEL"] = "leaked"
+        hook_test._restore_env("AIPASS_PROBE_SENTINEL", None)
+        assert "AIPASS_PROBE_SENTINEL" not in os.environ
+
+    def test_prior_value_is_put_back(self, monkeypatch):
+        monkeypatch.setenv("AIPASS_PROBE_SENTINEL", "changed")
+        hook_test._restore_env("AIPASS_PROBE_SENTINEL", "original")
+        assert os.environ["AIPASS_PROBE_SENTINEL"] == "original"

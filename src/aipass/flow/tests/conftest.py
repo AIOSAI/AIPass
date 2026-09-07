@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 # attributes that unittest.mock.patch needs for dotted-path traversal.
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
+from aipass.flow.apps.handlers.json import json_handler as json_handler_module
 import aipass.cli.apps.modules  # noqa: F401
 
 # Pre-import every module that calls find_repo_root() at MODULE level, for a
@@ -124,8 +125,50 @@ def mock_logger(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def mock_json_handler():
-    """Mock json_handler to prevent real JSON operations."""
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect flow's json writes into a temp dir.
+
+    autouse=True on purpose: flow's handler is a shim that binds the fleet json
+    service (DPLAN-0325), whose names write into the real flow_json/ unless the
+    seam is set, so a test that forgets to redirect pollutes the branch. The
+    guard belongs on every test, not on the ones that remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/flow/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler_module.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
+
+
+@pytest.fixture(autouse=True)
+def mock_json_handler(request):
+    """Spy on the audit line, so a test can assert WHICH operation was logged.
+
+    Eight suites take this fixture by name and assert on its calls, so it stays
+    a spy rather than becoming the seam — ``mock_infrastructure`` above is what
+    actually keeps writes out of flow_json/, and it does so for all nine names
+    rather than this one.
+
+    It patches a module attribute, which the shim's OWN wiring test must see
+    unpatched: that file's whole subject is that each name IS the service's
+    bound method, and a MagicMock in its place is exactly the drift it looks
+    for. Excluded by module rather than by marker so the fleet's canonical
+    wiring test stays byte-identical across every migrated branch.
+    """
+    if request.node.module.__name__.endswith("test_json_handler"):
+        yield None
+        return
+
     with patch("aipass.flow.apps.handlers.json.json_handler.log_operation") as mock_log_op:
         yield mock_log_op
 
@@ -147,6 +190,23 @@ def mock_console():
             "success": success_mock,
             "header": header_mock,
         }
+
+
+@pytest.fixture
+def sample_test_data() -> dict:
+    """Reusable sample data shaped like a valid 'data' JSON document.
+
+    The branch template ships this and 17 of 18 branches carry it; flow's
+    conftest had lost it, and the gap was invisible because an unrelated
+    handler test happened to mention the name. Restored with the sweep that
+    archived that test (DPLAN-0325 pair 7) rather than left to look covered.
+    """
+    return {
+        "created": "2026-09-04",
+        "last_updated": "2026-09-04",
+        "test_key": "test_value",
+        "sample_data": "example",
+    }
 
 
 @pytest.fixture
@@ -210,3 +270,9 @@ def mock_template_registry(tmp_path):
     registry_file = tmp_path / "template_registry.json"
     registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_file, registry
+
+
+# Never discover out of .archive/: it holds verbatim disposal copies (the old
+# handler's tests, the pre-service durability suite) that must not be collected
+# or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]

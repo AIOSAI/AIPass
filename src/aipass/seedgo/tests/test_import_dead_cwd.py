@@ -134,8 +134,15 @@ def _no_working_tree_litter():
     )
 
 
+#: Warmed while the cwd is still readable, so the sweep below convicts SEEDGO's
+#: modules rather than the shared infrastructure they pull in. A name belongs
+#: here only if something under _seedgo_modules() actually reaches it:
+#: aipass.aipass.shared.json_handler was dropped on 2026-09-04 because nothing
+#: in this branch imports it (json_handler_check.py holds it as an accept
+#: STRING, not an import), and @aipass retires the file under FPLAN-0489.
+#: Measured, not assumed - 83 passed, 3 skipped before and after.
 PRELOAD = """
-import aipass.prax  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.prax.apps.handlers.logging.setup  # noqa: F401
 import aipass.cli  # noqa: F401
@@ -144,7 +151,6 @@ import aipass.cli.apps.modules.display  # noqa: F401
 import aipass.drone.apps.modules  # noqa: F401
 import aipass.spawn.apps.modules  # noqa: F401
 import aipass.aipass.shared  # noqa: F401
-import aipass.aipass.shared.json_handler  # noqa: F401
 """
 
 # The two shapes the cure deleted, rebuilt verbatim. Written to disk and
@@ -816,6 +822,13 @@ def _seedgo_modules():
     modules = []
     for path in sorted(SEEDGO_ROOT.glob("apps/**/*.py")):
         parts = list(path.relative_to(SEEDGO_ROOT).parts)
+        # Dot-directories are not packages. .archive/ holds verbatim disposal
+        # copies (DPLAN-0325) and its dotted name is not even valid syntax —
+        # `aipass.seedgo.apps.handlers.json..archive.json_handler` took the
+        # whole sweep down with a SyntaxError before this line existed, which
+        # made six passing tests report nothing rather than fail honestly.
+        if any(part.startswith(".") or part == "__pycache__" for part in parts):
+            continue
         parts = parts[:-1] if parts[-1] == "__init__.py" else parts[:-1] + [parts[-1][:-3]]
         modules.append("aipass.seedgo." + ".".join(parts) if parts else "aipass.seedgo")
     return modules
@@ -2199,9 +2212,15 @@ class TestTheInstrumentsCanFire:
         takes every test in the module with it - and it must not answer empty
         for a directory that IS there, which is the failure that would make the
         fixture green forever."""
-        (tmp_path / "here").mkdir()
-        assert _working_tree_entries(tmp_path) == {"here"}
-        assert _working_tree_entries(tmp_path / "absent") == set()
+        # Its own room, not tmp_path itself: conftest's autouse
+        # mock_infrastructure creates the json seam under tmp_path in every
+        # test, and this is the one assertion here that reads an EXACT set
+        # rather than a before/after difference (DPLAN-0325).
+        room = tmp_path / "room"
+        room.mkdir()
+        (room / "here").mkdir()
+        assert _working_tree_entries(room) == {"here"}
+        assert _working_tree_entries(room / "absent") == set()
 
     def test_the_two_probe_literals_answer_DIFFERENT_questions(self, tmp_path):
         """Why this file carries two absolute literals instead of one.

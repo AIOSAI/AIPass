@@ -105,6 +105,11 @@
       "handler": "aipass.hooks.apps.handlers.security.rm_gate.handle",
       "matcher": "Bash"
     },
+    "testwrite_gate": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.testwrite_gate.handle",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
+    },
     "registry_gate": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.registry_gate.handle",

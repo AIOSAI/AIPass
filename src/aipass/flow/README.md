@@ -4,9 +4,9 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.6.0
+**Version:** 2.6.0 (README header) — `drone @flow --version` prints `FLOW v2.2.1`; the two disagree, see Known Issues
 **Created:** 2025-11-15
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-05
 
 ---
 
@@ -121,8 +121,8 @@ flow/
 │       ├── dashboard/           # Status push to local, central, branch dashboards
 │       ├── mbank/               # Memory archival and plan processing
 │       ├── runner/              # Lock file operations for background processes
-│       ├── json/                # Auto-creating JSON handler
-│       ├── json_templates/      # Seed JSON payloads for the auto-creating handler
+│       ├── json/                # The fleet json shim — binds aipass.prax.json_handler (DPLAN-0325)
+│       ├── json_templates/      # Seed JSON payloads — NO readers left, see Known Issues
 │       ├── summary/             # EMPTY — only generate.py(disabled) remains
 │       ├── config/              # EMPTY — package marker only, no code
 │       └── events/              # EMPTY — package marker only, no code
@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 1013 tests across 31 files
+├── tests/                       # 978 test functions across 28 files (1018 cases)
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -301,6 +301,21 @@ six modules take the walk while **loading**. On a bare checkout that import-time
 diagnostic lands inside whichever test window triggers the first import, where
 the autouse `mock_json_handler` counts it — so a test pinning
 `assert_called_once` breaks on CI and passes everywhere else.
+
+Still true after the json sweep, verified 2026-09-05. `handlers/json/json_handler.py`
+is now the fleet **shim**: it binds `aipass.prax.json_handler`'s callables and adds
+nothing (DPLAN-0325 — byte-identical in every branch, seedgo accepts it by hash).
+`repo_root._record_fallback` still resolves `json_handler.log_operation` as a module
+attribute at **call** time, so the autouse `mock_json_handler` still intercepts it —
+measured, not reasoned: patching that name and calling `_record_fallback` directly
+records exactly one `repo_root_fallback` call.
+
+What changed is the division of labour in `conftest.py`. `mock_json_handler` is now a
+**spy only**, and it steps aside for `tests/test_json_handler.py`, whose whole subject
+is that each name IS the service's bound method. Containment moved to the autouse
+`mock_infrastructure`, which sets `AIPASS_TEST_LOG_DIR` and measures the sandbox off
+the shim: the service recomputes its directory on every call, so a fixture that
+patches names could no longer keep writes out of `flow_json/`.
 
 `tests/conftest.py` therefore **pre-imports all six module-level callers**,
 settling the walk before any test window exists on every machine. The list is
@@ -556,26 +571,59 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ---
 
+## Status
+
+Verified 2026-09-05, claim by claim, against the tree as it stands tonight
+(FPLAN-0490 round 2, **docs-only** — no code changed in this pass). Green and
+re-measured: the suite from both rootdirs, every command form in the Commands
+block against `drone @flow --help`, the plan-type table against
+`drone @flow templates`, every figure under Quality, and every entry under Known
+Issues. Marked unverified where it is: the bare-checkout marker world was not
+re-run tonight (see Quality). Two defects found in this pass are **reported, not
+fixed** — the `--version` string and the orphaned `json_templates/` directory,
+both first two entries under Known Issues.
+
+---
+
 ## Quality
 
-- **Seedgo:** 100% (46 standards, no type errors)
-- **Tests:** 1013 tests in 31 files — 1042 cases collected after parametrisation, 1041 pass / 1 skip, from BOTH rootdirs (branch `pytest.ini` and `-c pyproject.toml --rootdir=.`) AND in both marker worlds (registry present, and a bare checkout like CI's). 101/102 public functions tested (`drone @seedgo test_map @flow`)
-- **Source files:** 45 tracked by seedgo (62 `.py` files under `apps/` in total; seedgo excludes `__init__.py` markers)
-- **Bypass rules:** 59 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
-- **Registries:** 7 registered plan types + 1 orphan; **820 plans on disk, 24 open, 796 closed**
-- **Dead-cwd:** 0 of 62 modules die on import with no readable working directory, in both injected worlds (`tests/test_import_dead_cwd.py`)
-- **Last audit:** 2026-08-31 (every figure on this list re-measured, not carried forward)
+- **Seedgo:** 100% on all 47 categories, no type errors — 45 production files measured (`drone @seedgo audit aipass @flow`)
+- **Tests:** **978 test functions in 28 files** (`def test_` in `tests/test_*.py`); pytest expands them to **1018 cases**, and tonight **1018 passed / 0 skipped** from BOTH rootdirs — branch `pytest.ini`, and `-c pyproject.toml --rootdir=.` from the repo root. **99 of 100** public functions tested (`drone @seedgo test_map @flow`). *Unverified tonight:* the second marker world. `AIPASS_REGISTRY.json` is present and machine-local on this box, and denying it means moving a live file, so only the registry-present world was run; the bare-checkout leg was last measured 2026-08-31.
+- **Source files:** 45 tracked by seedgo (62 `.py` under `apps/`, excluding `__pycache__` and `.archive/`; seedgo excludes `__init__.py` markers)
+- **Bypass rules:** 59 (`.seedgo/bypass.json`; 74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
+- **Registries:** 7 registered plan types + 1 orphan; **855 rows across the 8 registry files, 28 open, 827 closed** (854 / 28 / 826 excluding the orphaned `pbplan` registry)
+- **Dead-cwd:** 0 of 62 modules die on import with no readable working directory, in both injected worlds (`tests/test_import_dead_cwd.py`, 47 tests, green tonight)
+- **Last audit:** 2026-09-05 (every figure on this list re-measured tonight, not carried forward)
+
+The test count fell from the 1013-in-31-files figure this README carried on
+2026-08-31 because the DPLAN-0325 json sweep moved three files into
+`tests/.archive/` (47 test functions between them, 09-02 and 09-04) and added the
+canonical wiring test `test_json_handler.py` (6). Tonight's number is measured off
+the tree; the old one is replaced rather than reconciled, because it is not
+re-derivable from what is here now.
 
 ### Known Issues
-- **315 of 775 closed plans have no archived copy and cannot be restored.**
+- **`--version` prints `FLOW v2.2.1` while this README's header says 2.6.0.**
+  Found 2026-09-05. The string is hardcoded at `apps/flow.py:161` and no other
+  version constant exists in the branch, so `--version` cannot drift back into
+  agreement on its own. Reported to @devpulse rather than changed here: this pass
+  was docs-only, and picking which number is true is a decision, not a typo fix.
+- **`apps/handlers/json_templates/` has no readers left.** Found 2026-09-05, a
+  leftover of the DPLAN-0325 json sweep. The seed payloads it holds were replaced
+  by `_default_document()` inside `@prax`'s `json_service.py` (a default in a file
+  can go missing; one in code cannot), and a fleet grep for `json_templates`
+  outside `.archive/` returns only `@seedgo`'s own checker text — where the
+  standard is that such a directory is itself the defect. Nothing in flow imports
+  or reads it. Reported, not removed: docs-only pass.
+- **309 of 827 closed plans have no archived copy and cannot be restored.**
   Fixed 2026-08-22: `restore` now falls back to `.backup/processed_plans/` when
   the file is **not at** the registered `file_path`. Note the correction — the
   row's `file_path` is *not* emptied by close; it is left pointing at where the
-  file used to be. Measured 2026-08-25: all 775 closed rows carry a
-  `file_path`, and **0 of 775** have a file there. Before that fix restore
+  file used to be. Re-measured 2026-09-05: all 827 closed rows carry a
+  `file_path`, and **0 of 827** have a file there. Before that fix restore
   failed for every closed plan while the archive sat intact beside it.
   Coverage by close month: 2026-03 (198 rows) and 04 (97) are **0%**, 05 is
-  89%, 06 is 100%, 07 is 94%, 08 is 98%. The 295 pre-May rows have no artifact
+  89%, 06 is 100%, 07 is 99%, 08 is 98%, 09 is 100%. The 295 pre-May rows have no artifact
   to recover — that is a gap in the archive, not in restore, and it is not
   recoverable by code. A second, narrower refusal also applies: restore copies
   the archived file back to its *registered* directory, so a row whose original
@@ -585,9 +633,9 @@ aggregation untouched, plus anything auto-closed during the run.
   modules match only their short verb. It also lists `template`, which no
   module accepts — the working verb is `templates`, absent from that list.
 - **`registry status` counts only FPLAN.** It reports the default registry's
-  totals under a system-wide label — measured 2026-08-25 it prints
-  **401 total / 4 open**, which is `fplan_registry.json` exactly, where the true
-  figures across every registry on disk are **798 / 23**. Cause:
+  totals under a system-wide label — re-measured 2026-09-05 it prints
+  **439 total / 7 open**, which is `fplan_registry.json` exactly, where the true
+  figures across every registry on disk are **855 / 28**. Cause:
   `get_status_impl` calls a bare `load_registry()`. Its quarantine list and
   `Ignored folders: 33` are branch-wide and correct; only the two totals are
   scoped to one type.
@@ -607,7 +655,11 @@ aggregation untouched, plus anything auto-closed during the run.
   `/aipass/spawn/`). Out of scope for the round-4 dispatch (which is about the
   cwd defect, not the matching rule) and reported rather than changed, because
   narrowing it is a fence behaviour change that deserves its own red-first pin.
-- **`flow_json/PLAN_REGISTRY.json` is legacy and no longer read.** @trigger
+- **`flow_json/PLAN_REGISTRY.json` is legacy and no longer read.** Re-measured
+  2026-09-05: zero code readers fleet-wide — the only two `PLAN_REGISTRY` mentions
+  left outside `.archive/` are docstrings (flow's own `plan/project_scope.py`,
+  `@hooks`' `security/edit_gate.py`), and the file still holds 1 plan row against
+  `next_number: 402`. @trigger
   retired their `plan_file.py` handler on 2026-08-31 after measuring it
   themselves: their regex matched **1** of the 366 FPLAN files on disk, so it
   had been inert for essentially every plan since the naming convention took a
@@ -629,7 +681,7 @@ aggregation untouched, plus anything auto-closed during the run.
   "by design" while the handlers were in fact registered; the sentence is true
   again, for a different reason.
 - Dashboard push warns on some closes
-- `mbank/process.py` at 718 lines (over the 700 limit)
+- `mbank/process.py` at 723 lines (over the 700 limit; 718 on 2026-08-31)
 - **`CLOSED_PLANS.local.json` carries foreign keys on every branch that has
   one.** Measured 2026-08-25: 16 of the 18 core citizens hold the file, and
   **all 16** carry a `document_metadata` block whose `document_type` is
@@ -640,14 +692,15 @@ aggregation untouched, plus anything auto-closed during the run.
   attributes it to a past push from `@memory`'s pusher — *stated there, not
   verifiable from flow's side.* Known and deliberately NOT cleaned: a rebuild
   is scoped in DPLAN-0318.
-- `close_ops.py` was split into `close_ops.py` + `close_helpers.py` (257 lines),
+- `close_ops.py` was split into `close_ops.py` + `close_helpers.py` (263 lines),
   but `close_ops.py` has since grown back to **848 lines** — over the 700 limit,
-  and now the longest file in the branch (`mbank/process.py` is 718)
+  and still the longest file in the branch (`mbank/process.py` is 723). All three
+  re-measured 2026-09-05
 - `push_central.py` comprehensive rewrite (2026-06-02): now pushes all branches' plans, not just flow's — fixed dashboard refresh zeroing other branches' plan counts
 
 ---
 
-*Last Updated: 2026-08-31*
+*Last Updated: 2026-09-05*
 
 ---
 [← Back to AIPass](../../../README.md)

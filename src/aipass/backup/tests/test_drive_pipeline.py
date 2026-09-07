@@ -47,12 +47,20 @@ def _mock_dependencies() -> dict[str, types.ModuleType]:
     mocks["aipass.cli.apps"] = cli_apps
     mocks["aipass.cli.apps.modules"] = cli_modules
 
-    # json handler
+    # backup's own audit trail
+    audit_pkg = types.ModuleType("aipass.backup.apps.handlers.audit")
+    trail_mod = types.ModuleType("aipass.backup.apps.handlers.audit.trail")
+    trail_mod.log_operation = MagicMock()  # type: ignore[attr-defined]
+    mocks["aipass.backup.apps.handlers.audit"] = audit_pkg
+    mocks["aipass.backup.apps.handlers.audit.trail"] = trail_mod
+
+    # the fleet json shim
     json_pkg = types.ModuleType("aipass.backup.apps.handlers.json")
     json_handler = types.ModuleType("aipass.backup.apps.handlers.json.json_handler")
-    json_handler.log_operation = MagicMock()  # type: ignore[attr-defined]
-    json_handler.load_json = MagicMock(return_value={})  # type: ignore[attr-defined]
-    json_handler.save_json = MagicMock()  # type: ignore[attr-defined]
+    json_handler.read_json = MagicMock(return_value={})  # type: ignore[attr-defined]
+    json_handler.write_json = MagicMock(return_value=True)  # type: ignore[attr-defined]
+    json_handler.InvalidDocument = ValueError  # type: ignore[attr-defined]
+    json_handler.WriteFailed = OSError  # type: ignore[attr-defined]
     mocks["aipass.backup.apps.handlers.json"] = json_pkg
     mocks["aipass.backup.apps.handlers.json.json_handler"] = json_handler
 
@@ -525,12 +533,12 @@ class TestDriveTracker:
         assert isinstance(result, dict)
 
     def test_save_tracker(self, tmp_path: Path) -> None:
-        """Save tracker calls json_handler.save_json."""
+        """Save tracker calls json_handler.write_json and checks the bool."""
         mod = _fresh_import("aipass.backup.apps.handlers.drive.tracker")
         tracker = {"file.txt": {"drive_id": "abc"}}
         mod.save_tracker(str(tmp_path), tracker)
-        # Verify save_json was called (mocked)
-        mod.json_handler.save_json.assert_called_once()
+        # Verify write_json was called (mocked)
+        mod.json_handler.write_json.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

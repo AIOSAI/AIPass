@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-08-18
+# Modified: 2026-09-06
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -246,7 +246,15 @@ def handle(hook_data: dict) -> dict:
         snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
 
         stamped = _stamp_session_entry(branch_dir, snapshot, cap)
-        logger.info("[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s", stamped, branch_dir.name)
+        # Full path, not just the name: the test runner aims this handler at a
+        # throwaway skeleton named after the real branch, so "branch=hooks"
+        # alone cannot tell a probe stamp from a real one.
+        logger.info(
+            "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
+            stamped,
+            branch_dir.name,
+            branch_dir,
+        )
 
         return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}
 

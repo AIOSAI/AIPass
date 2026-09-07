@@ -6,8 +6,8 @@
 **Module:** `aipass.cli`
 **Version:** 2.1.0
 **Seedgo:** 100%
-**Tests:** 201 tests across 11 files — 210 passing, 0 skipped (parametrized cases expand at runtime)
-**Last Updated:** 2026-08-31
+**Tests:** 166 test functions across 10 files; pytest expands to 186 cases — 186 passing, 0 skipped (measured 2026-09-06)
+**Last Updated:** 2026-09-06
 
 ## Quick Start
 
@@ -116,27 +116,28 @@ cli/
 │   │   ├── cli/
 │   │   │   └── help_flags.py   # wants_help() — whole-sequence help detection
 │   │   ├── json/
-│   │   │   └── json_handler.py # JSON lifecycle (CRUD, validation, rotation)
+│   │   │   └── json_handler.py # Shim — binds the ONE fleet json service in @prax
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 201 tests across 11 files (210 pass, 0 skip)
+├── tests/                      # 166 test functions, 10 files — pytest expands to 186 cases, 0 skip
 │   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
-│   ├── test_display.py         # 60 tests — display functions + routing + exit codes + help flags
-│   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
-│   ├── test_templates.py       # 31 tests — operation templates + routing + help flags
-│   ├── test_help_flags.py      # 11 tests — whole-sequence help detection
-│   ├── test_json_durability.py # 10 tests — atomic writes, torn-read race
-│   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
-│   ├── test_handler_guard.py   # 19 tests — cross-branch import guard contract
-│   ├── test_integration.py     # 6 tests — main() flow, entry points
-│   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
-│   ├── test_parked_is_not_collected.py # 4 tests — collection barrier over tests/parked/ holds
-│   ├── test_import_dead_cwd.py # 9 tests — imports survive a deleted cwd + AST ban on inspect.stack()
+│   ├── test_display.py         # 60 defs — display functions + routing + exit codes + help flags
+│   ├── test_templates.py       # 31 defs — operation templates + routing + help flags
+│   ├── test_handler_guard.py   # 19 defs — cross-branch import guard contract
+│   ├── test_cli_routing.py     # 12 defs (15 cases) — entry point routing, help, version, refusals
+│   ├── test_json_handler.py    # 6 defs (14 cases) — shim WIRING only; behaviour is @seedgo's fleet contract
+│   ├── test_help_flags.py      # 11 defs (20 cases) — whole-sequence help detection
+│   ├── test_output_capture.py  # 8 defs — capture is environment-proof (ANSI strip, 4 shells)
+│   ├── test_integration.py     # 6 defs — main() flow, entry points
+│   ├── test_parked_is_not_collected.py # 4 defs — collection barrier over tests/parked/ holds
+│   ├── test_import_dead_cwd.py # 9 defs — imports survive a deleted cwd + AST ban on inspect.stack()
+│   ├── .archive/               # NOT collected — the pre-service handler suites (DPLAN-0325)
 │   └── parked/                 # TRACKED, not run — collect_ignore_glob barrier (archive doctrine, 2026-08-18)
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
-└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__, init_project leftovers)
+└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__,
+                                #   init_project leftovers) + four recovery_*_20260607 snapshots
 ```
 
 Branch-standard scaffold dirs are omitted from the tree above: `artifacts/`, `docs/`,
@@ -158,13 +159,22 @@ human reads as correct. Assert what is VISIBLE.
 
 ## JSON Handler
 
-Manages the three-file JSON pattern (config, data, log) for any module:
+`apps/handlers/json/json_handler.py` is a **shim**, not an implementation. It binds the
+one fleet json service published by `@prax` (DPLAN-0325) — nine names plus
+`InvalidDocument` and `WriteFailed` — and is byte-identical in every migrated branch.
+Anything added to it is drift.
 
-Every write goes through `_atomic_write_json()` — staged in the target directory, then
-`os.replace()`d into place. A reader always sees the whole old document or the whole new
-one, never a truncated file. This matters because `ensure_json_exists()` answers an
-unreadable file by regenerating a template over it, so a torn read would have become
-data loss.
+It BINDS (`log_operation = _h.log_operation`) and never wraps. The service names the
+calling module from `sys._getframe(2)`, so a `def` wrapper would add exactly one frame and
+send every log cli writes into `json_handler_log.json` instead of the caller's document.
+
+The three-file pattern (config, data, log), atomic writes, validation, provisioning and
+rotation all live in the service now, and are pinned once for the whole fleet by seedgo's
+cross-branch contract rather than re-tested per branch. Under pytest the writes are
+redirected by the `AIPASS_TEST_LOG_DIR` seam that `conftest.mock_infrastructure` sets;
+the shim has no attribute to patch, and that is the point.
+
+The call sites are unchanged:
 
 ```python
 from aipass.cli.apps.handlers.json import json_handler
@@ -179,11 +189,22 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 
 ### Depends On
 - `rich` — Terminal formatting (Console, Panel, Table, Text, Columns, box)
-- `aipass.prax` — Logging (one import, in `apps/cli.py` only — never in modules/ or handlers/)
-- Python stdlib (`sys`, `os`, `json`, `time`, `tempfile`, `inspect`, `importlib`, `pathlib`, `datetime`, `typing`)
+- `aipass.prax` — Two live imports, both outside `modules/`: the logger in `apps/cli.py:32`, and the
+  json service the shim binds in `apps/handlers/json/json_handler.py:26` (see JSON Handler above)
+- Python stdlib (`sys`, `os`, `importlib`, `pathlib`, `linecache`, `typing`) — measured over the live
+  tree 2026-09-06. `json`, `time`, `tempfile` and `datetime` left with the old json handler (DPLAN-0325);
+  `inspect` left with the dead-cwd cure and is now AST-banned in these modules
 
 ### Cannot Import (in modules/)
 - `aipass.prax` — Circular dependency (prax depends on cli). Bypassed in `.seedgo/bypass.json`.
+
+`handlers/json/json_handler.py` is the exception, and it is not a loophole: prax's
+`__init__` is lazy (PEP 562), so `from aipass.prax import json_handler` resolves the
+service without importing `cli.display`. The cycle is real — archiving cli's old handler
+mid-sweep took `drone` itself down through
+`drone → cli.apps.modules.display → cli json_handler` — and laziness is what breaks it.
+The two bypasses that read "json_handler cannot import prax (circular)" were retired on
+2026-09-03 because the shim demonstrably does.
 
 ### Provides To
 - **All branches** — Display formatting (header, success, error, warning, fatal, section)
@@ -195,13 +216,35 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 | Entry | Command | How |
 |-------|---------|-----|
 | drone | `drone @cli [command]` | Routes to `apps/cli.py:main()` |
-| Import | `from aipass.cli import ...` | The real entry point — 356 import statements in 264 files across 17 branches (measured 2026-08-25; 33 of them in test files) |
+| Import | `from aipass.cli import ...` | The real entry point — 352 import statements in 247 files across 18 branches (measured 2026-09-06; 29 in test files). 42 of those statements are cli's own tests; 310 in 230 files come from the other 17 branches |
 
 `python -m aipass.cli` is **not** an entry point — `__main__.py` was archived 2026-05-02 (no branch in the fleet ships one). `cli_entry()` still exists in `__init__.py` but is no longer wired: `pyproject.toml` maps the `aipass` script to `aipass.aipass.apps.aipass:main`. See APLAN-0002 for the keep-or-retire decision.
 
+## Status / Known issues
+
+**Status:** green. 186 cases pass, 0 skipped; seedgo audit 100% on every scored category
+(all measured 2026-09-06). No open defects in this branch's code.
+
+**Known issues**
+
+- `cli_entry()` in `__init__.py` is dead wiring. It is a valid console_scripts target, but
+  `pyproject.toml` points the `aipass` script at `aipass.aipass.apps.aipass:main`, so nothing
+  calls it. Keep-or-retire is still open under APLAN-0002.
+- Importer counts depend on the scope you measure. @hooks reports 21 cli imports in 21 of its
+  files; this README counts 22 in 22, and both are right — the extra is @hooks' own dead-cwd
+  test pin (`tests/test_import_dead_cwd.py:65`), a plain `import aipass.cli.apps.modules`.
+  Production-only and all-files are different questions; say which one a number answers.
+
+**Unverified in this pass**
+
+- `tests/parked/` is described as TRACKED (not gitignored). Tonight's pass was docs-only and ran
+  no git commands, so that word carries from 2026-08-19. The collection barrier beside it *was*
+  re-verified: `tests/parked/conftest.py` sets `collect_ignore_glob = ["*"]` and
+  `test_parked_is_not_collected.py` pins it with real pytest collection.
+
 ---
 
-*Last Updated: 2026-08-31*
+*Last Updated: 2026-09-06*
 
 ---
 [← Back to AIPass](../../../README.md)

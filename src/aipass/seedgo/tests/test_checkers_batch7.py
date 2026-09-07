@@ -2677,11 +2677,20 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
     imports. The checker exempted json_handler by NAME rather than by the
     property that makes it fine.
 
-    The property: if json_handler may be imported anywhere, so may anything
-    json_handler itself imports, because that module is BENEATH json_handler in
-    the branch's own import order. Measured 2026-08-31: 8 of 9 branches carrying
-    the dead-cwd cure have their json_handler importing it, so the derived set
-    finds it without anyone naming a file.
+    THE BASIS CHANGED 2026-09-04 (DPLAN-0325 pair 6). It used to read the
+    branch's own json_handler and take whatever that imported from under
+    handlers/. The sweep made every branch's handler the one canonical shim,
+    which imports aipass.prax and nothing else — measured across all eighteen
+    branches, the old derivation returned the EMPTY SET for every one of them.
+    It went blind silently: @daemon reddened on CI (f8d7867f) because its entry
+    point is the only one importing the resolution shim directly, and the other
+    seventeen were one edit away from the same red.
+
+    The rule now reads what a handler PUBLISHES. The resolution shim has to
+    live under handlers/ to be the one guarded spelling for Path(__file__) on a
+    machine with no readable working directory, and everything in the branch
+    resolves through it — so a top-level handler module defining module_file /
+    find_repo_root / source_root / resolved_file IS that file.
     """
 
     def _names(self, branch_root):
@@ -2690,55 +2699,91 @@ class TestEncapsulationDerivesItsInfrastructureAllowList:
         encapsulation_check._infrastructure_handlers.cache_clear()
         return encapsulation_check._infrastructure_handlers(str(branch_root))
 
-    def test_a_handler_the_branchs_json_handler_imports_is_infrastructure(self, tmp_path):
+    def test_a_handler_that_publishes_the_guarded_spelling_is_infrastructure(self, tmp_path):
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        handlers.mkdir(parents=True)
+        (handlers / "module_root.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
+        assert "module_root" in self._names(branch)
+
+    def test_the_canonical_json_shim_does_not_take_the_allow_list_with_it(self, tmp_path):
+        """THE REGRESSION PIN. This is the CI red, reproduced.
+
+        Before the cure, a branch whose json_handler was the canonical shim
+        derived nothing, because the shim imports aipass.prax and nothing under
+        handlers/. The resolution shim is still sitting right there, still the
+        floor of the branch, still imported by the entry point — and the
+        checker had stopped being able to see it. Red-first: build exactly that
+        branch and assert the name comes back.
+        """
         branch = tmp_path / "mybranch"
         handlers = branch / "apps" / "handlers"
         (handlers / "json").mkdir(parents=True)
         (handlers / "module_root.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
         (handlers / "json" / "json_handler.py").write_text(
-            "from aipass.mybranch.apps.handlers.module_root import module_file\n", encoding="utf-8"
+            "from aipass.prax import json_handler\n\n_h = json_handler.for_module(__file__)\n", encoding="utf-8"
         )
-        assert "module_root" in self._names(branch)
+        assert "module_root" in self._names(branch), (
+            "the shim's arrival emptied the infrastructure set — this is the defect that reddened daemon on f8d7867f"
+        )
 
-    def test_a_relatively_imported_one_counts_the_same(self, tmp_path):
-        """@canary spells theirs ``from ..paths import module_file``. A rule that
-        saw only absolute imports would exempt eight branches and not the ninth."""
+    def test_the_file_name_varies_by_branch_and_the_function_name_does_not(self, tmp_path):
+        """Four spellings ship in the fleet: module_root.py, paths.py,
+        repo_root.py, module_paths.py. Keying on the file name would exempt
+        some branches and not others for no reason a reader could defend."""
         branch = tmp_path / "mybranch"
         handlers = branch / "apps" / "handlers"
-        (handlers / "json").mkdir(parents=True)
-        (handlers / "paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
-        (handlers / "json" / "json_handler.py").write_text("from ..paths import module_file\n", encoding="utf-8")
-        assert "paths" in self._names(branch)
+        handlers.mkdir(parents=True)
+        (handlers / "paths.py").write_text("def find_repo_root():\n    return None\n", encoding="utf-8")
+        (handlers / "repo_root.py").write_text("def source_root():\n    return None\n", encoding="utf-8")
+        (handlers / "module_paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
+        assert self._names(branch) == frozenset({"paths", "repo_root", "module_paths"})
 
-    def test_a_handler_json_handler_does_not_import_is_not_infrastructure(self, tmp_path):
+    def test_a_domain_handler_is_not_infrastructure(self, tmp_path):
         """Negative control: the set is DERIVED, not a longer allow-list. A
         domain handler stays behind its module entry point."""
         branch = tmp_path / "mybranch"
         handlers = branch / "apps" / "handlers"
-        (handlers / "json").mkdir(parents=True)
+        handlers.mkdir(parents=True)
         (handlers / "openrouter.py").write_text("def get_response():\n    return None\n", encoding="utf-8")
-        (handlers / "json" / "json_handler.py").write_text("import json\n", encoding="utf-8")
         assert "openrouter" not in self._names(branch)
 
-    def test_a_name_that_is_not_a_file_is_not_admitted(self, tmp_path):
-        """The imported NAME must resolve to a real handler module. Without that,
-        `from ..paths import module_file` would admit `module_file` too — a
-        function name standing in for a module."""
-        branch = tmp_path / "mybranch"
-        handlers = branch / "apps" / "handlers"
-        (handlers / "json").mkdir(parents=True)
-        (handlers / "paths.py").write_text("def module_file(f):\n    return f\n", encoding="utf-8")
-        (handlers / "json" / "json_handler.py").write_text("from ..paths import module_file\n", encoding="utf-8")
-        assert "module_file" not in self._names(branch)
+    def test_calling_the_guarded_spelling_is_not_publishing_it(self, tmp_path):
+        """The discriminator is DEFINING the function, not naming it.
 
-    def test_an_unreadable_json_handler_grants_nothing(self, tmp_path):
-        """Ignorance is not evidence: a branch whose json_handler cannot be
-        parsed keeps the ordinary rule rather than being exempted by the
-        failure."""
+        Every module in a cured branch calls module_file at import time. If a
+        call counted, the exemption would spread to the whole branch and this
+        standard would mean nothing — which is the failure mode the old
+        substring-shaped rules in this pack were built out of.
+        """
         branch = tmp_path / "mybranch"
         handlers = branch / "apps" / "handlers"
-        (handlers / "json").mkdir(parents=True)
-        (handlers / "json" / "json_handler.py").write_text("def broken(:\n", encoding="utf-8")
+        handlers.mkdir(parents=True)
+        (handlers / "consumer.py").write_text(
+            "from aipass.mybranch.apps.handlers.module_root import module_file\n\nROOT = module_file(__file__)\n",
+            encoding="utf-8",
+        )
+        assert "consumer" not in self._names(branch)
+
+    def test_a_nested_definition_does_not_publish_it(self, tmp_path):
+        """Module level only. A local function of the same name inside some
+        other handler's body is not the branch's resolution shim."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        handlers.mkdir(parents=True)
+        (handlers / "sneaky.py").write_text(
+            "def unrelated():\n    def module_file(f):\n        return f\n    return module_file\n",
+            encoding="utf-8",
+        )
+        assert "sneaky" not in self._names(branch)
+
+    def test_an_unreadable_handler_grants_nothing(self, tmp_path):
+        """Ignorance is not evidence: a handler that cannot be parsed keeps the
+        ordinary rule rather than being exempted by the failure."""
+        branch = tmp_path / "mybranch"
+        handlers = branch / "apps" / "handlers"
+        handlers.mkdir(parents=True)
+        (handlers / "module_root.py").write_text("def module_file(:\n", encoding="utf-8")
         assert self._names(branch) == frozenset()
 
 

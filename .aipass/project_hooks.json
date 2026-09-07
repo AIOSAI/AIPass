@@ -1,5 +1,5 @@
 {
-  "_comment": "TEMPLATE: base per-project hook config copied into new projects by `aipass init` (DPLAN-0190). Mirrors AIPass's own .aipass/hooks.json. All handlers run from $AIPASS_HOME — projects only flip enabled true/false. Use `drone @hooks enable/disable <hook>` or edit here. NOTE: git_gate is enabled by default — it enforces git via drone to prevent state conflicts. To disable for your project, set git_gate.enabled to false below (this won't break other hooks).",
+  "_comment": "TEMPLATE: base per-project hook config copied into new projects by `aipass init` (DPLAN-0190). Mirrors AIPass's own .aipass/hooks.json. All handlers run from $AIPASS_HOME — projects only flip enabled true/false. Use `drone @hooks enable/disable <hook>` or edit here. NOTE: git_gate is enabled by default — it enforces git via drone to prevent state conflicts. To disable for your project, set git_gate.enabled to false below (this won't break other hooks). NOTE: testwrite_gate refuses CREATION of new test files by POLICY, not by defect (Patrick's ruling, 2026-09-01, DPLAN-0323) — editing existing tests stays allowed. It reads .aipass/test_write_policy.json, which `aipass init` does not yet stamp, so a fresh project lands on the fail-closed missing-policy path until that file exists. Read it with `drone @hooks testwrite`; the refusal names the file and the cure.",
   "hooks_enabled": true,
 
   "UserPromptSubmit": {
@@ -55,6 +55,11 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.rm_gate.handle",
       "matcher": "Bash"
+    },
+    "testwrite_gate": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.testwrite_gate.handle",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
     }
   },
 

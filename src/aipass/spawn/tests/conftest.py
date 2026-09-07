@@ -188,10 +188,18 @@ def mock_json_handler():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_spawn_json(tmp_path):
-    """Auto-isolate spawn_json directory to prevent test pollution."""
-    import aipass.spawn.apps.handlers.json.json_handler as _jh
+def _isolate_spawn_json(tmp_path, monkeypatch) -> Path:
+    """Auto-isolate spawn_json directory to prevent test pollution.
 
-    iso_dir = tmp_path / "spawn_json"
-    with patch.object(_jh, "_JSON_DIR", iso_dir), patch.object(_jh._handler, "_json_dir", iso_dir):
-        yield
+    The redirect is the AIPASS_TEST_LOG_DIR seam (DPLAN-0325). spawn's shim
+    binds the fleet's one json service, which recomputes its directory on every
+    call from that variable — so there is no ``_JSON_DIR`` and no ``_handler``
+    left to patch, and setting the variable here, long after import, still
+    takes effect. The previous spelling patched both and would now raise
+    AttributeError on every test in the suite.
+
+    Returns:
+        The directory the handler writes into for this test.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    return tmp_path / "spawn" / "spawn_json"

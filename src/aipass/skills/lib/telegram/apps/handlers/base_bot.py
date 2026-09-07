@@ -57,6 +57,16 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+# THE CLOCK SEAM. Every wall-clock read in this file goes through _now(), never
+# through time.time(). Tests need to drive the resume/backoff logic with a fake
+# clock, and `patch("...base_bot.time.time")` cannot do that safely: base_bot.time
+# IS the stdlib time module, so that patch replaces time.time for the WHOLE process.
+# With a fake epoch (the suspend tests use 1000.0) any deadline another thread
+# captured beforehand then reads ~56 years away, and that thread waits forever —
+# measured as a 22-minute CI hang on the Linux 3.10 leg, run 33941446687,
+# 2026-09-04. Patching this module-local name reaches this file and nothing else.
+from time import time as _now
 from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -308,8 +318,8 @@ class BaseBot:
         self.state = {
             "running": True,
             "message_count": 0,
-            "start_time": time.time(),
-            "conversation_start": time.time(),
+            "start_time": _now(),
+            "conversation_start": _now(),
             "last_message_time": 0.0,
         }
 
@@ -430,11 +440,11 @@ class BaseBot:
                 retry_delay = 5
 
                 # Anchor for the post-resume grace window: network is provably back.
-                self._last_successful_poll_at = time.time()
+                self._last_successful_poll_at = _now()
 
                 # Network recovery
                 if net_offline_since is not None:
-                    elapsed = time.time() - net_offline_since
+                    elapsed = _now() - net_offline_since
                     mins = int(elapsed / 60)
                     logger.info(
                         "Telegram reachable again after %dm, %d attempts suppressed",
@@ -460,7 +470,7 @@ class BaseBot:
 
             except _NetworkPollError as e:
                 self._health["errors"] = self._health.get("errors", 0) + 1
-                now = time.time()
+                now = _now()
                 if net_offline_since is None:
                     net_offline_since = now
                     net_suppressed = 0
@@ -838,7 +848,7 @@ class BaseBot:
             True if command was handled (caller should return), False to fall through.
         """
         cmd_name, cmd_args = parsed
-        self._last_control_command_at = time.time()
+        self._last_control_command_at = _now()
 
         # /logs command — session log stream control
         if cmd_name == "logs":
@@ -899,12 +909,12 @@ class BaseBot:
             return True
 
         # Compute conversation uptime (resets on /new) and daemon uptime (since boot)
-        conv_elapsed = time.time() - self.state.get("conversation_start", self.state["start_time"])
+        conv_elapsed = _now() - self.state.get("conversation_start", self.state["start_time"])
         conv_h, conv_rem = divmod(int(conv_elapsed), 3600)
         conv_m, conv_s = divmod(conv_rem, 60)
         uptime_str = f"{conv_h}h {conv_m}m {conv_s}s"
 
-        daemon_elapsed = time.time() - self.state["start_time"]
+        daemon_elapsed = _now() - self.state["start_time"]
         d_h, d_rem = divmod(int(daemon_elapsed), 3600)
         d_m, d_s = divmod(d_rem, 60)
         daemon_uptime_str = f"{d_h}h {d_m}m {d_s}s"
@@ -949,7 +959,7 @@ class BaseBot:
                 if action == "new":
                     self._kill_tmux_session()
                     self.state["message_count"] = 0
-                    self.state["conversation_start"] = time.time()
+                    self.state["conversation_start"] = _now()
                     self.send_message(chat_id, response_text)
                     logger.info("Handled /new command - session killed, counters reset")
             else:
@@ -1033,7 +1043,7 @@ class BaseBot:
 
         # Track message
         self.state["message_count"] = self.state.get("message_count", 0) + 1
-        self.state["last_message_time"] = time.time()
+        self.state["last_message_time"] = _now()
 
         logger.info("Processing message (msg_id=%d)", message_id)
 
@@ -1147,7 +1157,7 @@ class BaseBot:
 
         # Track message
         self.state["message_count"] = self.state.get("message_count", 0) + 1
-        self.state["last_message_time"] = time.time()
+        self.state["last_message_time"] = _now()
 
         # Ensure tmux session
         if not self.ensure_tmux_session():
@@ -1314,7 +1324,7 @@ class BaseBot:
             self._create_state[chat_id] = {
                 "branch_name": branch_name,
                 "branch_path": branch_path,
-                "started_at": time.time(),
+                "started_at": _now(),
             }
             self.send_message(
                 chat_id,
@@ -1360,7 +1370,7 @@ class BaseBot:
             self._create_state[chat_id] = {
                 "branch_name": branch_name,
                 "branch_path": branch_path,
-                "started_at": time.time(),
+                "started_at": _now(),
             }
             return
 
@@ -1431,7 +1441,7 @@ class BaseBot:
             return
 
         # Check state TTL
-        if time.time() - state.get("started_at", 0) > self._create_state_ttl:
+        if _now() - state.get("started_at", 0) > self._create_state_ttl:
             del self._create_state[chat_id]
             self.send_message(chat_id, "Create session expired. Start again with /create chat <branch>.")
             return
@@ -1619,7 +1629,7 @@ class BaseBot:
         Returns:
             True if within limits, False if rate limited
         """
-        current_time = time.time()
+        current_time = _now()
 
         if user_id not in self._rate_limit_tracker:
             self._rate_limit_tracker[user_id] = []
@@ -2051,8 +2061,8 @@ class BaseBot:
         Gives up after RC_IDLE_WAIT_SECONDS and returns the still-busy pane —
         the caller decides what to do, this only waits.
         """
-        deadline = time.time() + remote_control.IDLE_WAIT_SECONDS
-        while remote_control.pane_is_busy(pane) and time.time() < deadline:
+        deadline = _now() + remote_control.IDLE_WAIT_SECONDS
+        while remote_control.pane_is_busy(pane) and _now() < deadline:
             time.sleep(remote_control.IDLE_POLL_SECONDS)
             latest = remote_control.capture_pane(session)
             if latest is None:
@@ -2252,7 +2262,7 @@ class BaseBot:
             logger.warning("Could not read suspend heartbeat config, using defaults: %s", e)
 
         last_inbound = self._read_inbound_stamp()
-        if last_inbound and time.time() - last_inbound < int(window_minutes) * 60:
+        if last_inbound and _now() - last_inbound < int(window_minutes) * 60:
             logger.info("Suspend cadence: conversation is live, using %s-minute beat", active_minutes)
             return int(active_minutes) * 60
         return int(quiet_minutes) * 60
@@ -2342,7 +2352,7 @@ class BaseBot:
 
         # Remember when this alarm is due — the wake-cause check compares the actual
         # wake time against it to tell our own RTC wake from a human opening the lid.
-        self._suspend_alarm_at = time.time() + seconds
+        self._suspend_alarm_at = _now() + seconds
 
         try:
             subprocess.run(["systemctl", "suspend"], check=True, capture_output=True)
@@ -2371,7 +2381,7 @@ class BaseBot:
         """
         try:
             LAST_INBOUND_STAMP_FILE.parent.mkdir(parents=True, exist_ok=True)
-            payload = json.dumps({"last_inbound_at": time.time(), "bot_id": self.bot_id})
+            payload = json.dumps({"last_inbound_at": _now(), "bot_id": self.bot_id})
             tmp = LAST_INBOUND_STAMP_FILE.with_suffix(f".{os.getpid()}.tmp")
             tmp.write_text(payload, encoding="utf-8")
             os.replace(tmp, LAST_INBOUND_STAMP_FILE)
@@ -2413,7 +2423,7 @@ class BaseBot:
                     continue
                 if data.get("delivered"):
                     continue
-                if time.time() - float(data.get("timestamp", 0)) < PENDING_STUCK_TIMEOUT_SECONDS:
+                if _now() - float(data.get("timestamp", 0)) < PENDING_STUCK_TIMEOUT_SECONDS:
                     return True
         except OSError as e:
             logger.warning("Could not scan pending dir for in-flight turns: %s", e)
@@ -2479,7 +2489,7 @@ class BaseBot:
         no file, works on any hardware. The system-sleep hook's signal file is
         read as an optional secondary signal; the bot never depends on it.
         """
-        now = time.time()
+        now = _now()
         last_mark = self._suspend_last_loop_mark
         self._suspend_last_loop_mark = now
 
@@ -2598,7 +2608,7 @@ class BaseBot:
             "work_dir": str(self.work_dir),
             "session_name": self.session_name,
             "processing_message_id": processing_message_id,
-            "timestamp": time.time(),
+            "timestamp": _now(),
             "transcript_line_after": transcript_line_after,
             "transcript_path": str(self._active_transcript_path) if self._active_transcript_path else None,
             "session_id": self._active_session_id,
@@ -2624,7 +2634,7 @@ class BaseBot:
         if not self.pending_file.exists():
             return
         try:
-            age = time.time() - self.pending_file.stat().st_mtime
+            age = _now() - self.pending_file.stat().st_mtime
             if age > PENDING_TTL and not self._tmux_session_exists():
                 self.pending_file.unlink()
                 logger.info("Cleaned stale pending file (%.0fs old)", age)
@@ -2685,7 +2695,7 @@ class BaseBot:
                 return str(found), self._count_file_lines(found)
 
         # Strategy 2: most recently modified JSONL, but only if touched < 5 min ago
-        now = time.time()
+        now = _now()
         recent = sorted(
             ((f, f.stat().st_mtime) for f in jsonl_files),
             key=lambda x: x[1],
@@ -3050,9 +3060,9 @@ class BaseBot:
         completion instead — it either relays the output or says why it could
         not, and it always terminates.
         """
-        deadline = time.time() + SLASH_STDOUT_TIMEOUT_SECONDS
+        deadline = _now() + SLASH_STDOUT_TIMEOUT_SECONDS
         grace_used = False
-        while time.time() < deadline:
+        while _now() < deadline:
             time.sleep(SLASH_STDOUT_POLL_INTERVAL)
             payload, is_clean = self._scan_transcript_for_stdout(transcript_path, baseline)
             if not payload:
@@ -3288,7 +3298,7 @@ class BaseBot:
         gen = self._heartbeat_gen
 
         def _heartbeat_loop():
-            start = time.time()
+            start = _now()
 
             # Streaming mode (FPLAN-0297): live transcript tail
             if self._stream and self._active_transcript_path:
@@ -3309,7 +3319,7 @@ class BaseBot:
                 if self._heartbeat_gen != gen:
                     break
 
-                elapsed = time.time() - start
+                elapsed = _now() - start
                 if elapsed > PENDING_STUCK_TIMEOUT_SECONDS:
                     self._fail_stuck_pending(chat_id, processing_msg_id, elapsed)
                     break
@@ -3401,9 +3411,9 @@ class BaseBot:
                 break
 
             if not buffer:
-                elapsed = time.time() - start_time
+                elapsed = _now() - start_time
                 placeholder = f"Processing... ({self._format_elapsed(elapsed)})"
-                now = time.time()
+                now = _now()
                 if placeholder != last_sent and now >= retry_after_until:
                     if self._is_pending_delivered() or self._heartbeat_gen != gen:
                         break
@@ -3415,7 +3425,7 @@ class BaseBot:
             if buffer == last_sent:
                 continue
 
-            now = time.time()
+            now = _now()
             if now < retry_after_until:
                 continue
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo.py
 # Description: SEEDGO - Standards Platform for AIPass
-# Version: 2.1.0
+# Version: 2.0.1
 # Created: 2026-03-05
-# Modified: 2026-08-07
+# Modified: 2026-09-06
 # =============================================
 
 """
@@ -24,7 +24,9 @@ from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error
 
-VERSION = "2.0.0"
+# The header above and this constant are the two places a version lives; --version
+# and the README read this one. They disagreed (2.1.0 vs 2.0.0) until 2026-09-06.
+VERSION = "2.0.1"
 SEEDGO_ROOT = Path(__file__).parent
 MODULES_DIR = SEEDGO_ROOT / "modules"
 
@@ -191,6 +193,32 @@ def print_help() -> None:
     )
     console.print("  [green]drone @seedgo audit aipass[/green]                   [dim]# Audit all branches[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]             [dim]# Audit single branch[/dim]")
+    console.print("  [green]drone @seedgo standards_audit aipass @flow[/green]   [dim]# Same verb, long name[/dim]")
+    console.print(
+        "  [green]drone @seedgo audit pytest_quality @flow[/green]     "
+        "[dim]# 11 AST rules over a branch's tests (shadow: scores, gates nothing)[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo audit pytest_quality[/green]           [dim]# The same over every citizen[/dim]"
+    )
+    console.print()
+
+    console.print("[yellow]Test Quality:[/yellow]")
+    console.print(
+        "  [green]drone @seedgo audit-tests @flow[/green]              "
+        "[dim]# Run a suite under the write gate; advisory artifact[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo test-inventory <path>[/green]          "
+        "[dim]# Every test function in a tree, ranked for reading[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo test-inventory <path> --twins[/green]  [dim]# Same-named tests across branches[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo shadow-cycle run[/green]               "
+        "[dim]# The three weekly passes, one mail (--no-mail to print)[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Query Standards:[/yellow]")
@@ -219,6 +247,14 @@ def print_help() -> None:
     console.print(
         "  [green]drone @seedgo diagnostics @flow[/green]              [dim]# Single branch diagnostics[/dim]"
     )
+    console.print(
+        "  [green]drone @seedgo diagnostics_audit @flow[/green]        [dim]# Pyright scan as an audit report[/dim]"
+    )
+    console.print()
+
+    console.print("[yellow]README:[/yellow]")
+    console.print("  [green]drone @seedgo readme update @flow[/green]            [dim]# Update a branch README[/dim]")
+    console.print("  [green]drone @seedgo readme check @flow[/green]             [dim]# Dry run[/dim]")
     console.print()
 
     console.print("[yellow]Proof (Self-Check):[/yellow]")
@@ -235,6 +271,17 @@ def print_help() -> None:
     console.print(
         "  [green]drone @seedgo test_map @flow[/green]"
         "                 [dim]# Function test coverage map for branch[/dim]"
+    )
+    console.print()
+
+    console.print("[yellow]Housekeeping:[/yellow]")
+    console.print(
+        "  [green]drone @seedgo permissions[/green]                    "
+        "[dim]# Who may write outside their own branch[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo inbox_audit[/green]                    "
+        "[dim]# Flag malformed mail ids across every inbox[/dim]"
     )
     console.print()
 
@@ -258,8 +305,9 @@ def print_help() -> None:
 
     # Commands line for drone discovery
     console.print(
-        "[dim]Commands: audit, standards_audit, standards_query, standard, checklist, diagnostics,"
-        " diagnostics_audit, proof, proof_query, test_map, readme, readme_update, --help[/dim]"
+        "[dim]Commands: audit, audit-tests, test-inventory, shadow-cycle, standards_audit, standards_query,"
+        " standard, checklist, diagnostics, diagnostics_audit, proof, proof_query, test_map, readme,"
+        " readme_update, permissions, inbox_audit, --help[/dim]"
     )
     console.print()
 

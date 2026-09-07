@@ -23,7 +23,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 from ..diff.generator import generate_diff_content, should_create_diff
-from ..json import json_handler
+from ..audit import trail
 from ..path.builder import build_versioned_file_path
 
 
@@ -147,7 +147,7 @@ def copy_versioned(
         "bytes_copied": bytes_copied,
         "errors": errors,
     }
-    json_handler.log_operation(
+    trail.log_operation(
         "copy_versioned",
         {
             "project_root": project_root,

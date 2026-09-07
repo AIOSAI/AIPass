@@ -43,10 +43,11 @@ apps/
 │   ├── drive_check.py     # Drive check (stub — DPLAN-003)
 │   └── drive_clear.py     # Drive clear (stub)
 └── handlers/
+    ├── audit/             # backup's own op trail -> logs/operations.jsonl
     ├── copy/              # File copying (snapshot + versioned)
     ├── diff/              # Diff generation
     ├── ignore/            # .backupignore patterns + whitelist
-    ├── json/              # JSON persistence, atomic writes, ops log
+    ├── json/              # The fleet's json shim (prax service, DPLAN-0325)
     ├── path/              # Backup path building
     ├── project/           # Config, registry, setup (.backup/)
     ├── report/            # Result formatting
@@ -73,5 +74,6 @@ apps/
 - `drone @backup` only resolves from within the Backup-System project tree (drone CWD limitation)
 - Direct invocation via absolute python path works from anywhere
 - handlers/__init__.py has an access guard that blocks cross-branch imports — uses path-based check, not hardcoded module name
-- json_handler.log_operation() writes to branch-root logs/operations.jsonl — path-depth must match branch location
+- The audit trail (handlers/audit/trail.py) writes branch-root logs/operations.jsonl and honours AIPASS_TEST_LOG_DIR;
+  json_handler is the byte-identical fleet shim — never add a name to it
 - Drive handlers are intentional stubs (DPLAN-003 deferred)

@@ -286,6 +286,7 @@ class BrokerDaemon:
                     resolved=resolved,
                     reason=deny_reason,
                     caller=identity,
+                    project_root=self._repo_root,
                 )
                 return BrokerResponse(
                     ok=False,
@@ -310,6 +311,7 @@ class BrokerDaemon:
                     resolved=resolved,
                     reason=reason,
                     caller=identity,
+                    project_root=self._repo_root,
                 )
                 return BrokerResponse(
                     ok=False,
@@ -346,6 +348,7 @@ class BrokerDaemon:
                     reason=f"Deleted: {resolved}",
                     measurement=measurement,
                     caller=identity,
+                    project_root=self._repo_root,
                 )
                 return BrokerResponse(
                     ok=True,
@@ -369,6 +372,7 @@ class BrokerDaemon:
                     reason=f"Delete failed: {exc}",
                     measurement=measurement,
                     caller=identity,
+                    project_root=self._repo_root,
                 )
                 return BrokerResponse(
                     ok=False,
@@ -387,6 +391,7 @@ class BrokerDaemon:
             resolved=req.path,
             reason="Path not under any allowed base for this identity",
             caller=identity,
+            project_root=self._repo_root,
         )
         return BrokerResponse(
             ok=False,

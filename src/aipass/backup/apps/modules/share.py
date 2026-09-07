@@ -21,7 +21,7 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 
 MODULE_NAME = "share"
@@ -95,7 +95,7 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     if result.get("link"):
         console.print(result["link"], highlight=False)
 
-    json_handler.log_operation(
+    trail.log_operation(
         "share_command",
         {
             "file": resolved_path,

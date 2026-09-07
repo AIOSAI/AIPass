@@ -128,15 +128,37 @@ def discover_modules() -> list[Any]:
     return modules
 
 
-def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
-    """Route command to appropriate module."""
+def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bool, str | None]:
+    """Route command to appropriate module.
+
+    Every module is asked in turn, so one module raising must not deny the
+    command to a module further down the list -- that is why the exception is
+    caught rather than propagated.
+
+    But a caught exception is NOT the same answer as "nobody claimed this",
+    and folding the two together is what made a corrupt ``.backup/config.json``
+    print ``Unknown command: snapshot`` (measured live, 2026-09-03): the
+    command was known, it failed, and the operator was sent hunting for a typo.
+
+    Args:
+        command: The verb to route.
+        args: Remaining CLI arguments.
+        modules: Discovered modules exposing handle_command.
+
+    Returns:
+        (handled, failure). ``failure`` is the first module error seen, as
+        text for the operator, and is only meaningful when handled is False.
+    """
+    failure: str | None = None
     for module in modules:
         try:
             if module.handle_command(command, args):
-                return True
+                return True, None
         except Exception as e:
             logger.error(f"[BACKUP] Module {module.__name__} error: {e}")
-    return False
+            if failure is None:
+                failure = f"{module.__name__}: {e}"
+    return False, failure
 
 
 def main():
@@ -187,8 +209,12 @@ def main():
             mode = "all"
             remaining = [r for r in remaining if r != "--all"]
 
-        if route_command(mode, remaining, modules):
+        handled, failure = route_command(mode, remaining, modules)
+        if handled:
             return 0
+        if failure:
+            error(f"{mode} failed -- {failure}")
+            return 1
         error(f"Unknown mode: {mode}")
         return 1
 
@@ -203,8 +229,13 @@ def main():
             return 1
         remaining = [resolved] + remaining[1:]
 
-    if route_command(command, remaining, modules):
+    handled, failure = route_command(command, remaining, modules)
+    if handled:
         return 0
+
+    if failure:
+        error(f"{command} failed -- {failure}")
+        return 1
 
     error(f"Unknown command: {command}")
     return 1

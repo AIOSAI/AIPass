@@ -91,15 +91,21 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
 
         registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-        if not registry_path.exists():
+        # Opened, not checked first. exists() answers about a moment that is
+        # already over: between the check and the open the registry can be
+        # replaced (spawn rewrites it atomically, so there IS a window where the
+        # old inode is gone) or vanish, and the reward for asking is a second
+        # syscall plus a FileNotFoundError from the line below anyway. The open
+        # is the check.
+        try:
+            with open(registry_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
             logger.warning(
                 f"[file_watcher] No branch registry at {registry_path}, so the live monitor will "
                 f"watch no branches for file changes. The log feed is unaffected."
             )
             return []
-
-        with open(registry_path, encoding="utf-8") as f:
-            data = json.load(f)
 
         branches = data.get("branches", [])
         if not branches:

@@ -19,8 +19,14 @@ MEASURED IN THIS BRANCH, 2026-08-31: with the handlers guard cured, 49 of
 api's 61 modules still died on import in both denial worlds, and the
 traceback named ONE line - json_handler.py:43, the API_ROOT constant. Nearly
 every module in this tree imports json_handler, so a single unguarded
-resolve was the second mask layer. Three module-level sites route through
-module_file() here rather than each growing its own try/except.
+resolve was the second mask layer.
+
+That line is gone as of DPLAN-0325 (2026-09-04): the handler is now a shim
+over the one prax service, which derives its root from parents[3] and never
+resolves. TWO module-level sites route through module_file() here -
+usage/aggregation.py and usage/tracking.py - rather than each growing its own
+try/except. The guard stays: it is what keeps those two, and the next one, off
+an import-time cwd read.
 
 Shape mirrors @memory's repo_root.module_file - the ratified fleet cure -
 sized to this branch: api's repo_root() derives from drone's registry path

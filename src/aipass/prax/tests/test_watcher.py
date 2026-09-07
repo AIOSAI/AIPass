@@ -13,6 +13,7 @@
 
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -904,3 +905,109 @@ class TestOptionalTriggerIntegration:
             "prax's public logger could not be built while trigger was unavailable.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+
+# ============================================================================
+# THE BACKGROUND START — the walk must not be on a thread anyone waits on
+# ============================================================================
+
+
+class TestTheBackgroundStartDoesNotMakeTheCallerWait:
+    """Scheduling the watch is slow, and the first log line used to pay for it.
+
+    MEASURED 2026-09-04, this repo, 1605 directories under ECOSYSTEM_ROOT:
+    start_file_watcher() costs 0.119s in the calling thread when that thread is
+    alone and 13.9s — 117x — with one other Python thread busy, because watchdog
+    installs one inotify watch per directory and each of those syscalls drops
+    the GIL and has to win it back. SystemLogger._ensure_watcher called it on
+    the first log line of the process, so a test suite whose only crime was to
+    log something stalled for seconds on a watcher it never asked for.
+
+    These pin the property that fixes it — the caller returns while the walk is
+    still running — and the two things that property could easily break: a
+    second observer installed behind the first, and an inotify failure that no
+    longer has a caller to raise to.
+    """
+
+    def _module_and_a_gated_observer(self):
+        """The discovery watcher with a schedule() that blocks until released."""
+        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher()
+        setattr(mod, "_observer", None)
+        setattr(mod, "_start_thread", None)
+
+        gate = threading.Event()
+        observer_inst.schedule.side_effect = lambda *args, **kwargs: gate.wait(30)
+        return mod, observer_inst, gate
+
+    def test_the_caller_returns_while_the_walk_is_still_running(self):
+        """The whole point: the walk outlives the call that asked for it."""
+        mod, observer_inst, gate = self._module_and_a_gated_observer()
+
+        try:
+            mod.start_file_watcher_in_background()
+
+            # Still inside schedule(), which has not been released.
+            assert getattr(mod, "_start_thread").is_alive()
+            assert getattr(mod, "_observer") is None
+
+            gate.set()
+            getattr(mod, "_start_thread").join(timeout=10)
+
+            observer_inst.schedule.assert_called_once()
+            observer_inst.start.assert_called_once()
+            assert getattr(mod, "_observer") is observer_inst
+        finally:
+            gate.set()
+
+    def test_a_second_call_during_the_walk_starts_no_second_observer(self):
+        """Two walks install two watches on every directory and deliver every
+        event twice — the failure mode a non-blocking start invites."""
+        mod, observer_inst, gate = self._module_and_a_gated_observer()
+
+        try:
+            mod.start_file_watcher_in_background()
+            mod.start_file_watcher_in_background()
+            mod.start_file_watcher_in_background()
+
+            gate.set()
+            getattr(mod, "_start_thread").join(timeout=10)
+
+            observer_inst.schedule.assert_called_once()
+            observer_inst.start.assert_called_once()
+        finally:
+            gate.set()
+
+    def test_a_synchronous_start_during_the_walk_waits_and_installs_nothing(self):
+        """The other half of the same rule: the two doors share one lock."""
+        mod, observer_inst, gate = self._module_and_a_gated_observer()
+
+        try:
+            mod.start_file_watcher_in_background()
+            gate.set()
+            getattr(mod, "_start_thread").join(timeout=10)
+
+            mod.start_file_watcher()
+
+            observer_inst.schedule.assert_called_once()
+        finally:
+            gate.set()
+
+    def test_an_inotify_limit_is_logged_not_raised(self):
+        """There is no caller left to hand the OSError to.
+
+        _ensure_watcher used to catch it and warn; on a thread nobody joins an
+        escaping exception is a silent death, so the warning moved inside with
+        the same words.
+        """
+        mod, observer_inst, _cls = TestDiscoveryWatcher()._import_discovery_watcher()
+        setattr(mod, "_observer", None)
+        setattr(mod, "_start_thread", None)
+        observer_inst.schedule.side_effect = OSError("inotify watch limit reached")
+
+        with patch.object(mod, "logger") as mock_logger:
+            mod.start_file_watcher_in_background()
+            getattr(mod, "_start_thread").join(timeout=10)
+
+            assert getattr(mod, "_observer") is None
+            warnings = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+            assert "inotify limit reached" in warnings

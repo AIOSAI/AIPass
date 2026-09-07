@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_auto_process_background.py
 # Date: 2026-08-13
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: memory/tests
 # =============================================
 
@@ -21,6 +21,7 @@ Covers:
   - a stale lock is reclaimed rather than deadlocking the lane forever
   - run_once() (the child) acquires, works, and always releases — even on error
   - the child is detached, so it outlives the session that kicked it
+  - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
 """
 
 import json
@@ -199,6 +200,111 @@ class TestRunOnce:
 
         assert seen["lock"]["pid"] == os.getpid()
         assert seen["lock"]["started"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Completion event
+# ---------------------------------------------------------------------------
+
+
+class TestCompletionIsAnnounced:
+    """The child announces its own completion, because nothing else can.
+
+    THE DEFECT, found by @trigger 2026-09-05 and confirmed by @hooks: before
+    DPLAN-0294 phase 1b the hook called auto_process() inline and fired
+    `memory_pool_auto_processed` when it returned. Phase 1b detached the work
+    for latency and the fire went with the inline call — @trigger's handler
+    stayed registered and became unreachable, measured at ZERO fire sites
+    fleet-wide. The handler's failure leg is what turns a bad run into
+    `error_detected`, the medic dispatch path, so for that whole window a
+    vectorize or rollover failure inside the child was visible only as counters
+    in auto_process_log.json that nothing reads for failure.
+
+    The spawn site cannot cure it: @hooks returns as soon as a PID exists, and a
+    PID is not a completion. These pin that the announcement happens HERE, where
+    the result is actually known, on both outcomes.
+    """
+
+    @staticmethod
+    def _bus():
+        """The exact bus object ``_fire_completion`` will reach, resolved NOW.
+
+        The production code does ``from aipass.trigger.apps.modules.core import
+        trigger`` at call time, which resolves through ``sys.modules``. A dotted
+        ``patch("aipass.trigger.apps.modules.core.trigger.fire")`` does not
+        always land on that object: Python 3.10's ``mock`` walks the attribute
+        chain from the top package, 3.11+ resolves through ``sys.modules``. The
+        two routes agree only while the parent-package attribute and the
+        ``sys.modules`` entry name the same module; something earlier on one
+        xdist worker split them, and on 3.10 the patch landed on a ``Trigger``
+        the code never calls. CI run 34088947108, the 3.10 leg alone: "expected
+        exactly one completion fire, got 0", green on 3.11-3.13. The splitter is
+        not named: that worker's file order replayed on 3.12 in one process
+        shows both routes on one object. Patching through the import route pins
+        the object the code reaches on every interpreter, whatever split it.
+        """
+        import importlib
+
+        return importlib.import_module("aipass.trigger.apps.modules.core").trigger
+
+    @staticmethod
+    def _fired(mock_fire):
+        """The one memory_pool_auto_processed call, as (name, payload)."""
+        calls = [c for c in mock_fire.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
+        assert len(calls) == 1, f"expected exactly one completion fire, got {len(calls)}"
+        return calls[0].kwargs
+
+    def test_a_finished_run_announces_success_in_the_published_shape(self, isolated_lock):
+        """@trigger's handler reads `status` on both sections — the internal dicts do not carry it."""
+        done = {
+            "success": True,
+            "pool": {"success": True, "files_processed": 3, "total_chunks": 12},
+            "rollover": {"success": True, "triggers": 1, "processed": 1},
+        }
+        with patch.object(self._bus(), "fire") as fire:
+            with patch.object(ap, "auto_process", return_value=done):
+                ap.run_once()
+
+        payload = self._fired(fire)
+        assert payload["success"] is True
+        assert payload["error"] is None
+        assert payload["pool"] == {"status": "ok", "files_processed": 3, "total_chunks": 12}
+        assert payload["rollover"] == {"status": "ok", "triggers": 1, "processed": 1}
+
+    def test_a_crashed_run_announces_the_failure_that_reaches_medic(self, isolated_lock):
+        """The leg that was dead. `success: False` + `error` is what becomes error_detected."""
+        with patch.object(self._bus(), "fire") as fire:
+            with patch.object(ap, "auto_process", side_effect=RuntimeError("chroma exploded")):
+                ap.run_once()
+
+        payload = self._fired(fire)
+        assert payload["success"] is False
+        assert "chroma exploded" in payload["error"]
+        assert payload["branch"] == "memory", "the citizen to wake for a fault here is this code's owner"
+
+    def test_a_declined_run_announces_nothing(self, isolated_lock):
+        """A run that never held the lock did not complete anything.
+
+        Announcing here would report a completion that has not happened — the
+        same untruth that makes the spawn site the wrong place to fire from.
+        The holder announces its own.
+        """
+        isolated_lock.write_text(json.dumps({"pid": os.getpid(), "started": time.time()}), encoding="utf-8")
+
+        with patch.object(self._bus(), "fire") as fire:
+            result = ap.run_once()
+
+        assert result["skipped"] is True
+        assert not [c for c in fire.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
+
+    def test_a_broken_bus_does_not_break_the_run(self, isolated_lock):
+        """Observability must not take down the work it observes."""
+        with patch.object(self._bus(), "fire", side_effect=RuntimeError("bus down")):
+            with patch.object(ap, "auto_process", return_value={"success": True}):
+                result = ap.run_once()
+
+        assert result["success"] is True
+        assert not isolated_lock.exists(), "a failed fire must still release the lock"
 
 
 # ---------------------------------------------------------------------------

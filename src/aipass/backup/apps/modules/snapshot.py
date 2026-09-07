@@ -25,7 +25,7 @@ from aipass.cli.apps.modules import console
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -117,7 +117,7 @@ def _quick_check_early_return(
         files_skipped=len(filtered),
         duration_seconds=duration,
     )
-    json_handler.log_operation(
+    trail.log_operation(
         "snapshot_skipped",
         {
             "project_root": project_root,
@@ -206,7 +206,7 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
     metadata = build_metadata(result)
     append_changelog(project_root, metadata)
 
-    json_handler.log_operation(
+    trail.log_operation(
         "snapshot_complete",
         {"project_root": project_root, "files": result.files_copied},
     )

@@ -55,6 +55,7 @@ drone @git show <ref> <path>     # Read a file's contents AT that commit
 drone @git remote                # List remotes + urls (credentials redacted)
 drone @git lock                  # Check lock status
 drone @git tag --list            # List all tags (newest first)
+drone @git branches              # List remote branches
 drone @git issue list            # Passthrough to gh issue list
 drone @git issue view 42         # Passthrough to gh issue view 42
 drone @git run list              # Passthrough to gh run list
@@ -77,7 +78,6 @@ drone @git dev-pr "desc"         # Push dev and create PR to main
 drone @git merge <PR#>           # Merge a PR and sync local main
 drone @git delete-branch <name>  # Delete a remote branch (not main/dev)
 drone @git close-pr <number>     # Close a PR by number
-drone @git branches              # List remote branches
 drone @git sync                  # Pull latest (branch-aware: main or dev)
 drone @git sync --autostash      # Sync with autostash for dirty trees
 drone @git smart-sync            # Fetch + detect divergence + rebase
@@ -110,7 +110,7 @@ from aipass.drone import resolve_branch, list_branches, route_command
 path = resolve_branch("@seedgo")
 
 # List registered branches — status defaults to "active", it is not "all"
-active = list_branches()                      # 18 today; the default IS a filter
+active = list_branches()                      # 24 today; the default IS a filter
 by_type = list_branches(branch_type="core")   # 0 today — see note below
 
 # Route a command to a branch
@@ -119,7 +119,7 @@ print(result.stdout)      # Command output
 print(result.exit_code)   # 0 on success
 ```
 
-`list_branches(branch_type=...)` is a live parameter with nothing to match: no entry in `AIPASS_REGISTRY.json` carries a `branch_type` field, and all 18 carry `status: "active"`, so today the type filter always returns `[]` and any status but `active` returns `[]` too. Documented as it behaves, not as it reads — verified 2026-08-25.
+`list_branches()` returns **24** today, and that is not the 18 rows of `AIPASS_REGISTRY.json`: `get_all_branches()` merges the primary registry (18 entries, all `status: "active"`, none carrying a type field) with the external tier declared in `AIPASS_ROOTS.json` (6 — `@wren`, `@research`, `@vera`, `@verify`, `@writer`, `@my_agent`). `list_branches(branch_type=...)` is a live parameter with nothing to match: none of the 24 carries a type field, so the type filter always returns `[]`, and any status but `active` returns `[]` too. One precision the earlier wording missed — the filter reads `branch.get("type")`, not `branch_type`, so it names a key no code reads. Documented as it behaves, not as it reads — remeasured 2026-09-05.
 
 ### Registry Management
 
@@ -186,6 +186,7 @@ drone/
 │   │   ├── generic_adapter.py     # StringIO capture for external modules
 │   │   ├── help_flags.py          # wants_help() — whole-sequence help detection (rule E)
 │   │   ├── json_flags.py          # wants_json() / strip_json_flag() — --json in any slot
+│   │   ├── module_root.py         # Resolve a module's __file__ without an import-time cwd read
 │   │   ├── rm_handler.py          # Path containment checks + deletion
 │   │   ├── deletion_log.py        # Deletion record — JSONL store + prax line (both lanes)
 │   │   ├── routing_config.json    # External module declarations
@@ -195,7 +196,7 @@ drone/
 │   │   │   ├── path_resolver.py   # openat2 RESOLVE_BENEATH path resolution
 │   │   │   └── protocol.py       # Typed JSON-line IPC (BrokerRequest/Response)
 │   │   ├── json/
-│   │   │   └── json_handler.py    # Structured operation logging
+│   │   │   └── json_handler.py    # Binds prax's json service to this branch — fleet shim, byte-identical
 │   │   ├── scanning/
 │   │   │   ├── scanner.py         # Help parsing + modules/ file scanning
 │   │   │   └── formatters.py      # Rich output for scan results
@@ -229,10 +230,11 @@ drone/
 │       └── hook_sounds/                   # DISABLED — moved to hooks branch (drone @hooks hooksound on/off)
 │           ├── __init__.py.disabled
 │           └── hook_sounds_plugin.py.disabled
+├── integrations/                  # Present on disk, README only — no .py, nothing routes to it
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1243 tests across 32 test files
+└── tests/                         # 1185 test functions across 32 files; pytest expands to 1272 cases
 ```
 
 ### Routing Flow
@@ -392,7 +394,7 @@ Both the ref and the optional path are refused before any argv is built if git w
 
 Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can parse why it failed rather than getting a bare sentence it has to guess at. The exit code still goes non-zero, so a shell script reading only `$?` is told the same truth.
 
-Consumers were previously scraping the rendered output (@api's host lane carried ~385 lines of it, keyed on the *shape* of a status row). Prose output is unchanged by design — every existing reader keeps working — but new callers should take the document.
+Consumers were previously scraping the rendered output (@api's host lane carried ~385 lines of it, keyed on the *shape* of a status row). That migration has since completed: checked 2026-09-05, `api/apps/handlers/host/git_reads.py` takes the document (12 `--json` call sites, a `_document()` helper honouring the document's own `ok`) and reads no rendered drone row anywhere — its remaining line-splitting parses patch text. The ~385-line figure is history and is not re-checkable in the current tree. Prose output is unchanged by design — every existing reader keeps working — but new callers should take the document.
 
 **`status --json` reports git's two porcelain columns, which the rendered view cannot.** The columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M` an unstaged one. The rendered row shows one right-aligned letter and always has, so those two collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
 
@@ -408,7 +410,7 @@ Consumers were previously scraping the rendered output (@api's host lane carried
 
 SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
 
-A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error — two projects in the live tree have none.
+A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error. Remeasured 2026-09-05 across the four roots declared in `AIPASS_ROOTS.json`: **one** (`wren`) is a git repo with no remote configured and exercises this path; a second (`Demo`) has no `.git` at all, so `remote` there answers `ok: false` on a non-zero return, not `count: 0`. The earlier "two projects have none" collapsed those two different answers into one.
 
 ### Deleting — every delete leaves a record
 
@@ -430,9 +432,10 @@ Four things worth knowing:
  - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the guard just said that tree is off-limits, so nothing goes and reads inside it.
  - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than paying an unbounded walk.
  - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
+ - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon can serve a repository it is not standing in; resolving the store from cwd there files the record under the standing project instead — which is exactly how 211 sandbox deletions came to sit in this ledger (see Known Issues). `AIPASS_DELETION_LOG` still outranks both, so the test and container seam cannot be defeated by a lane naming its own root. `rm` passes nothing and keeps the cwd walk, which is correct for it: the operator IS standing in the project they are deleting from.
  - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
 
-**Known gap in the `caller` field — read it with this in mind.** The resolver's last resort before `unknown` is the *project*, not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no `.trinity/passport.json` anywhere up the tree, it derives a name from the registry that answered (for AIPass, the `AIPASS_REGISTRY.json` filename → `aipass`). A delete run from the repo root therefore records `caller: "aipass"` — a directory, not the citizen who typed it. The live store carries 8 such records, one of them a deletion inside @devpulse's own tree. Nothing is fabricated: `aipass` is a true statement about *where* the process stood, and the same `CallerIdentity.source` distinction documented under Caller Identity applies (`project`, not `passport` or `assigned`). But a reader auditing a deletion months later wants the citizen, and for those records the ledger cannot supply one. Not fixed here — writing it down beats a reader inferring a person from a project name.
+**Known gap in the `caller` field — read it with this in mind.** The resolver's last resort before `unknown` is the *project*, not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no `.trinity/passport.json` anywhere up the tree, it derives a name from the registry that answered (for AIPass, the `AIPASS_REGISTRY.json` filename → `aipass`). A delete run from the repo root therefore records `caller: "aipass"` — a directory, not the citizen who typed it. The live store carries **33** such records out of 916 total, and **23** of the 33 carry `devpulse` somewhere in the path — but 22 of those are `/tmp` session scratch directories, and exactly **1** is literally inside `src/aipass/devpulse/` (remeasured 2026-09-05; this said "8 such records, one of them a deletion inside @devpulse's own tree" on 08-27 — the count grew and the earlier phrasing over-read a path substring, the defect itself did not change). Nothing is fabricated: `aipass` is a true statement about *where* the process stood, and the same `CallerIdentity.source` distinction documented under Caller Identity applies (`project`, not `passport` or `assigned`). But a reader auditing a deletion months later wants the citizen, and for those records the ledger cannot supply one. Not fixed here — writing it down beats a reader inferring a person from a project name.
 
 Both of drone's delete lanes feed it: `rm` (`handlers/rm_handler.py`) and `broker` (`handlers/broker/daemon.py`, which deletes on behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading its own cwd). The broker's protocol audit log is unchanged — that records requests and error codes; this records deletions.
 
@@ -495,7 +498,7 @@ By default, drone captures subprocess output (both pipes, drained concurrently) 
 
 Commands in the interactive tuple bypass capture and inherit the terminal directly — enabling live Rich output, colors, and no timeout.
 
-**Interactive mode is a property of BRANCH (subprocess) routing only.** It means "inherit the terminal instead of capturing the subprocess", and `_handle_module()` runs in-process and takes no interactive parameter — so a module target never receives it and never could. `@seedgo`, `@cli` and `@spawn` are both module and branch, so an interactive command against them takes the subprocess lane and renders live. `git` is a module and **never** a branch: `drone @git status` matched `INTERACTIVE_COMMANDS`, skipped the module fast path, and raised `BranchNotFoundError` on every call by design — a fallback firing on the **happy path**, which is worse than one firing on failure because it trains everyone to ignore the channel it fires on. It was 1335 of 1337 lines in `system_logs/drone_drone.log`, burying the one real WARNING in there at 0.08% concentration (DPLAN-0315, Patrick's ruling: *"there should be no fallback full stop... if our intended action or process fail, it fail loud"*). The target is now checked for a branch before the interactive lane is taken.
+**Interactive mode is a property of BRANCH (subprocess) routing only.** It means "inherit the terminal instead of capturing the subprocess", and `_handle_module()` runs in-process and takes no interactive parameter — so a module target never receives it and never could. `@seedgo`, `@cli` and `@spawn` are both module and branch, so an interactive command against them takes the subprocess lane and renders live. `git` is a module and **never** a branch: `drone @git status` matched `INTERACTIVE_COMMANDS`, skipped the module fast path, and raised `BranchNotFoundError` on every call by design — a fallback firing on the **happy path**, which is worse than one firing on failure because it trains everyone to ignore the channel it fires on. It was 1335 of 1337 lines in `system_logs/drone_drone.log`, burying the one real WARNING in there at 0.08% concentration — and the cure holds: measured 2026-09-05, the current log carries 1352 of those lines in its first 1353, the last of them stamped 2026-08-21 21:31:56, and not one in the eleven days since (DPLAN-0315, Patrick's ruling: *"there should be no fallback full stop... if our intended action or process fail, it fail loud"*). The target is now checked for a branch before the interactive lane is taken.
 
 **Always interactive** — these presentational commands always inherit the terminal for Rich color on a TTY, plain when piped:
 
@@ -579,28 +582,46 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1243 tests collected across 32 test files (1238 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-27 — every file on disk appears in exactly one row, so the rows sum to the total:
+**1272 tests pass, 0 skip**, across 32 test files — measured 2026-09-06 from the repo root (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q`). Counted the seedgo readme rule's way: **1185 `def test_` functions**, which parametrization expands to **1272 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1272:
 
 | Area | Files | Tests |
 |------|-------|-------|
 | Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 188 |
 | Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 341 |
-| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 151 |
+| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
-| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 185 |
-| Deletion record | `test_deletion_log.py` | 26 |
-| Broker | `test_broker.py` | 60 |
-| Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 100 |
+| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 143 |
+| Deletion record | `test_deletion_log.py` | 36 |
+| Broker | `test_broker.py` | 61 |
+| Standards | `test_cli_routing.py` | 81 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 | Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
-| Caller identity provenance | `test_caller_identity_provenance.py` | 10 |
+| Caller identity provenance | `test_caller_identity_provenance.py` | 17 |
 | Machine output (`--json` doors, `remote`) | `test_git_json_and_remote.py` | 50 |
-| JSON log durability | `test_json_durability.py` | 10 |
+| External roots (declared-roots tier) | `test_external_roots.py` | 28 |
+| Dead-cwd hermeticity | `test_import_dead_cwd.py`, `test_no_cwd_sweep.py` | 38 |
+| Registry case sweep | `test_registry_case_sweep.py` | 8 |
+| Bypass anchors | `test_bypass_anchors.py` | 3 |
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
+**What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
+
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1272 passed in 203s on 2026-09-06.
 
 ---
+
+## Status
+
+Measured 2026-09-06, all numbers from this tree tonight:
+
+| What | Measured | How |
+|---|---|---|
+| Tests | 1272 pass, 0 skip, 32 files (1185 `def test_` functions) | `python -m pytest tests/ -q`, both rootdirs |
+| Seedgo audit | 100 on every CI-scored category | `drone @seedgo audit aipass @drone` |
+| Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
+| Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
+| json handler | the fleet shim, sha256 `3456b766…`, 1724 bytes — bound to prax's service, byte-identical fleet-wide | `sha256sum` |
+| Deletion store | 920 records, 33 of them attributed to the project name rather than a citizen; 211 forged by another branch's suite (see Known Issues) | `.ai_central/deletions.jsonl` |
 
 ## Known Issues
 
@@ -608,13 +629,14 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 - `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
 - Piping drone output into a truncating reader (`| head`) yields inconsistent exit codes (0, 1, or 243) — no BrokenPipe handling anywhere in the tree. Cosmetic, but blocks `drone ... | head` inside `set -e` scripts
 - Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
-- `apps/drone.py`'s file header says `Version: 1.1.1` while the runtime constant two lines down is `VERSION = "1.1.0"` — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. Found 2026-08-25; a code fix, out of scope for a README-only pass
-- Pyright's `json` package-shadowing warning could **not** be reproduced on 2026-08-25 (`pyright apps/handlers/json/json_handler.py` → 0 errors/0 warnings; a full run under the root `pyrightconfig.json` → 0 errors, 3 unrelated `reportUnusedExpression` warnings in tests). It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced — no evidence it was never real
+- `apps/drone.py`'s file header says **`Version: 1.2.1`** (line 4) while the runtime constant 42 lines below is `VERSION = "1.1.0"` (line 46) — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). The 08-25 entry recorded this mismatch as `1.1.1`; remeasured 2026-09-05 it is `1.2.1`, so the header has moved twice while the constant stood still. Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. A code fix, out of scope for a README-only pass
+- Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
+- **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 920 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Proposed cleanup of the 211 standing records is with @devpulse and Patrick — they are not being rewritten unilaterally, because a ledger someone edits to look right is worth less than one with a documented wrong patch in it
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1238 pass, 5 skip | **Last Updated:** 2026-08-27
+**Seedgo:** 100% | **Tests:** 1272 pass, 0 skip | **Last Updated:** 2026-09-06
 
 ---
 [← Back to AIPass](../../../README.md)

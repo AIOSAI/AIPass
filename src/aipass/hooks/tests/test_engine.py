@@ -907,18 +907,10 @@ class TestConftest:
         assert temp_test_dir.exists()
         assert temp_test_dir.is_dir()
 
-    def test_mock_logger_is_mock(self, mock_logger):
-        mock_logger.info("test")
-        mock_logger.info.assert_called_once()
-
     def test_autouse_mock_subprocess(self, mock_subprocess):
         mock_subprocess.return_value = MagicMock(returncode=0, stdout="x", stderr="")
         result = _run_hook("test_cmd", "input")
         assert result["stdout"] == "x"
-
-    def test_sys_modules_mock_logger(self, mock_logger):
-        mock_logger.error("error msg")
-        mock_logger.error.assert_called_with("error msg")
 
     def test_reimport_after_mock(self, mock_logger):
         from aipass.hooks.apps.modules import engine

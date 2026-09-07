@@ -2,10 +2,13 @@
 # META DATA HEADER
 # Name: conftest.py - Skills test configuration
 # Date: 2026-03-07
-# Version: 2.1.0
+# Version: 3.0.0
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam -
+#     the fleet service resolves its directory per call, so there is no module
+#     attribute left to patch and no handler to re-import (DPLAN-0325)
 #   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler via
 #     import_module at fixture-setup time instead of patching the stale
 #     module captured at conftest load — fixes real-file leaks (t_config.json
@@ -15,70 +18,42 @@
 #   - v1.0.0 (2026-03-07): Initial implementation
 #
 # CODE STANDARDS:
-#   - Adds skills root to sys.path for test imports
+#   - Sets the AIPASS_TEST_LOG_DIR seam before the first aipass import
 # =============================================
 
-"""Skills test configuration."""
+"""Skills test configuration.
+
+The autouse fixture here is the load-bearing one: this branch's json_handler
+binds the fleet's one json service (DPLAN-0325), which writes into skills_json/
+unless AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that
+variable per test, so every test lands in its own tmp_path without knowing it.
+"""
 
 import os
 import tempfile
 
-# Redirect prax logs to temp directory during tests
-# Must be set before any prax imports to catch logger initialization
+# Redirect prax logs AND the fleet json service to a temp directory during
+# tests. Must be set before any prax imports to catch logger initialization.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import importlib
 import logging
-import sys
-import types
 from pathlib import Path
-from typing import Generator
-from unittest.mock import MagicMock
+from typing import Generator, List, Tuple
 
 import pytest
 
-# Add src/ to path so aipass.skills is importable
-skills_root = Path(__file__).resolve().parents[3]
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
-
-# ---------------------------------------------------------------------------
-# Dynamic import for json_handler isolation
-# ---------------------------------------------------------------------------
+# aipass is an installed package (pip install -e), so nothing here hacks
+# sys.path to reach it — a conftest that prepends src/ hides a broken install
+# and shadows the wheel the e2e job measures.
+from aipass.skills.apps.handlers.json import json_handler  # noqa: E402
 
 BRANCH_MODULE = "aipass.skills"
 
-_handler_pkg = f"{BRANCH_MODULE}.apps.handlers"
-_json_mod_path = f"{BRANCH_MODULE}.apps.handlers.json.json_handler"
-
-# Ensure the handler package is importable
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = Path(__file__).resolve().parents[1] / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
-
-_json_mod = importlib.import_module(_json_mod_path)
-
-
-# ---------------------------------------------------------------------------
-# JSON_DIR variable discovery
-# ---------------------------------------------------------------------------
-
-_JSON_DIR_ATTR: str | None = None
-_JSON_DIR_CANDIDATES = [
-    "SKILLS_JSON_DIR",
-    "JSON_DIR",
-    "BRANCH_JSON_DIR",
-    "_JSON_DIR",
-]
-
-for _candidate in _JSON_DIR_CANDIDATES:
-    if hasattr(_json_mod, _candidate):
-        _JSON_DIR_ATTR = _candidate
-        break
+# Archived files are a record, never a subject: nothing under .archive/ is
+# collected, imported or discovered (DPLAN-0325 - a sibling branch's rglob
+# walked into one and generated a dotted name that would not parse).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
 # ---------------------------------------------------------------------------
@@ -120,70 +95,62 @@ def sample_data() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def mock_infrastructure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Autouse fixture that isolates JSON operations and silences logging.
+def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect this branch's json writes into a temp dir, and silence logging.
 
-    This fixture:
-      1. Redirects the branch's JSON_DIR to tmp_path (test isolation)
-      2. Patches the branch logger to a NullHandler (no console noise)
+    autouse=True on purpose: the shim's names write into the real skills_json/
+    unless the seam is set, so a test that forgets to redirect pollutes the
+    branch. The guard belongs on every test, not on the ones that remember.
 
-    Re-resolves the module via import_module (not the `_json_mod` captured at
-    conftest collection time) — another branch's conftest popping this module
-    from sys.modules mid-session leaves `_json_mod` stale, so patching it
-    misses the fresh instance tests actually import, and writes land in the
-    real skills_json/ dir instead of tmp_path.
+    The service recomputes its directory on every call, so setting the variable
+    here - after import - still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Returns:
+        The sandbox directory the handler now writes into.
     """
-    if _JSON_DIR_ATTR is not None:
-        json_mod = importlib.import_module(_json_mod_path)
-        monkeypatch.setattr(json_mod, _JSON_DIR_ATTR, tmp_path)
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/skills/skills_json, so a seam AT tmp_path would create
+    # tmp_path/skills/ in every test and collide with a test that builds a
+    # directory of its own branch's name.
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
 
     logger_names = [
         BRANCH_MODULE,
-        f"{BRANCH_MODULE}.apps.handlers.json.json_handler",
+        "aipass.prax.json",
     ]
     for logger_name in logger_names:
         log = logging.getLogger(logger_name)
         monkeypatch.setattr(log, "handlers", [logging.NullHandler()])
 
-
-@pytest.fixture()
-def mock_logger() -> MagicMock:
-    """Standalone mock logger for tests that need to verify logging calls."""
-    mock = MagicMock(spec=logging.Logger)
-    mock.debug = MagicMock()
-    mock.info = MagicMock()
-    mock.warning = MagicMock()
-    mock.error = MagicMock()
-    mock.critical = MagicMock()
-    return mock
+    return sandbox
 
 
 @pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolating from real file I/O."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler
+def mock_logger(monkeypatch: pytest.MonkeyPatch) -> List[Tuple[str, tuple]]:
+    """Capture calls made to the entry point's logger.
 
-
-@pytest.fixture()
-def reimport_after_mock(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Fixture demonstrating reimport_after_mock pattern.
-
-    Patches sys.modules to inject a mock, then reimports the handler module
-    so it picks up the mocked dependency. Useful for testing import-time behavior.
+    Returns:
+        A list that fills with (level, args) tuples as the code under test logs.
     """
-    mock_mod = MagicMock()
-    monkeypatch.setitem(sys.modules, f"{BRANCH_MODULE}.apps.handlers.json.json_handler", mock_mod)
-    reimported = importlib.import_module(_json_mod_path)
-    importlib.reload(reimported)
-    return mock_mod
+    captured: List[Tuple[str, tuple]] = []
+
+    class _CapturingLogger:
+        def debug(self, *args: object, **kwargs: object) -> None:
+            captured.append(("debug", args))
+
+        def info(self, *args: object, **kwargs: object) -> None:
+            captured.append(("info", args))
+
+        def warning(self, *args: object, **kwargs: object) -> None:
+            captured.append(("warning", args))
+
+        def error(self, *args: object, **kwargs: object) -> None:
+            captured.append(("error", args))
+
+    from aipass.skills.apps import skills as branch_entry
+
+    monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
+    return captured

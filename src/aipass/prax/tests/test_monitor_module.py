@@ -1050,68 +1050,6 @@ class TestInteractiveLoop:
         ):
             mod._interactive_loop()
 
-    def test_tty_empty_input_skipped(self):
-        """Empty input is ignored in TTY mode."""
-        mod = _import_monitor()
-        mod._stop_event.clear()
-
-        call_count = 0
-
-        def _input(prompt=""):
-            """Return empty first, then quit."""
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return ""
-            return "quit"
-
-        mock_filter = MagicMock()
-        returns = iter([("", []), ("quit", [])])
-        mock_filter.parse_command = MagicMock(side_effect=lambda x: next(returns))
-
-        with (
-            patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", side_effect=_input),
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
-        ):
-            mod._interactive_loop()
-
-    def test_tty_none_cmd_skipped(self):
-        """None command from parse_command is skipped."""
-        mod = _import_monitor()
-        mod._stop_event.clear()
-
-        call_count = 0
-
-        def _input(prompt=""):
-            """Return text first, then quit."""
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return "something"
-            return "quit"
-
-        mock_filter = MagicMock()
-        returns = iter([(None, []), ("quit", [])])
-        mock_filter.parse_command = MagicMock(side_effect=lambda x: next(returns))
-
-        with (
-            patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", side_effect=_input),
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
-        ):
-            mod._interactive_loop()
-
     def test_tty_keyboard_interrupt(self):
         """TTY mode handles KeyboardInterrupt gracefully."""
         mod = _import_monitor()

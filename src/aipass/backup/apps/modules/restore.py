@@ -23,7 +23,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console
 
 from aipass.backup.apps.handlers.diff.restore import list_versions, restore_file
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import build_versioned_store
 
 MODULE_NAME = "restore"
@@ -85,7 +85,7 @@ def run_list_versions(project_root: str, filename: str) -> bool:
         marker = "*" if v["type"] == "current" else " "
         console.print(f"  {marker} [{v['type']}] {v['timestamp']}  {v['path'].name}")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "restore_list",
         {"file": filename, "versions": len(versions)},
     )
@@ -116,7 +116,7 @@ def run_restore_file(project_root: str, filename: str, output_path: str) -> bool
         logger.warning(f"[restore] Failed to restore {filename}")
         console.print(f"Restore failed for {filename}")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "restore_complete",
         {"file": filename, "output": output_path, "success": success},
     )

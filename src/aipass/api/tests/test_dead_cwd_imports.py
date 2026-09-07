@@ -38,6 +38,11 @@ The handlers guard masked everything (apps/__init__ does `from . import
 handlers`, so every module died there first); curing it left 49/61, and the
 traceback named ONE remaining line - json_handler.py:43's API_ROOT constant,
 which nearly every module in this tree imports. 0/61 after both cures.
+
+That second site no longer exists: DPLAN-0325 (2026-09-04) replaced the
+handler with the fleet shim, which derives its root from parents[3] and never
+resolves. The measurement above is kept as the record of how the branch got
+to 0/61 - do not grep for API_ROOT expecting to find it.
 """
 
 import ast
@@ -278,6 +283,11 @@ class TestTheGuardNeverWalksInspectStack:
 _CALLER_PROBE = """
 import importlib, json, os, sys
 
+# Every write this world makes lands under the probe's own tmp_path, never in
+# the real api_json/: since DPLAN-0325 the one service reads this seam on every
+# call, and the probe below asks it to actually WRITE a log document.
+os.environ["AIPASS_TEST_LOG_DIR"] = os.path.join(os.environ["PROBE_TMP"], "_aipass_json_seam")
+
 for name in json.loads(os.environ["PROBE_PRELOAD"]):
     importlib.import_module(name)
 
@@ -311,15 +321,22 @@ class TestCallerDetectionStillAnswersWithoutARealpath:
     def test_it_names_the_calling_module_not_unknown(self, tmp_path: Path) -> None:
         # A REAL file supplies the caller frame, while the probe's own top-level
         # frame is a string pseudo-frame - the shape the defect actually meets.
+        #
+        # Measured THROUGH log_operation, not by calling the detector: after
+        # DPLAN-0325 there is no detector to call. The handler is a shim that
+        # binds the one prax service and publishes nine names, none of them
+        # private. A direct call would also be one frame short — the service
+        # resolves the caller at _getframe(2), counting on log_operation's own
+        # frame sitting between — so the honest probe is the public one, and
+        # the ANSWER is read off the document it wrote.
         (tmp_path / "deadcwd_named_caller.py").write_text(
             textwrap.dedent(
                 """
                 def ask(jh):
-                    # Mimics log_operation's depth: _get_caller_module_name
-                    # skips [0]=itself, [1]=its caller, [2]=the real caller.
-                    def stand_in_for_log_operation():
-                        return jh._get_caller_module_name()
-                    return stand_in_for_log_operation()
+                    jh.log_operation("dead_cwd_probe", {"ok": True})
+                    directory = jh.get_json_path("probe", "log").parent
+                    written = sorted(p.name for p in directory.glob("*_log.json"))
+                    return ",".join(n[: -len("_log.json")] for n in written)
                 """
             ),
             encoding="utf-8",

@@ -1,0 +1,10 @@
+{
+  "kind": "standards",
+  "ecosystem": "pytest",
+  "display_name": "pytest_quality",
+  "generic": true,
+  "status": "shadow",
+  "reason": "judges what a test proves; scores in shadow mode until the v5 numbers are diffed against the calibrated triage",
+  "replaces": "aipass_standards/test_quality (v4) - NOT removed until v5 is proven and the CI pack-count assertion is in place",
+  "design": "DPLAN-0323 / FPLAN-0469"
+}

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from ..json import json_handler
+from ..audit import trail
 from ..report.result import BackupResult
 
 
@@ -105,7 +105,7 @@ def cleanup_deleted_files(
         result: BackupResult to track deletions.
         dry_run: If True, only count what would be deleted.
     """
-    json_handler.log_operation("cleanup_started", {"backup_path": str(backup_path)})
+    trail.log_operation("cleanup_started", {"backup_path": str(backup_path)})
 
     if not backup_path.exists():
         return
@@ -117,7 +117,7 @@ def cleanup_deleted_files(
         result.add_warning(f"Cleanup scan error: {e}")
         logger.warning(f"[cleanup] Scan error: {e}")
 
-    json_handler.log_operation(
+    trail.log_operation(
         "cleanup_complete",
         {"files_deleted": result.files_deleted, "dry_run": dry_run},
     )

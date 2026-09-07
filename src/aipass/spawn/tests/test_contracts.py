@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from aipass.spawn.apps.handlers.json.json_handler import read_json, write_json
+from aipass.spawn.apps.handlers.json.json_handler import read_json
 
 
 class TestReturnTypeContracts:
@@ -40,14 +40,14 @@ class TestReturnTypeContracts:
 
 
 class TestExceptionContracts:
-    """Verify exception handling behavior."""
+    """Verify exception handling behavior.
 
-    def test_invalid_write_caught(self, tmp_path):
-        """write_json catches OSError and returns False, never raises."""
-        f = tmp_path / "test.json"
-        with patch("os.write", side_effect=OSError("disk full")):
-            result = write_json(f, {"data": True})
-        assert result is False
+    write_json's OSError contract used to be pinned here by patching os.write.
+    The fleet service (DPLAN-0325) writes through a NamedTemporaryFile, so that
+    patch reached nothing and the test passed a True back at an assertion
+    expecting False. It is in tests/.archive/; the claim is re-pinned against a
+    real unwritable target in tests/test_json_handler.py.
+    """
 
     def test_invalid_mode_raises(self):
         """Unknown command in main() returns error code, not exception."""
@@ -89,16 +89,6 @@ class TestDataStructureContracts:
 
 class TestInfrastructureMocking:
     """Verify infrastructure mocking patterns."""
-
-    def test_autouse_fixtures(self):
-        """Verify autouse fixture isolates spawn_json directory."""
-        # The conftest _isolate_spawn_json is autouse=True
-        # This test verifies it runs by checking json_handler._JSON_DIR is patched
-        from aipass.spawn.apps.handlers.json import json_handler
-
-        # The autouse fixture patches _JSON_DIR to tmp_path/spawn_json
-        # If it wasn't patched, it would be the real path
-        assert json_handler._JSON_DIR is not None
 
     def test_sys_modules_mock(self):
         """Verify sys.modules can be used for import isolation."""

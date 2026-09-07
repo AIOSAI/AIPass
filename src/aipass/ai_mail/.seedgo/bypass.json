@@ -28,11 +28,6 @@
       "reason": "Multi-command module where inbox, sent, contacts work without args by design. Adding no-args gate would break primary mail workflow (drone @ai_mail inbox)."
     },
     {
-      "file": "apps/handlers/json_utils/json_handler.py",
-      "standard": "json_structure",
-      "reason": "This IS the json_handler implementation — cannot import itself."
-    },
-    {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "deep_nesting",
       "reason": "run_daemon() depth 5 (main daemon loop with retry + signal handling)"

@@ -9,19 +9,48 @@
 """
 Memory Pool Auto-Processed Event Handler
 
-Handles memory_pool_auto_processed events fired by the hook engine after
-calling @memory's auto_process() entry point. Makes pool processing visible
-in AIPass's event/error tracking (not just buried in engine.jsonl).
+Handles memory_pool_auto_processed events fired by @memory's detached child at
+the point it finishes (``intake/auto_process.py``, ``_fire_completion()`` from
+``run_once()``). Makes pool processing visible in AIPass's event/error tracking
+(not just buried in engine.jsonl).
+
+The firer used to be @hooks, inline. DPLAN-0294 phase 1b detached the work and
+the fire went with the call it replaced, leaving this handler registered and
+unreachable for as long as nobody looked (found 2026-09-05). A spawn site cannot
+announce a completion: it returns the instant a PID exists, so the only honest
+firer is the process present when the work ends.
 
 On success: logs the result for monitoring.
 On failure: fires error_detected so the error enters the Medic dispatch pipeline.
 
 Event data expected:
     - success: bool — overall result from auto_process()
-    - branch: str — branch that triggered the processing (or "__global__")
+    - branch: str — the citizen to wake for a fault in the firing code
     - pool: dict — {status, files_processed, total_chunks}
     - rollover: dict — {status, triggers, processed}
     - error: str | None — error message if success=False
+
+``status`` vocabulary, published here because it is this handler's contract and
+the alternative is every firer inventing one: ``"ok"``, ``"skipped"``,
+``"failed"``, ``"unknown"``. Nothing branches on it — it is logged — so a firer
+that carries its own internal shape instead (``skipped``/``success`` booleans)
+silently logs ``"unknown"`` forever rather than failing. Derive it at the
+firing end.
+
+``"unknown"`` is the fourth value and it is load-bearing: it means THIS SECTION
+NEVER REPORTED, which is not the same as reporting success. A crashed run has no
+pool or rollover section at all, and a derivation that treats an absent section
+as "neither skipped nor failed, therefore ok" announces that the pool completed
+on the run where nothing ran (measured against @memory's ``_completion_status``,
+2026-09-05, reported by @hooks). Absent must derive to ``"unknown"``, never to
+``"ok"``. This handler's own default for a missing key is already ``"unknown"``
+— the value existed, it just was not published as part of the vocabulary.
+
+``branch`` must be a REGISTERED citizen, never ``"__global__"``. It is passed
+straight into error_detected, where gate 5 checks registry membership: measured
+2026-09-05, ``@__global__`` is not among the 18 registered emails, so a real
+failure announced that way is dropped at the gate and silently lost. The work
+being global does not make the fault ownerless — name the owner of the code.
 """
 
 from typing import Any

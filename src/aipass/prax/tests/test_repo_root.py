@@ -855,13 +855,27 @@ class TestNothingCallsInspectStack:
         """Negative control for the sweep: a blinded walk reads clean too.
 
         The pin above is a proof of absence, and a proof of absence from an
-        instrument that looked nowhere is worth nothing. This asserts the walk
-        found a real tree before its silence is allowed to mean anything.
+        instrument that looked nowhere is worth nothing. A bare non-empty (or
+        "> 50") guard catches a walk that finds NOTHING, but not one that
+        silently drops exactly one file: the table stays large, every
+        surviving module still passes clean, and the dropped file's
+        inspect.stack() call goes unwatched by a green board. So the expected
+        count is derived fresh from the tree, with the same filter
+        _tree_modules() uses but not by calling it, and the walk must match
+        that count exactly.
         """
         modules = _tree_modules()
-        assert len(modules) > 50, (
-            f"the apps/ walk found only {len(modules)} modules — the sweep above is reading a "
-            "tree that is not there, so its green is vacuous"
+        expected = sum(
+            1 for path in APPS_DIR.rglob("*.py") if ".archive" not in path.parts and "__pycache__" not in path.parts
+        )
+        assert expected > 50, (
+            f"a fresh scan of apps/ found only {expected} modules — the tree itself is not "
+            "there, so no walk over it could prove anything"
+        )
+        assert len(modules) == expected, (
+            f"the apps/ walk found {len(modules)} modules but a fresh scan of the same tree "
+            f"counts {expected} — the sweep above is silently dropping at least one file, and "
+            "its assertion would pass clean on whatever it dropped"
         )
 
     def test_the_matcher_convicts_a_planted_call_at_the_right_line(self, tmp_path):
@@ -1029,7 +1043,7 @@ class TestCallerAttributionWithoutAWorkingDirectory:
             from pathlib import Path
 
             CALLER_SOURCE = [
-                "from aipass.prax.apps.handlers.json import json_handler",
+                "from aipass.prax import json_handler",
                 "",
                 "",
                 "def stands_in_for_log_operation():",
@@ -1211,7 +1225,7 @@ class TestACallerNameIsNotAlwaysAModuleName:
         """
         result = _run_without_a_working_directory(
             """
-            from aipass.prax.apps.handlers.json import json_handler
+            from aipass.prax import json_handler
 
 
             def stands_in_for_log_operation():

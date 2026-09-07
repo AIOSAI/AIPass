@@ -40,6 +40,12 @@ from typing import Generator
 from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers.json import json_handler
+
+# Never discover out of .archive/: it holds verbatim disposal copies (the old
+# handler's tests, the lane's template routing suite) that must not be collected
+# or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
 @pytest.fixture(scope="session")
@@ -127,3 +133,34 @@ def sample_test_data() -> dict:
     Customize this fixture for your module's needs
     """
     return {"test_key": "test_value", "sample_data": "example"}
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect trigger's json writes into a temp dir.
+
+    autouse=True on purpose: trigger's handler is a shim that binds the fleet
+    json service (DPLAN-0325), whose names write into the real trigger_json/
+    unless the seam is set, so a test that forgets to redirect pollutes the
+    branch. The guard belongs on every test, not on the ones that remember.
+
+    The service recomputes its directory on every call, so setting the variable
+    here — after import — still takes effect. The sandbox is MEASURED off the
+    shim rather than spelled out, so it cannot drift from what the service does.
+
+    Note this does NOT cover apps/config.py, which owns its own atomic write
+    path (replace_with_retry, read_text_with_retry, the platform file lock) and
+    is redirected by the fixtures that address it directly. That layer is
+    trigger's own and the sweep deliberately left it alone.
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/trigger/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox

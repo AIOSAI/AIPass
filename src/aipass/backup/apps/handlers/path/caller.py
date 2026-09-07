@@ -22,7 +22,7 @@ direct invocation (tests, standalone runs). Same pattern @flow uses in
 import os
 from pathlib import Path
 
-from ..json import json_handler
+from ..audit import trail
 
 
 def caller_cwd() -> Path:
@@ -55,7 +55,7 @@ def resolve_caller_path(target: str | Path) -> Path:
         resolved = path.resolve()
     else:
         resolved = (caller_cwd() / path).resolve()
-    json_handler.log_operation(
+    trail.log_operation(
         "resolve_caller_path",
         {"given": str(target), "resolved": str(resolved)},
     )

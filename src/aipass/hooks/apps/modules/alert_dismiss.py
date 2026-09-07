@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -54,7 +55,7 @@ def _dismiss_alert(alert_id: str) -> bool:
         return False
 
     try:
-        data = json_handler.read_json_file(alerts_path)
+        data = json_files.read_json_file(alerts_path)
     except (json.JSONDecodeError, OSError) as exc:
         logger.error("[HOOKS] dismiss: read error: %s", exc)
         CONSOLE.print(f"[red]Failed to read alerts.json: {exc}[/red]")
@@ -69,7 +70,7 @@ def _dismiss_alert(alert_id: str) -> bool:
         return False
 
     try:
-        json_handler.write_json_file(alerts_path, {"alerts": remaining})
+        json_files.write_json_file(alerts_path, {"alerts": remaining})
     except OSError as exc:
         logger.error("[HOOKS] dismiss: write error: %s", exc)
         CONSOLE.print(f"[red]Failed to write alerts.json: {exc}[/red]")

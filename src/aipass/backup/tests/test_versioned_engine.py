@@ -22,7 +22,7 @@ class TestVersionedBaseline:
 
     def test_first_run_creates_baseline(self, tmp_path: Path):
         """New file -> baseline + current in file-folder."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -45,7 +45,7 @@ class TestVersionedBaseline:
 
     def test_first_run_current_matches_source(self, tmp_path: Path):
         """Current copy has same content as source."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -64,7 +64,7 @@ class TestVersionedDiff:
 
     def test_change_creates_diff(self, tmp_path: Path):
         """Modified file -> diff file appears in _diffs/ folder."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -91,7 +91,7 @@ class TestVersionedDiff:
 
     def test_change_overwrites_current(self, tmp_path: Path):
         """After change, current has new content."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -111,7 +111,7 @@ class TestVersionedDiff:
 
     def test_baseline_untouched_after_change(self, tmp_path: Path):
         """Baseline is never overwritten after first creation."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -137,7 +137,7 @@ class TestVersionedSkip:
 
     def test_unchanged_skipped(self, tmp_path: Path):
         """File with same mtime -> files_unchanged incremented."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 
             project = tmp_path / "project"
@@ -158,7 +158,7 @@ class TestVersionedNeverDelete:
 
     def test_deleted_source_preserved_in_store(self, tmp_path: Path):
         """Source file deleted -> versioned store still has it."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
@@ -186,7 +186,7 @@ class TestDiffGenerator:
 
     def test_text_diff(self, tmp_path: Path):
         """Text files produce unified diff."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.diff.generator import generate_diff_content
 
             old = tmp_path / "old.py"
@@ -199,7 +199,7 @@ class TestDiffGenerator:
 
     def test_binary_marker(self, tmp_path: Path):
         """Binary files get marker instead of diff."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.diff.generator import is_binary_file
 
             binary = tmp_path / "image.bin"
@@ -208,7 +208,7 @@ class TestDiffGenerator:
 
     def test_should_create_diff_patterns(self):
         """Include patterns override ignore patterns."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.diff.generator import should_create_diff
 
             assert should_create_diff(Path("app.py")) is True
@@ -221,7 +221,7 @@ class TestRestore:
 
     def test_restore_current(self, tmp_path: Path):
         """Restore current version from store."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.diff.restore import restore_file
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
@@ -240,7 +240,7 @@ class TestRestore:
 
     def test_list_versions(self, tmp_path: Path):
         """list_versions finds baseline + current + diffs."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
             from aipass.backup.apps.handlers.diff.restore import list_versions
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
@@ -269,7 +269,7 @@ class TestVersionedFilePath:
 
     def test_root_level_file(self):
         """Root-level file -> root/<name>/<name>."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
             result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
@@ -278,7 +278,7 @@ class TestVersionedFilePath:
 
     def test_nested_file(self):
         """Nested file -> <parent>/<name>/<name>."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
             result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
@@ -288,7 +288,7 @@ class TestVersionedFilePath:
 
     def test_long_filename_hashed(self):
         """Filename >50 chars -> shortened with hash."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
             long_name = "a" * 60 + ".py"
@@ -302,7 +302,7 @@ class TestRestoreModule:
 
     def test_find_file_folder(self, tmp_path: Path):
         """_find_file_folder locates a file-folder in the versioned store."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 
             project = tmp_path / "project"
@@ -311,7 +311,7 @@ class TestRestoreModule:
             src.write_text("cfg = True", encoding="utf-8")
             copy_versioned([(str(src), "config.py")], str(project))
 
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.modules.restore import _find_file_folder
 
             folder = _find_file_folder(str(project), "config.py")
@@ -321,7 +321,7 @@ class TestRestoreModule:
 
     def test_find_file_folder_missing(self, tmp_path: Path):
         """_find_file_folder returns None for missing file."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.modules.restore import _find_file_folder
 
             result = _find_file_folder(str(tmp_path), "nonexistent.py")
@@ -329,7 +329,7 @@ class TestRestoreModule:
 
     def test_run_restore_file_roundtrip(self, tmp_path: Path):
         """run_restore_file restores a file to an output path."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 
             project = tmp_path / "project"
@@ -338,7 +338,7 @@ class TestRestoreModule:
             src.write_text("important data", encoding="utf-8")
             copy_versioned([(str(src), "data.txt")], str(project))
 
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             with patch("aipass.backup.apps.modules.restore.console"):
                 from aipass.backup.apps.modules.restore import run_restore_file
 
@@ -349,7 +349,7 @@ class TestRestoreModule:
 
     def test_handle_command_help(self):
         """handle_command responds to --help."""
-        with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             with patch("aipass.backup.apps.modules.restore.console"):
                 from aipass.backup.apps.modules.restore import handle_command
 

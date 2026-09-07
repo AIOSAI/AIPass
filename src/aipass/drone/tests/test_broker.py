@@ -891,6 +891,42 @@ class TestBrokerFeedsDeletionRecord:
         assert deletions[0]["lane"] == "broker"
         assert deletions[0]["path"] == str(target.resolve())
 
+    def test_record_lands_in_the_repo_the_broker_SERVES_not_the_one_it_stands_in(
+        self, running_broker: BrokerDaemon, repo_root: Path, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The daemon is handed repo_root; the record must follow it.
+
+        Red before the 2026-09-06 fix. With no env override the store used to be
+        resolved by walking up from the CWD, so a broker serving a sandbox repo
+        filed its records in whatever project the process was standing in. That
+        is not a test-only wart: 211 deletions performed inside /tmp sandboxes
+        by @ai_mail's suite are sitting in this project's real ledger, filed
+        against a tree they never touched.
+
+        The decoy stands in for the standing project. If the daemon ever goes
+        back to the cwd walk the record lands there and this test says so,
+        without any test reaching a real ledger to prove it.
+        """
+        from aipass.drone.apps.handlers import deletion_log
+
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        decoy = tmp_path / "standing_project"
+        decoy.mkdir()
+        monkeypatch.setattr(deletion_log, "_find_project_root", lambda: decoy)
+
+        resp = _send_identified(
+            running_broker,
+            "testbranch",
+            BrokerRequest(op="delete", path="deleteme.txt", request_id="served1"),
+        )
+        assert resp.ok is True
+
+        served_store = repo_root / ".ai_central" / "deletions.jsonl"
+        assert served_store.exists(), "the served repo got no record"
+        assert not (decoy / ".ai_central" / "deletions.jsonl").exists(), (
+            "the record was filed against the standing project, not the served one"
+        )
+
     def test_broker_record_names_the_authenticated_requester(
         self, running_broker: BrokerDaemon, repo_root: Path
     ) -> None:

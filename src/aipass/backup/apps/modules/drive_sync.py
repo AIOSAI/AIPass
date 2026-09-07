@@ -31,7 +31,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console
 
 from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
-from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import build_versioned_store
 from aipass.backup.apps.modules.display import show_drive_result
 
@@ -203,7 +203,7 @@ def run_drive_sync(
     # 7. Save tracker
     save_tracker(project_root, tracker)
 
-    json_handler.log_operation(
+    trail.log_operation(
         "drive_sync_complete",
         {
             "project_root": project_root,

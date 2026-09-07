@@ -7,11 +7,6 @@
   },
   "bypass": [
     {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "naming",
-      "reason": "Shared-instance shim pattern — module-level names are function re-exports from JsonHandler, not constants. Matches spawn/apps/handlers/json/json_handler.py."
-    },
-    {
       "file": "apps/handlers/storage/chroma_subprocess.py",
       "standard": "cli",
       "reason": "Subprocess IPC script — print(json.dumps()) outputs JSON to stdout for parent process. Not display output."

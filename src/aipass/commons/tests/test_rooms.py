@@ -169,6 +169,17 @@ def test_join_room_no_args() -> None:
     assert "Room name required" in result["error"]
 
 
+@patch("aipass.commons.apps.modules.room.create_room")
+def test_room_create_help_prints_usage_without_creating(mock_create_room: object) -> None:
+    """'room create --help' should print usage and never reach create_room."""
+    from aipass.commons.apps.modules import room
+
+    handled = room.handle_command("room", ["create", "--help"])
+
+    assert handled is True
+    mock_create_room.assert_not_called()  # type: ignore[union-attr]
+
+
 # =============================================================================
 # ROOM STATE OPS — require initialized_db fixture
 # =============================================================================

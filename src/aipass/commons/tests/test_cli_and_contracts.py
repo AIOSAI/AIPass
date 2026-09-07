@@ -246,14 +246,20 @@ def test_ensure_database_returns_bool():
 
 
 def test_json_path_returns_path_like():
-    """get_json_path should return a pathlib.Path-compatible string path."""
+    """get_json_path answers a real pathlib.Path.
+
+    It used to answer a str built by os.path.join, and this test asserted
+    ``result.endswith(".json")`` — which only a str can do. That was commons
+    diverging from the other seventeen branches, and seedgo's contract carried
+    it as a named strict xfail (GET_JSON_PATH_TYPE). The shim (DPLAN-0325)
+    binds the one service, which answers a Path, so a caller doing
+    ``.parent`` or ``/`` works here now like it does everywhere else.
+    """
     from aipass.commons.apps.handlers.json.json_handler import get_json_path
 
     result = get_json_path("testmod", "config")
-    # get_json_path returns a string, but it should be convertible to Path
-    path = Path(result)
-    assert isinstance(path, Path)
-    assert result.endswith(".json")
+    assert isinstance(result, Path), f"expected a pathlib.Path, got {type(result).__name__}"
+    assert result.name.endswith(".json")
 
 
 # ===========================================================================
@@ -262,11 +268,16 @@ def test_json_path_returns_path_like():
 
 
 def test_missing_file_load_json_auto_creates(tmp_path, monkeypatch):
-    """Loading JSON for a missing_file should auto-create it, not raise FileNotFoundError."""
+    """Loading JSON for a missing_file should auto-create it, not raise FileNotFoundError.
+
+    Redirected through the fleet seam rather than by patching a module
+    constant: the shim holds no BRANCH_JSON_DIR, because the one service
+    (DPLAN-0325) resolves the directory on every call from AIPASS_TEST_LOG_DIR.
+    Patching an attribute would silently do nothing.
+    """
     import aipass.commons.apps.handlers.json.json_handler as jh
 
-    json_dir = str(tmp_path / "missing_file_test")
-    monkeypatch.setattr(jh, "BRANCH_JSON_DIR", json_dir)
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "missing_file_test"))
 
     # File does not exist; load_json should handle it gracefully
     result = jh.load_json("ghost", "config")
@@ -283,12 +294,14 @@ def test_empty_file_recovery(tmp_path, monkeypatch):
     """An empty_file should be detected as corrupt and recreated with defaults."""
     import aipass.commons.apps.handlers.json.json_handler as jh
 
-    json_dir = str(tmp_path / "empty_file_test")
-    monkeypatch.setattr(jh, "BRANCH_JSON_DIR", json_dir)
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "empty_file_test"))
 
-    # Create the directory and an empty_content file
-    Path(json_dir).mkdir(parents=True, exist_ok=True)
-    empty_path = Path(json_dir) / "emptymod_config.json"
+    # Create the directory and an empty_content file. The sandbox is MEASURED
+    # off the handler rather than spelled out here: the one service spells it
+    # <seam>/<branch>/<branch>_json, so a literal would drift the first time
+    # that changes.
+    empty_path = jh.get_json_path("emptymod", "config")
+    empty_path.parent.mkdir(parents=True, exist_ok=True)
     empty_path.write_text("", encoding="utf-8")
 
     result = jh.ensure_json_exists("emptymod", "config")
@@ -306,12 +319,30 @@ def test_empty_file_recovery(tmp_path, monkeypatch):
 
 
 def test_reimport_after_mock_preserves_function():
-    """Verify that importlib.reload can reimport a module after mocking."""
+    """Verify that importlib.reload can reimport a module after mocking.
+
+    Asserts on a PUBLIC name now. It used to reach for ``_get_default``, a
+    private factory the old handler owned; the shim binds the one service and
+    has no private surface at all, so the reload claim has to be made about
+    something the shim actually publishes. ``load_json`` is one of its nine
+    names and is rebound by the reload exactly as the factory was.
+    """
     import aipass.commons.apps.handlers.json.json_handler as jh
 
-    original_fn = jh._get_default
     # reload() the module and confirm it still works
     importlib.reload(jh)
-    assert callable(jh._get_default)
-    # Restore original to avoid side effects on other tests
-    jh._get_default = original_fn
+    assert callable(jh.load_json)
+
+    # Deliberately NOT restoring a pre-reload binding here. The old version of
+    # this test saved and re-assigned `_get_default`, a private symbol nothing
+    # else looked at. Doing the same to a shim name is a leak: the reload
+    # rebinds all nine names to a FRESH handle over the one service, so putting
+    # one name back to the pre-reload object leaves the module holding two
+    # handles at once. Caught by seedgo's contract
+    # (test_a_migrated_shim_binds_one_handle_rooted_at_its_own_branch) and only
+    # in the composed CI run, where this suite executes before that check in
+    # the same process. The reload already leaves a consistent module; the
+    # restore was the side effect it claimed to prevent.
+    assert len({id(getattr(jh, name).__self__) for name in ("load_json", "save_json", "get_json_path")}) == 1, (
+        "the reload left this module holding more than one service handle"
+    )

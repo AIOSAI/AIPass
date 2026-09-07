@@ -15,7 +15,7 @@ Recursively enumerates files beneath a project root and yields
 import os
 from collections.abc import Iterator
 
-from ..json import json_handler
+from ..audit import trail
 
 
 def walk_project(root: str) -> Iterator[tuple[str, str]]:
@@ -28,7 +28,7 @@ def walk_project(root: str) -> Iterator[tuple[str, str]]:
         Tuples of (absolute_path, relative_path) for every file beneath root.
         Skips symlinks.
     """
-    json_handler.log_operation("walk_project", {"root": root})
+    trail.log_operation("walk_project", {"root": root})
     root_path = os.path.realpath(root)
 
     for dirpath, _dirnames, filenames in os.walk(root_path, followlinks=False):

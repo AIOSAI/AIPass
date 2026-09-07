@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-08-14
+# Modified: 2026-09-06
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -58,6 +58,15 @@ def handle(hook_data: dict) -> dict:
     _ = hook_data
 
     if _already_ran_this_session():
+        return {"stdout": "", "exit_code": 0}
+
+    # The kick starts @memory's real background worker on the real pool. A probe
+    # that fires every wired hook must not put another citizen to work, and the
+    # session guard does not stop it — the guard is per session id, so the first
+    # probe run of a given mock id spawns for real. Refused here rather than at
+    # entry, so the guard path above is still exercised.
+    if os.environ.get("AIPASS_HOOK_PROBE") == "1":
+        logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}
 
     try:

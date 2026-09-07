@@ -398,6 +398,44 @@ def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
     return result
 
 
+def get_external_branches(repo_root: Path) -> Dict[str, str]:
+    """Load email->path mappings for every declared-root external citizen.
+
+    The delivery half of the external tier that wake.resolve_branch has carried
+    since FPLAN-0460 phase 5. Same gateway, same anchor: @memory's fleet module
+    reads AIPASS_ROOTS.json; nothing here reads it a second time. Until this
+    existed, a dispatch to an external citizen (e.g. @vera in Vera-Studio) was
+    refused at DELIVERY with "Unknown branch email" before the wake - which
+    already knew the address - ever ran. Patrick's ruling 2026-09-02: the admin
+    seat dispatches any agent in any directory; a map that stops at projects/
+    is the gap, not the design.
+
+    Contained like the wake tier: a gateway that cannot answer yields an empty
+    map and a warning, never a traceback into delivery.
+
+    Args:
+        repo_root: The AIPass repo root the gateway resolves declarations from.
+
+    Returns:
+        Dict mapping email address to absolute path string. Empty on failure
+        or when no roots are declared.
+    """
+    try:
+        from aipass.memory.apps.modules import fleet
+
+        rows = fleet.external_branches(repo_root=repo_root)
+    except Exception as exc:
+        logger.warning("[registry] external tier unavailable for delivery: %s", exc)
+        return {}
+    result: Dict[str, str] = {}
+    for citizen in rows:
+        email = citizen.get("email")
+        path = citizen.get("path")
+        if isinstance(email, str) and path:
+            result.setdefault(email.lower(), str(path))
+    return result
+
+
 def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
     """Load branch email→path mappings from the caller's project registry.
 

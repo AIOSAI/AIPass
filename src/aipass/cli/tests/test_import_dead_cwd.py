@@ -193,7 +193,15 @@ CALL_TIME_WORLD = (
     + r"""
 from aipass.cli.apps.handlers.json import json_handler
 
-name = json_handler._get_caller_module_name()
+# Reached through the service, because that is where it lives now: cli's
+# handler is a shim that BINDS the fleet json service (DPLAN-0325), and the
+# service owns caller detection for all 18 branches. Imported off cli's own
+# shim so the hop cli actually makes is the hop under test.
+import sys as _sys
+
+_service = _sys.modules[json_handler.log_operation.__self__.__class__.__module__]
+
+name = _service._get_caller_module_name()
 print(f"CALLER_NAME={name}")
 
 # display.print_help() resolves __file__ to print the module reference. Also

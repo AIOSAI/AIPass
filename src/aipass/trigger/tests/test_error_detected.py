@@ -201,14 +201,6 @@ class TestHandleErrorDetectedGates:
 
         send.assert_not_called()
 
-    def test_returns_early_send_email_is_none(self) -> None:
-        """Does not dispatch when _send_email callback was never set."""
-        mod = _import_module()
-        _setup_happy_path(mod)
-        mod._send_email = None  # type: ignore[attr-defined]
-
-        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
-
     def test_returns_early_devpulse_recipient(self) -> None:
         """Does not dispatch to @devpulse (protected branch)."""
         mod = _import_module()

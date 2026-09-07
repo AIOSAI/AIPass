@@ -1,0 +1,9 @@
+
+# Teaching templates (pytest_quality v5). Worked examples a human READS - nothing
+# imports them and nothing should, because not being stamped into sixteen branches
+# is the entire point of the pack that ships them. dead_code reads an import graph
+# and correctly sees no referent; the real referent is an argv path, invisible to it.
+# They are NOT unverified: tests/test_pytest_quality_pack.py runs all three through
+# subprocess pytest and goes red if any template rots (proven by renaming a symbol
+# in seam_test.py and watching that pin fail alone).
+apps/handlers/pytest_quality_standards/templates/

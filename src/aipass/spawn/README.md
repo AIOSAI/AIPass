@@ -102,6 +102,11 @@ drone @spawn delete @branch_name --dry-run                     # Preview
 drone @spawn delete @branch_name --yes                         # Archive + deregister
 ```
 
+The archive copy skips build and VCS noise — `ARCHIVE_EXCLUDE` in `repair_ops.py`
+is `.venv`, `.git`, `__pycache__`, `.chroma`, `node_modules`, `.pytest_cache`. The
+same set guards `repair --relocate`, so neither lane carries a virtualenv into
+`.archive/`.
+
 **Delete refuses protected branches, and every live citizen is protected.**
 `is_protected()` guards three layers, any one sufficient: the hardcoded floor
 (spawn, devpulse, drone), a registry entry carrying `owner: true`, and a passport
@@ -132,6 +137,12 @@ drone @spawn migrate-passports                                 # Measure every f
 drone @spawn migrate-passports --only @canary                  # Restrict to one branch
 drone @spawn migrate-passports --confirm                       # Execute: backup to passport.json.pre_v2_backup, then write
 
+# Passport seeds — regenerate each branch's tracked seed, dry-run by default
+drone @spawn export-seeds                                      # Measure every branch's live passport vs its seed, write nothing
+drone @spawn export-seeds --only @canary                       # Restrict to one branch
+drone @spawn export-seeds --root <path>                        # Another project root
+drone @spawn export-seeds --confirm                            # Execute: rewrite .aipass/passport.seed.json
+
 # Repair — the bare scan is read-only ALWAYS; only --relocate and --clean-pollution execute, and both need --apply
 drone @spawn repair <project_path>                             # Scan: pollution + registry path mismatches (read-only)
 drone @spawn repair --relocate @branch src/pkg/branch --apply  # Move branch to new location
@@ -139,7 +150,25 @@ drone @spawn repair --relocate @branch path --relocate-artifacts --apply  # Move
 drone @spawn repair <project_path> --clean-pollution --apply    # Archive + remove duplicate dirs
 ```
 
-`repair <project_path> --apply` is not an execute mode — `repair_project()` reports and
+### Registry entry shape — mixed casing is historical, not a rule
+
+`AIPASS_REGISTRY.json` carries 18 entries in two shapes, measured 2026-09-05: six
+UPPERCASE names with registry-relative paths (`BACKUP`, `CANARY`, `COMMONS`,
+`DAEMON`, `HOOKS`, `SKILLS`) and twelve lowercase names with absolute paths
+(@devpulse's finding, 2026-09-05).
+
+**The uppercase-plus-relative shape is what `create` writes today.** `core.py` hands
+`add_to_registry` the uppercased name (`branch_upper`) and a path relativized to the
+registry's own directory, falling back to absolute only when relativization raises.
+So the six are spawn's own lane; the twelve lowercase absolute entries predate it or
+were written by another hand.
+
+Nothing reads the difference: registry lookups lowercase both sides before comparing
+(`is_protected`, `ensure_admin`), and a path is resolved as `registry_dir / entry_path`,
+which pathlib returns unchanged when the entry is already absolute. It is cosmetic —
+two shapes a reader sees and no code does. **Normalising is not done here** and
+`sync-registry` does not currently touch casing; whether it should is @devpulse's call
+to make, not a defect to fix silently under a docs pass. — `repair_project()` reports and
 never writes, so the flag changes nothing on the scan path. It is the two submodes that
 act, and each refuses to act without `--apply`.
 
@@ -230,6 +259,7 @@ spawn/
 │   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   ├── handlers/
 │   │   ├── class_registry.py            # Citizen class → template directory mapping
+│   │   ├── adoption_ops.py              # The target-exists lane — adopt a passported dir, or birth from its tracked seed
 │   │   ├── file_ops.py                  # Template copy, path renaming, registry regeneration
 │   │   ├── metadata.py                  # Branch name extraction, profile detection
 │   │   ├── placeholders.py              # {{PLACEHOLDER}} replacement engine
@@ -247,16 +277,19 @@ spawn/
 │   │   ├── json_ops.py                  # JSON deep merge, backup utilities
 │   │   ├── atomic_write.py              # Atomic text write primitive (stage → fsync → os.replace)
 │   │   └── json/
-│   │       └── json_handler.py          # JSON I/O + operation logging — 9 functions over aipass.aipass.shared
-│   ├── json_templates/                  # Package marker for JSON template assets
-│   └── plugins/                         # Package marker — no plugins shipped
+│   │       └── json_handler.py          # The fleet json shim — 9 bound names + 2 exceptions over prax's service
+│   ├── plugins/                         # Package marker — no plugins shipped
+│   └── integrations/                    # Package marker — no integrations shipped
 ├── templates/
 │   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 29 test files, 788 tests
+├── tests/                               # 28 test files, 801 test functions (956 cases)
 ├── spawn_json/                          # JSON tracking directory
-├── tools/                               # Branch verification utilities
+├── tools/                               # birth_certificate_repair.py (gitignored — machine-local)
+├── artifacts/                           # Birth certificate
 ├── docs/                                # Documentation
+├── docs.local/                          # Machine-local notes, sub-agent drops
+├── dropbox/                             # Inbound file drops
 └── logs/                                # Prax log output
 ```
 
@@ -279,7 +312,7 @@ spawn/
 5. **Rename** — Replace `{{BRANCH}}` in directory and file names
 6. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal)
 7. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the passport number) and written as the `registry_id` of its `branches[]` registry entry. Minting it at registration time instead would be too late — the passport is written before the registry, so the two copies would be different UUIDs for one citizen. Distinct from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is shared by every citizen in a project (Patrick's ruling, 2026-08-24)
-8. **Meta** — Generate `.branch_meta.json` (meta tabs load from `@memory` when available, degrading gracefully to empty when it's not)
+8. **Meta** — Generate `.branch_meta.json`: the per-branch tracking file that maps each delivered file back to its **template file id** (`f001`…`f050`) with a current SHA-256, matched by path first and content hash second. This is what lets `update` reason about a renamed or drifted file rather than diffing blind. Meta tabs load from `@memory` when available, degrading gracefully to empty when it's not
 9. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only. The partial tree is deliberately left on disk for inspection
 10. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version this citizen carries, in @memory's four-key shape (`template_versions`, `stamped`, `stamped_by: "spawn birth"`, `config_rendered`). The versions are read from the fleet's GOLD source (`memory/templates/*.template.json` → `document_metadata.schema_version`), never from spawn's own seeds — reading the seeds would let a drifted copy mint a receipt claiming a version the fleet never issued, and the lie would score green. Shape copied, never imported: birth must not fail because another branch's package does not import. A gold source that cannot be read stamps NOTHING and surfaces the miss in `validation_issues` — a receipt naming an unverifiable version is worse than an absent one, but a citizen unborn because @memory's files are unreadable is worse than both
 11. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`. Placed after step 10 deliberately: a registered citizen always carries a receipt
@@ -314,14 +347,18 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**869 passed | 1 skipped | 0 failed** across 29 test files (870 collected — parametrized cases expand),
-measured 2026-08-31 from the repo root and from the branch directory (same tally both ways). The one skip is `test_scaffold.py`: the shipped
-scaffold smoke test skips by design once a branch has a real conftest (see Known Issues).
+**956 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-05 from the
+repo root and from the branch directory (same tally both ways). Counted the way seedgo's
+readme rule counts: **801 `def test_` functions; pytest expands them to 956 cases.**
+
+There is no longer a skip. `test_scaffold.py` moved to `tests/.archive/` during the
+DPLAN-0325 sweep — it still ships in the template (a newborn gets it), but spawn's own
+suite no longer carries it, so the file is out of the table below.
 
 | File | Focus |
 |------|-------|
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
-| `test_json_handler.py` | JSON I/O, operation logging, standard API |
+| `test_json_handler.py` | The shim's wiring to the fleet json service — the seam, the binding, the bool contract |
 | `test_handlers.py` | Handler function behavior and integration |
 | `test_modules_gateway.py` | The modules-package gateway other branches import through |
 | `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
@@ -345,10 +382,13 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 | `test_registry_credential.py` | Credential mint asymmetry: missing registry mints, unreadable never does |
 | `test_json_durability.py` | Torn-write durability — atomic writes across every JSON/text path |
 | `test_birth_receipt.py` | Birth receipt lane — gold versions, receipt shape, seed-vs-gold drift, retire carries `.trinity` |
-| `test_scaffold.py` | Shipped scaffold smoke test (skips once a real conftest exists) |
+| `test_passport_seeds.py` | Passport seeds — the tracked identity that ships with the repo (TDPLAN-0017) |
+| `test_template_import_guard.py` | What the newborn's handler guard must survive on its first import |
+| `test_conftest_fixtures.py` | Pins that spawn's own mocking fixtures reach the code they claim to mock |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 60 total, 60 tested (100%)
+**Public functions:** 93 total, 86 tested (92%) — seedgo's own count, `drone @seedgo audit
+aipass @spawn`, 2026-09-05. The seven untested are listed by `drone @seedgo test_map @spawn`.
 
 ---
 
@@ -358,7 +398,9 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 
 - **aipass.prax** — Logging via `system_logger`
 - **aipass.cli** — Console output (header, error, warning)
-- **aipass.aipass.shared** — `json_handler` (the real implementation behind spawn's shim), `json_ops` (`deep_merge`, `backup_json`), `registry_discovery.find_registry`
+- **aipass.prax** — `json_handler` (the fleet's one json service, DPLAN-0325; spawn's `apps/handlers/json/json_handler.py` is the byte-identical shim that binds it)
+- **aipass.aipass.shared** — `json_ops` (`deep_merge`, `backup_json`), `registry_discovery.find_registry`,
+  `project_home._detect_aipass_home` (the one shared home detector, used by `placeholders.py`)
 - **aipass.memory** (optional) — `tab_renderer.render_all_meta_tabs` for meta tabs at create; import is guarded and degrades to empty
 - Python stdlib (`pathlib`, `json`, `shutil`, `hashlib`, `re`, `argparse`, `uuid`)
 
@@ -372,14 +414,15 @@ scaffold smoke test skips by design once a branch has a real conftest (see Known
 ## Newborn Compliance
 
 A citizen minted from `templates/citizen/` audits **100%** against the CI gate on
-its first day — verified 2026-08-22 by minting one and running
+its first day — verified 2026-08-22, **not re-verified since** (no newborn was minted
+in tonight's docs pass) — by minting one and running
 `.venv/bin/python .github/scripts/seedgo_audit.py`, the real gate, floor 100.
 Before this the same mint scored 79% and failed the gate, having earned none of
 it (@canary's finding: their entry point was byte-identical to the template
 apart from name substitution).
 
-**Trinity: 100/100 on both classes, live-measured 2026-08-27** by minting a
-citizen and running @seedgo's trinity checker against it. It scored 77 before
+**Trinity: 100/100 on both classes, live-measured 2026-08-27** (**not re-verified
+since**) by minting a citizen and running @seedgo's trinity checker against it. It scored 77 before
 this: the receipt group at 0 and the file set at 80 (no
 `.trinity/.template_version.json` existed until birth stamped one), top-level
 keys at 78 (the seeds carried a `document_metadata.status` block the standard
@@ -403,20 +446,28 @@ mandate.
 ## Known Issues
 
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
-- `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291
+- `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291. Spawn's own copy moved to `tests/.archive/` in the DPLAN-0325 sweep for exactly that reason; the template still ships it to newborns
+- `AIPASS_REGISTRY.json` holds two entry shapes (see Registry entry shape). Cosmetic — every reader is case-insensitive and path-shape agnostic — but a reader comparing entries sees two conventions
+- A branch's own `tools/` is gitignored fleet-wide (`.gitignore:57`), so the verification utilities there are machine-local and diverge between checkouts. The **template's** `tools/` is explicitly un-ignored (`.gitignore:120-121`) and does ship to newborns — a fix belongs in the template copy, where it can actually be committed
 
 ---
 
 ## Metrics
 
-- **Seedgo:** 100% with bypasses, 98% without — both re-measured 2026-08-25 (17 live bypass rules; the two newest, `atomic_write.py` and `mint_verify.py`, date from 2026-08-16/17)
-- **Tests:** 764 passed, 1 skipped, 0 failed (2026-08-28, both rootdirs)
-- **Module coverage:** 27/27 files (100%)
-- **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from)
+- **Seedgo:** 100% on every scored category, 2026-09-05 (`drone @seedgo audit aipass @spawn`,
+  29 production files measured — `apps/` only, `tests/` not in the corpus). 16 live bypass rules.
+  The old "98% without bypasses" figure is **unverified** — not re-measured since 2026-08-25 and
+  it would need all 16 lifted to re-measure honestly.
+- **Tests:** 956 passed, 0 skipped, 0 failed (2026-09-05, both rootdirs) — 801 test functions
+- **Production files:** 29 in `apps/` (seedgo's corpus); 19 handlers, 9 modules, entry point
+- **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from),
+  manifest verified against disk 2026-09-05: every declared file present, nothing untracked but
+  the manifest itself
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
+  — **unverified since**; not re-run tonight
 
 ---
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-09-05*
 
 [← Back to AIPass](../../../README.md)

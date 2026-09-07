@@ -1,20 +1,34 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for devpulse tests
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-08
-# Modified: 2026-05-15
+# Modified: 2026-09-03
 # =============================================
 
-"""Shared pytest fixtures for cortex tests"""
+"""Shared pytest fixtures for devpulse tests.
+
+The first thing this file does is arm the fleet's test-redirect seam. The json
+handler is the one-source shim (DPLAN-0325): prax's service derives this
+branch's ``devpulse_json`` directory PER CALL and honours ``AIPASS_TEST_LOG_DIR``
+itself, so setting the variable here, before any import of the shim, is the
+only redirect a suite needs. Nothing patches handler attributes any more.
+"""
+
+import os
+import tempfile
+
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 from unittest.mock import patch
 
 import pytest
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Generator
+
+from aipass.devpulse.apps.handlers.json import json_handler
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -51,6 +65,29 @@ def mock_json_handler():
     """Mock json_handler to prevent filesystem writes during tests."""
     with patch("aipass.devpulse.apps.handlers.json.json_handler.log_operation") as mock_json:
         yield mock_json
+
+
+@pytest.fixture(autouse=True)
+def mock_infrastructure(tmp_path, monkeypatch) -> Path:
+    """Redirect this branch's json writes into a per-test sandbox.
+
+    The module-level seam above gives the whole process one directory; this
+    autouse fixture narrows it to one per test. The service recomputes its
+    directory on every call, so setting the variable after import still takes
+    effect. The sandbox is MEASURED off the shim rather than spelled out, so it
+    cannot drift from what the service does (template conftest shape).
+
+    Returns:
+        The sandbox directory the handler now writes into.
+    """
+    # Own subdirectory on purpose: the service spells the sandbox
+    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    # tmp_path/<branch>/ in every test and collide with a test that builds a
+    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = json_handler.get_json_path("probe", "config").parent
+    sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
 
 
 @pytest.fixture

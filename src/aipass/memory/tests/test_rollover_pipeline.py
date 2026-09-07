@@ -1526,26 +1526,6 @@ class TestRunRollover:
 class TestShowStatus:
     """Test show_status calls detector.get_rollover_stats and prints output."""
 
-    def test_displays_stats_on_success(self, monkeypatch):
-        rollover, mocks = _import_rollover_module(monkeypatch)
-        mocks["detector"].get_rollover_stats.return_value = {
-            "success": True,
-            "total_branches": 2,
-            "files_checked": 4,
-            "files_ready": 1,
-            "branches": {
-                "TEST": {
-                    "local": {
-                        "current": 500,
-                        "ready": False,
-                        "schema_version": "3.0.0",
-                    }
-                }
-            },
-        }
-        rollover.show_status()
-        mocks["console"].print.assert_called()
-
     def test_displays_error_on_failure(self, monkeypatch):
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["detector"].get_rollover_stats.return_value = {

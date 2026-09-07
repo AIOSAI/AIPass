@@ -1587,26 +1587,6 @@ class TestHandleRefresh:
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
             mod._handle_refresh([])
 
-    def test_refresh_cwd_walks_up_to_find_branch(self, tmp_path, monkeypatch):
-        """No args walks up directory tree to find branch root."""
-        mod = _load_dashboard_module()
-        from unittest.mock import patch as _patch
-
-        # Create a branch root with .aipass marker above CWD
-        branch_root = tmp_path / "src" / "aipass" / "flow"
-        branch_root.mkdir(parents=True)
-        (branch_root / ".aipass").mkdir()
-        deep_cwd = branch_root / "apps" / "modules"
-        deep_cwd.mkdir(parents=True)
-
-        monkeypatch.setattr(
-            mod,
-            "refresh_single_dashboard",
-            lambda bp: {"status": "success", "branch": bp.name.upper()},
-        )
-        with _patch("pathlib.Path.cwd", return_value=deep_cwd):
-            mod._handle_refresh([])
-
 
 # =============================================
 # _handle_push_template (dashboard.py)

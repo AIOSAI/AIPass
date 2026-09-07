@@ -25,11 +25,21 @@ class TestHandleCommand:
         assert "run" in HANDLED_COMMANDS
 
     def test_rejects_unknown(self):
-        assert handle_command("unknown", []) is False
+        result = handle_command("unknown", [])
+        assert result is False
+        # The return TYPE, pinned where the command actually runs. It used to
+        # be asserted in tests/test_contracts.py, one of the DPLAN-0059 stamp
+        # files — which had stopped RUNNING (it skipped module-wide on a
+        # JSON_DIR the shim does not have) while still reading as covered to a
+        # text scan. Archived with the sweep; the claim moves here, to a test
+        # that executes. A truthy int would satisfy `is False` nowhere, but it
+        # would satisfy `== False`, and callers branch on this.
+        assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
 
     def test_help_flag(self, capsys):
         result = handle_command("run", ["--help"])
         assert result is True
+        assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
 
 
 class TestRunTick:

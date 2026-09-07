@@ -1060,6 +1060,10 @@ class TestJsonRefusals:
         ("set-default",),
         ("reset",),
     ]
+    # seedgo SHORT-TABLE (2026-08-31): a non-empty parametrize is not a count
+    # guard - a row silently dropped from _CASES still leaves every surviving
+    # case green. Pin the count so a shrink is loud.
+    assert len(_CASES) == 15
 
     @pytest.mark.parametrize("args", _CASES)
     def test_ok_is_false(self, verbs, capsys, args) -> None:
@@ -1260,6 +1264,8 @@ class TestHelpOutranksJson:
         ("--json", "set", "@memory", "sessions", "25", "help"),
         ("set-default", "sessions", "25", "--json", "--help"),
     ]
+    # seedgo SHORT-TABLE (2026-08-31): same guard as _CASES above.
+    assert len(_COMBOS) == 5
 
     @pytest.mark.parametrize("args", _COMBOS)
     def test_file_is_byte_identical(self, verbs, args) -> None:

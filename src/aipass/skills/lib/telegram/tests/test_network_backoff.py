@@ -431,7 +431,7 @@ class TestLogOnceSemantics:
 
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
-            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=fake_time_fn),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot._now", side_effect=fake_time_fn),
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
         ):
             bot.run()

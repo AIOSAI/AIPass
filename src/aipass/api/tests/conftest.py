@@ -56,22 +56,11 @@ if _handler_pkg not in sys.modules:
 _json_mod = importlib.import_module(_json_mod_path)
 
 
-# ---------------------------------------------------------------------------
-# JSON_DIR variable discovery
-# ---------------------------------------------------------------------------
-
-_JSON_DIR_ATTR: str | None = None
-_JSON_DIR_CANDIDATES = [
-    f"{BRANCH_MODULE.upper()}_JSON_DIR",
-    "JSON_DIR",
-    "BRANCH_JSON_DIR",
-    "_JSON_DIR",
-]
-
-for _candidate in _JSON_DIR_CANDIDATES:
-    if hasattr(_json_mod, _candidate):
-        _JSON_DIR_ATTR = _candidate
-        break
+# Never discover out of .archive/: it holds verbatim disposal copies of the
+# suites the one json service subsumed, and rglobbing into a dot-directory
+# generates the dotted module name ...json..archive.json_handler, a SyntaxError
+# that kills the file that walked there (DPLAN-0325, hooks' finding).
+collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
 # ---------------------------------------------------------------------------
@@ -111,15 +100,40 @@ def sample_test_data() -> dict:
 def mock_infrastructure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+) -> Path:
     """Autouse fixture that isolates JSON operations and silences logging.
 
     This fixture:
-      1. Redirects the branch's JSON_DIR to tmp_path (test isolation)
+      1. Redirects the branch's json writes into a temp dir (test isolation)
       2. Patches the branch logger to a NullHandler (no console noise)
+
+    Redirected through the fleet seam, not by patching a module attribute.
+    It used to search the handler for API_JSON_DIR / JSON_DIR / BRANCH_JSON_DIR
+    / _JSON_DIR and monkeypatch whichever it found — and, finding none, do
+    NOTHING and say nothing. Since DPLAN-0325 the handler is a shim over the
+    one prax service, which holds no directory constant at all and resolves
+    its directory from AIPASS_TEST_LOG_DIR on EVERY call, so the search would
+    have gone silently empty and let the whole suite write into the real
+    api_json/.
+
+    Own subdirectory on purpose: the service spells the sandbox
+    <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
+    tmp_path/api/ in every test and collide with a test that builds a
+    directory of its own branch's name.
+
+    Deliberately does NOT create the sandbox. It is autouse over 1560 tests,
+    most of which never touch json at all, and an eager mkdir puts a directory
+    in every one of their tmp_paths — measured: it turned
+    test_the_staged_file_does_not_survive_a_failed_write red, a test that
+    asserts its tmp_path is empty after a failed atomic write and was right to.
+    The service builds the directory chain on the first call that needs it
+    (pinned by test_auto_creates_directory), so nothing is lost by waiting.
+
+    Returns:
+        The sandbox directory the handler will write into. May not exist yet.
     """
-    if _JSON_DIR_ATTR is not None:
-        monkeypatch.setattr(_json_mod, _JSON_DIR_ATTR, tmp_path)
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    sandbox = _json_mod.get_json_path("probe", "config").parent
 
     logger_names = [
         f"aipass.{BRANCH_MODULE}",
@@ -129,6 +143,8 @@ def mock_infrastructure(
     for logger_name in logger_names:
         log = logging.getLogger(logger_name)
         monkeypatch.setattr(log, "handlers", [logging.NullHandler()])
+
+    return sandbox
 
 
 @pytest.fixture()
@@ -151,7 +167,10 @@ def mock_json_handler() -> MagicMock:
     handler.save_json = MagicMock(return_value=True)
     handler.ensure_json_exists = MagicMock(return_value=True)
     handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
+    # gettempdir(), not a literal /tmp: this stand-in is only ever compared
+    # against, never opened, but a POSIX literal is still a POSIX literal and
+    # the fleet runs a Windows job.
+    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler

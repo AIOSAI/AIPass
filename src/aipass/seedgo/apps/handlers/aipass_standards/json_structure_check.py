@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.1.0
+# Version: 3.3.0
 # Created: 2026-03-05
 # Modified: 2026-08-07
 # =============================================
@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
@@ -364,6 +365,15 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
     branches = [d.name for d in source_root.iterdir() if (d / "apps").is_dir()]
     queue = ["aipass.prax.apps.modules.logger"]
     queue += [f"aipass.{name}.apps.handlers.json.json_handler" for name in branches]
+    # Branch-owned operation-logging seams are substrate too (DPLAN-0325): what
+    # a seam imports is beneath it in the import order, for the same reason. Left
+    # out, a stdlib-only path helper that only the seam reaches stays red for an
+    # import it must not carry — measured on @backup's module_paths.py.
+    for name in branches:
+        for seam_file in _seam_files(source_root / name):
+            seam_module = _module_name(seam_file, source_root)
+            if seam_module is not None:
+                queue.append(seam_module)
 
     seen: set = set()
     while queue and len(seen) < _BOOTSTRAP_WALK_CAP:
@@ -421,6 +431,91 @@ def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     return module_name is not None and module_name in _bootstrap_chain(str(source_root))
 
 
+def _branch_root(path: Path) -> Path | None:
+    """The branch directory a module lives in, or None if it is outside one."""
+    source_root = _aipass_source_root(path)
+    if source_root is None:
+        return None
+    try:
+        relative = path.resolve().relative_to(source_root)
+    except ValueError:
+        return None
+    return source_root / relative.parts[0] if relative.parts else None
+
+
+@lru_cache(maxsize=64)
+def _operation_log_seams(branch_root: str) -> frozenset[str]:
+    """Modules in this branch that ARE a branch-owned operation-logging seam.
+
+    DPLAN-0325 gave the fleet ONE json service and a byte-identical shim, and
+    nothing branch-specific may go into that shim. A branch whose audit trail
+    has a different record shape therefore has to own it in a module of its
+    own — @backup's ``apps/handlers/audit/trail.py`` is the first, a JSONL
+    stream built on ``aipass.prax.append_jsonl``. Check 2 below asked for the
+    literal spelling ``json_handler.log_operation`` and so convicted 41 of
+    backup's 43 files for following the spec.
+
+    A seam is recognised, not bypassed, and the shape is narrow on purpose:
+    the file must DEFINE ``log_operation`` itself AND build it on a logging
+    primitive imported from ``aipass.prax``. A module that merely defines a
+    function by that name buys nothing; the branch's own shim is excluded,
+    since it is the default path check 2 already accepts.
+
+    Args:
+        branch_root: Branch directory, as a string so the cache can key on it.
+
+    Returns:
+        The seam module stems, e.g. ``frozenset({"trail"})``.
+    """
+    return frozenset(f.stem for f in _seam_files(Path(branch_root)))
+
+
+def _seam_files(branch_root: Path) -> list[Path]:
+    """Every file in this branch that qualifies as an operation-logging seam."""
+    apps = branch_root / "apps"
+    if not apps.is_dir():
+        return []
+    found: list[Path] = []
+    for candidate in sorted(apps.rglob("*.py")):
+        if candidate.name == "json_handler.py":
+            continue
+        try:
+            source = candidate.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            logger.info("json_structure: unreadable while scanning for log seams: %s", exc)
+            continue
+        if _is_operation_log_seam(source):
+            found.append(candidate)
+    return found
+
+
+def _is_operation_log_seam(content: str) -> bool:
+    """True when this file IS a branch-owned operation-logging seam.
+
+    The seam is the substrate, not a consumer of it: asking ``trail.py`` to
+    call ``log_operation`` is asking it to log through itself. Same treatment
+    the shim already gets, resting on the same two conditions
+    ``_operation_log_seams`` uses, so a file cannot be a seam for one check
+    and not for the other.
+    """
+    if "def log_operation(" not in content:
+        return False
+    return bool(re.search(r"from\s+aipass\.prax\s+import\s+[^\n]*(?:append_jsonl|json_handler)", content))
+
+
+def _seam_logging(path: Path, content: str) -> str | None:
+    """The branch-owned seam this module logs its operations through, if any."""
+    root = _branch_root(path)
+    if root is None:
+        return None
+    for seam in sorted(_operation_log_seams(str(root))):
+        calls = f"{seam}.log_operation(" in content
+        imported = re.search(rf"import\s+[^\n]*\b{re.escape(seam)}\b", content)
+        if calls and imported:
+            return seam
+    return None
+
+
 def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     """
     Check that a module/handler file has the three-JSON wiring:
@@ -429,6 +524,20 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
 
     Returns a list of two check dicts.
     """
+    if _is_operation_log_seam(content):
+        return [
+            {
+                "name": "json_handler import",
+                "passed": True,
+                "message": "This module IS the branch's operation-logging seam (built on aipass.prax)",
+            },
+            {
+                "name": "log_operation call",
+                "passed": True,
+                "message": "Defines log_operation — the substrate does not log through itself",
+            },
+        ]
+
     checks: List[Dict] = []
 
     # Check 1: imports json_handler
@@ -436,30 +545,49 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     #   from aipass.seedgo.apps.handlers.json import json_handler
     #   from aipass.flow.apps.handlers.json import json_handler
     #   from ...handlers.json import json_handler
-    has_import = bool(
+    # A module that logs through a branch-owned seam imports the SEAM, not the
+    # shim — the two checks are one requirement (this module's operations reach
+    # a log), so they answer together or the seam would satisfy check 2 and
+    # still fail check 1 for an import it has no reason to carry.
+    seam = _seam_logging(_path, content)
+    has_import = seam is not None or bool(
         re.search(r"from\s+\S*\.json\s+import\s+json_handler", content)
         or re.search(r"from\s+\S*json\s+import\s+json_handler", content)
         or re.search(r"import\s+json_handler", content)
     )
+    if seam is not None:
+        import_message = f"Imports this branch's {seam} logging seam"
+    elif has_import:
+        import_message = "Imports json_handler"
+    else:
+        import_message = (
+            "Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler"
+        )
     checks.append(
         {
             "name": "json_handler import",
             "passed": has_import,
-            "message": "Imports json_handler"
-            if has_import
-            else "Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler",
+            "message": import_message,
         }
     )
 
-    # Check 2: calls json_handler.log_operation()
-    has_log_operation = "json_handler.log_operation" in content
+    # Check 2: the module logs its operations — by the fleet default, or
+    # through a branch-owned seam that is itself built on aipass.prax.
+    # The requirement is that operations ARE logged, never that they are
+    # logged in one spelling.
+    has_log_operation = "json_handler.log_operation" in content or seam is not None
+    seam = None if "json_handler.log_operation" in content else seam
+    if seam is not None:
+        log_message = f"Logs operations through this branch's {seam} seam (built on aipass.prax)"
+    elif has_log_operation:
+        log_message = "Calls json_handler.log_operation()"
+    else:
+        log_message = "Missing json_handler.log_operation() call — every module/handler must log operations"
     checks.append(
         {
             "name": "log_operation call",
             "passed": has_log_operation,
-            "message": "Calls json_handler.log_operation()"
-            if has_log_operation
-            else "Missing json_handler.log_operation() call — every module/handler must log operations",
+            "message": log_message,
         }
     )
 
@@ -514,19 +642,38 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
         )
 
     # Check 2: Uses relative path resolution
-    has_relative = bool(
+    # A shim that binds the fleet json service (DPLAN-0325) resolves nothing
+    # itself — the service derives this branch's root from the shim's own
+    # __file__, deliberately WITHOUT resolve(), so a dead cwd on Windows
+    # cannot poison it. Demanding the spelling here convicts the endpoint of
+    # the migration: measured 2026-09-03, prax's shim, spawn's shim and the
+    # citizen template each scored 75 on this check alone.
+    # THE TEST MOVED WITH PART B, it was not deleted (2026-09-04, finding (a)).
+    # This line used to read `SERVICE_IMPORT_MARKER in content`. Measured before
+    # the change: removing the marker without substituting the hash test costs
+    # EVERY migrated branch 25 points on its handler file — all eighteen, plus
+    # the citizen template, 100 -> 75 on "Missing relative path resolution".
+    # That is the endpoint of the migration convicted for being the endpoint.
+    binds_the_json_service = _is_canonical_shim(content)
+    resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
         or re.search(r"\.resolve\(\)", content)
         or re.search(r"\.parent", content)
     )
+    has_relative = binds_the_json_service or resolves_here
+
+    if binds_the_json_service:
+        resolution_message = "Delegates path resolution to the one json service (no absolute path can enter)"
+    elif resolves_here:
+        resolution_message = "Uses relative path resolution (Path(__file__).parent)"
+    else:
+        resolution_message = "Missing relative path resolution — should use Path(__file__).resolve().parent"
 
     checks.append(
         {
             "name": "Relative path resolution",
             "passed": has_relative,
-            "message": "Uses relative path resolution (Path(__file__).parent)"
-            if has_relative
-            else "Missing relative path resolution — should use Path(__file__).resolve().parent",
+            "message": resolution_message,
         }
     )
 
