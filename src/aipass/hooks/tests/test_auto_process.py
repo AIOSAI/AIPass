@@ -209,26 +209,34 @@ class TestAutoProcessHandler:
 
 
 class TestSessionGuard:
-    def test_skips_when_already_ran(self):
-        from aipass.hooks.apps.handlers.lifecycle.auto_process import handle
+    def test_the_guard_decides_whether_the_kick_happens(self):
+        """MERGED 2026-09-07 (DPLAN-0323 contested band): was two tests.
 
-        with patch(f"{MODULE}._already_ran_this_session", return_value=True):
-            with patch(f"{MODULE}.importlib.import_module") as mock_import:
-                result = handle({})
+        ``test_skips_when_already_ran`` and ``test_runs_when_not_yet_ran`` were
+        the negative and positive control on ONE assertion — whether the memory
+        module gets imported — with the guard state as the only difference
+        between them. Split apart, the positive half read as a third copy of the
+        spawn-path setup. Held together in one body, the claim is what it always
+        was: the guard is what decides. Both original assertions survive
+        verbatim, the negative half's exit code included.
 
-        assert result["exit_code"] == 0
-        mock_import.assert_not_called()
-
-    def test_runs_when_not_yet_ran(self):
+        Deliberately not parametrized: two parametrized cases collect as two
+        tests, which is a rename rather than a merge.
+        """
         from aipass.hooks.apps.handlers.lifecycle.auto_process import handle
 
         mock_module = _make_mock_module()
+
+        with patch(f"{MODULE}._already_ran_this_session", return_value=True):
+            with patch(f"{MODULE}.importlib.import_module") as mock_import:
+                guarded = handle({})
+        assert guarded["exit_code"] == 0
+        mock_import.assert_not_called()
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
                 with patch(f"{MODULE}.importlib.import_module", return_value=mock_module) as mock_import:
                     handle({})
-
         mock_import.assert_called_once()
 
     def test_marks_session_after_a_successful_kick(self):

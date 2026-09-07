@@ -1042,16 +1042,6 @@
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
-      "file": "apps/modules/presence.py",
-      "standard": "json_structure",
-      "reason": "Presence service uses stdlib json for .ai_central/PRESENCE.central.json — shared runtime namespace, not branch json_handler storage."
-    },
-    {
-      "file": "apps/modules/presence.py",
-      "standard": "unused_function",
-      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). Static analysis cannot trace hooks.json → engine → handler → presence module."
-    },
-    {
       "file": "apps/handlers/notification/telegram_response.py",
       "standard": "unused_function",
       "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in Stop.telegram_response."
@@ -1082,26 +1072,6 @@
       "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
-      "file": "apps/modules/presence.py",
-      "standard": "json_structure",
-      "reason": "Uses stdlib json for .ai_central/PRESENCE.central.json shared runtime namespace — not branch data storage needing json_handler."
-    },
-    {
-      "file": "apps/modules/presence.py",
-      "standard": "modules",
-      "reason": "Direct file ops on .ai_central/PRESENCE.central.json — a shared runtime namespace (gitignored, cross-branch). Not a handler-level concern; the module IS the presence service that owns this file."
-    },
-    {
-      "file": "apps/modules/presence.py",
-      "standard": "dead_code",
-      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). handle_command() and print_introspection() called by drone routing. Static analysis cannot trace hooks.json → engine → handler → presence module."
-    },
-    {
-      "file": "apps/modules/presence.py",
-      "standard": "unused_function",
-      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). handle_command() and print_introspection() called by drone routing."
-    },
-    {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' — not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
@@ -1115,26 +1085,6 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "tests/test_presence.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_presence.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_presence.py",
-      "standard": "encapsulation",
-      "reason": "Tests import modules directly to test implementation details."
-    },
-    {
-      "file": "tests/test_presence.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_presence_gate.py",

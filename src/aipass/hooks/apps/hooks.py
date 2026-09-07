@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.1.1
+# Version: 1.2.1
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-08-18
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -13,6 +13,7 @@ HOOKS Branch - Main Orchestrator
 
 Auto-discovery architecture:
 - Scans modules/ directory for .py files with handle_command()
+- Skips names marked (disabled) — the fleet's retirement convention
 - Routes commands to discovered modules automatically
 - No manual imports or routing needed
 """
@@ -33,13 +34,14 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
-from aipass.cli.apps.modules import console  # noqa: E402
+from aipass.cli.apps.modules import console, err_console  # noqa: E402
 
 # =============================================================================
 # MODULE DISCOVERY
 # =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
+_DISABLED_MARK = "(disabled)"
 
 
 def discover_modules() -> list[Any]:
@@ -51,6 +53,17 @@ def discover_modules() -> list[Any]:
 
     for file_path in sorted(MODULES_DIR.glob("*.py")):
         if file_path.name.startswith("_"):
+            continue
+
+        # "(disabled)" in a filename is the fleet's retirement mark, and until
+        # 2026-09-07 it did nothing here: importlib.import_module resolves a
+        # submodule by matching the FILE, not by parsing an identifier, so
+        # "presence(disabled)" imported exactly as happily as "presence" and the
+        # retired module kept answering `drone @hooks presence` with records
+        # frozen since June. Skipped by name, so the convention retires a module
+        # where it is written rather than only where someone remembers to check.
+        if _DISABLED_MARK in file_path.name:
+            logger.info("[HOOKS] Skipping retired module %s", file_path.name)
             continue
 
         module_names = [
@@ -105,7 +118,7 @@ def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
     console.print()
-    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.1.0[/dim] — Hook Infrastructure for AIPass")
+    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.2.1[/dim] — Hook Infrastructure for AIPass")
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -190,7 +203,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("hooks 1.1.0")
+        console.print("hooks 1.2.1")
         return True
 
     return route_command(command, args, modules)
@@ -211,8 +224,13 @@ def main() -> int:
     # to report "Unknown command: hooksound" — and hooksound IS a known command, so
     # the caller was told the wrong token was wrong. A renamed sub-verb read as a
     # missing top-level command. Exit stays 1; only the wording was ever dishonest.
+    # STDERR, not stdout (2026-09-07, todo 16 open since 09-03). A refusal is
+    # not output: `drone @hooks bogus > file` used to write the complaint into
+    # the file and leave the terminal silent. @flow already routes its refusal
+    # to stderr; @hooks was the outlier. Exit stays 1 — that is still the
+    # contract; the stream is now the fleet's.
     attempted = " ".join(args[:3])
-    console.print(f"Unknown command: {attempted}. Try: drone @hooks --help")
+    err_console.print(f"Unknown command: {attempted}. Try: drone @hooks --help")
     return 1
 
 

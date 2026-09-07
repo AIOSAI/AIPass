@@ -982,12 +982,28 @@ class TestCliRouting:
         assert "No .aipass/hooks.json" in captured.err
 
     def test_version_output(self, capsys):
-        from aipass.hooks.apps.hooks import main
+        """Read from the header, never hardcoded.
+
+        This asserted a literal "1.1.0" while the file header said 1.2.0 — the
+        second of two tests pinning the stale value they existed to catch
+        (todo 16, fixed 2026-09-07). Its twin lives in test_cli_routing.py and
+        covers both flags; this one keeps the claim on the engine-routed path.
+        """
+        import re
+
+        from aipass.hooks.apps import hooks as entry
+
+        header = re.search(
+            r"^# Version:\s*(\S+)",
+            Path(entry.__file__).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        assert header is not None, "apps/hooks.py has no '# Version:' header line"
 
         with patch("sys.argv", ["hooks", "--version"]):
-            main()
+            entry.main()
         captured = capsys.readouterr()
-        assert "1.1.0" in captured.out
+        assert header.group(1) in captured.out
 
 
 class TestConfigDataContracts:

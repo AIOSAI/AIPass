@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -346,17 +346,28 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
     return hits
 
 
-def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
-    """Return every (path, why) this command can be seen to write.
+def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], list[tuple[Path, str]]]]:
+    """Same reading as :func:`write_targets`, but grouped by the segment that earned it.
+
+    A caller asking a NARROWER question than "can this write" needs to know
+    which segment a target came from — ``pytest x && touch y`` is one command
+    with two very different halves, and a verdict that cannot tell them apart
+    must refuse both or neither. testwrite_gate is that caller: a test RUN
+    creates nothing, so it drops interpreter-attributed targets from runner
+    segments while leaving every other segment's targets alone.
+
+    Split out so there is still exactly ONE shell reader in this branch.
+    :func:`write_targets` flattens this and is unchanged in behaviour, dedupe
+    included — the seam exists to avoid a second parser, not to add one.
 
     Args:
         command: The raw Bash command string from the tool input.
         cwd: The session working directory relative paths resolve against.
 
     Returns:
-        A list of (resolved path, human-readable reason) pairs. Empty when the
-        command names no write target this parser can see — which is not the
-        same as "writes nothing"; see :data:`NOT_CAUGHT`.
+        (segment tokens, hits) pairs, in command order. Segments that name no
+        target are included with an empty hit list, so a caller can see the
+        shape of the whole command rather than only its writing half.
     """
     if not command or not command.strip():
         return []
@@ -369,7 +380,7 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
     # Two texts, deliberately: heredoc bodies are stripped for the SYNTAX read
     # (a quoted command in a mail body is not a command) and kept for the
     # interpreter read (a heredoc handed to python really can write anything).
-    hits: list[tuple[Path, str]] = []
+    grouped: list[tuple[list[str], list[tuple[Path, str]]]] = []
     seen: set[tuple[Path, str]] = set()
     for tokens in _readings(command):
         current = base
@@ -388,6 +399,7 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
                     current = moved
                 continue
 
+            hits: list[tuple[Path, str]] = []
             for hit in (
                 *_redirect_targets(segment, current),
                 *_verb_targets(segment, current),
@@ -399,5 +411,21 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
                     continue
                 seen.add(hit)
                 hits.append(hit)
+            grouped.append((segment, hits))
 
-    return hits
+    return grouped
+
+
+def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
+    """Return every (path, why) this command can be seen to write.
+
+    Args:
+        command: The raw Bash command string from the tool input.
+        cwd: The session working directory relative paths resolve against.
+
+    Returns:
+        A list of (resolved path, human-readable reason) pairs. Empty when the
+        command names no write target this parser can see — which is not the
+        same as "writes nothing"; see :data:`NOT_CAUGHT`.
+    """
+    return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.2.0
+# Version: 3.3.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-08-18
+# Modified: 2026-09-07
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -183,10 +183,8 @@ def handle(hook_data: dict) -> dict:
         branch = _resolve_branch(hook_data)
         branch_cwd = hook_data.get("cwd", "") or str(Path.cwd())
 
-        presence = importlib.import_module("aipass.hooks.apps.modules.presence")
-        our_pid = presence._resolve_session_pid()
-
         cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+        our_pid = cc_sessions.resolve_session_pid()
         occupant = cc_sessions.find_occupant(branch_cwd, exclude_pid=our_pid)
 
         if occupant is None:

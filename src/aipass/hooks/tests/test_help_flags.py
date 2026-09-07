@@ -255,10 +255,13 @@ class TestUnknownCommandNamesWhatFailed:
 
         from aipass.hooks.apps import hooks
 
+        # Both consoles: the refusal moved to err_console on 2026-09-07 and a
+        # helper watching only stdout would have read the move as silence.
         printed = []
         with (
             patch.object(sys, "argv", ["hooks", *argv]),
             patch.object(hooks.console, "print", side_effect=lambda m="", **k: printed.append(str(m))),
+            patch.object(hooks.err_console, "print", side_effect=lambda m="", **k: printed.append(str(m))),
         ):
             code = hooks.main()
         return code, "\n".join(printed)

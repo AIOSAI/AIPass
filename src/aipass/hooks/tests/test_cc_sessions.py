@@ -10,6 +10,72 @@ import pytest
 from aipass.hooks.apps.modules import cc_sessions
 
 
+class TestResolveSessionPid:
+    """The ppid walk that answers "which PID is my seat" (moved from presence.py)."""
+
+    def test_finds_session_file_ancestor(self):
+        ppid_map = {100: 90, 90: 80}
+        with (
+            patch("os.getpid", return_value=100),
+            patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == 80),
+            patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
+        ):
+            assert cc_sessions.resolve_session_pid() == 80
+
+    def test_no_session_file_ancestor_returns_none(self):
+        ppid_map = {100: 90, 90: 80, 80: 1}
+        with (
+            patch("os.getpid", return_value=100),
+            patch.object(cc_sessions, "_has_session_file", return_value=False),
+            patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
+        ):
+            assert cc_sessions.resolve_session_pid() is None
+
+    def test_ppid_failure_returns_none(self):
+        with (
+            patch("os.getpid", return_value=100),
+            patch.object(cc_sessions, "_has_session_file", return_value=False),
+            patch.object(cc_sessions, "_get_ppid_portable", return_value=None),
+        ):
+            assert cc_sessions.resolve_session_pid() is None
+
+    def test_direct_session_process(self):
+        with (
+            patch("os.getpid", return_value=100),
+            patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == 100),
+        ):
+            assert cc_sessions.resolve_session_pid() == 100
+
+
+class TestHasSessionFile:
+    """Reads through CC_SESSIONS_DIR, so an unresolvable home answers instead of raising."""
+
+    def test_true_when_the_file_is_there(self, tmp_path):
+        (tmp_path / "4242.json").write_text("{}")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            assert cc_sessions._has_session_file(4242) is True
+
+    def test_false_when_it_is_not(self, tmp_path):
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            assert cc_sessions._has_session_file(4242) is False
+
+    def test_unresolvable_home_answers_false_not_raises(self):
+        # _claude_home() degrades to a path that cannot exist. The old presence.py
+        # built this path from Path.home() directly, so the same machine raised
+        # RuntimeError into presence_gate's except-and-allow — the gate went dark
+        # rather than reporting "no session files here".
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", cc_sessions.Path("<no-home>") / ".claude" / "sessions"):
+            assert cc_sessions._has_session_file(os.getpid()) is False
+
+
+class TestGetPpidPortable:
+    def test_reports_our_real_parent(self):
+        assert cc_sessions._get_ppid_portable(os.getpid()) == os.getppid()
+
+    def test_dead_pid_returns_none(self):
+        assert cc_sessions._get_ppid_portable(999999999) is None
+
+
 class TestIsPidAlive:
     def test_alive(self):
         assert cc_sessions._is_pid_alive(os.getpid()) is True

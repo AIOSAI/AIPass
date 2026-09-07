@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Blocks agent creation of NEW test files behind a JSON policy switch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-07
 # =============================================
 
 """Enforces Patrick's 2026-09-01 ruling: agents do not create tests for now.
@@ -156,17 +156,58 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[Path]:
     return [Path(file_path)]
 
 
+# A module-run of one of these is a test RUN. It executes existing tests and
+# cannot create a source file, so the paths it is handed are arguments, not
+# write targets. Kept narrow on purpose: only the `-m <runner>` form, never a
+# bare `python script.py`, which really can write anything.
+_TEST_RUNNER_MODULES = frozenset({"pytest", "unittest"})
+
+# Why-strings bash_writes attributes to an interpreter holding a path. Breadth
+# that is correct for edit_gate's cross-project fence — an interpreter holding
+# a foreign path cannot be distinguished from one writing to it — and wrong for
+# this gate, which asks the narrower question "is a NEW TEST being created".
+_INTERPRETER_REASON = "(interpreter — may write any path it holds)"
+
+
+def _is_test_run(segment: list[str]) -> bool:
+    """True when this segment merely RUNS tests.
+
+    An interpreter asked for the pytest module, handed a test path, names that
+    path and writes nothing. Before this, every such invocation was refused as
+    a test creation — false fire #7, banked 2026-09-05 and reproduced live
+    2026-09-07 while measuring this fix: the diagnostic command written to
+    MEASURE the defect tripped it.
+    """
+    for index, token in enumerate(segment):
+        if token == "-m" and index + 1 < len(segment):
+            return segment[index + 1] in _TEST_RUNNER_MODULES
+    return False
+
+
 def testwrite_targets_bash(command: str, cwd: str) -> list[tuple[Path, str]]:
-    """Thin seam onto ``bash_writes.write_targets`` so tests can pin the reuse.
+    """Seam onto ``bash_writes``, minus the targets a test RUN merely names.
+
+    Reuses the one shell reader rather than growing a second, and drops only
+    interpreter-attributed targets from runner segments. Everything else
+    survives: ``pytest x && touch tests/test_new.py`` still refuses, because
+    ``touch`` names its target under its own reason in its own segment.
 
     Args:
         command: The raw Bash command string.
         cwd: The session working directory.
 
     Returns:
-        The (path, why) pairs bash_writes reports.
+        The (path, why) pairs bash_writes reports, runner noise removed.
     """
-    return _module("bash_writes").write_targets(command, cwd)
+    grouped = _module("bash_writes").write_targets_by_segment(command, cwd)
+    pairs: list[tuple[Path, str]] = []
+    for segment, hits in grouped:
+        run = _is_test_run(segment)
+        for target, why in hits:
+            if run and _INTERPRETER_REASON in why:
+                continue
+            pairs.append((target, why))
+    return pairs
 
 
 def _refuse_creation(targets: list[Path], policy: Any, branch: str, lane: str) -> dict:

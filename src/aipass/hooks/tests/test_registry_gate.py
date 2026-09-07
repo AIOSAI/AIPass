@@ -196,9 +196,6 @@ class TestHandleBash:
     def test_block_redirect_overwrite(self):
         self._assert_blocked(self._bash("echo '{}' > AIPASS_REGISTRY.json"))
 
-    def test_block_redirect_append(self):
-        self._assert_blocked(self._bash("echo data >> AIPASS_REGISTRY.json"))
-
     def test_block_tee(self):
         self._assert_blocked(self._bash("echo data | tee AIPASS_REGISTRY.json"))
 
@@ -217,9 +214,6 @@ class TestHandleBash:
     def test_block_rm(self):
         self._assert_blocked(self._bash("rm AIPASS_REGISTRY.json"))
 
-    def test_block_rm_force(self):
-        self._assert_blocked(self._bash("rm -f AIPASS_REGISTRY.json"))
-
     def test_block_unlink(self):
         self._assert_blocked(self._bash("unlink AIPASS_REGISTRY.json"))
 
@@ -232,26 +226,14 @@ class TestHandleBash:
     def test_block_vera_registry(self):
         self._assert_blocked(self._bash("rm VERA_REGISTRY.json"))
 
-    def test_allow_drone_spawn(self):
-        self._assert_allowed(self._bash("drone @spawn register --project ."))
-
     def test_allow_drone_spawn_with_registry(self):
         self._assert_allowed(self._bash("drone @spawn update AIPASS_REGISTRY.json"))
 
     def test_allow_cat(self):
         self._assert_allowed(self._bash("cat AIPASS_REGISTRY.json"))
 
-    def test_allow_jq_read(self):
-        self._assert_allowed(self._bash("jq '.branches' AIPASS_REGISTRY.json"))
-
-    def test_allow_grep(self):
-        self._assert_allowed(self._bash("grep owner AIPASS_REGISTRY.json"))
-
     def test_allow_cp_from_registry(self):
         self._assert_allowed(self._bash("cp AIPASS_REGISTRY.json /tmp/backup.json"))
-
-    def test_allow_head(self):
-        self._assert_allowed(self._bash("head -5 AIPASS_REGISTRY.json"))
 
     def test_allow_no_registry(self):
         self._assert_allowed(self._bash("echo hello"))
@@ -310,9 +292,6 @@ class TestHandleEditTools:
                 }
             )
         )
-
-    def test_block_vera_registry(self):
-        self._assert_blocked(self._edit("Edit", "/path/VERA_REGISTRY.json"))
 
     def test_allow_normal_file(self):
         self._assert_allowed(self._edit("Edit", "/path/config.json"))

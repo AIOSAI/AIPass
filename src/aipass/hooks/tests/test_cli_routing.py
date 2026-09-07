@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-09-03
+# Modified: 2026-09-07
 # =============================================
 
 """Tests for hooks's CLI entry point.
@@ -27,7 +27,9 @@ outright — hooks.py has neither name, so there was nothing to measure.
 
 import importlib
 import os
+import re
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -136,13 +138,27 @@ def test_help_flag_preempts_routing(monkeypatch, capsys, flag):
 
 
 @pytest.mark.parametrize("flag", ["--version", "-V"])
-def test_version_flag_prints_version(monkeypatch, capsys, flag):
-    """--version reports the branch and a version, then exits 0."""
+def test_version_flag_prints_the_header_version(monkeypatch, capsys, flag):
+    """--version reports the branch and the version the FILE claims, then exits 0.
+
+    Read from the header rather than hardcoded: this test asserted a literal
+    "1.1.0" while the header said 1.2.0 and the banner said 1.1.0 — it passed
+    the whole time, pinning the stale value it was supposed to catch (todo 16,
+    open since 2026-09-03, fixed 2026-09-07). A version test that names a
+    version can only ever confirm whatever drifted last.
+    """
+    header = re.search(
+        r"^# Version:\s*(\S+)",
+        (Path(branch_entry.__file__).read_text(encoding="utf-8")),
+        re.MULTILINE,
+    )
+    assert header is not None, "apps/hooks.py has no '# Version:' header line"
+
     assert _run(monkeypatch, [flag]) == 0
 
     out = capsys.readouterr().out
     assert "hooks" in out
-    assert "1.1.0" in out
+    assert header.group(1) in out
 
 
 # =============================================================================
@@ -193,11 +209,12 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     captured = capsys.readouterr()
 
     assert result == 1
-    # Stream-agnostic on purpose: hooks writes the refusal with the rest of its
-    # CLI output rather than to stderr, unlike the template this file came from.
-    # The exit code is the contract; which stream carries the sentence is an
-    # open question for the entry point, not something to bless here.
-    assert "Unknown command" in captured.out + captured.err
+    # STDERR, and not merely "somewhere". The open question this assert used to
+    # hedge on was settled 2026-09-07 (todo 16): a refusal goes to stderr, as
+    # @flow's already did, so redirecting stdout cannot swallow it. Pinning the
+    # stream is the whole point — out + err would pass either way.
+    assert "Unknown command" in captured.err
+    assert "Unknown command" not in captured.out
 
 
 # =============================================================================
@@ -219,7 +236,8 @@ def test_subcommand_help_on_unknown_command_exits_nonzero(monkeypatch, stub_modu
     captured = capsys.readouterr()
 
     assert result == 1
-    assert "Unknown command" in captured.out + captured.err
+    assert "Unknown command" in captured.err
+    assert "Unknown command" not in captured.out
 
 
 # =============================================================================
@@ -239,3 +257,64 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
 
     assert os.environ["AIPASS_BRANCH_NAME"] == "hooks"
     assert reloaded.discover_modules is not None
+
+
+class TestDiscoverySkipsRetiredModules:
+    """`(disabled)` in the filename must actually retire the module.
+
+    importlib.import_module resolves a submodule by matching the FILE on disk,
+    not by parsing a Python identifier — "presence(disabled)" imports as
+    cleanly as "presence". So the rename alone left the retired module wired
+    and answering commands. Discovery has to skip it by name.
+    """
+
+    def _modules_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(branch_entry, "MODULES_DIR", tmp_path)
+        return tmp_path
+
+    def test_a_disabled_module_is_never_imported(self, monkeypatch, tmp_path):
+        self._modules_dir(monkeypatch, tmp_path)
+        (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n")
+
+        imported = []
+        monkeypatch.setattr(
+            branch_entry.importlib,
+            "import_module",
+            lambda name: imported.append(name) or pytest.fail(f"imported {name}"),
+        )
+
+        assert branch_entry.discover_modules() == []
+        assert imported == []
+
+    def test_a_live_module_beside_it_still_loads(self, monkeypatch, tmp_path):
+        self._modules_dir(monkeypatch, tmp_path)
+        (tmp_path / "presence(disabled).py").write_text("")
+        (tmp_path / "sessions.py").write_text("")
+
+        stub = _StubModule()
+        seen = []
+
+        def fake_import(name):
+            seen.append(name)
+            if name.endswith("sessions"):
+                return stub
+            raise ImportError(name)
+
+        monkeypatch.setattr(branch_entry.importlib, "import_module", fake_import)
+
+        assert branch_entry.discover_modules() == [stub]
+        assert all("(disabled)" not in name for name in seen)
+
+    def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
+        # The convention writes the mark as a suffix, but a stem like
+        # "presence(disabled)_v2" is the same retirement and must not sneak back.
+        self._modules_dir(monkeypatch, tmp_path)
+        (tmp_path / "presence(disabled)_v2.py").write_text("")
+
+        monkeypatch.setattr(
+            branch_entry.importlib,
+            "import_module",
+            lambda name: pytest.fail(f"imported {name}"),
+        )
+
+        assert branch_entry.discover_modules() == []

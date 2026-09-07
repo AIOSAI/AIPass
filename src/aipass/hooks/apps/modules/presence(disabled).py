@@ -1,14 +1,25 @@
 # =================== AIPass ====================
-# Name: presence.py
-# Version: 1.0.0
-# Description: Branch presence service — claim/release/refresh for .ai_central/PRESENCE.central.json
+# Name: presence(disabled).py
+# Version: 1.0.1
+# Description: RETIRED 2026-09-07 (FPLAN-0495 item 4) — superseded by cc_sessions.py
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-29
-# Modified: 2026-06-29
+# Modified: 2026-09-07
 # =============================================
 
-"""Branch presence service for concurrent session detection.
+"""RETIRED. Branch presence service for concurrent session detection.
+
+Disabled 2026-09-07 (FPLAN-0495 item 4). PRESENCE.central.json has not been
+written since 2026-06-30; cc_sessions.py reads CC's own ~/.claude/sessions/<pid>.json
+instead, which is resume-aware and exit-aware. claim/release/refresh had zero
+production callers, and `drone @hooks presence` was still rendering the frozen
+June records as a live roster. The one part that was live — resolve_session_pid
+and its two helpers — moved to cc_sessions.py, which presence_gate now calls.
+
+The "(disabled)" name is what retires it: drone auto-discovers apps/modules/*.py
+by module name, and this one no longer imports. Archive after a session cycle
+proves nothing was connected.
 
 Manages a shared PRESENCE.central.json in .ai_central/ at the AIPass project root.
 Each branch can claim presence (one live session per branch), detect stale holders
