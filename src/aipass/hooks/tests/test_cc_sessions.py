@@ -69,8 +69,17 @@ class TestHasSessionFile:
 
 
 class TestGetPpidPortable:
+    # The helper shells out to `ps` and is documented "Linux + macOS. Returns None
+    # on failure". Windows has no `ps`, so None IS the contract there, not a
+    # miss; pinned per platform after the Windows matrix went red on 2c8271a7
+    # (assert None == 5516).
+    @pytest.mark.skipif(sys.platform == "win32", reason="ps-based; Linux + macOS only by contract")
     def test_reports_our_real_parent(self):
         assert cc_sessions._get_ppid_portable(os.getpid()) == os.getppid()
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="the documented Windows answer")
+    def test_windows_answers_none_by_contract(self):
+        assert cc_sessions._get_ppid_portable(os.getpid()) is None
 
     def test_dead_pid_returns_none(self):
         assert cc_sessions._get_ppid_portable(999999999) is None
