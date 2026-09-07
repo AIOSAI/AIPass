@@ -47,7 +47,7 @@ drone @hooks --help              # Full help reference
 | `drone @hooks context_window` | Show transcript fill vs the compact window |
 | `drone @hooks sandbox` | Show kernel sandbox (srt/bwrap) status |
 | `drone @hooks testwrite` | Show the test-write policy in force + what the gate cannot catch |
-| `drone @hooks test [--verbose]` | Run the portable hook test runner — fires every hook with mock data. **Not side-effect free:** it stamps a real snapshot into `.trinity/local.json` (see Status) |
+| `drone @hooks test [--verbose]` | Run the portable hook test runner — fires every hook with mock data against a throwaway branch skeleton, so no run touches real memory (2026-09-06). Bare `test` with no argument prints the module blurb and fires nothing — see Status |
 | `drone @hooks verify` | Cross-check provider settings vs project hook config (exits non-zero on ERROR findings) |
 | `drone @hooks --help` | Full help reference |
 | `drone @hooks --version` | Version info |
@@ -632,11 +632,13 @@ What is open, and what is stated rather than fixed:
 | `auto_watchdog` retirement is **decided but not executed** — it is live and fires on every PostToolUse (see its section above) | Blocked on a Patrick-present ceremony |
 | Branch audit is **100%** on every category, with **no `test_quality` bypass in `.seedgo/bypass.json`**. It sat at 99% from 2026-09-03, when the DPLAN-0325 sweep dropped that bypass and `seedgo`'s v4 pack went on asking for a `mock_json_handler` fixture and an `invalid_mode_raises` contract the sweep had retired. Measured green again 2026-09-05: @seedgo's v4 retirement has landed, and the 100 is earned rather than suppressed | Closed |
 | `.claude/provider_manifest.json` pins `2.1.228`; the installed binary is `2.1.263` | Drift, not re-pinned in this doc pass |
-| `drone @hooks test` fires the **real** PreCompact handlers, so `pre_compact_prep` stamps a genuine AUTO-COMPACT SNAPSHOT into the running branch's `.trinity/local.json` when no compaction happened. Found by running it for this doc pass, 2026-09-05; the false entry was removed by hand | Open, unreported before tonight |
+| ~~`drone @hooks test` fires the **real** PreCompact handlers, so `pre_compact_prep` stamps a genuine AUTO-COMPACT SNAPSHOT into the running branch's `.trinity/local.json` when no compaction happened. Found by running it for this doc pass, 2026-09-05; the false entry was removed by hand~~ | **Closed 2026-09-06.** Every fire now aims at a throwaway branch skeleton (payload `cwd` + process cwd + `AIPASS_HOME`). Proven by sha256 of all three `.trinity` files, identical across a run, with the handler's own log showing it stamped the skeleton — not vacuous |
+| Fixing the above surfaced two worse side effects the original report missed: `rollover` shelled out `drone @memory rollover run`, a **fleet-wide** memory trim, and `auto_process` spawned @memory's real background worker (the session guard keys on session id, so the first probe run of a mock id spawned for real). @memory resolves neither cwd nor `AIPASS_HOME` — measured, the name appears nowhere in its tree — so no environment seam can confine either | **Closed 2026-09-06.** Both refuse on `AIPASS_HOOK_PROBE`, read at the mutation and never at the entry, so everything up to the mutation still runs |
+| Bare `drone @hooks test` prints the module blurb and fires nothing (`hook_test.py:221` — `if not args: print_introspection()`). The documented command does not do the documented thing; the run needs an argument such as `--verbose`. Found 2026-09-06 while measuring the fix | Open — reported to @devpulse, not fixed here (a behaviour change outside the dispatched scope) |
 | A `MagicMock/LOG_FILE/` directory sits in the branch root, created 2026-07-10 — test debris from a mock used as a path. Author unknown; not attributed | Unexplained, left in place |
 | The `dead_code` 40% / "29 of 49 files" figure in Dynamic Dispatch is **historic and not re-verified** — re-running unshielded needs a bypass-rule change this branch does not make for a doc pass | Unverified, marked in place |
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-06*
 
 ---
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-06-19
+# Modified: 2026-09-06
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue."""
@@ -85,6 +85,16 @@ def handle(hook_data: dict) -> dict:  # noqa: ARG001
         return {"stdout": "", "exit_code": 0}
 
     logger.info("[HOOKS] rollover: overdue files detected — %s", check_output.replace("\n", " | "))
+
+    # Everything above is read-only and runs for real under the probe. This is
+    # the mutation: `rollover run` archives and TRIMS memory across the fleet,
+    # and @memory resolves its own roots — neither cwd nor AIPASS_HOME reaches
+    # it (measured 2026-09-06: the name appears nowhere in @memory's tree), so
+    # the refusal has to live at the call. Info, not warning: under a probe this
+    # is the designed path, not a fault.
+    if os.environ.get("AIPASS_HOOK_PROBE") == "1":
+        logger.info("[HOOKS] rollover: probe run — check ran, fleet rollover suppressed")
+        return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}
 
     success, output = _run_rollover(repo_root)
     if success:

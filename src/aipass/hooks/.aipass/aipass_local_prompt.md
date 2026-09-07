@@ -26,7 +26,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ```
 drone @hooks status              # Show hook config for current project
 drone @hooks log                 # Tail recent hook activity (last 20 JSONL entries)
-drone @hooks test                # Run the portable hook test runner
+drone @hooks test --verbose      # Portable hook runner (bare 'test' prints a blurb, fires nothing)
 drone @hooks verify              # Provider <-> project wiring check (non-zero on ERROR)
 drone @hooks --help              # Full help reference
 drone @hooks --version           # Version info

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-08-14
+# Modified: 2026-09-06
 # =============================================
 
 """Tests for handlers/lifecycle/auto_process.py.
@@ -18,6 +18,7 @@ The session guard now means "kicked once this session", not "ran once".
 """
 
 import logging
+import tempfile
 from unittest.mock import patch, MagicMock
 
 
@@ -201,7 +202,7 @@ class TestAutoProcessHandler:
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with patch(f"{MODULE}._mark_session_ran"):
                 with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
-                    result = handle({"tool_name": "Bash", "cwd": "/tmp"})
+                    result = handle({"tool_name": "Bash", "cwd": tempfile.gettempdir()})
 
         assert result["exit_code"] == 0
         assert result["sound"] == "auto process"
@@ -326,3 +327,53 @@ class TestSessionGuard:
                 _mark_session_ran()
 
         assert (tmp_path / "aipass-auto-process-test-mark").exists()
+
+
+class TestProbeSuppression:
+    """The test runner must not put @memory to work (DPLAN-0323 tie-up).
+
+    The session guard does not cover this: it keys on CLAUDE_CODE_SESSION_ID,
+    so the first probe run of a given mock id spawned a real background child.
+    Measured 2026-09-06 — the guard file for the mock id was dated the previous
+    night's probe run.
+    """
+
+    def test_probe_run_does_not_spawn(self, monkeypatch, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle import auto_process
+
+        mock_module = _make_mock_module()
+        # _GUARD_DIR is the real tempdir: without redirecting it these tests
+        # write guard files that outlive the run and silence the NEXT one.
+        monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-suppression-on")
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
+        with patch("importlib.import_module", return_value=mock_module):
+            result = auto_process.handle({})
+
+        mock_module.spawn_background.assert_not_called()
+        assert result["exit_code"] == 0
+
+    def test_real_run_still_spawns(self, monkeypatch, tmp_path):
+        """CAUSATION: proven both ways, or the guard proves nothing."""
+        from aipass.hooks.apps.handlers.lifecycle import auto_process
+
+        mock_module = _make_mock_module()
+        monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-suppression-off")
+        monkeypatch.delenv("AIPASS_HOOK_PROBE", raising=False)
+        with patch("importlib.import_module", return_value=mock_module):
+            auto_process.handle({})
+
+        mock_module.spawn_background.assert_called_once()
+
+    def test_probe_run_leaves_the_session_guard_unmarked(self, monkeypatch, tmp_path):
+        """A suppressed kick is not a kick — the next real prompt must still run."""
+        from aipass.hooks.apps.handlers.lifecycle import auto_process
+
+        monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-guard-check")
+        monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
+        with patch("importlib.import_module", return_value=_make_mock_module()):
+            auto_process.handle({})
+
+        assert not (tmp_path / "aipass-auto-process-probe-guard-check").exists()
