@@ -25,10 +25,19 @@ AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that variable per
 test, so every test lands in its own tmp_path without knowing it.
 """
 
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator, List, Tuple
+
+# The seam must exist at IMPORT time, not only inside the autouse fixture: the
+# repo-root conftest guard refuses to import a branch's json shim while
+# AIPASS_TEST_LOG_DIR is unset (61 errors under `-c pyproject.toml --rootdir=.`
+# on 2026-09-06). Sixteen branches set it here; this one set it per-test only
+# and passed in CI solely because a sibling conftest had already set it.
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
 
