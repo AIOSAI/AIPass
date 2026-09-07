@@ -446,3 +446,107 @@ class TestEveryResolverConsumerRefusesByName:
 
         assert result["success"] is False
         assert "no *_REGISTRY.json" in result["error"]
+
+
+class TestAnUnreadableRegistryIsNeverOverwritten:
+    """FPLAN-0492: a live registry that cannot be parsed must never be written over.
+
+    ``load_registry`` answers a MISSING file and an UNREADABLE one with the same
+    empty document, which is the right answer for a reader and a destructive one
+    for a writer: the read-modify-write cycle then rebuilds ``branches`` from
+    nothing. Measured 2026-09-07 with the guard disabled, on a 3-branch project
+    whose registry was truncated mid-file:
+
+      add_to_registry   -> 3 branches and metadata.id 'proj-cred-123' became
+                           1 branch and no metadata.id at all
+      sync_registry     -> the same file came back with 3 freshly minted
+        (fix=True)         uppercase entries, new registry_ids, and no
+                           metadata.id — every passport carrying the real
+                           credential orphaned
+
+    delete_branch and repair's move_branch were probed the same way and refuse on
+    their own ("Branch 'x' not found in registry"), so they are safe by structure
+    rather than by guard; they are not re-pinned here.
+    """
+
+    LIVE = {
+        "metadata": {"version": "1.0.0", "last_updated": "2026-09-07", "total_branches": 2, "id": "proj-cred-123"},
+        "branches": [
+            {"name": "alpha", "path": "src/alpha", "email": "@alpha", "status": "active", "registry_id": "a1"},
+            {"name": "beta", "path": "src/beta", "email": "@beta", "status": "active", "registry_id": "b1"},
+        ],
+    }
+
+    def _corrupt_registry(self, tmp_path):
+        path = tmp_path / "AIPASS_REGISTRY.json"
+        text = json.dumps(self.LIVE, indent=2)
+        path.write_text(text[: len(text) // 2], encoding="utf-8")  # exists, unparseable
+        return path
+
+    def test_add_to_registry_refuses_and_leaves_the_file_untouched(self, tmp_path):
+        from aipass.spawn.apps.handlers.registry import add_to_registry
+
+        path = self._corrupt_registry(tmp_path)
+        before = path.read_bytes()
+
+        added = add_to_registry(path, "GAMMA", str(tmp_path / "src" / "gamma"), "Profile", "@gamma")
+
+        assert added is False
+        assert path.read_bytes() == before
+
+    def test_add_to_registry_still_writes_a_readable_one(self, tmp_path):
+        """The control: refusing an unreadable file must not refuse a good one."""
+        from aipass.spawn.apps.handlers.registry import add_to_registry
+
+        path = tmp_path / "AIPASS_REGISTRY.json"
+        path.write_text(json.dumps(self.LIVE, indent=2), encoding="utf-8")
+
+        added = add_to_registry(path, "GAMMA", str(tmp_path / "src" / "gamma"), "Profile", "@gamma")
+
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert added is True
+        assert [b["name"] for b in written["branches"]] == ["GAMMA", "alpha", "beta"]
+        assert written["metadata"]["id"] == "proj-cred-123", "an existing credential is never touched"
+
+    def test_a_missing_registry_is_still_created(self, tmp_path):
+        """Absent is not unreadable — the create lane's own case stays open."""
+        from aipass.spawn.apps.handlers.registry import add_to_registry
+
+        path = tmp_path / "AIPASS_REGISTRY.json"
+
+        added = add_to_registry(path, "ALPHA", str(tmp_path / "src" / "alpha"), "Profile", "@alpha")
+
+        assert added is True
+        assert [b["name"] for b in json.loads(path.read_text(encoding="utf-8"))["branches"]] == ["ALPHA"]
+
+    def test_sync_registry_refuses_rather_than_rebuilding(self, tmp_path, monkeypatch):
+        from aipass.spawn.apps.handlers import sync_registry_ops
+
+        path = self._corrupt_registry(tmp_path)
+        before = path.read_bytes()
+        for name in ("alpha", "beta"):
+            branch = tmp_path / "src" / name / ".trinity"
+            branch.mkdir(parents=True)
+            (branch / "passport.json").write_text(json.dumps({"identity": {"citizen_class": "specialist"}}))
+        monkeypatch.setattr(sync_registry_ops, "find_registry", lambda *a, **k: path)
+
+        result = sync_registry_ops.sync_registry(fix=True)
+
+        assert "could not be read" in result["error"]
+        assert result["unregistered"] == []
+        assert path.read_bytes() == before
+
+    def test_the_guard_itself_separates_absent_from_unreadable(self, tmp_path):
+        from aipass.spawn.apps.handlers.registry import registry_is_writable_document
+
+        missing = tmp_path / "NOT_THERE.json"
+        corrupt = self._corrupt_registry(tmp_path)
+        not_an_object = tmp_path / "LIST_REGISTRY.json"
+        not_an_object.write_text("[]", encoding="utf-8")
+        good = tmp_path / "GOOD_REGISTRY.json"
+        good.write_text(json.dumps(self.LIVE), encoding="utf-8")
+
+        assert registry_is_writable_document(missing) is True
+        assert registry_is_writable_document(corrupt) is False
+        assert registry_is_writable_document(not_an_object) is False
+        assert registry_is_writable_document(good) is True

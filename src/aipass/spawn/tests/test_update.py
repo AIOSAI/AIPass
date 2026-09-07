@@ -714,3 +714,179 @@ class TestHandleUpdate:
             result = handle_update(["specialist", "--all"])
 
         assert result == 0
+
+
+class TestPassportHealIsNotAMigration:
+    """FPLAN-0492: the heal repairs three derived fields; it never changes schema.
+
+    The premise handed to spawn was that ``update @vera --dry-run`` half-migrates a
+    schema-1.0.0 passport — adding ``identity.principles`` beside the seven real
+    top-level ones while ``schema_version`` stays 1.0.0. Measured against the real
+    lane on 2026-09-07 it does not: that simulation ran raw ``deep_merge`` over the
+    whole document, and ``.trinity/passport.json`` never reaches ``_merge_json``.
+    ``_heal_passport`` walks _PASSPORT_HEAL_ALLOWLIST one field at a time, and all
+    three of those fields exist in schema 1.0.0 and 2.0.0 alike.
+
+    That is a property of the allowlist's CONTENTS, so it is pinned here: adding a
+    2.0-only field to the allowlist would half-migrate every 1.0 passport it met,
+    and this is the test that says so. Completing a migration — every field the
+    target schema requires, ``schema_version`` bumped in the same write, or a
+    refusal naming the reason — is ``migrate-passports``' job, and
+    ``passport_migration.migrate_document`` raises ``PassportMigrationError``
+    rather than write a partial document.
+    """
+
+    SCHEMA_1_PASSPORT = {
+        "document_metadata": {"schema_version": "1.0.0", "version": "1.0.0"},
+        "branch_info": {"branch_name": "legacy", "email": "@legacy", "git_branch": "main"},
+        "identity": {"citizen_class": "manager", "role": "archivist", "traits": ["careful"]},
+        "principles": ["Top-level, the 1.0 shape", "Seven of these in the real thing"],
+    }
+
+    def _heal(self, tmp_path, template_passport, existing_passport):
+        from aipass.spawn.apps.handlers.update_ops import _heal_passport
+
+        template_file = tmp_path / "template_passport.json"
+        template_file.write_text(json.dumps(template_passport, indent=2), encoding="utf-8")
+        dest = tmp_path / "branch" / ".trinity" / "passport.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(existing_passport, indent=2) + "\n", encoding="utf-8")
+        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+        return result, json.loads(dest.read_text(encoding="utf-8"))
+
+    def test_a_schema_1_passport_gains_no_2_0_fields_and_no_bump(self, tmp_path):
+        """The whole half-migration claim, as a pin: no new keys, no schema change."""
+        template = {
+            "document_metadata": {"schema_version": "2.0.0", "version": "2.0.0"},
+            "branch_info": {"email": "@template", "git_branch": "dev"},
+            "citizenship": {"residency": "resident", "citizen_id": ""},
+            "identity": {"traits": [], "principles": ["Code is truth - fail honestly"]},
+        }
+
+        result, healed = self._heal(tmp_path, template, self.SCHEMA_1_PASSPORT)
+
+        assert result == "unchanged"
+        assert healed["document_metadata"]["schema_version"] == "1.0.0"
+        assert "principles" not in healed["identity"]
+        assert "citizenship" not in healed
+        assert healed == self.SCHEMA_1_PASSPORT
+
+    def test_every_allowlisted_field_exists_in_both_schemas(self, tmp_path):
+        """The structural reason the test above passes — pinned so it stays the reason."""
+        from aipass.spawn.apps.handlers.update_ops import _PASSPORT_HEAL_ALLOWLIST
+
+        for section, key in _PASSPORT_HEAL_ALLOWLIST:
+            assert key in self.SCHEMA_1_PASSPORT.get(section, {}), (
+                f"{section}.{key} is on the heal allowlist but a schema-1.0.0 passport has no such field — "
+                "healing it there would be a migration, and a migration must complete or refuse"
+            )
+
+    def test_a_passport_written_with_escapes_is_left_alone(self, tmp_path):
+        """An untouched document must not be rewritten because it is SPELLED differently.
+
+        Passports written with ``ensure_ascii=True`` carry ``\\u2014`` where the heal's
+        own serialiser writes ``—``. The old check compared those two texts, so every
+        such passport came back "updated" with a backup and a diff full of dashes and
+        not one changed field (measured on @vera's passport, 2026-09-07: 120 bytes of
+        difference, zero fields). Comparing documents instead of text answers the
+        question that was actually being asked.
+        """
+        from aipass.spawn.apps.handlers.update_ops import _heal_passport
+
+        template_file = tmp_path / "template_passport.json"
+        template_file.write_text(
+            json.dumps({"branch_info": {"email": "@t", "git_branch": "dev"}, "identity": {"traits": []}}, indent=2),
+            encoding="utf-8",
+        )
+        existing = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "branch_info": {"email": "@legacy", "git_branch": "main"},
+            "identity": {"traits": ["Radical specificity — exact numbers"]},
+        }
+        dest = tmp_path / "branch" / ".trinity" / "passport.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(existing, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        before = dest.read_bytes()
+        assert b"\\u2014" in before, "fixture must carry an escaped character for this to mean anything"
+
+        result = _heal_passport(template_file, dest, {}, dry_run=False, trace=False)
+
+        assert result == "unchanged"
+        assert dest.read_bytes() == before
+
+
+class TestTemplateOwnedListsGrow:
+    """FPLAN-0492: declared template-owned lists are additive; every other list is not.
+
+    deep_merge keeps a non-empty existing list whole, so a list entry added to a
+    template after a branch was born never reaches that branch. Measured on @vera:
+    the template's ``.registry_ignore.json`` went from two ``ignore_files`` entries
+    to four and an update would have left the branch at two.
+    """
+
+    TEMPLATE_IGNORE = {
+        "metadata": {"version": "1.3.0"},
+        "ignore_files": [".template_registry.json", ".registry_ignore.json", "test_cli_routing.py"],
+        "ignore_patterns": ["__pycache__", "*.pyc"],
+    }
+    BRANCH_IGNORE = {
+        "metadata": {"version": "1.1.0"},
+        "ignore_files": [".template_registry.json", ".registry_ignore.json"],
+        "ignore_patterns": ["__pycache__", "*.pyc"],
+    }
+
+    def _merge(self, tmp_path, resolved_path, template_data, existing_data, name="file.json"):
+        from aipass.spawn.apps.handlers.update_ops import _merge_json
+
+        template_file = tmp_path / f"template_{name}"
+        template_file.write_text(json.dumps(template_data, indent=2), encoding="utf-8")
+        dest = tmp_path / "branch" / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(existing_data, indent=2) + "\n", encoding="utf-8")
+        result = _merge_json(template_file, dest, {}, False, False, tmp_path / ".recovery", resolved_path)
+        return result, json.loads(dest.read_text(encoding="utf-8"))
+
+    def test_a_declared_list_receives_the_templates_additions(self, tmp_path):
+        result, merged = self._merge(tmp_path, ".spawn/.registry_ignore.json", self.TEMPLATE_IGNORE, self.BRANCH_IGNORE)
+
+        assert result == "updated"
+        assert merged["ignore_files"] == [
+            ".template_registry.json",
+            ".registry_ignore.json",
+            "test_cli_routing.py",
+        ]
+
+    def test_the_branchs_own_entries_and_their_order_survive(self, tmp_path):
+        existing = dict(self.BRANCH_IGNORE, ignore_files=["branch_only.json", ".template_registry.json"])
+
+        _result, merged = self._merge(tmp_path, ".spawn/.registry_ignore.json", self.TEMPLATE_IGNORE, existing)
+
+        assert merged["ignore_files"][:2] == ["branch_only.json", ".template_registry.json"]
+        assert set(merged["ignore_files"]) == set(self.TEMPLATE_IGNORE["ignore_files"]) | {"branch_only.json"}
+        assert len(merged["ignore_files"]) == len(set(merged["ignore_files"])), "no duplicates"
+
+    def test_a_second_pass_changes_nothing(self, tmp_path):
+        from aipass.spawn.apps.handlers.update_ops import _merge_json
+
+        template_file = tmp_path / "template.json"
+        template_file.write_text(json.dumps(self.TEMPLATE_IGNORE, indent=2), encoding="utf-8")
+        dest = tmp_path / "branch" / ".registry_ignore.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(self.BRANCH_IGNORE, indent=2) + "\n", encoding="utf-8")
+
+        first = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
+        second = _merge_json(template_file, dest, {}, False, False, tmp_path / ".rec", ".spawn/.registry_ignore.json")
+
+        assert (first, second) == ("updated", "unchanged")
+
+    def test_an_undeclared_file_keeps_existing_wins(self, tmp_path):
+        """@devpulse carries 17 fewer deny rules than the template because it is the one
+        citizen allowed to write the repository history. A blanket union would re-deny the
+        fleet's only publishing lane, so permissions are NOT in the declared set."""
+        template = {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(commit-ish*)"], "allow": []}}
+        existing = {"permissions": {"deny": ["Bash(rm -rf*)"], "allow": ["Bash(ls*)"]}}
+
+        result, merged = self._merge(tmp_path, ".claude/settings.local.json", template, existing, "settings.json")
+
+        assert result == "unchanged"
+        assert merged["permissions"]["deny"] == ["Bash(rm -rf*)"]
