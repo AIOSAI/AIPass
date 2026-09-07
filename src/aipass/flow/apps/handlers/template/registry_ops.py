@@ -37,6 +37,7 @@ from typing import Any, Dict, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.repo_root import module_file
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -45,8 +46,6 @@ from aipass.flow.apps.handlers.json import json_handler
 MODULE_NAME = "registry_ops"
 
 # registry_ops.py -> template/ -> handlers/ -> apps/ -> flow/
-from aipass.flow.apps.handlers.repo_root import module_file
-
 FLOW_ROOT: Path = module_file(__file__).parents[3]
 REGISTRY_PATH: Path = FLOW_ROOT / "flow_json" / "template_registry.json"
 
@@ -239,9 +238,39 @@ def _auto_register_new_types(data: Dict[str, Any]) -> bool:
 
 
 def _derive_prefix(dir_name: str, used: set) -> str | None:
-    """Derive a unique prefix from a directory name, or None if collision."""
-    first_word = dir_name.split("_")[0]
-    prefix = (first_word[0].upper() + "PLAN") if first_word else "XPLAN"
+    """Derive a unique prefix from a directory name, or None if collision.
+
+    THE RULE: one initial per meaningful word, then ``PLAN``. A trailing
+    ``plans`` segment is the noun every directory carries and contributes
+    nothing, so it is dropped first — ``dev_plans`` -> ``DPLAN``,
+    ``team_dev_plans`` -> ``TDPLAN``.
+
+    It used to read the FIRST word only, which made the prefix depend on
+    install history rather than on the directory name: ``team_dev_plans``
+    derived ``TPLAN`` on a fresh install while this machine's registry already
+    held ``TDPLAN`` from an earlier manual registration, so every existing
+    ``TDPLAN-NNNN`` file was unreadable on a new clone. Ruled 2026-09-07
+    (FPLAN-0492 wave 4): TDPLAN on every install, and the derivation must be
+    deterministic — the same directory name yields the same prefix everywhere.
+    All seven template directories now derive the prefix their registry row
+    already holds.
+
+    Only the COLLISION fallback still consults *used*: a second directory
+    wanting a taken prefix widens to the first two letters of its first word,
+    and failing that returns None for manual registration.
+
+    Args:
+        dir_name: Template directory name, e.g. ``team_dev_plans``.
+        used: Prefixes already taken in the registry.
+
+    Returns:
+        The derived prefix, or None when it collides and cannot widen.
+    """
+    words = [word for word in dir_name.split("_") if word]
+    if words and words[-1].lower() == "plans" and len(words) > 1:
+        words = words[:-1]
+    prefix = ("".join(word[0] for word in words).upper() + "PLAN") if words else "XPLAN"
+    first_word = words[0] if words else ""
     if prefix in used and len(first_word) > 1:
         prefix = first_word[:2].upper() + "PLAN"
     return None if prefix in used else prefix

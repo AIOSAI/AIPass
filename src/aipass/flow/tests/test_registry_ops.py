@@ -922,10 +922,56 @@ class TestDerivePrefix:
 
         assert result == "XPLAN"
 
-    def test_underscore_prefix_splits_on_underscore(self):
-        """Uses only the first word before underscore."""
+    def test_every_meaningful_word_contributes_an_initial(self):
+        """One initial per word, trailing 'plans' dropped: SAPLAN, not SPLAN.
+
+        Was pinned as SPLAN while the rule read the first word only. That rule
+        is what made ``team_dev_plans`` derive TPLAN on a fresh install and it
+        was changed under the 2026-09-07 ruling, so this pin moves with it.
+        """
         mod = _import_mod()
 
         result = mod._derive_prefix("security_audit_plans", set())
 
-        assert result == "SPLAN"
+        assert result == "SAPLAN"
+
+    def test_team_dev_plans_derives_tdplan_on_a_fresh_install(self):
+        """The ruled answer, with an EMPTY registry — no install history to lean on."""
+        mod = _import_mod()
+
+        assert mod._derive_prefix("team_dev_plans", set()) == "TDPLAN"
+
+    def test_derivation_does_not_depend_on_what_is_already_registered(self):
+        """Same directory, three different registries, one answer.
+
+        The defect was that the answer moved with install history; a pin that
+        only asks the empty case cannot see that coming back.
+        """
+        mod = _import_mod()
+
+        answers = {
+            mod._derive_prefix("team_dev_plans", set()),
+            mod._derive_prefix("team_dev_plans", {"FPLAN", "DPLAN"}),
+            mod._derive_prefix("team_dev_plans", {"FPLAN", "DPLAN", "APLAN", "PPLAN", "RPLAN", "CPLAN"}),
+        }
+
+        assert answers == {"TDPLAN"}
+
+    def test_every_shipped_template_dir_derives_its_registered_prefix(self):
+        """A fresh install must reach the prefixes this branch's files already use.
+
+        Measured off the tree and off the registry rather than from a list
+        written here: a hand-copied table would agree with itself no matter how
+        wrong the rule is. This is the pin that fails if a NEW template
+        directory is added whose registered prefix the rule cannot reach.
+        """
+        mod = _import_mod()
+        registry = mod.load_registry()
+
+        mismatches = {
+            dir_name: (entry.get("prefix"), mod._derive_prefix(dir_name, set()))
+            for dir_name, entry in registry["types"].items()
+            if mod._derive_prefix(dir_name, set()) != entry.get("prefix")
+        }
+
+        assert mismatches == {}, f"derivation disagrees with the registry: {mismatches}"

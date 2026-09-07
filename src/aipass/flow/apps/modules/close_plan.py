@@ -432,14 +432,26 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         console.print("[dim]Run 'drone @flow close --help' for usage[/dim]")
         console.print()
-        return True  # Command was handled (error already displayed)
+        # Handled, and FAILED. It used to return True here, which flow.py reads
+        # as success: `drone @flow close not_a_plan` printed the refusal and
+        # exited 0, so a script chained on && carried on as if a plan had
+        # closed (ruling 2026-09-07 — a refusal must carry a failing code).
+        raise SystemExit(1)
 
     # 3. EXECUTE: Run workflow orchestrator
-    close_plan(plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run, exclude_types=exclude_types)
+    closed = close_plan(
+        plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run, exclude_types=exclude_types
+    )
 
-    # 4. RETURN: True = command was handled (even if the operation failed,
-    #    the error has already been displayed -- returning False would cause
-    #    flow.py to print a spurious "Unknown command" message)
+    # 4. RETURN: handled is not the same as succeeded. Returning True on a
+    #    failed close made `drone @flow close not_a_plan` print "Invalid plan
+    #    number" and exit 0 — the refusal was already correct, the exit code
+    #    lied about it (ruling 2026-09-07). False still must not be returned:
+    #    flow.py reads that as "no module claimed this command" and prints a
+    #    second, contradictory "Unknown command".
+    if not closed:
+        raise SystemExit(1)
+
     return True
 
 

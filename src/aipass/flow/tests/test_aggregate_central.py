@@ -95,21 +95,21 @@ class TestRunCommand:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_run_calls_aggregate_with_heal(self, mock_aggregate):
         handle_command = _import_handle_command()
-        result = handle_command("aggregate", ["run"])
+        result = handle_command("aggregate", ["--heal"])
         assert result is True
         mock_aggregate.assert_called_once_with(heal=True)
 
     @patch(f"{_MOD}.aggregate_central", return_value=False)
     def test_run_returns_false_on_failure(self, mock_aggregate):
         handle_command = _import_handle_command()
-        result = handle_command("aggregate", ["run"])
+        result = handle_command("aggregate", ["--heal"])
         assert result is False
 
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_heal_flag_explicit(self, mock_aggregate):
         """Explicit --heal flag should still pass heal=True."""
         handle_command = _import_handle_command()
-        result = handle_command("aggregate", ["run", "--heal"])
+        result = handle_command("aggregate", ["--heal"])
         assert result is True
         mock_aggregate.assert_called_once_with(heal=True)
 
@@ -130,7 +130,7 @@ class TestNoHealFlag:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_no_heal_with_run(self, mock_aggregate):
         handle_command = _import_handle_command()
-        result = handle_command("aggregate", ["run", "--no-heal"])
+        result = handle_command("aggregate", ["--no-heal"])
         assert result is True
         mock_aggregate.assert_called_once_with(heal=False)
 
@@ -186,11 +186,11 @@ class TestOperationLogging:
     @patch(f"{_MOD}.json_handler")
     def test_logs_operation(self, mock_jh, mock_aggregate):
         handle_command = _import_handle_command()
-        result = handle_command("aggregate", ["run"])
+        result = handle_command("aggregate", ["--heal"])
         assert result is True  # Command was handled
         mock_jh.log_operation.assert_called_once_with(
             "central_aggregated",
-            {"command": "aggregate", "args": ["run"]},
+            {"command": "aggregate", "args": ["--heal"]},
         )
 
     @patch(f"{_MOD}.print_introspection")

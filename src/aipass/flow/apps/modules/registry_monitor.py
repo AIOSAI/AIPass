@@ -55,6 +55,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -81,6 +82,9 @@ from aipass.flow.apps.handlers.registry.heal_registry import (
 # =============================================
 
 MODULE_NAME = "registry_monitor"
+
+# The subcommands this verb accepts, named once for the check and the refusal.
+REGISTRY_SUBCOMMANDS = ("scan", "heal", "status")
 
 
 def _find_repo_root() -> Path:
@@ -248,14 +252,16 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     else:
-        error(f"Unknown subcommand: {subcommand}")
-        console.print()
-        console.print("Available commands:")
-        console.print("  • scan    - One-time scan and heal registry")
-        console.print("  • heal    - Alias for scan")
-        console.print("  • status  - Show registry status")
-        console.print()
-        return False
+        # Through the shared gate (ruling 2026-09-07). This door already
+        # refused by name and exited 1, but by returning False — which tells
+        # flow.py no module claimed the command, so it printed a SECOND,
+        # contradictory "Unknown command: registry" and the whole help screen
+        # underneath the real diagnosis. One refusal, one exit.
+        try:
+            refuse_unknown(subcommand, door="registry", valid=REGISTRY_SUBCOMMANDS, noun="subcommand")
+        except UnknownArgument as exc:
+            error(exc.message, suggestion=exc.usage)
+            raise SystemExit(1) from exc
 
 
 # =============================================

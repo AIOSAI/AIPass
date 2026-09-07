@@ -1,5 +1,6 @@
 """Tests for close_plan module -- handle_command routing."""
 
+import pytest
 from unittest.mock import patch
 
 
@@ -229,11 +230,18 @@ class TestParseError:
         f"{_PARSER}.parse_close_command_args",
         return_value=(None, False, False, False, [], "Plan number or --all required"),
     )
-    def test_parse_error_returns_true(self, mock_parse, mock_close, mock_format):
-        """Parse error is still a handled command."""
+    def test_parse_error_exits_non_zero_without_closing_anything(self, mock_parse, mock_close, mock_format):
+        """A refused close FAILS.
+
+        Was pinned as "still a handled command" returning True, which flow.py
+        turns into exit 0 — so `drone @flow close not_a_plan && next_step` ran
+        the next step as if a plan had closed (ruling 2026-09-07). Handled and
+        succeeded are different answers; the refusal itself was always correct.
+        """
         handle_command = _import_handle_command()
-        result = handle_command("close", ["--unknown-flag"])
-        assert result is True
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("close", ["--unknown-flag"])
+        assert exit_info.value.code == 1
         mock_close.assert_not_called()
 
     @patch(f"{_MOD}.error_display")
@@ -250,8 +258,9 @@ class TestParseError:
         diagnosis printed under a true refusal.
         """
         handle_command = _import_handle_command()
-        result = handle_command("close", ["--all", "--exclude-type", "APLNA"])
-        assert result is True  # Command was handled (error displayed)
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("close", ["--all", "--exclude-type", "APLNA"])
+        assert exit_info.value.code == 1  # Handled, refused, and it says so
         mock_error.assert_called_once_with("Unknown plan type(s): APLNA. Registered: APLAN, FPLAN")
 
     @patch(f"{_MOD}.format_delete_usage_error", return_value="Usage error text")
@@ -262,7 +271,8 @@ class TestParseError:
     )
     def test_parse_error_does_not_print_the_misleading_usage_block(self, mock_parse, mock_close, mock_format):
         handle_command = _import_handle_command()
-        handle_command("close", ["--unknown-flag"])
+        with pytest.raises(SystemExit):
+            handle_command("close", ["--unknown-flag"])
         mock_format.assert_not_called()
 
 

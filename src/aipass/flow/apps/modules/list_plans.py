@@ -51,6 +51,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -72,6 +73,10 @@ from aipass.flow.apps.handlers.plan.list_ops import list_plans_impl
 # =============================================
 
 MODULE_NAME = "list_plans"
+
+# The filters this verb accepts. Named once so the refusal message, the help
+# text and the check itself cannot drift apart.
+VALID_FILTERS = ("open", "closed", "all")
 
 # =============================================
 # INTROSPECTION FUNCTION
@@ -202,15 +207,21 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Log the operation
     json_handler.log_operation("plans_listed", {"command": command, "args": args})
 
-    # STEP 1: Parse filter argument
-    filter_type = "open"  # Default to open plans
+    # STEP 1: Parse filter argument. An unknown filter is REFUSED, never
+    # defaulted (ruling 2026-09-07): listing the open plans because the caller
+    # misspelled "closed" answers a question nobody asked, and exit 0 tells a
+    # script it got what it wanted.
+    try:
+        filter_arg = args[0].lower()
+        if filter_arg not in VALID_FILTERS:
+            refuse_unknown(args[0], door="list", valid=VALID_FILTERS, noun="filter")
+        if len(args) > 1:
+            refuse_extra(args[1:], door=f"list {filter_arg}")
+    except UnknownArgument as exc:
+        error(exc.message, suggestion=exc.usage)
+        raise SystemExit(1) from exc
 
-    filter_arg = args[0].lower()
-    if filter_arg in ["open", "closed", "all"]:
-        filter_type = filter_arg
-    else:
-        warning(f"Unknown filter '{filter_arg}', defaulting to 'open'")
-        console.print("[dim]Valid filters: open, closed, all[/dim]")
+    filter_type = filter_arg
 
     # STEP 2: Execute workflow
     list_plans(filter_type)
