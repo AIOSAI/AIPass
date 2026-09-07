@@ -36,8 +36,9 @@ if sys.platform == "win32":
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate, refuse
 
 # Import report generation handler (implementation lives in handler layer)
 from aipass.daemon.apps.handlers.monitoring.report_generator import (
@@ -56,6 +57,9 @@ from aipass.daemon.apps.handlers.monitoring import activity_collector
 # =============================================
 
 MODULE_NAME = "activity_report"
+
+# The one cure line every branch-health refusal points at.
+BRANCH_HEALTH_USAGE = "drone @daemon branch-health <branch_name> [--hours N]"
 
 
 # =============================================
@@ -304,6 +308,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         if args and args[0] in ("--help", "-h", "help"):
             print_introspection()
             return True
+        gate(command, args, value_flags=("--hours", "-t"), usage="drone @daemon activity_report [--hours N]")
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
@@ -317,6 +322,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             _print_activity_help()
             return True
 
+        gate(command, args, value_flags=("--hours", "-t"), usage="drone @daemon activity [--hours N]")
+
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
@@ -329,6 +336,14 @@ def handle_command(command: str, args: List[str]) -> bool:
         if args and args[0] in ("--help", "-h", "help"):
             _print_activity_report_help()
             return True
+
+        gate(
+            command,
+            args,
+            flags=("--json", "-j"),
+            value_flags=("--hours", "-t"),
+            usage="drone @daemon activity-report [--json] [--hours N]",
+        )
 
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
@@ -385,17 +400,19 @@ def _resolve_branch(branch_name: str) -> str | None:
     return None
 
 
-def _refuse(message: str) -> NoReturn:
-    """Print a refusal and exit non-zero, naming the token that caused it.
+def _refuse(verb: str, token: str, usage: str = "") -> NoReturn:
+    """Refuse *token* by name and exit non-zero, through the shared gate.
 
     Patrick's standing ruling: an unknown command or argument FAILS with a
     non-zero exit and a message naming the token. Printing a refusal and
     returning 0 tells a caller's `&&` that the command succeeded - reported by
     @devpulse's 2026-09-07 fleet sweep against `branch-health`, which rendered
     two "not found" blocks and exited 0.
+
+    Delegated to handlers/cli/arg_gate rather than spelled here: wave 2b gates
+    eleven verbs, and eleven refusals written independently drift.
     """
-    error(message)
-    sys.exit(1)
+    refuse(verb, token, usage)
 
 
 def _handle_branch_health(args: List[str]) -> bool:
@@ -409,19 +426,17 @@ def _handle_branch_health(args: List[str]) -> bool:
         _print_branch_health_help()
         return True
 
+    # The usage line rides the refusal's own suggestion slot now, so it is not
+    # printed a second time here — one refusal, one cure, in one place.
     branch_name = _extract_branch_name(args)
     if not branch_name:
-        console.print()
-        console.print("Usage: branch-health <branch_name> [--hours N]")
-        console.print("Example: branch-health DRONE")
-        _refuse("branch-health requires a branch name")
+        _refuse("branch-health", " ".join(args), BRANCH_HEALTH_USAGE)
 
     resolved = _resolve_branch(branch_name)
     if resolved is None:
-        known = ", ".join(_known_branch_names())
         console.print()
-        console.print(f"Known branches: {known}")
-        _refuse(f"branch-health: unknown branch '{branch_name}'")
+        console.print(f"Known branches: {', '.join(_known_branch_names())}")
+        _refuse("branch-health", branch_name, BRANCH_HEALTH_USAGE)
 
     hours = _parse_hours_arg(args)
     report = generate_branch_report(resolved, since_hours=hours)

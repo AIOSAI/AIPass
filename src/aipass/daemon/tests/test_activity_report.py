@@ -13,6 +13,11 @@ from unittest.mock import patch
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
 
+# activity_report no longer imports error() at all (FPLAN-0492 wave 2b): a verb
+# RAISES UnknownArgument and apps/daemon.py renders it, so error() is patched on
+# the router and the refusal itself is asserted on the exception.
+ROUTER = "aipass.daemon.apps.daemon"
+
 
 # =============================================
 # handle_command -- routing basics
@@ -21,7 +26,7 @@ MODULE = "aipass.daemon.apps.modules.activity_report"
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestHandleCommandRouting:
     """Tests for handle_command routing and unknown commands."""
@@ -69,7 +74,7 @@ class TestHandleCommandRouting:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestActivityReportCommand:
     """Tests for 'activity-report' command."""
@@ -120,7 +125,7 @@ class TestActivityReportCommand:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestActivityReportAlias:
     """Tests for 'activity_report' underscore alias."""
@@ -159,7 +164,7 @@ ROSTER_TARGET = f"{MODULE}._known_branch_names"
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestBranchHealthCommand:
     """Tests for 'branch-health' command."""
@@ -214,12 +219,12 @@ class TestBranchHealthCommand:
         """
         import pytest
 
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(UnknownArgument) as exc:
             handle_command("branch-health", ["--hours", "48"])
-        assert exc.value.code == 1
-        mock_err.assert_called()
+        assert exc.value.verb == "branch-health"
 
     def test_unknown_branch_refuses_non_zero_and_names_the_token(self, _log, mock_err, mock_con, _jh):
         """@devpulse's 2026-09-07 fleet sweep, row 21: EXIT-0-ON-FAILURE.
@@ -232,16 +237,16 @@ class TestBranchHealthCommand:
         """
         import pytest
 
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
         from aipass.daemon.apps.modules.activity_report import handle_command
 
         with patch(f"{MODULE}.generate_branch_report") as mock_br:
-            with pytest.raises(SystemExit) as exc:
+            with pytest.raises(UnknownArgument) as exc:
                 handle_command("branch-health", ["not_a_real_subarg_xyz"])
 
-        assert exc.value.code == 1
         # Refused BEFORE any report is generated — one refusal, not two blocks.
         mock_br.assert_not_called()
-        assert "not_a_real_subarg_xyz" in str(mock_err.call_args)
+        assert exc.value.token == "not_a_real_subarg_xyz"
 
     def test_a_known_branch_resolves_case_insensitively(self, _log, _err, mock_con, _jh):
         from aipass.daemon.apps.modules.activity_report import handle_command
@@ -426,7 +431,7 @@ class TestRenderEntryHealthDegradation:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestBranchHealthWiring:
     """branch-health must actually call @memory's API — the todo's whole point."""

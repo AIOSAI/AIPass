@@ -25,6 +25,7 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, warning
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import load_runstate, job_key
 from aipass.daemon.apps.handlers.schedule.rotation import (
@@ -313,6 +314,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args and args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate("rotation", args, flags=("--json",), usage="drone @daemon rotation [--json]")
 
     json_handler.log_operation("rotation_command", {"json": "--json" in args})
 

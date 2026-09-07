@@ -20,6 +20,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
@@ -492,6 +493,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     elif args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate("run", args, flags=("--dry-run",), usage="drone @daemon run [--dry-run]")
 
     dry_run = "--dry-run" in args
 

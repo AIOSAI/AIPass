@@ -34,6 +34,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.monitoring.inbox_scanner import (
     DEFAULT_STALE_HOURS,
     find_stale_inboxes,
@@ -280,6 +281,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args and args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate(
+        "inbox-sweep",
+        args,
+        flags=("--dry-run",),
+        value_flags=("--hours", "--limit"),
+        usage="drone @daemon inbox-sweep [--dry-run] [--hours N] [--limit N]",
+    )
 
     dry_run = "--dry-run" in args
     stale_hours = _parse_int_flag(args, "--hours", DEFAULT_STALE_HOURS)

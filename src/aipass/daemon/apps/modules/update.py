@@ -29,6 +29,7 @@ from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, error, warning
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (
     load_inbox,
     load_local,
@@ -173,11 +174,18 @@ def handle_command(command: str, args: list) -> bool:
     if command != "update":
         return False
 
-    try:
-        if args and args[0] in ["--help", "-h", "help"]:
-            print_help()
-            return True
+    if args and args[0] in ["--help", "-h", "help"]:
+        print_help()
+        return True
 
+    # OUTSIDE the try, and that placement is the point. The digest's catch-all
+    # exists so a broken data file reports one error instead of cascading — but
+    # it would also swallow the refusal below, log it as "Error generating update
+    # digest" and return True, handing the caller exit 0 for a command that was
+    # rejected. A refusal is not a digest failure and must not be caught as one.
+    gate("update", args, usage="drone @daemon update")
+
+    try:
         # No args = run the digest (this is the primary use case)
         json_handler.log_operation("update_digest")
         inbox_data = load_inbox()
@@ -199,10 +207,19 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def main() -> None:
-    """Main entry point for direct execution."""
+    """Main entry point for direct execution.
+
+    Help is screened ANYWHERE in the argument list, not just in the first slot.
+    The branch router already normalises this, so `drone @daemon update x --help`
+    prints help — but this entry point handed raw sys.argv straight to
+    handle_command(), which only inspected args[0]. Since wave 2b added the
+    unknown-argument gate, the difference stopped being cosmetic: `python
+    update.py x --help` used to run the digest, and would now REFUSE a help
+    request. A help flag must never exit non-zero.
+    """
     args = sys.argv[1:]
 
-    if len(args) == 0 or args[0] in ["--help", "-h", "help"]:
+    if not args or any(a in ("--help", "-h", "help") for a in args):
         print_help()
         return
 

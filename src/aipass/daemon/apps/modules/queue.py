@@ -20,6 +20,7 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
@@ -182,6 +183,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate("queue", args, flags=("--json",), usage="drone @daemon queue [--json]")
 
     json_handler.log_operation("queue_command", {"json": "--json" in args})
 

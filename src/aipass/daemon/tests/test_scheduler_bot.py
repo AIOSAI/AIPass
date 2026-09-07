@@ -334,18 +334,33 @@ class TestDormantArchived:
             from aipass.daemon.apps.handlers.actions.actions_registry import load_registry  # type: ignore[import-not-found] # noqa: F401
 
     def test_schedule_module_retired(self):
-        """Schedule module handle_command shows retirement notice, not old CRUD."""
+        """Bare `schedule` shows the migration notice; a retired subcommand refuses.
+
+        The notice is still the right GUIDANCE and still prints — but `schedule
+        create test` did not create anything, and exiting 0 told the caller's
+        `&&` that it had (FPLAN-0492 wave 2b).
+        """
+        import pytest
+
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
         from aipass.daemon.apps.modules.schedule import handle_command as sched_cmd
 
         assert sched_cmd("schedule", []) is True
-        assert sched_cmd("schedule", ["create", "test"]) is True
+        with pytest.raises(UnknownArgument) as exc:
+            sched_cmd("schedule", ["create", "test"])
+        assert exc.value.token == "create"
 
     def test_actions_module_retired(self):
-        """Actions module handle_command shows retirement notice, not old CRUD."""
+        """Bare `actions` shows the migration notice; a retired subcommand refuses."""
+        import pytest
+
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
         from aipass.daemon.apps.modules.actions import handle_command as act_cmd
 
         assert act_cmd("actions", []) is True
-        assert act_cmd("actions", ["list"]) is True
+        with pytest.raises(UnknownArgument) as exc:
+            act_cmd("actions", ["list"])
+        assert exc.value.token == "list"
 
     def test_queue_command_wired(self):
         """drone @daemon queue is routable."""

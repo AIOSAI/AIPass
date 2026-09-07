@@ -115,39 +115,66 @@ class TestUpdateCommand:
 # ============================================================================
 
 
+from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
+
+ROUTER = "aipass.daemon.apps.daemon"
+
+
 class TestErrorCascade:
-    """Tests that error paths return True (command handled) to prevent cascade."""
+    """A handled-but-refused command must not cascade to another module.
 
-    def test_actions_unknown_subcommand_returns_true(self) -> None:
-        """Unknown subcommand should return True (error displayed, not cascaded)."""
-        result = _actions_mod.handle_command("actions", ["nonexistent_xyz"])
-        assert result is True, "Unknown subcommand must return True to prevent cascade"
+    THE CONTRACT IS UNCHANGED; THE SHAPE OF THE ANSWER MOVED (FPLAN-0492 wave
+    2b). These used to assert `is True` — "actions handled it, router, stop
+    looking". `actions` is a retired verb, so every one of these subcommands is
+    an unknown argument, and Patrick's standing ruling says an unknown argument
+    exits non-zero naming the token. SystemExit(1) stops the cascade harder than
+    a True ever did: nothing after it runs at all. What would still be a defect
+    is falling THROUGH to another module, and that is what each of these pins.
+    """
 
-    def test_actions_invalid_id_returns_true(self) -> None:
-        """Invalid action ID should return True (error displayed, not cascaded)."""
-        result = _actions_mod.handle_command("actions", ["9999", "info"])
-        assert result is True, "Invalid ID must return True to prevent cascade"
+    @pytest.mark.parametrize(
+        "args",
+        [
+            pytest.param(["nonexistent_xyz"], id="unknown-subcommand"),
+            pytest.param(["9999", "info"], id="invalid-id"),
+            pytest.param(["delete"], id="delete-without-id"),
+            pytest.param(["set"], id="set-without-args"),
+            pytest.param(["set", "badtype"], id="set-bad-type"),
+        ],
+    )
+    def test_actions_refuses_every_retired_subcommand(self, args) -> None:
+        """Called DIRECTLY, a verb raises; the router turns that into exit 1.
 
-    def test_actions_delete_no_id_returns_true(self) -> None:
-        """actions delete with no ID should return True (error displayed)."""
-        result = _actions_mod.handle_command("actions", ["delete"])
-        assert result is True
+        The split is the layering: the module decides the argument is unknown,
+        apps/daemon.py renders and exits. Pinning the raise here and the exit in
+        test_route_command_* keeps both halves honest.
+        """
+        with pytest.raises(UnknownArgument) as exc:
+            _actions_mod.handle_command("actions", args)
+        assert exc.value.token == args[0]
+        assert exc.value.verb == "actions"
 
-    def test_actions_set_no_args_returns_true(self) -> None:
-        """actions set with insufficient args should return True (error displayed)."""
-        result = _actions_mod.handle_command("actions", ["set"])
-        assert result is True
-
-    def test_actions_set_bad_type_returns_true(self) -> None:
-        """actions set with unknown type should return True (error displayed)."""
-        result = _actions_mod.handle_command("actions", ["set", "badtype"])
-        assert result is True
-
-    def test_route_command_no_cascade(self) -> None:
-        """route_command should return True for handled-but-failed actions commands."""
+    def test_the_refusal_names_the_offending_token(self) -> None:
+        """A refusal that does not name the token leaves the caller guessing."""
         modules = _daemon_mod.get_modules()
-        result = _daemon_mod.route_command("actions", ["nonexistent_xyz"], modules)
-        assert result is True, "route_command must not fall through on handled errors"
+        with patch(f"{ROUTER}.error") as mock_err:
+            with pytest.raises(SystemExit):
+                _daemon_mod.route_command("actions", ["nonexistent_xyz"], modules)
+        assert "nonexistent_xyz" in str(mock_err.call_args)
+
+    def test_route_command_does_not_fall_through_on_a_refusal(self) -> None:
+        """The router must not try the next module after a verb refuses.
+
+        route_command catches Exception broadly and moves on to the next module.
+        UnknownArgument is caught BEFORE that, or the refusal would be logged as
+        a module error and the loop would carry on — turning "actions: unknown
+        argument 'x'" into "unknown command: actions", which names the wrong
+        thing and exits through a different path entirely.
+        """
+        modules = _daemon_mod.get_modules()
+        with pytest.raises(SystemExit) as exc:
+            _daemon_mod.route_command("actions", ["nonexistent_xyz"], modules)
+        assert exc.value.code == 1
 
 
 # ============================================================================
