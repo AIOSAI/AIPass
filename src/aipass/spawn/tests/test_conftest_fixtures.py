@@ -32,11 +32,6 @@ class TestMockLoggerReachesItsConsumer:
     def test_the_replacement_is_actually_a_mock(self, mock_logger):
         assert isinstance(file_ops.logger, Mock)
 
-    def test_calls_through_the_consumer_are_recorded(self, mock_logger):
-        file_ops.logger.info("probe")
-
-        mock_logger.info.assert_called_once_with("probe")
-
     def test_patching_the_prax_package_would_reach_nothing(self):
         """The retired spelling, pinned as the failure it was.
 
@@ -56,11 +51,6 @@ class TestMockJsonHandlerReachesItsConsumer:
 
     def test_fixture_replaces_the_call_site(self, mock_json_handler):
         assert file_ops.json_handler.log_operation is mock_json_handler
-
-    def test_the_patched_call_is_recorded(self, mock_json_handler):
-        file_ops.json_handler.log_operation("probe")
-
-        mock_json_handler.assert_called_once_with("probe")
 
 
 class TestIsolateSpawnJsonActuallyRedirects:

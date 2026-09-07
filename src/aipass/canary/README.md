@@ -23,13 +23,22 @@ drone @canary --version    # branch and version
 Run the branch's own suite from the repo root:
 
 ```bash
-pytest src/aipass/canary/tests -v          # 61 passed, measured 2026-09-06
+pytest src/aipass/canary/tests -v          # 47 passed, measured 2026-09-07
 ```
 
-The suite is 33 `def test_` functions across 3 files; parametrization expands
-them to 61 collected cases. Both numbers are true of different things — the
+The suite is 27 `def test_` functions across 2 files; parametrization expands
+them to 47 collected cases. Both numbers are true of different things — the
 tree below states the function count, which is what the standards audit
 measures.
+
+Was 33 across 3 files until 2026-09-07, when `tests/test_json_handler.py` moved
+to `tests/.archive/deleted_2026-09-07_test_json_handler.py`. Its six tests all
+pinned properties of the canonical json shim, and every one of them is now
+carried once — parametrised over all 18 branches, canary included — by
+`seedgo/tests/test_json_handler_contract.py`. Nothing about canary's shim went
+unmeasured; the measurement moved to where the shim is actually one file.
+Archived and counted by @seedgo under FPLAN-0491; the numbers above are its
+measurement, not an estimate.
 
 **What CI actually runs.** No workflow names canary. `.github/workflows/ci.yml`
 runs the whole fleet in ONE process from the repo root, on a 3.10–3.13 matrix:
@@ -99,7 +108,7 @@ CANARY/
 │   └── plugins/            # Scaffold, empty
 ├── artifacts/              # Test artifacts written during dispatches
 ├── canary_json/            # Where the json shim writes — test data, nothing depends on it
-├── tests/                  # 33 test functions in 3 files; 61 cases, all passing 2026-09-06
+├── tests/                  # 27 test functions in 2 files; 47 cases, all passing 2026-09-07
 ├── docs/
 └── README.md
 ```

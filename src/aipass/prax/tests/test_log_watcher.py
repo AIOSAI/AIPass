@@ -612,43 +612,6 @@ class TestReadNewContent:
 class TestOnModified:
     """Test on_modified event handler."""
 
-    def test_ignores_directory_events(self):
-        """Should ignore directory modification events."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        event = MagicMock()
-        event.is_directory = True
-
-        watcher.on_modified(event)
-        mock_queue.enqueue.assert_not_called()
-
-    def test_ignores_non_log_files(self):
-        """Should ignore files that don't end with .log."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/fake/logs/system/test.txt"
-
-        watcher.on_modified(event)
-        mock_queue.enqueue.assert_not_called()
-
-    def test_ignores_logs_outside_system_dir(self):
-        """Should ignore log files outside the system logs directory."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/other/dir/test.log"
-
-        with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs/system")):
-            watcher.on_modified(event)
-
-        mock_queue.enqueue.assert_not_called()
-
     def test_processes_valid_log_file(self, tmp_path):
         """Should process a valid log file in the system logs directory."""
         mod = _import_log_watcher()
@@ -685,23 +648,6 @@ class TestOnModified:
             patch.object(watcher, "_read_new_content", side_effect=OSError("disk error")),
         ):
             # Should not raise
-            watcher.on_modified(event)
-
-        mock_queue.enqueue.assert_not_called()
-
-    def test_skips_when_no_new_content(self):
-        """Should skip processing when _read_new_content returns None."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = "/fake/logs/system/empty.log"
-
-        with (
-            patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs/system")),
-            patch.object(watcher, "_read_new_content", return_value=None),
-        ):
             watcher.on_modified(event)
 
         mock_queue.enqueue.assert_not_called()

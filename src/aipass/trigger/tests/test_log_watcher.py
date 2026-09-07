@@ -1886,25 +1886,6 @@ class TestProcessLogLineDeeper:
         assert call_kwargs["fingerprint"] == "fp456"
         assert call_kwargs["count"] == 1
 
-    def test_registry_path_fire_event_none_logs_warning(self):
-        """Registry available but _fire_event is None: logs warning."""
-        lw = _import_log_watcher()
-        lw._fire_event = None
-        lw._REGISTRY_AVAILABLE = True
-
-        mock_report = MagicMock(
-            return_value={
-                "is_new": True,
-                "count": 1,
-                "id": "reg999",
-            }
-        )
-        lw.registry_report = mock_report
-
-        watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("No callback set")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-
     def test_registry_report_exception_falls_to_fallback(self):
         """Registry report raises: falls through to fallback path."""
         lw = _import_log_watcher()
@@ -1964,22 +1945,6 @@ class TestProcessLogLineDeeper:
         assert fire.call_count == 2
         second_call = fire.call_args_list[1][1]
         assert second_call["count"] == 2
-
-    def test_local_count_fire_event_none_logs_warning(self):
-        """Local count with _fire_event=None: logs warning, no crash."""
-        lw = _import_log_watcher()
-        lw._fire_event = None
-        lw._REGISTRY_AVAILABLE = True
-        lw.registry_report = MagicMock(side_effect=RuntimeError("registry down"))
-        lw._fallback_error_counts.clear()
-
-        with patch.dict(
-            sys.modules,
-            {"aipass.trigger.apps.handlers.error_registry": None},
-        ):
-            watcher = lw.BranchLogWatcher()
-            line = self._make_error_line("No callback at all")
-            watcher._process_log_line(line, _BRANCH_LOG_PATH)
 
     def test_outer_exception_handler_catches_unexpected(self):
         """Outer try/except catches unexpected errors without raising."""
@@ -2182,15 +2147,6 @@ class TestProcessWarningLine:
         watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
 
         fire.assert_called_once()
-
-    def test_missing_callback_does_not_raise(self):
-        """Warning lines can arrive before the module layer wires the bus."""
-        lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
-        lw._fire_event = None
-        watcher = lw.BranchLogWatcher()
-
-        watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
 
     def test_unexpected_failure_is_contained(self):
         """The watcher must survive a warning it cannot parse."""

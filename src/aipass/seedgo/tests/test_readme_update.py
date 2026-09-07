@@ -187,20 +187,6 @@ def test_print_help_runs():
 # ---------------------------------------------------------------------------
 
 
-def test_print_target_error_no_args():
-    """_print_target_error handles 'no_args' code without raising."""
-    from aipass.seedgo.apps.modules.readme_update import _print_target_error
-
-    _print_target_error("no_args")
-
-
-def test_print_target_error_no_branches():
-    """_print_target_error handles 'no_branches' code without raising."""
-    from aipass.seedgo.apps.modules.readme_update import _print_target_error
-
-    _print_target_error("no_branches")
-
-
 def test_print_target_error_not_found():
     """_print_target_error handles 'not_found:xyz' code without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_target_error

@@ -27,9 +27,7 @@ Redirection here is the ``AIPASS_TEST_LOG_DIR`` seam the conftest sets per test.
 import json
 from pathlib import Path
 
-import pytest
 
-from aipass.prax import json_handler as json_service
 from aipass.spawn.apps.handlers.json import json_handler
 
 
@@ -109,16 +107,6 @@ class TestTheSeamRedirectsSpawnsJson:
 class TestTheShimBindsAndNeverWraps:
     """spawn's names ARE the service's callables, not calls into it."""
 
-    @pytest.mark.parametrize("name", BOUND_NAMES)
-    def test_every_public_name_is_a_bound_method_of_the_service(self, name):
-        """A wrapper would add a stack frame, and the service names the calling
-        module from frame 2 — every entry spawn logged would be attributed to
-        the wrapper's file instead of the caller's."""
-        bound = getattr(json_handler, name)
-
-        assert bound.__func__ is getattr(json_service.JsonHandle, name)
-        assert isinstance(bound.__self__, json_service.JsonHandle)
-
     def test_the_shim_reexports_every_documented_name(self):
         """The full service surface, not a subset."""
         expected = BOUND_NAMES + ("InvalidDocument", "WriteFailed")
@@ -126,21 +114,9 @@ class TestTheShimBindsAndNeverWraps:
 
         assert missing == [], f"shim is missing re-exports: {missing}"
 
-    def test_the_exceptions_are_the_services_own(self):
-        """A caller catching spawn's InvalidDocument catches the service's."""
-        assert json_handler.InvalidDocument is json_service.InvalidDocument
-        assert json_handler.WriteFailed is json_service.WriteFailed
-
     def test_the_shim_is_bound_to_spawn(self):
         """for_module derived spawn's root from the shim's own __file__."""
         assert json_handler.get_json_path.__self__.branch_root.name == "spawn"
-
-    def test_the_shim_carries_nothing_else(self):
-        """Byte-identical in all eighteen branches by design — anything spawn
-        adds here is the drift DPLAN-0325 removed."""
-        public = {name for name in vars(json_handler) if not name.startswith("_")}
-
-        assert public == set(json_handler.__all__) | {"json_handler"}
 
     def test_the_shim_is_byte_identical_to_the_template_spawn_ships(self):
         """spawn mints every citizen from that file; if the two ever differ, a

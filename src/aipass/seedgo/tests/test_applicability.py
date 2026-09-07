@@ -158,12 +158,20 @@ def test_trigger_is_production_only():
     assert applicability.applies_to(discover_checkers()["trigger"]) == applicability.PRODUCTION
 
 
-def test_test_quality_is_the_one_tests_only_standard():
+def test_no_standard_is_tests_only_since_v4_retired():
+    """v4 test_quality was the sole APPLIES_TO = tests checker; it left 2026-09-07.
+
+    The bucket is empty, not gone: applicability.TESTS is still a legal
+    declaration and the checklist/audit lanes still branch on it. This pins that
+    nothing in the shipped pack claims it, so a future checker declaring `tests`
+    is a deliberate act and not an inherited one.
+    """
     from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 
     checkers = discover_checkers()
     tests_only = [n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS]
-    assert tests_only == ["test_quality"]
+    assert tests_only == []
+    assert "test_quality" not in checkers
 
 
 # ---------------------------------------------------------------------------

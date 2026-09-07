@@ -21,7 +21,7 @@ THRESHOLD = 100
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 47
+EXPECTED_STANDARDS = 46
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

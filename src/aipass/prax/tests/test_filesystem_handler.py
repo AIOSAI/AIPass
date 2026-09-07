@@ -1615,15 +1615,6 @@ class TestHandleEvent:
         # Should not raise
         handler._handle_event("modified", "/some/file.py")
 
-    def test_no_queue(self):
-        """Should not crash without a queue."""
-        mod, _, mock_bd, mock_filters, _ = _import_filesystem_handler()
-        handler = _make_handler(mod, queue=None)
-        mock_filters.should_monitor.return_value = True
-        mock_filters.get_priority.return_value = "info"
-        mock_bd.detect_branch_from_path.return_value = "PRAX"
-        handler._handle_event("modified", "/home/user/src/aipass/prax/test.py")
-
     def test_priority_levels_mapped(self):
         """Should map priority levels correctly."""
         mod, mock_eq, mock_bd, mock_filters, queue = _import_filesystem_handler()

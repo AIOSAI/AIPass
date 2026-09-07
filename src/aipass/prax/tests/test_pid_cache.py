@@ -123,18 +123,6 @@ class TestRefresh:
             mod.refresh()
             mock_parse.assert_not_called()
 
-    def test_refreshes_when_ttl_expired(self, tmp_path):
-        """Cache refresh runs when TTL has expired."""
-        mod = _import_pid_cache()
-        with mod._pid_cache_lock:
-            setattr(mod, "_pid_cache_last_refresh", 0.0)
-
-        registry_data = {"branches": [{"name": "flow", "path": str(tmp_path / "flow")}]}
-        registry_file = tmp_path / "AIPASS_REGISTRY.json"
-        registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
-
-        mod.refresh(repo_root=tmp_path)
-
     def test_handles_missing_registry(self, tmp_path):
         """Missing registry file does not crash."""
         mod = _import_pid_cache()

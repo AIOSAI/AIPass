@@ -239,6 +239,11 @@ class TestNobodyEvictsThePackageOneWay:
     # mechanical fix (assign __path__) broke 41 tests in one pass: several of
     # these shadow their whole subtree ON PURPOSE, and telling them apart is a
     # per-file reading, not a sed. Named so a SEVENTEENTH cannot arrive quietly.
+    #
+    # 2026-09-07 (DELETE walk): the three test_symbolic{,_cli,_module}.py rows
+    # left with their files, archived under tests/.archive/. Their subject was
+    # the parked symbolic tier, so the stand-ins went with them rather than
+    # being fixed. test_symbolic_extras.py stays — it is still on disk.
     KNOWN_BARE_PACKAGE_STAND_INS = {
         "conftest.py::aipass.prax.apps.modules",
         "test_orchestrator_exec.py::aipass.memory.apps.handlers.monitor",
@@ -251,10 +256,7 @@ class TestNobodyEvictsThePackageOneWay:
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.monitor",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.rollover",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.tracking",
-        "test_symbolic.py::aipass.memory.apps.handlers.symbolic",
-        "test_symbolic_cli.py::aipass.memory.apps.handlers.symbolic",
         "test_symbolic_extras.py::aipass.memory.apps.handlers.vector",
-        "test_symbolic_module.py::aipass.memory.apps.handlers.symbolic",
     }
 
     def _bare_package_stand_ins(self):

@@ -774,19 +774,6 @@ def test_watch_agent_live_dispatch_timeout_path():
     assert result["agent_state"] == "timeout"
 
 
-@pytest.mark.integration
-def test_watch_agent_crash_path_skipped():
-    """Crash-path integration test — skipped.
-
-    Cheaply triggering a real agent crash mid-task would require either
-    crafting a malformed dispatch (risk: corrupting the ai_mail flow) or
-    SIGKILLing a live monitor (risk: leaving stale locks). The unit test
-    test_watch_agent_crashed_via_bounce_file already covers the bounce-file
-    branch via the same code path the monitor uses.
-    """
-    pytest.skip("Crash path covered by unit test test_watch_agent_crashed_via_bounce_file")
-
-
 def _case_insensitive_glob(monkeypatch):
     """Emulate a Windows directory listing on any OS: *_REGISTRY.json also
     matches *_registry.json there, because NTFS compares names case-folded.

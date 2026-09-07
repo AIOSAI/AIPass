@@ -1,8 +1,12 @@
-"""Tests for 6 seedgo checker handlers: stderr_routing, todo, trigger, dead_code, test_quality, unused_function."""
+"""Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code, unused_function.
+
+Was 6. The test_quality section retired 2026-09-07 with the v4 standard itself
+(FPLAN-0491); disposal copy in tests/.archive/deleted_2026-09-07_test_quality_v4.py.
+"""
 
 # =================== META ====================
 # Name: test_checkers_batch4.py
-# Description: Unit tests for 6 seedgo checker handlers (batch 4)
+# Description: Unit tests for 5 seedgo checker handlers (batch 4)
 # Version: 1.0.0
 # Created: 2026-03-29
 # Modified: 2026-03-29
@@ -23,9 +27,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
 )
 from aipass.seedgo.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
-)
-from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
-    check_branch as quality_check_branch,
 )
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
     check_branch as unused_function_check_branch,
@@ -266,168 +267,6 @@ class TestDeadCodeCheck:
             "def handle_command(): pass\n",
         )
         result = dead_code_check_branch(str(branch))
-        assert result["score"] == 100
-        assert result["passed"] is True
-
-
-# =============================================
-# 5. test_quality_check (check_branch)
-# =============================================
-
-
-@patch("aipass.seedgo.apps.handlers.aipass_standards.test_quality_check.json_handler")
-class TestTestQualityCheck:
-    """Tests for the test_quality_check checker."""
-
-    def test_test_quality_clean_passes(self, mock_json, tmp_path: Path) -> None:
-        """Branch with test files containing relevant patterns scores >= 75."""
-        branch = _make_branch(tmp_path)
-        tests_dir = branch / "tests"
-        tests_dir.mkdir()
-
-        # Create a module so module_coverage has something to find
-        _write_file(
-            branch / "apps" / "modules" / "core.py",
-            "def run(): pass\n",
-        )
-
-        # Write a comprehensive conftest that covers many pattern categories
-        _write_file(
-            tests_dir / "conftest.py",
-            (
-                "import pytest\n"
-                "from pathlib import Path\n"
-                "from unittest.mock import MagicMock\n"
-                "import importlib\n"
-                "\n"
-                "@pytest.fixture\n"
-                "def tmp_path(tmp_path):\n"
-                "    return tmp_path\n"
-                "\n"
-                "@pytest.fixture\n"
-                "def sample_test_data():\n"
-                "    return {'key': 'value'}\n"
-                "\n"
-                "@pytest.fixture(autouse=True)\n"
-                "def mock_infrastructure():\n"
-                "    yield\n"
-                "\n"
-                "@pytest.fixture\n"
-                "def mock_logger():\n"
-                "    return MagicMock()\n"
-                "\n"
-                "@pytest.fixture\n"
-                "def mock_json_handler():\n"
-                "    return MagicMock()\n"
-                "\n"
-                "@pytest.fixture\n"
-                "def cleanup(tmp_path):\n"
-                "    from shutil import rmtree\n"
-                "    yield tmp_path\n"
-                "    rmtree(tmp_path, ignore_errors=True)\n"
-            ),
-        )
-
-        # Write a test file that covers many standard categories
-        _write_file(
-            tests_dir / "test_core.py",
-            (
-                "import pytest\n"
-                "import sys\n"
-                "import importlib\n"
-                "from pathlib import Path\n"
-                "from aipass.{name}.apps.modules.core import run\n"
-                "\n"
-                "def test_json_handler_create_default():\n"
-                "    result = _create_default()\n"
-                "    assert validate_json_structure(result)\n"
-                "    p = get_json_path('test')\n"
-                "    assert ensure_json_exists(p) is True\n"
-                "    data = load_json(p)\n"
-                "    save_json(p, data)\n"
-                "    log_operation('test', {{}})\n"
-                "    ensure_module_jsons('mod')\n"
-                "\n"
-                "def test_cli_routing():\n"
-                "    result = run('--help')\n"
-                '    run("-h")\n'
-                "    run('help')\n"
-                "    # test_no_args path\n"
-                "    assert 'unknown_command' or True\n"
-                "    assert result is True\n"
-                "    assert result is False\n"
-                "    print_help()\n"
-                "    print_introspection()\n"
-                "    capsys = None\n"
-                "\n"
-                "def test_error_resilience():\n"
-                "    with pytest.raises(FileNotFoundError):\n"
-                "        pass\n"
-                "    # corrupt json\n"
-                "    from json import JSONDecodeError\n"
-                "    # empty_file test\n"
-                "    empty_content = ''\n"
-                "    # nonexistent dir\n"
-                "    pass\n"
-                "\n"
-                "def test_return_type_contracts():\n"
-                "    assert isinstance(result, bool)\n"
-                "    assert isinstance(result, Path)\n"
-                "    assert ensure_json_exists(p) is True\n"
-                "    assert isinstance(result, dict)\n"
-                "\n"
-                "def test_exception_contracts():\n"
-                "    with pytest.raises(ValueError):\n"
-                "        _create_default()\n"
-                "    with pytest.raises(Exception):\n"
-                "        save_json(None, None)\n"
-                "    # invalid_mode test\n"
-                "    pass\n"
-                "\n"
-                "def test_data_structure_contracts():\n"
-                "    assert 'module_name' in result\n"
-                "    assert 'last_updated' in result\n"
-                "    assert 'log_entry' in result\n"
-                "\n"
-                "def test_success_failure_paths():\n"
-                "    assert result is True\n"
-                "    assert result is False\n"
-                "    run('--help')\n"
-                "    print_introspection()\n"
-                "\n"
-                "def test_init_provisioning():\n"
-                "    assert p.exists()\n"
-                "    ensure_json_exists(p)\n"
-                "    import os; os.makedirs('x', exist_ok=True)\n"
-                "    # no_overwrite / already_exists check\n"
-                "    already_exists = True\n"
-                "    assert isinstance(result, dict)\n"
-                "\n"
-                "def test_infrastructure_mocking():\n"
-                "    # autouse=True fixture\n"
-                "    sys.modules['fake'] = MagicMock()\n"
-                "    importlib.reload(mod)\n"
-                "\n".format(name=branch.name)
-            ),
-        )
-
-        result = quality_check_branch(str(branch))
-        assert result["score"] >= 75
-        assert result["standard"] == "TEST_QUALITY"
-
-    def test_test_quality_violation_caught(self, mock_json, tmp_path: Path) -> None:
-        """Branch with no test files scores 0."""
-        branch = _make_branch(tmp_path)
-        # No tests/ directory at all
-        result = quality_check_branch(str(branch))
-        assert result["score"] == 0
-        assert result["passed"] is False
-
-    def test_test_quality_bypass_respected(self, mock_json, tmp_path: Path) -> None:
-        """Bypass rules produce score=100."""
-        branch = _make_branch(tmp_path)
-        bypass = [{"standard": "test_quality"}]
-        result = quality_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
 

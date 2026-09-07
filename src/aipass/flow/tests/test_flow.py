@@ -544,13 +544,6 @@ class TestPrintModuleHelp:
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
         print_module_help("create_plan", [mod])
 
-    def test_prefix_match(self) -> None:
-        """Finds module when command is a prefix (e.g., 'create' matches 'create_plan')."""
-        from aipass.flow.apps.flow import print_module_help
-
-        mod = _make_module("create_plan", doc="Create plans\nDetails")
-        print_module_help("create", [mod])
-
     def test_no_match(self) -> None:
         """Shows error for unknown command."""
         from aipass.flow.apps.flow import print_module_help

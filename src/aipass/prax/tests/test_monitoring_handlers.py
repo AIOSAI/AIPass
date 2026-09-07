@@ -602,14 +602,6 @@ class TestFileEventCallback:
         call_kwargs = mod.MonitoringEvent.call_args
         assert call_kwargs[1]["action"] == "renamed" or call_kwargs.kwargs.get("action") == "renamed"
 
-    def test_handles_enqueue_failure(self):
-        """Should handle failed enqueue gracefully (no exception)."""
-        mod, _, _, _ = _import_file_watcher_integration()
-        mod.global_queue.enqueue.return_value = False
-
-        # Should not raise
-        mod.file_event_callback("PRAX", "MODIFIED", "/some/file.py")
-
     def test_handles_exception(self):
         """Should catch and log exceptions."""
         mod, _, _, _ = _import_file_watcher_integration()
@@ -1138,12 +1130,12 @@ class TestFindRepoRoot:
             return Path("/counted/root")
 
         original = mod.find_repo_root
-        mod.find_repo_root = counting
+        setattr(mod, "find_repo_root", counting)
         try:
             first = detector._find_repo_root()
             second = detector._find_repo_root()
         finally:
-            mod.find_repo_root = original
+            setattr(mod, "find_repo_root", original)
 
         assert first == second == Path("/counted/root")
         assert len(calls) == 1

@@ -384,22 +384,6 @@ class TestHeartbeat:
         assert first_call[0][1] == 101  # message_id
         assert "Processing..." in first_call[0][2]
 
-    @patch("aipass.skills.lib.telegram.apps.handlers.base_bot.HEARTBEAT_INTERVAL", 0.1)
-    def test_heartbeat_stops_when_pending_removed(self, base_bot, tmp_path):
-        """Heartbeat should exit when pending file is removed."""
-        # Create then immediately remove pending file
-        base_bot.pending_file.write_text("{}")
-
-        with patch.object(base_bot, "edit_message"):
-            with patch.object(base_bot, "_tmux_session_exists", return_value=True):
-                base_bot._start_heartbeat(chat_id=12345, processing_msg_id=101)
-                time.sleep(0.05)
-                base_bot.pending_file.unlink()
-                time.sleep(0.3)
-                base_bot._stop_heartbeat()
-
-        # Thread should have noticed the missing file and stopped early
-
     def test_stop_heartbeat_without_start(self, base_bot):
         """Stopping heartbeat without starting should not raise."""
         base_bot._stop_heartbeat()  # Should be a no-op

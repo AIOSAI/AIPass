@@ -911,66 +911,6 @@ def test_the_two_standards_share_the_shim_TEST_not_a_copy_of_a_string():
 
 
 # ---------------------------------------------------------------------------
-# Tests -- v4 test_quality retires the handler's items (DPLAN-0325 part B)
-# ---------------------------------------------------------------------------
-
-
-def test_the_handlers_own_categories_no_longer_score_a_branch():
-    """A per-branch TEXT scan cannot see coverage that moved to one service.
-
-    The handler's behaviour is tested once, by execution, over all 18 shims in
-    test_json_handler_contract.py. Measured 2026-09-03: the four swept trees
-    each lost their sole carrier for these items when the DPLAN-0059 stamp
-    files were archived, and CI gates every branch at 100.
-    """
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import STANDARD_CATEGORIES
-
-    assert "json_handler" not in STANDARD_CATEGORIES
-    assert "exception_contracts" not in STANDARD_CATEGORIES
-    assert "data_structure_contracts" not in STANDARD_CATEGORIES
-    assert "mock_json_handler" not in STANDARD_CATEGORIES["conftest_fixtures"]
-    assert "load_correct_type" not in STANDARD_CATEGORIES["return_type_contracts"]
-    assert "ensure_returns_bool" not in STANDARD_CATEGORIES["return_type_contracts"]
-    assert "returns_dict" not in STANDARD_CATEGORIES["init_provisioning"]
-    assert "sys_modules_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
-    assert "reimport_after_mock" not in STANDARD_CATEGORIES["infrastructure_mocking"]
-
-
-def test_the_total_moved_with_the_items_it_counts():
-    """Numerator and denominator move together, which is why nobody drops."""
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
-        STANDARD_CATEGORIES,
-        TOTAL_ITEMS,
-    )
-
-    assert TOTAL_ITEMS == sum(len(items) for items in STANDARD_CATEGORIES.values()) + 3
-    assert TOTAL_ITEMS == 31
-
-
-def test_a_subscripted_isinstance_is_still_a_bool_return_contract():
-    """@aipass asserts isinstance(result["ok"], bool) — real coverage, missed.
-
-    Red-first: with only the literal `isinstance(result, bool)` token the item
-    reads as uncovered, and @aipass's sweep stays below the CI gate for a
-    contract its suite actually pins.
-    """
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
-
-    patterns = STANDARD_CATEGORIES["return_type_contracts"]["command_returns_bool"]
-    source = 'def test_ok():\n    assert isinstance(result["ok"], bool)\n'
-    assert _find_covering_file(patterns, [("test_sandbox_check.py", source)]) == "test_sandbox_check.py"
-
-
-def test_an_empty_input_test_counts_however_the_branch_spells_it():
-    """test_empty_project is empty-input resilience; empty_file was a spelling."""
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _find_covering_file, STANDARD_CATEGORIES
-
-    patterns = STANDARD_CATEGORIES["error_resilience"]["empty_file"]
-    source = "def test_empty_project(tmp_path):\n    assert scan(tmp_path) == []\n"
-    assert _find_covering_file(patterns, [("test_structure_scan.py", source)]) == "test_structure_scan.py"
-
-
-# ---------------------------------------------------------------------------
 # Tests -- json_structure recognises a branch-owned operation-logging seam
 # ---------------------------------------------------------------------------
 
@@ -1046,81 +986,12 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 
 
 # ---------------------------------------------------------------------------
-# Tests -- an item is only scored where the branch ships a subject for it
+# RETIRED 2026-09-07 (FPLAN-0491) -- the v4 test_quality sections.
+#
+# Two sections lived here: "v4 test_quality retires the handler's items"
+# (DPLAN-0325 part B) and "an item is only scored where the branch ships a
+# subject for it". Both imported test_quality_check, which moved to
+# apps/handlers/aipass_standards/.archive/ when Patrick sealed DPLAN-0323.
+# A test whose subject is archived cannot go red; it can only ImportError.
+# Verbatim disposal copy: tests/.archive/deleted_2026-09-07_test_quality_v4.py
 # ---------------------------------------------------------------------------
-
-
-def _branch_with(tmp_path, apps_body: str, test_body: str = "def test_x():\n    assert True\n"):
-    """A minimal branch: some production code, some tests."""
-    module = tmp_path / "apps" / "modules" / "work.py"
-    module.parent.mkdir(parents=True)
-    module.write_text(apps_body, encoding="utf-8")
-    suite = tmp_path / "tests" / "test_work.py"
-    suite.parent.mkdir(parents=True)
-    suite.write_text(test_body, encoding="utf-8")
-    return tmp_path
-
-
-def test_a_branch_that_parses_no_json_is_not_charged_for_corrupt_json(tmp_path):
-    """@canary's whole production surface parses no JSON and returns no Path.
-
-    Measured 2026-09-03: retiring these four fleet-wide was the obvious move and
-    the measurement refused it — 16 of 18 branches earn each of them from tests
-    with nothing to do with the handler. The defect was asking every branch for
-    coverage of something two of them do not do.
-    """
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import check_branch
-
-    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
-    result = check_branch(str(branch))
-    overall = next(c for c in result["checks"] if c["name"] == "Overall coverage")
-    assert "not applicable to this branch" in overall["message"]
-    assert "error_resilience/corrupt_json" in overall["message"]
-
-
-def test_a_branch_that_does_parse_json_is_still_charged(tmp_path):
-    """Red-first: without the probe the gate would excuse every branch."""
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
-        _inapplicable_items,
-        check_branch,
-    )
-
-    branch = _branch_with(tmp_path, "import json\n\n\ndef work(p):\n    return json.load(p.open())\n")
-    assert ("error_resilience", "corrupt_json") not in _inapplicable_items(str(branch))
-    result = check_branch(str(branch))
-    resilience = next(c for c in result["checks"] if c["name"] == "error_resilience")
-    assert "corrupt_json" in resilience["message"]
-
-
-def test_the_shim_does_not_hand_every_branch_every_subject(tmp_path):
-    """The handler is the fleet's file, byte-identical everywhere.
-
-    Counting it would give every branch json parsing, a Path return and a write,
-    and the gate would never exclude anything again.
-    """
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import _inapplicable_items
-
-    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
-    shim = branch / "apps" / "handlers" / "json" / "json_handler.py"
-    shim.parent.mkdir(parents=True)
-    shim.write_text(
-        "import json\nfrom pathlib import Path\n\n\ndef get_json_path(n) -> Path:\n"
-        "    Path(n).mkdir()\n    return Path(json.load(open(n)))\n",
-        encoding="utf-8",
-    )
-
-    assert len(_inapplicable_items(str(branch))) == 4
-
-
-def test_an_excluded_item_leaves_the_denominator_too(tmp_path):
-    """It neither convicts nor flatters: both sides of the fraction move."""
-    from aipass.seedgo.apps.handlers.aipass_standards.test_quality_check import (
-        TOTAL_ITEMS,
-        _inapplicable_items,
-        check_branch,
-    )
-
-    branch = _branch_with(tmp_path, "def work():\n    return 1\n")
-    excluded = len(_inapplicable_items(str(branch)))
-    overall = next(c for c in check_branch(str(branch))["checks"] if c["name"] == "Overall coverage")
-    assert f"/{TOTAL_ITEMS - excluded} items covered" in overall["message"]

@@ -2,7 +2,7 @@
 
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 46 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
+**Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 45 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
 **Version:** 2.0.1
 **Created:** 2026-03-05
@@ -22,7 +22,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 ## Overview
 
 ### What I Do
-- Audit all 18 citizen branches against 46 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, gateway boundary, etc.)
+- Audit all 18 citizen branches against 45 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, gateway boundary, etc.)
 - Score files 0-100 per standard and report violations with actionable details
 - Manage bypass rules (`.seedgo/bypass.json`) for deliberate exceptions
 - Run pyright diagnostics across branches for type error detection
@@ -41,7 +41,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 ## Commands
 
 All commands available via `drone @seedgo <command>` or `python3 -m aipass.seedgo.apps.seedgo <command>`.
-Every command below was run against this branch on **2026-09-05** and produced the output described.
+Every command below was run against this branch on **2026-09-07** and produced the output described.
 
 ### Via Drone (primary)
 
@@ -51,14 +51,14 @@ drone @seedgo --help                                   # Usage guide (see the ga
 drone @seedgo --version                                # Version string — "seedgo v2.0.1"
 
 # Audit
-drone @seedgo audit aipass                             # Audit all 18 citizens (46 standards + diagnostics)
+drone @seedgo audit aipass                             # Audit all 18 citizens (45 standards + diagnostics)
 drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
-drone @seedgo standard                                 # List every standard name across ALL THREE packs (58)
+drone @seedgo standard                                 # List every standard name across ALL THREE packs (57)
 drone @seedgo standard cli                             # Show standard content (short form)
-drone @seedgo standards_query aipass_standards         # List the 46 standards in the aipass pack
+drone @seedgo standards_query aipass_standards         # List the 45 standards in the aipass pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
 
 # Per-file Check
@@ -78,7 +78,7 @@ drone @seedgo audit-tests @branch                      # Execution-tier test qua
 drone @seedgo audit-tests <directory>                  # Any directory with pytest targets
 drone @seedgo audit-tests aipass                       # Every citizen
 
-# Test quality v5 (generic pack, shadow mode — scores, gates nothing)
+# Test quality v5 (generic pack — weekly cadence + on demand, scores, gates nothing)
 drone @seedgo audit pytest_quality @branch             # 11 AST rules over a project's tests
 drone @seedgo audit pytest_quality                     # Every citizen
 
@@ -109,7 +109,7 @@ python3 -m aipass.seedgo.apps.seedgo standards_query aipass_standards cli
 
 > **Note:** `diagnostics` takes no branch argument despite what `--help` shows — standalone
 > diagnostics is disabled and runs through the audit pipeline (`audit aipass [@branch]`).
-> Re-checked 2026-09-05: `drone @seedgo diagnostics @flow` answers *"Unknown argument: '@flow'"*.
+> Re-checked 2026-09-07: `drone @seedgo diagnostics @flow` answers *"Unknown argument: '@flow'"*.
 
 > **`--help` names the whole command surface as of 2026-09-06.** Until then its closing
 > `Commands:` line stopped at 13 and left six live verbs unnamed (`audit-tests`, `test-inventory`,
@@ -118,8 +118,8 @@ python3 -m aipass.seedgo.apps.seedgo standards_query aipass_standards cli
 > and the pack under Audit, and the `Commands:` line lists all 18.
 
 > **Note — `standard` and `standards_query` count differently.** `drone @seedgo standard` is
-> pack-agnostic and lists the union of all three checker packs (**58** names on 2026-09-05).
-> `drone @seedgo standards_query aipass_standards` lists that one pack (**46**). Both read names
+> pack-agnostic and lists the union of all three checker packs (**57** names on 2026-09-07).
+> `drone @seedgo standards_query aipass_standards` lists that one pack (**45**). Both read names
 > from `*_content.py`, which is why `ruff` appears as `ruff_check` — see the naming-split note
 > under the standards table.
 
@@ -150,8 +150,8 @@ seedgo/
 │   └── handlers/                    # 15 handler directories + 2 shared modules
 │       ├── module_root.py           # Guarded module_file() — the one import-time __file__ resolve
 │       ├── registry_scan.py         # Case-EXACT registry discovery — the one reader every lane uses
-│       ├── aipass_standards/        # 46 checker standards (137 files: 46 check + 46 content
-│       │   │                        #   + 39 md + applicability.py, exception_handling.py,
+│       ├── aipass_standards/        # 45 checker standards (134 files: 45 check + 45 content
+│       │   │                        #   + 38 md + applicability.py, exception_handling.py,
 │       │   │                        #   skip_dirs.py, trinity_groups.py, diagnostics.json,
 │       │   │                        #   __init__.py)
 │       │   ├── *_check.py           # Checker implementations (score 0-100)
@@ -182,11 +182,11 @@ seedgo/
 │       ├── readme/                  # README generator + branch resolution
 │       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
-│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, shadow mode
+│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, weekly + on demand
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 63 test files, 3087 test functions (pytest expands to 3731 cases)
+├── tests/                           # 62 test files, 3030 test functions (pytest expands to 3700 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -216,14 +216,16 @@ every log line in the branch.
 
 ---
 
-## The 46 Standards
+## The 45 Standards
 
 `Scope` is the checker's own `AUDIT_SCOPE` (where a result is REPORTED); `Applies to`
 is its `APPLIES_TO` (which files are ELIGIBLE, default `everywhere`). These are two
 different axes — see `applicability.py`. Both columns below are read from the checker
-sources, not maintained by hand — regenerated against them **2026-09-05**, when the pack
-was 46 checkers. The previous regeneration (2026-08-25) wrote 45 rows and left `trinity`
-out of the table entirely; that row is restored below.
+sources, not maintained by hand — regenerated against them **2026-09-07**, when the pack
+was 45 checkers. It has been 45, 46 and 45 again inside a fortnight, which is why the row
+count is verified against `discover_checkers()` on every pass rather than carried: the
+2026-08-25 regeneration wrote 45 rows and silently omitted `trinity`, so the count matched
+by accident while the table was wrong.
 
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
@@ -267,22 +269,32 @@ out of the table entirely; that row is restored below.
 | stderr_routing | all_files | everywhere | Proper stderr vs stdout usage |
 | subcommand_help | entry_point | everywhere | Subcommand --help interception before dispatch |
 | template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
-| test_quality | branch_level | tests | JSON handler test coverage (31 items, 8 categories: 7 pattern categories + module coverage) |
 | todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
 | trigger | all_files | production | Trigger integration patterns |
 | trinity | branch_level | everywhere | `.trinity/` document set — schema, caps, ordering, freshness |
 | unused_function | branch_level | everywhere | No unreferenced public functions |
 | windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
 
-The audit consults **47** entries for a branch — these 46 plus `diagnostics` (pyright), which has
-no `_check.py` of its own. That 47 is what CI's `EXPECTED_STANDARDS` pins.
+The audit consults **46** entries for a branch — these 45 plus `diagnostics` (pyright), which has
+no `_check.py` of its own. That 46 is what CI's `EXPECTED_STANDARDS` pins.
+
+**`test_quality` (v4) left this table on 2026-09-07.** It was the pack's only
+`APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an item for finding a
+substring anywhere under `tests/`. Patrick sealed DPLAN-0323 that night — the scan
+manufactured tests instead of measuring them, and the json sweep had to add four
+`test_cli_routing.py` files purely to keep its items covered. The checker, its content
+module and its `.md` are in `apps/handlers/aipass_standards/.archive/`; the table above
+is 45 rows because of it, and no checker declares `APPLIES_TO = tests` any more. What
+replaces it is not another gate: `pytest_quality` (v5, 11 AST rules) runs weekly and on
+demand and scores without gating, and the json-handler claims v4 approximated are pinned
+by execution over all 18 shims in `tests/test_json_handler_contract.py`.
 
 > **Known naming split — `ruff` vs `ruff_check`.** The checker file is
 > `ruff_check.py`, so stripping the `_check.py` suffix yields the standard name
 > **`ruff`** — that is what the audit and checklist display. Its content and doc
 > files are `ruff_check_content.py` / `ruff_check.md`, so the query surface lists
 > and accepts **`ruff_check`**: `drone @seedgo standard ruff` returns
-> "Unknown standard" (re-checked 2026-09-05). The name the audit shows you is not
+> "Unknown standard" (re-checked 2026-09-07). The name the audit shows you is not
 > the name the query takes. This also makes the triplet proof report two
 > half-standards. Tracked in APLAN-0005.
 
@@ -296,7 +308,7 @@ longer mirrors its roster here: the hand-maintained table this section used to c
 handlers when 29 existed, and named one — `prompt.global_loader` — that had already moved to
 `.archive/`. A copy of someone else's registry rots quietly; the directory does not.
 
-Counted from `src/aipass/hooks/apps/handlers/` on 2026-09-05 (`*.py`, excluding `__init__.py`):
+Counted from `src/aipass/hooks/apps/handlers/` on 2026-09-07 (`*.py`, excluding `__init__.py`):
 
 | Category | Handlers | Directory |
 |----------|----------|-----------|
@@ -312,7 +324,7 @@ previous count here said 29 and was taken on 2026-08-25; `security/` has gained 
 
 Provider settings route every event through the bridge (`claude.py`), which dispatches to those
 handlers. Event registrations live in `.claude/provider_manifest.json` (27 entries under
-`cli.claude.hooks`, verified 2026-09-05) and are keyed by **hook alias, not filename** —
+`cli.claude.hooks`, verified 2026-09-07) and are keyed by **hook alias, not filename** —
 `UserPromptSubmit:branch_prompt` fires `prompt/branch_loader.py`, `identity_injector` fires
 `prompt/identity.py`. The two lists do not line up by name, which is the second reason not to
 restate them here. Read the directory, or ask @hooks.
@@ -324,12 +336,19 @@ restate them here. Read the directory, or ask @hooks.
 
 ## Tests
 
-Counted 2026-09-05, both ways, because the two numbers answer different questions:
+Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **63 test files, 3087 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 3731 cases** once
+- **62 test files, 3030 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 3700 cases** once
   parametrisation is applied.
-- **Run result:** 3726 passed, 5 skipped, 0 failed (80s, `python3 -m pytest tests/ -q`).
+- **Run result:** 3695 passed, 5 skipped, 0 failed (334s, from the repo root in the CI shape:
+  `python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.`).
+- **Down from 3087 functions on 2026-09-05, and every one of the 57 was retired on evidence**
+  (FPLAN-0491): the v4 `test_quality` sections went with the standard; `tests/test_json_handler.py`
+  moved whole to `.archive/` because all six of its tests are carried, parametrised over all 18
+  shims, by `tests/test_json_handler_contract.py`; `test_content_functions.py` merged 37 twin pairs
+  into 37 single tests, mutation-checked at the merge; and three rows judged DELETE in the
+  2026-09-05 contested band came out after a mutation confirmed they pinned nothing.
 - **The 5 skips are documented, not silent:** three in `test_import_dead_cwd.py` are instrument
   self-checks retired under the 2026-09-01 one-fix ruling (owner to rewrite as measurement); one in
   `test_checkers_batch7.py` needs canary's `paths.py`, which is not on this machine; one in
@@ -360,29 +379,30 @@ Counted 2026-09-05, both ways, because the two numbers answer different question
 
 ---
 
-## Status (2026-09-05)
+## Status (2026-09-07)
 
 | Signal | Value | How it was measured |
 |--------|-------|---------------------|
-| Self-audit | **100** on all 47 consulted entries, 212 production files | `drone @seedgo audit aipass @seedgo` |
-| Tests | 3726 passed, 5 skipped, 0 failed | `python3 -m pytest tests/ -q` |
+| Self-audit | **100** on all 46 consulted entries | `drone @seedgo audit aipass --full` |
+| Tests | 3695 passed, 5 skipped, 0 failed | `python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.` |
 | Type errors | 0 | pyright, via the audit pipeline |
 | Proof certification | **NOT CERTIFIED** — 3 of 5 pass | `drone @seedgo proof aipass` |
-| Function coverage | 451 / 586 tested (76%) | `drone @seedgo test_map @seedgo` |
+| Function coverage | 449 / 584 tested (76%) | `drone @seedgo test_map @seedgo` |
 | Bypass rules | **43** | `.seedgo/bypass.json` |
+| Weekly v5 cadence | **enabled** 2026-09-07, next run Sun 2026-09-13 03:00 | `drone @daemon queue` |
 
 ---
 
 ## Known Issues / Tech Debt
 
 Full detail and status live in **APLAN-0005** (the standing branch health record).
-Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
+Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
 
 - `seedgo proof aipass` reports **NOT CERTIFIED** — the auditor does not currently pass its own proof pack.
-  Tonight's line, verbatim: `content_naming` PASSED (46 correct / 46 total), `interface` PASSED
-  (all 46 checkers comply), `plugin_integrity` PASSED (4/5 clean, 1 cosmetic), and:
+  Tonight's line, verbatim: `content_naming` PASSED (45 correct / 45 total), `interface` PASSED
+  (all 45 checkers comply), `plugin_integrity` PASSED (4/5 clean, 1 cosmetic), and:
   - `readme_currency` FAILED: *"README is stale: count mismatch, 1 stale reference(s),
-    45 undocumented standard(s). (14 issues)"*. Three separate causes, and only the first is a
+    44 undocumented standard(s). (15 issues)"*. Three separate causes, and only the first is a
     plain detector bug.
     (a) It recognises standard names only in a `pack checks:` prose format this README
     does not use, so the standards in the table above read as "undocumented" no matter how
@@ -392,24 +412,24 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
     (c) It harvests **this bullet** into `stale_refs` — describing the detector's own bug
     in the README makes the detector fail harder. A checker cannot tell a document from
     a document *about* the document; see also `rich_markup` on `# BAD` examples.
-  - `triplet` FAILED, live 2026-09-05: **38 complete | 1 check-only | 1 missing-check |
-    7 other-incomplete | 4 orphaned | 47 total (9 issues)**. Read out:
+  - `triplet` FAILED, live 2026-09-07: **37 complete | 1 check-only | 1 missing-check |
+    7 other-incomplete | 4 orphaned | 46 total (9 issues)**. Read out:
     - **8 checkers have no `.md`** — the 7 "other-incomplete" (cli_ux, gateway_boundary,
       hardcoded_path, json_structure, readme_quality, rich_markup, subcommand_help) plus
       `ruff`, which is the "check-only" entry and is missing content *and* md.
       `gateway_boundary` shipped without one on 08-18 and still has none.
     - The `ruff`/`ruff_check` name split is what produces the 1 check-only (`ruff`) +
-      1 missing-check (`ruff_check`) pair. 38 + 1 + 1 + 7 = the 47 total.
+      1 missing-check (`ruff_check`) pair. 37 + 1 + 1 + 7 = the 46 total.
     - The **4 orphans** are `trinity_groups.py`, `applicability.py`, `skip_dirs.py` and
       `exception_handling.py` — shared infrastructure that lives in the pack directory without
-      being standards, which the triplet proof has no category for. Two of these
-      (`exception_handling.py`, `trinity_groups.py`) landed after the previous README pass,
-      which is why that pass recorded 2 orphans.
-- **`test_quality_check.py` says 11 categories and holds 7.** Its header comment and module
-  docstring both claim *"11 categories (10 pattern categories + module coverage)"*, but
-  `STANDARD_CATEGORIES` has 7 keys and `TOTAL_ITEMS` is 31 — 7 pattern categories plus module
-  coverage is 8. The docstring predates the DPLAN-0325 part-B retirement that took the item table
-  from 51 to 31. A code defect in this branch's own tree; not fixed in this docs-only pass.
+      being standards, which the triplet proof has no category for. The 46 total is one lower
+      than the 47 of 2026-09-05 for one reason: `test_quality` retired.
+- ~~`test_quality_check.py` says 11 categories and holds 7~~ — **moot 2026-09-07: the file is
+  archived.** The 09-05 README pass found its header and docstring claiming *"11 categories"*
+  against a `STANDARD_CATEGORIES` of 7. It was never corrected because the standard itself
+  retired first (FPLAN-0491), taking checker, content module and `.md` to
+  `apps/handlers/aipass_standards/.archive/`. Recorded rather than deleted: the drift was real,
+  and a docstring outliving the table it describes is the species, not the instance.
 - ~~`--help` names 13 commands and the branch answers 19~~ — fixed 2026-09-06: `audit-tests`,
   `test-inventory`, `shadow-cycle`, `permissions`, `inbox_audit` and the `audit pytest_quality`
   pack are in the help text and its `Commands:` line.
@@ -420,7 +440,7 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
   subcommand while `drone @seedgo permissions` answered "Unknown command" *and then*
   printed the block. It now claims its own command and is silent for every other.
 - This README has no auto-update markers, so `drone @seedgo readme check @seedgo` skips every
-  section — re-run 2026-09-05, five sections, all *"Skipped — no marker found"*. The branch that
+  section — re-run 2026-09-07, five sections, all *"Skipped — no marker found"*. The branch that
   ships README generation does not consume it.
 - **No bypass-rot detection, and the obvious detector is wrong.** Nothing tells a branch
   that a bypass rule has stopped suppressing anything. The tempting measurement — re-run
@@ -432,12 +452,13 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
   `*_violations` list — removing it drops that standard 100 → 95. A rot detector must
   read both lanes and canary branch-level standards through `check_branch()`.
   **UNVERIFIED at today's 43 rules** — the removed-rules sweep has not been re-run since
-  08-13, and the rule set has grown by 15 entries. See APLAN-0005.
+  08-13, and the rule set has grown by 15 entries. Re-checked 2026-09-07 only that the count is
+  still 43; the sweep itself is still not re-run. See APLAN-0005.
 - `audit_display.py`: **the DPLAN-0047 dynamic refactor has landed** — this line once claimed
   16 hardcoded per-standard display blocks; the file derives every standard from its
   `<name>_violations` key and renders it generically, with exactly **one** special case left
   (`architecture`, `audit_display.py:282`, which routes to its own renderer because it reports
-  through `results['checks']`). Re-verified 2026-09-05. The change is not attributed here
+  through `results['checks']`). Re-verified 2026-09-05, unchanged 2026-09-07. The change is not attributed here
   because this branch's memory does not record who made it.
 - `documentation_check.py` multi-line signature lookahead is **30 lines**, not the 5 an older
   edition of this line claimed. The site is `documentation_check.py:285`
@@ -445,22 +466,28 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
   Still a bounded window, still a limitation — just six times wider than documented.
 - `dead_code_check.py` recognises `glob("*.py")` / `glob('*.py')` as a discovery pattern
   (`dead_code_check.py:194`) but **not** `iterdir()` — no `iterdir` appears anywhere in the
-  file. Re-verified 2026-09-05.
+  file. Re-verified 2026-09-05, unchanged 2026-09-07.
 - ~~Cross-branch file write detection recommended but not yet in standards (S73 finding)~~ —
-  **shipped as the `gateway_boundary` standard, 2026-08-18.** It was the 45th checker; `trinity`
-  has since made 46, and this README's table had been missing it.
+  **shipped as the `gateway_boundary` standard, 2026-08-18.** It was the 45th checker, `trinity`
+  made 46, and `test_quality` leaving on 2026-09-07 puts the pack back at 45 — a different 45
+  from the one that number named in August.
+- **`standards_audit.print_help` has no test calling it.** Removing
+  `test_handle_command_output_capture` (a DELETE verdict from the 2026-09-05 contested band, whose
+  own comment said the `capsys` fixture was there "to satisfy the pattern requirement") left the
+  function reached only through `handle_command`'s no-args path. The removed row asserted nothing
+  about the output it captured, so this is a gap that was already there, now visible. Noted, not
+  papered over.
 
 ---
 
-## Latest Audit (2026-09-05)
+## Latest Audit (2026-09-07)
 
-- **Seedgo score:** 100% — 47 consulted entries (46 standards + diagnostics), every one at 100,
-  nothing `not_applicable`, over **212 production files** (`apps/` only; `tests/` is not in the
-  audit corpus). Read from this branch's own audit run tonight. The previous edition of this line
-  said 129 files, a figure from 2026-08-25.
-- **Tests:** 3726 passed, 5 skipped (3087 test functions across 63 files; pytest expands them to
-  3731 cases)
-- **Coverage:** 451 public functions tested of 586 (76%)
+- **Seedgo score:** 100% — **46** consulted entries (45 standards + diagnostics), every one at 100,
+  nothing `not_applicable`. 47 until 2026-09-07; `test_quality` retiring is the whole difference,
+  and CI's `EXPECTED_STANDARDS` tripwire moves with it.
+- **Tests:** 3695 passed, 5 skipped (3030 test functions across 62 files; pytest expands them to
+  3700 cases)
+- **Coverage:** 449 public functions tested of 584 (76%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)
 - **Bypass:** 43 rules. The 100% above is a real score with 43 documented exceptions under it, not
@@ -470,7 +497,7 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
 
 ---
 
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-07
 
 ---
 [<- Back to AIPass](../../../README.md)

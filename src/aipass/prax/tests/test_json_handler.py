@@ -638,17 +638,6 @@ class TestTheShimBindsAndNeverWraps:
             f"{name} is not a bound method — a wrapper adds a frame and breaks caller attribution"
         )
 
-    def test_the_exceptions_are_the_services_own(self):
-        assert json_handler.InvalidDocument is json_service.InvalidDocument
-        assert json_handler.WriteFailed is json_service.WriteFailed
-
-    def test_the_shim_carries_nothing_else(self):
-        """Byte-identical in every branch by design. Anything a branch adds here
-        is drift, and the whole point of DPLAN-0325 is that there is none."""
-        public = {name for name in vars(json_handler) if not name.startswith("_")}
-
-        assert public == set(json_handler.__all__) | {"json_handler"}
-
     def test_the_shim_is_bound_to_prax(self):
         assert json_handler.get_json_path.__self__.branch_root.name == "prax"
 

@@ -46,6 +46,7 @@ the exact cross-branch chain it closes.
 import contextlib
 import copy
 import errno
+import hashlib
 import importlib
 import inspect
 import json
@@ -987,6 +988,106 @@ def test_a_migrated_shim_reads_the_redirect_seam_after_import_not_at_import(
 
     expected = elsewhere / branch / f"{branch}_json" / "identity_probe_data.json"
     assert answer == expected, f"{branch}: the seam set after import answered {answer}, expected {expected}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_every_shipped_shim_is_byte_identical_to_the_pinned_canonical(branch: str):
+    """One file, one hash, eighteen copies — asserted here, not only by the audit.
+
+    The ``json_handler`` standard refuses any handler whose sha256 is not
+    ``CANONICAL_SHIM_SHA256`` (DPLAN-0325 section 3, B4), so the fleet audit
+    already convicts drift. That is a checker run, not a test run: a branch
+    could edit its shim and stay green in the suite all the way to CI. This
+    pins the same fact where the rest of the shim contracts live.
+
+    It is also the pin that four of the six per-branch shim tests retired
+    against on 2026-09-07 (FPLAN-0491) — see the retirement record below. A
+    byte-identical file cannot carry a name the canonical does not carry, and
+    cannot fail to carry one it does; those claims are the hash, restated.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+    content = handler_path(branch).read_text(encoding="utf-8")
+    if SERVICE_IMPORT_MARKER not in content:
+        pytest.skip(f"{branch} has not migrated to the one service yet — its handler does not import it")
+
+    measured = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    assert measured == CANONICAL_SHIM_SHA256, (
+        f"{branch}'s shim hashes {measured}, not the pinned canonical "
+        f"{CANONICAL_SHIM_SHA256} — it is no longer the fleet's one file"
+    )
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_a_migrated_shims_exceptions_are_the_services_own(branch: str):
+    """``InvalidDocument`` and ``WriteFailed`` ARE the service's classes.
+
+    The nine bound names are covered by identity above; the two exception names
+    are not, and they are the half of the surface a caller reaches for in an
+    ``except`` clause. A shim that re-declared either — even with the same name
+    and the same bases — would make ``except branch.InvalidDocument`` miss the
+    error the service actually raises, and every behavioural contract in this
+    file would still pass.
+
+    Folded here 2026-09-07 (FPLAN-0491) from
+    ``test_the_exceptions_are_the_services_own``, which was stamped into 15
+    branches; this is the one copy, over every branch.
+    """
+    service = json_service_or_skip()
+    module = shim_or_skip(branch)
+
+    wrong = []
+    for name in ("InvalidDocument", "WriteFailed"):
+        theirs = getattr(module, name, None)
+        ours = getattr(service, name, None)
+        if theirs is None:
+            wrong.append(f"{name}: absent from the shim")
+        elif theirs is not ours:
+            wrong.append(f"{name}: {theirs!r} is not the service's {ours!r}")
+    assert not wrong, f"{branch}'s shim does not re-export the service's own exceptions: {wrong}"
+
+
+# ---------------------------------------------------------------------------
+# RETIRED 2026-09-07 (FPLAN-0491): the six per-branch shim-pin twins
+# ---------------------------------------------------------------------------
+#
+# Six identities were stamped into the branches' own tests/test_json_handler.py
+# during the DPLAN-0325 sweep — 89 instances across 16 files, measured tonight.
+# All six are now carried once, here, over every discovered branch. Nothing was
+# dropped; each claim is named with where it now lives.
+#
+# Retired against the hash pin above (a byte-identical file cannot differ):
+#   test_the_shim_carries_nothing_else (15 copies) — asserted the public name
+#     set equals __all__ plus the module alias. The canonical shim's bytes fix
+#     that set; a copy that added a name would fail the sha256 first.
+#   test_shim_reexports_every_documented_name (13 copies) — asserted the nine
+#     names plus the two exceptions are present. Presence of the nine is
+#     reported by name in the identity test above ("<name>: absent"); presence
+#     of the two exceptions is reported by the exceptions test above.
+#
+# Subsumed by a contract that was already here, and is stricter:
+#   test_every_public_name_is_a_bound_method_of_the_service (14 copies) ->
+#     test_every_public_name_in_a_migrated_shim_is_the_services_own_function.
+#     The branch copy asserted __func__ identity for the nine; the contract
+#     asserts the same and additionally names a plain-function WRAPPER as the
+#     specific failure, which is the frame-depth hazard the DPLAN measured.
+#   test_the_shim_is_bound_to_this_branch (13 copies) ->
+#     test_a_migrated_shim_binds_one_handle_rooted_at_its_own_branch. The
+#     branch copy compared branch_root.name to a hardcoded string; the contract
+#     compares branch_root to parents[3] of the shim's real path AND pins that
+#     all nine names share ONE handle, which the branch copy never checked.
+#   test_get_path_returns_path_under_branch_json_dir (13 copies) ->
+#     test_a_migrated_shim_reads_the_redirect_seam_after_import_not_at_import.
+#     The branch copy asserted the answer's parent equals the fixture sandbox;
+#     the contract sets the seam AFTER import and asserts the whole composed
+#     path, so a shim that captured its directory at import fails there and
+#     passed here.
+#
+# Folded into a new single contract:
+#   test_the_exceptions_are_the_services_own (15 copies) ->
+#     test_a_migrated_shims_exceptions_are_the_services_own, directly above.
+#     This one was NOT already covered: SHIM_PUBLIC_NAMES holds the nine bound
+#     methods and neither exception is among them.
 
 
 # ---------------------------------------------------------------------------
