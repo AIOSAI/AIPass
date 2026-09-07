@@ -4,8 +4,26 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.5.0
-**Last Updated:** 2026-09-03
+**Version:** 2.4.0 — the string `drone @prax --version` actually prints (`apps/prax.py:211`)
+**Last Updated:** 2026-09-05
+
+---
+
+## Status
+
+Every claim below was re-checked against the code on **2026-09-05** (FPLAN-0490
+truth pass, round 2). Numbers in this file are measurements taken that night on
+this machine, not estimates: where a number is a single-machine reading rather
+than a property of the system, it says so. Anything that could not be verified
+is marked **UNVERIFIED** in place rather than left standing green.
+
+- **Tests:** 1428 test functions across 36 files; pytest expands them to 1503
+  cases, all passing from both rootdirs.
+- **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
+  category.
+- **Last structural change:** DPLAN-0325 post-sweep bundle (2026-09-04,
+  commit 08359ec2) — document modes, `allow_nan=False`, the TOCTOU close, and
+  the watcher's background start. All four are described below.
 
 ---
 
@@ -87,10 +105,13 @@ answered before reinstalling anything:
   story first.
 - **The ecosystem observer.** Any long-lived process that logs still lazy-starts
   a recursive observer over the ecosystem root (`start_file_watcher()` schedules
-  one `WatchdogObserver` with `recursive=True`). Re-read 2026-08-25: unchanged.
-  DPLAN-0307, which tracked it, was closed 2026-08-22 in a batch with three other
-  prax plans, and no prax commit since carries a change to this path — so the
-  plan is closed and the design is not. Always-on processes still multiply it.
+  one `WatchdogObserver` with `recursive=True`). Re-read 2026-09-05: the watch is
+  unchanged and always-on processes still multiply it. What changed on 2026-09-04
+  is *who waits for it* — the logger's first call now goes through
+  `start_file_watcher_in_background()`, so the walk happens on a thread nobody
+  joins (see "The watcher start does not block the first log line" below).
+  DPLAN-0307, which tracked the design, was closed 2026-08-22 in a batch with
+  three other prax plans — the plan is closed and the design is not.
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
@@ -113,12 +134,19 @@ is resolved against *its own registry's* directory, not the process CWD. First r
 claim a name AIPass already uses.
 
 The project sweep resolves whoever the registries *declare*, not whoever has a
-directory. Measured 2026-08-25: 23 known branches — the 18 core plus BAUD,
-EARMARK, MARKETSTAND, AIPASS_SITE and FINCH. `projects/speakeasy(on_hold)/`
-has a registry with an empty `branches[]`, so it contributes no citizen and the
-monitor does not know the name; that is the declaration rule working, not a
-gap. Earlier revisions of this README listed a `TESTING` citizen — no such
-project registry exists, and none was found in the tree.
+directory. Measured 2026-09-05: **22 known branches** — the 18 in
+`AIPASS_REGISTRY.json` (AIPASS, AI_MAIL, API, BACKUP, CANARY, CLI, COMMONS,
+DAEMON, DEVPULSE, DRONE, FLOW, HOOKS, MEMORY, PRAX, SEEDGO, SKILLS, SPAWN,
+TRIGGER) plus the four project citizens that ship a registry today: BAUD,
+EARMARK, AIPASS_SITE and FINCH.
+
+Two names this README used to list are no longer resolvable, and the tree
+explains both without naming anyone: `projects/` now holds exactly four
+directories (`aipass-site`, `baud`, `earmark`, `finch`), so **MARKETSTAND** has
+no registry to declare it and `projects/speakeasy(on_hold)/` — previously cited
+here as an empty-`branches[]` citizen — is not in the tree at all. The count
+moved because the declarations moved; the rule did not change. Earlier revisions
+also listed a `TESTING` citizen — no such project registry exists.
 
 That third shape was missing until 2026-08-14: `monitor run baud` answered "BAUD
 is not a known branch", and — worse — BAUD's files were labelled **AIPASS**,
@@ -377,28 +405,43 @@ one that **crashes** against a mocked `aipass.prax`, because the mock package ha
 no `apps` submodule. A branch that follows the top recommendation and mocks prax
 gets `ModuleNotFoundError`, not a mock.
 
-Import cost is not load-bearing either: 131.0ms vs 130.7ms median over 5 samples
+Import cost was not load-bearing either: 131.0ms vs 130.7ms median over 5 samples
 for the object and module forms — indistinguishable, because `prax/__init__.py`
-eagerly imports `apps.modules.logger`, so every spelling pays the same package
-init. Consistency is the only real tiebreak left, and one spelling across the
-fleet is worth more than a rebindability property that does not work.
+eagerly imported `apps.modules.logger` at the time, so every spelling paid the
+same package init. **That reason expired on 2026-09-03**: the init is lazy now
+(PEP 562, see the json service section), so importing `aipass.prax` no longer
+pays for the logger graph and only a spelling that actually *touches* `logger`
+does. The ruling itself is unaffected — it never rested on the cost — and
+consistency remains the tiebreak: one spelling across the fleet is worth more
+than a rebindability property that does not work.
 
-**The actual defect is prax's, and it is located.** Under pytest, prax already
-redirects log files — `get_system_logs_dir()` returns
-`/tmp/aipass_test_logs/system` when `PYTEST_CURRENT_TEST` is set or a pytest
-session is detected. `PRAX_JSON_DIR` never got the same treatment: it is a
-module-level constant built from `__file__` with no pytest branch, so it resolves
-to the real `prax_json/` in every suite in the fleet.
+**The defect that section named is fixed for module documents, and survives for
+path-based writes.** The json service resolves its directory per call from
+`AIPASS_TEST_LOG_DIR`, so everything written *by module name* is redirected.
+Measured 2026-09-05, one `logger.info()` in a fresh interpreter with the
+variable set:
 
 ```
-prax_json dir under pytest  : src/aipass/prax/prax_json      <- real state
-system_logs dir under pytest: /tmp/aipass_test_logs/system    <- already isolated
+files written into the real src/aipass/prax/prax_json/ : 0
+files written under AIPASS_TEST_LOG_DIR                : 18
 ```
 
-That asymmetry is the whole bug. It is one path resolution in one handler, it
-fixes every branch at once, and it needs no conftest edits and no import
-migration anywhere. Tracked in APLAN-0009; not built in the same pass that found
-it, because it changes where prax's own suite reads and writes.
+What is **not** redirected is the handful of module-level path constants built
+from `__file__`. Measured the same night, with `AIPASS_TEST_LOG_DIR` set:
+
+```
+config.load.PRAX_JSON_DIR         -> src/aipass/prax/prax_json     <- real tree
+registry.save.REGISTRY_FILE       -> …/prax_json/prax_registry.json <- real tree
+logging.operations.LOG_FILE       -> …/prax_json/prax_logger_log.json <- real tree
+config.load.get_system_logs_dir() -> /tmp/<redirect>/system         <- redirected
+```
+
+Four modules still build paths that way — `handlers/config/load.py`,
+`handlers/config/ignore_patterns.py`, `handlers/registry/load.py` and
+`handlers/registry/save.py` — and any write that goes through a *path* rather
+than a module name (the module registry is the live one) lands in the real tree
+under any suite. It is the same shape as before, one layer down. Reported
+2026-09-05, unfixed here because this pass is documentation only.
 
 ### Mocking the logger — the contract
 
@@ -415,13 +458,13 @@ against a real consumer:
 | `setitem(sys.modules, "aipass.prax")` | REAL |
 | `patch("<the consuming module>.logger")` | **MOCK** |
 
-The cause is in this package's own `__init__.py`: it re-exports by binding
-(`from …modules.logger import system_logger as logger`), so the object is copied
-at the package boundary and copied again into each consumer's globals. Anything
-patched at or above `aipass.prax` is upstream of a copy already taken. **The last
-dot must be resolved at call time**, which only the consumer-module patch does.
-prax's own conftest was one of the four that miss — this is prax's gap before it
-is anyone else's.
+The cause is in this package's own `__init__.py`, and the lazy rewrite did not
+change it: `__getattr__` resolves `logger` once and caches the object in
+`globals()`, so the object is still copied at the package boundary and copied
+again into each consumer's globals. Anything patched at or above `aipass.prax`
+is upstream of a copy already taken. **The last dot must be resolved at call
+time**, which only the consumer-module patch does. prax's own conftest was one of
+the four that miss — this is prax's gap before it is anyone else's.
 
 **Interim technique, correct today, one line per consuming module:**
 
@@ -470,13 +513,29 @@ from aipass.prax import json_handler          # the entry point, the only sancti
   imports without the logger graph. No `resolve()`, no `getcwd()`, no
   `inspect.stack()`: it runs with a deleted working directory.
 - `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in all
-  18 branches (seedgo hashes it). It BINDS the service's callables and never
-  wraps them: a wrapper would add a stack frame and silently rename every entry
-  in the operations log.
+  18 branches. **1724 bytes, sha256 `3456b766…cf0b7`** (verified 2026-09-05);
+  seedgo accepts it by hash, not by substring. It BINDS the service's callables
+  and never wraps them: a wrapper would add a stack frame and silently rename
+  every entry in the operations log.
 - The old handler and `json_templates/` are in
   `apps/handlers/json/.archive/`. The default document is in code now — a
   default that lives in a file can go missing, and a handler whose default is
   missing stops self-healing exactly when it is needed.
+
+**What the entry point hands you.** `from aipass.prax import json_handler` gives
+you the **service module** — `for_module()`, `JsonHandle`, `InvalidDocument`,
+`WriteFailed`. That is what a branch's shim imports before binding a handle to
+itself with `for_module(__file__)`. Branch code calls its own shim
+(`from aipass.<branch>.apps.handlers.json import json_handler`) and gets the
+bound names — `load_json`, `save_json`, `log_operation`, and the rest.
+
+**Healing is per module, per call — there is no sweep.** `ensure_json_exists`
+regenerates exactly one document (`<module>_<type>.json`) when it is missing,
+empty, unreadable or structurally invalid, and `ensure_module_jsons` does the
+three types for one module. Nothing walks a directory and nothing repairs
+another module's documents: a self-heal that ranges wider than the call that
+triggered it would rewrite state nobody asked about, in a process that may only
+have wanted to log one line.
 
 **The package init is lazy** (PEP 562 `__getattr__` in `aipass/prax/__init__.py`).
 `logger`, `append_jsonl` and `json_handler` resolve on first attribute access.
@@ -499,76 +558,100 @@ rather than answering `False` (a lost document must not look like success) and
 `False` on a write failure — it runs on the monitor's display and watchdog
 threads, where a raising writer is silent half-death.
 
+### The post-sweep bundle (2026-09-04, commit 08359ec2)
+
+Four defects found after the migration, all in prax's tree, all fixed and pinned.
+
+**A write no longer changes a mode nobody asked it to change.** The staged write
+went through `tempfile.NamedTemporaryFile`, which creates at a hardcoded `0600`,
+and `os.replace` carries the **staged** file's mode onto the target — so every
+service write narrowed the document it rewrote, fleet-wide: a `664` config came
+back `600` on its next write, and the group that could read it yesterday could
+not today. Nothing failed loudly. Now an existing document keeps its own mode
+(read off the target, applied to the staged fd with `fchmod`, which the umask
+does not touch) and a new one is created with `0o666` for the **kernel** to
+narrow by the process umask — byte for byte what `open(path, "w")` would have
+produced. The umask is never read: `os.umask()` both sets and returns, so reading
+it means briefly widening it for every other thread, and prax runs watchdog and
+display threads. Pinned at 664/644/600/640, and for a fresh document against a
+reference file created by a plain `open()` in the same directory in the same
+breath — the expectation is measured, never the constant `0664`.
+
+**NaN and Infinity are refused.** `json.dumps` defaults to `allow_nan=True` and
+writes the bare tokens `NaN`/`Infinity`/`-Infinity`, which are not JSON: the
+document lands, prax reads it back happily, and it fails in some other
+language's strict parser days later, nowhere near the branch that wrote it. The
+service passes `allow_nan=False` and lets json's own **`ValueError`** out — the
+same answer it already gives an unknown `json_type`. `log_operation` still
+answers `False` rather than raising, because it runs per event on threads where
+a raising writer is silent half-death.
+
+**A staged file's name must not read the clock.** The first cut of the mode fix
+named temp files with `time.time_ns()`, and seedgo's cross-branch contract stubs
+the module's `time` to take the sleep out of the bounded retry — 45 contract
+tests across 15 branches went red on `AttributeError`. Names come from
+`os.getpid()` + `itertools.count()` now. Worth writing down: the fleet contract
+caught a prax defect within minutes of it existing.
+
+**The watcher start does not block the first log line.** `SystemLogger._ensure_watcher`
+called `start_file_watcher()` inline, and watchdog installs one inotify watch per
+directory under the ecosystem root. Measured 2026-09-04 on this machine, 1605
+directories: **0.119 s** when the calling thread is alone, **13.949 s (117×)**
+when one other Python thread is CPU-busy — each `inotify_add_watch` drops the GIL
+and then has to win it back from a thread that never blocks, so the walk pays up
+to a full switch interval (5 ms) per directory. A suite whose only crime was to
+log something waited seconds for a watcher it never asked about. The logger now
+calls `start_file_watcher_in_background()`: same walk, same watches, on a thread
+nobody joins — caller blocked **5.72 ms**, the walk finishing ~4.5 s later off to
+the side. Neither cure first proposed would have worked: yielding between
+directories adds handoffs to a walk already starving on them, and bounding the
+walk to `apps/` (what Mission Control does) would stop discovering the 113 of 196
+registered modules that live in `tests/` and elsewhere (counted 2026-09-05). `start_file_watcher()`
+itself still blocks, for its one remaining caller
+(`lifecycle.run_initialization`, which explicitly asked to initialise), and both
+doors share one lock — without it each finds no observer, each walks, and the
+second assignment orphans the first: two watches per directory and every event
+delivered twice.
+
 ---
 
-**Closed 2026-08-30 — `AIPASS_TEST_LOG_DIR` is the fleet contract.**
-`json_handler.PRAX_JSON_DIR` now honours it, in @trigger's form
-(`trigger/apps/handlers/json/json_handler.py`) rather than a sixth spelling
-invented here. Measured on a real suite:
-
-| | before | after |
-|---|---|---|
-| one `logger.info()` under pytest | 24 writes into real `prax_json/` | **0** |
-| prax's own suite, collection alone | 107 atomic renames + 535 mkdirs | **0** |
-
-**Resolution happens at call time, not import time**, and that is load-bearing.
-The env-var branch alone was not enough: prax's own conftest sets the variable at
-module scope and the constant *still* resolved to the live tree, because
-something imports this module before the conftest runs. That is the same defect
-as the unmockable logger one section up — a value captured at import cannot be
-redirected by anything that runs later. A seam that depends on winning an import
-race is not a seam.
-
-Precedence: an explicit `monkeypatch.setattr(mod, "PRAX_JSON_DIR", …)` wins (≈20
-tests in this suite rely on it), then `AIPASS_TEST_LOG_DIR`, then the real
-directory. An **empty** env value is absence, not a redirect — `Path("") / "prax"`
-is relative and would scatter state wherever the process happens to stand.
-
-**Corrected 2026-08-30 — do not detect the override against a captured value.**
-prax's first cut compared the attribute by *identity* against the import-time
-value. @daemon adopted that from prax's own contract mail and 9 of their pins went
-green alone and red in the full suite: a test calling `importlib.reload` while a
-monkeypatch is live has its teardown write the **pre-reload** Path back onto the
-**post-reload** module, so the attribute is no longer the object the module holds
-and every later call reads it as a deliberate override — the redirect dies
-silently for the rest of the session, in a branch that looks adopted. **All 18
-branches use `importlib.reload` somewhere**, so this is everyone's problem;
-prax was shielded only by a conftest that drops the module from `sys.modules`.
-
-@daemon's fix — compare by value — rescues their ordering but not the one that
-made call-time resolution necessary: import first, env set afterwards. There the
-written-back value is the **real** directory while the post-reload default is the
-**redirect**, so the two differ and a value comparison *also* reads "explicitly
-patched". Reproduced against prax's own module:
-
-```
-IDENTITY: False   EQUAL: False
-before = /tmp/prax_rl_b/prax/prax_json
-after  = /home/…/src/aipass/prax/prax_json   *** redirect silently died ***
-```
-
-The fix is to compare against **both fixed points** and hold nothing stale — an
-override counts only when it differs from the real directory *and* from the
-current redirect target:
+**`AIPASS_TEST_LOG_DIR` is the fleet contract, and the service made it simple.**
+Every branch's documents are redirected by one variable, honoured by the service
+itself:
 
 ```python
-default = _resolve_prax_json_dir(os.environ.get("AIPASS_TEST_LOG_DIR"), _PRAX_ROOT)
-real    = _resolve_prax_json_dir(None, _PRAX_ROOT)
-if PRAX_JSON_DIR != real and PRAX_JSON_DIR != default:
-    return PRAX_JSON_DIR
-return default
+@property
+def json_dir(self) -> Path:                      # json_service.py
+    name = self.branch_root.name
+    test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
+    if test_dir:
+        return Path(test_dir) / name / f"{name}_json"
+    return self.branch_root / f"{name}_json"
 ```
 
-Cost, stated rather than hidden: a test that patches this to the real directory,
-or to exactly the redirect target, is indistinguishable from one that never
-patched — but both resolve to the same path anyway, so no answer changes. Both
-reload orderings verified to survive.
+**Resolved per call, never captured at import**, and that is the whole reason it
+works. The two predecessors of this design both failed on import order — a
+module-level constant cannot be redirected by a conftest that runs after
+something already imported the module, and the "compare against the import-time
+value" refinement that followed broke on `importlib.reload` (a monkeypatch
+teardown writes the pre-reload Path onto the post-reload module, and the redirect
+dies silently for the rest of the session — measured against @daemon's adoption,
+2026-08-30). A property has no fixed point to go stale: there is nothing to
+compare and nothing to write back. Both of those older mechanisms retired with
+the old handler and are in `apps/handlers/json/.archive/json_handler.py` if
+anyone needs the reasoning.
 
-Each branch adopts the same variable in its **own** `json_handler`; prax cannot
-redirect another branch's state directory. And the per-module logger patch stays
-**opt-in per module, never blanket autouse** — @daemon proved a blanket mock
-silenced their refused-and-named `caplog` pin, and a suite that cannot show its
-refusals are loud has traded evidence for a number.
+An **empty** value is absence, not a redirect — `Path("") / "prax"` is relative
+and would scatter state wherever the process happens to stand. Pinned in
+`tests/test_json_handler.py`, and in subprocesses (both import orderings) in
+`tests/test_json_durability.py`, because in-process the ordering under test is
+already decided.
+
+Each branch gets this by binding the service; no branch adopts a spelling of its
+own. And the per-module logger patch stays **opt-in per module, never blanket
+autouse** — @daemon proved a blanket mock silenced their refused-and-named
+`caplog` pin, and a suite that cannot show its refusals are loud has traded
+evidence for a number.
 
 ### Log levels
 
@@ -673,7 +756,7 @@ rewrite handlers.
 
 ```
 prax/
-├── __init__.py                        # Public API: exports `logger` (NullLogger fallback)
+├── __init__.py                        # Public API, LAZY (PEP 562): `logger`, `append_jsonl`, `json_handler` resolve on first access; NullLogger fallback
 ├── apps/
 │   ├── prax.py                        # Entry point — auto-discovers modules, routes commands
 │   ├── modules/                       # Business logic (6 command modules)
@@ -699,7 +782,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1488 tests across 36 files
+└── tests/                             # 1428 test functions, 36 files (1503 cases)
 ```
 
 ### Design Pattern
@@ -728,55 +811,69 @@ drone @prax monitor run
 
 ## Tests
 
-1488 tests across 36 files (all pass, both rootdirs), covering all major components:
+**1428 test functions across 36 files; pytest expands them to 1503 cases**, all
+passing from both rootdirs (measured 2026-09-05). The two numbers differ because
+of parametrisation — the table below counts collected cases, which is what a
+suite run reports.
 
-| Test File | Tests | Coverage |
+| Test File | Cases | Coverage |
 |-----------|-------|----------|
+| test_monitoring_handlers.py | 143 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
 | test_filesystem_handler.py | 142 | Multi-CLI adapters, Codex branch detection |
-| test_monitoring_handlers.py | 139 | Branch detector, stream output, event handling |
 | test_operations.py | 99 | Dashboard operations, write-through |
 | test_log_watcher.py | 90 | Log file tailing, agent activity parsing |
+| test_json_handler.py | 83 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
 | test_monitor_module.py | 82 | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
 | test_config.py | 61 | Config loading, path resolution, log levels |
+| test_repo_root.py | 55 | Repo-root resolution with a dead working directory, per-platform expectation tables |
+| test_logger_module.py | 54 | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint (subprocess) |
+| test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
 | test_logging_handlers.py | 49 | Setup, rotation, introspection, direct logger |
 | test_logging.py | 47 | Core logging system, debug level gating |
-| test_logger_module.py | 54 | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint |
-| test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
+| test_watcher.py | 47 | File watcher behaviour; dispatcher survives handler failure (real observer); liveness reporting; the background start that does not block its caller |
 | test_monitoring_filters.py | 39 | Event filtering rules |
-| test_commons_feed.py | 27 | Commons live feed, cursors, room filtering, full-body rendering |
-| test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
+| test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
+| test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
 | test_rate_tracker.py | 34 | Rate tracking, thresholds, persistence (incl. rate history), suppression |
+| test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
+| test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
+| test_commons_feed.py | 27 | Commons live feed, cursors, room filtering, full-body rendering |
 | test_discovery.py | 25 | Module scanning |
+| test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
 | test_registry.py | 24 | Module registry |
-| test_watcher.py | 40 | File watcher behavior; dispatcher survives handler failure (real observer), liveness reporting |
-| test_json_handler.py | 72 | The fleet json service: branch resolution, the per-call seam, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
+| test_flow_section_contract.py | 22 | `sections.flow` five-key contract; per-branch recently_closed; total_plans carried, not derived |
+| test_project_citizens.py | 20 | projects/* registry sweep, passport resolution, collision precedence, CWD-independent paths |
 | test_central.py | 14 | Central reader |
 | test_log_audit.py | 13 | Log audit |
+| test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
 | test_pid_cache.py | 12 | PID resolution cache |
 | test_devpulse_dashboard_plugin.py | 9 | Dashboard plugin (git, session, dispatch) |
 | test_jsonl_writer.py | 9 | JSONL append writer |
-| test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
-| test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
-| test_flow_section_contract.py | 22 | `sections.flow` five-key contract; per-branch (not fleet-wide) recently_closed; total_plans carried, not derived |
-| test_json_durability.py | 4 | `AIPASS_TEST_LOG_DIR` seam, measured in subprocesses (both import orderings) |
-| test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
-| test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
-| test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
-| test_project_citizens.py | 20 | projects/* registry sweep, passport resolution, collision precedence, CWD-independent paths |
-| test_log_health.py | 7 | Snapshot staleness reporting, rate display, routing |
 | test_status.py | 8 | Status commands |
+| test_log_health.py | 7 | Snapshot staleness reporting, rate display, routing |
 | test_sweep.py | 6 | Log sweep |
-| test_scaffold.py | 1 | Scaffold placeholder (skipped — branch conftest) |
+| test_json_durability.py | 4 | `AIPASS_TEST_LOG_DIR` seam, measured in subprocesses (both import orderings) |
 
 ## Integration Points
 
 ### Depends On
-- `aipass.cli` — Console output, headers, success/error formatting
-- `aipass.drone` — Caller attribution via `[CALLER:BRANCH]` log markers
-- `aipass.trigger` — Optional event firing (module_discovered, error_detected)
+- `aipass.cli` — Console output, headers, success/error formatting (imported)
+- `aipass.trigger` — Optional event firing (`module_discovered`, `startup`,
+  `runaway_log_detected`, `file_watcher_died`). Every import site is guarded by
+  `except (ImportError, OSError)`: prax runs without it.
 - `watchdog` — File system monitoring (inotify + polling fallback)
 - Python stdlib (`pathlib`, `logging`, `threading`, `argparse`, `importlib`)
+- **@drone is not an import.** prax never imports drone; it *parses* the
+  `[CALLER:BRANCH]` marker drone writes into its own log lines
+  (`handlers/monitoring/log_watcher.py`), and reads `AIPASS_CALLER_CWD` from the
+  environment. The coupling is a text format, not a dependency — verified
+  2026-09-05, no `aipass.drone` import exists anywhere in the tree.
+- The json service imports **stdlib only**, on purpose: measured 2026-09-05,
+  `from aipass.prax import json_handler` in a fresh interpreter loads 6 aipass
+  modules and no third-party package at all.
+
+*(All import claims here re-verified 2026-09-05.)*
 
 ### Provides To
 - All branches — Unified logging via `from aipass.prax import logger`
@@ -785,9 +882,11 @@ drone @prax monitor run
 - System — Log audit enforcement
 
 ## Known Issues
-- **inotify pressure** — The monitor and log watcher fall back to polling when inotify watches run out (functional but slower). Earlier revisions said the system is "often near" the limit; measured on this machine 2026-08-25 it is not — **7,664 watches held against a `max_user_watches` of 65,536**, about 12%. The fallback is real and tested; the headroom claim was stale. It is a single-machine reading, not a fleet property.
+- **inotify pressure** — The monitor and log watcher fall back to polling when inotify watches run out (functional but slower). Earlier revisions said the system is "often near" the limit; measured again 2026-09-05 it is not — **8,340 watches held across all processes against a `max_user_watches` of 65,536**, about 13% (it was 7,664 on 2026-08-25). The fallback is real and tested. It is a single-machine reading, not a fleet property.
 - **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches on top of every other watcher (see the inotify note above). Verified 2026-08-13 by launching five alongside the then-live systemd service; none complained. That service is retired as of 2026-08-18 (monitor is on-request only), so the everyday risk is now several forgotten terminals rather than a daemon plus terminals — but the missing guard is unchanged.
-- **Error paths exit 0.** `monitor bogus`, `log-audit bogus`, `log-health bogus` and `dashboard refresh @nosuchbranch` all print an error and return exit code 0. `status` is worse: an unknown subcommand or unknown flag is dropped silently and the normal status block prints. Nothing scripted can detect a prax command failure from `$?`.
+- **Error paths exit 0.** Re-run 2026-09-05: `monitor bogus`, `log-audit bogus` and `log-health bogus` each print an error and return **0**. `status` is worse — `status bogus` prints the normal status block with no complaint at all, also **0**. Nothing scripted can detect a prax command failure from `$?`.
+- **The test seam does not cover path-based writes.** `AIPASS_TEST_LOG_DIR` redirects everything the json service writes by module name (measured 2026-09-05: 0 files into the real `prax_json/`, 18 into the redirect). It does not reach the module-level constants in `handlers/config/load.py`, `handlers/config/ignore_patterns.py`, `handlers/registry/load.py` and `handlers/registry/save.py`, which resolve to the real tree even with the variable set — so a registry save under any suite writes the live `prax_registry.json`. See the json service section.
+- **The module registry never prunes.** `prax_registry.json` gains an entry when a `.py` file appears and loses one only if someone removes it by hand. Counted 2026-09-05: **196 modules registered, 63 of which name a file that is no longer on disk** — probes, scratch files and archived tests from a dozen branches' sweeps. Stale rows mislead rather than break (every reader opens the path), but a third of the registry describing files that do not exist is not a registry anyone should trust for a count.
 - **No runtime filtering in Mission Control** — `_handle_interactive_cmd` dispatches
   only `help` and `status`; `watch` and `filter` fall through to "Unknown command". Branch
   selection is launch-time only (`monitor run seedgo,cli`) and cannot be changed without a
@@ -796,7 +895,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-09-03*
+*Last Updated: 2026-09-05*
 
 ---
 [← Back to AIPass](../../../README.md)

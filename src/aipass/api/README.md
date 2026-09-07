@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (46/46) | **Tests:** 1625 pass | **Functions:** 240 public (218 tested)
-**Last Updated:** 2026-08-27
+**Seedgo:** 100% (47/47) | **Tests:** 1463 test functions across 47 files; pytest expands to 1561 cases, 1561 pass | **Functions:** 240 public (217 tested)
+**Last Updated:** 2026-09-05
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -152,10 +152,12 @@ repo-root conftest WRAPS `log_operation` to keep parallel runs off shared
 files — so the caller of `log_operation` really is that wrapper. Measured
 before blaming the change: `inspect.stack()[2]` returns the same frame, so
 the old implementation named `conftest` too and this test was simply the
-first thing in the tree ever to look. It pins AGREEMENT between the two
-implementations now, plus the depth itself through a stand-in compiled under
-another filename — a stand-in defined in the test file put frames 1 and 2 in
-the same module, and the off-by-one mutation survived. The TTL test failed on
+first thing in the tree ever to look. That pin no longer exists here: it
+compared api's own `_get_caller_module_name` against an `inspect.stack()` walk,
+and DPLAN-0325 replaced both with prax's one service on 09-04, so the comparison
+has no subject in this tree. Section 4 of `test_host_perf.py` is archived
+verbatim under `tests/.archive/deleted_2026-09-04_test_host_perf_caller_detection.py`,
+and its two surviving claims moved into seedgo's fleet contract. The TTL test failed on
 Windows only because `time.monotonic` advances there in ~15.6ms steps, so two
 reads landed on one tick and `0.0 > 0.0` is false; it drives its own clock
 now and sleeps not at all. The pump's POSIX-only machinery patches the
@@ -270,16 +272,16 @@ api/
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
-│   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory)
+│   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory), autostart.py (the systemd unit renderer)
 │   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
 │   │   ├── host/pump.py (the attach socket's two directions), settings.py (the desktop's two gears), memory_config.py (@memory's limits, served)
 │   │   ├── integrations/list.py, call.py
-│   │   ├── json/json_handler.py
+│   │   ├── json/json_handler.py       # The fleet's ONE json service, bound to prax — byte-identical in every branch, checked by hash
 │   │   ├── openrouter/caller.py, client.py, models.py, provision.py
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1634 collected across 50 files (parametrised)
+└── tests/                             # 1463 test functions across 47 files; pytest expands to 1561 cases
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
@@ -307,6 +309,11 @@ a raw `resolve()`; B: realpath denied directly, abspath left working — convict
 | after the guard cure | 49 — one line left: `json_handler.py`'s `API_ROOT` |
 | after routing three sites through `module_file()` | 0 |
 
+*The table is the 08-31 measurement and is left as measured. Its middle row names
+a line that no longer exists: `json_handler.py` became the fleet's shim on 09-04
+(DPLAN-0325) and `API_ROOT` was retired with the old handler — do not grep for it.
+Two module-level constants route through `module_file()` today, not three.*
+
 Two cures:
 
 - `apps/handlers/__init__.py` walks frames with `sys._getframe` instead of `inspect.stack()`,
@@ -314,9 +321,10 @@ Two cures:
   raw-spelling fallback, and reads the import line with `linecache`. The second `inspect.stack()`
   walk in the caller-is-None branch is gone — it was a second copy of the same cwd dependency in
   service of a branch that returned either way.
-- `apps/handlers/module_root.py` holds `module_file()`, the one guarded spelling. Three
-  module-level constants route through it (`json/json_handler.py`, `usage/aggregation.py`,
-  `usage/tracking.py`). Its diagnostics live inside their own protection: the world that reaches
+- `apps/handlers/module_root.py` holds `module_file()`, the one guarded spelling. **Two**
+  module-level constants route through it today (`usage/aggregation.py`, `usage/tracking.py`)
+  — it was three until 09-04, when `json/json_handler.py` became the fleet shim and stopped
+  resolving anything of its own. Its diagnostics live inside their own protection: the world that reaches
   the fallback is the world where prax's logger may be down too, so `sys.stderr` is the last
   resort rather than a crash.
 
@@ -1226,17 +1234,50 @@ Private drivers in `apps/integrations/{project}/driver.py` (gitignored) register
 
 ---
 
-## Known Issues
+## Status / Known issues
 
-- Error paths exit `0` — a failed command (missing arg, no key, no data) reports success to the shell, so `drone @api validate && ...` proceeds on failure. Unknown commands correctly exit `1`. See APLAN-0013.
-- Google auth libraries are optional deps — commands fail with install instructions if missing
-- Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`; legacy dir still present)
-- No rate limiting on OpenRouter calls (S117 finding)
+**Measured 2026-09-05:** seedgo audit 100% on all 47 categories · 1463 test
+functions across 47 files, pytest expands to 1561 cases, 1561 pass / 0 skipped
+(137s) · 240 public functions, 217 tested · 45 production files in the audit
+corpus · ruff, format and pyright clean.
+
+- **Two working command families are absent from `drone @api --help`: `host-api` and
+  `integrations`.** Both run — `host-api status` returned a live server tonight and
+  `integrations list` printed two registered contracts — but neither appears in the help
+  table or the trailing `Commands:` line, which lists 14 and omits these. The `host-api`
+  half was found by @devpulse 2026-09-05; checking every README command against `--help`
+  the same night turned up `integrations` as the same defect. So the largest surface on
+  this branch is undiscoverable from the front door, and this README is the only place
+  that documents it. Code fix, not a docs fix; deliberately not made in this docs-only
+  pass. Everything `--help` *does* list was run tonight and matches its description.
+- **`openai` is a provider name with no provider behind it.** `list-providers` prints it
+  and `PROVIDER_DEFAULTS` carries an `api.openai.com` base URL and an `sk-` validation
+  rule, but nothing reads that base URL: `create_client()` is hardcoded to
+  `OPENROUTER_BASE_URL`, and `PROVIDER_DEFAULTS` is consumed only by the listing itself
+  (`api_key.py:164`). So `get-key openai` and `validate openai` reach a key store that is
+  never used to call anything. The OpenAI SDK here is transport for OpenRouter, not an
+  OpenAI integration.
+- **Error paths exit `0`** — a failed command reports success to the shell, so
+  `drone @api validate && ...` proceeds on failure. Re-measured tonight: `get-key openai`
+  and `validate openai` both print a red failure and exit `0`. Unknown commands correctly
+  exit `1`. Blocked on Patrick's fleet-wide ruling; see APLAN-0013.
+- **Google auth libraries are optional deps** — commands fail with install instructions if
+  missing. Verified importable tonight (`google.auth`, `googleapiclient`).
+- **No rate limiting on OpenRouter calls** (S117 finding). Verified tonight: zero
+  rate-limit, throttle or backoff code in `handlers/openrouter/` or `openrouter_client.py`.
+
+*Retired 2026-09-05:* this list carried "backup branch credential migration pending
+(`~/.aipass/` → `~/.secrets/aipass/`, legacy dir still present)" for months. It is
+**wrong**: `~/.aipass/` holds live fleet state — `commons.db`, `daemon-tick.log`,
+`trusted_projects.json`, `admin_grant.key`, `skills/`, `telegram_bots/` — and not one
+api credential. There is nothing here to migrate, and acting on the item as written
+would have deleted state other branches depend on. Closed once already in the 08-28
+audit refresh; the README kept it standing until tonight.
 
 **Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-25 (`openai` 2.49.0, `google.auth` + `googleapiclient`), verified by import alone — no call goes out.
 
 ---
 
-*Last Updated: 2026-08-25*
+*Last Updated: 2026-09-05*
 
 [← Back to AIPass](../../../README.md)

@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-08-30
+**Last Updated:** 2026-09-05
 
 ---
 
@@ -68,7 +68,7 @@ daemon/
 │   │   ├── actions/
 │   │   │   └── .archive/             # actions_registry, action_processor (archived)
 │   │   ├── json/
-│   │   │   └── json_handler.py       # JSON data operations
+│   │   │   └── json_handler.py       # The fleet's one json shim — binds prax's service (DPLAN-0325)
 │   │   ├── monitoring/
 │   │   │   ├── activity_collector.py  # Collects branch activity data
 │   │   │   ├── inbox_scanner.py       # Cross-branch stale unread-mail detection
@@ -93,12 +93,14 @@ daemon/
 │       ├── __init__.py                # discover_plugins() — ORPHANED, no live caller
 │       └── .archive/                  # ALL plugins archived: heartbeat, daily_audit,
 │                                      # community_rotation, botfather_reminder, dev_central_monitor
+├── daemon-tick.service         # systemd user unit — one oneshot tick
+├── daemon-tick.timer           # systemd user timer — ~2 min cadence
 ├── daemon_json/                # JSON tracking data
 ├── docs/                       # Documentation
 ├── dropbox/                    # Incoming file drops
 ├── logs/                       # Prax log output
 ├── tools/                      # Branch verification utilities
-└── tests/                      # Test suite
+└── tests/                      # Test suite — 473 test functions in 19 files (pytest expands to 495)
 ```
 
 ---
@@ -175,13 +177,13 @@ default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min*
 `626320000` ns) and roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's
 own output appends to `~/.aipass/daemon-tick.log`.
 
-Two trees are swept: core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) and resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`).
+**Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it.
 
-**Who counts as a citizen (2026-08-28, DPLAN-0319 wave 3).** Candidate discovery is registry-led and shallow — exactly `projects/<project>/<NAME>_REGISTRY.json`, one level down, every dot-prefixed path component refused by an explicit filter, because `pathlib` globs match hidden directories where a shell would not. It never walks passports: on this machine a passport walk under `projects/` finds eight passports for four residents, since `baud` carries real resident-declaring copies under `.backup/versioned/` and `.backup/snapshots/`. Classification then reads the branch's own `citizenship.residency`, and inside `projects/` **both keys are required** — the registry lists the branch `active` *and* the passport declares `resident`. Every other outcome is refused and named at error level: missing passport, unreadable passport, absent field, `core` claimed from inside `projects/`, an unknown value, or a registry path that is not on disk.
+**Who counts as a citizen is no longer decided here (FPLAN-0460).** The core-registry read, the `projects/*` glob, the dot-filter and the two-key resident rule all used to live in `discovery.py` as a second copy of the fleet definition. They are now one call to `fleet.fleet_branches()` in @memory — a fleet definition with two implementations agrees only by coincidence. `discovery.py:159` consumes that list rather than mirroring it, which is why the federated-external tier above arrived here without a line changing in this branch.
 
-The trust model is asymmetric on purpose. A passport can never *add* scope (nothing walks passports, so a declared resident no registry lists is unreachable by construction), and a passport can never *remove* a core citizen (a core branch declaring nothing is kept and the disagreement is logged — otherwise an agent could stop its own jobs firing by deleting one line of its own file).
+**What this branch still decides is an address.** @memory deliberately leaves that to each caller: their ruling is that a branch with no `email` is KEPT, because the path-based lanes (trinity push, rollover) still want it. Daemon cannot use it — a job's owner IS an email and the wake targets an email — so an addressless citizen is refused, and refused **loudly at error level**, because a citizen dropped without a line in the log is indistinguishable from one that was never discovered. A second row carrying an address already claimed is refused the same way: @memory deduplicates by resolved path, correct for its path-keyed lanes, but daemon is email-keyed and two rows sharing an address would double-fire the first citizen's schedule.
 
-**This changed the parked-project policy.** The old walk made every branch a project registry marked `active` into a citizen, so a parked project kept its place in the scheduler, the steward rotation and the inbox sweep on the strength of a status field nobody had revisited — `marketstand` is parked and its registry still says `active`. The passport is now the second key and such a project is refused. The live roster is unchanged (22 citizens: 18 core + 4 residents, all four declaring `resident`), because both parked projects already sit under `projects/.archive/`; the change bites the day one is parked in place rather than moved. The same wave closed a real hole: `SKIP_DIRS` never listed `.archive`, so a registry planted directly at `projects/.archive/X_REGISTRY.json` *was* discovered — the parked projects escaped only by sitting one level deeper than the walk reached. A project registry's paths resolve against its own project root, never the repo root — BAUD's registry row reads `src/baud/baud`, which is a path that also *could* resolve under this repo, and resolving repo-first picks the wrong directory. That collision was live until the phantom `<aipass>/src/baud/` was removed (2026-08-24); the guard and its test stay, because the row is still relative and a repo-first join would recreate the phantom rather than fail. Vera-Studio is a separate repo and is out of scope until multi-root discovery exists.
+The trust model behind the fleet definition remains asymmetric on purpose: a passport can never *add* scope (nothing walks passports, so a declared resident no registry lists is unreachable by construction), and a passport can never *remove* a core citizen (a core branch declaring nothing is kept and the disagreement is logged — otherwise an agent could stop its own jobs firing by deleting one line of its own file). A project registry's paths resolve against its own project root, never the repo root — BAUD's registry row reads `src/baud/baud`, a path that *could* also resolve under this repo, and resolving repo-first picks the wrong directory.
 
 ### Job file schema
 
@@ -318,7 +320,8 @@ ANSI before asserting. Both are load-bearing, and each was paid for:
   failed under `TERM=dumb` — the same defect, one layer along.
 
 The suite is verified green under `FORCE_COLOR=3`, `TERM=dumb`, `NO_COLOR=1`, and
-`TERM=xterm-256color`. `TestSharedConsoleContract` separately pins the hazard behaviourally against
+`TERM=xterm-256color` (re-measured 2026-09-05: 36 passed under each of the four).
+Both classes live in `tests/test_activity_report.py`. `TestSharedConsoleContract` separately pins the hazard behaviourally against
 the real `aipass.cli` console: it asserts a lowercase tag is still swallowed there, so a cli change
 surfaces here rather than blanking this report.
 
@@ -345,7 +348,7 @@ surfaces here rather than blanking this report.
 
 ## Plugins
 
-**The plugin system is retired.** All three plugins are in `apps/plugins/.archive/`, and the
+**The plugin system is retired.** All five plugins are in `apps/plugins/.archive/`, and the
 `discover_plugins()` entry point in `apps/plugins/__init__.py` has no live caller — its only
 remaining import is from an archived file. Scheduling is now decentralized: each citizen owns
 `<branch>/.daemon/schedule.json` and the daemon discovers and fires. See **Scheduling Jobs** above.
@@ -354,16 +357,19 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 |--------|--------|--------|
 | `community_rotation` | @rotating | Archived — superseded by `rotation` module + `fleet-steward` job |
 | `daily_audit` | @seed | Archived — targeted @seed, renamed to @seedgo years prior |
-| `heartbeat` | @vera | Archived — @vera was never in the branch registry |
+| `heartbeat` | @vera | Archived — @vera was not in `AIPASS_REGISTRY.json` then and is not now. It *is* a live citizen tonight, via the federated-external tier (`external/VERA-STUDIO`), so the target exists again — the plugin does not |
+| `botfather_reminder` | @dev_central | Archived — Telegram stripped |
+| `dev_central_monitor` | @dev_central | Archived — @dev_central is in no registry tonight |
 
 ---
 
 ## Known Issues
 
-*Verified live 2026-08-13 (APLAN-0015). Items are listed only if reproduced this session.*
+*Re-verified live 2026-09-05 (FPLAN-0490 truth pass). Items are listed only if reproduced this session.*
 
-- **`update` digest reads empty** (0 messages, 0 sessions, no focus) even with live mail and 30+
-  recorded sessions — `data_loader` reads different paths than `.trinity/local.json`. Long-standing.
+- **`update` digest reads empty** — reproduced 2026-09-05: `drone @daemon update` printed 0 messages
+  and 0 sessions while the mailbox held 2 opened emails and `.trinity/local.json` held 16 sessions.
+  `data_loader` reads different paths than `.trinity/local.json`. Long-standing.
 - **`apps/modules/wakeup_ops.py` is orphaned.** Not in the router's module list, so
   `drone @daemon wakeup-ops` returns "Unknown command"; `daemon_wakeup.py` names it only inside a
   print string. Its 9 tests are the only thing importing it.
@@ -378,9 +384,12 @@ remaining import is from an archived file. Scheduling is now decentralized: each
   17.9% unparseable, 92.5% unusable**. Now every write site routes through `_atomic_write_json`
   (staged via `tempfile.mkstemp` in the *target's own* directory, then `os.replace`; the staged
   file is unlinked on failure and the helper raises rather than swallowing). Same probe after:
-  **0 of 1,410 reads unusable**. `tests/test_json_durability.py` holds the guards, including a
-  source check that no truncating `open()` returns — mutation-checked against `"w"`, `"a"` and
-  `"w+"` reintroductions.
+  **0 of 1,410 reads unusable**. The guards travelled with the subject: this branch's json handler is
+  now the fleet shim over prax's service (DPLAN-0325 pair 5), so `tests/test_json_durability.py` moved
+  to `tests/.archive/deleted_2026-09-04_json_durability.py` along with the handler it pinned. The
+  durability contract is prax's to hold now, and it does: `aipass/prax/tests/test_json_durability.py`
+  is live there (verified 2026-09-05). **Nothing in this branch tests it any more** — correctly, since
+  nothing in this branch implements it.
 - ~~Memory health is fleet-wide noise~~ (2026-08-15) — `validate_memory_structure()` demanded a
   `limits` field that schema 3.0.0 dropped, so **0 of 17** branches passed and every one read
   WARNING forever. Per @memory's schema call the check now asks whether the file is *usable*:
@@ -408,11 +417,21 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-- **473 tests** across 19 test files (DPLAN-0325 pair 5, 2026-09-04: five DPLAN-0059 json-handler stamp files moved to `tests/.archive/`; the json handler is now the fleet's one shim over prax's service)
-- 10/10 modules covered, 46/50 public functions tested
-- Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
+All numbers below measured 2026-09-05.
 
-*Last Updated: 2026-09-04*
+- **473 test functions** across 19 test files; parametrization expands these to **495 cases**
+  (`python3 -m pytest tests/ -q` → `495 passed in 37.07s`, 0 failed, 0 skipped)
+- 10/10 modules covered — every module under `apps/modules/` is imported by at least one live test file
+- **47 of 51 public functions tested** (seedgo's count; was 46/50 before the pair-5 sweep)
+- Seedgo audit **100%**, every scored category at 100 including Trinity, with 22 bypass rows
+- The bypass list holds **22 rows**. The `apps/daemon_wakeup.py` *encapsulation* row added by
+  a6956b0f is **gone** — seedgo cured the derivation (251f2eb9) and Encapsulation now scores 100
+  with no row for that file, so it is not needed. The row still present for `daemon_wakeup.py` is
+  the long-standing *architecture* one (entry-point script outside the 3-layer structure).
+- *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
+  emptying the list is a seedgo-side change, out of scope for a docs pass.
+
+*Last Updated: 2026-09-05*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -51,6 +51,7 @@ aipass/
 │   │   │   └── adopt.py                   # Project adoption logic (additive scaffold onto an existing dir)
 │   │   ├── json/                          # Branch-local shim — binds the fleet json service (prax-owned)
 │   │   ├── help_flag.py                   # wants_help() — --help detection in any argv position
+│   │   ├── module_root.py                 # Branch-root resolution for handlers
 │   │   ├── ping_sweep/                    # Branch reachability verification
 │   │   ├── provider_reconcile.py          # Stale deny-rule detection + fix
 │   │   ├── provider_wire.py               # Provider settings wiring (used by doctor --fix)
@@ -58,13 +59,15 @@ aipass/
 │   │   ├── sandbox_check/                 # Sandbox / containment detection
 │   │   ├── structure_scan/                # Agent placement + pollution detection
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
+│   │   ├── telegram_readiness.py.disabled # Parked — not imported, not collected
 │   │   └── ui/                            # Rich progress bars, spinners, check glyphs, step headers
 │   ├── integrations/                      # Placeholder — no code yet
 │   └── plugins/                           # Placeholder — no code yet
 ├── shared/                                # Cross-handler code, stdlib-only (loads pre-drone) — json_ops,
 │                                          #   project_home, registry_discovery, scaffold_content. Four modules:
 │                                          #   json_handler retired to shared/.archive/ 2026-09-04 (DPLAN-0325)
-├── tests/                                 # 1081 passing
+├── docs/                                  # admin_setup, probe_hygiene, test-quality research
+├── tests/                                 # 1044 test functions -> 1081 cases
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -89,6 +92,7 @@ aipass/
 | `aipass init run --name/--cli/--style/--template <v>` | Pre-fill a stage answer |
 | `aipass init run --dry-run` | Walk all stages, write nothing |
 | `aipass init --list` | List available project templates |
+| `aipass init <template>` | Run the guided setup with that template pre-selected (a bare template name, e.g. `aipass init python`; absent from `init --help`) |
 | `aipass init <path> [name]` | Scaffold AIPass files into an existing path (absent from `init --help`) |
 | `aipass init agent <name>` | Create an agent via `drone @spawn` (absent from `init --help`) |
 | `aipass init update [target]` | Refresh managed scaffold + provision owner-tier repo auth |
@@ -97,6 +101,7 @@ aipass/
 | `aipass install --path DIR` / `--here` | Choose the install home |
 | `aipass install --non-interactive` / `--no-chat` / `--chat-only` | Headless, install-only, or chat-only |
 | `aipass install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
+| `aipass install --force-global-home` | Allow installing into `/tmp` — unsafe, absent from this table until 09-05 |
 | `aipass install --dry-run` | Walk the steps, no side effects |
 | `aipass profile` | Show user profile |
 | `aipass profile set <field> <value>` | Update a profile field |
@@ -115,7 +120,7 @@ aipass/
 | `aipass trust [path]` | Show enrolled projects or enroll a project in the trust registry |
 | `aipass revoke <path>` | Remove a project from the trust registry |
 | `aipass trust prune` | Drop registry entries whose project path no longer exists |
-| `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks) |
+| `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks). Bare `aipass feedback` prints module info, not the current state |
 | `aipass --version` | Version |
 
 ## Admin setup
@@ -156,7 +161,8 @@ the authoritative check.
 ### Depends On
 
 - `@drone` — routing; every outbound command in this branch is a `drone` subprocess call
-- `@spawn` — agent creation (`init run`, `init agent`, `new`) + registry sync during `install`
+- `@spawn` — agent creation (`init run`, `init agent`, `new`), registry sync during `install`, and
+  `doctor`'s owner/identity check + `--fix` repair (`drone @spawn sync-registry --check/--fix`)
 - `@hooks` — `feedback` delegates to it outright; `doctor` and the cross-OS pre-flight check `drone @hooks status`
 - `@ai_mail` — test-convention ping emails (`ping_sweep`)
 - `@prax` — logging, imported by nearly every module and handler
@@ -167,20 +173,78 @@ the authoritative check.
 
 ### Provides To
 
-Humans only. No `.py` source elsewhere in AIPass imports this branch.
+Humans, first — the CLI is the product and nothing in the fleet drives it.
+
+But the old claim that *no* `.py` source elsewhere imports this branch was wrong, and
+was corrected on 2026-09-05 by grepping the tree. `shared/` is a real cross-branch
+dependency: **@spawn imports three of its four modules** in production code —
+`shared/json_ops.py` (`backup_json`, `deep_merge` via `spawn/apps/handlers/json_ops.py`),
+`shared/project_home.py` (`_detect_aipass_home` via `handlers/placeholders.py`), and
+`shared/registry_discovery.py` (`find_registry` via `handlers/registry.py`). This branch's
+own `.seedgo/bypass.json` has said so since 2026-08-09 in the `backup_json` rule; the
+README simply disagreed with it. Nothing outside `shared/` is imported by anyone —
+`apps/` really is humans-only.
+
+Consequence worth stating: `shared/` is stdlib-only *by contract*, not by preference —
+it loads before drone exists, and @spawn is downstream of it. `tests/test_shared_bootstrap_safety.py`
+is the guard.
 
 ## Tests
 
-1081 passing — `pytest src/aipass/aipass/tests/`
+1044 test functions across 29 files; pytest expands them to **1081 cases**, all passing —
+`pytest src/aipass/aipass/tests/`. Both numbers measured 2026-09-05 (`def test_` lines in
+`tests/test_*.py` for the first, a real run for the second).
+
+Run it from the branch directory or the repo root. From `src/aipass` four tests fail —
+that cwd puts a local `aipass/` directory ahead of the installed package, so the
+subprocess-based tests cannot resolve `aipass.aipass` or `aipass.hooks`. Pre-existing and
+not a regression (proven by restore-and-rerun on 2026-09-04); it is on the fix list, not
+a property of the suite.
+
+## Status
+
+Green. Every command in the table above was run on 2026-09-05 and behaves as described;
+the suite passes; `drone @seedgo audit aipass @aipass` is 100 on every scored category.
+The open items below are all **help text disagreeing with working code** — no command is
+broken, and none of them is fixed in this pass (docs-only). Nothing in this README is
+carried on trust: anything not verifiable tonight is marked inline rather than left green.
 
 ## Known Issues
 
-- Running the file directly (`python apps/aipass.py`) fails on package imports (ModuleNotFoundError) — use the installed `aipass` entry point, which works from any directory.
-- `aipass --help` omits `feedback` and `handoff`, and its example line still claims `aipass init` starts the guided setup. Bare `aipass` lists `feedback` but also omits `handoff`.
-- `aipass init --help` documents neither `aipass init <path> [name]` nor `aipass init agent <name>`, and omits the `--style` flag that `init run` accepts.
-- `aipass handoff --help` claims bare `aipass handoff` shows status; it prints the usage block instead.
-- `aipass install --no-chat` returns before the doctor pre-flight runs, so the pre-flight is skipped along with the chat.
+Each verified against live code on 2026-09-05.
+
+**Help text vs behaviour** — the code is right, the help is wrong:
+
+- `aipass --help` omits `feedback` and `handoff`, and its example line still claims
+  `aipass init` starts the guided setup (bare `init` prints usage). Bare `aipass` lists
+  `feedback` but also omits `handoff`. Fix in `print_help()`, `apps/aipass.py:195`.
+- `aipass --help` advertises `doctor --json` as "JSON output for structure scan". It is
+  not: `--json` alone falls through to the normal report, and JSON only comes from
+  `doctor --fix --json`. The table above is correct; the help is not.
+- `aipass init --help` documents neither `aipass init <path> [name]` nor
+  `aipass init agent <name>` nor `aipass init <template>` — all three route in
+  `init_flow.py` — and omits the `--style` flag that `init run` accepts (`init_flow.py:1155`).
+- `aipass handoff --help` claims bare `aipass handoff` shows status; it prints the usage
+  block instead. Status is `aipass handoff --info`.
+- `aipass feedback --help` claims bare `aipass feedback` shows the current state; it prints
+  module introspection instead (`feedback.py:90-93`). The real state lives with @hooks.
+
+**Stale docstring:**
+
+- `apps/handlers/init/bootstrap.py:22` lists `.ai_mail.local/inbox.json` as scaffold step 9.
+  No code in the file creates it — mailboxes are per-agent, inside `src/PKG/AGENT/`.
+
+**Behaviour:**
+
+- Running the file directly (`python apps/aipass.py`) fails on package imports
+  (`ModuleNotFoundError: No module named 'aipass.cli'`) — use the installed `aipass` entry
+  point, which works from any directory.
+- `aipass install --no-chat` returns from `_end_in_chat` before `_run_doctor_preflight()`
+  (`install.py:322-332`), so the pre-flight is skipped along with the chat.
+- The concierge prompt built at `install.py:234-241` carries the resolved binary paths plus
+  only the hooks / wire-verify doctor failures — not the full doctor verdict. Intended, and
+  recorded here so the narrower scope is not mistaken for a bug.
 
 ## Last Updated
 
-Last Updated: 2026-08-25
+Last Updated: 2026-09-05 — full claim-by-claim verification pass (FPLAN-0490 round 2).

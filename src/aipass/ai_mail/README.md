@@ -5,11 +5,31 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-09-03
+**Last Updated:** 2026-09-05
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1433 pass across 49 files, 0 skipped, both rootdirs (on a fresh checkout 4 live-hygiene tests skip instead — 2 in `test_live_mailbox_hygiene.py`, 2 in `test_live_contacts_hygiene.py`) | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1399 test functions across 48 files in `tests/test_*.py`; pytest expands them to **1433 cases**, 1433 passed / 0 skipped, measured 2026-09-05 from both rootdirs (branch and repo root)
+
+> Two numbers because they answer different questions: `def test_` counts what
+> was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
+> single `@pytest.mark.parametrize` in `test_refused_sends.py` turns 18 functions
+> into 25 cases. Per-file counts in the tests listing below are **collected
+> cases**, not `def` lines; the two agree in most files and do not in the
+> parametrized ones. `tests/` holds 49 files total — 48 test modules plus
+> `conftest.py`, which is why the count read 49 until tonight.
+>
+> **UNVERIFIED — fresh-checkout skips.** A previous edition claimed 4
+> live-hygiene tests skip on a fresh checkout (2 in `test_live_mailbox_hygiene.py`,
+> 2 in `test_live_contacts_hygiene.py`). That cannot be measured from a working
+> tree that already has live mailboxes, and it was not measured tonight. The
+> file sizes are 4 and 3 tests respectively, so the "2 and 2" split is at minimum
+> imprecise. Treat it as unverified until someone runs the suite on a clean clone.
+>
+> **UNVERIFIED — "Battle Tested: S62".** This field was carried here for months
+> and is now removed rather than restated: no other branch README in the fleet
+> uses it, nothing defines what S62 measured, and the session counter passed 178
+> long ago. An unfalsifiable badge is worse than no badge.
 
 ## Quick Start
 
@@ -515,7 +535,22 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
    - **Auto-retry** — 3 strikes: attempt 1+2 resume, attempt 3 fresh (new session)
    - **Bounce email** — on final failure, sends error report back to sender
    - **Lock cleanup** — removes `.dispatch.lock` when agent exits
-   - **Wake-back** — on agent exit, wakes the original sender so they can process the result. Wake-back sessions carry an empty sender, so chains terminate at the original dispatcher
+   - **Wake-back** — on agent exit, the original sender is notified. A
+     builder-class sender is **woken**; a **manager sender is MAILED, never
+     woken** (`_mail_wake_back()`), because the manager gate is deliberate and
+     stays — telling a manager "you will be woken" was a promise the lane could
+     not keep, and the manager then heard nothing at all (two live cases
+     2026-08-21). `dispatch` announces which of the two will happen, by reading
+     `is_manager(sender)` up front rather than guessing.
+     Wake-back sessions carry an empty sender, so chains terminate at the
+     original dispatcher, and `AIPASS_WAKE_DEPTH` caps the chain at
+     `MAX_WAKE_DEPTH = 3` regardless. `_wake_sender()` returns one of nine
+     result tags into `dispatch_wake.log` — `success`, `mailed_manager`,
+     `failed_manager_mail`, `blocked_occupied`, `blocked_locked`,
+     `blocked_depth`, `skipped_sender`, `skipped_self`, `failed` — so "notified"
+     is never inferred from a bare boolean. It was: the manager gate returns
+     `True` having woken nothing, and trusting that bool logged "woken" for a
+     wake that never happened
 
 ### Safety Limits
 
@@ -524,7 +559,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 - `WAKE_BLOCKLIST` protects `@devpulse` from cross-branch manual wakes
 - **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The three exceptions (scheduled, admin, @daemon self-wake) are named below
 - **Self-wake guard** — if sender equals target, wake-back is skipped (prevents self-loops)
-- **Chain termination** — wake-back sessions carry an empty sender, so the chain always stops at the original dispatcher
+- **Chain termination** — wake-back sessions carry an empty sender, so the chain always stops at the original dispatcher; `MAX_WAKE_DEPTH = 3` on `AIPASS_WAKE_DEPTH` bounds it even if that were bypassed
 - `dispatch_monitor.py` strips `AIPASS_CALLER_*` env vars to prevent parent context leaking into agent identity
 - `AIPASS_BRANCH_NAME` env var set in spawn_env for CWD-independent identity
 
@@ -1095,7 +1130,8 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1433 tests across 49 test files (selection below)
+└── tests/                      # 48 test modules + conftest.py; 1399 def test_,
+                                # 1433 collected cases (selection below)
     ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -1103,7 +1139,7 @@ ai_mail/
     ├── test_wake.py            # Branch resolution, PID checks, lock files
     ├── test_wake_blocklist.py  # Wake protection for @devpulse
     ├── test_delivery.py        # Inbox migration, private branches, pipeline
-    ├── test_send_identity.py   # Sender identity chain (62 tests)
+    ├── test_send_identity.py   # Sender identity chain (67 tests)
     ├── test_identity_fence.py  # Every verb refuses outside a branch
     ├── test_user_paths.py      # Mailbox path resolution (22 tests)
     ├── test_contacts.py        # Address book operations
@@ -1139,7 +1175,11 @@ ai_mail/
   package: `@branch` resolution is internal (`registry/read.py`, `users/branch_detection.py`),
   and "drone routes commands to us" describes how `drone @ai_mail …` invokes this branch
   from outside, not a dependency
-- `aipass.trigger` — `trigger.fire()` for `email_dispatched` / `dispatch_completed` events
+- `aipass.trigger` — `trigger.fire()`. **Four** event names are fired, not the two this
+  line used to list (counted from the call sites, 2026-09-05): `email_sent`
+  (`email/send.py:258`), `email_broadcast_sent` (`email/send.py:184`), `email_dispatched`
+  (`modules/dispatch.py:451` and `modules/email_send.py:281`), and `dispatch_completed`
+  (`dispatch/report.py:305`). All in-process only — see the feed section
 - Python stdlib (`pathlib`, `json`, `importlib`, `subprocess`, `fcntl`) — argument parsing
   is hand-rolled in `send_args.py`, not `argparse`
 
@@ -1152,13 +1192,17 @@ ai_mail/
 
 ## Bypass Registry
 
-`.seedgo/bypass.json` holds **20** rules — 17 survivors of the prune below, one added the
-same day *with* `cli/help_flags.py` and measured live (99% with it off, 100% on, the
-opposite of a prune candidate), plus two added since: `handlers` on
-`dispatch/report.py` (FPLAN-0452 P1) and `unused_function` on the package `__init__.py`
-(S154, re-checked against the built wire). The 99%-with-everything-off figure was measured
-on 2026-08-13 against the 18-rule registry and has **not** been re-run since — the 100%
-audit score below is current, that one is dated.
+`.seedgo/bypass.json` holds **19** rules, counted from the file tonight (2026-09-05):
+17 survivors of the prune below, **minus one retired** on 2026-09-03 (`json_structure`
+on `apps/handlers/json_utils/json_handler.py` — the file itself went to
+`apps/handlers/.archive/` in the DPLAN-0325 sweep, and a bypass naming a path that no
+longer exists suppresses nothing), one added the same day as the prune *with*
+`cli/help_flags.py` and measured live (99% with it off, 100% on, the opposite of a prune
+candidate), plus two added since: `handlers` on `dispatch/report.py` (FPLAN-0452 P1) and
+`unused_function` on the package `__init__.py` (S154, re-checked against the built wire).
+17 − 1 + 1 + 2 = 19. The 99%-with-everything-off figure was measured on 2026-08-13 against
+the then 18-rule registry and has **not** been re-run since — the 100% audit score below
+is current, that one is dated.
 
 It held 51 until the 2026-08-13 audit measured
 every one of them in **both** lanes — the audit lane (`audit aipass @ai_mail --full`, walks
@@ -1182,21 +1226,71 @@ re-measure per lane.
 
 ## Known Issues
 
-- **DPLAN-0138**: Inbox backdoor audit identified 2 write path classes — ad-hoc direct writes (detectable by non-UUID ID format) and `_deliver_via_reply_path()` bypass (no lock, no notification). Fix pending.
-- **Caller detection**: `BRANCH DETECTION FAILED` when callers don't set `AIPASS_CALLER_BRANCH` (low severity, caller-side fix — use `--from` flag)
-- **Cross-branch writes**: ai_mail not in trusted cross-writers list for `system-pr`
+- **DPLAN-0138 — half of this entry was stale and is corrected here (measured 2026-09-05).**
+  The audit named two backdoor write classes. Re-read against the code tonight:
+  - `_deliver_via_reply_path()` **does lock now**, and the entry saying otherwise was
+    wrong. It lives in `email/reply.py:233`, validates the stored path through
+    `_validate_reply_path()` first, then delegates to `delivery.deliver_to_inbox_file()`
+    — which takes the same `_get_inbox_lock()` every other write takes and mints a
+    `uuid4[:8]` id. So "no lock" is false and "detectable by non-UUID ID format" does
+    not apply to this route either.
+  - **The notification gap is real and still open.** `send_notification` is called from
+    exactly one place in `delivery.py` (line 923, inside `deliver_email_to_branch`).
+    Neither `deliver_to_inbox_file()` nor `reply.py` calls it, so a cross-project reply
+    lands in the recipient's inbox with **no feed line** — BAUD's bell never rings for it.
+  - **UNVERIFIED:** the first class, "ad-hoc direct writes detectable by non-UUID ID
+    format", was not re-measured tonight and is carried forward as claimed.
+- **UNVERIFIED — Caller detection**: `BRANCH DETECTION FAILED` when callers don't set
+  `AIPASS_CALLER_BRANCH` (low severity, caller-side fix — use `--from`). Carried
+  forward; not re-measured tonight.
+- **UNVERIFIED — Cross-branch writes**: ai_mail not in trusted cross-writers list for
+  `system-pr`. That list lives in @hooks' `security/edit_gate.py`, another branch's
+  tree, so this one is not mine to measure from here. Carried forward as claimed.
+
+The five below were each re-run tonight (2026-09-05) and all five still reproduce:
+
 - **No per-subcommand help**: `view --help`, `reply --help`, `close --help`, `sent --help`,
-  `contacts --help` and `inbox --help` all print the same email-module help. The
+  `contacts --help` and `inbox --help` all print the same email-module help. Confirmed
+  tonight on `view --help` and `inbox --help` — byte-identical module help. The
   `subcommand_help` standard scores 100% on it. Open in APLAN-0006.
-- **`--from` is undocumented in `email --help`** — it is in this README and in the code, but
-  not in the module's own FLAGS block. Open in APLAN-0006.
-- **`--model` help names retired models** ("Claude Opus 4.6", "Sonnet 4.6"). Open in APLAN-0006.
+- **`--from` is undocumented in `email --help`** — confirmed tonight: the FLAGS block
+  lists `--dispatch`, `--reply-to`, `--no-memory-save` and `--upsert-key`, and no
+  `--from`. The flag itself is live (`send_args.py:54`, `dispatch.py:344`). Open in
+  APLAN-0006.
+- **`--model` help names retired models** — confirmed tonight, verbatim from
+  `dispatch --help`: "Claude Opus 4.6", "Claude Sonnet 4.6", "Claude Haiku 4.5".
+  Open in APLAN-0006.
 - **`dispatch status` reports "No dispatches recorded yet." while dispatches are running.**
-  Reproduced 2026-08-25 with two live entries visible in `dispatch register` at the same
-  moment. The register is the trustworthy view; `status` reads a different log and its
-  empty answer is a false negative, not an empty state. Open in APLAN-0006.
+  First reproduced 2026-08-25 with two live entries; **reproduced again tonight** —
+  `dispatch status` printed "No dispatches recorded yet." while `dispatch register`
+  listed **5 outstanding**, including this very dispatch. The register is the
+  trustworthy view; `status` reads a different log and its empty answer is a false
+  negative, not an empty state. Open in APLAN-0006.
 - **`dispatch wake` prints "see step status above"** when the step status prints below it
-  (`dispatch.py`). Named under *Output ordering*; open in APLAN-0006.
+  (`dispatch.py:318`, confirmed tonight). Named under *Output ordering*; open in
+  APLAN-0006.
+- **`tests/test_dispatch_monitor.py` carries 8 duplicate test pairs — 16 functions
+  where 8 would do.** Flagged by an opus judge (2026-09-05) as three pairs; an AST
+  comparison of every top-level test body in the file found **eight**, so the report
+  understated it. Each pair is two differently-named functions whose bodies are
+  identical after the docstring:
+
+  | | line | line |
+  |---|---|---|
+  | `kill_process_terminate_succeeds` / `kill_process_sigterm_success` | 624 | 1262 |
+  | `kill_process_terminate_timeout_falls_back_to_sigkill` / `kill_process_sigkill_fallback` | 638 | 1276 |
+  | `stdout_rotation_on_large_file` / `stdout_rotation` | 736 | 1375 |
+  | `lock_cleanup_on_success` / `lock_cleaned_on_success` | 782 | 1420 |
+  | `lock_cleanup_on_failure` / `lock_cleaned_on_failure` | 801 | 1439 |
+  | `rotate_attempt_stdout_skips_empty` / `rotate_attempt_stdout_empty_file_noop` | 845 | 2590 |
+  | `cleanup_own_lock_deletes_when_owner` / `cleanup_own_lock_deletes_when_pid_matches` | 945 | 2752 |
+  | `cleanup_own_lock_missing_noop` / `cleanup_own_lock_missing_file_noop` | 975 | 2775 |
+
+  Not a correctness bug — the file is green, and 122 test functions in one module is
+  how two copies of the same coverage go unnoticed. The cost is that the suite reports
+  8 more passing tests than it has distinct assertions, which inflates every count on
+  this page. **Recorded, not fixed:** merging tests is Patrick's call, and a docs-only
+  pass is the wrong place to delete coverage. Open in APLAN-0006.
 
 ---
 

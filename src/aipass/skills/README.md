@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-05
 
 ---
 
@@ -184,7 +184,11 @@ drone @skills on <name>                    # Reconnect a skill and start its pro
 drone @skills off <name> [reason]          # Disconnect a skill and stop its processes
 drone @skills switch [name]                # Show each skill's on/off state
 drone @skills --help                       # Show help
+drone @skills --version, -V                # Show version
 ```
+
+Every command above was run against this branch on 2026-09-05 and matches
+`drone @skills --help`.
 
 ---
 
@@ -202,7 +206,7 @@ src/aipass/skills/
       validator.py         # Check skill requirements
       switch.py            # Per-skill off-switch (on / off / switch)
     handlers/
-      json/                # JSON handler (three-JSON pattern)
+      json/                # json_handler.py — the fleet shim (see The JSON Handler)
       discovery_handler.py # Search paths, SKILL.md scanning, frontmatter parsing
       module_paths.py      # Dead-cwd-safe module location (stdlib only)
       loader_handler.py    # Full SKILL.md parse, dynamic handler import
@@ -223,10 +227,50 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Test suite (355 passing, 1 skipped)
+  tests/                   # Branch suite: 287 test functions in 14 files
+                           #   (pytest expands to 300 cases)
 ```
 
+Counted 2026-09-05. That 287 is the branch suite alone — the figure the seedgo
+readme rule checks, `def test_` under `tests/`.
+
+The telegram skill carries its own suite under `lib/telegram/tests/`: 28 files
+holding 1086 `def test_` functions, expanding to 1119 cases. Both together run
+1419 passing, 0 skipped — the same number from the branch root and from the
+repo root.
+
 ---
+
+## The JSON Handler
+
+`apps/handlers/json/json_handler.py` is **not an implementation**. Since
+DPLAN-0325 (landed 2026-09-03) it is the fleet's canonical shim: 1724 bytes,
+byte-identical in all eighteen branches, sha256
+`3456b7660698fa9d2a1f9352523f3a0aa75c3d862bcf6222ce4be280513cf0b7`. seedgo
+checks it by hash, so nothing branch-specific may be added to it.
+
+It **binds** the one json service — `aipass.prax.json_handler`, owned by @prax —
+and adds nothing. Binding rather than wrapping is load-bearing: the service
+names the calling module from frame 2, so a wrapper would attribute every entry
+this branch logs to the wrapper's own file.
+
+```python
+from aipass.skills.apps.handlers.json import json_handler
+
+json_handler.log_operation("skill_executed", {"name": name})
+```
+
+Consequences worth knowing before you touch it:
+
+- **There is no `SKILLS_JSON_DIR` and no `atomic_write_json`.** Both retired
+  with the old handler. Code that needs this branch's json directory asks the
+  service — `json_handler.get_json_path(module, json_type).parent` — which
+  recomputes it per call rather than capturing it at import.
+- **Tests redirect with `AIPASS_TEST_LOG_DIR`, never by patching an attribute.**
+  The shim has no attributes to patch, and that is the point. Both conftests set
+  the seam; the autouse `mock_infrastructure` fixture scopes it per test.
+- The retired handler is kept at `apps/handlers/json/.archive/` as the record.
+  Nothing imports out of `.archive/`.
 
 ## Running Where The Working Directory Is Gone
 
@@ -312,7 +356,13 @@ be computed must not be guessed at.
 ## Integration Points
 
 ### Depends On
-- Python stdlib (`pathlib`, `json`, `shutil`, `importlib`, `re`, `subprocess`)
+- **@prax** — a hard dependency, two ways: `from aipass.prax import logger` is
+  the only logging system, and the json shim binds `aipass.prax.json_handler`
+  (see The JSON Handler). Both are reached through prax's entry point, never
+  through its internals.
+- Python stdlib, as imported across `apps/` on 2026-09-05: `datetime`,
+  `importlib`, `json`, `linecache`, `os`, `pathlib`, `shutil`, `subprocess`,
+  `sys`, `tempfile`, `time`, `typing`
 - PyYAML — **optional**. Frontmatter is parsed with `yaml` when importable;
   otherwise a built-in fallback parser handles it (`discovery_handler.py`)
 - `systemctl --user` — only for the off-switch, and only for skills that
@@ -326,7 +376,48 @@ be computed must not be guessed at.
 
 ---
 
-*Last Updated: 2026-08-31*
+## Status / Known issues
+
+Everything below was measured on this branch on 2026-09-05. Anything this
+branch could not exercise is marked unverified rather than left standing green.
+
+**Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
+`--help`, `--version`. The off-switch's three doors were exercised, not just
+read: `drone @skills run telegram` refuses with the OFF message while the units
+stay masked. Suite 1419 passing, 0 skipped, identical from the branch root and
+the repo root. seedgo audit 100 on every CI-scored category.
+
+**Unverified — the telegram skill's runtime.** The skill is discovered, listed
+and gated correctly, and its own 1119-case suite passes. Its *live* behaviour
+was not exercised: it has been switched OFF since 2026-08-18 (Patrick's ruling,
+DPLAN-0305 — five bots leaked ~2.3GB each), and `drone @skills validate
+telegram` reports its `telethon` dependency missing on this machine. Nothing in
+this README claims its runtime works today.
+
+**Known issue — one bypass carried, not a clean 100.**
+`.seedgo/bypass.json` waives `json_structure` for
+`apps/handlers/module_paths.py`. That helper is stdlib-only on purpose and must
+never import the json seam; seedgo's `_is_prelogging_bootstrap` used to exempt
+it automatically, because the exemption is granted to whatever the logging
+substrate imports and the *old* json_handler imported it. The canonical shim
+imports nothing branch-local, so the chain now stops at the shim and the
+exemption lapsed. skills is the only branch in the fleet carrying a
+`module_paths.py`, so no other branch is affected. The bypass carries the full
+measurement and comes out when seedgo's clause learns a module-scope importer.
+
+**Known issue — a CI flake under investigation.** On 2026-09-04 the Linux 3.10
+leg stalled inside `lib/telegram/tests/test_suspend.py` and was cancelled at the
+30-minute cap; the same leg passed in 8 minutes an hour earlier. Cause located
+2026-09-05: those tests patch `base_bot.time.time`, and because `base_bot.time`
+*is* the stdlib `time` module, the fake clock is process-global. It returns
+epoch 1000.0, so any deadline captured before the patch reads as ~56 years away
+while the patch is held. The code under test cannot spin — `_check_resume_signal`
+contains no loop — so the wait is in a third party, not here. Fix not yet
+applied; reported to @devpulse.
+
+---
+
+*Last Updated: 2026-09-05*
 
 ---
 [← Back to AIPass](../../../README.md)
