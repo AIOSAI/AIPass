@@ -20,6 +20,16 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     _is_once_due,
     _already_ran_today,
     _already_ran_this_hour,
+    _slot_anchor,
+    is_catch_up_fire,
+    missed_window,
+    needs_slot_seed,
+    note_missed_window,
+    seed_interval_slot,
+    window_closed_unrun,
+    window_label,
+    MISSED_MARKER,
+    WINDOW_MINUTES,
 )
 
 
@@ -347,3 +357,246 @@ class TestPruneOrphans:
         runstate = {"jobs": {"@a/1": {}}}
         pruned = prune_orphans(runstate, {"@a/1"})
         assert pruned == 0
+
+
+# ── closed windows: catch_up + the MISSED record (FPLAN-0492 ruling 6) ──
+
+DAY = "2026-09-07"
+
+
+def windowed_job(time_str="03:00", catch_up=None, owner="@seedgo", job_id="nightly"):
+    """A daily job, optionally opted in to catch-up."""
+    schedule = {"type": "daily", "time": time_str}
+    if catch_up is not None:
+        schedule["catch_up"] = catch_up
+    return {"owner": owner, "id": job_id, "enabled": True, "schedule": schedule, "prompt": "x"}
+
+
+class TestWindowClosedUnrun:
+    def test_inside_the_window_is_not_closed(self):
+        # 03:10 is inside 03:00 +/-15, so the window is still open and the job
+        # has not missed anything yet.
+        assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 3, 10)) is False
+
+    def test_on_the_closing_edge_is_not_closed(self):
+        # 03:15 is the last minute INSIDE the window. Off-by-one here would
+        # accuse a job in the same minute it is still allowed to fire.
+        assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 3, 15)) is False
+
+    def test_one_minute_past_the_edge_is_closed(self):
+        assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 3, 16)) is True
+
+    def test_before_the_window_is_not_closed(self):
+        assert window_closed_unrun({"time": "03:00"}, None, datetime(2026, 9, 7, 1, 0)) is False
+
+    def test_a_run_today_means_nothing_was_missed(self):
+        ran = datetime(2026, 9, 7, 3, 2).isoformat()
+        assert window_closed_unrun({"time": "03:00"}, ran, datetime(2026, 9, 7, 9, 0)) is False
+
+    def test_yesterdays_run_does_not_cover_today(self):
+        ran = datetime(2026, 9, 6, 3, 2).isoformat()
+        assert window_closed_unrun({"time": "03:00"}, ran, datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_window_crossing_midnight_never_closes(self):
+        # 23:50 +/-15 runs to 00:05 the NEXT day, so no instant inside 09-07
+        # proves the miss. Refused rather than guessed.
+        for hour in (0, 12, 23):
+            assert window_closed_unrun({"time": "23:50"}, None, datetime(2026, 9, 7, hour, 30)) is False
+
+    def test_unparseable_time_states_no_window(self):
+        assert window_closed_unrun({"time": "not-a-time"}, None, datetime(2026, 9, 7, 9, 0)) is False
+
+
+class TestCatchUpDueness:
+    def test_off_by_default_a_closed_window_does_not_fire(self):
+        job = windowed_job()
+        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is False
+
+    def test_opted_in_a_closed_window_fires_late(self):
+        job = windowed_job(catch_up=True)
+        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_catch_up_cannot_double_fire_the_same_day(self):
+        # The bound is _already_ran_today: once today's catch-up has run, the
+        # rest of the day's ticks must not fire it again.
+        job = windowed_job(catch_up=True)
+        runstate = {
+            "jobs": {
+                "@seedgo/nightly": {
+                    "last_run": datetime(2026, 9, 7, 9, 1).isoformat(),
+                    "last_success_at": datetime(2026, 9, 7, 9, 1).isoformat(),
+                }
+            }
+        }
+        assert is_job_due(job, runstate, now=datetime(2026, 9, 7, 9, 30)) is False
+
+    def test_catch_up_does_not_widen_the_window_backwards(self):
+        job = windowed_job(catch_up=True)
+        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 1, 0)) is False
+
+    def test_rotation_opts_in_the_same_way(self):
+        job = windowed_job(catch_up=True)
+        job["schedule"]["type"] = "rotation"
+        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_in_window_still_fires_with_catch_up_on(self):
+        job = windowed_job(catch_up=True)
+        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 3, 5)) is True
+
+
+class TestIsCatchUpFire:
+    def test_names_a_late_run(self):
+        assert is_catch_up_fire(windowed_job(catch_up=True), {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_an_in_window_run_is_not_a_catch_up(self):
+        assert is_catch_up_fire(windowed_job(catch_up=True), {"jobs": {}}, now=datetime(2026, 9, 7, 3, 5)) is False
+
+    def test_interval_jobs_are_never_catch_ups(self):
+        job = {"owner": "@a", "id": "b", "schedule": {"type": "interval", "interval_minutes": 30}}
+        assert is_catch_up_fire(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is False
+
+
+class TestCaughtUpStamp:
+    def test_a_caught_up_run_is_recorded_as_one(self):
+        runstate = {"jobs": {}}
+        update_job_runstate(
+            runstate,
+            "@seedgo",
+            "nightly",
+            {"type": "daily", "time": "03:00"},
+            timestamp="2026-09-07T09:00:00",
+            caught_up=True,
+        )
+        assert runstate["jobs"]["@seedgo/nightly"]["caught_up"] == "2026-09-07T09:00:00"
+
+    def test_an_ordinary_run_clears_a_stale_marker(self):
+        # A marker left from last week's catch-up would report a healthy job as
+        # chronically late for as long as nobody looked at the timestamp.
+        runstate = {"jobs": {"@seedgo/nightly": {"caught_up": "2026-08-30T09:00:00"}}}
+        update_job_runstate(
+            runstate, "@seedgo", "nightly", {"type": "daily", "time": "03:00"}, timestamp="2026-09-07T03:02:00"
+        )
+        assert runstate["jobs"]["@seedgo/nightly"]["caught_up"] is None
+
+
+class TestMissedWindowRecord:
+    def test_missed_window_is_independent_of_catch_up(self):
+        # A job nobody opted in still MISSED, and the operator still needs told.
+        assert missed_window(windowed_job(), {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_first_note_is_new_and_the_rest_are_not(self):
+        runstate = {"jobs": {}}
+        now = datetime(2026, 9, 7, 9, 0)
+        assert note_missed_window(runstate, "@seedgo", "nightly", now) is True
+        assert note_missed_window(runstate, "@seedgo", "nightly", now) is False
+        assert runstate["jobs"]["@seedgo/nightly"][MISSED_MARKER] == DAY
+
+    def test_a_new_day_is_reported_again(self):
+        runstate = {"jobs": {"@seedgo/nightly": {MISSED_MARKER: "2026-09-06"}}}
+        assert note_missed_window(runstate, "@seedgo", "nightly", datetime(2026, 9, 7, 9, 0)) is True
+
+    def test_the_marker_does_not_make_a_job_look_run(self):
+        # note_missed_window creates a runstate row. If that row read as a run,
+        # a catch_up job would be silenced by the very line reporting its miss.
+        runstate = {"jobs": {}}
+        now = datetime(2026, 9, 7, 9, 0)
+        note_missed_window(runstate, "@seedgo", "nightly", now)
+        assert is_job_due(windowed_job(catch_up=True), runstate, now=now) is True
+
+    def test_window_label_names_the_window(self):
+        assert window_label({"time": "03:00"}) == f"03:00 +/-{WINDOW_MINUTES}m"
+
+
+# ── interval slots (FPLAN-0492 ruling 6, the seedgo weekly lesson) ──
+
+WEEK_MINUTES = 7 * 24 * 60
+
+
+def slotted_job(slot=None, minutes=WEEK_MINUTES, owner="@seedgo", job_id="shadow-cycle-weekly"):
+    schedule = {"type": "interval", "interval_minutes": minutes}
+    if slot is not None:
+        schedule["slot"] = slot
+    return {"owner": owner, "id": job_id, "enabled": True, "schedule": schedule, "prompt": "x"}
+
+
+class TestSlotAnchor:
+    def test_a_past_slot_rolls_forward_by_whole_intervals(self):
+        # The anchor names a RHYTHM, so a slot left in the past keeps its phase
+        # instead of making the job instantly overdue.
+        anchor = _slot_anchor("2026-08-02T03:00:00", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0))
+        assert anchor == datetime(2026, 9, 6, 3, 0)
+
+    def test_a_future_slot_seeds_one_interval_behind_itself(self):
+        anchor = _slot_anchor("2026-09-13T03:00:00", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0))
+        assert anchor == datetime(2026, 9, 6, 3, 0)
+
+    def test_unreadable_slot_is_refused(self):
+        assert _slot_anchor("next tuesday", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0)) is None
+
+    def test_non_positive_interval_is_refused(self):
+        assert _slot_anchor("2026-09-06T03:00:00", 0, datetime(2026, 9, 7, 9, 0)) is None
+
+
+class TestNeedsSlotSeed:
+    def test_a_never_run_interval_job_needs_seeding(self):
+        assert needs_slot_seed(slotted_job(), {"jobs": {}}) is True
+
+    def test_a_job_that_has_run_does_not(self):
+        runstate = {"jobs": {"@seedgo/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
+        assert needs_slot_seed(slotted_job(), runstate) is False
+
+    def test_a_blocked_job_still_needs_seeding(self):
+        # THE DEFECT, pinned. record_job_blocked creates a row carrying
+        # last_blocked_at and no last_run, so a "no row" test would refuse to
+        # seed exactly the job that most needs it - @seedgo's weekly cycle,
+        # enabled unseeded and blocked twice at 01:34 and 01:40 on 2026-09-07.
+        runstate = {
+            "jobs": {
+                "@seedgo/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
+            }
+        }
+        assert needs_slot_seed(slotted_job(), runstate) is True
+
+    def test_disabled_jobs_are_left_alone(self):
+        job = slotted_job()
+        job["enabled"] = False
+        assert needs_slot_seed(job, {"jobs": {}}) is False
+
+    def test_daily_jobs_are_not_interval_jobs(self):
+        assert needs_slot_seed(windowed_job(), {"jobs": {}}) is False
+
+
+class TestSeedIntervalSlot:
+    def test_seeding_moves_the_first_fire_to_the_next_slot(self):
+        # The lesson in one test: enabled 01:34 Monday, seeded from a Sunday
+        # 03:00 slot, first fire is the NEXT Sunday 03:00 - not 01:34.
+        runstate = {"jobs": {}}
+        job = slotted_job(slot="2026-09-06T03:00:00")
+        seeded = seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34))
+        assert seeded == "2026-09-06T03:00:00"
+        entry = runstate["jobs"]["@seedgo/shadow-cycle-weekly"]
+        assert entry["next_run"] == "2026-09-13T03:00:00"
+        assert entry["seeded_from_slot"] == "2026-09-06T03:00:00"
+
+    def test_a_seeded_job_is_not_due_on_the_next_tick(self):
+        runstate = {"jobs": {}}
+        job = slotted_job(slot="2026-09-06T03:00:00")
+        seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34))
+        assert is_job_due(job, runstate, now=datetime(2026, 9, 7, 1, 36)) is False
+
+    def test_a_seeded_job_is_due_at_its_slot(self):
+        runstate = {"jobs": {}}
+        job = slotted_job(slot="2026-09-06T03:00:00")
+        seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34))
+        assert is_job_due(job, runstate, now=datetime(2026, 9, 13, 3, 0)) is True
+
+    def test_no_slot_seeds_nothing(self):
+        runstate = {"jobs": {}}
+        assert seed_interval_slot(runstate, slotted_job(), now=datetime(2026, 9, 7, 1, 34)) is None
+        assert runstate["jobs"] == {}
+
+    def test_unreadable_slot_seeds_nothing(self):
+        runstate = {"jobs": {}}
+        job = slotted_job(slot="whenever")
+        assert seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34)) is None
+        assert runstate["jobs"] == {}

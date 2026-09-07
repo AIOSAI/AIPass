@@ -44,8 +44,7 @@ apps/
 
 ## Known Issues
 
-- `activity_report` module shows as `activity_report` in `--help` but its actual commands are `activity`, `activity-report`, `branch-health` — calling `drone @daemon activity_report` fails
-- `branch-health` expects uppercase branch names from registry; lowercase fails
+- `activity_report` module shows as `activity_report` in `--help`; its commands are `activity`, `activity-report`, `branch-health`. The bare module name is handled as an alias and works (re-measured 2026-09-07, exit 0)
 - Secrets path: `~/.secrets/aipass/` (Path.home() / '.secrets' / 'aipass')
 
 ## Memory & Tracking

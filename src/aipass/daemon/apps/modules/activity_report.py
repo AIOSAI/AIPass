@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-01-30
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -25,7 +25,7 @@ must never reach for it.
 
 import os
 import sys
-from typing import List
+from typing import List, NoReturn
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -45,6 +45,10 @@ from aipass.daemon.apps.handlers.monitoring.report_generator import (
     generate_branch_report,
     get_json_report,
 )
+
+# The same roster generate_branch_report() resolves against, so a name this
+# module accepts is exactly a name that module can report on.
+from aipass.daemon.apps.handlers.monitoring import activity_collector
 
 
 # =============================================
@@ -362,6 +366,38 @@ def _extract_branch_name(args: List[str]) -> str | None:
     return None
 
 
+def _known_branch_names() -> List[str]:
+    """Canonical names of every branch the reports can be generated for."""
+    return sorted(bp.get("name", "") for bp in activity_collector.get_branch_paths() if bp.get("name"))
+
+
+def _resolve_branch(branch_name: str) -> str | None:
+    """Match *branch_name* case-insensitively to a canonical name, or None.
+
+    Asked BEFORE any report is generated, so an unknown token is refused once
+    with its own name in the message instead of producing two report blocks
+    that each say "not found" in their own words.
+    """
+    wanted = branch_name.upper()
+    for name in _known_branch_names():
+        if name.upper() == wanted:
+            return name
+    return None
+
+
+def _refuse(message: str) -> NoReturn:
+    """Print a refusal and exit non-zero, naming the token that caused it.
+
+    Patrick's standing ruling: an unknown command or argument FAILS with a
+    non-zero exit and a message naming the token. Printing a refusal and
+    returning 0 tells a caller's `&&` that the command succeeded - reported by
+    @devpulse's 2026-09-07 fleet sweep against `branch-health`, which rendered
+    two "not found" blocks and exited 0.
+    """
+    error(message)
+    sys.exit(1)
+
+
 def _handle_branch_health(args: List[str]) -> bool:
     """Handle 'branch-health [branch]' command. No args = all branches summary."""
     if not args:
@@ -375,17 +411,23 @@ def _handle_branch_health(args: List[str]) -> bool:
 
     branch_name = _extract_branch_name(args)
     if not branch_name:
-        error("branch-health requires a branch name")
         console.print()
         console.print("Usage: branch-health <branch_name> [--hours N]")
         console.print("Example: branch-health DRONE")
-        return True
+        _refuse("branch-health requires a branch name")
+
+    resolved = _resolve_branch(branch_name)
+    if resolved is None:
+        known = ", ".join(_known_branch_names())
+        console.print()
+        console.print(f"Known branches: {known}")
+        _refuse(f"branch-health: unknown branch '{branch_name}'")
 
     hours = _parse_hours_arg(args)
-    report = generate_branch_report(branch_name, since_hours=hours)
+    report = generate_branch_report(resolved, since_hours=hours)
     console.print(report)
-    console.print(_render_entry_health(branch_name))
-    logger.info("[DAEMON] activity_report: Branch health report generated for %s", branch_name)
+    console.print(_render_entry_health(resolved))
+    logger.info("[DAEMON] activity_report: Branch health report generated for %s", resolved)
     return True
 
 

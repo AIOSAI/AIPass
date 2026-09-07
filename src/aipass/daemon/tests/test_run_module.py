@@ -143,11 +143,20 @@ def live_job(owner: str = "@commons", job_id: str = "live") -> dict:
 
 class TestPrunePersistence:
     def _quiet_tick(self, runstate, dry_run=False):
-        """Run a tick where nothing is due, returning the save mock."""
+        """Run a tick where nothing is due, returning the save mock.
+
+        ``missed_window`` is pinned False because these tests are about PRUNE
+        persistence and nothing else. live_job() is a daily 04:00 job, so from
+        04:16 until midnight its window is genuinely closed-and-unrun and the
+        MISSED pass writes its once-per-day marker - a real write, covered by
+        TestMissedWindowLine, that would otherwise make the assertions here
+        pass or fail on the wall clock the suite happened to run at.
+        """
         with (
             patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
             patch(f"{RUN}.load_runstate", return_value=runstate),
             patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
             patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
         ):
             run_tick(dry_run=dry_run)
@@ -212,3 +221,181 @@ class TestRotationDelegation:
             outcome, _detail = _fire_job(live_job(), {"jobs": {}})
         assert outcome == OUTCOME_FAILED
         mock_rotation.assert_not_called()
+
+
+# ── closed windows and interval slots (FPLAN-0492 ruling 6) ──
+
+
+def flat(text: str) -> str:
+    """Collapse whitespace so Rich's line wrapping cannot break a substring check.
+
+    Measured: at the suite's terminal width the tick summary arrives as
+    "0 \nseeded", which fails `"0 seeded" in out` for a reason that has nothing
+    to do with the behaviour under test.
+    """
+    return " ".join(text.split())
+
+
+def interval_job_with_slot(slot="2026-09-06T03:00:00", minutes=10080):
+    """@seedgo's weekly cycle, in the shape that caused the lesson."""
+    schedule = {"type": "interval", "interval_minutes": minutes}
+    if slot is not None:
+        schedule["slot"] = slot
+    return {
+        "owner": "@seedgo",
+        "id": "shadow-cycle-weekly",
+        "enabled": True,
+        "schedule": schedule,
+        "wake": {},
+        "prompt": "x",
+    }
+
+
+class TestMissedWindowLine:
+    def _tick(self, runstate, dry_run=False, catch_up=None):
+        job = live_job()
+        if catch_up is not None:
+            job["schedule"]["catch_up"] = catch_up
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=True),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
+        ):
+            results = run_tick(dry_run=dry_run)
+        return results, mock_save
+
+    def test_a_closed_window_is_reported_once(self, capsys):
+        runstate = {"jobs": {}}
+        results, _save = self._tick(runstate)
+        out = capsys.readouterr().out
+        assert results["missed"] == 1
+        assert "MISSED: @commons/live" in flat(out)
+        assert "04:00 +/-15m" in flat(out)
+
+    def test_the_same_miss_is_not_repeated_on_the_next_tick(self):
+        # The scheduler ticks about every two minutes; an unguarded line would
+        # repeat ~500 times between a closed window and midnight.
+        runstate = {"jobs": {}}
+        first, _ = self._tick(runstate)
+        second, _ = self._tick(runstate)
+        assert (first["missed"], second["missed"]) == (1, 0)
+
+    def test_the_marker_is_persisted(self):
+        runstate = {"jobs": {}}
+        _results, mock_save = self._tick(runstate)
+        mock_save.assert_called_once()
+        assert runstate["jobs"]["@commons/live"]["missed_logged_for"]
+
+    def test_a_job_without_catch_up_is_told_it_is_not_firing(self, capsys):
+        self._tick({"jobs": {}})
+        assert "catch_up is off — not firing" in flat(capsys.readouterr().out)
+
+    def test_a_job_with_catch_up_is_told_it_is_firing_late(self, capsys):
+        self._tick({"jobs": {}}, catch_up=True)
+        assert "catch_up is on — firing late this tick" in flat(capsys.readouterr().out)
+
+    def test_dry_run_reports_without_writing(self, capsys):
+        runstate = {"jobs": {}}
+        results, mock_save = self._tick(runstate, dry_run=True)
+        assert results["missed"] == 0
+        assert "DRY RUN — would record MISSED" in flat(capsys.readouterr().out)
+        mock_save.assert_not_called()
+        assert runstate["jobs"] == {}
+
+
+class TestSlotSeeding:
+    def _tick(self, job, runstate, dry_run=False):
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
+        ):
+            results = run_tick(dry_run=dry_run)
+        return results, mock_save
+
+    def test_a_slotted_job_is_seeded_before_it_can_fire(self, capsys):
+        # The whole point: seeding runs BEFORE the due check, so the job never
+        # fires at the arbitrary minute the daemon happened to tick.
+        runstate = {"jobs": {}}
+        results, _save = self._tick(interval_job_with_slot(), runstate)
+        out = capsys.readouterr().out
+        assert results["seeded"] == 1
+        assert results["fired"] == 0
+        assert "SEED: @seedgo/shadow-cycle-weekly" in flat(out)
+        assert runstate["jobs"]["@seedgo/shadow-cycle-weekly"]["last_run"] == "2026-09-06T03:00:00"
+
+    def test_a_slotless_job_warns_and_still_fires(self, caplog):
+        # Asserted on the LOGGER, not the console: this is the line that lands
+        # in logs/run.log, which is the artifact an owner actually reads.
+        runstate = {"jobs": {}}
+        with caplog.at_level("WARNING"):
+            results, _save = self._tick(interval_job_with_slot(slot=None), runstate)
+        assert results["seeded"] == 0
+        assert results["fired"] == 1
+        assert "declares no 'slot'" in caplog.text
+        assert "@seedgo/shadow-cycle-weekly" in caplog.text
+        assert "IMMEDIATE" in caplog.text
+
+    def test_a_blocked_job_is_still_seedable(self, capsys):
+        # record_job_blocked leaves a row with no last_run. Keying the seed on
+        # the ROW would strand exactly the job the lesson came from.
+        runstate = {
+            "jobs": {
+                "@seedgo/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
+            }
+        }
+        results, _save = self._tick(interval_job_with_slot(), runstate)
+        assert results["seeded"] == 1
+        assert "SEED: @seedgo/shadow-cycle-weekly" in flat(capsys.readouterr().out)
+
+    def test_an_already_running_job_is_left_alone(self):
+        runstate = {"jobs": {"@seedgo/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
+        results, _save = self._tick(interval_job_with_slot(), runstate)
+        assert results["seeded"] == 0
+
+    def test_dry_run_seeds_nothing(self, capsys):
+        runstate = {"jobs": {}}
+        results, mock_save = self._tick(interval_job_with_slot(), runstate, dry_run=True)
+        assert results["seeded"] == 0
+        assert "DRY RUN — would seed" in flat(capsys.readouterr().out)
+        mock_save.assert_not_called()
+        assert runstate["jobs"] == {}
+
+
+class TestCaughtUpTick:
+    def test_a_late_run_is_counted_and_stamped(self, capsys):
+        job = live_job()
+        job["schedule"]["catch_up"] = True
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}.is_catch_up_fire", return_value=True),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.update_job_runstate") as mock_update,
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            results = run_tick()
+        assert results["caught_up"] == 1
+        assert "CAUGHT UP: @commons/live" in flat(capsys.readouterr().out)
+        assert mock_update.call_args.kwargs["caught_up"] is True
+
+    def test_an_ordinary_run_is_not_stamped(self):
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}.is_catch_up_fire", return_value=False),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.update_job_runstate") as mock_update,
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            results = run_tick()
+        assert results["caught_up"] == 0
+        assert mock_update.call_args.kwargs["caught_up"] is False

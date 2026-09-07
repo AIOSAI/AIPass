@@ -180,7 +180,11 @@ class TestBranchHealthCommand:
             result = handle_command("branch-health", ["DRONE"])
 
         assert result is True
-        mock_br.assert_called_once_with("DRONE", since_hours=24.0)
+        # The CANONICAL name, not the token typed. Resolution moved ahead of the
+        # report so an unknown branch can be refused once with a non-zero exit;
+        # a side effect is that the registry's own spelling is what travels on.
+        # generate_branch_report already re-derived the same name internally.
+        mock_br.assert_called_once_with("drone", since_hours=24.0)
 
     def test_branch_health_with_branch_and_hours(self, _log, _err, mock_con, _jh):
         from aipass.daemon.apps.modules.activity_report import handle_command
@@ -189,14 +193,52 @@ class TestBranchHealthCommand:
             result = handle_command("branch-health", ["DRONE", "--hours", "48"])
 
         assert result is True
-        mock_br.assert_called_once_with("DRONE", since_hours=48.0)
+        mock_br.assert_called_once_with("drone", since_hours=48.0)
 
-    def test_branch_health_only_flags_shows_error(self, _log, mock_err, mock_con, _jh):
+    def test_branch_health_only_flags_refuses_non_zero(self, _log, mock_err, mock_con, _jh):
+        """A missing branch name is a refusal, and a refusal exits non-zero.
+
+        Was `assert result is True` — the command printed "requires a branch
+        name" and handed its caller a 0, so `daemon branch-health --hours 48 &&
+        next-thing` ran next-thing.
+        """
+        import pytest
+
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        result = handle_command("branch-health", ["--hours", "48"])
-        assert result is True
+        with pytest.raises(SystemExit) as exc:
+            handle_command("branch-health", ["--hours", "48"])
+        assert exc.value.code == 1
         mock_err.assert_called()
+
+    def test_unknown_branch_refuses_non_zero_and_names_the_token(self, _log, mock_err, mock_con, _jh):
+        """@devpulse's 2026-09-07 fleet sweep, row 21: EXIT-0-ON-FAILURE.
+
+        `branch-health not_a_real_subarg_xyz` printed "Branch not found" twice —
+        once from the report, once from the entry-health block — and exited 0.
+        Patrick's standing ruling: an unknown argument FAILS non-zero with the
+        token named. The token has to appear, or the caller cannot tell WHICH
+        argument was rejected.
+        """
+        import pytest
+
+        from aipass.daemon.apps.modules.activity_report import handle_command
+
+        with patch(f"{MODULE}.generate_branch_report") as mock_br:
+            with pytest.raises(SystemExit) as exc:
+                handle_command("branch-health", ["not_a_real_subarg_xyz"])
+
+        assert exc.value.code == 1
+        # Refused BEFORE any report is generated — one refusal, not two blocks.
+        mock_br.assert_not_called()
+        assert "not_a_real_subarg_xyz" in str(mock_err.call_args)
+
+    def test_a_known_branch_resolves_case_insensitively(self, _log, _err, mock_con, _jh):
+        from aipass.daemon.apps.modules.activity_report import handle_command
+
+        with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
+            assert handle_command("branch-health", ["dRoNe"]) is True
+        mock_br.assert_called_once_with("drone", since_hours=24.0)
 
 
 # =============================================

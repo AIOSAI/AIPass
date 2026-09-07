@@ -212,6 +212,48 @@ class TestFindStaleInboxes:
                 assert find_stale_inboxes(now=NOW) == []
 
 
+# ── fleet scope: a citizen is a citizen (FPLAN-0492 ruling 6, todo 188) ──
+
+
+class TestSweepScopeIsTheWholeFleet:
+    """The sweep looks wherever the fleet definition looks — no second registry.
+
+    Ruled 2026-09-07: projects/* citizens must not be invisible to the sweep.
+    MEASURED on this machine the same morning: they already are not. The scan
+    walks active_branch_map() -> active_citizens() -> @memory's
+    fleet.fleet_branches(), which covers src/aipass/*, projects/*/ and the
+    federated externals alike — 28 citizens, 18 core + 4 under projects/ + 6
+    external, and the 08:48 sweep listed @baud, @finch, @earmark and
+    @aipass_site among its stale mailboxes. FPLAN-0460 moved that scope in when
+    it deleted daemon's private copy of the registry read.
+
+    These pins exist so the scope cannot silently narrow back to core-only:
+    that regression would look like nothing at all until a project citizen sat
+    on unread mail for a week.
+    """
+
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+
+    def test_a_projects_citizen_is_scanned(self, branch_dir):
+        resident = branch_dir / "earmark"
+        (resident / ".ai_mail.local").mkdir(parents=True)
+        write_inbox(resident, [message(48)])
+
+        fake = [{"name": "earmark", "path": resident, "registry": "EARMARK_REGISTRY.json", "email": "@earmark"}]
+        with (
+            patch(f"{self.FLEET}.fleet_branches", return_value=fake),
+            patch(f"{self.FLEET}.declared_residency", return_value="resident"),
+        ):
+            entries = find_stale_inboxes(now=NOW)
+
+        assert [e["owner"] for e in entries] == ["@earmark"]
+
+    def test_the_scanner_reads_no_registry_of_its_own(self, branch_dir):
+        """An empty fleet means an empty sweep — nothing else can add a branch."""
+        with patch(f"{self.FLEET}.fleet_branches", return_value=[]):
+            assert find_stale_inboxes(now=NOW) == []
+
+
 # ── run_sweep ─────────────────────────────────────────
 
 
