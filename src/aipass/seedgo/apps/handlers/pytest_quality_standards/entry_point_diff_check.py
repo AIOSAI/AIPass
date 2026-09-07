@@ -85,7 +85,7 @@ STANDARD_NAME = "entry_point_diff"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Module-level tuple/list names that declare a module's CLI verbs. Kept short
 #: and conventional: a name this list does not know declares nothing this rule

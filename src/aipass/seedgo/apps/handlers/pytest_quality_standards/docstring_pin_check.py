@@ -72,7 +72,7 @@ STANDARD_NAME = "docstring_pin"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: WHETHER THE MEASURED NUMBER IS THE REPORTED NUMBER. False ships the ruling as
 #: accepted: the check still reports every violation and every check line, and

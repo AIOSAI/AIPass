@@ -1138,12 +1138,19 @@ class TestHandleCommandDirectoryMode:
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
 
+        from aipass.seedgo.apps.handlers.audit_tests import refusal
+        from aipass.seedgo.apps.modules import CommandRefused
+
         d = tmp_path / "emptydir"
         d.mkdir()
         (d / "readme.txt").write_text("not python\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(d)])
-        assert result is True
+        # Refuses since 2026-09-07: it printed ❌ and returned True, which
+        # seedgo.py turned into exit 0 - a caller could not tell "nothing to
+        # check here" from "checked, all clean".
+        with pytest.raises(CommandRefused) as refused:
+            checklist.handle_command("checklist", [str(d)])
+        assert refused.value.code == refusal.EXIT_NO_UNITS
 
     def test_directory_filters_underscore_files(self, tmp_path, monkeypatch):
         """Directory mode filters files starting with underscore."""
@@ -1152,12 +1159,18 @@ class TestHandleCommandDirectoryMode:
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
 
+        from aipass.seedgo.apps.handlers.audit_tests import refusal
+        from aipass.seedgo.apps.modules import CommandRefused
+
         d = tmp_path / "onlypriv"
         d.mkdir()
         (d / "_init.py").write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(d)])
-        assert result is True
+        # Filtered down to nothing is the same answer as empty, and it refuses
+        # for the same reason.
+        with pytest.raises(CommandRefused) as refused:
+            checklist.handle_command("checklist", [str(d)])
+        assert refused.value.code == refusal.EXIT_NO_UNITS
 
 
 # ===========================================================================
@@ -1201,8 +1214,12 @@ class TestHandleCommandPackFlag:
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
 
-        result = checklist.handle_command("checklist", ["--pack", "custom"])
-        assert result is True  # Handled, but shows error
+        from aipass.seedgo.apps.handlers.audit_tests import refusal
+        from aipass.seedgo.apps.modules import CommandRefused
+
+        with pytest.raises(CommandRefused) as refused:
+            checklist.handle_command("checklist", ["--pack", "custom"])
+        assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
 
     def test_unknown_flag_skipped(self, tmp_path, monkeypatch):
         """Unknown flags are skipped during argument parsing."""

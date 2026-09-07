@@ -738,13 +738,32 @@ class TestPrintBranchSummary:
         return out
 
     def test_basic_summary(self):
-        """Basic summary renders without error."""
+        """The summary renders for every score tier, and for a standard at 100.
+
+        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band). Four
+        further rows called this same renderer with different numbers and
+        asserted nothing: ``test_high_scores``, ``test_medium_scores``,
+        ``test_low_scores`` and ``test_score_100_skipped_in_violations``. The
+        icon each named in its docstring is a literal string choice no row
+        checked, and a standard at 100 only skips a render branch. What the
+        five rows really pinned together was "none of these shapes crashes the
+        renderer", so the inputs move here and the claim is made once.
+
+        Mutation-checked at the merge: a renderer that raises on any one of
+        these tiers reds this test.
+        """
         from aipass.seedgo.apps.handlers.audit.audit_display import (
             print_branch_summary,
         )
 
-        result = self._make_audit_result()
-        print_branch_summary(result)
+        for scores, average in (
+            ({"architecture": 90, "naming": 80}, 85),  # the baseline fixture
+            ({"architecture": 95, "naming": 92}, 93),  # >= 90
+            ({"architecture": 80, "naming": 76}, 78),  # 75-89
+            ({"architecture": 50, "naming": 60}, 55),  # < 75
+            ({"naming": 100, "meta": 90}, 95),  # a 100 skips its violation render
+        ):
+            print_branch_summary(self._make_audit_result(scores=scores, average=average))
 
     def test_the_header_states_what_it_measured_not_only_how_much(self, monkeypatch):
         """The count is scoped out loud, because the corpus is not the branch.
@@ -825,33 +844,6 @@ class TestPrintBranchSummary:
         printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
         assert "post-check crashed" in printed, "a 100 that excludes a check must say so on screen"
         assert "TypeError" in printed
-
-    def test_high_scores(self):
-        """Scores >= 90 get check icon."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
-        result = self._make_audit_result(scores={"architecture": 95, "naming": 92}, average=93)
-        print_branch_summary(result)
-
-    def test_medium_scores(self):
-        """Scores 75-89 get warning icon."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
-        result = self._make_audit_result(scores={"architecture": 80, "naming": 76}, average=78)
-        print_branch_summary(result)
-
-    def test_low_scores(self):
-        """Scores < 75 get error icon."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
-        result = self._make_audit_result(scores={"architecture": 50, "naming": 60}, average=55)
-        print_branch_summary(result)
 
     def test_odd_number_of_scores(self):
         """Odd number of scores renders last one alone."""
@@ -1033,18 +1025,6 @@ class TestPrintBranchSummary:
             overall_system_avg=87,
         )
 
-    def test_score_100_skipped_in_violations(self):
-        """Score 100 skips violation rendering for that standard."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_branch_summary,
-        )
-
-        result = self._make_audit_result(
-            scores={"naming": 100, "meta": 90},
-            average=95,
-        )
-        print_branch_summary(result)
-
     def test_no_bypass_label_travels_with_the_branch_score(self):
         """A --no-bypass summary says so — the score alone reads as a regression."""
         from aipass.seedgo.apps.handlers.audit import audit_display
@@ -1094,30 +1074,35 @@ class TestPrintSystemSummary:
 
         print_system_summary([])
 
-    def test_all_excellent(self):
-        """All branches >= 90 counted as excellent."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
-
-        results = [
-            self._make_result("a", 95),
-            self._make_result("b", 92),
-        ]
-        print_system_summary(results)
-
     def test_mixed_tiers(self):
-        """Branches across all tiers counted correctly."""
+        """A fleet spanning all three tiers renders, and so does an all-excellent one.
+
+        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
+        ``test_all_excellent`` built a two-branch list at 95 and 92 and
+        asserted nothing; the counting it named in its docstring is never
+        checked, and the excellent branch below already walks that arm. Its
+        input moves here so the all-one-tier shape is still executed rather
+        than assumed to be covered.
+
+        Mutation-checked at the merge: a summary that raises on either list
+        reds this test.
+        """
         from aipass.seedgo.apps.handlers.audit.audit_display import (
             print_system_summary,
         )
 
-        results = [
-            self._make_result("excellent", 95),
-            self._make_result("good", 82),
-            self._make_result("bad", 60),
-        ]
-        print_system_summary(results)
+        for results in (
+            [
+                self._make_result("excellent", 95),
+                self._make_result("good", 82),
+                self._make_result("bad", 60),
+            ],
+            [
+                self._make_result("a", 95),
+                self._make_result("b", 92),
+            ],
+        ):
+            print_system_summary(results)
 
     def test_type_errors_in_summary(self):
         """Type errors total rendered."""
@@ -1141,19 +1126,26 @@ class TestPrintSystemSummary:
         print_system_summary(results)
 
     def test_odd_standard_count(self):
-        """Odd number of standards renders last one alone."""
+        """An odd standard count renders the last one alone, at any tier of averages.
+
+        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
+        ``test_standard_averages_icons`` was this same single-result shape with
+        three standards at 95/80/50; the per-tier icons it named are literal
+        string choices that cannot crash and were never asserted. Its scores
+        move here, so the three-tier spread is still rendered.
+
+        Mutation-checked at the merge: a renderer that raises on either score
+        set reds this test.
+        """
         from aipass.seedgo.apps.handlers.audit.audit_display import (
             print_system_summary,
         )
 
-        results = [
-            self._make_result(
-                "a",
-                80,
-                scores={"arch": 80, "naming": 85, "meta": 90},
-            ),
-        ]
-        print_system_summary(results)
+        for scores in (
+            {"arch": 80, "naming": 85, "meta": 90},
+            {"high": 95, "mid": 80, "low": 50},
+        ):
+            print_system_summary([self._make_result("a", 80, scores=scores)])
 
     def test_top_improvement_areas(self):
         """Top improvement areas listed with failing branch count."""
@@ -1164,21 +1156,6 @@ class TestPrintSystemSummary:
         results = [
             self._make_result("a", 60, scores={"arch": 50, "naming": 70}),
             self._make_result("b", 80, scores={"arch": 90, "naming": 70}),
-        ]
-        print_system_summary(results)
-
-    def test_standard_averages_icons(self):
-        """Standard averages display correct icons for all tiers."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
-
-        results = [
-            self._make_result(
-                "a",
-                80,
-                scores={"high": 95, "mid": 80, "low": 50},
-            ),
         ]
         print_system_summary(results)
 

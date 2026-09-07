@@ -21,7 +21,12 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
-# -- Standard functions to exclude (already covered by test_quality checker) --
+# -- Standard functions to exclude (covered elsewhere, so an absence here is not a gap) --
+#
+# It read "already covered by test_quality checker" until 2026-09-07, when v4
+# test_quality retired to aipass_standards/.archive/ (DPLAN-0323 seal). The
+# exclusions did not change - the coverage moved - but a comment naming a
+# retired checker sends the next reader to a file that is no longer scored.
 
 # CLI routing — every branch has these, not custom logic
 CLI_ROUTING_FUNCTIONS = frozenset(
@@ -33,7 +38,8 @@ CLI_ROUTING_FUNCTIONS = frozenset(
     }
 )
 
-# json_handler standard functions — covered by test_quality checker
+# json_handler standard functions — covered by seedgo's json contract suite,
+# which judges every branch's shim against the pinned canonical sha256
 JSON_HANDLER_FUNCTIONS = frozenset(
     {
         "validate_json_structure",

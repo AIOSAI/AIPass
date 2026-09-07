@@ -86,7 +86,7 @@ STANDARD_NAME = "capture_never_read"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Fixtures that capture output. Requesting one is a declaration of intent -
 #: the fixture does nothing whatever unless it is read.

@@ -23,6 +23,7 @@ from typing import List, Any
 from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error
+from aipass.seedgo.apps.modules import CommandRefused
 
 # The header above and this constant are the two places a version lives; --version
 # and the README read this one. They disagreed (2.1.0 vs 2.0.0) until 2026-09-06.
@@ -62,11 +63,20 @@ def discover_modules() -> List[Any]:
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """Route command to appropriate module."""
+    """Route command to appropriate module.
+
+    A CommandRefused is NOT a module error. It is the module's answer, carrying
+    the exit code the shell must see, so it passes through the catch-all below
+    untouched - logging it and moving to the next module would print the
+    refusal, swallow its code, and then let some later module claim the same
+    command.
+    """
     for module in modules:
         try:
             if module.handle_command(command, args):
                 return True
+        except CommandRefused:
+            raise
         except Exception as e:
             logger.error(f"[SEEDGO] Module error: {e}")
     return False
@@ -361,6 +371,12 @@ def main() -> int:
 
         error(f"Unknown command: {command}", suggestion="Run 'seedgo --help' for usage")
         return 1
+    except CommandRefused as refused:
+        # The module already printed why. Patrick's standing ruling, fleet
+        # sweep 2026-09-07: an unknown command or argument FAILS. Until this
+        # arm existed, `audit --bogus-flag` printed "exit code: 7" and handed
+        # the shell a 0 on the next line.
+        return refused.code
     except Exception as exc:
         logger.error("[seedgo] Unhandled error in main: %s", exc)
         raise

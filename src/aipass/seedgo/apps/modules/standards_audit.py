@@ -16,7 +16,7 @@ Standards Audit Module — per-branch compliance against a checker pack.
 import sys
 import time
 from pathlib import Path
-from typing import List
+from typing import List, NoReturn
 from collections import defaultdict
 
 # IMPORTS — prax logger first, system-wide
@@ -30,6 +30,7 @@ from aipass.cli.apps.modules import error, warning
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit handlers (implementation)
+from aipass.seedgo.apps.handlers.audit import argv as audit_argv
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
@@ -38,7 +39,6 @@ from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-from aipass.seedgo.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 
 # The audit-tests lane's refusal vocabulary, reused rather than re-invented:
 # Law ARGV, its exit code and its did-you-mean live in one place so the two
@@ -46,6 +46,7 @@ from aipass.seedgo.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 
 # The execution lane `audit tests <target>` hands off to, unchanged.
+from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.modules import audit_tests as lane_verb
 
 # Drone services for @ resolution
@@ -57,9 +58,9 @@ from aipass.drone.apps.modules import normalize_branch_arg
 # =============================================================================
 
 #: Every flag this verb accepts — the list a mistyped token is offered against.
-AUDIT_FLAGS: tuple = tuple(
-    "--show-bypasses --bypasses -b --no-bypass --full --artifact --no-artifact --help -h".split()
-)
+#: Read from the parser that owns the grammar, and re-bound here because this
+#: is the name the refusal tests reach for.
+AUDIT_FLAGS: tuple = audit_argv.AUDIT_FLAGS
 
 #: The sibling surfaces one keystroke away. `audit -tests @backup` is
 #: `audit tests @backup` with a stray hyphen, and that typo used to run this
@@ -70,9 +71,6 @@ SIBLING_VERBS: tuple = ("audit tests", "audit-tests")
 #: The first positional that means "not a pack, the execution lane". Recognised
 #: here and forwarded whole; `audit-tests <target>` remains the same lane.
 LANE_WORD = "tests"
-
-#: Pack, then @branch. A third bare word fills no slot: refused, never dropped.
-MAX_POSITIONAL = 2
 
 
 def _handlers_dir() -> Path:
@@ -226,18 +224,26 @@ def _emit_artifact(
     return written
 
 
-def _print_refusal(refused) -> None:
-    """Print a refusal: its one line, the law and code, then the evidence.
+def _print_refusal(refused) -> NoReturn:
+    """Print a refusal, then RAISE it so the shell gets the code it just read.
 
     Printing lives here, not beside the rule: a handler that displays is one
-    nobody can reuse without its console (the cli standard)."""
+    nobody can reuse without its console (the cli standard).
+
+    The raise is the second half of the same sentence. This function printed
+    "exit code: 7" and then returned, its callers returned True, and
+    `seedgo.py` turned that into exit 0 - so the line above was a claim the
+    process contradicted one line later. Patrick's standing ruling (fleet
+    sweep 2026-09-07): an unknown command or argument FAILS.
+    """
     error(refused.stdout_line())
     console.print(f"[dim]law: {refused.law}   exit code: {refused.code}[/dim]")
     for line in refused.detail:
         console.print(f"  [dim]{line}[/dim]")
+    raise CommandRefused(refused.code, refused.reason)
 
 
-def _refuse_unknown_argument(token: str, args: List[str]) -> None:
+def _refuse_unknown_argument(token: str, args: List[str]) -> NoReturn:
     """Refuse a token this verb never claimed, and print the fix (Law ARGV)."""
     suggestion = refusal.suggested_command(token, "audit", args, AUDIT_FLAGS, SIBLING_VERBS)
     _print_refusal(refusal.refusal_for_unknown_argument(token, suggestion, "audit"))
@@ -253,7 +259,6 @@ def _dispatch_lane(args: List[str]) -> bool:
     """
     if LANE_WORD in _discover_packs():
         _print_refusal(refusal.refusal_for_ambiguous_lane_word(LANE_WORD, "audit"))
-        return True
     return lane_verb.handle_command("audit-tests", args[1:])
 
 
@@ -286,72 +291,41 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] == LANE_WORD:
         return _dispatch_lane(args)
 
-    # Parse pack name (first non-flag arg) and branch name (second non-flag arg)
-    pack_name = None
-    specific_branch = None
-    show_bypasses = False
-    no_bypass = False
-    force_full = False
-    write_artifact = True
-    artifact_path = None
-    expect_artifact_path = False
-
-    positional = []
-    # Collected, never acted on until the whole list is read: a help flag further
-    # along is a question, and a question is answered even beside nonsense.
-    unrecognized: List[str] = []
-    for arg in args:
-        # Before the value slots, never after: '--artifact --help' wrote the
-        # artifact to a file named '--help' and ran the audit to fill it.
-        if arg in DASHED_HELP_TOKENS:
-            print_help()
-            return True
-        if expect_artifact_path:
-            artifact_path = arg
-            expect_artifact_path = False
-            continue
-        if arg in ["--show-bypasses", "--bypasses", "-b"]:
-            show_bypasses = True
-            continue
-        if arg == "--no-bypass":
-            no_bypass = True
-            continue
-        if arg == "--full":
-            force_full = True
-            continue
-        if arg == "--artifact":
-            expect_artifact_path = True
-            continue
-        if arg.startswith("--artifact="):
-            artifact_path = arg.split("=", 1)[1]
-            continue
-        if arg == "--no-artifact":
-            write_artifact = False
-            continue
-        if arg in ["--help", "-h", "help"]:
-            # Pack-specific help (placeholder)
-            print_help()
-            return True
-        if not arg.startswith("-"):
-            positional.append(arg)
-            if len(positional) > MAX_POSITIONAL:
-                unrecognized.append(arg)
-            continue
-        # A dashed token no branch claimed. It used to fall off the end of this
-        # loop and be forgotten (Law ARGV).
-        unrecognized.append(arg)
-
-    if unrecognized:
-        # True, not False: a False has seedgo.py report 'Unknown command: audit'.
-        _refuse_unknown_argument(unrecognized[0], args)
+    # The grammar is read in one place (handlers/audit/argv.py) and decided
+    # here. Help wins over every other reading, including a refusal.
+    parsed = audit_argv.parse(args)
+    # The whole list, not args[0]: a question anywhere in the line is answered
+    # before anything executes (help_flag_safety, Law "a question must never
+    # execute"). The parser reports the same thing in `wants_help` and reads a
+    # wider vocabulary; the scan is spelled out HERE as well because this
+    # module is the layer that standard measures, and a gate visible only
+    # inside a handler is a gate the next reader of this file cannot see.
+    if parsed.wants_help or any(arg in ("--help", "-h", "help") for arg in args):
+        print_help()
         return True
 
-    if expect_artifact_path:
+    pack_name = None
+    specific_branch = None
+    show_bypasses = parsed.show_bypasses
+    no_bypass = parsed.no_bypass
+    force_full = parsed.force_full
+    write_artifact = parsed.write_artifact
+    artifact_path = parsed.artifact_path
+    positional = parsed.positional
+
+    if parsed.unrecognized:
+        # Raises: the refusal carries its own exit code out to seedgo.py. A
+        # plain `return True` here meant the shell saw 0 (Patrick's ruling,
+        # fleet sweep 2026-09-07); a `return False` would have had seedgo.py
+        # report 'Unknown command: audit' over a verb that is very much ours.
+        _refuse_unknown_argument(parsed.unrecognized[0], args)
+
+    if parsed.artifact_path_missing:
         error(
             "--artifact needs a destination path",
             suggestion="Usage: drone @seedgo audit aipass --artifact <path>",
         )
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "--artifact with no path")
 
     if len(positional) >= 1:
         if positional[0].startswith("@"):
@@ -368,7 +342,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 f"Branch name must use @ prefix: '@{branch_arg}'",
                 suggestion=f"Usage: drone @seedgo audit {pack_name} @{branch_arg}",
             )
-            return True
+            raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, branch_arg)
         specific_branch = normalize_branch_arg(branch_arg)
 
     # Validate pack name
@@ -379,7 +353,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             f"Unknown pack: '{pack_name}'",
             suggestion=f"Available packs: {available}. Usage: drone @seedgo audit {next(iter(packs), '<pack>')}",
         )
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, str(pack_name))
 
     pack_path = packs[pack_name]
 
@@ -395,7 +369,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             console.print(
                 f"[red]Branch '{specific_branch}' is private — audit access restricted to internal use only[/red]"
             )
-            return True
+            # A refusal, not a clean run of nothing: EXIT_UNPROVEN is exactly
+            # "the harness could not prove it was entitled to publish".
+            raise CommandRefused(refusal.EXIT_UNPROVEN, specific_branch)
 
     # Log audit start
     json_handler.log_operation("standards_audit_started", {"pack": pack_name, "specific_branch": specific_branch})
@@ -420,7 +396,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         branches = [b for b in branches if b["name"].upper() == specific_branch.upper()]
         if not branches:
             error(f"Branch '{specific_branch}' not found")
-            return True
+            raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, specific_branch)
 
     from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, SpinnerColumn
 

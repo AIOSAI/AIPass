@@ -23,6 +23,13 @@ from pathlib import Path
 #: The REAL discovery handler, bound before any fixture replaces it in sys.modules.
 from aipass.seedgo.apps.handlers.audit import discovery as real_discovery  # noqa: E402
 
+#: The REAL argv parser, bound the same way and for the opposite reason: it is
+#: pure grammar with no infrastructure to mock away, and a MagicMock in its
+#: place answers `wants_help` truthily — every audit in this file then prints
+#: help and audits nothing, which is exactly what happened when the parser was
+#: first split out of the module (2026-09-07).
+from aipass.seedgo.apps.handlers.audit import argv as real_argv  # noqa: E402
+
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
@@ -97,6 +104,7 @@ def _mock_infrastructure(monkeypatch):
     # would silently not apply.
     audit_pkg = MagicMock()
     audit_pkg.discovery = discovery_mod
+    audit_pkg.argv = real_argv
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
 
     branch_audit_mod = MagicMock()
@@ -227,11 +235,22 @@ def test_print_help_runs():
 
 
 def test_handle_command_unknown_pack():
-    """Passing an unknown pack name still returns True (error is displayed)."""
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
+
+    This is the defect the 2026-09-07 fleet sweep found on this branch:
+    `drone @seedgo audit not_a_real_subarg_xyz` printed the ❌ line and exited
+    0, so a script checking $? read it as a clean audit.
+    """
+    import pytest
+
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+    from aipass.seedgo.apps.modules import CommandRefused
     from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    result = handle_command("audit", ["nonexistent_pack"])
-    assert result is True
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("audit", ["nonexistent_pack"])
+    assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert refused.value.token == "nonexistent_pack"
 
 
 def test_discover_packs_returns_dict(tmp_path):
@@ -497,6 +516,23 @@ def _refused_argv() -> bool:
     return "REFUSED: [ARGV]" in _refusal_text()
 
 
+def _refuse(argv: list):
+    """Run the audit verb expecting a refusal, and hand back what it carried.
+
+    Since 2026-09-07 a refusal is RAISED, not returned: `handle_command` used
+    to answer True on every path and `seedgo.py` turned that into exit 0, so
+    the shell could not tell a refusal from an audit. Every test below that
+    used to read `handle_command(...) is True` now reads the code instead -
+    the same claim, made where it is now load-bearing.
+    """
+    from aipass.seedgo.apps.modules import CommandRefused
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("audit", argv)
+    return refused.value
+
+
 def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
     """`audit -tests @backup` -- a space where a hyphen belonged.
 
@@ -505,9 +541,8 @@ def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
     minutes were spent reading one lane's numbers as another's.
     """
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    assert handle_command("audit", ["-tests", "@backup"]) is True
+    assert _refuse(["-tests", "@backup"]).code == 7
     assert audit_mock.call_count == 0, "the audit ran on a command it had not understood"
     assert _refused_argv()
 
@@ -515,9 +550,8 @@ def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
 def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
     """Patrick's ruling: it should have failed AND given the solution."""
     _wire_branches(monkeypatch, "BACKUP")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["-tests", "@backup"])
+    _refuse(["-tests", "@backup"])
 
     assert "'-tests'" in _refusal_text()
     assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
@@ -525,21 +559,22 @@ def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
 
 def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
     _wire_branches(monkeypatch, "BACKUP")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["-tests", "@backup"])
+    refused = _refuse(["-tests", "@backup"])
 
     assert _refusal_text().startswith("REFUSED: [ARGV]")
-    # The code is printed beside the law, and it is not a pass.
+    # The code is printed beside the law, and it is not a pass — AND the
+    # process leaves with it. Printing "exit code: 7" over an exit 0 was the
+    # defect the 2026-09-07 fleet sweep named.
     assert "exit code: 7" in _console_text()
+    assert refused.code == 7
 
 
 def test_an_extra_positional_is_refused_rather_than_ignored(monkeypatch):
     """Pack, then @branch. A third bare word filled no slot and vanished."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    assert handle_command("audit", ["aipass", "@flow", "@prax", "--no-artifact"]) is True
+    assert _refuse(["aipass", "@flow", "@prax", "--no-artifact"]).code == 7
     assert audit_mock.call_count == 0
     assert "'@prax'" in _refusal_text()
 
@@ -547,9 +582,8 @@ def test_an_extra_positional_is_refused_rather_than_ignored(monkeypatch):
 def test_the_first_unrecognized_token_is_the_one_reported(monkeypatch):
     """Argv order, so the report names the mistake the caller made first."""
     _wire_branches(monkeypatch, "FLOW")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["aipass", "--first", "--second"])
+    _refuse(["aipass", "--first", "--second"])
 
     assert "'--first'" in _refusal_text()
     assert "'--second'" not in _refusal_text()
@@ -739,9 +773,8 @@ def test_the_space_typo_now_suggests_the_canonical_two_word_form(monkeypatch):
     one keystroke from the typo invites the typo back.
     """
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    assert handle_command("audit", ["-tests", "@backup"]) is True
+    assert _refuse(["-tests", "@backup"]).code == 7
 
     assert _refused_argv()
     assert audit_mock.call_count == 0
@@ -777,9 +810,8 @@ def test_a_pack_named_tests_makes_the_word_ambiguous_and_it_refuses(monkeypatch)
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
     calls = _wire_lane(monkeypatch)
     _collide(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    assert handle_command("audit", ["tests", "@backup"]) is True
+    assert _refuse(["tests", "@backup"]).code == 7
 
     assert _refused_argv(), "an ambiguous word must refuse, never resolve by preference"
     assert calls == [], "the lane must not be picked silently"
@@ -791,9 +823,8 @@ def test_the_ambiguity_refusal_names_both_meanings(monkeypatch):
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["tests", "@backup"])
+    _refuse(["tests", "@backup"])
     text = _refusal_text() + "\n" + _console_text()
 
     assert "'tests'" in text
@@ -806,9 +837,8 @@ def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(monkeypat
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["tests", "@backup"])
+    _refuse(["tests", "@backup"])
     text = _console_text()
 
     assert "drone @seedgo audit-tests <target>" in text
@@ -820,12 +850,12 @@ def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
 
-    handle_command("audit", ["tests", "@backup"])
+    refused = _refuse(["tests", "@backup"])
 
     assert _refusal_text().startswith("REFUSED: [ARGV]")
     assert "exit code: 7" in _console_text()
+    assert refused.code == 7, "the printed code and the carried code are one number"
 
 
 def test_a_pack_named_tests_is_still_reachable_by_its_directory_name(monkeypatch):

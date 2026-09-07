@@ -48,9 +48,12 @@ import copy
 import errno
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 import os
+import stat
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -69,8 +72,58 @@ import aipass
 #: rootdir pytest picks (branch-local or repo-root).
 PACKAGE_ROOT = Path(aipass.__file__).resolve().parent
 
+#: Where a citizen's json_handler lives, relative to its branch root.
+HANDLER_RELPATH = Path("apps") / "handlers" / "json" / "json_handler.py"
+
+
+def _installed_roster() -> dict[str, Path]:
+    """The citizens inside the installed package, found by file glob.
+
+    The fallback, and the floor: whatever else is reachable, these 18 always
+    are, because they are the package this suite is imported from.
+    """
+    return {path.parents[3].name: path.parents[3] for path in PACKAGE_ROOT.glob("*/apps/handlers/json/json_handler.py")}
+
+
+def _fleet_roster() -> dict[str, Path]:
+    """Every citizen the registry knows, core and resident and external.
+
+    RESIDENTS WERE OUTSIDE THIS SUITE UNTIL 2026-09-07. Discovery was a glob
+    over the INSTALLED package, so a citizen minted into another project's
+    tree — @vera under Vera-Studio, the four under `projects/` — got no
+    coverage from the contract at all, while a newborn minted under
+    `src/aipass/` joined the parametrised run automatically (@spawn's finding,
+    FPLAN-0493). The roster is @memory's `fleet_branches()`, the same one
+    @daemon's fleet sweep uses, so "the fleet" means one thing in both places.
+
+    A citizen whose tree is not on this machine, or which ships no handler at
+    that path, is simply absent from the roster rather than a failure: this
+    suite measures handlers that exist, and a checkout someone else has is not
+    a defect here. When @memory is unreachable the installed glob answers
+    alone — a narrower run that still runs, never an empty one.
+    """
+    roster = _installed_roster()
+    try:
+        from aipass.memory.apps.handlers.monitor.registry_scope import fleet_branches
+    except Exception:  # pragma: no cover - exercised only where @memory is absent
+        return roster
+    try:
+        rows = fleet_branches()
+    except Exception:  # pragma: no cover - a broken registry must not empty the run
+        return roster
+    for row in rows:
+        root = Path(str(row.get("path", "")))
+        name = str(row.get("name", ""))
+        if name and name not in roster and (root / HANDLER_RELPATH).is_file():
+            roster[name] = root
+    return roster
+
+
+#: Branch name -> branch root, for every citizen that ships a handler here.
+ROSTER: dict[str, Path] = _fleet_roster()
+
 #: Every branch that ships the canonical handler path, in stable order.
-BRANCHES = sorted(path.parents[3].name for path in PACKAGE_ROOT.glob("*/apps/handlers/json/json_handler.py"))
+BRANCHES = sorted(ROSTER)
 
 
 #: The fleet's redirect seam, read by the one json service on every call. Set
@@ -97,19 +150,46 @@ SHIM_PUBLIC_NAMES = (
 
 def handler_path(branch: str) -> Path:
     """Return the canonical handler file for *branch*."""
-    return PACKAGE_ROOT / branch / "apps" / "handlers" / "json" / "json_handler.py"
+    return ROSTER[branch] / HANDLER_RELPATH
 
 
 def implementation(branch: str) -> Any:
     """Import one branch's ``json_handler`` module.
 
+    A core citizen is imported by its dotted name, which is what every other
+    caller in the fleet uses. A RESIDENT has no dotted name inside `aipass`,
+    so it is loaded from the file instead — the same module object either way,
+    and the alternative was leaving those citizens unmeasured, which is the
+    gap this widening closes.
+
     Args:
-        branch: Directory name under the ``aipass`` package.
+        branch: A name in :data:`ROSTER`.
 
     Returns:
         The imported module.
     """
-    return importlib.import_module(f"aipass.{branch}.apps.handlers.json.json_handler")
+    if ROSTER[branch].parent == PACKAGE_ROOT:
+        return importlib.import_module(f"aipass.{branch}.apps.handlers.json.json_handler")
+
+    # CACHED IN sys.modules, EXACTLY AS import_module WOULD. Loading the file
+    # afresh on each call returns a NEW module object every time, and a test
+    # that captures a function from one call and redirects another gets a
+    # redirect that covers neither. Measured the hard way on 2026-09-07: the
+    # uncached first draft of this branch wrote contract documents into
+    # @vera's live vera_json/ directory, because `expose(module, ...)` held
+    # the unredirected module while `prepared(...)` redirected a different one.
+    key = f"_aipass_contract_json_handler_{branch}"
+    cached = sys.modules.get(key)
+    if cached is not None:
+        return cached
+    path = handler_path(branch)
+    spec = importlib.util.spec_from_file_location(key, path)
+    if spec is None or spec.loader is None:
+        pytest.skip(f"{branch}: {path} could not be loaded as a module")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[key] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def parametrized(divergences: Mapping[str, str] | None = None) -> list:
@@ -292,6 +372,33 @@ def require_document_addressing(module: Any, branch: str) -> None:
             f"{branch}'s json_handler is the PATH-ADDRESSED family — "
             f"load_json{inspect.signature(module.load_json)} takes a filesystem path, "
             f"so (module_name, json_type) contracts do not apply to it"
+        )
+
+
+def require_one_service(branch: str) -> None:
+    """Skip a citizen whose handler has not migrated to the one json service.
+
+    The third family, and the one that arrived with the roster widening on
+    2026-09-07. Every core citizen is a byte-identical shim over
+    ``aipass.prax.json_handler``; the four Vera-Studio externals still ship the
+    PRE-MIGRATION handler — a full implementation of their own, 169-177 lines,
+    with no ``SERVICE_IMPORT_MARKER``. Durability is a property of the service:
+    it stages a temp file and lands it through a bounded retry, and those four
+    write straight through ``open(path, "w")``, so a durability contract asked
+    of them is not a contract they ever signed.
+
+    The skip line is the measurement, and it names the finding rather than
+    hiding it: those handlers are unmigrated AND they do land writes by a bare
+    write, which is exactly what the migration exists to end.
+
+    Args:
+        branch: Branch name, for the message.
+    """
+    if SERVICE_IMPORT_MARKER not in handler_path(branch).read_text(encoding="utf-8"):
+        pytest.skip(
+            f"{branch} ships the PRE-MIGRATION json_handler — it does not import the one service "
+            f"({SERVICE_IMPORT_MARKER!r}), so the service's durability contracts do not apply to it. "
+            f"Measured 2026-09-07: it stages nothing and lands its write directly."
         )
 
 
@@ -768,18 +875,43 @@ def test_validate_json_structure_answers_the_measured_matrix(
 
 
 def test_discovery_finds_every_shipped_handler_and_names_no_branch_itself():
-    """Discovery is a glob, so a new branch is covered without editing this file.
+    """Discovery is a roster, so a new citizen is covered without editing this file.
 
-    Guards the mechanism the rest of the file stands on: if the glob silently
+    Guards the mechanism the rest of the file stands on: if discovery silently
     matched nothing, every parametrized contract above would collect zero cases
     and the run would be green while measuring nothing. Pins a floor rather
-    than a count, so adding or retiring a branch does not turn this red, and
-    checks that each discovered name really is importable as a module path.
+    than a count, so adding or retiring a citizen does not turn this red, and
+    checks that each discovered name really has a handler at the path the
+    roster gave for it.
+
+    The floor is the INSTALLED package, not the roster: those 18 are the
+    package this suite is imported from and are always reachable, while a
+    resident's tree may simply not be on this machine.
     """
     assert len(BRANCHES) >= 2, f"json_handler discovery found {BRANCHES} under {PACKAGE_ROOT}"
     assert len(set(BRANCHES)) == len(BRANCHES)
+    assert set(_installed_roster()) <= set(BRANCHES), "widening discovery must never lose an installed citizen"
     for branch in BRANCHES:
-        assert (PACKAGE_ROOT / branch / "apps" / "handlers" / "json" / "json_handler.py").is_file()
+        assert handler_path(branch).is_file()
+
+
+def test_one_branch_is_one_module_however_many_times_it_is_asked_for():
+    """``implementation`` must be idempotent, or the redirect covers nothing.
+
+    THE SAFETY PROPERTY OF THE WHOLE WIDENING, and it was learned by breaking
+    it. A resident is loaded from its file rather than by dotted name, and the
+    first draft of that loader built a NEW module on every call. Contracts that
+    capture a function from one call (``expose(module, ...)``) and redirect
+    another (``prepared(...)``) then redirect a module nobody writes through:
+    on 2026-09-07 that ran the write contracts against four Vera-Studio
+    citizens' LIVE document directories and left 23 default-template documents
+    in each. ``importlib`` caches; so must this.
+    """
+    for branch in BRANCHES:
+        assert implementation(branch) is implementation(branch), (
+            f"{branch} loads a fresh module per call — every redirect in this file would cover a module "
+            f"that no contract then writes through, and the writes would land in its live tree"
+        )
 
 
 def test_no_contract_writes_into_a_live_branch_document_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1490,7 +1622,7 @@ def test_every_canonical_handler_that_stages_a_write_also_retries_the_replace():
     """
     unguarded = []
     for branch in BRANCHES:
-        source = (PACKAGE_ROOT / branch / "apps" / "handlers" / "json" / "json_handler.py").read_text(encoding="utf-8")
+        source = handler_path(branch).read_text(encoding="utf-8")
         if "os.replace(" in source and not any(f"def {name}(" in source for name in RETRY_HELPER_NAMES):
             unguarded.append(branch)
     assert not unguarded, f"handlers calling os.replace with no bounded retry: {json.dumps(sorted(unguarded))}"
@@ -1644,6 +1776,7 @@ def public_writer(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         The redirected module, a one-argument ``save`` closure, and the
         document path that ``save`` writes to.
     """
+    require_one_service(branch)
     module = implementation(branch)
     if required_positionals(module.save_json) == 3:
         module, _ = prepared(branch, tmp_path, monkeypatch)
@@ -2435,6 +2568,53 @@ def test_log_operation_rotates_to_the_modules_declared_cap(
     )
 
 
+@pytest.mark.parametrize("branch", parametrized(DECLARED_LOG_CAP_IGNORED))
+def test_log_rotation_keeps_the_newest_entries_and_not_some_other_window(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Rotation must drop the OLDEST entries, named one by one.
+
+    ADDED 2026-09-07 from @devpulse's advisory mutation run (FPLAN-0492 ruling
+    5): a survivor turned the service's ``log[-cap:]`` into ``log[cap:]``,
+    which keeps 5 of 105 entries — the five OLDEST — and both existing
+    rotation assertions still passed. The count test only bounds how many
+    survive, and "newest is last" is true of any contiguous window taken in
+    order. So the two of them together could not tell a FIFO from a filter
+    that threw away everything recent, which is the one thing rotation exists
+    to get right: the entries a reader goes to the log for are the last ones
+    written.
+
+    Pinned by CONTENT: every surviving operation name is asserted, in order,
+    over a log that is already past its cap when rotation runs.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    log_operation = expose(module, branch, "log_operation")
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+    if not declare_log_cap(module, "windowmod", DECLARED_LOG_CAP):
+        pytest.skip(f"{branch}'s config document has no config mapping to declare max_log_entries in")
+
+    # THE LOG HAS TO ARRIVE ALREADY LONG, and this is the half that took a
+    # measurement to see. Appending one entry at a time never distinguishes the
+    # two slices: the first append over the cap truncates to a single entry and
+    # the log never grows past the cap again, so `log[cap:]` and `log[-cap:]`
+    # agree on every subsequent call. The survivor only shows itself on a log
+    # that is already over the cap when rotation runs — a document written
+    # before the cap was lowered, or by a handler that was not rotating.
+    seeded = [{"timestamp": "2020-01-01T00:00:00", "operation": f"op_{index}"} for index in range(105)]
+    module.save_json("windowmod", "log", seeded)
+
+    log_operation("newest", module_name="windowmod")
+
+    entries = json.loads(Path(str(module.get_json_path("windowmod", "log"))).read_text(encoding="utf-8"))
+    survived = [entry["operation"] for entry in entries]
+    expected = [f"op_{index}" for index in range(105 - DECLARED_LOG_CAP + 1, 105)] + ["newest"]
+    assert survived == expected, (
+        f"{branch}: rotation kept {len(survived)} entries beginning {survived[:1]} — "
+        f"a cap of {DECLARED_LOG_CAP} over 106 entries keeps {expected}"
+    )
+
+
 @pytest.mark.parametrize("branch", parametrized())
 def test_save_json_reports_true_on_a_write_that_landed(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The success signal every caller branches on.
@@ -2470,6 +2650,81 @@ def test_save_json_writes_a_document_that_parses_from_disk(
     raw = Path(str(module.get_json_path("disk", "log"))).read_bytes()
     parsed = json.loads(raw.decode("utf-8"))
     assert parsed == LOG_PAYLOAD, f"{branch}: the document on disk is not what was saved"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_rewriting_a_document_keeps_the_permission_bits_it_already_had(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A save must not silently re-permission the document it replaces.
+
+    ADDED 2026-09-07 from @devpulse's advisory mutation run (FPLAN-0492 ruling
+    5): three survivors restored the DPLAN-0325 pair-2 regression in which a
+    664 config came back 600 across the whole fleet. An atomic write is a
+    CREATE plus a rename, so the new file is born with the stager's mode and
+    the document's own bits are lost unless the writer carries them over —
+    and nothing in this contract read a mode back, so all three mutants lived.
+
+    The failure is quiet in exactly the way that costs a day: the document is
+    correct, the write reports success, and the next process that is not this
+    user cannot read it.
+    """
+    if os.name == "nt":
+        pytest.skip("permission bits are not the file's own on Windows; the claim has no subject there")
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    require_one_service(branch)
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    module.save_json("permmod", "config", copy.deepcopy(CONFIG_PAYLOAD))
+    path = Path(str(module.get_json_path("permmod", "config")))
+    # 0o640, NOT the 0o664 the mutation report names. A new document is staged
+    # 0o666 and lands 0o664 under the ordinary 002 umask, so a 664 probe passes
+    # whether or not the writer carries the mode over — measured 2026-09-07, the
+    # first draft of this test could not kill the mutant it was written for. The
+    # probe mode has to be one no new document would be born with.
+    os.chmod(path, 0o640)
+    before = stat.S_IMODE(os.stat(path).st_mode)
+
+    module.save_json("permmod", "config", copy.deepcopy(CONFIG_PAYLOAD))
+
+    after = stat.S_IMODE(os.stat(path).st_mode)
+    assert after == before, f"{branch}: a rewrite changed the document's mode from {before:o} to {after:o}"
+
+
+@pytest.mark.parametrize("branch", parametrized())
+def test_a_nan_or_infinity_payload_is_refused_and_the_document_left_alone(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """NaN and Infinity are not JSON, so they are refused at the writer.
+
+    ADDED 2026-09-07 from @devpulse's advisory mutation run (FPLAN-0492 ruling
+    5): three survivors flipped ``allow_nan=False`` off and nothing went red.
+    The service's docstring spends a paragraph on why the refusal exists —
+    Python writes the bare tokens ``NaN`` and ``Infinity``, the document lands
+    looking fine, and every strict parser in the fleet and every other
+    language rejects it later, far from the branch that wrote it — and no test
+    held it to that.
+
+    Both halves are asserted, because a refusal that has already clobbered the
+    file is not a refusal: the previous document must still be on disk,
+    byte-for-byte.
+    """
+    module = implementation(branch)
+    require_document_addressing(module, branch)
+    require_one_service(branch)
+    module, _ = prepared(branch, tmp_path, monkeypatch)
+
+    module.save_json("nanmod", "config", copy.deepcopy(CONFIG_PAYLOAD))
+    path = Path(str(module.get_json_path("nanmod", "config")))
+    before = path.read_bytes()
+
+    for spelling in ("nan", "inf", "-inf"):
+        payload = copy.deepcopy(CONFIG_PAYLOAD)
+        payload["config"]["threshold"] = float(spelling)
+        with pytest.raises(ValueError):
+            module.save_json("nanmod", "config", payload)
+        assert path.read_bytes() == before, f"{branch}: a refused {spelling} payload still changed the document on disk"
 
 
 # ===========================================================================

@@ -103,11 +103,22 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_pack():
-    """Unknown pack name returns True (error displayed to user)."""
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
+
+    It returned True until 2026-09-07 and `seedgo.py` turned that into exit 0,
+    so a script reading the exit code saw a successful query of a pack that
+    does not exist (Patrick's standing ruling, fleet sweep 2026-09-07).
+    """
+    import pytest
+
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+    from aipass.seedgo.apps.modules import CommandRefused
     from aipass.seedgo.apps.modules.standards_query import handle_command
 
-    result = handle_command("standards_query", ["nonexistent_pack_xyz"])
-    assert result is True
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("standards_query", ["nonexistent_pack_xyz"])
+    assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert refused.value.token == "nonexistent_pack_xyz"
 
 
 def test_print_introspection_runs():
@@ -171,11 +182,23 @@ def test_alias_shows_content_for_known_standard():
     assert handle_command("standard", ["json_structure"]) is True
 
 
-def test_alias_unknown_standard_returns_true():
-    """Unknown standard name is reported to the user, not silently passed on."""
+def test_alias_unknown_standard_refuses_with_a_non_zero_code():
+    """Unknown standard name is REFUSED, not reported and then called a success.
+
+    Renamed from `..._returns_true` on 2026-09-07: returning True was the
+    defect. `seedgo.py` turned it into exit 0, so `drone @seedgo standard
+    <typo>` printed ❌ and told the shell it had worked.
+    """
+    import pytest
+
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+    from aipass.seedgo.apps.modules import CommandRefused
     from aipass.seedgo.apps.modules.standards_query import handle_command
 
-    assert handle_command("standard", ["nonexistent_standard_xyz"]) is True
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("standard", ["nonexistent_standard_xyz"])
+    assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert refused.value.token == "nonexistent_standard_xyz"
 
 
 def test_alias_help_flag():
@@ -231,7 +254,13 @@ def test_alias_ambiguous_name_refuses_to_guess(monkeypatch):
     loaded = []
     monkeypatch.setattr(standards_query, "_display_content", lambda *a: loaded.append(a))
 
-    assert standards_query.handle_command("standard", ["dupe"]) is True
+    import pytest
+
+    from aipass.seedgo.apps.modules import CommandRefused
+
+    with pytest.raises(CommandRefused) as refused:
+        standards_query.handle_command("standard", ["dupe"])
+    assert refused.value.code == 7, "refusing to guess is a refusal, and a refusal is not exit 0"
     assert loaded == []
 
 

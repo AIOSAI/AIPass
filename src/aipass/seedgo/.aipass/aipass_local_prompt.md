@@ -7,22 +7,29 @@ Standards compliance platform. Audits branches, queries standard content, manage
 ## Commands
 
 ```
-seedgo audit aipass                              # Audit all 11 agents (33 audit lines)
-seedgo audit aipass flow                         # Single branch
+seedgo audit aipass                              # Audit all 18 citizens against 46 consulted entries
+seedgo audit aipass @flow                        # Single branch
+seedgo audit pytest_quality [@branch]            # v5 pack — 11 AST rules over tests/ (scores, gates nothing)
+seedgo audit-tests @branch                       # Execution lane — a suite under the write gate, advisory
 seedgo standard cli                              # Show standard content (short form)
 seedgo standards_query aipass_standards cli      # Show standard content (explicit pack)
-seedgo checklist <file>                          # Per-file standards check (hook consumer)
+seedgo checklist <file|dir>                      # Per-file standards check (hook consumer)
 seedgo diagnostics                               # Pyright type errors (runs via audit pipeline)
 seedgo proof aipass                              # Proof certification
 seedgo test_map @branch                          # Custom function test coverage
+seedgo test-inventory <path>                     # Every test function in a tree, ranked
+seedgo shadow-cycle run                          # The three weekly v5 passes
+seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
 seedgo readme update @branch                     # README auto-update
 ```
 
-All modules also accept filename: `standards_audit`, `diagnostics_audit`, `readme_update`. Note: `proof`, `proof_query`, `test_map` currently not --help output (known TODO).
+All modules also accept the filename form: `standards_audit`, `standards_query`, `diagnostics_audit`, `readme_update`.
+
+An unknown command, pack, flag or branch REFUSES by name and exits non-zero (Patrick's ruling, 2026-09-07 fleet sweep) — code 7 for an argument nobody recognised, 3 for a target with nothing to check, 2 for a lane that could not run.
 
 ## Hook Architecture
 
-The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure — engine, bridge, and 14 native handlers. Seedgo audits hooks via standards but does not own the hook system.
+The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure — engine, bridge, and the native handlers. Seedgo audits hooks via standards but does not own the hook system, and does not carry its counts.
 
 Provider settings route all events through the bridge: `src/aipass/hooks/apps/handlers/bridges/claude.py <Event>:<handler>`. The bridge dispatches to native Python handlers in `hooks/apps/handlers/` (prompt, security, lifecycle, notification categories).
 
@@ -30,19 +37,27 @@ Provider settings route all events through the bridge: `src/aipass/hooks/apps/ha
 
 ```
 apps/
-├── seedgo.py              # Entry point — thin router
-├── modules/               # standards_audit, standards_query, diagnostics_audit, readme_update
-└── handlers/
-    ├── aipass_standards/   # Checker pack (*_check.py + *_content.py pairs)
-    ├── audit/              # branch_audit, discovery, audit_display
-    ├── bypass/             # bypass_handler, ignore_handler
-    ├── config/             # aipass_bypass, aipass_ignore
-    ├── diagnostics/        # discovery (standalone disabled, runs via audit pipeline)
-    ├── file/               # file_handler
-    └── json/               # json_handler
+├── seedgo.py                    # Entry point — thin router; turns a CommandRefused into its exit code
+├── modules/                     # 13 CLI verbs; __init__.py holds CommandRefused
+└── handlers/                    # 15 directories
+    ├── aipass_standards/        # v4 checker pack (*_check.py + *_content.py + *.md triplets)
+    ├── pytest_quality_standards/ # v5 SCORING pack, generic, 11 branch-level AST rules
+    ├── tests_pytest_standards/  # EXECUTION pack — nominators, not checkers; never scored
+    ├── aipass_proof/            # Proof certification
+    ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
+    ├── audit_tests/             # The execution lane: refusal vocabulary, runner, render
+    ├── bypass/                  # bypass_handler, ignore_handler, inert
+    ├── cli/                     # help_flags
+    ├── config/                  # aipass_bypass, aipass_ignore
+    ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)
+    ├── json/                    # json_handler — the canonical shim, byte-identical fleet-wide
+    ├── readme/                  # readme_update handlers
+    ├── shadow_cycle/            # Weekly v5 cadence: score, cycle
+    ├── test_inventory/          # collection, exclusions
+    └── test_map/                # function_scanner
 ```
 
-`.sorting_unprocessed/` inside pack = staging area, not dead. Move files out before using.
+Two lanes, and a finding can exist in one and not the other: the **audit** walks `apps/**/*.py` only (`tests/` is not in its corpus), while the PostToolUse **checklist** hook checks `tests/`. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
 
 ## How I Work — Standards Reasoning
 

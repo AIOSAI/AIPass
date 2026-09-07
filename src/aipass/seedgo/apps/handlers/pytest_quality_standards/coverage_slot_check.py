@@ -94,7 +94,7 @@ STANDARD_NAME = "coverage_slot"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Purposive phrases. Each states a REASON for the test's existence that is not
 #: "this behaviour matters". Word-boundary anchored so "before coverage runs"

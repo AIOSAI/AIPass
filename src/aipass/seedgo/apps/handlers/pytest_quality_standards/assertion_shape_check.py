@@ -65,7 +65,7 @@ STANDARD_NAME = "assertion_shape"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Names that make a clause a MACHINE-capability probe, which acquits an `or`.
 #: Both the dotted spelling and the bare tail are accepted, because a test that

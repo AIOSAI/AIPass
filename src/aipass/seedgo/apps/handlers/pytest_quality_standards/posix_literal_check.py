@@ -96,7 +96,7 @@ STANDARD_NAME = "posix_literal"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Constructors whose first argument is a path. A `.resolve()` hanging off one of
 #: these is pathlib's resolve and no other object's - which is what keeps a

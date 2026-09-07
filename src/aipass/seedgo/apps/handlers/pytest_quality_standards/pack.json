@@ -5,6 +5,11 @@
   "generic": true,
   "status": "shadow",
   "reason": "judges what a test proves; scores in shadow mode until the v5 numbers are diffed against the calibrated triage",
-  "replaces": "aipass_standards/test_quality (v4) - NOT removed until v5 is proven and the CI pack-count assertion is in place",
-  "design": "DPLAN-0323 / FPLAN-0469"
+  "replaces": "aipass_standards/test_quality (v4) - retired to aipass_standards/.archive/ on 2026-09-07 (DPLAN-0323 seal, FPLAN-0491); the CI pack-count assertion moved 47 -> 46 in the same landing",
+  "design": "DPLAN-0323 / FPLAN-0469",
+  "corpus": {
+    "noun": "test files",
+    "detail": "tests/ only; apps/ is read only by the rules that name it",
+    "measured_by": "corpus:measure"
+  }
 }

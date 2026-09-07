@@ -17,6 +17,7 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.audit.artifact import DEFAULT_PACK_NAME
+from aipass.seedgo.apps.handlers.audit.discovery import measure_pack_corpus, pack_corpus
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
@@ -500,8 +501,10 @@ def audit_branch(
             continue
         # Per-file lanes only check files the standard applies to. Branch-level
         # checkers above are exempt because they walk the tree themselves —
-        # test_quality's whole corpus is tests/, and nothing here could filter
-        # it without also filtering it away.
+        # every `pytest_quality` rule has tests/ for its whole corpus, and
+        # nothing here could filter it without also filtering it away. The
+        # example read `test_quality` until that standard retired on
+        # 2026-09-07; the live pack makes the same point and still exists.
         if not applicability.applies_to_file(checker, entry_file):
             continue
         # Entry-point: always run on entry file. Genuine entry_point-scope
@@ -611,6 +614,12 @@ def audit_branch(
         test_map_result = None
 
     diag_result = results.get("diagnostics", {})
+    # The banner over these scores describes the PACK's corpus, not the
+    # engine's. `files_checked` is this walk of apps/**/*.py; a pack whose
+    # rules are all branch-level never opens one of those files, so it says
+    # what it read and measures its own size (discovery.pack_corpus).
+    corpus_terms = pack_corpus(pack_path)
+    measured = measure_pack_corpus(pack_path, branch_path)
     output = {
         "branch": branch,
         "results": results,
@@ -619,6 +628,9 @@ def audit_branch(
         "average": avg,
         "deprecated_patterns": deprecated,
         "files_checked": len(all_files),
+        "corpus_noun": corpus_terms["noun"],
+        "corpus_detail": corpus_terms["detail"],
+        "corpus_size": len(all_files) if measured is None else measured,
         "type_errors": diag_result.get("total_errors", 0),
         "type_error_files": diag_result.get("results", []),
         "test_map": test_map_result,

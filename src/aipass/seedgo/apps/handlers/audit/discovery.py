@@ -22,6 +22,7 @@ from typing import List, Dict
 # IMPORTS
 # =============================================================================
 
+import importlib.util
 import json
 
 from aipass.prax import logger
@@ -233,3 +234,76 @@ def non_scoring_packs(handlers_dir: Path) -> Dict[str, str]:
         if kind != SCORING_PACK_KIND:
             found[entry.name.removesuffix("_standards")] = kind
     return found
+
+
+# =============================================================================
+# PACK CORPUS
+# =============================================================================
+
+#: What the banner says a pack measured when its manifest declares nothing.
+#: These are the aipass pack's own terms: it walks apps/**/*.py one file at a
+#: time and never enters tests/. It is the default because every pack was that
+#: pack before a second one existed.
+DEFAULT_PACK_CORPUS: Dict[str, str] = {
+    "noun": "production files",
+    "detail": "apps/ only, tests/ not in the corpus",
+}
+
+
+def pack_corpus(pack_dir: Path | None) -> Dict[str, str]:
+    """What a pack says it reads, for the banner printed over its scores.
+
+    THE BANNER IS A CLAIM ABOUT THE PACK, NOT ABOUT THE ENGINE. It read
+    "N production files measured - apps/ only, tests/ not in the corpus" under
+    every pack until 2026-09-07, including one whose eleven rules are all
+    branch-level and read nothing but test units; the sentence was then false
+    twice over - wrong corpus, and a count no rule of that pack had used.
+
+    `measured_by` is "<module>:<callable>" inside the pack directory, resolved
+    the same way its checkers are. A pack that declares none keeps the engine's
+    own file count, which is the honest answer for a per-file pack.
+    """
+    corpus = dict(DEFAULT_PACK_CORPUS)
+    if pack_dir is None:
+        return corpus
+    manifest = pack_dir / "pack.json"
+    if not manifest.is_file():
+        return corpus
+    try:
+        declared = json.loads(manifest.read_text(encoding="utf-8")).get("corpus")
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        logger.warning(f"[seedgo] {pack_dir.name}/pack.json is unreadable, banner keeps the default corpus: {exc}")
+        return corpus
+    if isinstance(declared, dict):
+        corpus.update({key: str(value) for key, value in declared.items()})
+    return corpus
+
+
+def measure_pack_corpus(pack_dir: Path | None, branch_path: Path) -> int | None:
+    """The size the pack itself measures for one branch, or None when it declares no measurer.
+
+    None is not zero. A pack with no `measured_by` has not failed to measure -
+    it has said nothing, and the caller keeps its own count. A measurer that
+    raises returns None for the same reason: a banner is not worth failing an
+    audit over, and a fabricated 0 would read as an empty branch.
+    """
+    corpus = pack_corpus(pack_dir)
+    target = corpus.get("measured_by")
+    if not target or pack_dir is None:
+        return None
+    module_name, _, attribute = target.partition(":")
+    module_path = pack_dir / f"{module_name}.py"
+    if not attribute or not module_path.is_file():
+        logger.warning(f"[seedgo] {pack_dir.name}/pack.json names measured_by '{target}', which does not resolve")
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(f"{pack_dir.name}_{module_name}", module_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        measured = getattr(module, attribute)(branch_path)
+    except Exception as exc:
+        logger.warning(f"[seedgo] {pack_dir.name} corpus measurer {target} failed: {exc}")
+        return None
+    return int(measured)

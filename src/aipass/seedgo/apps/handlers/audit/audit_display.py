@@ -29,6 +29,7 @@ from collections import defaultdict
 from aipass.cli import console
 
 # JSON handler for tracking
+from aipass.seedgo.apps.handlers.audit.discovery import DEFAULT_PACK_CORPUS
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
@@ -240,12 +241,22 @@ def print_branch_summary(
     # the walk to each checker's APPLIES_TO (+136 findings across 12 branches)
     # is a separate, scheduled fleet change needing Patrick's GO. A score that
     # stops overclaiming is a fix, not a change.
+    #
+    # THE SENTENCE COMES FROM THE PACK since 2026-09-07. It was hardcoded to
+    # the aipass pack's corpus and printed verbatim under pytest_quality too -
+    # a pack whose eleven rules are all branch-level and read test units, not
+    # one apps/ file - so both halves were wrong at once: the wrong corpus,
+    # and a count taken from a walk none of those rules used. Falls back to
+    # the aipass wording, which is what a pack declaring nothing still means.
+    corpus_noun = audit_result.get("corpus_noun") or DEFAULT_PACK_CORPUS["noun"]
+    corpus_detail = audit_result.get("corpus_detail") or DEFAULT_PACK_CORPUS["detail"]
+    corpus_size = audit_result.get("corpus_size", files_checked)
     cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
     no_bypass_tag = " [bold yellow][BYPASSES DISABLED][/bold yellow]" if no_bypass else ""
     console.print()
     console.print(
         f"[bold cyan]{branch['name']}[/bold cyan] "
-        f"[dim]({files_checked} production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+        f"[dim]({corpus_size} {corpus_noun} measured — {corpus_detail})[/dim]"
         f"{cached_tag}{no_bypass_tag}"
     )
 

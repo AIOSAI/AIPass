@@ -99,7 +99,8 @@ Example bypass rule:
 ## History
 
 - Renamed from `testing` to `error_handling` (2026-03-27)
-- The `check_test_functions()` feature was removed (redundant with test_quality standard)
+- The `check_test_functions()` feature was removed (redundant with the `test_quality` standard,
+  itself retired on 2026-09-07 — DPLAN-0323; test quality is now the `pytest_quality` pack's)
 - Original checker focused on two things: error handling + test function presence
 - Now focused solely on error handling, which is what it actually checks
 
