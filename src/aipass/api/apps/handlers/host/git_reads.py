@@ -57,6 +57,7 @@ from typing import Any, Dict, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import refusals as host_refusals
+from aipass.api.apps.handlers.host.read_cache import ReadCache
 
 # The resolution half of the read lane. One direction only: repository reads
 # lean on the name fence, never the other way round.
@@ -77,6 +78,35 @@ from aipass.api.apps.handlers.host.reads import (
 MAX_DIFF_BYTES = 512 * 1024
 
 DIFF_TIMEOUT_SECONDS = 30
+
+# THE STAMPEDE, AND WHY A TIMEOUT WAS NEVER THE ANSWER (2026-09-07).
+#
+# The phone renders one card per branch and asks /v1/git-changes for each, one
+# request per branch, all at once. Every one of those used to reach its own
+# `drone @git status --json` subprocess: no cache, nothing shared. Measured on
+# this host — one call alone 0.5s, twenty concurrent 13.8s median, thirty-one
+# concurrent 17.9s. That is not a slow lane, it is N subprocesses fighting over
+# one machine, and on 2026-09-07 at 12:17:03 thirty-one of them crossed the 30s
+# timeout in the same second under boot-window load.
+#
+# So the cure is the one fleet.py already proves for @baud's snapshot, and NOT
+# a longer timeout — raising the ceiling only makes a slow screen slower while
+# leaving the N execs in place.
+#
+# Short enough that nobody watching a card sees a stale count; long enough that
+# one screen's worth of cards costs ONE exec per distinct question.
+GIT_CHANGES_TTL_SECONDS = 1.5
+
+# Keyed by (branch, project, grain). The brief said (branch, grain) and the
+# project is added deliberately: a branch NAME is not unique across projects —
+# 'api' exists in more than one census — so keying without it would serve one
+# project's change list for another's card. The read lane already refuses to
+# resolve a branch without its project for exactly that reason.
+#
+# The mechanism itself is read_cache.py, which fleet.py's snapshot proved
+# first. What lives here is only WHAT this lane asks and HOW the question is
+# keyed; the coalescing is not a git concern.
+_changes = ReadCache("git_changes", GIT_CHANGES_TTL_SECONDS)
 
 # THE MACHINE DOOR. Asking for it is what makes every lane below a reader of
 # facts rather than of sentences, and it is not optional politeness: the
@@ -466,6 +496,48 @@ def _patch_command(staged: bool, grain: str) -> Any:
 
 
 def read_git_changes(branch: str, project: str = "", grain: str = "") -> Dict[str, Any]:
+    """
+    A branch's change list, coalesced and briefly cached.
+
+    Fresh answers within GIT_CHANGES_TTL_SECONDS are served from memory, and
+    concurrent callers asking the same question share ONE subprocess: the first
+    arrival runs it, the rest wait on that flight and read its result. Both
+    halves matter — the TTL kills the cost of a phone that re-polls, the single
+    flight kills the stampede a screen full of cards makes in one instant.
+
+    A FAILURE IS NOT CACHED. Only a good answer is stored, so a branch whose
+    read failed is retried on the very next request rather than being refused
+    for the rest of the TTL. Concurrent callers still share the failed flight,
+    which is what stops N requests each waiting out their own 30s timeout —
+    the exact shape of the 2026-09-07 incident.
+
+    The real read, and everything the contract says about it, is in
+    `_read_git_changes_uncached` below.
+
+    Args:
+        branch: Branch name, resolved through the same two doors as every
+            other read.
+        project: Optional project name. Empty means the seat.
+        grain: branch (the default) for the card's question, or repo for the
+            app's.
+
+    Returns:
+        Dict with branch, grain, files, count, untracked, and rows.
+
+    Raises:
+        ReadRefused: Unknown branch, or a project with no such branch.
+        ReadUnavailable: drone could not be run, timed out, or refused.
+    """
+    # Normalised BEFORE it becomes a key: 'repo' and '' resolve to the same
+    # grain, and two spellings of one question must not each pay for an exec.
+    grain = _checked_grain(grain)
+    return _changes.get(
+        (branch, project, grain),
+        lambda: _read_git_changes_uncached(branch, project, grain),
+    )
+
+
+def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") -> Dict[str, Any]:
     """
     A branch's uncommitted change list — @baud's desktop card contract, served.
 

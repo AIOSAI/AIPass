@@ -65,9 +65,12 @@ Tests — routes:
 - GET /v1/diff: unknown branch is 400
 """
 
+import concurrent.futures as cf
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -122,6 +125,26 @@ def _event(ts: str, kind: str = "mail", title: str = "t", body: str = "b", sourc
 def _write_feed(path: Path, events: list) -> None:
     """Write events as JSON lines, one per line, in order."""
     path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _clean_git_changes_cache():
+    """
+    Empty the git-changes cache around every case in this file.
+
+    `read_git_changes` coalesces on (branch, project, grain) with a 1.5s TTL
+    (2026-09-07, the stampede cure). Cases here mock a different `drone @git
+    status` answer under the same branch name, so without this the SECOND case
+    to run is served the FIRST one's document and asserts against a subprocess
+    that was never called. That failure reads as a broken lane and is not one —
+    it is the cache doing its job across a boundary a suite does not have.
+
+    Autouse rather than opt-in: a case added later would otherwise inherit the
+    bleed silently, and it passes alone, which is the worst way to find it.
+    """
+    host_git._changes.clear()
+    yield
+    host_git._changes.clear()
 
 
 @pytest.fixture
@@ -777,6 +800,184 @@ class TestGitChangesMatchesTheDesktopCard:
             "untracked": 0,
             "rows": [],
         }
+
+
+class TestGitChangesCoalescesTheStampede:
+    """
+    The 2026-09-07 cure: one screen's worth of cards costs one exec per
+    distinct question, not one per card.
+
+    The phone asks /v1/git-changes once per branch and fires them together.
+    Every one of those used to reach its own `drone @git status --json`; on
+    2026-09-07 at 12:17:03 thirty-one crossed the 30s timeout in the same
+    second. Measured on that host: one call 0.5s, 31 concurrent 17.9s — N
+    subprocesses fighting over one machine, which is why the cure is the
+    single-flight-plus-TTL fleet.py already proves and NOT a longer timeout.
+    """
+
+    def _completed(self, stdout: str = GIT_STATUS_STDOUT, returncode: int = 0, stderr: str = "") -> Any:
+        result = MagicMock()
+        result.stdout = stdout
+        result.stderr = stderr
+        result.returncode = returncode
+        return result
+
+    def test_concurrent_callers_asking_the_same_question_share_one_subprocess(self, fake_repo: dict) -> None:
+        """
+        Thirty-one cards, one exec. The stampede itself, pinned.
+
+        The read is made SLOW rather than synchronised on a barrier: a barrier
+        across all thirty-one can never release here, because only one thread
+        is ever inside the subprocess — which is the property under test. A
+        slow first flight is what gives the other thirty time to arrive, queue
+        on the lock, and be served by the re-check inside it.
+        """
+        entered = threading.Event()
+
+        def slow(*_args: Any, **_kwargs: Any) -> Any:
+            entered.set()
+            time.sleep(0.4)
+            return self._completed()
+
+        with patch.object(subprocess, "run", side_effect=slow) as mock_run:
+            with cf.ThreadPoolExecutor(max_workers=31) as pool:
+                futures = [pool.submit(host_git.read_git_changes, "demo") for _ in range(31)]
+                answers = [f.result(timeout=30) for f in futures]
+
+        assert entered.is_set(), "the first flight must actually have run"
+        assert len(answers) == 31, "every caller must get an answer"
+        assert mock_run.call_count == 1, "thirty-one cards must not mean thirty-one subprocesses"
+
+    def test_a_second_read_inside_the_ttl_runs_nothing(self, fake_repo: dict) -> None:
+        """The other half: a re-poll within the window costs no exec at all."""
+        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+            host_git.read_git_changes("demo")
+            host_git.read_git_changes("demo")
+
+        assert mock_run.call_count == 1
+
+    def test_an_expired_entry_is_read_again_rather_than_served_stale(self, fake_repo: dict) -> None:
+        """
+        A cache that never expires is a lane that lies about a tree that moved.
+
+        The TTL is aged out directly rather than slept through: a test that
+        waits 1.5s to prove a 1.5s window is a test nobody runs.
+        """
+        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+            host_git.read_git_changes("demo")
+            key = ("demo", "", "branch")
+            stored_at, answer = host_git._changes._entries[key]
+            host_git._changes._entries[key] = (stored_at - (host_git.GIT_CHANGES_TTL_SECONDS + 1), answer)
+            host_git.read_git_changes("demo")
+
+        assert mock_run.call_count == 2
+
+    def test_one_callers_edit_to_a_row_does_not_reach_the_next_caller(self, fake_repo: dict) -> None:
+        """
+        A cached answer is handed out as a COPY, and this pin exists because a
+        mutation proved it was not protected.
+
+        The answer carries `rows` — a list of mutable dicts. Returning the
+        stored object lets whoever edits a row edit it for everyone until the
+        TTL runs out: not a crash, just a card quietly showing another card's
+        text. Returning `answer` in place of the deep copy survived the whole
+        suite when it was mutated in, including the five cases above, because
+        every one of them counts execs rather than reading what came back.
+
+        THREE reads, not two, and the number is the whole point. The caller
+        that MISSES is handed the producer's own object while a copy goes into
+        the store, so its edits cannot reach anyone — two reads therefore pass
+        against a cache that copies on the way in and shares on the way out.
+        It is the second HIT that proves the read path: caller two edits what
+        it was given, and caller three is what notices.
+        """
+        with patch.object(subprocess, "run", return_value=self._completed()):
+            first = host_git.read_git_changes("demo")
+            assert first["rows"], "the fixture must produce at least one row to mutate"
+
+            # The way IN: the miss returns the producer's object, so this edit
+            # must not have reached the entry that was stored.
+            first["rows"][0]["path"] = "clobbered-on-the-way-in"
+
+            second = host_git.read_git_changes("demo")
+            assert second["rows"][0]["path"] != "clobbered-on-the-way-in", (
+                "the answer was stored by reference — the caller that filled the cache can still edit it"
+            )
+
+            # The way OUT: this one was served FROM the store.
+            second["rows"][0]["path"] = "clobbered-on-the-way-out"
+            second["files"].append("clobbered-on-the-way-out")
+
+            third = host_git.read_git_changes("demo")
+
+        assert third["rows"][0]["path"] != "clobbered-on-the-way-out", (
+            "the third caller was served the second caller's edit — the cache is handing out its own object"
+        )
+        assert "clobbered-on-the-way-out" not in third["files"], (
+            "the file list is shared too, so one card's edit rewrites the next card's list"
+        )
+
+    def test_different_branches_are_not_queued_behind_each_other(self, fake_repo: dict) -> None:
+        """
+        The flight lock is PER KEY. A global one would turn the stampede into a
+        queue — every card correct, every card late, which on a phone is the
+        same complaint wearing better manners.
+        """
+        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+            host_git.read_git_changes("demo")
+            host_git.read_git_changes("demo", grain="repo")
+
+        assert mock_run.call_count == 2, "branch and repo grain are different questions"
+
+    def test_one_branch_name_in_two_projects_is_two_cache_entries(self, fake_repo: dict, tmp_path: Path) -> None:
+        """
+        The PROJECT is part of the key, and this pin exists because a mutation
+        proved it was not protected.
+
+        The brief specified single-flight per (branch, grain). Keying on that
+        literally is wrong: a branch NAME is not unique across projects, so the
+        seat's 'demo' and a foreign project's 'demo' would share one entry and
+        one card would be served the other's change list. Dropping `project`
+        from the key survived the whole suite when it was mutated in — nothing
+        anywhere could tell. That is an unpinned contract, not dead code, so it
+        is pinned here rather than left to the next reader to rediscover.
+        """
+        foreign = tmp_path / "OtherRepo"
+        (foreign / ".git").mkdir(parents=True)
+        foreign_root = foreign / "src" / "other" / "demo"
+        foreign_root.mkdir(parents=True)
+
+        census = MagicMock()
+        census.FleetUnavailable = host_fleet.FleetUnavailable
+        census.resolve_branch.return_value = {"name": "demo", "path": str(foreign_root)}
+
+        with patch(PATCH_HOST_FLEET, census):
+            with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+                host_git.read_git_changes("demo")
+                host_git.read_git_changes("demo", project="OTHER")
+
+        assert mock_run.call_count == 2, "the same branch name in two projects is two different questions"
+
+    def test_a_failed_read_is_never_stored_in_the_cache(self, fake_repo: dict) -> None:
+        """
+        Only a good answer is stored, so no branch is served a remembered
+        failure once its read starts working again.
+
+        This asserts on the CACHE rather than on a second subprocess, and the
+        distinction is real: `refusals.py` keeps its own deliberate memory of
+        an unreadable root to stop a broken tree writing the same sentence to
+        the log on every poll. That mechanism — not this one — is what decides
+        whether a second call re-execs. Pinning a second exec here would be
+        pinning refusals.py's behaviour through this lane by accident, and
+        would go red the day that module tuned its own window.
+        """
+        broken = self._completed(stdout="not a json object", returncode=1, stderr="boom")
+
+        with patch.object(subprocess, "run", return_value=broken):
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_changes("demo")
+
+        assert host_git._changes._entries == {}, "a failure must never be stored as an answer"
 
 
 class TestGitStaysDroneOnlyOnThisLaneToo:

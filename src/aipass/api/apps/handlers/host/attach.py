@@ -442,6 +442,56 @@ def client_command(room: str) -> List[str]:
     ]
 
 
+def attach_only_command(room: str) -> List[str]:
+    """
+    The tmux client argv for a room this server must NOT create (DPLAN-0327).
+
+    `client_command` above is `new-session -A` — attach-OR-create — which is
+    right for a room named after the branch, because if it is missing the
+    branch should get one. It is exactly wrong for a room the fleet snapshot
+    told us about: `outside_room` names a session somebody ELSE created, and
+    the only honest thing to do with a name we did not choose is attach to it
+    or fail. Creating it would mint an empty session under a name the desktop
+    believes it owns.
+
+    That is the m12 shape one level down. On 2026-09-04 Patrick opened his
+    aipass chat on the laptop and attached from the phone to a blank terminal,
+    because `_room_for` rebuilt `baud-<branch>` from the name and `-A` happily
+    created it while the live seat sat elsewhere. A builder that cannot create
+    is how that stops being possible rather than being remembered not to do.
+
+    Args:
+        room: The room to attach to, exactly as the snapshot named it.
+
+    Returns:
+        The argv. Same mouse and window-size options as `client_command`, each
+        carrying its own `-t` for the same pinned reason: a `set-option` with
+        no target resolves against whatever tmux calls current and exits 0
+        either way.
+    """
+    return [
+        TMUX_BINARY,
+        # attach-session, never new-session: no -A, and nothing here can bring
+        # a room into being.
+        "attach-session",
+        "-t",
+        room,
+        ";",
+        "set-option",
+        "-t",
+        room,
+        "mouse",
+        "on",
+        ";",
+        "set-option",
+        "-w",
+        "-t",
+        room,
+        "window-size",
+        "smallest",
+    ]
+
+
 def set_winsize(descriptor: int, cols: int, rows: int) -> None:
     """
     Stamp a terminal size into the kernel for a PTY.
@@ -601,7 +651,13 @@ class AttachSession:
         logger.info("[host_api] detached from %s — the room survives", self.room)
 
 
-def open_attach(branch: str, cwd: Optional[Path] = None, scope: str = "", room: str = "") -> AttachSession:
+def open_attach(
+    branch: str,
+    cwd: Optional[Path] = None,
+    scope: str = "",
+    room: str = "",
+    attach_only: bool = False,
+) -> AttachSession:
     """
     Spawn a PTY running a tmux client into a branch's room.
 
@@ -616,6 +672,9 @@ def open_attach(branch: str, cwd: Optional[Path] = None, scope: str = "", room: 
         room: Explicit room name override — the shell lane's door. When set,
             `branch`/`scope` no longer decide the name (use `shell_room_name`
             to build it) and `branch` may be empty.
+        attach_only: Attach to `room` or fail, never create it. For a room this
+            server did not name — the snapshot's `outside_room` (DPLAN-0327).
+            Requires `room`; without a name there is nothing to attach to.
 
     Returns:
         A live AttachSession.
@@ -637,7 +696,10 @@ def open_attach(branch: str, cwd: Optional[Path] = None, scope: str = "", room: 
 
     if room and room.strip():
         room = room.strip()
-        command = client_command(room)
+        # attach_only is only meaningful for a NAMED room, which is why it is
+        # read here and nowhere else: the generated-name branch below always
+        # owns the name it builds and is always allowed to create it.
+        command = attach_only_command(room) if attach_only else client_command(room)
     else:
         room = room_name(branch, scope)
         command = attach_command(branch, scope)

@@ -1740,6 +1740,145 @@ class TestAWatchIsNotAnchorTooling:
 
 
 @fastapi_required
+class TestOneRoomHonoursAnOutsideSeat:
+    """
+    ONE ROOM, step 1 (DPLAN-0327). The phone attaches to where the agent
+    ACTUALLY IS, not to a room rebuilt from its name.
+
+    On 2026-09-04 Patrick opened his aipass chat on the laptop and attached
+    from the phone to a blank terminal. `_room_for` composed `baud-<branch>`,
+    `new-session -A` created that empty room on the spot, and the live seat was
+    in the shim's own `aipass-<id>` session the whole time. DPLAN-0310 ruled on
+    08-18 that the snapshot's `outside_room` is how the seat is found; this is
+    that, built.
+    """
+
+    def _row(self, has_room: bool, outside: Any) -> dict:
+        return {"name": "demo", "path": "/x/demo", "has_room": has_room, "outside_room": outside}
+
+    @pytest.fixture(autouse=True)
+    def _seated_branch_exists(self, tmp_path: Path):
+        """
+        Stand 'demo' up as a seated branch.
+
+        The non-external lane resolves a branch through the real citizen
+        registry, so without this every case here fails on 'demo' not existing
+        — which measures the registry, not the room resolution under test.
+        """
+        with (
+            patch.object(host_server.host_verbs, "citizen_address", return_value="@demo"),
+            patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path),
+        ):
+            yield
+
+    def test_an_outside_room_is_attached_and_never_created(self) -> None:
+        """
+        The whole cure in one assertion: the argv attaches, and carries nothing
+        that could bring a session into being.
+
+        `outside_room` names a session somebody else made. Creating it would
+        mint an empty room under a name the desktop believes it owns — which is
+        the m12 defect one level down from where it was first found.
+        """
+        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(False, "aipass-42")):
+            target, cwd, scope, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+
+        assert room == "aipass-42", "the snapshot's own name must be used verbatim"
+        assert attach_only is True
+
+    def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self) -> None:
+        """
+        The WIRING, not just the resolution — and this pin exists because a
+        mutation proved the wiring was unprotected.
+
+        Making `open_attach` ignore `attach_only` and always build
+        `client_command` survived the whole file: every case above asserts what
+        `_room_for` decided, and none of them followed the decision through to
+        the process that actually gets spawned. A resolution nobody acts on is
+        the same blank terminal with more paperwork, so this drives the real
+        door and reads the argv `_spawn_pty` was handed.
+        """
+        with patch.object(host_attach, "_spawn_pty") as spawn:
+            spawn.return_value = (MagicMock(pid=4242), 7)
+            with patch(PATCH_ATTACH_LOGGER), patch(PATCH_ATTACH_JSON):
+                host_attach.open_attach("demo", cwd=None, room="aipass-42", attach_only=True)
+
+        argv = spawn.call_args[0][0]
+        assert "attach-session" in argv
+        assert "new-session" not in argv, "this lane must not be able to create a room"
+        assert "-A" not in argv, "attach-or-create is exactly what put a blank terminal on the phone"
+
+    def test_without_the_flag_a_named_room_is_still_attach_or_create(self) -> None:
+        """
+        The regression guard for the pin above. The shell lane names its own
+        room and MUST still be able to create it — if this ever goes red
+        alongside that one passing, attach-only has escaped its one case and
+        every shell is now refusing to open.
+        """
+        with patch.object(host_attach, "_spawn_pty") as spawn:
+            spawn.return_value = (MagicMock(pid=4242), 7)
+            with patch(PATCH_ATTACH_LOGGER), patch(PATCH_ATTACH_JSON):
+                host_attach.open_attach("demo", cwd=None, room="shell-demo")
+
+        argv = spawn.call_args[0][0]
+        assert "new-session" in argv
+        assert "-A" in argv
+
+    def test_an_own_room_still_wins_and_the_snapshot_does_not_override_it(self) -> None:
+        """
+        has_room true keeps today's behaviour EXACTLY. This lane may only ever
+        rescue a branch that has no room of its own; it must never take one
+        away from a branch that does.
+        """
+        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(True, "aipass-42")):
+            _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+
+        assert room == "", "an empty room name is what lets the agent naming rule decide"
+        assert attach_only is False
+
+    def test_no_outside_room_falls_through_to_the_naming_rule(self) -> None:
+        """A branch with neither a room nor an outside seat is unchanged."""
+        with patch.object(host_server.host_fleet, "resolve_branch", return_value=self._row(False, None)):
+            _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+
+        assert room == ""
+        assert attach_only is False
+
+    def test_a_census_that_cannot_answer_does_not_refuse_the_attach(self) -> None:
+        """
+        A read failure leaves the caller on the behaviour that shipped for
+        months. Refusing an attach because an IMPROVEMENT to it could not be
+        computed would make the phone worse the moment @baud's binary hiccups.
+        """
+        with patch(PATCH_SERVER_LOGGER):
+            with patch.object(
+                host_server.host_fleet,
+                "resolve_branch",
+                side_effect=host_server.host_fleet.FleetUnavailable("census down"),
+            ):
+                _, _, _, room, attach_only = host_server._room_for("demo", "", False, False, "AIPass")
+
+        assert room == ""
+        assert attach_only is False
+
+    def test_a_shell_is_never_diverted_to_an_outside_room(self) -> None:
+        """
+        A shell asks for its OWN room by name. `outside_room` is where an agent
+        sits, and dropping an operator's shell into the agent's session is the
+        opposite of what they typed.
+        """
+        with patch.object(
+            host_server.host_fleet, "resolve_branch", return_value=self._row(False, "aipass-42")
+        ) as census:
+            _, _, _, room, attach_only = host_server._room_for("demo", "", False, True, "AIPass")
+
+        assert room != "aipass-42"
+        assert attach_only is False
+        # A shell resolves its own room by name, so the census is never
+        # consulted at all — the cheapest possible proof it cannot be diverted.
+        census.assert_not_called()
+
+
 class TestTheOneSeatHostsAnyProjectsRoom:
     """
     Attach under the one-terminal ruling: any census-known project, tenant or

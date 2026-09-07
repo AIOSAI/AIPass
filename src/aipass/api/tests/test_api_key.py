@@ -418,18 +418,19 @@ def test_init_env_create_failure(mock_env, mock_error, mock_success, mock_header
 
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
-def test_list_providers_prints_header(mock_header, mock_console):
-    """list_providers should print 'Available Providers' header."""
+def test_list_providers_prints_openrouter(mock_header, mock_console):
+    """
+    list_providers announces itself and lists the provider.
+
+    MERGED 2026-09-07 (DPLAN-0323 contested band). `test_list_providers_
+    prints_header` ran this identical call to assert the title alone. The
+    header assertion moved HERE rather than being dropped with it — the
+    sibling never checked the title, so deleting outright would have retired
+    an oracle instead of a duplicate call.
+    """
     api_key.list_providers()
 
     mock_header.assert_called_once_with("Available Providers")
-
-
-@patch(PATCH_CONSOLE)
-@patch(PATCH_HEADER)
-def test_list_providers_prints_openrouter(mock_header, mock_console):
-    """list_providers should print openrouter as an available provider."""
-    api_key.list_providers()
 
     # Check that console.print was called with the openrouter provider line
     print_calls = [str(c) for c in mock_console.print.call_args_list]
@@ -442,36 +443,39 @@ def test_list_providers_prints_openrouter(mock_header, mock_console):
 # =============================================
 
 
-@patch(PATCH_CONSOLE)
-@patch(PATCH_HEADER)
-@patch(PATCH_JSON_HANDLER)
-def test_handle_command_logs_operation(mock_jh, mock_header, mock_console):
-    """Valid command should call json_handler.log_operation with command context."""
-    api_key.handle_command("list-providers", [])
-
-    mock_jh.log_operation.assert_called_once_with(
-        "api_key_list-providers",
-        {"command": "list-providers"},
-    )
-
-
+@pytest.mark.parametrize(
+    "command, args",
+    [
+        ("list-providers", []),
+        ("get-key", ["openrouter"]),
+    ],
+)
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
 @patch(PATCH_SUCCESS)
 @patch(PATCH_ERROR)
 @patch(PATCH_JSON_HANDLER)
 @patch(PATCH_KEYS)
-def test_handle_command_logs_operation_for_get_key(
-    mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console
+def test_handle_command_logs_operation(
+    mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console, command, args
 ):
-    """get-key command should log api_key_get-key operation."""
+    """
+    The audit operation name carries the VERB, whichever verb ran.
+
+    PARAMETRISED 2026-09-07 (DPLAN-0323 contested band). This was two test
+    functions with one assertion shape and a different verb each — the
+    definition of one parametrize case per verb. Kept as two CASES rather than
+    collapsed to one, because the whole property under test is that the name
+    varies with the verb, and a single case could not tell a real
+    f"api_key_{command}" from a hardcoded string.
+    """
     mock_keys.get_api_key.return_value = "FAKE-sk-test1234567890"
 
-    api_key.handle_command("get-key", ["openrouter"])
+    api_key.handle_command(command, args)
 
     mock_jh.log_operation.assert_called_once_with(
-        "api_key_get-key",
-        {"command": "get-key"},
+        f"api_key_{command}",
+        {"command": command},
     )
 
 
@@ -482,18 +486,18 @@ def test_handle_command_logs_operation_for_get_key(
 
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
-def test_print_introspection_shows_header(mock_header, mock_console):
-    """print_introspection should display the module header."""
+def test_print_introspection_shows_handlers(mock_header, mock_console):
+    """
+    print_introspection titles itself and lists its connected handlers.
+
+    MERGED 2026-09-07 (DPLAN-0323 contested band), same shape as
+    list_providers above: `test_print_introspection_shows_header` made this
+    identical call for the title alone, and the title assertion came with it
+    rather than being retired alongside the duplicate call.
+    """
     api_key.print_introspection()
 
     mock_header.assert_called_once_with("API Key Module Introspection")
-
-
-@patch(PATCH_CONSOLE)
-@patch(PATCH_HEADER)
-def test_print_introspection_shows_handlers(mock_header, mock_console):
-    """print_introspection should list connected handlers."""
-    api_key.print_introspection()
 
     print_calls = [str(c) for c in mock_console.print.call_args_list]
     found_keys = any("auth.keys" in c for c in print_calls)

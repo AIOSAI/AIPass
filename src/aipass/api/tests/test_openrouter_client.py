@@ -163,13 +163,23 @@ def test_handle_command_logs_operation(mock_console, mock_header, mock_jh, mock_
 # =============================================
 
 
+@patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.models")
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_test_connection_success(mock_console, mock_header, mock_keys, mock_models, mock_success):
-    """Successful connection prints success with model count."""
+def test_test_connection_success(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
+    """
+    A successful connection reports the model count AND says nothing else.
+
+    MERGED 2026-09-07 (DPLAN-0323 contested band). This file split every happy
+    path into a second not-called twin running identical setup;
+    `test_test_connection_success_no_error` was this call again for one
+    `assert_not_called`. That line came here rather than being deleted with the
+    twin: "success was reported" and "no error was ALSO reported" are two
+    facts, and a path that printed both would have passed the positive half.
+    """
     from aipass.api.apps.modules import openrouter_client
 
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
@@ -180,32 +190,21 @@ def test_test_connection_success(mock_console, mock_header, mock_keys, mock_mode
     mock_models.fetch_models_from_api.assert_called_once_with("FAKE-sk-or-testkey")
     mock_success.assert_called_once()
     assert "3 models" in mock_success.call_args[0][0]
-
-
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.console")
-def test_test_connection_success_no_error(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
-    """Successful connection must not call error()."""
-    from aipass.api.apps.modules import openrouter_client
-
-    mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
-    mock_models.fetch_models_from_api.return_value = [{"id": "m1"}]
-
-    openrouter_client.test_connection()
-
     mock_error.assert_not_called()
 
 
+@patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error):
-    """Missing API key triggers error with diagnosis."""
+def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error, mock_success):
+    """
+    A missing key is diagnosed, reported as an error, and never as a success.
+
+    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
+    `test_test_connection_no_key_no_success`, identical setup for one line.
+    """
     from aipass.api.apps.modules import openrouter_client
 
     mock_keys.get_api_key.return_value = None
@@ -215,22 +214,6 @@ def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error
 
     mock_keys.diagnose_key.assert_called_once_with("openrouter")
     mock_error.assert_called_once_with("No key found in env")
-
-
-@patch(f"{_MOD}.success")
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.console")
-def test_test_connection_no_key_no_success(mock_console, mock_header, mock_keys, mock_error, mock_success):
-    """Missing API key path must not call success()."""
-    from aipass.api.apps.modules import openrouter_client
-
-    mock_keys.get_api_key.return_value = None
-    mock_keys.diagnose_key.return_value = "No key found in env"
-
-    openrouter_client.test_connection()
-
     mock_success.assert_not_called()
 
 
@@ -240,27 +223,13 @@ def test_test_connection_no_key_no_success(mock_console, mock_header, mock_keys,
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_test_connection_api_failure_no_success(
-    mock_console, mock_header, mock_keys, mock_models, mock_error, mock_success
-):
-    """API failure path must not call success()."""
-    from aipass.api.apps.modules import openrouter_client
+def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_models, mock_error, mock_success):
+    """
+    A None from the API is reported as a failure and never as a success.
 
-    mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
-    mock_models.fetch_models_from_api.return_value = None
-
-    openrouter_client.test_connection()
-
-    mock_success.assert_not_called()
-
-
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.console")
-def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_models, mock_error):
-    """API returning None triggers connection-failed error."""
+    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
+    `test_test_connection_api_failure_no_success`, identical setup for one line.
+    """
     from aipass.api.apps.modules import openrouter_client
 
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
@@ -270,6 +239,7 @@ def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_
 
     mock_error.assert_called_once()
     assert "failed" in mock_error.call_args[0][0].lower()
+    mock_success.assert_not_called()
 
 
 # =============================================
@@ -277,13 +247,19 @@ def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_
 # =============================================
 
 
+@patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.models")
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, mock_success):
-    """Successful model listing prints success and table rows."""
+def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
+    """
+    A successful listing reports the count and rows, and reports no error.
+
+    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
+    `test_list_models_success_no_error`, the same call again for one line.
+    """
     from aipass.api.apps.modules import openrouter_client
 
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
@@ -303,25 +279,6 @@ def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, 
     assert "3 models" in mock_success.call_args[0][0]
     # Header row + separator + 3 data rows = at least 5 console.print calls after header
     assert mock_console.print.call_count >= 5
-
-
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.console")
-def test_list_models_success_no_error(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
-    """Successful model listing must not call error()."""
-    from aipass.api.apps.modules import openrouter_client
-
-    mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
-    mock_models.fetch_models_from_api.return_value = [
-        {"id": "p/m", "context_length": 4096, "pricing": {"prompt": "0", "completion": "0"}}
-    ]
-
-    openrouter_client.list_models([])
-
     mock_error.assert_not_called()
 
 
@@ -330,24 +287,13 @@ def test_list_models_success_no_error(mock_console, mock_header, mock_keys, mock
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_list_models_no_key_no_success(mock_console, mock_header, mock_keys, mock_error, mock_success):
-    """Missing API key on list_models must not call success()."""
-    from aipass.api.apps.modules import openrouter_client
+def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error, mock_success):
+    """
+    A missing key is reported as an error and never as a success.
 
-    mock_keys.get_api_key.return_value = None
-    mock_keys.diagnose_key.return_value = "Key not set"
-
-    openrouter_client.list_models([])
-
-    mock_success.assert_not_called()
-
-
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.console")
-def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error):
-    """Missing API key triggers error with diagnosis."""
+    MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
+    `test_list_models_no_key_no_success`, identical setup for one line.
+    """
     from aipass.api.apps.modules import openrouter_client
 
     mock_keys.get_api_key.return_value = None
@@ -356,6 +302,7 @@ def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error):
     openrouter_client.list_models([])
 
     mock_error.assert_called_once_with("Key not set")
+    mock_success.assert_not_called()
 
 
 @patch(f"{_MOD}.success")
