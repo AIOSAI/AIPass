@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Module path prefix for patching
@@ -202,21 +204,6 @@ class TestHandleCommandList:
         assert result is True
         mock_console.print.assert_not_called()
 
-    def test_list_logs_operation(self) -> None:
-        """'list' logs via json_handler before processing."""
-        with (
-            patch(f"{_MOD}.list_modules", return_value=[]),
-            patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
-        ):
-            from aipass.drone.apps.modules.module_registry import handle_command
-
-            handle_command("list")
-
-        mock_jh.log_operation.assert_called_once_with(
-            "handle_command", {"module": "module_registry", "command": "list"}
-        )
-
 
 # ===========================================================================
 # 4. info command
@@ -276,21 +263,6 @@ class TestHandleCommandInfo:
         assert "2.1.0" in printed
         assert "Seedgo audit system" in printed
 
-    def test_info_logs_operation(self) -> None:
-        """'info' logs via json_handler before processing."""
-        with (
-            patch(f"{_MOD}.get_module_info", return_value=None),
-            patch(f"{_MOD}.logger"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
-        ):
-            from aipass.drone.apps.modules.module_registry import handle_command
-
-            handle_command("info", ["anything"])
-
-        mock_jh.log_operation.assert_called_once_with(
-            "handle_command", {"module": "module_registry", "command": "info"}
-        )
-
 
 # ===========================================================================
 # 5. check command
@@ -345,21 +317,6 @@ class TestHandleCommandCheck:
         assert "fakemod" in printed
         assert "False" in printed
 
-    def test_check_logs_operation(self) -> None:
-        """'check' logs via json_handler before processing."""
-        with (
-            patch(f"{_MOD}.is_module", return_value=False),
-            patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
-        ):
-            from aipass.drone.apps.modules.module_registry import handle_command
-
-            handle_command("check", ["anything"])
-
-        mock_jh.log_operation.assert_called_once_with(
-            "handle_command", {"module": "module_registry", "command": "check"}
-        )
-
 
 # ===========================================================================
 # 6. Unknown command
@@ -384,18 +341,45 @@ class TestHandleCommandUnknown:
         warning_msg = mock_logger.warning.call_args[0][0]
         assert "unknown command" in warning_msg.lower()
 
-    def test_unknown_command_logs_operation(self) -> None:
-        """Even unknown commands get logged via json_handler."""
+
+# ===========================================================================
+# 7. The audit line — one claim, every verb
+# ===========================================================================
+
+
+class TestTheAuditLine:
+    """Every verb is audited before it is dispatched."""
+
+    @pytest.mark.parametrize("command", ["list", "info", "check", "bogus"])
+    def test_the_verb_is_audited_before_it_is_dispatched(self, command: str) -> None:
+        """log_operation names the verb it received, whatever the verb is.
+
+        One test, four cases — it used to be four tests, one per verb, sitting
+        in four different classes. There is only one call site: it sits ABOVE
+        the verb branch in handle_command, so list / info / check / an unknown
+        string are the same line of code reached four ways. Four copies read as
+        four claims and all four die to the same edit.
+
+        The verb still has to be parametrized rather than dropped to one case:
+        the payload's ``command`` key comes from the argument, and a hardcoded
+        ``"list"`` there is a real mutant that a single-verb test cannot see.
+        The unknown verb is a case and not an afterthought — a command that is
+        about to be REFUSED is the one most worth having written down.
+        """
         with (
+            patch(f"{_MOD}.list_modules", return_value=[]),
+            patch(f"{_MOD}.get_module_info", return_value=None),
+            patch(f"{_MOD}.is_module", return_value=False),
             patch(f"{_MOD}.logger"),
+            patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler") as mock_jh,
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
-            handle_command("bogus")
+            handle_command(command, ["anything"])
 
         mock_jh.log_operation.assert_called_once_with(
-            "handle_command", {"module": "module_registry", "command": "bogus"}
+            "handle_command", {"module": "module_registry", "command": command}
         )
 
 

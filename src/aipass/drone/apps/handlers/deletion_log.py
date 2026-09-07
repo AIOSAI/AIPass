@@ -43,7 +43,11 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in, resolve_caller_identity
+from aipass.drone.apps.handlers.router_handler import (
+    caller_cwd,
+    registries_in,
+    resolve_caller_identity_signal,
+)
 
 _LOG_DIR_NAME = ".ai_central"
 _LOG_NAME = "deletions.jsonl"
@@ -100,6 +104,28 @@ def _find_project_root() -> Path | None:
         if home.is_dir() and registries_in(home):
             return home.resolve()
     return None
+
+
+def _resolve_citizen_caller(cwd: Path | None) -> str:
+    """Name the CITIZEN who deleted, or say ``unknown`` — never a directory.
+
+    The shared resolver's last resort before nothing is the PROJECT: with no
+    assigned ``AIPASS_BRANCH_NAME`` and no passport up the tree, it derives a
+    name from the registry that answered, so a delete run from the repo root
+    recorded ``caller: "aipass"`` — a directory, not a person. The live store
+    holds 33 such rows, one of them a deletion inside @devpulse's own tree.
+
+    A record is read months later by someone asking WHO. ``unknown`` tells them
+    the truth and sends them to the cwd and the prax line; a project name that
+    looks like a citizen sends them after the wrong actor, and @ai_mail's CLI
+    entry was fenced for exactly this species (6be0da57). So the ``project``
+    source is refused here even though the shared resolver returns it happily:
+    it is a true answer to "where", and this field asks "who".
+    """
+    signal = resolve_caller_identity_signal(cwd)
+    if signal.name and signal.source in ("assigned", "passport"):
+        return signal.name
+    return UNKNOWN_CALLER
 
 
 def deletion_log_path(project_root: Path | None = None) -> Path:
@@ -272,7 +298,7 @@ def record_deletion(
     on: losing the log must not turn into losing the delete.
     """
     cwd = caller_cwd()
-    caller = caller or resolve_caller_identity(cwd) or UNKNOWN_CALLER
+    caller = caller or _resolve_citizen_caller(cwd)
     shape = measurement or {"kind": "unknown", "size_bytes": None, "entry_count": None, "measured": "none"}
 
     record = {

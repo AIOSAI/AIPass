@@ -130,18 +130,18 @@ class TestPathCommand:
         result = handle_command(command="path")
         assert result is True
 
-    def test_path_calls_get_registry_path(self, mocks):
-        from aipass.drone.apps.modules.config import handle_command
-
-        handle_command(command="path")
-        mocks["get_registry_path"].assert_called_once()
-
     def test_path_prints_registry_location(self, mocks):
+        # The once-ness was a test of its own until FPLAN-0492. Printing the
+        # handler's value already proves the handler was asked; only "exactly
+        # once" was extra, and reading the registry path twice per 'path' is
+        # still a defect worth catching. So it stays — as a second assertion
+        # about this call, not as a second test claiming a second behaviour.
         from aipass.drone.apps.modules.config import handle_command
 
         handle_command(command="path")
         printed = mocks["console"].print.call_args[0][0]
         assert "/fake/registry.json" in printed
+        mocks["get_registry_path"].assert_called_once()
 
     def test_path_logs_operation(self, mocks):
         from aipass.drone.apps.modules.config import handle_command

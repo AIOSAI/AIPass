@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
 
 
@@ -215,8 +216,8 @@ class TestCallerIdentity:
         target.write_text("x")
 
         with patch(
-            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity",
-            return_value=None,
+            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
+            return_value=CallerIdentity(None, None),
         ):
             safe_delete([str(target)])
 
@@ -228,13 +229,49 @@ class TestCallerIdentity:
         target.write_text("x")
 
         with patch(
-            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity",
-            return_value="devpulse",
+            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
+            return_value=CallerIdentity("devpulse", "passport"),
         ) as resolver:
             safe_delete([str(target)])
 
         assert resolver.called
         assert read_records(project)[0]["caller"] == "devpulse"
+
+    def test_a_project_name_is_refused_as_an_identity(self, project):
+        """todo 178: the record said `aipass` for a deletion @devpulse made.
+
+        The shared resolver's last resort is the PROJECT — a true answer to
+        WHERE the process stood, and the wrong kind of answer for a field that
+        asks WHO deleted. 33 rows in the live store carry it, one of them a
+        deletion inside @devpulse's own tree. An audit trail that names the
+        wrong actor is worse than one naming none, so `project` becomes
+        `unknown` here and the cwd field still carries the location.
+        """
+        target = project / "x.txt"
+        target.write_text("x")
+
+        with patch(
+            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
+            return_value=CallerIdentity("aipass", "project"),
+        ):
+            safe_delete([str(target)])
+
+        record = read_records(project)[0]
+        assert record["caller"] == "unknown"
+        assert record["cwd"], "the location must survive — only the identity claim is refused"
+
+    def test_an_assigned_identity_is_still_honoured(self, project):
+        """The fence refuses `project`, not every answer."""
+        target = project / "x.txt"
+        target.write_text("x")
+
+        with patch(
+            "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
+            return_value=CallerIdentity("commons", "assigned"),
+        ):
+            safe_delete([str(target)])
+
+        assert read_records(project)[0]["caller"] == "commons"
 
     def test_passport_walkup_beats_the_directory_name(self, project, monkeypatch):
         """The directory is deliberately NOT named after the branch.

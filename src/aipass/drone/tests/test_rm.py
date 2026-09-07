@@ -665,3 +665,48 @@ class TestRmModule:
         from aipass.drone.apps.modules.rm import print_help
 
         print_help()
+
+    def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
+        """A refusal is an error: handle_command reports False, the CLI exits 1.
+
+        @seedgo's 2026-09-07 report was that ``drone rm`` on paths outside every
+        allowed root printed the red refusal and exited 0 — a script reading
+        ``$?`` would read a delete that never happened as done. Measured from
+        every door reachable here (built-in lane, @drone routing, multi-path,
+        sibling-branch refusal, projectless cwd) the exit was already 1, so this
+        pins the mapping rather than fixing it: the boolean handle_command
+        returns is the only thing standing between a refusal and exit 0.
+
+        The root and the target are SIBLINGS under tmp_path, and the roots list
+        is narrowed by hand. Two earlier drafts of this test passed the delete
+        instead of the refusal: the shared ``_patch_roots`` fixture leaves /tmp
+        allowed, and ``project_dir`` IS ``tmp_path``, so a target under either
+        one sits inside a root. A containment test whose subject is inside the
+        fence proves nothing about the fence.
+        """
+        from aipass.drone.apps.modules.rm import handle_command
+
+        root = tmp_path / "the_only_allowed_root"
+        root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        target = elsewhere / "keepme.txt"
+        target.write_text("must survive")
+
+        with patch(
+            "aipass.drone.apps.handlers.rm_handler.get_allowed_roots",
+            return_value=[root.resolve()],
+        ):
+            assert handle_command(str(target)) is False
+
+        assert target.exists(), "the refusal did not hold — the file was deleted"
+
+    def test_the_cli_maps_a_refusal_to_a_non_zero_exit(self, monkeypatch):
+        """The other half: False must not be flattened to 0 on the way out."""
+        from aipass.drone.apps import drone as drone_cli
+
+        monkeypatch.setattr(drone_cli, "_handle_rm", drone_cli._handle_rm)
+        with patch("aipass.drone.apps.modules.rm.handle_command", return_value=False):
+            assert drone_cli._handle_rm(["/some/refused/path"]) == 1
+        with patch("aipass.drone.apps.modules.rm.handle_command", return_value=True):
+            assert drone_cli._handle_rm(["/some/allowed/path"]) == 0

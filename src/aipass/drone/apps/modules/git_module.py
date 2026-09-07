@@ -631,9 +631,18 @@ def _handle_log(args: list[str]) -> dict:
         try:
             count = int(candidate)
             break
-        except ValueError as exc:
-            logger.warning("Invalid log count argument '%s': %s", arg, exc)
-            continue
+        except ValueError:
+            # Patrick's standing ruling: an unknown argument FAILS by name. This
+            # used to log a WARNING and carry on with the default 10, so
+            # `log not_a_real_count` printed output byte-identical to `log` with
+            # an empty stderr and exit 0 — the code knew the token was bad and
+            # proceeded as if a default had been meant. A caller reading $? was
+            # told the count it asked for had been honoured.
+            message = f"Unknown argument for 'log': {arg}"
+            logger.warning("git log refused unknown argument '%s'", arg)
+            if as_json:
+                return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
+            return {"stdout": "", "stderr": message, "exit_code": 1}
 
     if count < 1:
         message = f"Invalid log count {count}: must be 1 or greater"
