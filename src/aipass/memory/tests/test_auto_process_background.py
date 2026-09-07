@@ -233,15 +233,15 @@ class TestCompletionIsAnnounced:
         trigger`` at call time, which resolves through ``sys.modules``. A dotted
         ``patch("aipass.trigger.apps.modules.core.trigger.fire")`` does not
         always land on that object: Python 3.10's ``mock`` walks the attribute
-        chain from the top package, 3.11+ resolves through ``sys.modules``. An
-        earlier test on the same xdist worker that re-imports a trigger module
-        under ``monkeypatch.delitem`` leaves the parent-package attribute on the
-        NEW module and restores the OLD one into ``sys.modules`` — from then on
-        the two routes name two different ``Trigger`` instances, and on 3.10 the
-        patch lands on the one the code never calls. CI run 34088947108, the
-        3.10 leg alone: "expected exactly one completion fire, got 0", green on
-        3.11-3.13. Patching through the import route pins the same object the
-        code reaches on every interpreter.
+        chain from the top package, 3.11+ resolves through ``sys.modules``. The
+        two routes agree only while the parent-package attribute and the
+        ``sys.modules`` entry name the same module; something earlier on one
+        xdist worker split them, and on 3.10 the patch landed on a ``Trigger``
+        the code never calls. CI run 34088947108, the 3.10 leg alone: "expected
+        exactly one completion fire, got 0", green on 3.11-3.13. The splitter is
+        not named: that worker's file order replayed on 3.12 in one process
+        shows both routes on one object. Patching through the import route pins
+        the object the code reaches on every interpreter, whatever split it.
         """
         import importlib
 
