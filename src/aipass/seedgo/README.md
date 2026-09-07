@@ -4,7 +4,7 @@
 
 **Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 46 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
-**Version:** 2.0.0
+**Version:** 2.0.1
 **Created:** 2026-03-05
 
 ---
@@ -48,7 +48,7 @@ Every command below was run against this branch on **2026-09-05** and produced t
 ```bash
 drone @seedgo                                          # Introspection (13 modules, 3 packs, version)
 drone @seedgo --help                                   # Usage guide (see the gap note below)
-drone @seedgo --version                                # Version string — "seedgo v2.0.0"
+drone @seedgo --version                                # Version string — "seedgo v2.0.1"
 
 # Audit
 drone @seedgo audit aipass                             # Audit all 18 citizens (46 standards + diagnostics)
@@ -111,12 +111,11 @@ python3 -m aipass.seedgo.apps.seedgo standards_query aipass_standards cli
 > diagnostics is disabled and runs through the audit pipeline (`audit aipass [@branch]`).
 > Re-checked 2026-09-05: `drone @seedgo diagnostics @flow` answers *"Unknown argument: '@flow'"*.
 
-> **Note — `--help` under-reports the command surface.** Its closing `Commands:` line lists
-> `audit, standards_audit, standards_query, standard, checklist, diagnostics, diagnostics_audit,
-> proof, proof_query, test_map, readme, readme_update, --help`. Six live verbs are missing from
-> it: `audit-tests`, `test-inventory`, `shadow-cycle`, `permissions`, `inbox_audit`, and the
-> `audit pytest_quality` pack. They all work; `--help` just does not name them. Measured
-> 2026-09-05, and this README is the fuller list until the help text catches up.
+> **`--help` names the whole command surface as of 2026-09-06.** Until then its closing
+> `Commands:` line stopped at 13 and left six live verbs unnamed (`audit-tests`, `test-inventory`,
+> `shadow-cycle`, `permissions`, `inbox_audit`, and the `audit pytest_quality` pack — all of them
+> ran, measured 2026-09-05). The help text now carries a Tests section, a Housekeeping section
+> and the pack under Audit, and the `Commands:` line lists all 18.
 
 > **Note — `standard` and `standards_query` count differently.** `drone @seedgo standard` is
 > pack-agnostic and lists the union of all three checker packs (**58** names on 2026-09-05).
@@ -411,9 +410,9 @@ Everything below was re-checked on 2026-09-05 unless marked **UNVERIFIED**.
   `STANDARD_CATEGORIES` has 7 keys and `TOTAL_ITEMS` is 31 — 7 pattern categories plus module
   coverage is 8. The docstring predates the DPLAN-0325 part-B retirement that took the item table
   from 51 to 31. A code defect in this branch's own tree; not fixed in this docs-only pass.
-- **`--help` names 13 commands and the branch answers 19.** Missing from its `Commands:` line:
-  `audit-tests`, `test-inventory`, `shadow-cycle`, `permissions`, `inbox_audit`, and the
-  `audit pytest_quality` pack. All six run. A help_text gap in this branch's own entry point.
+- ~~`--help` names 13 commands and the branch answers 19~~ — fixed 2026-09-06: `audit-tests`,
+  `test-inventory`, `shadow-cycle`, `permissions`, `inbox_audit` and the `audit pytest_quality`
+  pack are in the help text and its `Commands:` line.
 - `standard ruff` returns "Unknown standard" while the audit displays the standard as `Ruff` (see the naming-split note above).
 - `--help` advertises `drone @seedgo diagnostics @flow`, but the module rejects a branch argument — standalone diagnostics runs only through the audit pipeline.
 - ~~`permissions.py` introspection leak~~ — **fixed 2026-08-13 (S80).** The gate keyed on
