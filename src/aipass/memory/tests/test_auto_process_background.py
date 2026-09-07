@@ -226,6 +226,28 @@ class TestCompletionIsAnnounced:
     """
 
     @staticmethod
+    def _bus():
+        """The exact bus object ``_fire_completion`` will reach, resolved NOW.
+
+        The production code does ``from aipass.trigger.apps.modules.core import
+        trigger`` at call time, which resolves through ``sys.modules``. A dotted
+        ``patch("aipass.trigger.apps.modules.core.trigger.fire")`` does not
+        always land on that object: Python 3.10's ``mock`` walks the attribute
+        chain from the top package, 3.11+ resolves through ``sys.modules``. An
+        earlier test on the same xdist worker that re-imports a trigger module
+        under ``monkeypatch.delitem`` leaves the parent-package attribute on the
+        NEW module and restores the OLD one into ``sys.modules`` — from then on
+        the two routes name two different ``Trigger`` instances, and on 3.10 the
+        patch lands on the one the code never calls. CI run 34088947108, the
+        3.10 leg alone: "expected exactly one completion fire, got 0", green on
+        3.11-3.13. Patching through the import route pins the same object the
+        code reaches on every interpreter.
+        """
+        import importlib
+
+        return importlib.import_module("aipass.trigger.apps.modules.core").trigger
+
+    @staticmethod
     def _fired(mock_fire):
         """The one memory_pool_auto_processed call, as (name, payload)."""
         calls = [c for c in mock_fire.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
@@ -239,7 +261,7 @@ class TestCompletionIsAnnounced:
             "pool": {"success": True, "files_processed": 3, "total_chunks": 12},
             "rollover": {"success": True, "triggers": 1, "processed": 1},
         }
-        with patch("aipass.trigger.apps.modules.core.trigger.fire") as fire:
+        with patch.object(self._bus(), "fire") as fire:
             with patch.object(ap, "auto_process", return_value=done):
                 ap.run_once()
 
@@ -251,7 +273,7 @@ class TestCompletionIsAnnounced:
 
     def test_a_crashed_run_announces_the_failure_that_reaches_medic(self, isolated_lock):
         """The leg that was dead. `success: False` + `error` is what becomes error_detected."""
-        with patch("aipass.trigger.apps.modules.core.trigger.fire") as fire:
+        with patch.object(self._bus(), "fire") as fire:
             with patch.object(ap, "auto_process", side_effect=RuntimeError("chroma exploded")):
                 ap.run_once()
 
@@ -269,7 +291,7 @@ class TestCompletionIsAnnounced:
         """
         isolated_lock.write_text(json.dumps({"pid": os.getpid(), "started": time.time()}), encoding="utf-8")
 
-        with patch("aipass.trigger.apps.modules.core.trigger.fire") as fire:
+        with patch.object(self._bus(), "fire") as fire:
             result = ap.run_once()
 
         assert result["skipped"] is True
@@ -277,7 +299,7 @@ class TestCompletionIsAnnounced:
 
     def test_a_broken_bus_does_not_break_the_run(self, isolated_lock):
         """Observability must not take down the work it observes."""
-        with patch("aipass.trigger.apps.modules.core.trigger.fire", side_effect=RuntimeError("bus down")):
+        with patch.object(self._bus(), "fire", side_effect=RuntimeError("bus down")):
             with patch.object(ap, "auto_process", return_value={"success": True}):
                 result = ap.run_once()
 
