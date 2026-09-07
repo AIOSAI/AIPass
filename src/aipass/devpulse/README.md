@@ -241,12 +241,12 @@ Three production files elsewhere in the fleet import this branch (measured 2026-
 
 ## Status & Known Issues
 
-Verified 2026-09-06 (README truth pass round 2, FPLAN-0490 — every command table above checked against tonight's `--help`, the suite run, every count measured, the four 08-25 issues re-tested live).
+Verified 2026-09-06 (README truth pass round 2, FPLAN-0490 — every command table above checked against tonight's `--help`, the suite run, every count measured, the four 08-25 issues re-tested live); counts re-measured 2026-09-07 after the DPLAN-0323 seal.
 
-| Signal | Measured 2026-09-06 |
+| Signal | Measured 2026-09-07 |
 |---|---|
-| Tests | 460 `def test_` across 23 files; 572 cases, 569 passed / 3 skipped (`.venv` python, branch rootdir) |
-| Seedgo | `drone @seedgo audit aipass @devpulse` — Overall 100, every scored category 100 (Readme, Readme_Quality, Trinity, Test_Quality included), no type errors; 10 bypass rules in `.seedgo/bypass.json` |
+| Tests | 455 `def test_` across 22 files; 559 cases, 557 passed / 2 skipped in 744 s under load (`.venv` python, from the repo root in the CI shape: `python -m pytest src/aipass/devpulse -c pyproject.toml --rootdir=.`). Down from 460 / 23 on 09-06: `tests/test_json_handler.py` archived (its six shim pins run for all 18 branches in seedgo's contract suite) and one judged-DELETE row removed from `test_watchdog_agent.py`; up two on 09-07 for the unknown-flag and did-you-mean pins in `test_devpulse.py`. |
+| Seedgo | `drone @seedgo audit aipass @devpulse` — Overall 100, every scored category 100 across the **46** consulted entries (v4 `test_quality` retired from the pack 2026-09-07), no type errors; 10 bypass rules in `.seedgo/bypass.json` |
 | json handler | `apps/handlers/json/json_handler.py` is the fleet shim: sha256 `3456b766…`, binds `aipass.prax.json_handler`, adds nothing |
 | Version | `drone @devpulse --version` prints `devpulse 1.0.2` — one `VERSION` constant in `apps/devpulse.py`, kept in step with the file header |
 
@@ -256,12 +256,15 @@ Verified 2026-09-06 (README truth pass round 2, FPLAN-0490 — every command tab
 - ~~Refusals that exit 0~~ — `compass archive 999999`, `compass rate 999999 good` and `feedback view zzzz` all exit 2; every module calls `mark_command_failed()`. The last survivor, `watchdog cancel <unknown>`, printed FAILED and exited 0 until 2026-09-06 — it now goes through `error()` and exits 2.
 - ~~`--version` hardcoded~~ — printed `devpulse 1.0.0` against a `1.0.1` header; one `VERSION` constant now (1.0.2), fixed 2026-09-06.
 
-**Open:**
+**Resolved 2026-09-07** (Patrick's blanket ruling on the held items, FPLAN-0492):
 
-- **statusline.sh untracked** — the watchdog statusline lives at `~/.claude/statusline.sh` (6099 bytes tonight), outside the repo; on any other machine watchdog paints red until hand-copied. Fix direction undecided (Patrick's call — provider config dir).
-- **Foreground-wire gap, half cured** — the `via` field landed (`wire.py` reads the wrapper from stdout: `monitor` / `background` / `foreground`; `watchdog status` prints it), but the statusline script does not read it (0 hits for `via` or `foreground` in the script tonight), so a wire armed without the Monitor tool still paints `watchdog:in` green.
+- ~~statusline.sh untracked~~ — a byte-identical copy is tracked at `tools/statusline.sh` (6140 bytes); install on another machine is `cp tools/statusline.sh ~/.claude/statusline.sh` (the statusline path is provider config, so the copy is the versioned source and the home file is the deployment).
+- ~~Foreground-wire gap, half cured~~ — the statusline's green now also requires the registered wire's `metadata.wrapper == "monitor"`; a foreground or background wire with no listener paints `watchdog:OUT`. Verified on this session's monitor wire: still `watchdog:in`.
+- **Unknown command or flag refused silently** — `drone @devpulse <bogus>` exited 1 with empty stdout and stderr (the 09-07 fleet sweep's REFUSES-SILENT). `route_command` now names the token, offers a did-you-mean, and lists the known commands.
 
-*Last Updated: 2026-09-06*
+**Open:** nothing known as of 2026-09-07. The one standing caveat: a wire armed *before* the 09-07 statusline change carries no `wrapper` field and paints `watchdog:OUT` until re-armed through the Monitor tool.
+
+*Last Updated: 2026-09-07*
 
 ---
 

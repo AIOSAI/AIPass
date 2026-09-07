@@ -9,6 +9,19 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased] — after the clampdown (opened 2026-09-07, retitled at the next merge)
+
+### Fixed
+- **devpulse: an unknown command or flag is refused by name.** `drone @devpulse <bogus>` used to exit 1 with empty stdout and stderr (the 2026-09-07 fleet sweep's REFUSES-SILENT). `route_command` now prints `Unknown command: <token>`, a did-you-mean from the discovered module names, the known list, and a `--help` pointer; exit code unchanged. Pinned in `tests/test_devpulse.py` (FPLAN-0492, Patrick's standing unknown-argument ruling: fail non-zero and name the token, never default).
+
+### Added
+- **devpulse `tools/statusline.sh`** — the watchdog statusline for Claude Code, previously only at `~/.claude/statusline.sh` and tracked nowhere. Byte-identical copy is now the versioned source; the green `watchdog:in` additionally requires the registered wire's `metadata.wrapper == "monitor"`, so a foreground wire with no listener paints `watchdog:OUT`.
+
+### Changed
+- **`tests/docker_checklist.md`** (repo root) gains "The one flow": one image (`aipass-test:latest` from `Dockerfile.test`), `--rm` containers only, post-mortem naming `aipass-verify-<date>`, the two runner scripts, never `docker cp`/`exec` a fix into a container (Patrick's 2026-08-28 ruling: no invented flow per test).
+
+---
+
 ## [2026-09-07] — the clampdown: test-write gate, one json service for the fleet, v4 test_quality retired, every README verified (DPLAN-0323 / DPLAN-0325, merged as PR #751, v2.8.2)
 
 Section opened 2026-09-01 as "the clampdown begins"; retitled on the merge date per the convention above. Everything from the test-write gate (FPLAN-0468/0469) through the DPLAN-0323 seal (FPLAN-0491) shipped in one PR.

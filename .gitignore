@@ -162,6 +162,13 @@ src/aipass/skills/tools/*
 !src/aipass/skills/tools/suspend/
 !src/aipass/skills/tools/suspend/**
 
+# devpulse watchdog statusline — the versioned source for ~/.claude/statusline.sh
+# (provider config, otherwise tracked nowhere; FPLAN-0492, 2026-09-07). Collides
+# with the blanket tools/ ignore (line 57).
+!src/aipass/devpulse/tools/
+src/aipass/devpulse/tools/*
+!src/aipass/devpulse/tools/statusline.sh
+
 # User/sample projects — each is its own git repo (git init on create).
 # Contents never belong to the AIPass repo; only the catalog README is tracked
 # so the public repo can point at the standalone project repos.
@@ -187,3 +194,6 @@ sandbox_test/
 # SQLite WAL sidecars (runtime artifacts — commons.db ro-feed etc.)
 *.db-wal
 *.db-shm
+
+# mutmut working copy (advisory mutation runs, DPLAN-0323, 2026-09-07)
+mutants/
