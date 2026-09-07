@@ -280,22 +280,23 @@ def hook_workspace(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFacto
 
 
 def test_t2a_rm_gate_blocks(clean_venv: CleanVenv, hook_workspace: Path) -> None:
-    """rm -rf is blocked via {"decision":"block"} on STDOUT with exit code 2.
+    """rm -rf is blocked via {"decision":"block"} on STDERR with exit code 2.
 
     Block contract: every security gate (rm/git/edit/subagent/presence) returns
-    exit_code 2 plus a block-JSON decision on stdout, and the bridge propagates
-    that exit code. The non-zero exit is the cross-event block signal — it is
-    what lets a UserPromptSubmit gate (presence_gate) actually cancel a prompt,
-    not just PreToolUse. Claude Code surfaces the stdout decision reason either
-    way. (Pre-FPLAN-0289 the bridge swallowed the exit code, so this test once
-    pinned exit 0; beb048d corrected the bridge to propagate it.)
+    exit_code 2 plus a block-JSON decision. The bridge sends exit-2 output to
+    stderr because Claude Code feeds stderr back to the refused agent. The
+    non-zero exit is the cross-event block signal — it is what lets a
+    UserPromptSubmit gate (presence_gate) actually cancel a prompt, not just
+    PreToolUse. (Pre-FPLAN-0289 the bridge swallowed the exit code, so this test
+    once pinned exit 0; beb048d corrected the bridge to propagate it.)
     """
     sentinel = f"e2e-block-{uuid.uuid4()}"
     proc = _fire_hook(clean_venv, hook_workspace, "rm -rf /tmp/x", sentinel)
 
     assert proc.returncode == 2, f"expected exit 2 (block), got {proc.returncode}. stderr:\n{proc.stderr}"
-    decision = json.loads(proc.stdout)
-    assert decision.get("decision") == "block", f"stdout was: {proc.stdout!r}"
+    assert proc.stdout == "", f"blocked hook wrote to stdout: {proc.stdout!r}"
+    decision = json.loads(proc.stderr)
+    assert decision.get("decision") == "block", f"stderr was: {proc.stderr!r}"
 
     # Oracle: the engine log must hold a record with OUR sentinel AND hook==rm_gate.
     log = _engine_log(clean_venv)

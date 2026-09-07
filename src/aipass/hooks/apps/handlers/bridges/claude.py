@@ -55,7 +55,8 @@ def main() -> None:
 
     output, exit_code = dispatch(event_type, stdin_data, config)
     if output:
-        sys.stdout.write(output)
+        stream = sys.stderr if exit_code == 2 else sys.stdout
+        stream.write(output)
     if exit_code:
         sys.exit(exit_code)
 
