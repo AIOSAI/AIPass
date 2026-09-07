@@ -108,6 +108,20 @@ session` in the logs is that guard working as designed; it only serves senders
 whose session closed). Dispatch and idle without signing in and nothing will
 ever wake you — the report just queues.
 
+**Dead-monitor backstop (FPLAN-0499, DPLAN-0314 "outcome M"):** a dispatch whose
+monitor died — host reboot, OOM, kill — can never report, so the receiver announces
+it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once
+(no agent is polled, no process is armed) and pushes one line per dispatch of yours
+that is past `expected_by` (ai_mail's hard timeout — a live monitor cannot overrun it):
+
+```
+DEAD @prax [70da6e9c] dispatched 09-07 12:00 "..." — no completion by 09-07 14:00, the hard timeout: its monitor died (reboot, OOM, kill). Re-dispatch in continue mode.
+```
+
+Each death is announced once ever (cursor `devpulse_json/wire_dead_cursor.json`), so
+a re-sign-in never repeats one. `drone @devpulse watchdog status` shows the same
+rows on demand as "Dispatches overdue".
+
 Two rules the receiver enforces, neither optional:
 
 - **Only completions wake.** The feed also carries dispatch *start* edges, and

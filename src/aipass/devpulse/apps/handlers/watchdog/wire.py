@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-08-19
-# Modified: 2026-08-22
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -13,6 +13,7 @@ Public surface:
   arm_wire(once=False, ...) -> dict
   find_repo_root(start=None) -> Path | None
   HEARTBEAT_FILE, HEARTBEAT_STALE_SECONDS
+  DEAD_CHECK_SECONDS, DEAD_CURSOR_NAME
 
 The arm door (``watchdog baseline`` routes here):
   1. sweep the registry — deregister dead entries and take over EVERY live
@@ -21,7 +22,10 @@ The arm door (``watchdog baseline`` routes here):
   2. replay completions past the cursor as ``MISSED`` stdout lines;
   3. follow the notification feed, one stdout line per completion THAT THIS
      SEAT DISPATCHED, cursor advanced after every delivery;
-  4. touch the heartbeat so the statusline can tell a live wire from a hung one.
+  4. touch the heartbeat so the statusline can tell a live wire from a hung one;
+  5. announce the dead — at sign-in and every DEAD_CHECK_SECONDS, one ``DEAD``
+     line per dispatch of this seat's whose monitor can no longer report
+     (FPLAN-0499; the hole DPLAN-0314 named "outcome M").
 
 There is no detection process to ensure, watch, or mourn. Run via the Monitor
 tool with description "watchdog".
@@ -89,11 +93,13 @@ from everything else. It is long on purpose and it stays.
 # listener is gone. Takeover-always + the arm-at-session-start reflex bound
 # that window.
 
+import json
 import os
 import signal
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -126,6 +132,29 @@ _HEARTBEAT_INTERVAL_SECONDS = 5.0
 # carries "wake" start edges for other readers and a silent widening here would
 # be a silent re-broadening of what wakes this seat.
 _DELIVER_KINDS = ("dispatch",)
+
+# THE DEAD-MONITOR BACKSTOP (FPLAN-0499). A completion is pushed by the agent
+# that finishes — and a monitor that died in a host reboot, an OOM kill or a
+# SIGKILL finishes nothing, so a pure push design is blind to exactly the case
+# a watchdog exists for. DPLAN-0314 named it "outcome M" and called the
+# backstop load-bearing; on 2026-09-07 the 12:17 reboot killed two wave-3
+# agents mid-work and nothing said so for two and a half hours, although
+# dispatches.overdue() already knew — it was pull-only.
+#
+# Patrick's shape (2026-09-07 15:00): five minutes, not sixty seconds, and the
+# code checks, not the seat — "the whole redesign was to cut cpu and not need
+# tokens to monitor". So: one register read through @ai_mail's door per five
+# minutes, no agent polled, no process armed, and a stdout line only when a
+# death is found. Overdue is THEIR reading: expected_by is dispatch_monitor's
+# hard timeout, which a live monitor cannot overrun (dispatches.py).
+DEAD_CHECK_SECONDS = 300.0
+
+# Announced once EVER per dispatch, not once per wire: a re-sign-in after the
+# reboot that caused the death must not re-deliver it. Sibling of the feed
+# cursor, same directory, its own name (feed.cursor_file_for explains why two
+# readers never share one cursor).
+DEAD_CURSOR_NAME = "wire_dead_cursor.json"
+_DEAD_CURSOR_CAP = 200
 
 _WIRE_KIND = "baseline_wire"
 
@@ -362,9 +391,98 @@ def _partition_mine(records: list[dict], seat: str) -> list[dict]:
 
 def _result(state: str, **extra) -> dict:
     """Uniform return shape for every path that returns at all."""
-    base = {"state": state, "replayed": 0, "delivered": 0, "ticks": 0}
+    base = {"state": state, "replayed": 0, "delivered": 0, "dead": 0, "ticks": 0}
     base.update(extra)
     return base
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The dead-monitor backstop (FPLAN-0499)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _dead_cursor_file(repo_root: Path) -> Path:
+    return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME)
+
+
+def _load_announced(path: Path) -> list[str]:
+    """The dispatch keys already announced as DEAD. Missing file = none yet.
+
+    An unreadable cursor is logged and treated as empty: the cost of that
+    failure is a repeated DEAD line, the cost of the opposite choice would be
+    a death never delivered.
+    """
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        logger.warning("[watchdog.wire] dead cursor unreadable %s: %s", path, exc)
+        return []
+    ids = doc.get("announced") if isinstance(doc, dict) else None
+    return [key for key in ids if isinstance(key, str)] if isinstance(ids, list) else []
+
+
+def _save_announced(path: Path, keys: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"version": 1, "announced": keys[-_DEAD_CURSOR_CAP:]}), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _dead_key(entry: dict) -> str:
+    """dispatch_id when the register has one; target+timestamp otherwise, so an
+    id-less row is still announced exactly once rather than never or always."""
+    dispatch_id = str(entry.get("dispatch_id") or "")
+    return dispatch_id or f"{entry.get('target', '?')}|{entry.get('ts', '?')}"
+
+
+def _clock(stamp: object) -> str:
+    """``2026-09-07T12:00:24.229153-07:00`` -> ``09-07 12:00``; anything else verbatim."""
+    try:
+        return datetime.fromisoformat(str(stamp)).strftime("%m-%d %H:%M")
+    except ValueError:
+        logger.info("[watchdog.wire] register stamp is not ISO, shown verbatim: %r", stamp)
+        return str(stamp or "?")
+
+
+def _format_dead(entry: dict) -> str:
+    subject = str(entry.get("subject") or "").strip()
+    return (
+        f"DEAD {entry.get('target', '?')} [{_dead_key(entry)[:8]}] dispatched {_clock(entry.get('ts'))} "
+        f'"{subject}" — no completion by {_clock(entry.get("expected_by"))}, the hard timeout: '
+        "its monitor died (reboot, OOM, kill). Re-dispatch in continue mode."
+    )
+
+
+def _announce_dead(root: Path, seat: str, announced: list[str]) -> int:
+    """One register read; one stdout line per NEW dead dispatch of this seat's.
+
+    Reads ``outstanding`` rather than ``overdue`` on purpose: the latter logs a
+    json operation every time it finds a late row, and a row stays late until
+    @ai_mail closes it — a log write every five minutes forever is exactly the
+    idle cost this lane exists to avoid. The only write here is the cursor,
+    and only when something new was announced.
+
+    A register that cannot be read is a warning, not a dead wire: completions
+    keep flowing through the feed regardless, and the next check retries.
+    """
+    try:
+        rows = _dispatches.outstanding(repo_root=root)
+    except RuntimeError as exc:
+        logger.warning("[watchdog.wire] dead check skipped, register unreadable: %s", exc)
+        return 0
+    fresh = [
+        row for row in rows if row.get("overdue") and _dispatches.is_mine(row, seat) and _dead_key(row) not in announced
+    ]
+    for row in fresh:
+        _stdout_event(_format_dead(row))
+        announced.append(_dead_key(row))
+    if fresh:
+        _save_announced(_dead_cursor_file(root), announced)
+        logger.warning("[watchdog.wire] announced %s dead dispatch(es)", len(fresh))
+        json_handler.log_operation("dead_dispatches_announced", {"count": len(fresh)})
+    return len(fresh)
 
 
 def arm_wire(
@@ -373,20 +491,23 @@ def arm_wire(
     storage_path: Path | None = None,
     max_ticks: int | None = None,
     wire_poll: float = WIRE_POLL_SECONDS,
+    dead_check: float = DEAD_CHECK_SECONDS,
 ) -> dict:
     """The arm door: take the wire for THIS session and deliver my completions.
 
     Args:
         once: Return after the first delivery (replayed MISSED events count —
-            they ARE the wake the unwired window owed).
+            they ARE the wake the unwired window owed; so does a DEAD line).
         repo_root: Override the repo root holding AIPASS_REGISTRY.json.
         storage_path: Override the watch registry path (tests).
         max_ticks: Bound the follow loop to N ticks (tests). None = unbounded.
         wire_poll: Seconds between delivery ticks.
+        dead_check: Seconds between register reads for the dead-monitor
+            backstop (tests pass 0 to check every tick).
 
     Returns:
         dict with ``state`` in {"completed", "stopped"} plus
-        ``replayed``/``delivered``/``ticks`` counters and ``session``.
+        ``replayed``/``delivered``/``dead``/``ticks`` counters and ``session``.
 
     Raises:
         SystemExit(1): after a ``BASELINE DEAD: ...`` stdout line, for any
@@ -476,6 +597,12 @@ def arm_wire(
             replayed = len(missed)
             logger.info("[watchdog.wire] replayed %s missed completions", replayed)
 
+        # Sign-in is the moment a death is most likely to be waiting: the
+        # reboot that killed the monitor killed the previous wire too.
+        announced = _load_announced(_dead_cursor_file(root))
+        dead = _announce_dead(root, seat, announced)
+        last_dead_check = time.monotonic()
+
         _stderr(
             f"watchdog wire: armed handle={handle} session={session_name or 'NONE (fg)'} "
             f"replayed={replayed} tick={wire_poll}s"
@@ -489,8 +616,8 @@ def arm_wire(
                 "if this was armed with run_in_background, TaskStop it and re-arm via Monitor"
             )
 
-        if once and replayed:
-            return _result("completed", session=session_name, replayed=replayed, delivered=replayed)
+        if once and (replayed or dead):
+            return _result("completed", session=session_name, replayed=replayed, delivered=replayed, dead=dead)
 
         while True:
             ticks += 1
@@ -498,6 +625,9 @@ def arm_wire(
             if now - last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
                 _touch_heartbeat()
                 last_heartbeat = now
+            if now - last_dead_check >= dead_check:
+                dead += _announce_dead(root, seat, announced)
+                last_dead_check = now
 
             feed_records, feed_state = _feed.drain_feed(
                 feed_cursor_file, kinds=_DELIVER_KINDS, feed_file_path=feed_source, state=feed_state
@@ -509,13 +639,23 @@ def arm_wire(
                 delivered += len(fresh)
                 logger.info("[watchdog.wire] delivered %s completions", len(fresh))
 
-            if once and delivered:
+            if once and (delivered or dead):
                 return _result(
-                    "completed", session=session_name, replayed=replayed, delivered=replayed + delivered, ticks=ticks
+                    "completed",
+                    session=session_name,
+                    replayed=replayed,
+                    delivered=replayed + delivered,
+                    dead=dead,
+                    ticks=ticks,
                 )
             if max_ticks is not None and ticks >= max_ticks:
                 return _result(
-                    "stopped", session=session_name, replayed=replayed, delivered=replayed + delivered, ticks=ticks
+                    "stopped",
+                    session=session_name,
+                    replayed=replayed,
+                    delivered=replayed + delivered,
+                    dead=dead,
+                    ticks=ticks,
                 )
 
             _sleep(wire_poll)
