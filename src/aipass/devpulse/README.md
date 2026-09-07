@@ -248,17 +248,16 @@ Verified 2026-09-06 (README truth pass round 2, FPLAN-0490 — every command tab
 | Tests | 460 `def test_` across 23 files; 572 cases, 569 passed / 3 skipped (`.venv` python, branch rootdir) |
 | Seedgo | `drone @seedgo audit aipass @devpulse` — Overall 100, every scored category 100 (Readme, Readme_Quality, Trinity, Test_Quality included), no type errors; 10 bypass rules in `.seedgo/bypass.json` |
 | json handler | `apps/handlers/json/json_handler.py` is the fleet shim: sha256 `3456b766…`, binds `aipass.prax.json_handler`, adds nothing |
-| Version | `drone @devpulse --version` prints `devpulse 1.0.0` |
+| Version | `drone @devpulse --version` prints `devpulse 1.0.2` — one `VERSION` constant in `apps/devpulse.py`, kept in step with the file header |
 
 **Resolved since 08-25** (re-tested tonight, not carried forward on trust):
 
 - ~~`watchdog cancel` always prints KILLED~~ — `killed or True` is gone from `registry.py` (commit `32349742`); cancel now reports `was_alive` / `reason` per handle.
-- ~~Refusals that exit 0~~ — `compass archive 999999`, `compass rate 999999 good` and `feedback view zzzz` all exit 2 tonight; every module calls `mark_command_failed()`. One survivor, below.
+- ~~Refusals that exit 0~~ — `compass archive 999999`, `compass rate 999999 good` and `feedback view zzzz` all exit 2; every module calls `mark_command_failed()`. The last survivor, `watchdog cancel <unknown>`, printed FAILED and exited 0 until 2026-09-06 — it now goes through `error()` and exits 2.
+- ~~`--version` hardcoded~~ — printed `devpulse 1.0.0` against a `1.0.1` header; one `VERSION` constant now (1.0.2), fixed 2026-09-06.
 
 **Open:**
 
-- **`watchdog cancel <unknown>` exits 0.** Prints `[nosuch] FAILED was_alive=False reason=handle not found` and returns success — the one refusal in this branch that still exits 0. Found 2026-09-06, code defect, not fixed in this docs pass.
-- **`--version` is hardcoded.** `apps/devpulse.py:159` prints `devpulse 1.0.0` while the file header says `1.0.1`; no version constant exists to keep them aligned. Same species as @flow's. Found 2026-09-06.
 - **statusline.sh untracked** — the watchdog statusline lives at `~/.claude/statusline.sh` (6099 bytes tonight), outside the repo; on any other machine watchdog paints red until hand-copied. Fix direction undecided (Patrick's call — provider config dir).
 - **Foreground-wire gap, half cured** — the `via` field landed (`wire.py` reads the wrapper from stdout: `monitor` / `background` / `foreground`; `watchdog status` prints it), but the statusline script does not read it (0 hits for `via` or `foreground` in the script tonight), so a wire armed without the Monitor tool still paints `watchdog:in` green.
 

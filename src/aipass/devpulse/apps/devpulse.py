@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-07-31
+# Modified: 2026-09-06
 # =============================================
 
 """
@@ -38,6 +38,11 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import err_console, resolve_exit, reset_command_state
 
 console = err_console
+
+# The one version string. --version printed a hardcoded "1.0.0" while the header
+# above said 1.0.1 (FPLAN-0490, found 2026-09-06); keep this constant and the
+# header in step - there is no other version source in the branch.
+VERSION = "1.0.2"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -156,7 +161,7 @@ def _handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("devpulse 1.0.0")
+        console.print(f"devpulse {VERSION}")
         return True
 
     return route_command(command, args, modules)
