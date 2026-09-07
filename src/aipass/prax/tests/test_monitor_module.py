@@ -24,6 +24,8 @@ import json
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Shared helper: monitoring handler mock dict
@@ -106,14 +108,20 @@ class TestHandleCommand:
             mock_run.assert_called_once_with(["seedgo,cli"])
 
     def test_unknown_subcommand_prints_error_and_help(self):
-        """Unknown subcommand shows error + help, returns True."""
+        """Unknown subcommand is refused by name — a refusal, not a handled command.
+
+        Returning True is what the router reads as success; `monitor bogus` used
+        to exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
+        """
+        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
         mod = _import_monitor()
-        with patch.object(mod, "print_help") as mock_help:
-            result = mod.handle_command("monitor", ["bogus"])
-            assert result is True
-            mock_help.assert_called_once()
-            # error() is the CLI mock -- check that it was called
-            mod.error.assert_called()
+
+        with pytest.raises(UnknownArgument) as refusal:
+            mod.handle_command("monitor", ["bogus"])
+
+        assert refusal.value.verb == "monitor"
+        assert refusal.value.token == "bogus"
 
 
 # ---------------------------------------------------------------------------
@@ -322,35 +330,24 @@ class TestPrintHelp:
 class TestRenderEvent:
     """Test event rendering to console."""
 
-    def test_render_command_event(self):
-        """Command-type events call print_command_separator."""
+    @pytest.mark.parametrize(
+        ("action", "expected_target"),
+        [("audit:flow", "flow"), ("audit_only", None)],
+    )
+    def test_render_command_event_target_parsed_from_action(self, action, expected_target):
+        """A command event reaches print_command_separator with the target parsed out of its action."""
         mod = _import_monitor()
         event = MagicMock()
         event.event_type = "command"
         event.branch = "FLOW"
         event.message = "seedgo audit"
         event.caller = "prax"
-        event.action = "audit:flow"
+        event.action = action
 
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
             mod._render_event(event)
-        mod.print_command_separator.assert_called_once()
 
-    def test_render_command_event_no_target(self):
-        """Command event without colon in action passes target=None."""
-        mod = _import_monitor()
-        event = MagicMock()
-        event.event_type = "command"
-        event.branch = "FLOW"
-        event.message = "seedgo audit"
-        event.caller = "prax"
-        event.action = "audit_only"
-
-        with patch.object(mod, "_get_pid_for_branch", return_value=None):
-            mod._render_event(event)
-        mod.print_command_separator.assert_called_once()
-        call_args = mod.print_command_separator.call_args
-        assert call_args[0][3] is None
+        mod.print_command_separator.assert_called_once_with("FLOW", "seedgo audit", "prax", expected_target)
 
     def test_render_non_command_event(self):
         """Non-command events call print_event."""
@@ -989,18 +986,23 @@ class TestInteractiveLoop:
         ):
             mod._interactive_loop()
 
-    def test_tty_quit_command(self):
-        """TTY mode exits on 'quit' command."""
+    @pytest.mark.parametrize("alias", ["quit", "exit", "q"])
+    def test_tty_quit_command(self, alias):
+        """Every exit alias breaks the TTY loop on its first turn and says so on the console."""
         mod = _import_monitor()
         mod._stop_event.clear()
 
         mock_filter = MagicMock()
-        mock_filter.parse_command = MagicMock(return_value=("quit", []))
+        mock_filter.parse_command = MagicMock(return_value=(alias, []))
         mock_filter.get_help_text = MagicMock(return_value="help")
 
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", return_value="quit"),
+            # An alias that stopped breaking the loop would read a second line;
+            # the EOFError makes that a red instead of a hang.
+            patch("builtins.input", side_effect=[alias, EOFError()]) as mock_input,
+            patch.object(mod, "console") as mock_console,
+            patch.object(mod, "_handle_interactive_cmd") as mock_handle,
             patch.dict(
                 sys.modules,
                 {
@@ -1010,45 +1012,10 @@ class TestInteractiveLoop:
         ):
             mod._interactive_loop()
 
-    def test_tty_exit_command(self):
-        """TTY mode exits on 'exit' command."""
-        mod = _import_monitor()
-        mod._stop_event.clear()
-
-        mock_filter = MagicMock()
-        mock_filter.parse_command = MagicMock(return_value=("exit", []))
-
-        with (
-            patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", return_value="exit"),
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
-        ):
-            mod._interactive_loop()
-
-    def test_tty_q_command(self):
-        """TTY mode exits on 'q' command."""
-        mod = _import_monitor()
-        mod._stop_event.clear()
-
-        mock_filter = MagicMock()
-        mock_filter.parse_command = MagicMock(return_value=("q", []))
-
-        with (
-            patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", return_value="q"),
-            patch.dict(
-                sys.modules,
-                {
-                    "aipass.prax.apps.handlers.monitoring.interactive_filter": mock_filter,
-                },
-            ),
-        ):
-            mod._interactive_loop()
+        mock_input.assert_called_once()
+        mock_filter.parse_command.assert_called_once_with(alias)
+        mock_handle.assert_not_called()
+        mock_console.print.assert_called_once_with("[yellow]Stopping monitoring...[/yellow]")
 
     def test_tty_keyboard_interrupt(self):
         """TTY mode handles KeyboardInterrupt gracefully."""

@@ -37,6 +37,7 @@ LOG_AUDIT_PATH = "aipass.prax.apps.modules.log_audit"
 LOG_HEALTH_PATH = "aipass.prax.apps.modules.log_health"
 MONITOR_PATH = "aipass.prax.apps.modules.monitor"
 FLAGS_PATH = "aipass.prax.apps.handlers.cli.help_flags"
+PRAX_PATH = "aipass.prax.apps.prax"
 
 
 def _load(module_path: str):
@@ -129,6 +130,83 @@ class TestHelpNeverExecutes:
         with patch.object(mod, "print_help"), patch.object(mod, "_display_rates") as display:
             mod.handle_command("log-health", ["scan", "-h"])
         assert display.call_count == 0
+
+
+class TestUnknownArgumentIsRefused:
+    """Patrick's standing ruling: an unknown token FAILS — named, on stderr, non-zero.
+
+    @devpulse's 2026-09-07 fleet CLI sweep found prax swallowing two of them.
+    `drone @prax --definitely-not-a-flag` printed the self-map and exited 0,
+    output byte-identical to a clean no-args run, because argparse's
+    parse_known_args hands an unrecognised flag back instead of erroring.
+    `log-audit not_a_real_subarg_xyz` printed the right refusal and still
+    exited 0 — the same failure wearing a friendlier face, and the one a
+    caller's `&&` reads as success.
+    """
+
+    def test_an_unknown_top_level_flag_never_reaches_the_self_map(self, mock_prax_infrastructure):
+        """The refusal comes first: no self-map, no help, exit 1, token named."""
+        mod = _load(PRAX_PATH)
+
+        with (
+            patch.object(sys, "argv", ["prax", "--definitely-not-a-flag"]),
+            patch.object(mod, "print_introspection") as self_map,
+            patch.object(mod, "print_help") as help_fn,
+        ):
+            exit_code = mod.main()
+
+        assert exit_code == 1
+        self_map.assert_not_called()
+        help_fn.assert_not_called()
+        refusals = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        assert any("--definitely-not-a-flag" in call for call in refusals), refusals
+
+    def test_a_near_miss_flag_is_offered_the_one_it_meant(self, mock_prax_infrastructure):
+        """A typo gets a pointer, not a lecture."""
+        mod = _load(PRAX_PATH)
+
+        with patch.object(sys, "argv", ["prax", "--verison"]), patch.object(mod, "print_introspection"):
+            assert mod.main() == 1
+
+        refusals = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        assert any("--version" in call for call in refusals), refusals
+
+    def test_a_flag_prax_does_define_still_answers_zero(self):
+        """The gate must not over-refuse: --help is prax's own option."""
+        mod = _load(PRAX_PATH)
+
+        with patch.object(sys, "argv", ["prax", "--help"]), patch.object(mod, "print_help") as help_fn:
+            assert mod.main() == 0
+
+        help_fn.assert_called_once()
+
+    def test_an_unknown_sub_argument_is_refused_by_name_not_reported_handled(self):
+        """log-audit raises instead of returning True — True is what became exit 0."""
+        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
+        mod = _load(LOG_AUDIT_PATH)
+
+        with _no_execution(mod, LOG_AUDIT_PATH), pytest.raises(UnknownArgument) as refusal:
+            mod.handle_command("log-audit", ["not_a_real_subarg_xyz"])
+
+        assert refusal.value.verb == "log-audit"
+        assert refusal.value.token == "not_a_real_subarg_xyz"
+
+    def test_the_router_turns_a_refused_sub_argument_into_exit_one(self, mock_prax_infrastructure):
+        """End to end: exit 1, and the caller is told WHICH token was refused.
+
+        route_command's blanket `except Exception` would also produce exit 1,
+        but it renders "Handler failed: ..." — a refusal reported as a crash.
+        The named re-raise is what keeps the token in the message.
+        """
+        mod = _load(PRAX_PATH)
+
+        with patch.object(sys, "argv", ["prax", "log-audit", "not_a_real_subarg_xyz"]):
+            assert mod.main() == 1
+
+        rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        assert any("not_a_real_subarg_xyz" in call for call in rendered), rendered
+        assert not any("Handler failed" in call for call in rendered), rendered
 
 
 class TestOwnershipStillComesFirst:

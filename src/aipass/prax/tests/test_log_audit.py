@@ -16,6 +16,8 @@ autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # =============================================
 # HELPERS
@@ -221,18 +223,23 @@ def test_display_audit_oversized(mock_prax_infrastructure, monkeypatch):
 
 
 def test_handle_command_unknown_subcommand(mock_prax_infrastructure, monkeypatch):
-    """Unknown subcommand shows error and help text."""
+    """An unknown subcommand is refused BY NAME instead of reporting itself handled.
+
+    It used to print the right words and return True, which prax.py turns into
+    exit 0 — so `drone @prax log-audit typo && next-step` ran next-step
+    (@devpulse's fleet CLI sweep, 2026-09-07).
+    """
+    from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
     _ensure_watchdog_mock(monkeypatch)
     handle_command, _, _, _, _ = _fresh_import()
 
-    result = handle_command("log-audit", ["bogus"])
-    assert result is True
-    # error() called with unknown subcommand message
-    calls = [str(c) for c in mock_prax_infrastructure.cli.error.call_args_list]
-    assert any("bogus" in c for c in calls)
-    # Help text printed after error
-    console_calls = [str(c) for c in mock_prax_infrastructure.console.print.call_args_list]
-    assert any("audit" in c.lower() for c in console_calls)
+    with pytest.raises(UnknownArgument) as refusal:
+        handle_command("log-audit", ["bogus"])
+
+    assert refusal.value.verb == "log-audit"
+    assert refusal.value.token == "bogus"
+    assert "bogus" in str(refusal.value)
 
 
 def test_handle_command_audit_subcommand(mock_prax_infrastructure, monkeypatch):

@@ -67,6 +67,8 @@ from aipass.prax.apps.handlers.dashboard.refresh import refresh_all_dashboards, 
 from aipass.prax.apps.handlers.dashboard.template_pusher import push_dashboard_template, get_template_status
 from aipass.prax.apps.handlers.dashboard.template_differ import diff_dashboard_template
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
+from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 
 # ============================================
@@ -439,7 +441,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # A dashed help flag ANYWHERE wins: gating at args[0] only let
+    # `dashboard refrsh --help` fall through to the refusal below, which
+    # answers a question with a failure.
+    if wants_help(args):
         print_help()
         return True
 
@@ -455,10 +460,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         "template-status": lambda: _handle_template_status(),
     }
     handler = dispatch.get(subcmd)
-    if handler:
-        handler()
-    else:
-        print_help()
+    if handler is None:
+        # Printing help and returning True read as success to every caller —
+        # `drone @prax dashboard refrsh` silently did nothing and exited 0.
+        refuse("dashboard", subcmd, "drone @prax dashboard --help")
+    handler()
     return True
 
 
@@ -479,7 +485,13 @@ def main():
     command = args[0].lower()
     remaining_args = args[1:]
 
-    if not handle_command(command, remaining_args):
+    try:
+        handled = handle_command(command, remaining_args)
+    except UnknownArgument as exc:
+        error(str(exc), suggestion=exc.usage)
+        sys.exit(1)
+
+    if not handled:
         error(f"Unknown command: {command}")
         print_help()
 

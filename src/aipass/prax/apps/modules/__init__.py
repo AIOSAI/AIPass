@@ -15,3 +15,16 @@ Available modules:
 
   Logs auto-route to: {repo_root}/system_logs/<your_module>.log
 """
+
+# The unknown-argument gate is re-exported here on purpose: the entry point
+# (apps/prax.py) talks to the modules layer, never to a handler directly. The
+# gate itself lives in apps/handlers/cli/arg_gate.py, where the modules import
+# it from.
+from aipass.prax.apps.handlers.cli.arg_gate import (  # noqa: E402
+    UnknownArgument,
+    did_you_mean,
+    refuse,
+    unknown_option,
+)
+
+__all__ = ["UnknownArgument", "did_you_mean", "refuse", "unknown_option"]

@@ -1251,6 +1251,11 @@ def _load_dashboard_module() -> types.ModuleType:
     return mod
 
 
+def _printed_lines(mod: types.ModuleType) -> list:
+    """Every line the mocked console was asked to print (bare print() calls dropped)."""
+    return [str(call[0][0]) for call in mod.console.print.call_args_list if call[0]]
+
+
 class TestDashboardModuleUpdateSection:
     """Tests for dashboard.py module-level update_section wrapper."""
 
@@ -1333,17 +1338,15 @@ class TestPrintTemplate:
 class TestDashboardPrintIntrospection:
     """Tests for print_introspection -- CLI module info display."""
 
-    def test_prints_introspection_without_error(self):
-        """Introspection output runs without raising."""
+    def test_introspection_lists_template_sections(self):
+        """Introspection runs and names every section of the template."""
         mod = _load_dashboard_module()
         mod.print_introspection()
 
-    def test_introspection_lists_template_sections(self):
-        """Introspection lists all template section names."""
-        mod = _load_dashboard_module()
-        mod.print_introspection()
-        # console.print should have been called multiple times
-        assert mod.console.print.call_count > 3
+        printed = _printed_lines(mod)
+        assert len(printed) > 3
+        for section in mod.DASHBOARD_TEMPLATE["sections"]:
+            assert any(section in line for line in printed), f"section {section} not listed"
 
 
 # =============================================
@@ -1354,16 +1357,15 @@ class TestDashboardPrintIntrospection:
 class TestDashboardPrintHelp:
     """Tests for print_help -- CLI help output."""
 
-    def test_prints_help_without_error(self):
-        """Help output runs without raising."""
+    def test_help_lists_commands(self):
+        """Help runs and names every subcommand the dispatch table accepts."""
         mod = _load_dashboard_module()
         mod.print_help()
 
-    def test_help_lists_commands(self):
-        """Help output includes subcommand names."""
-        mod = _load_dashboard_module()
-        mod.print_help()
-        assert mod.console.print.call_count > 5
+        printed = _printed_lines(mod)
+        assert len(printed) > 5
+        for command in ("status", "template", "refresh", "push-template", "diff-template", "template-status"):
+            assert any(line.strip().startswith(command) for line in printed), f"{command} not documented"
 
 
 # =============================================
@@ -1470,14 +1472,20 @@ class TestDashboardHandleCommand:
             mock_ts.assert_called_once()
 
     def test_unknown_subcommand_shows_help(self):
-        """Unknown subcommand shows help and returns True."""
-        mod = _load_dashboard_module()
-        from unittest.mock import patch as _patch
+        """Unknown subcommand is refused by name instead of printing help and exiting 0.
 
-        with _patch.object(mod, "print_help") as mock_help:
-            result = mod.handle_command("dashboard", ["bogus"])
-            assert result is True
-            mock_help.assert_called_once()
+        `drone @prax dashboard refrsh` silently did nothing and reported success
+        (@devpulse's fleet CLI sweep, 2026-09-07).
+        """
+        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
+        mod = _load_dashboard_module()
+
+        with pytest.raises(UnknownArgument) as refusal:
+            mod.handle_command("dashboard", ["bogus"])
+
+        assert refusal.value.verb == "dashboard"
+        assert refusal.value.token == "bogus"
 
 
 # =============================================
@@ -1756,8 +1764,15 @@ class TestHandleDiffTemplate:
 class TestHandleTemplateStatus:
     """Tests for _handle_template_status -- template status display."""
 
-    def test_template_status_basic(self, monkeypatch):
-        """Template status displays version info."""
+    @pytest.mark.parametrize(
+        ("pushed", "expected_line"),
+        [
+            (["FLOW", "AI_MAIL"], "Branches pushed: 2 (FLOW, AI_MAIL)"),
+            (["A", "B", "C", "D", "E", "F", "G"], "Branches pushed: 7 (A, B, C, D, E...)"),
+        ],
+    )
+    def test_template_status_basic(self, monkeypatch, pushed, expected_line):
+        """Template status prints the version and the pushed branches, truncated past five."""
         mod = _load_dashboard_module()
         monkeypatch.setattr(
             mod,
@@ -1769,38 +1784,16 @@ class TestHandleTemplateStatus:
                 "last_updated": "2026-03-01",
                 "updated_by": "prax",
                 "last_push": "2026-03-02",
-                "last_push_branches": ["FLOW", "AI_MAIL"],
+                "last_push_branches": pushed,
                 "changes": [],
             },
         )
+
         mod._handle_template_status()
 
-    def test_template_status_with_many_branches(self, monkeypatch):
-        """Template status truncates branch list at 5 with ellipsis."""
-        mod = _load_dashboard_module()
-        monkeypatch.setattr(
-            mod,
-            "get_template_status",
-            lambda: {
-                "templates_dir": "/path/to/templates",
-                "template_exists": True,
-                "version": "3.0.0",
-                "last_updated": "2026-03-01",
-                "updated_by": "prax",
-                "last_push": "2026-03-02",
-                "last_push_branches": [
-                    "A",
-                    "B",
-                    "C",
-                    "D",
-                    "E",
-                    "F",
-                    "G",
-                ],
-                "changes": ["added commons"],
-            },
-        )
-        mod._handle_template_status()
+        printed = _printed_lines(mod)
+        assert any("Schema version:  3.0.0" in line for line in printed)
+        assert any(expected_line in line for line in printed), f"missing: {expected_line}"
 
     def test_template_status_missing(self, monkeypatch):
         """Template status handles missing template."""
@@ -1881,25 +1874,21 @@ class TestDashboardMain:
             mod.main()
         mock_intro.assert_called_once()
 
-    def test_main_help_flag(self, monkeypatch):
-        """--help flag shows help."""
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_main_help_flag(self, monkeypatch, flag):
+        """Both help aliases show help and route nowhere else."""
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        monkeypatch.setattr(sys, "argv", ["dashboard", "--help"])
-        with _patch.object(mod, "print_help") as mock_help:
+        monkeypatch.setattr(sys, "argv", ["dashboard", flag])
+        with (
+            _patch.object(mod, "print_help") as mock_help,
+            _patch.object(mod, "handle_command") as mock_hc,
+        ):
             mod.main()
-        mock_help.assert_called_once()
 
-    def test_main_h_flag(self, monkeypatch):
-        """-h flag shows help."""
-        mod = _load_dashboard_module()
-        from unittest.mock import patch as _patch
-
-        monkeypatch.setattr(sys, "argv", ["dashboard", "-h"])
-        with _patch.object(mod, "print_help") as mock_help:
-            mod.main()
         mock_help.assert_called_once()
+        mock_hc.assert_not_called()
 
     def test_main_valid_command(self, monkeypatch):
         """Valid command delegates to handle_command."""

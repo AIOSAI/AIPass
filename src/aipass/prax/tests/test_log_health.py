@@ -29,6 +29,7 @@ Covers:
 import importlib
 import io
 
+import pytest
 from rich.console import Console
 
 
@@ -113,6 +114,17 @@ class TestRouting:
         assert module.handle_command("monitor", ["run"]) is False
 
     def test_unknown_subcommand_reports_and_shows_help(self):
-        """A bogus subcommand is named, not silently swallowed."""
+        """A bogus subcommand is refused by name and never reported as handled.
+
+        It used to print the right words and return True, which the router turns
+        into exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
+        """
+        from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
         module = importlib.import_module("aipass.prax.apps.modules.log_health")
-        assert module.handle_command("log-health", ["bogus"]) is True
+
+        with pytest.raises(UnknownArgument) as refusal:
+            module.handle_command("log-health", ["bogus"])
+
+        assert refusal.value.verb == "log-health"
+        assert refusal.value.token == "bogus"

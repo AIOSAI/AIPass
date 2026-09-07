@@ -29,6 +29,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 
 
 def print_introspection():
@@ -148,6 +149,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     Returns:
         True if command was handled
+
+    Raises:
+        UnknownArgument: The subcommand is not one log-audit defines
     """
     if command != "log-audit":
         return False
@@ -196,9 +200,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         _run_sweep()
         return True
 
-    error(f"Unknown log-audit subcommand: {subcmd}")
-    print_help()
-    return True
+    # Refused, not "handled": this printed the right words and still exited 0,
+    # so `drone @prax log-audit typo && next-step` ran next-step (devpulse's
+    # 2026-09-07 CLI sweep). The raise carries the exit code back to prax.py.
+    refuse("log-audit", subcmd, "drone @prax log-audit --help")
 
 
 def _run_enforce():
@@ -281,4 +286,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
-    handle_command("log-audit", args)
+    try:
+        handle_command("log-audit", args)
+    except UnknownArgument as exc:
+        error(str(exc), suggestion=exc.usage)
+        sys.exit(1)

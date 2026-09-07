@@ -27,6 +27,8 @@ from aipass.prax.apps.modules.logger import get_system_status, system_logger as 
 from aipass.prax.apps.handlers.status.sync import sync_status
 from aipass.cli.apps.modules import console, success, error, warning
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.cli.arg_gate import refuse
+from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 
 def print_help():
@@ -54,7 +56,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     # --- sub-command routing ------------------------------------------------
-    if args and args[0] in ("--help", "-h", "help"):
+    # A dashed help flag ANYWHERE wins — `status sync -h` asks about sync, and
+    # answering it by running the sync is the wrong reply. It also has to beat
+    # the unknown-argument refusal below: a question is never a bad argument.
+    if wants_help(args):
         print_help()
         return True
 
@@ -62,7 +67,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         json_handler.log_operation("status_checked", {"subcommand": "sync"})
         return _handle_sync()
 
-    # --- default: show PRAX system status (bare 'status' or unknown sub) ---
+    # An unknown sub-argument was the quietest swallow of them all: `status
+    # bogus` printed the normal status block with no complaint and exited 0,
+    # so a typo'd subcommand was indistinguishable from the real thing.
+    if args:
+        refuse("status", args[0], "drone @prax status --help")
+
+    # --- default: show PRAX system status (bare 'status') ---
     json_handler.log_operation("status_checked", {"subcommand": "show"})
     status = get_system_status()
 

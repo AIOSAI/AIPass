@@ -28,6 +28,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 
 
 def print_introspection():
@@ -191,9 +192,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         _display_rates(results, is_scan=False)
         return True
 
-    error(f"Unknown log-health subcommand: {subcmd}")
-    print_help()
-    return True
+    refuse("log-health", subcmd, "drone @prax log-health --help")
 
 
 if __name__ == "__main__":
@@ -206,4 +205,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
-    handle_command("log-health", args)
+    try:
+        handle_command("log-health", args)
+    except UnknownArgument as exc:
+        error(str(exc), suggestion=exc.usage)
+        sys.exit(1)

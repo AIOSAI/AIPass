@@ -11,19 +11,20 @@
 
 ## Status
 
-Every claim below was re-checked against the code on **2026-09-05** (FPLAN-0490
-truth pass, round 2). Numbers in this file are measurements taken that night on
-this machine, not estimates: where a number is a single-machine reading rather
-than a property of the system, it says so. Anything that could not be verified
-is marked **UNVERIFIED** in place rather than left standing green.
+Every claim below was re-checked against the code on **2026-09-07** (FPLAN-0492
+wave 3; the 09-05 truth pass is its predecessor). Numbers in this file are
+measurements taken on this machine, not estimates: where a number is a
+single-machine reading rather than a property of the system, it says so.
+Anything that could not be verified is marked **UNVERIFIED** in place rather
+than left standing green.
 
-- **Tests:** 1428 test functions across 36 files; pytest expands them to 1503
+- **Tests:** 1404 test functions across 36 files; pytest expands them to 1487
   cases, all passing from both rootdirs.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category.
-- **Last structural change:** DPLAN-0325 post-sweep bundle (2026-09-04,
-  commit 08359ec2) — document modes, `allow_nan=False`, the TOCTOU close, and
-  the watcher's background start. All four are described below.
+- **Last structural change:** FPLAN-0492 wave 3 (2026-09-07) — the
+  unknown-argument gate: six verbs that swallowed an unknown token now refuse it
+  by name and exit non-zero. Described under Command Routing.
 
 ---
 
@@ -263,7 +264,8 @@ Found by @seedgo's `help_flag_safety` standard, 2026-08-13; `dashboard.py`
 already scanned both spellings and was the reference implementation. The
 predicate lives in `handlers/cli/help_flags.py` — pure argument inspection, no
 I/O, matching the convention @memory, @trigger, @drone and @ai_mail settled the
-same day.
+same day. Its sibling `handlers/cli/arg_gate.py` answers the opposite question —
+"is this token one we do not define?" — and is described under Command Routing.
 
 ### Dashboard
 
@@ -768,12 +770,12 @@ prax/
 │   │   └── log_health.py             # Log health — rate overview (scan/snapshot)
 │   ├── plugins/
 │   │   └── devpulse_dashboard/        # Per-branch dashboard sections (git, session, dispatch)
-│   └── handlers/                      # Implementation details (12 handler directories)
+│   └── handlers/                      # Implementation details (11 handler directories)
 │       ├── central/                   # Central file reader (.ai_central/*.central.json)
 │       ├── config/                    # Path resolution, log config, ignore patterns
 │       ├── dashboard/                 # Refresh, operations, template push/diff, agent status
 │       ├── discovery/                 # Module scanning, filtering, file watcher for new .py
-│       ├── cli/                       # Help-flag detection (pure predicate, no I/O)
+│       ├── cli/                       # Help-flag detection and the unknown-argument gate (pure predicates, no I/O)
 │       ├── json/                      # The fleet json service + prax's own shim (config/data/log per module)
 │       ├── logging/                   # Setup, rotation, introspection, override, direct logger, log watchdog, jsonl writer
 │       ├── monitoring/                # Event queue, branch detector, branch scope, stream output, log watcher, rate tracker, filters, commons feed, telegram relay, instance lock, CLI-session handler, pid cache
@@ -782,7 +784,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1428 test functions, 36 files (1503 cases)
+└── tests/                             # 1404 test functions, 36 files (1487 cases)
 ```
 
 ### Design Pattern
@@ -798,6 +800,34 @@ drone @prax monitor run
   → monitor.py delegates to handlers/monitoring/*
 ```
 
+### The unknown-argument gate
+
+Patrick's standing ruling: **an unknown command or argument FAILS** — non-zero
+exit, a message naming the token, a did-you-mean where one is close. @devpulse's
+fleet CLI sweep (2026-09-07) found prax breaking it in six places, and they
+broke it two different ways:
+
+- `drone @prax --definitely-not-a-flag` printed the self-map and exited **0** —
+  output byte-identical to a clean no-args run. argparse's `parse_known_args`
+  hands an unrecognised flag back instead of erroring, so nothing ever looked at
+  it. `status bogus` was the same silence at the module level: the normal status
+  block, no complaint, exit 0.
+- `log-audit`, `log-health`, `monitor` and `dashboard` each printed the right
+  refusal and then **returned `True`**, which the router reads as "handled" and
+  turns into exit 0. Truth on screen, a lie in `$?`.
+
+The cure is one gate, `handlers/cli/arg_gate.py`. It DECIDES and does not
+display: `refuse()` logs the refusal through `json_handler` and raises
+`UnknownArgument`; `prax.py` catches it once, renders through cli, returns 1.
+`route_command` re-raises it past its own blanket `except Exception`, because a
+refusal reported as "Handler failed" loses the token the caller needs. The
+modules import the gate directly; the entry point imports it re-exported through
+`apps/modules/__init__.py`, since an entry point never reaches into handlers.
+
+Help still wins over the gate everywhere: `wants_help(args)` runs first, so
+`status sync -h` and `dashboard refrsh --help` explain themselves rather than
+failing. A question is never a bad argument.
+
 ## How It Works
 
 1. **Auto-routing** — `logger.info()` inspects the call stack to identify the caller's module, branch, and file path, then routes the log entry to the correct per-module log file.
@@ -811,46 +841,46 @@ drone @prax monitor run
 
 ## Tests
 
-**1428 test functions across 36 files; pytest expands them to 1503 cases**, all
-passing from both rootdirs (measured 2026-09-05). The two numbers differ because
+**1404 test functions across 36 files; pytest expands them to 1487 cases**, all
+passing from both rootdirs (measured 2026-09-07). The two numbers differ because
 of parametrisation — the table below counts collected cases, which is what a
 suite run reports.
 
 | Test File | Cases | Coverage |
 |-----------|-------|----------|
-| test_monitoring_handlers.py | 143 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
-| test_filesystem_handler.py | 142 | Multi-CLI adapters, Codex branch detection |
-| test_operations.py | 99 | Dashboard operations, write-through |
-| test_log_watcher.py | 90 | Log file tailing, agent activity parsing |
-| test_json_handler.py | 83 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
-| test_monitor_module.py | 82 | Monitor commands, thread lifecycle (4-thread), branch scoping |
+| test_filesystem_handler.py | 141 | Multi-CLI adapters, Codex branch detection |
+| test_monitoring_handlers.py | 141 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
+| test_operations.py | 96 | Dashboard operations, write-through |
+| test_log_watcher.py | 84 | Log file tailing, agent activity parsing |
+| test_json_handler.py | 81 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
+| test_monitor_module.py | 80 | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
 | test_config.py | 61 | Config loading, path resolution, log levels |
 | test_repo_root.py | 55 | Repo-root resolution with a dead working directory, per-platform expectation tables |
-| test_logger_module.py | 54 | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint (subprocess) |
+| test_logger_module.py | 52 | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint (subprocess) |
 | test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
-| test_logging_handlers.py | 49 | Setup, rotation, introspection, direct logger |
+| test_logging_handlers.py | 48 | Setup, rotation, introspection, direct logger |
 | test_logging.py | 47 | Core logging system, debug level gating |
 | test_watcher.py | 47 | File watcher behaviour; dispatcher survives handler failure (real observer); liveness reporting; the background start that does not block its caller |
 | test_monitoring_filters.py | 39 | Event filtering rules |
 | test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
 | test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
+| test_help_flag_safety.py | 34 | Help flags in any position never execute; ownership before help; free-text safety; the unknown-argument gate (top-level flag, sub-argument, exit code, did-you-mean) |
 | test_rate_tracker.py | 34 | Rate tracking, thresholds, persistence (incl. rate history), suppression |
-| test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
 | test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
 | test_commons_feed.py | 27 | Commons live feed, cursors, room filtering, full-body rendering |
 | test_discovery.py | 25 | Module scanning |
 | test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
-| test_registry.py | 24 | Module registry |
 | test_flow_section_contract.py | 22 | `sections.flow` five-key contract; per-branch recently_closed; total_plans carried, not derived |
+| test_registry.py | 22 | Module registry |
 | test_project_citizens.py | 20 | projects/* registry sweep, passport resolution, collision precedence, CWD-independent paths |
 | test_central.py | 14 | Central reader |
 | test_log_audit.py | 13 | Log audit |
 | test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
-| test_pid_cache.py | 12 | PID resolution cache |
+| test_pid_cache.py | 11 | PID resolution cache |
 | test_devpulse_dashboard_plugin.py | 9 | Dashboard plugin (git, session, dispatch) |
 | test_jsonl_writer.py | 9 | JSONL append writer |
-| test_status.py | 8 | Status commands |
+| test_status.py | 9 | Status commands; an unknown sub-argument is refused rather than ignored |
 | test_log_health.py | 7 | Snapshot staleness reporting, rate display, routing |
 | test_sweep.py | 6 | Log sweep |
 | test_json_durability.py | 4 | `AIPASS_TEST_LOG_DIR` seam, measured in subprocesses (both import orderings) |
@@ -884,7 +914,7 @@ suite run reports.
 ## Known Issues
 - **inotify pressure** — The monitor and log watcher fall back to polling when inotify watches run out (functional but slower). Earlier revisions said the system is "often near" the limit; measured again 2026-09-05 it is not — **8,340 watches held across all processes against a `max_user_watches` of 65,536**, about 13% (it was 7,664 on 2026-08-25). The fallback is real and tested. It is a single-machine reading, not a fleet property.
 - **`monitor run` is not single-instance.** `instance_lock` guards the *Telegram relay* only, so N concurrent Mission Controls start cleanly and each adds its own watches on top of every other watcher (see the inotify note above). Verified 2026-08-13 by launching five alongside the then-live systemd service; none complained. That service is retired as of 2026-08-18 (monitor is on-request only), so the everyday risk is now several forgotten terminals rather than a daemon plus terminals — but the missing guard is unchanged.
-- **Error paths exit 0.** Re-run 2026-09-05: `monitor bogus`, `log-audit bogus` and `log-health bogus` each print an error and return **0**. `status` is worse — `status bogus` prints the normal status block with no complaint at all, also **0**. Nothing scripted can detect a prax command failure from `$?`.
+- ~~**Error paths exit 0.**~~ **Fixed 2026-09-07** (FPLAN-0492 wave 3). Every unknown token now exits **1** with the token named on stderr: measured after the change, `--definitely-not-a-flag`, `monitor bogus`, `log-audit bogus`, `log-health bogus`, `dashboard bogus` and `status bogus` all return 1, and `status`, `log-health scan`, `dashboard status`, `log-audit audit`, `monitor --help` and `dashboard template-status` still return 0. See the unknown-argument gate under Command Routing.
 - **The test seam does not cover path-based writes.** `AIPASS_TEST_LOG_DIR` redirects everything the json service writes by module name (measured 2026-09-05: 0 files into the real `prax_json/`, 18 into the redirect). It does not reach the module-level constants in `handlers/config/load.py`, `handlers/config/ignore_patterns.py`, `handlers/registry/load.py` and `handlers/registry/save.py`, which resolve to the real tree even with the variable set — so a registry save under any suite writes the live `prax_registry.json`. See the json service section.
 - **The module registry never prunes.** `prax_registry.json` gains an entry when a `.py` file appears and loses one only if someone removes it by hand. Counted 2026-09-05: **196 modules registered, 63 of which name a file that is no longer on disk** — probes, scratch files and archived tests from a dozen branches' sweeps. Stale rows mislead rather than break (every reader opens the path), but a third of the registry describing files that do not exist is not a registry anyone should trust for a count.
 - **No runtime filtering in Mission Control** — `_handle_interactive_cmd` dispatches
@@ -895,7 +925,7 @@ suite run reports.
 
 ---
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-07*
 
 ---
 [← Back to AIPass](../../../README.md)
