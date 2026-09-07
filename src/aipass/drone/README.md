@@ -234,7 +234,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1181 test functions across 32 files; pytest expands to 1268 cases
+└── tests/                         # 1185 test functions across 32 files; pytest expands to 1272 cases
 ```
 
 ### Routing Flow
@@ -432,6 +432,7 @@ Four things worth knowing:
  - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the guard just said that tree is off-limits, so nothing goes and reads inside it.
  - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than paying an unbounded walk.
  - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
+ - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon can serve a repository it is not standing in; resolving the store from cwd there files the record under the standing project instead — which is exactly how 211 sandbox deletions came to sit in this ledger (see Known Issues). `AIPASS_DELETION_LOG` still outranks both, so the test and container seam cannot be defeated by a lane naming its own root. `rm` passes nothing and keeps the cwd walk, which is correct for it: the operator IS standing in the project they are deleting from.
  - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
 
 **Known gap in the `caller` field — read it with this in mind.** The resolver's last resort before `unknown` is the *project*, not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no `.trinity/passport.json` anywhere up the tree, it derives a name from the registry that answered (for AIPass, the `AIPASS_REGISTRY.json` filename → `aipass`). A delete run from the repo root therefore records `caller: "aipass"` — a directory, not the citizen who typed it. The live store carries **33** such records out of 916 total, and **23** of the 33 carry `devpulse` somewhere in the path — but 22 of those are `/tmp` session scratch directories, and exactly **1** is literally inside `src/aipass/devpulse/` (remeasured 2026-09-05; this said "8 such records, one of them a deletion inside @devpulse's own tree" on 08-27 — the count grew and the earlier phrasing over-read a path substring, the defect itself did not change). Nothing is fabricated: `aipass` is a true statement about *where* the process stood, and the same `CallerIdentity.source` distinction documented under Caller Identity applies (`project`, not `passport` or `assigned`). But a reader auditing a deletion months later wants the citizen, and for those records the ledger cannot supply one. Not fixed here — writing it down beats a reader inferring a person from a project name.
@@ -581,7 +582,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-**1268 tests pass, 0 skip**, across 32 test files — measured 2026-09-05 in both rootdirs (1268 from the repo root, 1268 from `src/aipass/drone`). Counted the seedgo readme rule's way: **1181 `def test_` functions**, which parametrization expands to **1268 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1268:
+**1272 tests pass, 0 skip**, across 32 test files — measured 2026-09-06 from the repo root (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q`). Counted the seedgo readme rule's way: **1185 `def test_` functions**, which parametrization expands to **1272 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1272:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -591,8 +592,8 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
 | Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 143 |
-| Deletion record | `test_deletion_log.py` | 33 |
-| Broker | `test_broker.py` | 60 |
+| Deletion record | `test_deletion_log.py` | 36 |
+| Broker | `test_broker.py` | 61 |
 | Standards | `test_cli_routing.py` | 81 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 | Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
@@ -605,22 +606,22 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 **What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q` — 1268 passed in 136s tonight. From the repo root, `python -m pytest src/aipass/drone/tests/ -q` gives the same 1268 in 121s.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1272 passed in 203s on 2026-09-06.
 
 ---
 
 ## Status
 
-Measured 2026-09-05, all numbers from this tree tonight:
+Measured 2026-09-06, all numbers from this tree tonight:
 
 | What | Measured | How |
 |---|---|---|
-| Tests | 1268 pass, 0 skip, 32 files (1181 `def test_` functions) | `python -m pytest tests/ -q`, both rootdirs |
+| Tests | 1272 pass, 0 skip, 32 files (1185 `def test_` functions) | `python -m pytest tests/ -q`, both rootdirs |
 | Seedgo audit | 100 on every CI-scored category | `drone @seedgo audit aipass @drone` |
 | Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
 | Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
 | json handler | the fleet shim, sha256 `3456b766…`, 1724 bytes — bound to prax's service, byte-identical fleet-wide | `sha256sum` |
-| Deletion store | 916 records, 33 of them attributed to the project name rather than a citizen | `.ai_central/deletions.jsonl` |
+| Deletion store | 920 records, 33 of them attributed to the project name rather than a citizen; 211 forged by another branch's suite (see Known Issues) | `.ai_central/deletions.jsonl` |
 
 ## Known Issues
 
@@ -630,12 +631,12 @@ Measured 2026-09-05, all numbers from this tree tonight:
 - Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
 - `apps/drone.py`'s file header says **`Version: 1.2.1`** (line 4) while the runtime constant 42 lines below is `VERSION = "1.1.0"` (line 46) — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). The 08-25 entry recorded this mismatch as `1.1.1`; remeasured 2026-09-05 it is `1.2.1`, so the header has moved twice while the constant stood still. Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. A code fix, out of scope for a README-only pass
 - Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
-- **The live deletion store is carrying test-forged records** (found 2026-09-05 during this truth pass, a code defect, not fixed here): 211 of the 916 records in `.ai_central/deletions.jsonl` have paths under `/tmp/pytest-of-patrick/...`, all on the `broker` lane, spanning 2026-08-14 through 2026-09-05. The autouse `_isolate_deletion_log` fixture in `tests/conftest.py` sets `AIPASS_DELETION_LOG` in the *parent* process, and the broker daemon subprocess does not inherit it — so the fleet's audit trail holds entries no one deleted. That is the outcome the fixture's own docstring calls worse than ordinary test pollution. Drone's own defect; queued, not fixed in this docs-only pass
+- **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 920 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Proposed cleanup of the 211 standing records is with @devpulse and Patrick — they are not being rewritten unilaterally, because a ledger someone edits to look right is worth less than one with a documented wrong patch in it
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1268 pass, 0 skip | **Last Updated:** 2026-09-05
+**Seedgo:** 100% | **Tests:** 1272 pass, 0 skip | **Last Updated:** 2026-09-06
 
 ---
 [← Back to AIPass](../../../README.md)

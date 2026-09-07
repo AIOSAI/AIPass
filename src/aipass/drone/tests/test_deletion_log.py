@@ -358,6 +358,53 @@ class TestLogLocation:
         monkeypatch.setenv("AIPASS_DELETION_LOG", str(elsewhere))
         assert deletion_log.deletion_log_path() == elsewhere
 
+    def test_a_named_project_root_beats_the_cwd_walk(self, project, monkeypatch, tmp_path):
+        """A lane that KNOWS its project files the record there, not where it stands.
+
+        The broker is handed ``repo_root`` at construction and can serve a
+        repository it is not standing in. Resolving from cwd there wrote the
+        record into whichever project the process happened to sit in — which is
+        how 211 deletions performed inside /tmp sandboxes came to sit in this
+        project's own ledger, filed by a suite that never touched this tree
+        (@ai_mail's test_dispatch_monitor.py, found 2026-09-06).
+        """
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        served = tmp_path / "another_repo"
+        served.mkdir()
+        assert deletion_log.deletion_log_path(served) == served / ".ai_central" / "deletions.jsonl"
+        assert deletion_log.deletion_log_path() == project / ".ai_central" / "deletions.jsonl"
+
+    def test_env_override_outranks_a_named_project_root(self, project, monkeypatch, tmp_path):
+        """Two overrides, and the operator's is the outer one.
+
+        Otherwise a lane passing its own root would quietly defeat the seam the
+        tests and containers relocate the store with.
+        """
+        elsewhere = tmp_path / "somewhere" / "d.jsonl"
+        served = tmp_path / "another_repo"
+        served.mkdir()
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(elsewhere))
+        assert deletion_log.deletion_log_path(served) == elsewhere
+
+    def test_record_deletion_writes_to_the_named_project(self, project, monkeypatch, tmp_path):
+        """The whole point, end to end: the record follows the deletion's repo."""
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        served = tmp_path / "another_repo"
+        served.mkdir()
+
+        deletion_log.record_deletion(
+            lane=deletion_log.LANE_BROKER,
+            outcome=deletion_log.OUTCOME_DELETED,
+            requested="deleteme.txt",
+            resolved=served / "deleteme.txt",
+            reason="Deleted",
+            caller="testbranch",
+            project_root=served,
+        )
+
+        assert (served / ".ai_central" / "deletions.jsonl").exists()
+        assert not (project / ".ai_central" / "deletions.jsonl").exists()
+
     def test_override_cannot_silence_the_prax_line(self, project, monkeypatch):
         """Relocating the store must not become a way to erase the event.
 

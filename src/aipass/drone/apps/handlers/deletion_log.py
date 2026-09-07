@@ -102,21 +102,31 @@ def _find_project_root() -> Path | None:
     return None
 
 
-def deletion_log_path() -> Path:
-    """Return the deletion log path for the project the caller is standing in.
+def deletion_log_path(project_root: Path | None = None) -> Path:
+    """Return the deletion log path for the project the deletion belongs to.
 
     One log per project, not one per branch: ``drone rm`` runs from whichever
     branch is deleting, and a record split across seventeen mailboxes is not a
     record. Falls back to the temp dir when there is no project — a deletion
     outside any project still gets written down somewhere.
 
-    ``AIPASS_DELETION_LOG`` overrides the location outright.
+    Args:
+        project_root: The project the deleted path lives in, when the lane
+            already knows it. The broker is handed its ``repo_root`` at
+            construction and may serve a repository the daemon is not standing
+            in; resolving from cwd there files the record under whichever
+            project the process happens to sit in, which is how a deletion in
+            one repo lands in another repo's ledger. Left unset, the cwd walk
+            answers — correct for ``rm``, where the operator IS standing in the
+            project they are deleting from.
+
+    ``AIPASS_DELETION_LOG`` overrides the location outright, ahead of both.
     """
     override = os.environ.get(_PATH_ENV_VAR)
     if override:
         return Path(override)
 
-    root = _find_project_root()
+    root = project_root if project_root is not None else _find_project_root()
     if root is None:
         return Path(tempfile.gettempdir()) / _LOG_NAME
     return root / _LOG_DIR_NAME / _LOG_NAME
@@ -237,6 +247,7 @@ def record_deletion(
     reason: str,
     measurement: dict | None = None,
     caller: str | None = None,
+    project_root: Path | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
@@ -252,6 +263,10 @@ def record_deletion(
             deletes on their behalf, so resolving from cwd there would record
             the daemon's own location instead of whoever asked. Left unset,
             the shared resolver answers.
+        project_root: The project whose ledger this record belongs in, for the
+            same reason and from the same lane: a broker serving one repository
+            while standing in another would otherwise write its record into the
+            standing project's store. Left unset, the cwd walk answers.
 
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
@@ -289,7 +304,7 @@ def record_deletion(
     )
 
     try:
-        _append_record(record, deletion_log_path())
+        _append_record(record, deletion_log_path(project_root))
     except Exception as exc:
         # Loud, because the durable half of the record is the half that
         # survives to be searched. The prax line above already landed, so the
