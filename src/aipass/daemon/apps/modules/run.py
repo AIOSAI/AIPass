@@ -15,6 +15,7 @@ Part of the DPLAN-0204 decentralized scheduler redesign.
 
 import sys
 import time
+from datetime import datetime
 from typing import List
 
 from aipass.prax import logger
@@ -24,6 +25,9 @@ from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
+    RECOVERY_LANE_LIVE,
+    catch_up_on,
+    get_job_state,
     load_runstate,
     save_runstate,
     is_catch_up_fire,
@@ -39,6 +43,7 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     prune_orphans,
     window_label,
 )
+from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.module_root import module_file
 
 try:
@@ -137,16 +142,37 @@ def print_help():
     console.print("              [dim]lands on the next slot instead of the next tick. Without it,[/dim]")
     console.print("              [dim]enabling a weekly job at 01:34 locks it to 01:34 forever.[/dim]")
     console.print("              [dim]A past slot keeps its phase — it is rolled forward, not used raw.[/dim]")
-    console.print("    [cyan]catch_up[/cyan]  true                    [dim](daily and rotation jobs)[/dim]")
-    console.print("              [dim]Off unless stated. When the window closed with no run (host[/dim]")
-    console.print("              [dim]down, daemon not ticking), the first tick after it fires the[/dim]")
-    console.print("              [dim]job once and stamps caught_up on the runstate row.[/dim]")
+    console.print("    [cyan]catch_up[/cyan]  false                   [dim](daily, rotation and hourly jobs)[/dim]")
+    console.print("              [dim]ON UNLESS YOU SET false (DPLAN-0332, 2026-09-08). When a[/dim]")
+    console.print("              [dim]window closed with no run, the job fires once afterwards and[/dim]")
+    console.print("              [dim]stamps caught_up on the runstate row. Set false when a late[/dim]")
+    console.print("              [dim]run is worthless.[/dim]")
+    console.print("    [cyan]catch_up_max_age_hours[/cyan]  24         [dim](optional)[/dim]")
+    console.print("              [dim]A missed window older than this is logged MISSED and not[/dim]")
+    console.print("              [dim]queued. Unlimited by default: ten days away should still be[/dim]")
+    console.print("              [dim]exactly one wake.[/dim]")
     console.print()
     console.print("  [bold]Staggering:[/bold] Prefer `slot` on interval jobs. Seeding last_run values")
     console.print("  in daemon_json/daemon_runstate.json by hand still works for the other types.")
     console.print()
-    console.print("  [bold]run.log:[/bold] a MISSED line names every daily job whose window closed")
-    console.print("  unrun — once per job per day, whether or not catch_up is on.")
+    console.print("[bold cyan]RECOVERY AFTER A GAP (DPLAN-0332):[/bold cyan]")
+    console.print("  Every tick stamps last_tick. If the next tick is more than 30 min later,")
+    console.print("  the scheduler was away: it names the cause from the host boot time (machine")
+    console.print("  off, scheduler stopped while up, or both), enumerates every window that")
+    console.print("  closed inside the gap, and queues ONE catch-up per job carrying them all.")
+    console.print("  Ten days off is one wake with ten dates, never ten wakes.")
+    console.print()
+    console.print("  The queue drains one at a time fleet-wide: the next fires when the previous")
+    console.print("  completes, or 60 min later if it never reports. Three refusals park an entry")
+    console.print("  at the tail so it cannot block the queue — it is never dropped.")
+    console.print()
+    console.print("  Every wake carries a header saying why it is awake: SCHEDULED with the last")
+    console.print("  run, or CATCH-UP with the gap, the cause and the missed windows. The agent")
+    console.print("  is told the truth about time and decides what matters — nothing is replayed.")
+    console.print()
+    console.print("  [bold]run.log:[/bold] GAP once per gap, then QUEUED / CATCH-UP FIRED /")
+    console.print("  CATCH-UP FAILED / SUPERSEDED. The MISSED line still names every windowed job")
+    console.print("  whose window closed unrun, once per job per day.")
     console.print()
 
 
@@ -177,7 +203,7 @@ def _blocked_reason(status) -> str:
     return ""
 
 
-def _fire_job(job: dict, runstate: dict) -> tuple:
+def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     """Fire a single job via direct wake_branch import (DPLAN-0204 path A).
 
     Rotation jobs don't wake their owner — they wake tonight's steward — so they
@@ -194,7 +220,7 @@ def _fire_job(job: dict, runstate: dict) -> tuple:
     calling it blocked would re-fire a rotation whose turn was already taken.
     """
     if job.get("schedule", {}).get("type") == ROTATION_TYPE:
-        ok, detail = fire_rotation(job, runstate)
+        ok, detail = fire_rotation(job, runstate, header=header)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
     # Cross-branch handler import authorized by DPLAN-0204 §2.8
@@ -207,7 +233,8 @@ def _fire_job(job: dict, runstate: dict) -> tuple:
 
     owner = job["owner"]
     job_id = job["id"]
-    prompt = job["prompt"]
+    prompt = recovery.compose_prompt(header, job["prompt"]) if header else job["prompt"]
+    recovery.record_wake_prompt(owner, job_id, prompt)
     wake = job.get("wake", {})
     fresh = wake.get("fresh", True)
     model = wake.get("model")
@@ -330,7 +357,10 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
 
         owner, job_id = job["owner"], job["id"]
         window = window_label(job["schedule"])
-        catch_up = job.get("schedule", {}).get("catch_up")
+        # ONE predicate for the line and the fire. Reading the raw field here
+        # while is_job_due() read catch_up_on() is what let 11:37:52 log
+        # "catch_up is off - not firing" three seconds before firing.
+        catch_up = catch_up_on(job.get("schedule", {}))
 
         if dry_run:
             _log(f"DRY RUN — would record MISSED {owner}/{job_id} (window {window})")
@@ -349,12 +379,129 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
     return missed_count
 
 
-def run_tick(dry_run: bool = False) -> dict:
-    """
-    Execute one discover -> due-check -> fire pass.
+def _detect_and_queue(enabled: List[dict], runstate: dict, dry_run: bool) -> tuple:
+    """Find the gap, enumerate what closed inside it, queue one entry per job.
 
-    Returns summary dict with counts.
+    Returns (gap or None, jobs_queued). Runs BEFORE the due check, because a job
+    whose regular window is open right now must be able to supersede its own
+    queued entry on this same tick.
     """
+    if not RECOVERY_LANE_LIVE:
+        return None, 0
+
+    gap = recovery.detect_gap(runstate)
+    if not gap:
+        return None, 0
+
+    _log(f"GAP {gap['duration']} ({gap['sentence']})")
+    logger.warning("[run] GAP %s — %s", gap["duration"], gap["sentence"])
+
+    try:
+        gap_start = datetime.fromisoformat(gap["gap_start"])
+        gap_end = datetime.fromisoformat(gap["gap_end"])
+    except (ValueError, TypeError) as e:
+        logger.error("[run] gap instants unreadable (%s) — nothing queued", e)
+        return gap, 0
+
+    queued = 0
+    for job in enabled:
+        instants = recovery.enumerate_missed(job, gap_start, gap_end)
+        if not instants:
+            continue
+        if dry_run:
+            _log(f"DRY RUN — would queue {job['owner']}/{job['id']} ({len(instants)} window(s))")
+            continue
+        entry = recovery.queue_catch_up(runstate, job, instants, gap)
+        if entry is None:
+            _log(f"SKIP QUEUE: {job['owner']}/{job['id']} — catch_up off or every window too old")
+            continue
+        queued += 1
+        _log(f"QUEUED: {job['owner']}/{job['id']} ({entry['count']} window(s), oldest {entry['oldest']})")
+
+    if queued and not dry_run:
+        save_runstate(runstate)
+    return gap, queued
+
+
+def _drain_one(runstate: dict, enabled: List[dict], dry_run: bool) -> int:
+    """Fire at most ONE queued catch-up. Returns 1 if one fired, else 0.
+
+    Patrick's rule, and the reason this function can only ever return 0 or 1:
+    "imagine 10 missed events all firing at once."
+    """
+    if not RECOVERY_LANE_LIVE:
+        return 0
+
+    entry = recovery.drain_ready(runstate)
+    if entry is None:
+        return 0
+
+    by_key = {job_key(j["owner"], j["id"]): j for j in enabled}
+    job = by_key.get(job_key(entry["owner"], entry["job_id"]))
+    if job is None:
+        # The job left the fleet while it was queued. Drop it rather than
+        # retrying forever against a schedule nobody publishes any more.
+        recovery.drop_from_queue(runstate, entry["owner"], entry["job_id"])
+        _log(f"CATCH-UP DROPPED: {entry['owner']}/{entry['job_id']} — job no longer discovered")
+        if not dry_run:
+            save_runstate(runstate)
+        return 0
+
+    if dry_run:
+        _log(f"DRY RUN — would fire CATCH-UP {entry['owner']}/{entry['job_id']} ({entry['count']} window(s))")
+        return 0
+
+    state = get_job_state(runstate, entry["owner"], entry["job_id"])
+    header = recovery.catch_up_header(entry, job, state)
+    outcome, detail = _fire_job(job, runstate, header=header)
+
+    if outcome == OUTCOME_FIRED:
+        recovery.drop_from_queue(runstate, entry["owner"], entry["job_id"])
+        recovery.mark_in_flight(runstate, entry)
+        update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=True)
+        _log(f"CATCH-UP FIRED: {entry['owner']}/{entry['job_id']} ({entry['count']} window(s))")
+        logger.info("[run] CATCH-UP FIRED %s/%s (%s windows)", entry["owner"], entry["job_id"], entry["count"])
+        save_runstate(runstate)
+        return 1
+
+    parked = recovery.record_attempt(entry)
+    if parked:
+        _log(f"CATCH-UP FAILED: {entry['owner']}/{entry['job_id']} — {recovery.MAX_ATTEMPTS} attempts, moved to tail")
+        logger.warning(
+            "[run] CATCH-UP FAILED %s/%s after %s attempts — moved to the tail",
+            entry["owner"],
+            entry["job_id"],
+            recovery.MAX_ATTEMPTS,
+        )
+    else:
+        _log(f"CATCH-UP DEFERRED: {entry['owner']}/{entry['job_id']} — {detail}")
+    save_runstate(runstate)
+    return 0
+
+
+def run_tick(dry_run: bool = False) -> dict:
+    """Execute one discover -> due-check -> fire pass, and stamp the tick.
+
+    THE STAMP IS IN A finally, and that is the whole reason this wrapper exists.
+    ``last_tick`` is what gap detection reads, so a tick that returned early —
+    no jobs discovered, nothing enabled — must still record that the scheduler
+    was alive. Miss those and the next tick reports a gap the fleet never had,
+    and queues catch-ups for windows nobody missed.
+
+    A dry run stamps nothing: it is a question about the world, not an event in
+    it, and answering it must not erase the gap a real tick is about to report.
+    """
+    runstate = load_runstate()
+    try:
+        return _tick_body(runstate, dry_run)
+    finally:
+        if not dry_run:
+            recovery.record_tick(runstate)
+            save_runstate(runstate)
+
+
+def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
+    """The tick itself. Returns summary dict with counts."""
     results = {
         "discovered": 0,
         "enabled": 0,
@@ -366,6 +513,8 @@ def run_tick(dry_run: bool = False) -> dict:
         "seeded": 0,
         "missed": 0,
         "caught_up": 0,
+        "queued": 0,
+        "drained": 0,
     }
 
     json_handler.log_operation("scheduler_tick", {"dry_run": dry_run})
@@ -388,9 +537,8 @@ def run_tick(dry_run: bool = False) -> dict:
         _log("No enabled jobs.")
         return results
 
-    # Step 3: Load runstate and check due
-    runstate = load_runstate()
-
+    # Step 3: Check due. The runstate arrived from run_tick, which holds it so
+    # the tick stamp survives every early return above.
     # Prune orphan runstate entries. Persist immediately when anything changed:
     # pruning happens on every tick but the save used to live inside the fire
     # loop, so quiet ticks dropped their prunes and stale entries survived for
@@ -402,6 +550,12 @@ def run_tick(dry_run: bool = False) -> dict:
         _log(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
 
     results["seeded"] = _seed_interval_slots(enabled, runstate, dry_run)
+
+    # DPLAN-0332. Before the due check on purpose: a job whose regular window is
+    # open right now must be able to supersede its own queued entry on this very
+    # tick, and it can only do that if the entry already exists.
+    gap, results["queued"] = _detect_and_queue(enabled, runstate, dry_run)
+
     results["missed"] = _report_missed_windows(enabled, runstate, dry_run)
 
     due_jobs = [j for j in enabled if is_job_due(j, runstate)]
@@ -412,6 +566,9 @@ def run_tick(dry_run: bool = False) -> dict:
         _log("No jobs due at this time.")
         for j in enabled:
             _log(f"  {j['owner']}/{j['id']} — not due")
+        # A quiet tick is exactly when the queue should move: nothing is
+        # competing for the fleet and the branches are most likely free.
+        results["drained"] = _drain_one(runstate, enabled, dry_run)
         return results
 
     _log(f"{len(due_jobs)} job(s) due:")
@@ -427,7 +584,23 @@ def run_tick(dry_run: bool = False) -> dict:
         # Asked BEFORE the fire: firing is what makes it untrue, so a caught-up
         # run read after the fact would always report as an ordinary one.
         caught_up = is_catch_up_fire(job, runstate)
-        outcome, detail = _fire_job(job, runstate)
+
+        # SUPERSESSION (DPLAN-0332). This job's regular window arrived before
+        # its queued catch-up got a turn, so the queue entry is dropped — but
+        # its missed list rides along on THIS wake. The truth about time travels
+        # with whichever wake goes first, or an agent whose catch-up was
+        # superseded would never learn it was away at all.
+        superseded = recovery.drop_from_queue(runstate, job["owner"], job["id"])
+        missed_list = superseded.get("missed", []) if superseded else []
+        if superseded:
+            _log(
+                f"SUPERSEDED: {job['owner']}/{job['id']} — regular window arrived first, "
+                f"carrying {len(missed_list)} missed window(s) on this wake"
+            )
+
+        state = get_job_state(runstate, job["owner"], job["id"])
+        header = recovery.scheduled_header(job, state, missed=missed_list)
+        outcome, detail = _fire_job(job, runstate, header=header)
         if outcome == OUTCOME_FIRED:
             results["fired"] += 1
             if caught_up:
@@ -449,10 +622,15 @@ def run_tick(dry_run: bool = False) -> dict:
         if job != due_jobs[-1]:
             time.sleep(1.0)
 
+    # One catch-up per tick at most, and never in front of a live window: the
+    # on-time fires above have already had their turn.
+    results["drained"] = _drain_one(runstate, enabled, dry_run)
+
     _log(
         f"Tick complete: {results['fired']} fired, {results['failed']} failed, "
         f"{results['blocked']} blocked, {results['skipped']} skipped, "
-        f"{results['seeded']} seeded, {results['missed']} missed, {results['caught_up']} caught up"
+        f"{results['seeded']} seeded, {results['missed']} missed, {results['caught_up']} caught up, "
+        f"{results['queued']} queued, {results['drained']} drained"
     )
     return results
 

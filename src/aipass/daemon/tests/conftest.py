@@ -16,6 +16,7 @@
 
 """Shared pytest fixtures for daemon tests"""
 
+import json
 import os
 import tempfile
 
@@ -33,6 +34,7 @@ from unittest.mock import MagicMock, patch
 
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import timer_install
+from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 
 # The two units the scheduler runs on. Named here because both the seal and the
 # host-state snapshot need them and a second spelling is a second thing to drift.
@@ -132,6 +134,97 @@ def _seal_timer_host_state(tmp_path):
         patch.object(timer_install, "_STATE_DIR", tmp_path / "_sealed_state_dir"),
     ):
         yield fake_systemctl
+
+
+@pytest.fixture(autouse=True)
+def _seal_runstate_file(tmp_path):
+    """Keep the suite out of the LIVE scheduler runstate.
+
+    daemon_json/daemon_runstate.json is not scratch: it holds the fleet's real
+    last_run / next_run / seeded slots. @seedgo's weekly slot was hand-seeded
+    there over two sessions, and @vera's and @daemon's rows are how the
+    scheduler knows what already fired.
+
+    MEASURED, 2026-09-08, and this is a defect I introduced earlier in this same
+    session. DPLAN-0332 made run_tick() stamp last_tick in a finally so a gap
+    can be detected — which means EVERY non-dry tick now saves, including one in
+    a test that patched load_runstate but not save_runstate
+    (test_scheduler_bot.py, the notify-not-called case). One suite run replaced
+    three real fleet rows with the fixture row @commons/test. Snapshot before,
+    diff after: CHANGED. Restored by hand from the snapshot.
+
+    The narrow fix would be to patch save_runstate in that one test. This is the
+    wide one, for the same reason the timer seal above is session-wide: the
+    defect is not "one test forgot", it is "a test can reach the live scheduler
+    state at all", and the next person to call run_tick() in a test inherits the
+    hole with no way to know.
+    """
+    with patch.object(runstate_mod, "RUNSTATE_FILE", tmp_path / "_sealed_runstate.json"):
+        yield
+
+
+def _live_job_keys(path):
+    """The job keys the live scheduler runstate currently holds."""
+    if not path.exists():
+        return None
+    try:
+        return set(json.loads(path.read_text(encoding="utf-8")).get("jobs", {}))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _runstate_sentinel():
+    """Fail the session that put fixture rows into the live scheduler runstate.
+
+    Same argument as _host_state_sentinel: the seal stops the known route, this
+    catches the one nobody has thought of. Read-only and non-restoring, so the
+    damage is reported rather than quietly papered over.
+
+    IT COMPARES KEYS, NOT BYTES, and that is not a weakening — it is the only
+    check that can be trusted here. THE LIVE SCHEDULER RUNS WHILE THE SUITE RUNS:
+    the systemd timer fires every ~2 minutes, the suite takes ~30 seconds, and a
+    real tick landing mid-session legitimately moves ``last_tick`` and rewrites
+    ``last_status``/``last_blocked_at`` on real rows. Two byte-comparing versions
+    of this fixture failed healthy runs on 2026-09-08 before that was measured,
+    and a sentinel that cries wolf teaches people to ignore it.
+
+    What it still catches is exactly the damage that happened: on 2026-09-08 one
+    suite run replaced @seedgo/shadow-cycle-weekly, @daemon/inbox-sweep and
+    @vera/release-watch with the fixture row @commons/test. A live tick never
+    invents a key discovery does not publish, and never drops one it does.
+    """
+    live = runstate_mod.RUNSTATE_FILE
+    before = _live_job_keys(live)
+    yield
+    after = _live_job_keys(live)
+    if before is None or after is None:
+        return
+
+    try:
+        from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
+
+        real = {runstate_mod.job_key(j["owner"], j["id"]) for j in discover_jobs()}
+    except (ImportError, OSError):
+        real = before  # cannot ask the fleet; hold the pre-suite roster as truth
+
+    invented = after - before - real
+    assert not invented, (
+        "THE SUITE WROTE FIXTURE ROWS INTO THE LIVE SCHEDULER RUNSTATE.\n"
+        f"  file: {live}\n"
+        f"  rows no citizen publishes: {sorted(invented)}\n"
+        "Some test reached the real file. Find it and seal its seam — "
+        "see _seal_runstate_file in this file."
+    )
+
+    lost = (before - after) & real
+    assert not lost, (
+        "THE SUITE DELETED LIVE SCHEDULER ROWS THAT THE FLEET STILL PUBLISHES.\n"
+        f"  file: {live}\n"
+        f"  rows lost: {sorted(lost)}\n"
+        "Every one of these carries a citizen's last_run. Losing it makes the job "
+        "look like it never ran, and the next tick fires it out of window."
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
