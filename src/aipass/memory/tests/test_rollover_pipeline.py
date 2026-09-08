@@ -27,6 +27,7 @@ All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 import json
 import logging
 import subprocess
+import tempfile
 import types
 import sys
 from datetime import datetime
@@ -292,7 +293,7 @@ class TestStoreVectorsSubprocess:
                 embeddings=[[0.1, 0.2]],
                 documents=["doc1"],
                 metadatas=[{"key": "val"}],
-                db_path="/tmp/test.chroma",
+                db_path=str(Path(tempfile.gettempdir()) / "test.chroma"),
             )
 
         assert result["success"] is True
@@ -1202,7 +1203,7 @@ class TestTodayIsNotEvidenceAgainstANumberedEntry:
 
         assert 99 not in [e["number"] for e in archivable]
 
-    def test_a_tail_entry_numbered_EQUAL_to_the_head_is_still_refused(self, monkeypatch):
+    def test_a_tail_entry_numbered_equal_to_the_head_is_still_refused(self, monkeypatch):
         """The `<` in `number < head_number` is load-bearing and nothing pinned it.
 
         A duplicate of the head sitting at the tail is the one shape ordering
@@ -1876,7 +1877,7 @@ class TestASkippedTriggerIsNotSilentlyDropped:
     def _trigger(name="guinea.local"):
         trigger = MagicMock()
         trigger.__str__ = lambda self: name
-        trigger.file_path = Path("/tmp/does-not-matter/local.json")
+        trigger.file_path = Path(tempfile.gettempdir()) / "does-not-matter" / "local.json"
         trigger.branch = "guinea"
         trigger.memory_type = "local"
         return trigger

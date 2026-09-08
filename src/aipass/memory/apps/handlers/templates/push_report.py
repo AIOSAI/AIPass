@@ -101,7 +101,14 @@ def _branch_block(entry: dict, dry_run: bool) -> List[str]:
 
     strays = entry.get("strays", [])
     if strays:
-        lines.append(f"   NOT push scope — {len(strays)} stray file(s) in .trinity/: {', '.join(strays)}")
+        # "NOT push scope" alone read as a verdict on the BRANCH — @spawn and
+        # @devpulse both took it that way on 2026-09-07 and held the first real
+        # bump back on the strength of it, when every one of those branches was
+        # being pruned and carried normally on the line directly above. The
+        # files are out of scope; the branch never was.
+        lines.append(
+            f"   {len(strays)} file(s) in .trinity/ are not push scope (reported, never deleted): {', '.join(strays)}"
+        )
     lines.append("")
     return lines
 

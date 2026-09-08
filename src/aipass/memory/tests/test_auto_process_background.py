@@ -281,6 +281,8 @@ class TestCompletionIsAnnounced:
         assert payload["success"] is False
         assert "chroma exploded" in payload["error"]
         assert payload["branch"] == "memory", "the citizen to wake for a fault here is this code's owner"
+        assert payload["pool"]["status"] == "unknown", "a section that never reported is not a completion"
+        assert payload["rollover"]["status"] == "unknown"
 
     def test_a_declined_run_announces_nothing(self, isolated_lock):
         """A run that never held the lock did not complete anything.

@@ -196,8 +196,16 @@ def spawn_background() -> Dict[str, Any]:
 
 
 def _completion_status(section: Dict[str, Any] | None) -> str:
-    """Map one section of the result onto @trigger's ``status`` vocabulary."""
-    section = section or {}
+    """Map one section of the result onto @trigger's ``status`` vocabulary.
+
+    An absent or empty section means the section never reported — the crash
+    leg's payload carries no ``pool``/``rollover`` key — and that is not the
+    same as it reporting success. Derive it to ``"unknown"``, never ``"ok"``
+    (found by @hooks 2026-09-05, published as the fourth value in @trigger's
+    contract, ``handlers/events/memory_pool.py``).
+    """
+    if not section:
+        return "unknown"
     if section.get("skipped"):
         return "skipped"
     if section.get("success") is False:

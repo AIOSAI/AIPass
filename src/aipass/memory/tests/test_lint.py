@@ -22,6 +22,7 @@ Covers:
 import importlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -444,7 +445,7 @@ class TestUnknownBranchIsAnError:
 
     def test_unknown_branch_calls_error(self) -> None:
         lint = self._lint_module()
-        registry = [{"name": "memory", "path": "/tmp/memory"}]
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "_read_registry", return_value=registry):
             with patch.object(lint, "error") as errored:
@@ -457,7 +458,7 @@ class TestUnknownBranchIsAnError:
 
     def test_unknown_branch_does_not_report_success(self) -> None:
         lint = self._lint_module()
-        registry = [{"name": "memory", "path": "/tmp/memory"}]
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "_read_registry", return_value=registry):
             with patch.object(lint, "error"):
@@ -469,7 +470,7 @@ class TestUnknownBranchIsAnError:
     def test_known_branch_still_scans(self) -> None:
         """The guard must not block a real branch."""
         lint = self._lint_module()
-        registry = [{"name": "memory", "path": "/tmp/memory"}]
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "_read_registry", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
@@ -481,7 +482,7 @@ class TestUnknownBranchIsAnError:
     def test_known_branch_match_is_case_insensitive(self) -> None:
         """run_lint matches case-insensitively, so the guard must too."""
         lint = self._lint_module()
-        registry = [{"name": "memory", "path": "/tmp/memory"}]
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "_read_registry", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
@@ -492,7 +493,7 @@ class TestUnknownBranchIsAnError:
 
     def test_no_filter_scans_everything(self) -> None:
         lint = self._lint_module()
-        registry = [{"name": "memory", "path": "/tmp/memory"}]
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
         with patch.object(lint, "_read_registry", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:

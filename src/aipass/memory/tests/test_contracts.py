@@ -27,7 +27,9 @@ Data structure contracts:
 """
 
 import json
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -176,6 +178,47 @@ class TestEntryPointImportContract:
             if "aipass.memory.apps.handlers" in line and "import" in line
         ]
         assert not offenders, "Handler imported directly in the entry point:\n" + "\n".join(offenders)
+
+
+class TestUnknownArgumentExitsNonZero:
+    """An unknown command or argument FAILS — Patrick's standing ruling.
+
+    All three shapes printed the correct refusal and then exited 0, because
+    every door in main() returned None and __main__ never passed it to
+    sys.exit. Every caller scripting against the exit code was told success.
+    @devpulse's fleet sweep of 2026-09-07 named this branch as the only one
+    failing all three probes.
+
+    The two codes differ on purpose: 1 = nothing routed, 2 = a module routed
+    and refused. `handle_command` returning True means "I handled this", not
+    "it worked", so a refused sub-argument cannot be told apart from a
+    successful run without the resolve_exit flip.
+    """
+
+    def _run_main(self, argv: list[str]) -> int:
+        """Call the entry point's main() with argv, returning its exit code."""
+        import importlib
+
+        entry = importlib.import_module("aipass.memory.apps.memory")
+        with patch.object(sys, "argv", ["memory", *argv]):
+            return entry.main()
+
+    def test_an_unknown_verb_exits_non_zero(self) -> None:
+        assert self._run_main(["definitely_not_a_verb_xyz"]) == 1
+
+    def test_an_unknown_flag_exits_non_zero(self) -> None:
+        """A dashed token nothing routes is the same refusal as a bare word."""
+        assert self._run_main(["--definitely-not-a-flag"]) == 1
+
+    def test_a_known_verb_given_a_bogus_subargument_exits_non_zero(self) -> None:
+        """Routed but refused — 2, not 0, and not 1 either."""
+        assert self._run_main(["rollover", "not_a_real_subarg_xyz"]) == 2
+
+    def test_the_doors_that_must_still_exit_zero(self) -> None:
+        """The refusal flip must not turn help, version or introspection red."""
+        assert self._run_main(["--help"]) == 0
+        assert self._run_main(["--version"]) == 0
+        assert self._run_main([]) == 0
 
 
 class TestWatchRunnerImportContract:

@@ -67,6 +67,9 @@ docs.local/
 **/*_json/
 
 # Branch-specific runtime files
+# memory's templates bump ledger: per-machine push state (last_push, stamped_by),
+# first stamped 2026-09-07 (FPLAN-0492 wave 6). Never one machine's state in the repo.
+src/aipass/memory/templates/.template_version.json
 src/aipass/memory/config/fragmented_memory_config.json
 src/aipass/memory/config/fragmented_memory_state.json
 src/aipass/memory/config/memory_bank.config.json
