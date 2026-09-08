@@ -66,7 +66,7 @@ def _seed_test_agents(conn: sqlite3.Connection) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_has_been_welcomed_new_branch_returns_false(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -77,7 +77,7 @@ def test_has_been_welcomed_new_branch_returns_false(
     assert has_been_welcomed(initialized_db, "TEST_BRANCH") is False
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_has_been_welcomed_welcomed_branch_returns_true(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -94,7 +94,7 @@ def test_has_been_welcomed_welcomed_branch_returns_true(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_create_welcome_post_creates_post_in_general(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -120,7 +120,7 @@ def test_create_welcome_post_creates_post_in_general(
     assert mention is not None
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_create_welcome_post_double_welcome_prevented(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -140,7 +140,7 @@ def test_create_welcome_post_double_welcome_prevented(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_get_onboarding_nudge_no_posts_gets_nudge(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -153,7 +153,7 @@ def test_get_onboarding_nudge_no_posts_gets_nudge(
     assert "commons post" in nudge
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_get_onboarding_nudge_active_branch_returns_none(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -176,7 +176,7 @@ def test_get_onboarding_nudge_active_branch_returns_none(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_welcome_new_branches_welcomes_unwelcomed(
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
@@ -197,7 +197,7 @@ def test_welcome_new_branches_welcomes_unwelcomed(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.engagement.engagement_ops.json_handler")
+@patch("aipass.commons.apps.handlers.engagement.engagement_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.engagement.engagement_ops.close_db")
 @patch("aipass.commons.apps.handlers.engagement.engagement_ops.get_db")
 def test_generate_prompt_creates_post(
@@ -238,7 +238,7 @@ def test_create_event_no_args_returns_error() -> None:
     assert "Usage" in result["error"]
 
 
-@patch("aipass.commons.apps.handlers.engagement.engagement_ops.json_handler")
+@patch("aipass.commons.apps.handlers.engagement.engagement_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.engagement.engagement_ops.close_db")
 @patch("aipass.commons.apps.handlers.engagement.engagement_ops.get_db")
 def test_create_event_with_args_creates_event_post(
@@ -274,7 +274,7 @@ def test_create_event_with_args_creates_event_post(
 
 
 @patch("aipass.commons.apps.modules.welcome.run_welcome")
-@patch("aipass.commons.apps.modules.welcome.json_handler")
+@patch("aipass.commons.apps.modules.welcome.json_handler", autospec=True)
 @patch("aipass.commons.apps.modules.welcome.console")
 def test_welcome_module_routes_welcome_command(
     mock_console: MagicMock,
@@ -306,7 +306,7 @@ def test_welcome_module_rejects_unknown_command(mock_console: MagicMock) -> None
 
 
 @patch("aipass.commons.apps.modules.engagement.generate_prompt")
-@patch("aipass.commons.apps.modules.engagement.json_handler")
+@patch("aipass.commons.apps.modules.engagement.json_handler", autospec=True)
 @patch("aipass.commons.apps.modules.engagement.console")
 def test_engagement_module_routes_prompt_command(
     mock_console: MagicMock,
@@ -330,7 +330,7 @@ def test_engagement_module_routes_prompt_command(
 
 
 @patch("aipass.commons.apps.modules.engagement.create_event")
-@patch("aipass.commons.apps.modules.engagement.json_handler")
+@patch("aipass.commons.apps.modules.engagement.json_handler", autospec=True)
 @patch("aipass.commons.apps.modules.engagement.console")
 def test_engagement_module_routes_event_command(
     mock_console: MagicMock,

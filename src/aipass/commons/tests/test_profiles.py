@@ -115,7 +115,7 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_AGENT") -> No
     conn.commit()
 
 
-@patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler")
+@patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True)
 def test_get_profile_returns_agent_data(mock_json: object, initialized_db: object) -> None:
     """get_profile should return a dict with all profile fields for an existing agent."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -136,7 +136,7 @@ def test_get_profile_nonexistent_returns_none(initialized_db: object) -> None:
     assert profile is None
 
 
-@patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler")
+@patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True)
 def test_update_bio_changes_agent_bio(mock_json: object, initialized_db: object) -> None:
     """update_bio should change the bio text and return True for an existing agent."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -153,7 +153,7 @@ def test_update_bio_changes_agent_bio(mock_json: object, initialized_db: object)
 def test_update_bio_nonexistent_returns_false(initialized_db: object) -> None:
     """update_bio should return False when the agent does not exist."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
-    with patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler"):
+    with patch("aipass.commons.apps.handlers.profiles.profile_queries.json_handler", autospec=True):
         result = update_bio(conn, "NOBODY", "irrelevant")
     assert result is False
 

@@ -333,7 +333,7 @@ def test_get_branch_info_by_name_missing_file(tmp_path: Path, monkeypatch: pytes
 # ===========================================================================
 
 
-@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
 def test_get_caller_branch_uses_caller_branch_env(
     mock_register: MagicMock,
@@ -363,7 +363,7 @@ def test_get_caller_branch_uses_caller_branch_env(
     mock_register.assert_called_once()
 
 
-@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
 def test_get_caller_branch_prefers_cwd_over_env(
     mock_register: MagicMock,
@@ -407,7 +407,7 @@ def test_get_caller_branch_prefers_cwd_over_env(
     assert result["name"] == "flow"
 
 
-@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
 def test_get_caller_branch_returns_none_when_no_detection(
     mock_json: MagicMock,
     tmp_path: Path,
@@ -515,7 +515,7 @@ def test_unknown_branch_still_returns_none(tmp_path: Path, monkeypatch: pytest.M
     assert _id_mod.get_branch_info_by_name("nobody") is None
 
 
-@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
 def test_get_caller_branch_end_to_end_for_external_citizen(
     mock_register: MagicMock,

@@ -103,8 +103,8 @@ def _seed_room(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler")
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -138,8 +138,8 @@ def test_add_react_success_post(
     assert result["agent"] == "TEST_BRANCH"
 
 
-@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler")
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -186,7 +186,10 @@ def test_add_react_invalid_target_type() -> None:
 
     result = add_react(["thread", "1", "thumbsup"])
     assert result["success"] is False
-    assert "post" in result["error"] or "comment" in result["error"]
+    # The exact message, not a substring: the usage error two branches up also
+    # contains both "post" and "comment", so a disjunction over those words
+    # passes whichever branch the code actually took.
+    assert result["error"] == "Target must be 'post' or 'comment'"
 
 
 def test_add_react_non_numeric_id() -> None:
@@ -326,7 +329,7 @@ def test_remove_react_no_caller(mock_caller: MagicMock) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 def test_show_reactions_empty(
@@ -382,8 +385,8 @@ def test_show_reactions_non_numeric_id() -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler")
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -415,8 +418,8 @@ def test_pin_post_cmd_success_by_author(
     assert result["agent"] == "TEST_BRANCH"
 
 
-@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler")
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -469,10 +472,13 @@ def test_pin_post_cmd_rejected_non_author(
 
     result = pin_post_cmd([str(post_id)])
     assert result["success"] is False
-    assert "author" in result["error"] or "SYSTEM" in result["error"]
+    # The exact refusal: "author" and "SYSTEM" both appear in the caller-detect
+    # error one branch up, so a disjunction over them cannot tell an ownership
+    # refusal from a failure to resolve the caller at all.
+    assert result["error"] == "Only the post author or SYSTEM can pin a post"
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -559,8 +565,8 @@ def test_pin_post_cmd_post_not_found(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler")
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.curation_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 @patch(
@@ -631,7 +637,7 @@ def test_unpin_post_cmd_no_args() -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 def test_show_pinned_no_pinned(
@@ -655,7 +661,7 @@ def test_show_pinned_no_pinned(
     assert result["room"] is None
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 def test_show_pinned_with_room_filter(
@@ -686,7 +692,7 @@ def test_show_pinned_with_room_filter(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.curation.curation_ops.close_db")
 @patch("aipass.commons.apps.handlers.curation.curation_ops.get_db")
 def test_show_trending_empty(
@@ -714,7 +720,7 @@ def test_show_trending_empty(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
@@ -745,7 +751,7 @@ def test_explore_rooms_no_hidden_rooms(
     assert result["rooms_visited"] == 0
 
 
-@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
@@ -778,7 +784,7 @@ def test_explore_rooms_with_hidden_rooms_no_reveal(
     assert "revealed" not in result
 
 
-@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
 @patch(
@@ -951,8 +957,8 @@ def test_list_secrets_no_caller(mock_caller: MagicMock) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_dry_run_scan(
@@ -979,8 +985,8 @@ def test_run_welcome_dry_run_scan(
     assert "BETA" in result["would_welcome"]
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_dry_run_specific_branch(
@@ -1005,8 +1011,8 @@ def test_run_welcome_dry_run_specific_branch(
     assert result["would_welcome"] is True
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_dry_run_already_welcomed(
@@ -1037,8 +1043,8 @@ def test_run_welcome_dry_run_already_welcomed(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_scan_welcomes_new_branches(
@@ -1062,8 +1068,8 @@ def test_run_welcome_scan_welcomes_new_branches(
     assert "NEW_BRANCH" in result["welcomed"]
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_specific_branch_success(
@@ -1089,8 +1095,8 @@ def test_run_welcome_specific_branch_success(
     assert result["post_id"] is not None
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler")
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_specific_already_welcomed(
@@ -1116,7 +1122,7 @@ def test_run_welcome_specific_already_welcomed(
     assert result["already_welcomed"] is True
 
 
-@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler")
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
 @patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
 def test_run_welcome_specific_branch_not_found(

@@ -131,10 +131,10 @@ def test_relative_time_days_ago() -> None:
 def test_relative_time_future_timestamp() -> None:
     """Future timestamps produce negative deltas; should return 'just now' (negative seconds < 60)."""
     ts = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    # Negative total_seconds means the condition chain falls through oddly,
-    # but in practice negative ints are < 60, so it returns "just now"
-    result = _relative_time(ts)
-    assert isinstance(result, str)
+    # A negative delta is still < 60, so the first arm claims it and a clock
+    # skew reads as "just now" rather than "unknown" or a negative "-60m ago".
+    # Naming the string is what makes that a decision instead of an accident.
+    assert _relative_time(ts) == "just now"
 
 
 @patch("aipass.commons.apps.handlers.activity.activity_ops.logger")
@@ -202,7 +202,7 @@ def test_calculate_time_label_invalid(mock_logger: object) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.activity.activity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.activity.activity_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.activity.activity_ops.close_db")
 @patch("aipass.commons.apps.handlers.activity.activity_ops.get_db")
 def test_run_activity_returns_formatted_activity(
@@ -235,7 +235,7 @@ def test_run_activity_returns_formatted_activity(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.catchup.catchup_ops.json_handler")
+@patch("aipass.commons.apps.handlers.catchup.catchup_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_onboarding_nudge", create=True)
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.update_last_active")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.query_catchup_data")

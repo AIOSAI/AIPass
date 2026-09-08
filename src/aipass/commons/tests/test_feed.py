@@ -97,7 +97,7 @@ def test_format_time_ago_boundary_60_seconds():
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_default_args(
@@ -121,7 +121,7 @@ def test_display_feed_default_args(
     assert result["posts"] == []
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_room_filter(
@@ -141,7 +141,7 @@ def test_display_feed_room_filter(
     assert result["room"] == "general"
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_sort_modes(
@@ -167,7 +167,7 @@ def test_display_feed_sort_modes(
     assert result["sort"] == "hot"
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_limit_clamping(
@@ -191,7 +191,7 @@ def test_display_feed_limit_clamping(
     assert result["limit"] == 50
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_page_to_offset(
@@ -209,7 +209,7 @@ def test_display_feed_page_to_offset(
     assert result["offset"] == 20  # (3-1) * 10
 
 
-@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler")
+@patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.feed.feed_ops.close_db")
 @patch("aipass.commons.apps.handlers.feed.feed_ops.get_db")
 def test_display_feed_negative_offset_clamped(
@@ -232,7 +232,7 @@ def test_display_feed_negative_offset_clamped(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.modules.feed.json_handler")
+@patch("aipass.commons.apps.modules.feed.json_handler", autospec=True)
 @patch("aipass.commons.apps.modules.feed.display_feed")
 @patch("aipass.commons.apps.modules.feed.console")
 def test_handle_command_routes_feed(

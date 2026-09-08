@@ -120,7 +120,7 @@ def test_set_entrance(mock_logger: object, initialized_db: sqlite3.Connection) -
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
@@ -187,8 +187,8 @@ def test_get_room_look_data(
     assert result["recent_posts"][0]["title"] == "Test Post"
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler")
-@patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.rooms.space_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.logger")
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
@@ -241,7 +241,7 @@ def test_get_visitors_data(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.database.catchup_queries.json_handler")
+@patch("aipass.commons.apps.handlers.database.catchup_queries.json_handler", autospec=True)
 def test_query_catchup_data_counts(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """query_catchup_data should return correct new_posts_count and new_comments_count."""
     post_id = _seed_agent_and_post(initialized_db)
@@ -351,7 +351,7 @@ def test_backfill_fts_index_counts(initialized_db: sqlite3.Connection) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.search.log_export.json_handler")
+@patch("aipass.commons.apps.handlers.search.log_export.json_handler", autospec=True)
 def test_export_room_log(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """export_room_log should return a formatted plaintext log with posts and comments."""
     post_id = _seed_agent_and_post(initialized_db)

@@ -110,7 +110,7 @@ def test_parse_search_args_flag_without_value():
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.search.search_ops.json_handler")
+@patch("aipass.commons.apps.handlers.search.search_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.search.search_ops.close_db")
 @patch("aipass.commons.apps.handlers.search.search_ops.get_db")
 @patch("aipass.commons.apps.handlers.search.search_ops.search_all")
@@ -126,7 +126,7 @@ def test_run_search_no_args(
     assert result["error"].startswith("Usage")
 
 
-@patch("aipass.commons.apps.handlers.search.search_ops.json_handler")
+@patch("aipass.commons.apps.handlers.search.search_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.search.search_ops.close_db")
 @patch("aipass.commons.apps.handlers.search.search_ops.get_db")
 @patch("aipass.commons.apps.handlers.search.search_ops.search_all")
