@@ -1,14 +1,13 @@
 {
   "metadata": {
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Files and patterns to exclude when updating branches from template",
-    "last_updated": "2026-08-22"
+    "last_updated": "2026-09-07"
   },
   "ignore_files": [
     ".template_registry.json",
     ".registry_ignore.json",
-    "test_cli_routing.py",
-    "test_json_handler.py"
+    "test_cli_routing.py"
   ],
   "ignore_patterns": [
     "__pycache__",
@@ -42,7 +41,7 @@
     },
     "what_gets_ignored": "These files never copy to branches during updates - they stay template-only",
     "starter_tests": {
-      "why_the_test_files_are_here": "These two files SHIP AT CREATE - a newborn gets them and needs them, they are what carries test_quality from 15% to 100% at birth. They are listed here because seedgo's architecture baseline treats every file in this template as a structural requirement of EVERY branch of this class, and starter tests are not that: a mature branch replaces them with its own suite, exactly as spawn's README already documents for test_scaffold.py.",
+      "why_the_test_file_is_here": "test_cli_routing.py SHIPS AT CREATE - a newborn gets it as a real, readable starter suite it owns from day one. The test_quality standard that once scored these files 15% to 100% at birth retired 2026-09-07 (DPLAN-0323), and the JSON-handler starter suite that shipped beside it was archived the same day (FPLAN-0492): its six shim-pin checks now live once in seedgo's json handler contract suite, which discovers every branch's shim by walking the installed package, so a newborn is covered without carrying a copy. This entry stays because seedgo's architecture baseline treats every file in this template as a structural requirement of EVERY branch of this class, and a starter test is not that: a mature branch replaces it with its own suite, exactly as spawn's README already documents for test_scaffold.py.",
       "what_happens_without_this_entry": "Measured 2026-08-22: adding these two files to the template and running the CI gate (.github/scripts/seedgo_audit.py) dropped 9 existing branches from 100% to 99% with 'Missing file: tests/test_cli_routing.py' - aipass, canary, cli, commons, flow, hooks, memory, seedgo, trigger. The gate floor is 100 and it exits 1, so a template addition reds the whole board without touching a single branch's code.",
       "scope_of_this_list": "ignore_files is honoured by seedgo's architecture baseline (matched on basename). spawn's create copies these files regardless - .registry_ignore.json and .template_registry.json are themselves in this list and both land in every newborn, which is the proof. The 'never copy during updates' note below describes update behaviour, not create."
     }

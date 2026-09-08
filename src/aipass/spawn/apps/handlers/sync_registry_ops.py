@@ -26,6 +26,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
     load_registry,
+    registry_is_writable_document,
     save_registry,
     branches_as_list,
     fix_passport_registry_id,
@@ -195,6 +196,31 @@ def sync_registry(fix: bool = False) -> dict:
             "descriptions_backfilled": [],
         }
     project_root = registry_path.parent
+
+    # Sync REPAIRS a registry against the filesystem; it cannot repair a file it
+    # cannot read. With --fix that path is destructive, not merely wrong:
+    # load_registry answers an unreadable file with an empty document, every
+    # branch on disk then looks unregistered, and the rebuild writes fresh
+    # uppercase entries with new registry_ids and NO metadata.id — measured
+    # 2026-09-07, a 3-branch project came back credential-less and every
+    # passport carrying the real credential orphaned. Rebuilding is re-minting.
+    if not registry_is_writable_document(registry_path):
+        logger.error(
+            "[sync-registry] %s exists but could not be read as a registry document — refusing to sync. "
+            "Restore or repair the file by hand; a rebuild here would re-mint the project.",
+            registry_path.name,
+        )
+        return {
+            "error": f"{registry_path.name} exists but could not be read as a registry document",
+            "stale": [],
+            "unregistered": [],
+            "healthy": [],
+            "fixed": [],
+            "spawn_rebuilt": [],
+            "ids_fixed": [],
+            "descriptions_backfilled": [],
+        }
+
     registry = load_registry(registry_path)
     branches = branches_as_list(registry.get("branches", []))
 

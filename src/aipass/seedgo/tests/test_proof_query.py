@@ -105,11 +105,22 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_pack():
-    """Unknown pack name returns True (error displayed to user)."""
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
+
+    It returned True until 2026-09-07 and `seedgo.py` turned that into exit 0,
+    so a script reading the exit code saw a successful query of a pack that
+    does not exist (Patrick's standing ruling, fleet sweep 2026-09-07).
+    """
+    import pytest
+
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+    from aipass.seedgo.apps.modules import CommandRefused
     from aipass.seedgo.apps.modules.proof_query import handle_command
 
-    result = handle_command("proof_query", ["nonexistent_pack_xyz"])
-    assert result is True
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("proof_query", ["nonexistent_pack_xyz"])
+    assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert refused.value.token == "nonexistent_pack_xyz"
 
 
 def test_print_introspection_runs():

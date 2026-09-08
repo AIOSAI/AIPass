@@ -36,7 +36,7 @@ from rich import box
 from rich.table import Table
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -267,8 +267,25 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 # =============================================================================
 
 
-def main():
-    """Main entry point - routes commands or shows help"""
+def main() -> int:
+    """Main entry point - routes commands or shows help.
+
+    Exit codes: 0 success, 1 unroutable command, 2 routed but refused.
+
+    Every door here used to `return` None and the ``__main__`` block never
+    passed it to ``sys.exit``, so the process exited 0 on all three shapes of
+    an unknown argument — an unknown verb, an unknown flag, and a known verb
+    given a bogus sub-argument. The refusal was printed correctly and then
+    contradicted by the exit code, which is the half a script reads (Patrick's
+    standing ruling; @devpulse's fleet sweep 2026-09-07 named this branch as
+    the only one failing all three probes).
+
+    A refused sub-argument exits 2 rather than 1 because the command WAS
+    routed: ``handle_command`` returning True means "I handled this", not "it
+    worked". The modules already call ``error()``, which marks the failure —
+    only the flip at this seam was missing.
+    """
+    reset_command_state()
 
     # Parse arguments
     args = sys.argv[1:]
@@ -276,17 +293,17 @@ def main():
     # Show introspection when run without arguments
     if len(args) == 0:
         print_introspection()
-        return
+        return 0
 
     # Version flag
     if args[0] in ["--version", "-V"]:
         console.print("memory v1.0.0")
-        return
+        return 0
 
     # Show help only for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
-        return
+        return 0
 
     # Command provided - try to route to modules
     modules = discover_modules()
@@ -297,22 +314,22 @@ def main():
         remaining_args = ["--help"]
         for module in modules:
             if module.handle_command(command, remaining_args):
-                return
+                return 0
         print_help()
-        return
+        return 0
 
     if route_command(command, remaining_args, modules):
-        return  # Module handled it successfully
+        return resolve_exit(True)  # Routed — 0, or 2 if the module refused
     else:
         console.print()
         error(f"Unknown command: {command}", suggestion="Run 'drone @memory --help' for available commands")
         console.print()
-        return
+        return 1
 
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except KeyboardInterrupt:
         logger.info("[memory] Operation cancelled by user (KeyboardInterrupt)")
         console.print("\n\nOperation cancelled by user")

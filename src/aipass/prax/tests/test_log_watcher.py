@@ -818,15 +818,6 @@ class TestExtractTargetFromCmd:
 class TestEmitCommandSeparator:
     """Test _emit_command_separator event emission."""
 
-    def test_dict_format(self):
-        """Should handle dict command_info format."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-        watcher.last_command_per_branch.clear()
-
-        watcher._emit_command_separator("PRAX", {"command": "test cmd", "caller": "DRONE", "target": "FLOW"})
-        mock_queue.enqueue.assert_called_once()
-
     def test_tuple_format(self):
         """Should handle legacy tuple (command, caller) format."""
         mod = _import_log_watcher()
@@ -858,27 +849,22 @@ class TestEmitCommandSeparator:
         assert mock_queue.enqueue.call_count == 1
 
     def test_target_stored_in_action(self):
-        """Should store target in action field when target is provided."""
+        """The dict format enqueues one event carrying the command, the caller and the target."""
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
         watcher.last_command_per_branch.clear()
 
-        watcher._emit_command_separator("PRAX", {"command": "cmd", "caller": None, "target": "FLOW"})
+        watcher._emit_command_separator("PRAX", {"command": "test cmd", "caller": "DRONE", "target": "FLOW"})
 
-        enqueued_event = mock_queue.enqueue.call_args[0][0]
-        assert "FLOW" in enqueued_event.action
+        mock_queue.enqueue.assert_called_once()
+        assert "FLOW" in mock_queue.enqueue.call_args[0][0].action
+        event_kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert event_kwargs["caller"] == "DRONE"
+        assert event_kwargs["message"] == "test cmd"
 
 
 class TestEmitLogEvent:
     """Test _emit_log_event event emission."""
-
-    def test_emits_log_event(self):
-        """Should create and enqueue a log monitoring event."""
-        mod = _import_log_watcher()
-        watcher, mock_queue = _make_watcher(mod)
-
-        watcher._emit_log_event("PRAX", "test message", "info")
-        mock_queue.enqueue.assert_called_once()
 
     def test_error_level_fires_trigger(self):
         """Should fire trigger event for ERROR level logs."""
@@ -912,10 +898,13 @@ class TestEmitLogEvent:
         setattr(mod, "trigger", mock_trigger)
 
         watcher._emit_log_event("PRAX", "normal info", "info")
+
         mock_trigger.fire.assert_not_called()
+        mock_queue.enqueue.assert_called_once()
+        assert mod.MonitoringEvent.call_args.kwargs["level"] == "info"
 
     def test_trigger_not_fired_when_unavailable(self):
-        """Should skip trigger when HAS_TRIGGER is False."""
+        """With no trigger available an error line still enqueues exactly one event."""
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
@@ -924,7 +913,11 @@ class TestEmitLogEvent:
 
         # Should not raise
         watcher._emit_log_event("PRAX", "error msg", "error")
+
         mock_queue.enqueue.assert_called_once()
+        event_kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert event_kwargs["level"] == "error"
+        assert event_kwargs["message"] == "error msg"
 
     def test_error_with_no_log_file_path(self):
         """Should use 'unknown' for log_file when path not provided."""

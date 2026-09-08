@@ -361,15 +361,6 @@ class TestHandleCommand:
         json_handler = mocks["aipass.prax.apps.handlers.json"].json_handler
         json_handler.log_operation.assert_called_once_with("logger_handle_command", {"args": ["--help"]})
 
-    def test_no_args_logs_operation(self, monkeypatch):
-        """handle_command with no args still logs the operation."""
-        mod, mocks = _inject_and_import(monkeypatch)
-
-        mod.handle_command("logger", [])
-
-        json_handler = mocks["aipass.prax.apps.handlers.json"].json_handler
-        json_handler.log_operation.assert_called_once_with("logger_handle_command", {"args": []})
-
 
 # =============================================
 # initialize_logging_system
@@ -501,6 +492,9 @@ class TestTerminalOutputControl:
 # =============================================
 
 
+_PROXIED_LEVELS = ("debug", "info", "warning", "error")
+
+
 class TestSystemLogger:
     """Tests for the SystemLogger class — auto-routing logger proxy."""
 
@@ -529,69 +523,28 @@ class TestSystemLogger:
 
         assert callable(getattr(mod.system_logger, "error", None))
 
-    def test_info_calls_get_system_logger(self, monkeypatch):
-        """SystemLogger.info() delegates to get_system_logger().info()."""
-        mod, mocks = _inject_and_import(monkeypatch)
-
-        # Reset watcher flag so _ensure_watcher runs
-        mod.SystemLogger._watcher_started = True
-
-        mod.system_logger.info("test message %s", "arg1")
-
-        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.setup_individual_logger.assert_called()
-
-    def test_warning_calls_get_system_logger(self, monkeypatch):
-        """SystemLogger.warning() delegates to get_system_logger().warning()."""
-        mod, mocks = _inject_and_import(monkeypatch)
-
-        mod.SystemLogger._watcher_started = True
-
-        mod.system_logger.warning("warn: %s", "problem")
-
-        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.setup_individual_logger.assert_called()
-
-    def test_error_calls_get_system_logger(self, monkeypatch):
-        """SystemLogger.error() delegates to get_system_logger().error()."""
-        mod, mocks = _inject_and_import(monkeypatch)
-
-        mod.SystemLogger._watcher_started = True
-
-        mod.system_logger.error("error: %s", "failure")
-
-        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.setup_individual_logger.assert_called()
-
     def test_system_logger_has_debug(self, monkeypatch):
         """SystemLogger exposes a debug() method."""
         mod, _mocks = _inject_and_import(monkeypatch)
 
         assert callable(getattr(mod.system_logger, "debug", None))
 
-    def test_debug_calls_get_system_logger(self, monkeypatch):
-        """SystemLogger.debug() routes through the same per-caller lookup."""
-        mod, mocks = _inject_and_import(monkeypatch)
-
-        mod.SystemLogger._watcher_started = True
-
-        mod.system_logger.debug("detail: %s", "value")
-
-        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
-        setup.setup_individual_logger.assert_called()
-
-    def test_debug_delegates_to_the_debug_level(self, monkeypatch):
-        """The routed logger's debug() is what gets called — not info()."""
+    @pytest.mark.parametrize("level", _PROXIED_LEVELS)
+    def test_each_level_delegates_to_that_level_of_the_routed_logger(self, monkeypatch, level):
+        """Each proxy method goes through the per-caller lookup and calls THAT level, no other."""
         mod, mocks = _inject_and_import(monkeypatch)
 
         mod.SystemLogger._watcher_started = True
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
         routed = setup.setup_individual_logger.return_value
 
-        mod.system_logger.debug("detail: %s", "value")
+        getattr(mod.system_logger, level)("detail: %s", "value")
 
-        routed.debug.assert_called_once_with("detail: %s", "value")
-        routed.info.assert_not_called()
+        setup.setup_individual_logger.assert_called()
+        getattr(routed, level).assert_called_once_with("detail: %s", "value")
+        for other_level in _PROXIED_LEVELS:
+            if other_level != level:
+                getattr(routed, other_level).assert_not_called()
 
 
 # =============================================

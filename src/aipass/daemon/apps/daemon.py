@@ -33,6 +33,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
+    UnknownArgument,
     update,
     schedule,
     activity_report,
@@ -86,6 +87,13 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         try:
             if module.handle_command(command, args):
                 return True
+        # Caught BEFORE the generic handler below, which logs and moves on to the
+        # next module: swallowing a refusal here would turn "queue: unknown
+        # argument 'x'" into "unknown command: queue", naming the wrong thing and
+        # then falling through to a verb that never asked for these arguments.
+        except UnknownArgument as refusal:
+            error(f"{refusal.verb}: unknown argument '{refusal.token}'", refusal.usage or None)
+            sys.exit(1)
         except Exception as e:
             logger.error(f"[DAEMON] Module {module.__name__} error: {e}")
 

@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 class TestFeedbackPulseHandler:
     """Tests for the feedback_pulse prompt handler."""
@@ -320,15 +322,28 @@ class TestFeedbackToggleModule:
         captured = capsys.readouterr()
         assert "NO PROJECT" in captured.err
 
-    def test_handle_command_off_no_aipass_dir(self, capsys):
+    @pytest.mark.parametrize("sub", ["off", "on"])
+    def test_no_aipass_dir_refuses_with_exit_1(self, capsys, sub):
+        """Rewritten 2026-09-07 (canary refusal sweep): this asserted `is True`.
+
+        Both arms printed "No .aipass/ directory found" and returned True, which
+        hooks.main() turns into exit 0 — `drone @hooks feedback off` reported
+        success having toggled nothing. Patrick's standing ruling: a refusal
+        exits non-zero and names the reason.
+
+        Both subcommands in one body because the cure is one seam
+        (_require_sentinel); the `on` arm had no pin at all before this.
+        """
         from aipass.hooks.apps.modules.feedback import handle_command
 
         with patch(
             "aipass.hooks.apps.modules.feedback._sentinel",
             return_value=None,
         ):
-            assert handle_command("feedback", ["off"]) is True
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("feedback", [sub])
 
+        assert exit_info.value.code == 1
         captured = capsys.readouterr()
         assert "No .aipass/" in captured.err
 

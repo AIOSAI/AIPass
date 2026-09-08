@@ -10,7 +10,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ## What I Do
 
 - Own the hook engine -- receives events from platform bridges, routes to handlers, logs everything
-- Maintain 29 native handlers across 4 categories (prompt, security, lifecycle, notification)
+- Maintain 28 native handlers across 4 categories (prompt, security, lifecycle, notification)
 - Bridge platforms -- thin normalization layer per provider (Claude + Codex, both shipping)
 - Per-project config -- `.aipass/hooks.json` controls what fires per project
 - Log everything -- prax integration + JSONL diagnostics for every hook execution
@@ -63,7 +63,6 @@ apps/
       testwrite_gate.py    #   Blocks CREATION of new test files (JSON switch: drone @hooks testwrite)
     lifecycle/             # Session management hooks
       auto_fix.py          #   Post-edit diagnostics (ruff, pyright, py_compile)
-      auto_watchdog.py     #   Watchdog arming after dispatch
       auto_process.py      #   Scheduled inbox/task processing
       compact.py           #   Pre-compact memory archival
       rollover.py          #   Pre-compact memory rollover
@@ -87,7 +86,8 @@ apps/
       diagnostics.py       #   JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 53 test files, 1857 tests
+tests/                     # 51 files, 1838 cases (1837 pass, 1 env-skip)
+  parked/                  # retired suites, barred from collection by their own conftest
 ```
 
 ## Handler Categories
@@ -96,7 +96,7 @@ tests/                     # 53 test files, 1857 tests
 |----------|-------|----------|
 | prompt | 9 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, temporal, persistent_alert |
 | security | 7 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate, testwrite_gate |
-| lifecycle | 8 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, post_compact_regrounding, session_start |
+| lifecycle | 7 | auto_fix, auto_process, compact, rollover, pre_compact_prep, post_compact_regrounding, session_start |
 | notification | 5 | announce, email, stop_sound, tool_sound, telegram_response |
 
 ## How It Works

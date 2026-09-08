@@ -261,7 +261,7 @@
       "path": "apps/modules/README.md"
     },
     "f024": {
-      "content_hash": "1170eef8a2a4",
+      "content_hash": "d293c849ffbf",
       "has_branch_placeholder": false,
       "name": ".registry_ignore.json",
       "path": ".spawn/.registry_ignore.json"
@@ -285,7 +285,7 @@
       "path": "apps/{{BRANCH}}.py"
     },
     "f028": {
-      "content_hash": "de20d11e5cfd",
+      "content_hash": "c60a1a23e9e0",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "artifacts/README.md"
@@ -297,13 +297,13 @@
       "path": "artifacts/birth_certificate.json"
     },
     "f030": {
-      "content_hash": "2434da568727",
+      "content_hash": "35a2a20a80e5",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "docs/README.md"
     },
     "f031": {
-      "content_hash": "c19d8872ea2c",
+      "content_hash": "e1c3425c0cef",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "docs.local/README.md"
@@ -315,7 +315,7 @@
       "path": "docs.local/sub_agent_drops/README.md"
     },
     "f033": {
-      "content_hash": "9e1e9b71f93b",
+      "content_hash": "275cc7e999c7",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "dropbox/README.md"
@@ -339,7 +339,7 @@
       "path": "templates/README.md"
     },
     "f037": {
-      "content_hash": "e464e53f006f",
+      "content_hash": "7a753f85e4df",
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "tests/README.md"
@@ -351,7 +351,7 @@
       "path": "tests/__init__.py"
     },
     "f039": {
-      "content_hash": "0618f6541ec5",
+      "content_hash": "109bb10d6e10",
       "has_branch_placeholder": false,
       "name": "conftest.py",
       "path": "tests/conftest.py"
@@ -415,17 +415,11 @@
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
-    },
-    "f050": {
-      "content_hash": "a19565c8709d",
-      "has_branch_placeholder": false,
-      "name": "test_json_handler.py",
-      "path": "tests/test_json_handler.py"
     }
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-09-03",
+    "last_updated": "2026-09-07",
     "version": "1.0.0"
   }
 }

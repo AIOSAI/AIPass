@@ -200,17 +200,14 @@ def test_on_email_delivered_with_none_callbacks():
 
 
 def test_on_email_delivered_central_failure_does_not_raise():
-    """Central update failure is caught silently."""
+    """Central update failure is caught silently.
+
+    A second copy of this pinned the same call and the same single assertion
+    with only the exception text changed (DPLAN-0323, merged FPLAN-0492). The
+    text the callback raises is not part of the contract — that it is swallowed
+    and the callback still ran is.
+    """
     update_fn = MagicMock(side_effect=RuntimeError("central broken"))
-
-    on_email_delivered(update_central_fn=update_fn)
-
-    update_fn.assert_called_once()
-
-
-def test_on_email_delivered_central_fail_no_exception():
-    """Central callback failing does not raise any exception."""
-    update_fn = MagicMock(side_effect=RuntimeError("update fail"))
 
     on_email_delivered(update_central_fn=update_fn)
 

@@ -83,47 +83,8 @@ class TestDirectRotatingFileHandlerDoRollover:
             assert backup.exists() or log_file.exists()
             handler.close()
 
-    def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, tmp_path):
-        """doRollover suppresses PermissionError instead of crashing."""
-        mock_config = MagicMock()
-        mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
-        mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
-        mock_config.DEFAULT_LOG_LEVEL = "DEBUG"
-        mock_config.load_log_config = MagicMock()
-        mock_config.lines_to_bytes = MagicMock(return_value=10000)
-        mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
-
-        mock_introspection = MagicMock()
-        mock_override = MagicMock()
-        mock_override._original_getLogger = logging.getLogger
-
-        with patch.dict(
-            sys.modules,
-            {
-                "aipass.prax.apps.handlers.config.load": mock_config,
-                "aipass.prax.apps.handlers.logging.introspection": mock_introspection,
-                "aipass.prax.apps.handlers.logging.override": mock_override,
-            },
-        ):
-            _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
-            sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
-
-            log_file = tmp_path / "test_perm.log"
-            log_file.write_text("data\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
-
-            with patch(
-                "logging.handlers.RotatingFileHandler.doRollover",
-                side_effect=PermissionError("file locked"),
-            ):
-                handler.doRollover()
-            handler.close()
-
     def test_do_rollover_os_error_suppressed(self, mock_prax_infrastructure, tmp_path):
-        """doRollover suppresses OSError instead of crashing."""
+        """A failed rotation is swallowed and logged — PermissionError is an OSError, one clause catches both."""
         mock_config = MagicMock()
         mock_config.get_system_logs_dir = MagicMock(return_value=tmp_path / "system")
         mock_config.get_module_logs_dir = MagicMock(return_value=tmp_path / "local")
@@ -154,11 +115,17 @@ class TestDirectRotatingFileHandlerDoRollover:
                 str(log_file), maxBytes=10, backupCount=1
             )
 
-            with patch(
-                "logging.handlers.RotatingFileHandler.doRollover",
-                side_effect=OSError("disk error"),
+            with (
+                patch(
+                    "logging.handlers.RotatingFileHandler.doRollover",
+                    side_effect=OSError("disk error"),
+                ),
+                patch.object(direct_mod, "logger") as mock_logger,
             ):
                 handler.doRollover()
+
+            mock_logger.warning.assert_called_once()
+            assert "disk error" in str(mock_logger.warning.call_args)
             handler.close()
 
 

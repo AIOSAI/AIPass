@@ -109,12 +109,15 @@ class TestLoadModuleRegistry:
         assert result["flow"]["size"] == 2048
 
     def test_empty_dict_on_corrupt_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Corrupt JSON should return empty dict, not raise."""
+        """Corrupt JSON returns an empty dict and says why in a warning."""
         load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text("<<<not json>>>", encoding="utf-8")
 
         result = load_mod.load_module_registry()
+
         assert result == {}
+        load_mod.logger.warning.assert_called_once()  # type: ignore[union-attr]
+        assert "failed to load module registry" in load_mod.logger.warning.call_args[0][0]  # type: ignore[union-attr]
 
     def test_empty_dict_when_modules_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry without 'modules' key should return empty dict."""
@@ -145,14 +148,6 @@ class TestLoadModuleRegistry:
         load_mod.json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
             "registry_loaded", {"module_count": 2}
         )
-
-    def test_logs_warning_on_corrupt_file(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Should log warning when file is corrupt."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
-        load_mod.REGISTRY_FILE.write_text("broken!", encoding="utf-8")
-
-        load_mod.load_module_registry()
-        load_mod.logger.warning.assert_called()  # type: ignore[union-attr]
 
 
 # =============================================
@@ -266,7 +261,10 @@ class TestSaveModuleRegistry:
         monkeypatch.setattr(save_mod, "REGISTRY_FILE", blocker / "subdir" / "reg.json")
 
         result = save_mod.save_module_registry({"x": {}})
+
         assert result is False
+        save_mod.logger.error.assert_called_once()  # type: ignore[union-attr]
+        assert "failed to save module registry" in save_mod.logger.error.call_args[0][0]  # type: ignore[union-attr]
 
     def test_logs_operation_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should call json_handler.log_operation after successful save."""
@@ -277,18 +275,6 @@ class TestSaveModuleRegistry:
         save_mod.json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
             "registry_saved", {"total_modules": 3}
         )
-
-    def test_logs_error_on_failure(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Should log error when save fails."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
-
-        blocker = tmp_path / "blocker_file"
-        blocker.write_text("I am a file", encoding="utf-8")
-        monkeypatch.setattr(save_mod, "PRAX_JSON_DIR", blocker / "subdir")
-        monkeypatch.setattr(save_mod, "REGISTRY_FILE", blocker / "subdir" / "reg.json")
-
-        save_mod.save_module_registry({"x": {}})
-        save_mod.logger.error.assert_called()  # type: ignore[union-attr]
 
     def test_no_leftover_tmp_file_after_save(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Atomic write should leave no .tmp file behind after a successful save."""

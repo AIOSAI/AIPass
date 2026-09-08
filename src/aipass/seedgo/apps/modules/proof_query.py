@@ -37,7 +37,9 @@ from aipass.cli.apps.modules import error, warning
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+from aipass.seedgo.apps.modules import CommandRefused
 
 
 # =============================================================================
@@ -219,19 +221,23 @@ def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None
         for name in proofs:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
-        return
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, proof_name)
 
     content = _load_proof_content(proofs[proof_name], proof_name)
     json_handler.log_operation("proof_queried", {"pack": pack_name, "proof": proof_name})
-    if content:
-        console.print()
-        # Handle both str and List[str] return types from content handlers
-        if isinstance(content, list):
-            for line in content:
-                console.print(line)
-        else:
-            console.print(content)
-        console.print()
+    if not content:
+        # `_load_proof_content` already said why. Falling through to a silent
+        # return had the process exit 0 on a proof it never printed.
+        raise CommandRefused(refusal.EXIT_UNPROVEN, f"{pack_name}/{proof_name}")
+
+    console.print()
+    # Handle both str and List[str] return types from content handlers
+    if isinstance(content, list):
+        for line in content:
+            console.print(line)
+    else:
+        console.print(content)
+    console.print()
 
 
 # =============================================================================
@@ -277,7 +283,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         for name in packs:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, pack_name)
 
     # No second arg = list proofs in pack
     if len(args) < 2:

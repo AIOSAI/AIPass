@@ -67,7 +67,7 @@ aipass/
 │                                          #   project_home, registry_discovery, scaffold_content. Four modules:
 │                                          #   json_handler retired to shared/.archive/ 2026-09-04 (DPLAN-0325)
 ├── docs/                                  # admin_setup, probe_hygiene, test-quality research
-├── tests/                                 # 1044 test functions -> 1081 cases
+├── tests/                                 # 1052 test functions -> 1081 cases
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -191,9 +191,11 @@ is the guard.
 
 ## Tests
 
-1044 test functions across 29 files; pytest expands them to **1081 cases**, all passing —
-`pytest src/aipass/aipass/tests/`. Both numbers measured 2026-09-05 (`def test_` lines in
-`tests/test_*.py` for the first, a real run for the second).
+1052 test functions across 28 files; pytest expands them to **1081 cases**, all passing —
+`pytest src/aipass/aipass/tests/`. Both numbers measured 2026-09-07 (`def test_` lines in
+`tests/test_*.py` for the first, a real run for the second). The file count read 29 until
+that measurement and was never right — `tests/` holds 28 `test_*.py` plus `conftest.py`
+and `__init__.py`.
 
 Run it from the branch directory or the repo root. From `src/aipass` four tests fail —
 that cwd puts a local `aipass/` directory ahead of the installed package, so the

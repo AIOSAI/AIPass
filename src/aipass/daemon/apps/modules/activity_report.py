@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-01-30
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -25,7 +25,7 @@ must never reach for it.
 
 import os
 import sys
-from typing import List
+from typing import List, NoReturn
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -36,8 +36,9 @@ if sys.platform == "win32":
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate, refuse
 
 # Import report generation handler (implementation lives in handler layer)
 from aipass.daemon.apps.handlers.monitoring.report_generator import (
@@ -46,12 +47,19 @@ from aipass.daemon.apps.handlers.monitoring.report_generator import (
     get_json_report,
 )
 
+# The same roster generate_branch_report() resolves against, so a name this
+# module accepts is exactly a name that module can report on.
+from aipass.daemon.apps.handlers.monitoring import activity_collector
+
 
 # =============================================
 # CONSTANTS
 # =============================================
 
 MODULE_NAME = "activity_report"
+
+# The one cure line every branch-health refusal points at.
+BRANCH_HEALTH_USAGE = "drone @daemon branch-health <branch_name> [--hours N]"
 
 
 # =============================================
@@ -300,6 +308,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         if args and args[0] in ("--help", "-h", "help"):
             print_introspection()
             return True
+        gate(command, args, value_flags=("--hours", "-t"), usage="drone @daemon activity_report [--hours N]")
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
@@ -313,6 +322,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             _print_activity_help()
             return True
 
+        gate(command, args, value_flags=("--hours", "-t"), usage="drone @daemon activity [--hours N]")
+
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
@@ -325,6 +336,14 @@ def handle_command(command: str, args: List[str]) -> bool:
         if args and args[0] in ("--help", "-h", "help"):
             _print_activity_report_help()
             return True
+
+        gate(
+            command,
+            args,
+            flags=("--json", "-j"),
+            value_flags=("--hours", "-t"),
+            usage="drone @daemon activity-report [--json] [--hours N]",
+        )
 
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
@@ -362,6 +381,40 @@ def _extract_branch_name(args: List[str]) -> str | None:
     return None
 
 
+def _known_branch_names() -> List[str]:
+    """Canonical names of every branch the reports can be generated for."""
+    return sorted(bp.get("name", "") for bp in activity_collector.get_branch_paths() if bp.get("name"))
+
+
+def _resolve_branch(branch_name: str) -> str | None:
+    """Match *branch_name* case-insensitively to a canonical name, or None.
+
+    Asked BEFORE any report is generated, so an unknown token is refused once
+    with its own name in the message instead of producing two report blocks
+    that each say "not found" in their own words.
+    """
+    wanted = branch_name.upper()
+    for name in _known_branch_names():
+        if name.upper() == wanted:
+            return name
+    return None
+
+
+def _refuse(verb: str, token: str, usage: str = "") -> NoReturn:
+    """Refuse *token* by name and exit non-zero, through the shared gate.
+
+    Patrick's standing ruling: an unknown command or argument FAILS with a
+    non-zero exit and a message naming the token. Printing a refusal and
+    returning 0 tells a caller's `&&` that the command succeeded - reported by
+    @devpulse's 2026-09-07 fleet sweep against `branch-health`, which rendered
+    two "not found" blocks and exited 0.
+
+    Delegated to handlers/cli/arg_gate rather than spelled here: wave 2b gates
+    eleven verbs, and eleven refusals written independently drift.
+    """
+    refuse(verb, token, usage)
+
+
 def _handle_branch_health(args: List[str]) -> bool:
     """Handle 'branch-health [branch]' command. No args = all branches summary."""
     if not args:
@@ -373,19 +426,23 @@ def _handle_branch_health(args: List[str]) -> bool:
         _print_branch_health_help()
         return True
 
+    # The usage line rides the refusal's own suggestion slot now, so it is not
+    # printed a second time here — one refusal, one cure, in one place.
     branch_name = _extract_branch_name(args)
     if not branch_name:
-        error("branch-health requires a branch name")
+        _refuse("branch-health", " ".join(args), BRANCH_HEALTH_USAGE)
+
+    resolved = _resolve_branch(branch_name)
+    if resolved is None:
         console.print()
-        console.print("Usage: branch-health <branch_name> [--hours N]")
-        console.print("Example: branch-health DRONE")
-        return True
+        console.print(f"Known branches: {', '.join(_known_branch_names())}")
+        _refuse("branch-health", branch_name, BRANCH_HEALTH_USAGE)
 
     hours = _parse_hours_arg(args)
-    report = generate_branch_report(branch_name, since_hours=hours)
+    report = generate_branch_report(resolved, since_hours=hours)
     console.print(report)
-    console.print(_render_entry_health(branch_name))
-    logger.info("[DAEMON] activity_report: Branch health report generated for %s", branch_name)
+    console.print(_render_entry_health(resolved))
+    logger.info("[DAEMON] activity_report: Branch health report generated for %s", resolved)
     return True
 
 

@@ -92,7 +92,7 @@ STANDARD_NAME = "self_skip"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Dotted names whose presence in a condition makes it a MACHINE probe. These
 #: acquit outright: a platform or environment gate is correct code, and a rule

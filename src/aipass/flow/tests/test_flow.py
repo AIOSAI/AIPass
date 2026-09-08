@@ -23,6 +23,8 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -475,15 +477,26 @@ class TestPrintIntrospection:
         mod = _make_module("bare_mod", doc=None)
         print_introspection([mod])
 
-    def test_multiple_modules(self) -> None:
-        """Lists all discovered modules."""
+    @pytest.mark.parametrize("names", [("alpha",), ("alpha", "beta")])
+    def test_every_discovered_module_is_named(self, names) -> None:
+        """One module or several, each one appears in the listing.
+
+        MERGED (DPLAN-0323 contested band, 2026-09-07) with the former
+        ``test_multiple_modules``, which ran the identical call path with two
+        list entries instead of one and asserted nothing — 'lists all
+        discovered modules' was never read back. Mutation-checked before
+        merging: dropping the second module changed no branch, so the count is
+        a parameter, not a test. The oracle is new: both rows now READ the
+        output, so deleting the loop body reds them.
+        """
         from aipass.flow.apps.flow import print_introspection
 
-        mods = [
-            _make_module("alpha", doc="Alpha module"),
-            _make_module("beta", doc="Beta module"),
-        ]
-        print_introspection(mods)
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_introspection([_make_module(name, doc=f"{name} module") for name in names])
+
+        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        for name in names:
+            assert name in printed
 
 
 # ===========================================================================
@@ -507,19 +520,33 @@ class TestPrintHelp:
 
         print_help([])
 
-    def test_module_without_underscore(self) -> None:
-        """Handles module names without underscores (no short form)."""
+    @pytest.mark.parametrize(
+        ("module_name", "expected_short"),
+        [("create_plan", "create"), ("templates", None)],
+    )
+    def test_a_short_form_is_shown_only_when_the_name_has_one(self, module_name, expected_short) -> None:
+        """An underscored name prints 'short, full'; a single word prints once.
+
+        MERGED (DPLAN-0323 contested band, 2026-09-07) from
+        ``test_module_with_underscore`` and ``test_module_without_underscore``,
+        which made the identical call as their sibling with a different name
+        string and asserted nothing — the 'no short form' and 'shows short and
+        full name' claims were never read. Kept as a PARAMETRISED pair rather
+        than deleted, because unlike the introspection twins these two DO
+        straddle a real branch (``if short_name != module_name`` in flow.py),
+        and each row now carries the oracle its own claim needs.
+        """
         from aipass.flow.apps.flow import print_help
 
-        mod = _make_module("templates", doc="Template operations")
-        print_help([mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_help([_make_module(module_name, doc="Any description")])
 
-    def test_module_with_underscore(self) -> None:
-        """Shows both short and full name for underscore-separated modules."""
-        from aipass.flow.apps.flow import print_help
-
-        mod = _make_module("create_plan", doc="Create a plan")
-        print_help([mod])
+        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        assert module_name in printed
+        if expected_short:
+            assert f"{expected_short}," in printed
+        else:
+            assert f"{module_name}," not in printed
 
     def test_module_without_docstring(self) -> None:
         """Uses 'No description' for undocumented modules."""
@@ -558,12 +585,27 @@ class TestPrintModuleHelp:
         mod = _make_module("bare_mod", doc=None)
         print_module_help("bare_mod", [mod])
 
-    def test_module_with_multiline_docstring(self) -> None:
-        """Displays the full stripped docstring."""
+    def test_a_multiline_docstring_is_shown_whole_and_stripped(self) -> None:
+        """Every line reaches the reader, without the leading/trailing blanks.
+
+        KEPT rather than merged into ``test_exact_match`` (DPLAN-0323 contested
+        band, 2026-09-07). The two make the same found-module call, but this
+        one's subject is what ``print_module_help`` does to a docstring that
+        spans lines — ``.strip()`` on the whole string, not the first line
+        only, which is what the module listing does instead. Mutation-checked:
+        with the assertions it now carries, printing only the first line reds
+        it; before, it asserted nothing and both spellings passed.
+        """
         from aipass.flow.apps.flow import print_module_help
 
         mod = _make_module(
             "list_plans",
-            doc="List plans\n\nShows all plans in the registry.",
+            doc="\nList plans\n\nShows all plans in the registry.\n",
         )
-        print_module_help("list_plans", [mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_module_help("list_plans", [mod])
+
+        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        assert "List plans" in printed
+        assert "Shows all plans in the registry." in printed
+        assert not printed.strip().endswith("\\n")

@@ -1395,13 +1395,20 @@ class TestUnknownArgumentRefusal:
         """The refusal is only real once a reader sees it."""
         from aipass.seedgo.apps.modules import audit_tests as verb
 
+        from aipass.seedgo.apps.modules import CommandRefused
+
         printed = _capture_output(monkeypatch, verb)
 
-        verb._refuse_unknown_argument("--nonsense", ["@backup", "--nonsense"])
+        # Raises since 2026-09-07: the printed "exit code: 7" and the code the
+        # process leaves with are one number, not two (Patrick's standing
+        # ruling, fleet sweep 2026-09-07).
+        with pytest.raises(CommandRefused) as refused:
+            verb._refuse_unknown_argument("--nonsense", ["@backup", "--nonsense"])
 
         assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)
         assert any("exit code: 7" in line for line in printed)
         assert any("try: drone @seedgo audit-tests" in line for line in printed)
+        assert refused.value.code == 7
 
 
 class TestLaneParsingRefusesTheUnrecognized:
@@ -1464,10 +1471,13 @@ class TestLaneVerbRefusesTheUnrecognized:
     def test_nothing_is_measured_once_a_token_is_unrecognized(self, monkeypatch):
         from aipass.seedgo.apps.modules import audit_tests as verb
 
+        from aipass.seedgo.apps.modules import CommandRefused
+
         printed = _capture_output(monkeypatch, verb)
         monkeypatch.setattr(verb.runner, "run", lambda *a, **k: printed.append("MEASURED"))
 
-        verb._run(["@backup", "--nonsense"])
+        with pytest.raises(CommandRefused):
+            verb._run(["@backup", "--nonsense"])
 
         assert "MEASURED" not in printed, "the lane measured a target it had already failed to understand"
         assert any(line.startswith("REFUSED: [ARGV]") and "'--nonsense'" in line for line in printed)

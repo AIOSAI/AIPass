@@ -53,6 +53,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -65,6 +66,10 @@ from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 # =============================================
 
 MODULE_NAME = "aggregate_central"
+
+# Everything `aggregate` reads. Named once so the refusal, the help
+# text and the parsing cannot drift apart.
+AGGREGATE_FLAGS = ("--heal", "--no-heal", "--sweep-cards")
 
 
 def _find_repo_root() -> Path:
@@ -181,6 +186,18 @@ def handle_command(command: str, args: List[str]) -> bool:
     if wants_help(args):
         print_help()
         return True
+
+    # Every token this verb reads. Anything else is refused BY NAME rather than
+    # ignored: measured 2026-09-07, `aggregate <typo>` ran the real
+    # cross-branch write and reported success, so a mistyped flag looked like
+    # the aggregation the caller asked for (ruling 2026-09-07).
+    unknown = [token for token in args if token not in AGGREGATE_FLAGS]
+    if unknown:
+        try:
+            refuse_unknown(unknown[0], door="aggregate", valid=AGGREGATE_FLAGS, noun="argument")
+        except UnknownArgument as exc:
+            error(exc.message, suggestion=exc.usage)
+            raise SystemExit(1) from exc
 
     # Log the operation
     json_handler.log_operation("central_aggregated", {"command": command, "args": args})

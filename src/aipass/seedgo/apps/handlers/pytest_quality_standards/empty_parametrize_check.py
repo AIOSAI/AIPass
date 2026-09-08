@@ -102,7 +102,7 @@ STANDARD_NAME = "empty_parametrize"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Builtins that cannot invent emptiness on their own: handed a non-empty
 #: argument they return something non-empty. `range` is here because

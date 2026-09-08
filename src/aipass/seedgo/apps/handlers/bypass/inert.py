@@ -220,10 +220,13 @@ def out_of_scope_reason(rule: dict) -> str | None:
 
     Says nothing about two cases it genuinely cannot see. A wildcard file
     pattern covers both kinds of file at once. And a branch-level checker walks
-    the tree itself: test_quality's module-coverage category names PRODUCTION
-    modules while the standard is about tests, so reading its rules against the
-    per-file lanes' scope would confidently report live rules as dead — the
-    same mistake this module already made once by reading half a call site.
+    the tree itself: every rule in the `pytest_quality` pack declares
+    AUDIT_SCOPE branch_level and reads test units directly, so reading its
+    rules against the per-file lanes' scope would confidently report live
+    rules as dead — the same mistake this module already made once by reading
+    half a call site. The example here was v4 `test_quality`, whose
+    module-coverage category named PRODUCTION modules while the standard was
+    about tests; it retired 2026-09-07 and the hazard outlived it.
     """
     path = rule.get("file")
     if not path or any(ch in path for ch in "*?["):

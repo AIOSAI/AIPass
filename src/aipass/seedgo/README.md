@@ -186,7 +186,7 @@ seedgo/
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 62 test files, 3030 test functions (pytest expands to 3700 cases)
+├── tests/                           # 62 test files, 3028 test functions (pytest expands to 3897 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -338,11 +338,19 @@ restate them here. Read the directory, or ask @hooks.
 
 Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **62 test files, 3030 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 3700 cases** once
-  parametrisation is applied.
-- **Run result:** 3695 passed, 5 skipped, 0 failed (334s, from the repo root in the CI shape:
-  `python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.`).
+- **62 test files, 3028 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 3897 cases** once
+  parametrisation is applied. Re-measured 2026-09-07 after FPLAN-0496: six merged rows out of
+  `test_coverage_audit.py`, three mutation pins into the json contract, and the contract's
+  discovery widening from 18 branches to 22 — which is most of the case growth, since every
+  parametrised contract now runs on four resident citizens as well.
+- **Run result:** 3843 passed, 53 skipped, **1 failed** (79s, from the repo root in the CI shape:
+  `python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.`). The failure is
+  `TestFleetAcceptanceBar::test_exactly_six_citizens_are_canonical_on_observations`, a live-state
+  guard that reads the whole fleet's `.trinity/observations.json`: @hooks added an observation
+  without `tags` at 11:11 on 2026-09-07 and the clean set moved. Their file, their cure — reported
+  to them at 11:20, not edited here, and the guard is deliberately an exact equality that is never
+  loosened to keep a suite green.
 - **Down from 3087 functions on 2026-09-05, and every one of the 57 was retired on evidence**
   (FPLAN-0491): the v4 `test_quality` sections went with the standard; `tests/test_json_handler.py`
   moved whole to `.archive/` because all six of its tests are carried, parametrised over all 18
@@ -485,9 +493,10 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
 - **Seedgo score:** 100% — **46** consulted entries (45 standards + diagnostics), every one at 100,
   nothing `not_applicable`. 47 until 2026-09-07; `test_quality` retiring is the whole difference,
   and CI's `EXPECTED_STANDARDS` tripwire moves with it.
-- **Tests:** 3695 passed, 5 skipped (3030 test functions across 62 files; pytest expands them to
-  3700 cases)
-- **Coverage:** 449 public functions tested of 584 (76%)
+- **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
+  drift, not seedgo's code (see the run result above). 3028 test functions across 62 files; pytest
+  expands them to 3897 cases.
+- **Coverage:** 451 public functions tested of 588 (77%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)
 - **Bypass:** 43 rules. The 100% above is a real score with 43 documented exceptions under it, not

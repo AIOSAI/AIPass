@@ -274,7 +274,16 @@ class TestHandleErrorDetectedGates:
         assert "Backoff active" in str(rate_log.call_args)
 
     def test_suppressed_fingerprint_does_not_dispatch(self) -> None:
-        """A registry-suppressed fingerprint never dispatches (compass #219)."""
+        """A registry-suppressed fingerprint never dispatches (compass #219).
+
+        KEPT against the DPLAN-0323 merge walk, which read this as a restatement
+        of test_returns_early_should_dispatch_false. Measured 2026-09-07: move
+        the shared `return` into the backoff arm only, so the suppressed arm
+        falls through and dispatches, and the entire 1042-case suite stays
+        GREEN — this is the only test that fails. The logging sibling asserts
+        which trail the refusal is written to and never looks at the send, so
+        it cannot see a suppressed error going out the door.
+        """
         mod = _import_module()
         send = _setup_happy_path(mod)
         mod.registry_should_dispatch = MagicMock(return_value=False)  # type: ignore[attr-defined]

@@ -1,7 +1,14 @@
 """Tests for restore_ops handler -- plan restore business logic."""
 
+import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+# A real temp directory rather than a hardcoded "/tmp": these rows are only
+# fixture data, but a POSIX-only literal is a Windows defect waiting for the
+# first assertion that reads one back.
+_TMP = Path(tempfile.gettempdir())
 
 
 # ─── Helpers ─────────────────────────────────────────────
@@ -21,24 +28,29 @@ def _import_recover_plan_from_backup():
     return recover_plan_from_backup
 
 
-def _make_deps(**overrides):
-    """Build a default set of injected dependencies, with optional overrides."""
-    deps = {
+def _make_deps(**overrides) -> dict[str, Any]:
+    """Build a default set of injected dependencies, with optional overrides.
+
+    Annotated ``dict[str, Any]`` on purpose: callers substitute plain functions
+    for the MagicMock defaults, and without the annotation the value type is
+    inferred from those defaults alone.
+    """
+    deps: dict[str, Any] = {
         "normalize_plan_number": MagicMock(side_effect=lambda x: x.zfill(4)),
         "load_registry": MagicMock(
             return_value={
                 "plans": {
                     "0001": {
                         "status": "closed",
-                        "file_path": "/tmp/FPLAN-0001.md",
-                        "location": "/tmp",
+                        "file_path": str(_TMP / "FPLAN-0001.md"),
+                        "location": str(_TMP),
                         "relative_path": "flow",
                         "subject": "Test plan",
                         "closed": "2026-03-19",
                         "closed_reason": "completed",
                         "memory_created": True,
                         "memory_created_date": "2026-03-19",
-                        "memory_file": "/tmp/memory.md",
+                        "memory_file": str(_TMP / "memory.md"),
                     },
                 }
             }
@@ -608,6 +620,87 @@ class TestRecoverPlanFromBackup:
         saved_reg = save.call_args[0][0]
         assert saved_reg["plans"]["0010"]["location"] == str(flow_root)
 
+    # ── What "absolute" means in a registry shared across install histories ──
+    # Ruled 2026-09-07 (FPLAN-0492 wave 4): absolute is EITHER dialect, and a
+    # vanished absolute record is refused by name — never re-homed to FLOW_ROOT.
+    # The host running these tests must not decide any of these verdicts.
+
+    def _recover_with_recorded_location(self, tmp_path, recorded, plan_key="0077"):
+        """Recover a backup whose header records *recorded*, in a sandbox tree."""
+        fn = _import_recover_plan_from_backup()
+
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        backup_file = backup_dir / f"FPLAN-{plan_key}.md"
+        backup_file.write_text(f"# Plan\n**Location**: {recorded}\n", encoding="utf-8")
+
+        flow_root = tmp_path / "flow"
+        flow_root.mkdir()
+
+        load = MagicMock(return_value={"plans": {}})
+        save = MagicMock()
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", flow_root),
+        ):
+            ok, msg = fn(plan_key, load_registry=load, save_registry=save)
+
+        return ok, msg, save, flow_root
+
+    def test_a_windows_recorded_location_is_not_read_as_relative(self, tmp_path):
+        """``C:\\plans`` is absolute even on POSIX, so it cannot land in FLOW_ROOT.
+
+        This is the defect the ruling names: ``startswith("/")`` calls a
+        drive-letter path relative, the relative branch fails to resolve it, and
+        the fallback files the plan under FLOW_ROOT — a directory the plan's own
+        header never mentioned. Refusing is the cure; where it must NOT go is the
+        assertion that catches a regression.
+        """
+        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"C:\plans\archive")
+
+        assert ok is False
+        assert r"C:\plans\archive" in msg
+        save.assert_not_called()
+        assert not list(flow_root.glob("*.md"))
+
+    def test_a_unc_recorded_location_is_not_read_as_relative(self, tmp_path):
+        """A UNC share is the other windows-absolute spelling, and it has no drive letter."""
+        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"\\server\share\plans")
+
+        assert ok is False
+        assert r"\\server\share\plans" in msg
+        save.assert_not_called()
+        assert not list(flow_root.glob("*.md"))
+
+    def test_a_vanished_posix_location_is_refused_by_name(self, tmp_path):
+        """The same rule in the host's own dialect: gone means refused, not re-homed."""
+        gone = tmp_path / "deleted_seat"
+        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, str(gone))
+
+        assert ok is False
+        assert str(gone) in msg
+        save.assert_not_called()
+        assert not list(flow_root.glob("*.md"))
+
+    def test_a_live_posix_location_still_restores_there(self, tmp_path):
+        """The refusal is about a MISSING directory, not about absolute paths."""
+        seat = tmp_path / "live_seat"
+        seat.mkdir()
+        ok, msg, save, _flow_root = self._recover_with_recorded_location(tmp_path, str(seat))
+
+        assert ok is True
+        assert (seat / "FPLAN-0077.md").exists()
+        assert save.call_args[0][0]["plans"]["0077"]["location"] == str(seat)
+
+    def test_a_relative_location_still_resolves_against_the_tree(self, tmp_path):
+        """The relative branch is untouched: 'flow' still means FLOW_ROOT."""
+        ok, _msg, save, flow_root = self._recover_with_recorded_location(tmp_path, "flow")
+
+        assert ok is True
+        assert save.call_args[0][0]["plans"]["0077"]["location"] == str(flow_root)
+
     def test_picks_newest_variant(self, tmp_path):
         fn = _import_recover_plan_from_backup()
 
@@ -787,6 +880,7 @@ class TestRestoreFileFromBackup:
 
         target, msg = restore_file_from_backup(row, "0042", backup_dir=archive)
         assert target == home / name
+        assert target is not None
         assert target.is_file()
         assert (archive / name).is_file(), "archive copy was consumed"
         assert "restored" in msg

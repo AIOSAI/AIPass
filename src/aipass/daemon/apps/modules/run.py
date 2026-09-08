@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-15
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -20,17 +20,24 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
     save_runstate,
+    is_catch_up_fire,
     is_job_due,
+    missed_window,
+    needs_slot_seed,
+    note_missed_window,
+    seed_interval_slot,
     update_job_runstate,
     record_job_failure,
     record_job_blocked,
     job_key,
     prune_orphans,
+    window_label,
 )
 from aipass.daemon.apps.handlers.module_root import module_file
 
@@ -109,7 +116,8 @@ def print_help():
     console.print()
     console.print("  [bold]Schedule types:[/bold]")
     console.print("    [cyan]interval[/cyan]  interval_minutes: N")
-    console.print("              [dim]Fires when elapsed >= N since last_run. Fires immediately if never run.[/dim]")
+    console.print("              [dim]Fires when elapsed >= N since last_run.[/dim]")
+    console.print("              [dim]Never run and no slot -> fires IMMEDIATELY (warned in run.log).[/dim]")
     console.print("    [cyan]daily[/cyan]     time: HH:MM")
     console.print("              [dim]+/-15 min window, once per day.[/dim]")
     console.print("    [cyan]hourly[/cyan]    time: M  [dim](minute of hour)[/dim]")
@@ -122,8 +130,23 @@ def print_help():
     console.print()
     console.print("  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models)")
     console.print()
-    console.print("  [bold]Staggering:[/bold] No native offset field. Seed different last_run values")
-    console.print("  in daemon_json/daemon_runstate.json to offset first-fire timing.")
+    console.print("  [bold]Optional schedule fields:[/bold]")
+    console.print('    [cyan]slot[/cyan]      "2026-09-06T03:00:00"   [dim](interval jobs)[/dim]')
+    console.print("              [dim]An ISO instant naming ONE occurrence of the rhythm you want.[/dim]")
+    console.print("              [dim]A job that has never run is seeded from it, so the first fire[/dim]")
+    console.print("              [dim]lands on the next slot instead of the next tick. Without it,[/dim]")
+    console.print("              [dim]enabling a weekly job at 01:34 locks it to 01:34 forever.[/dim]")
+    console.print("              [dim]A past slot keeps its phase — it is rolled forward, not used raw.[/dim]")
+    console.print("    [cyan]catch_up[/cyan]  true                    [dim](daily and rotation jobs)[/dim]")
+    console.print("              [dim]Off unless stated. When the window closed with no run (host[/dim]")
+    console.print("              [dim]down, daemon not ticking), the first tick after it fires the[/dim]")
+    console.print("              [dim]job once and stamps caught_up on the runstate row.[/dim]")
+    console.print()
+    console.print("  [bold]Staggering:[/bold] Prefer `slot` on interval jobs. Seeding last_run values")
+    console.print("  in daemon_json/daemon_runstate.json by hand still works for the other types.")
+    console.print()
+    console.print("  [bold]run.log:[/bold] a MISSED line names every daily job whose window closed")
+    console.print("  unrun — once per job per day, whether or not catch_up is on.")
     console.print()
 
 
@@ -243,6 +266,89 @@ def _fire_job(job: dict, runstate: dict) -> tuple:
         return OUTCOME_FAILED, str(e)
 
 
+def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> int:
+    """Give every never-run interval job a rhythm before it can fire. Returns count seeded.
+
+    Runs BEFORE the due check, because an unseeded interval job is due on the
+    very tick that discovers it — seeding afterwards would already have fired it
+    at whatever minute the daemon happened to tick, which is the whole defect.
+
+    A job declaring no slot keeps today's behaviour and fires immediately. That
+    is not silent: it warns, names itself, and says what is about to happen, so
+    an owner who wanted a slot finds out on the first tick rather than a week
+    later from the wrong hour in their log.
+    """
+    seeded_count = 0
+    for job in enabled:
+        if not needs_slot_seed(job, runstate):
+            continue
+
+        owner, job_id = job["owner"], job["id"]
+        slot = job.get("schedule", {}).get("slot")
+
+        if not slot:
+            logger.warning(
+                "[run] %s/%s is an interval job that has never run and declares no 'slot' — "
+                "its first fire is IMMEDIATE, on this tick, and every later run measures from "
+                "that arbitrary minute. Add a slot to choose the hour.",
+                owner,
+                job_id,
+            )
+            _log(f"WARNING: {owner}/{job_id} — no slot, first fire is immediate at this tick's minute")
+            continue
+
+        if dry_run:
+            _log(f"DRY RUN — would seed {owner}/{job_id} from slot {slot}")
+            continue
+
+        seeded = seed_interval_slot(runstate, job)
+        if seeded is None:
+            _log(f"WARNING: {owner}/{job_id} — slot {slot!r} unreadable, first fire is immediate")
+            continue
+
+        seeded_count += 1
+        next_run = runstate["jobs"][job_key(owner, job_id)].get("next_run")
+        _log(f"SEED: {owner}/{job_id} — slot {slot}, last_run seeded {seeded}, first fire {next_run}")
+
+    if seeded_count and not dry_run:
+        save_runstate(runstate)
+    return seeded_count
+
+
+def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -> int:
+    """Write one MISSED line per daily job whose window closed unrun. Returns count.
+
+    Independent of ``catch_up``: a job nobody opted in still missed its window,
+    and that is exactly the fact an operator needs in order to decide whether to
+    opt it in. Stamped once per job per day so a tick every two minutes does not
+    repeat the same miss until midnight.
+    """
+    missed_count = 0
+    for job in enabled:
+        if not missed_window(job, runstate):
+            continue
+
+        owner, job_id = job["owner"], job["id"]
+        window = window_label(job["schedule"])
+        catch_up = job.get("schedule", {}).get("catch_up")
+
+        if dry_run:
+            _log(f"DRY RUN — would record MISSED {owner}/{job_id} (window {window})")
+            continue
+
+        if not note_missed_window(runstate, owner, job_id):
+            continue
+
+        missed_count += 1
+        tail = "catch_up is on — firing late this tick" if catch_up else "catch_up is off — not firing"
+        logger.warning("[run] MISSED %s/%s: window %s closed with no run; %s", owner, job_id, window, tail)
+        _log(f"MISSED: {owner}/{job_id} — window {window} closed with no run; {tail}")
+
+    if missed_count and not dry_run:
+        save_runstate(runstate)
+    return missed_count
+
+
 def run_tick(dry_run: bool = False) -> dict:
     """
     Execute one discover -> due-check -> fire pass.
@@ -257,6 +363,9 @@ def run_tick(dry_run: bool = False) -> dict:
         "failed": 0,
         "blocked": 0,
         "skipped": 0,
+        "seeded": 0,
+        "missed": 0,
+        "caught_up": 0,
     }
 
     json_handler.log_operation("scheduler_tick", {"dry_run": dry_run})
@@ -292,6 +401,9 @@ def run_tick(dry_run: bool = False) -> dict:
         save_runstate(runstate)
         _log(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
 
+    results["seeded"] = _seed_interval_slots(enabled, runstate, dry_run)
+    results["missed"] = _report_missed_windows(enabled, runstate, dry_run)
+
     due_jobs = [j for j in enabled if is_job_due(j, runstate)]
     results["due"] = len(due_jobs)
     results["skipped"] = len(enabled) - len(due_jobs)
@@ -312,10 +424,18 @@ def run_tick(dry_run: bool = False) -> dict:
 
     # Step 4: Fire due jobs
     for job in due_jobs:
+        # Asked BEFORE the fire: firing is what makes it untrue, so a caught-up
+        # run read after the fact would always report as an ordinary one.
+        caught_up = is_catch_up_fire(job, runstate)
         outcome, detail = _fire_job(job, runstate)
         if outcome == OUTCOME_FIRED:
             results["fired"] += 1
-            update_job_runstate(runstate, job["owner"], job["id"], job["schedule"])
+            if caught_up:
+                results["caught_up"] += 1
+                _log(
+                    f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window_label(job['schedule'])} window closed"
+                )
+            update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=caught_up)
         elif outcome == OUTCOME_BLOCKED:
             # Never stamps last_run — the job stays due and the next tick tries
             # again inside the same window.
@@ -331,7 +451,8 @@ def run_tick(dry_run: bool = False) -> dict:
 
     _log(
         f"Tick complete: {results['fired']} fired, {results['failed']} failed, "
-        f"{results['blocked']} blocked, {results['skipped']} skipped"
+        f"{results['blocked']} blocked, {results['skipped']} skipped, "
+        f"{results['seeded']} seeded, {results['missed']} missed, {results['caught_up']} caught up"
     )
     return results
 
@@ -372,6 +493,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     elif args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate("run", args, flags=("--dry-run",), usage="drone @daemon run [--dry-run]")
 
     dry_run = "--dry-run" in args
 

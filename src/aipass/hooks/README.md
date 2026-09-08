@@ -29,21 +29,20 @@ drone @hooks --help              # Full help reference
 | Command | What it does |
 |---|---|
 | `drone @hooks` | Show branch structure (auto-discovered modules) |
-| `drone @hooks status` | Show hook config for current project |
+| `drone @hooks status` | Show hook config for current project — **exits 1** when there is no config to show |
 | `drone @hooks engine` | Show connected handlers — **works, but is absent from `--help`** (see Status) |
 | `drone @hooks log` | Tail recent hook activity (last 20 JSONL entries) |
 | `drone @hooks hooksound` | Show current sound mute status |
 | `drone @hooks hooksound off` | Mute all hook sounds |
 | `drone @hooks hooksound on` | Unmute all hook sounds |
 | `drone @hooks feedback` | Show feedback pulse status (enabled/disabled) |
-| `drone @hooks feedback off` | Disable feedback pulse for this project |
-| `drone @hooks feedback on` | Enable feedback pulse for this project |
-| `drone @hooks dismiss <alert-id>` | Remove an alert from `.aipass/alerts.json` |
+| `drone @hooks feedback off` | Disable feedback pulse for this project — **exits 1** outside an AIPass project |
+| `drone @hooks feedback on` | Enable feedback pulse for this project — **exits 1** outside an AIPass project |
+| `drone @hooks dismiss <alert-id>` | Remove an alert from `.aipass/alerts.json` — **exits 1** when the id is not found |
 | `drone @hooks cadence` | Show prompt injection cadence config and state |
 | `drone @hooks diagnostics_state` | Show recorded post-edit diagnostics and re-check them live |
 | `drone @hooks sessions` | List live Claude Code sessions (PIDs) |
 | `drone @hooks sessions reclaim [@branch]` | Stop sessions cleanly — clean slate |
-| `drone @hooks presence` | Show branch presence claims |
 | `drone @hooks context_window` | Show transcript fill vs the compact window |
 | `drone @hooks sandbox` | Show kernel sandbox (srt/bwrap) status |
 | `drone @hooks testwrite` | Show the test-write policy in force + what the gate cannot catch |
@@ -87,7 +86,7 @@ src/aipass/hooks/
 │   │   ├── context_window.py    # Transcript usage reader + per-branch compact-window resolver
 │   │   ├── diagnostics_state.py # What .diagnostics_state.json means — shared by auto_fix + edit_gate
 │   │   ├── hook_test.py         # Portable test runner (drone @hooks test)
-│   │   ├── cc_sessions.py       # CC-native session file reader (~/.claude/sessions/<pid>.json)
+│   │   ├── cc_sessions.py       # CC-native session reader + session-PID resolution
 │   │   ├── cc_transcripts.py    # CC-native transcript reader (~/.claude/projects/<cwd>/<sessionId>.jsonl)
 │   │   ├── engine.py            # Core dispatch — routes events to handlers
 │   │   ├── feedback.py          # Feedback pulse toggle (drone @hooks feedback on/off)
@@ -99,7 +98,7 @@ src/aipass/hooks/
 │   │   ├── admin_seat.py        # The verified admin-seat exemption — one home, read by two gates
 │   │   ├── testgate_policy.py   # Reads .aipass/test_write_policy.json (drone @hooks testwrite)
 │   │   ├── testwrite_targets.py # Which write targets are NEW test files — testwrite_gate's classifier
-│   │   ├── presence.py          # Branch presence — claim/release/refresh for .ai_central/PRESENCE.central.json
+│   │   ├── presence(disabled).py # RETIRED 2026-09-07 — superseded by cc_sessions.py; PID resolution moved there
 │   │   ├── sandbox.py           # Kernel sandbox — srt/bwrap wrapper + per-role policy generator
 │   │   └── wire_verify.py       # Wire verification — provider ↔ project hook wiring checker
 │   ├── handlers/
@@ -127,7 +126,7 @@ src/aipass/hooks/
 │   │   ├── lifecycle/           # Session management hooks
 │   │   │   ├── auto_fix.py      #   Post-edit diagnostics (ruff, pyright, py_compile)
 │   │   │   ├── auto_process.py  #   Scheduled inbox/task processing (UserPromptSubmit + PreCompact)
-│   │   │   ├── auto_watchdog.py #   Watchdog arming after dispatch (live; retirement pending — see below)
+│   │   │   ├── auto_watchdog(disabled).py # RETIRED 2026-09-07 — was watchdog arming after dispatch
 │   │   │   ├── compact.py       #   Pre-compact memory archival
 │   │   │   ├── session_boot.py  #   Boot wrapper (main() CLI, not a hook — no handle())
 │   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction (PostToolUse, DPLAN-0276)
@@ -154,7 +153,8 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1801 test functions across 54 files; pytest expands to 1883 cases (1882 pass, 1 env-skipped)
+└── tests/                       # 1758 test functions across 51 files; pytest expands to 1840 cases (1838 pass, 2 skipped — 1 env, 1 win32-only)
+    └── parked/                  # 2 retired suites + a collect_ignore_glob conftest — kept for revival, never run
 ```
 
 ## How It Works
@@ -222,9 +222,9 @@ The switch lives in `engine._log_detail()`, read per call. **Correction, 2026-09
 
 ## Dynamic Dispatch
 
-Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 60 non-`__init__` files, and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
+Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 59 live non-`__init__` files (61 on disk, two parked as `(disabled)`), and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
 
-Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
+Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). **30 of the 32 are `enabled: true`** as of 2026-09-07: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` was flipped off when it was retired (FPLAN-0495 item 3). Editing `.aipass/hooks.json` breaks its enrolled hash, which disables EVERY hook for the project until a human re-enrolls with `aipass trust /home/patrick/Projects/AIPass` — that checkpoint is deliberate, it does not auto-heal, and it is outstanding right now. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
 
 ## Event Types
 
@@ -232,7 +232,7 @@ Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names �
 |---|---|---|
 | UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
 | PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (scripted cross-project lane) once its matcher is widened — see the CONFIG WIRE note under Edit Gate |
-| PostToolUse | auto_fix, auto_watchdog, post_compact_regrounding | Diagnostics + watchdog + post-compaction re-ground backstop |
+| PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
 | SubagentStop | subagent_gate | Seedgo validation |
 | Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
 | Notification | announce | Announcement tone |
@@ -255,13 +255,28 @@ Entry name and filename diverge for others too (`pre_edit_gate` → `security/ed
 entry name, not the filename** — `claude.py UserPromptSubmit:branch_prompt`, never `:branch_loader`.
 Wire a new per-handler entry with the name as it appears in `hooks.json`.
 
-### auto_watchdog — retirement decided, not yet executed
+### auto_watchdog — retired 2026-09-07, awaiting the trust re-enrol
 
-`auto_watchdog` is **live and enabled** in this repo and fires on every PostToolUse. Its retirement
-has been decided (its arming path is owner-only, which makes it a refusal for 17 of 18 citizens), but
-it is gated on a Patrick-present ceremony: both `hooks.json` entries set `enabled: false`, then
-`aipass trust` re-enrol, then the file rename. Until that runs, the handler stays as documented above.
-Do not disable or rename it out-of-band — an un-re-enrolled config edit takes *every* hook dark.
+`auto_watchdog` fired on every PostToolUse to pattern-match one command shape and inject a reminder.
+Its arming path is owner-only, which made it a refusal for 17 of 18 citizens. Retired under
+FPLAN-0495 item 3:
+
+1. `apps/handlers/lifecycle/auto_watchdog.py` → `auto_watchdog(disabled).py`; its tests parked under
+   `tests/parked/`. The dotted-path entry in both configs names the old module, so the rename alone
+   disables nothing — the flip below is what retires it.
+2. `"enabled": false` in **both** `.aipass/hooks.json` and `.aipass/project_hooks.json`. One line
+   changed per file; nothing else was touched.
+
+**Every hook in this project is DARK until the trust re-enrol runs.** `hooks.json` is hash-enrolled,
+so any byte change invalidates it. The re-enrol is a human checkpoint (the DPLAN-0285 scar — an
+out-of-band config edit took all hooks dark for ~8 minutes) and was deliberately not run here:
+
+```
+aipass trust <path-to-this-repo>
+```
+
+Enrolled hash was `sha256:2d545329590915e3…`; after the flip the file hashes `sha256:6bfb591a3e8305…`.
+Archive the handler only after a session cycle proves nothing was connected.
 
 ## Git Gate
 
@@ -480,7 +495,7 @@ fence.
 > and `registry_gate` already had). Before that widening, Bash events never reached the handler at
 > all and the scripted lane was dark no matter what the code did. Because any byte change to
 > `hooks.json` invalidates the trust hash in `~/.aipass/trusted_projects.json`, the edit was followed
-> immediately by `aipass trust /home/patrick/Projects/AIPass` — an un-re-enrolled config edit takes
+> immediately by `aipass trust <path-to-this-repo>` — an un-re-enrolled config edit takes
 > *every* hook dark. Verify with `drone @hooks hookstatus`; re-run `aipass trust` after any further
 > edit to that file.
 
@@ -609,7 +624,7 @@ There is no uninstall script: remove the marked block from each rc file by hand.
 
 | Branch | What for |
 |---|---|
-| prax | Logging (system_logger for prax monitor visibility) — 57 import statements in 55 files under `apps/` |
+| prax | Logging (system_logger for prax monitor visibility) — 57 import statements in 56 files under `apps/` |
 | cli | Rich console rendering for every command surface — 21 import statements in 21 files under `apps/` |
 
 ### Provides To
@@ -629,7 +644,7 @@ What is open, and what is stated rather than fixed:
 | `testwrite_gate` has false-fired **7 times** across the DPLAN-0325 campaign: it reads a path-shaped *argument* of a read-only command (a pytest target, a `cd`-compound resolved against the wrong cwd) as a new test file | Open, reported by @devpulse 2026-09-04, queued |
 | `git_gate` false-fired once on a **heredoc mail body**: `RAW_GIT_RE` scans command text after stripping *quoted* strings, and a heredoc body is not quoted, so prose containing "git" blocked an `ai_mail` reply | Open, reported by @devpulse/@seedgo 2026-09-04, queued |
 | `engine._log_detail()`'s env switch predates prax gaining `logger.debug()`; folding one onto the other is unstarted | Open cleanup |
-| `auto_watchdog` retirement is **decided but not executed** — it is live and fires on every PostToolUse (see its section above) | Blocked on a Patrick-present ceremony |
+| ~~`auto_watchdog` retirement is **decided but not executed** — it is live and fires on every PostToolUse~~ | **Executed 2026-09-07** (FPLAN-0495 item 3). Renamed + both configs flipped. Hooks are dark until `aipass trust <path-to-this-repo>` runs — see its section above |
 | Branch audit is **100%** on every category, with **no `test_quality` bypass in `.seedgo/bypass.json`**. It sat at 99% from 2026-09-03, when the DPLAN-0325 sweep dropped that bypass and `seedgo`'s v4 pack went on asking for a `mock_json_handler` fixture and an `invalid_mode_raises` contract the sweep had retired. Measured green again 2026-09-05: @seedgo's v4 retirement has landed, and the 100 is earned rather than suppressed | Closed |
 | `.claude/provider_manifest.json` pins `2.1.228`; the installed binary is `2.1.263` | Drift, not re-pinned in this doc pass |
 | ~~`drone @hooks test` fires the **real** PreCompact handlers, so `pre_compact_prep` stamps a genuine AUTO-COMPACT SNAPSHOT into the running branch's `.trinity/local.json` when no compaction happened. Found by running it for this doc pass, 2026-09-05; the false entry was removed by hand~~ | **Closed 2026-09-06.** Every fire now aims at a throwaway branch skeleton (payload `cwd` + process cwd + `AIPASS_HOME`). Proven by sha256 of all three `.trinity` files, identical across a run, with the handler's own log showing it stamped the skeleton — not vacuous |
@@ -638,7 +653,7 @@ What is open, and what is stated rather than fixed:
 | A `MagicMock/LOG_FILE/` directory sits in the branch root, created 2026-07-10 — test debris from a mock used as a path. Author unknown; not attributed | Unexplained, left in place |
 | The `dead_code` 40% / "29 of 49 files" figure in Dynamic Dispatch is **historic and not re-verified** — re-running unshielded needs a bypass-rule change this branch does not make for a doc pass | Unverified, marked in place |
 
-*Last Updated: 2026-09-06*
+*Last Updated: 2026-09-07*
 
 ---
 

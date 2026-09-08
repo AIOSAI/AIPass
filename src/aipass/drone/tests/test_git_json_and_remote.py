@@ -276,6 +276,48 @@ class TestLogJson:
         assert doc["ok"] is False
         assert result["exit_code"] == 1
 
+    @patch(_AUTH, return_value="drone")
+    def test_unknown_argument_refuses_by_name(self, _auth: MagicMock) -> None:
+        """Patrick's standing ruling: an unknown argument FAILS, by name.
+
+        Red before 2026-09-07. ``log not_a_real_count`` logged a WARNING that
+        the token was unparseable and then carried on with the default 10, so
+        the output was byte-identical to plain ``log``, stderr was empty and the
+        exit code was 0 — the caller was told the count it asked for had been
+        honoured. The bad token must reach the message, or the next reader has
+        nothing to grep for.
+        """
+        with patch(f"{_GIT_MOD}.log_handler.get_git_log") as mock_log:
+            result = handle_command("log", ["not_a_real_count"])
+
+        assert result["exit_code"] == 1
+        assert result["stdout"] == ""
+        assert "not_a_real_count" in result["stderr"]
+        mock_log.assert_not_called()
+
+    @patch(_AUTH, return_value="drone")
+    def test_unknown_argument_refuses_as_a_document_under_json(self, _auth: MagicMock) -> None:
+        """A refusal is a document too — the JSON caller parses why, not a guess."""
+        with patch(f"{_GIT_MOD}.log_handler.get_git_log") as mock_log:
+            result = handle_command("log", ["not_a_real_count", JSON_FLAG])
+
+        doc = json.loads(result["stdout"])
+        assert doc["ok"] is False
+        assert "not_a_real_count" in doc["message"]
+        assert result["exit_code"] == 1
+        mock_log.assert_not_called()
+
+    @patch(_AUTH, return_value="drone")
+    def test_the_valid_idioms_still_parse(self, _auth: MagicMock) -> None:
+        """The refusal must not eat the three shapes git itself accepts."""
+        for args, expected in ((["20"], 20), (["-n", "5"], 5), (["-3"], 3)):
+            with patch(
+                f"{_GIT_MOD}.log_handler.get_git_log",
+                return_value={"entries": [], "count": 0, "message": "0 log entries"},
+            ) as mock_log:
+                handle_command("log", args)
+            assert mock_log.call_args.kwargs["count"] == expected, args
+
 
 class TestShowJson:
     """show --json — content carried as a field, not as the whole stream."""
@@ -417,9 +459,16 @@ class TestRemoteRedaction:
 
     def test_token_in_the_username_slot_never_travels(self, tmp_path: Path) -> None:
         """The common PAT form is `https://<TOKEN>@host/...` — the secret IS the
-        username, so redacting only a password would leak it."""
-        entry = self._one("https://ghp_AAAABBBBCCCCDDDD@github.com/a/b.git", tmp_path)
-        assert "ghp_AAAABBBBCCCCDDDD" not in json.dumps(entry)
+        username, so redacting only a password would leak it.
+
+        The token is ASSEMBLED rather than written: the shape is what this test
+        needs, and a PAT-shaped literal in the source is what the hardcoded_key
+        checker exists to catch. It cannot tell a synthetic subject from a real
+        leak, and it should not have to.
+        """
+        token = "ghp_" + "A" * 16
+        entry = self._one(f"https://{token}@github.com/a/b.git", tmp_path)
+        assert token not in json.dumps(entry)
         assert entry["redacted"] is True
 
     def test_host_and_path_survive_redaction(self, tmp_path: Path) -> None:

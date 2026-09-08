@@ -49,6 +49,7 @@ from aipass.prax.apps.handlers.monitoring.telegram_relay import (
 )
 from aipass.prax.apps.handlers.monitoring.pid_cache import get_pid_for_branch as _get_pid_for_branch
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 
 import json as _json
 
@@ -181,10 +182,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if subcmd == "run":
         return _dispatch_run(args[1:])
 
-    # Unknown subcommand
-    error(f"Unknown monitor subcommand: {subcmd}")
-    print_help()
-    return True
+    # Unknown subcommand: refused by name, never "handled". Printing the right
+    # words and returning True is what made this exit 0 (devpulse, 2026-09-07).
+    refuse("monitor", subcmd, "drone @prax monitor --help")
 
 
 def _dispatch_run(run_args: List[str]) -> bool:
@@ -819,5 +819,9 @@ if __name__ == "__main__":
     _cmd_args = _standalone_run_args(args.tokens, _passthrough)
 
     # Execute monitor command
-    handled = handle_command("monitor", _cmd_args)
+    try:
+        handled = handle_command("monitor", _cmd_args)
+    except UnknownArgument as exc:
+        error(str(exc), suggestion=exc.usage)
+        sys.exit(1)
     sys.exit(0 if handled else 1)

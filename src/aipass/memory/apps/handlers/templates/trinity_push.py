@@ -601,9 +601,19 @@ _CANONICAL_TRINITY_FILES = (
     ".template_version.json",
 )
 
+# Backups written by two NAMED migrations, not unexplained files: `.pre_v2_backup`
+# by @spawn's `migrate-passports --confirm` (DPLAN-0319) and `.pre_v3_backup` by
+# this branch's own v3 rollover. 54 of them across 22 branches made every branch
+# report "NOT push scope" on every run forever — a permanent line that says
+# nothing, since the push neither needs them gone nor may delete them. An
+# accounted-for artifact of a migration someone can name is not a stray. Genuinely
+# unexplained files in a `.trinity/` still are, and are still reported (FPLAN-0492
+# wave 6; measured by @spawn 2026-09-07, ruled by @devpulse).
+_KNOWN_MIGRATION_BACKUPS = (".pre_v2_backup", ".pre_v3_backup")
+
 
 def _trinity_strays(trinity: Path) -> list[str]:
-    """Names in ``.trinity/`` that are not one of the five canonical files.
+    """Unexplained names in ``.trinity/`` — not canonical, not a known backup.
 
     Reported, never removed. Deleting another branch's backup or status file
     is a destructive act outside this lane's three-part mandate; the dry-run
@@ -613,7 +623,7 @@ def _trinity_strays(trinity: Path) -> list[str]:
         return sorted(
             item.name + ("/" if item.is_dir() else "")
             for item in trinity.iterdir()
-            if item.name not in _CANONICAL_TRINITY_FILES
+            if item.name not in _CANONICAL_TRINITY_FILES and not item.name.endswith(_KNOWN_MIGRATION_BACKUPS)
         )
     except OSError as exc:
         logger.warning(f"[trinity_push] Cannot list {trinity}: {exc}")

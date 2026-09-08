@@ -50,7 +50,7 @@ STANDARD_NAME = "no_oracle"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Helper-name prefixes that mean the unit delegates its checking. A unit calling
 #: `_assert_document_is_lawful(...)` has an oracle one hop away, and flagging it

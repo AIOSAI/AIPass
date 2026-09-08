@@ -61,4 +61,4 @@ drone @prax --help                       # Full command reference
 
 # Tests
 
-901 tests across 19 files. Run with `pytest tests/` from branch root. See README for per-file breakdown.
+1404 test functions across 36 files (1487 cases, measured 2026-09-07). Run with `pytest tests/` from branch root. See README for per-file breakdown.

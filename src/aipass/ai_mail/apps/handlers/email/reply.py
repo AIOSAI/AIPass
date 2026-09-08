@@ -188,6 +188,25 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
     with open(sent_file, "w", encoding="utf-8") as f:
         json.dump(reply_email_data, f, indent=2)
 
+    # Close the dispatch register row this reply answers (FPLAN-0499 phase 2).
+    #
+    # Rows whose agent had already reported by mail sat outstanding until their
+    # expected_by and were then announced as dead monitors — a false alarm for
+    # work that was reported hours earlier. The reply is the completion
+    # evidence; nothing was reading it.
+    #
+    # AFTER DELIVERY, NEVER BEFORE. Closing a row for a reply that then failed
+    # to deliver would erase the promise while the work was still unanswered,
+    # which is the one thing the register exists to prevent. Best-effort and
+    # non-fatal for the same reason in reverse: a delivered reply must not be
+    # reported as failed because a register write did not land.
+    #
+    # MATCHED BY THREAD, not by the replier's dispatch stamp — see
+    # _close_dispatch_row_on_reply and register.close_on_reply for the incident
+    # that settled it. A report-first plan mail is not a reply on the thread, so
+    # a dispatch keeps being watched until its agent actually answers the brief.
+    _close_dispatch_row_on_reply(reply_email_data)
+
     # Auto-close the original email
     original_id = original_email.get("id")
     if original_id:
@@ -197,6 +216,35 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
             return True, f"Reply sent (warning: original not closed: {close_msg})", reply_id
 
     return True, f"Reply sent to {reply_destination}, original closed", reply_id
+
+
+def _close_dispatch_row_on_reply(reply_email_data: Dict) -> None:
+    """Close the dispatch register row this reply answers. Never raises.
+
+    Matched by THREAD — who is replying, who they are answering, and the
+    subject — not by the sender's dispatch stamp. The stamp names the dispatch
+    the agent is currently RUNNING UNDER, which is a different question: it
+    lands on a report-first plan mail sent before the work is done, and it
+    changes when an agent is resumed, so it both closes too early and misses
+    the real completion. ``register.close_on_reply`` carries the incident that
+    proved it.
+
+    Every failure is swallowed and logged. The reply is already DELIVERED by
+    the time this runs; letting a register problem surface as a reply failure
+    would report a sent message as unsent, which is the worse lie.
+    """
+    try:
+        from aipass.ai_mail.apps.handlers.dispatch import register
+
+        closed = register.close_on_reply(
+            replier=str(reply_email_data.get("from", "")),
+            recipient=str(reply_email_data.get("to", "")),
+            subject=str(reply_email_data.get("subject", "")),
+        )
+        if closed:
+            logger.info("[reply] dispatch %s closed — its target reported back on the thread", closed[:8])
+    except Exception as e:
+        logger.warning("[reply] could not close a dispatch row for this reply: %s", e)
 
 
 def _validate_reply_path(reply_path: str) -> Tuple[bool, str]:

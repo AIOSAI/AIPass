@@ -124,8 +124,8 @@ memory/
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1431 test functions on disk across 42 files — 1567 collected,
-│                                #   1567 pass, 2 skip (measured 2026-09-07)
+├── tests/                       # 1437 test functions on disk across 42 files — 1573 collected,
+│                                #   1573 pass, 2 skip (measured 2026-09-07)
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -259,6 +259,26 @@ array that is not newest-first, or entries carrying no usable `number`. Same spe
 auto-compact skip loop behind DPLAN-0290 item 3: *a lane whose refusals are all correct can still
 be a lane that never drains.*
 
+### An unknown argument exits non-zero (FPLAN-0492 wave 6, 2026-09-07)
+
+Patrick's standing ruling: an unknown command or argument **fails**. This branch printed the correct refusal
+on all three shapes and then exited **0** — @devpulse's fleet sweep of 2026-09-07 named it as the only branch
+failing every probe. Every door in `main()` returned `None` and the `__main__` block called `main()` without
+passing the result to `sys.exit`, so the refusal was contradicted by the one half a script reads.
+
+| probe | before | now |
+|---|---|---|
+| `drone @memory definitely_not_a_verb_xyz` | 0 | **1** — nothing routed |
+| `drone @memory --definitely-not-a-flag` | 0 | **1** — a dashed token nothing routes is the same refusal |
+| `drone @memory rollover not_a_real_subarg_xyz` | 0 | **2** — routed, then refused |
+
+The two codes differ on purpose: `handle_command()` returning `True` means *I handled this*, not *it worked*,
+so a refused sub-argument is indistinguishable from a successful run without the flip. The modules already
+called `error()`, which marks the failure (`cli/display.mark_command_failed`) — only the seam was missing, so
+the cure is `reset_command_state()` at the top of `main()` and `resolve_exit(True)` on the routed path, the
+same idiom @ai_mail and @devpulse carry. `--help`, `--version`, a bare `drone @memory` and every working verb
+still exit 0, pinned alongside the three refusals in `TestUnknownArgumentExitsNonZero`.
+
 ### A help flag is never an instruction
 
 Every module routes its help check through `handlers/cli/help_flags.wants_help()`, evaluated **before** any subcommand dispatch. Modules used to read `args[0]` only, so a flag in a later slot was discarded and the subcommand ran instead — `drone @memory rollover push --help` performed the fleet-wide `per_branch` reset it was being asked to describe.
@@ -370,7 +390,29 @@ trinity push with every gate intact.
   `modules/templates._announce_bump()`, because reaching the bus means importing @trigger's module
   layer, and a handler that does that is orchestration in a handler's clothes.
 
-**There is no ledger yet, and that is the honest state.** `templates/.template_version.json` did
+**The first real ledger was stamped 2026-09-07 17:50 (FPLAN-0492 wave 6).** `templates/.template_version.json`
+now holds `local 3.0.0 · observations 3.0.0`, `last_push 2026-09-07T17:50:09`, `stamped_by "memory push"` —
+written by a `templates bump --confirm` that actually ran: 22 branches, 44 files written, 22 receipts stamped,
+**5 entries archived and pruned**, 854 carried. Verified rather than assumed: a fleet `push --dry-run` taken
+straight after reports **0 entries to archive**, where the run before it reported 5. `template-status` now
+reads *no bump pending*. The six `NO RECEIPT` branches (`wren`, `research`, `vera`, `verify`, `writer`,
+`my-agent`) are external-tier and out of push scope by design — `resolve_scope()` drops `external` because the
+push writes.
+
+**What held it back for a day was this branch's own wording, not the fleet's state.** Every branch printed
+`NOT push scope — N stray file(s) in .trinity/`, which reads as a verdict on the *branch*; @spawn measured it
+that way on 2026-09-07, declined to fire `--confirm` on the reasoning that a push doing nothing would stamp a
+false ledger, and @devpulse relayed the same reading. Both were right to stop, and both were reading a line
+that meant something else: the *files* are out of scope, and the line directly above it showed those same
+branches pruning and carrying normally. Two things changed. The line now says the files are not push scope,
+never the branch. And `_trinity_strays()` no longer counts `*.pre_v2_backup` / `*.pre_v3_backup`
+(`_KNOWN_MIGRATION_BACKUPS`): 54 of them across 22 branches, every one an accounted-for artifact of a named
+migration — @spawn's `migrate-passports --confirm` and this branch's own v3 rollover — reported on every run
+forever, on a line no run could ever clear, because the push may not delete them and does not need them gone.
+An unexplained file in a `.trinity/` is still a stray and is still reported; the backups still exist and are
+still never deleted, which is pinned.
+
+The old paragraph, kept because the reasoning in it is still the standard: `templates/.template_version.json` did
 exist — written by the retired `pusher.py` and by nothing else, holding `last_push: 2026-06-25` and
 sixteen uppercase branch names, no version field anywhere. A file with no `template_versions` is not
 a record of a push, so `bump_pending()` already read it as PENDING; but a fossil sitting in
@@ -930,8 +972,8 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** **1567 passed, 0 failures, 2 skipped, 34.1s** — re-measured 2026-09-07 from the repo root in the CI shape (`python -m pytest src/aipass/memory -c pyproject.toml --rootdir=. -q`). This supersedes the 1578/5-skip reading of 2026-09-05 (itself over the 1222/21.8s of 2026-08-27): the DPLAN-0323 seal archived the three parked symbolic test files and `tests/test_json_handler.py` that night, which is the whole difference. The 2 skips are what is left of the parked symbolic-fragments tier — `test_symbolic_extras.py` and its embedder `test_vector.py`, see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout"). *Not re-measured tonight and carried forward from the 08-27 build, marked so rather than restated as fresh:* the 69 push tests in `tests/test_trinity_push.py` and the 10 mutations run against that lane (all 10 bit).
-  *Two different numbers, deliberately, both re-measured 2026-09-07 after the DPLAN-0323 seal:* `grep -c 'def test_'` over `tests/test_*.py` finds **1431 test functions** on disk across **42 files**. Of those, **91 live in the 2 modules** that call `pytest.skip(allow_module_level=True)` at import (`test_symbolic_extras.py`, `test_vector.py`), so pytest never collects them individually — they surface as the 2 skips. The remaining **1340** expand through `@pytest.mark.parametrize` into **1567** collected cases, and all 1567 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1431 on disk, a green board counts the 1567 that execute. The drop from the 09-05 reading (1580 across 46 files) is four files leaving the tree on Patrick's 2026-09-07 ruling: the three parked symbolic files (below) and `tests/test_json_handler.py`, whose six shim-pin tests now run once for every branch inside seedgo's `test_json_handler_contract.py`.
+- **Tests:** **1573 passed, 0 failures, 2 skipped, 33.6s** — re-measured 2026-09-07 (FPLAN-0492 wave 6) from the repo root in the CI shape (`python -m pytest src/aipass/memory -c pyproject.toml --rootdir=. -q`). This supersedes the 1578/5-skip reading of 2026-09-05 (itself over the 1222/21.8s of 2026-08-27): the DPLAN-0323 seal archived the three parked symbolic test files and `tests/test_json_handler.py` that night, which is the whole difference. The 2 skips are what is left of the parked symbolic-fragments tier — `test_symbolic_extras.py` and its embedder `test_vector.py`, see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout"). *Not re-measured tonight and carried forward from the 08-27 build, marked so rather than restated as fresh:* the 69 push tests in `tests/test_trinity_push.py` and the 10 mutations run against that lane (all 10 bit).
+  *Two different numbers, deliberately, both re-measured 2026-09-07 after the DPLAN-0323 seal:* `grep -c 'def test_'` over `tests/test_*.py` finds **1437 test functions** on disk across **42 files**. Of those, **91 live in the 2 modules** that call `pytest.skip(allow_module_level=True)` at import (`test_symbolic_extras.py`, `test_vector.py`), so pytest never collects them individually — they surface as the 2 skips. The remaining **1346** expand through `@pytest.mark.parametrize` into **1573** collected cases, and all 1573 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1437 on disk, a green board counts the 1573 that execute. The +6 over the 09-07 seal reading (1431) is wave 6: four exit-code pins in `test_contracts.py` and two known-migration-backup pins in `test_trinity_push.py`. The drop from the 09-05 reading (1580 across 46 files) is four files leaving the tree on Patrick's 2026-09-07 ruling: the three parked symbolic files (below) and `tests/test_json_handler.py`, whose six shim-pin tests now run once for every branch inside seedgo's `test_json_handler_contract.py`.
 - **Seedgo:** **100% on all 46 scored categories, 0 type errors** — re-run 2026-09-07 after the DPLAN-0323 seal (`drone @seedgo audit aipass @memory`, apps/ only). 47 on 2026-09-05; the one fewer is `test_quality` (v4), retired from seedgo's pack that night — the audit consults 45 standards plus diagnostics now, and CI's `EXPECTED_STANDARDS` tripwire reads 46. The count drift this README carried for an hour after the tests moved (`Readme` 90) was cleared by re-measuring the tests block above, not by bypass. `Readme` and `Readme_Quality` are both green as this document stands. The historical detail below is from the 08-27 marker-7 run and is kept as the record of how those findings were cleared, not as a fresh measurement. Two findings that build itself introduced were fixed, not bypassed: extracting `_handle_rollover_verb()` out of `rollover.handle_command()` moved the no-args gate behind a delegation (`introspection` 85%, and the checker was right — the entry seam should say for itself that a bare `rollover` introspects), and adding the renamed verb to the top-level `elif` chain pushed it to depth 5 (`deep_nesting`); the chain is now flat `if`/`return`, one arm per command. The four findings the first audit raised on the new files were fixed rather than bypassed: report rendering moved out of the module into `handlers/templates/push_report.py` (modules do no direct file I/O), `json_handler` logging added to both new handlers, and the `unused_function` hit on `is_canonical()` was cleared by giving it a real caller — the guard that measures the push's own session note against the same gate everything else was pruned against. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
 - **Bypass registry:** **114** rules across **40 distinct files** in `.seedgo/bypass.json` (`last_updated: 2026-08-31`). Re-counted 2026-09-05: **41 of the 114 point at 12 files that are no longer in the tree** — parked on 08-14 / 08-18 (`symbolic/*.py` ×6, `vector/embedder.py`, `storage/chroma.py`, `search/vector_search.py`, `learnings/manager.py`) and on 08-27 with the retired template lane (`templates/differ.py`, `templates/pusher.py`). One duplicate `(file, standard)` pair as well — `learnings/manager.py` / `architecture`, twice. This supersedes the 08-25 reading of 37 rules across 10 files, which was correct when taken and drifted with the template-lane retirement. The rules are inert — a bypass for an absent file suppresses nothing — but the registry is a record of a tree that stopped existing. Cleanup is an open item, not fixed tonight.
 
@@ -1064,7 +1106,12 @@ unreferenced". See that directory's README for the full method.
 
 ---
 
-*Last Updated: 2026-09-05 (FPLAN-0490 README truth pass round 2 — docs only, no code changed. Re-measured tonight against the tree: test counts, seedgo audit, bypass registry, fleet dry-run, stray-file and `.trinity/README.md` counts, and every command in the Commands block run against its own `--help`. Two figures are explicitly carried forward and NOT re-measured, marked at their sites: the `70.1 → 97.2` fleet-average projection and the 69 push tests / 10 mutations from the 08-27 trinity-push build. Dated 'Measured' sections are kept as the record of the build they name.)*
+*Last Updated: 2026-09-07 (FPLAN-0492 wave 6 — code changed: the entry point's exit codes, the
+known-migration-backup stray rule, and the first real fleet ledger, each documented at its own site above and
+measured tonight: 1437 functions / 42 files / 1573 collected, 1573 pass / 2 skip, audit 100 on every scored
+category, 0 type errors. The 09-05 pass below is kept as the record of that build.)*
+
+*Previously: 2026-09-05 (FPLAN-0490 README truth pass round 2 — docs only, no code changed. Re-measured tonight against the tree: test counts, seedgo audit, bypass registry, fleet dry-run, stray-file and `.trinity/README.md` counts, and every command in the Commands block run against its own `--help`. Two figures are explicitly carried forward and NOT re-measured, marked at their sites: the `70.1 → 97.2` fleet-average projection and the 69 push tests / 10 mutations from the 08-27 trinity-push build. Dated 'Measured' sections are kept as the record of the build they name.)*
 
 ---
 [← Back to AIPass](../../../README.md)

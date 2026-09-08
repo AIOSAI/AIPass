@@ -25,6 +25,7 @@ push that skips its step (see the mutation notes in the class docstrings).
 
 import copy
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -237,12 +238,13 @@ class TestNothingIsPrunedWithoutProof:
                 self.mode = "honest" if self.seen == 1 else "never_lands"
                 return super().vectorize_and_store_subprocess(branch, memory_type, texts, metadatas, db_path)
 
-        result = tp.apply_plan(plan, HalfHonest(), [("local", "/tmp/x"), ("global", None)])
+        local_db = str(Path(tempfile.gettempdir()) / "x")
+        result = tp.apply_plan(plan, HalfHonest(), [("local", local_db), ("global", None)])
 
         assert result["refused"] is True
         assert result["pruned"] == 0
 
-    def test_an_absent_vector_and_a_corrupted_one_get_DIFFERENT_reasons(self, tmp_path):
+    def test_an_absent_vector_and_a_corrupted_one_get_different_reasons(self, tmp_path):
         """Both refuse — but the repair differs, so the reason must too.
 
         "read back with different content" sends someone hunting for an
@@ -609,21 +611,51 @@ class TestStraysAreReportedNeverDeleted:
 
     def test_strays_are_listed(self, tmp_path):
         root = _branch(tmp_path, "messy", {"sessions": []})
-        (root / ".trinity" / "local.json.pre_v3_backup").write_text("{}", encoding="utf-8")
+        (root / ".trinity" / "mystery_file.json").write_text("{}", encoding="utf-8")
 
         plan = tp.plan_branch("messy", root, _config())
 
-        assert "local.json.pre_v3_backup" in plan["strays"]
+        assert "mystery_file.json" in plan["strays"]
 
     def test_strays_survive_the_push(self, tmp_path):
         root = _branch(tmp_path, "messy", {"sessions": [_entry(1, extra="x")]})
-        stray = root / ".trinity" / "local.json.pre_v3_backup"
+        stray = root / ".trinity" / "mystery_file.json"
         stray.write_text("{}", encoding="utf-8")
         plan = tp.plan_branch("messy", root, _config())
 
         tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
         assert stray.is_file()
+
+    def test_a_known_migration_backup_is_not_a_stray(self, tmp_path):
+        """An accounted-for artifact of a NAMED migration is not unexplained.
+
+        54 of these across 22 branches made every branch report strays on every
+        run forever, which is a line that can never be cleared: the push may not
+        delete them and does not need them gone. @spawn and @devpulse both read
+        that permanent line as "this branch is out of push scope" on 2026-09-07
+        and held the first real bump back on it. `.pre_v2_backup` is @spawn's
+        migrate-passports, `.pre_v3_backup` is this branch's own v3 rollover.
+        """
+        root = _branch(tmp_path, "migrated", {"sessions": []})
+        trinity = root / ".trinity"
+        for name in ("local.json.pre_v3_backup", "observations.json.pre_v3_backup", "passport.json.pre_v2_backup"):
+            (trinity / name).write_text("{}", encoding="utf-8")
+
+        plan = tp.plan_branch("migrated", root, _config())
+
+        assert plan["strays"] == []
+
+    def test_a_known_backup_still_survives_the_push(self, tmp_path):
+        """Excluded from the report is not excluded from existing — still never deleted."""
+        root = _branch(tmp_path, "migrated", {"sessions": [_entry(1, extra="x")]})
+        backup = root / ".trinity" / "passport.json.pre_v2_backup"
+        backup.write_text("{}", encoding="utf-8")
+        plan = tp.plan_branch("migrated", root, _config())
+
+        tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+
+        assert backup.is_file()
 
 
 # =============================================================================
@@ -751,7 +783,8 @@ class TestRefreshIsScopable:
         from aipass.memory.apps.handlers.tracking import tab_renderer
 
         visited = []
-        registry = [{"name": "alpha", "path": "/tmp/alpha"}, {"name": "beta", "path": "/tmp/beta"}]
+        tmp = Path(tempfile.gettempdir())
+        registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
         from aipass.memory.apps.handlers.monitor import detector
 
@@ -766,7 +799,8 @@ class TestRefreshIsScopable:
         from aipass.memory.apps.handlers.tracking import tab_renderer
 
         visited = []
-        registry = [{"name": "alpha", "path": "/tmp/alpha"}, {"name": "beta", "path": "/tmp/beta"}]
+        tmp = Path(tempfile.gettempdir())
+        registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
         from aipass.memory.apps.handlers.monitor import detector
 

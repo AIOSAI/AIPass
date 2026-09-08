@@ -503,6 +503,7 @@ def _room_for(branch: str, project: str, external: bool, shell: bool, seated: st
             project, or a census that reports no root to open a shell in.
     """
     room = ""
+    row = None
 
     if branch:
         if external:
@@ -520,15 +521,76 @@ def _room_for(branch: str, project: str, external: bool, shell: bool, seated: st
         if shell:
             room = host_attach.shell_room_name(project or seated, branch)
             target = f"shell {target}"
+            return target, cwd, scope, room, False
 
-        return target, cwd, scope, room
+        # ONE ROOM, step 1 (DPLAN-0327). An agent room only. The external
+        # branch above already HAS its row, so it is handed over rather than
+        # asked for twice — one socket must not cost two snapshots.
+        outside = _outside_room_for(project, branch, row)
+        if outside:
+            return target, cwd, scope, outside, True
+
+        return target, cwd, scope, room, False
 
     if shell:
         # The one door with no branch: a shell at the project's root.
         cwd = Path(_census_root(project)) if external else host_reads.repo_root()
-        return f"shell ({project or seated})", cwd, "", host_attach.shell_room_name(project or seated)
+        return f"shell ({project or seated})", cwd, "", host_attach.shell_room_name(project or seated), False
 
     raise host_attach.AttachRefused("A branch name is required — this lane has no default room")
+
+
+def _outside_room_for(project: str, branch: str, row: Optional[Dict[str, Any]] = None) -> str:
+    """
+    The session an agent is ALREADY seated in, when it is not a room BAUD made.
+
+    ONE ROOM, step 1 (DPLAN-0327), built on the 08-18 ruling in DPLAN-0310 that
+    the phone finds the seat by reading the snapshot rather than rebuilding a
+    name. On 2026-09-04 Patrick opened his aipass chat on the laptop and the
+    phone attached to a blank terminal: `_room_for` composed `baud-<branch>`
+    from the branch name, `new-session -A` created that empty room, and the
+    live seat was sitting in the shim's own `aipass-<id>` session the whole
+    time. The name was right and the room was wrong.
+
+    THE GUARD IS `has_room`, and it is deliberately the only thing consulted.
+    `has_room` true means a BAUD-named session exists, so today's behaviour is
+    kept exactly — this cannot take a branch away from its own room. Only when
+    BAUD reports no room of its own AND names an `outside_room` does this fire,
+    which is precisely the state that produced the blank terminal.
+
+    NOT step 2. "An empty room must not outrank a live seat" needs to know
+    whether a room that EXISTS has anyone in it, and `has_room` is a name match
+    that says nothing about occupancy. That fact is @baud's to publish and is
+    not in the envelope today, so this deliberately does not guess at it.
+
+    A CENSUS THAT CANNOT ANSWER IS NOT AN ANSWER OF 'NO'. Any failure here
+    leaves the caller on the ordinary naming rule — the behaviour that shipped
+    for months — rather than refusing an attach over a lane that is an
+    improvement to it. Read failures are swallowed for that reason and that
+    reason only; the attach itself still refuses honestly downstream.
+
+    Args:
+        project: The project named on the socket, or empty for the seat.
+        branch: The branch named on the socket.
+        row: The branch's snapshot row when the caller already resolved one —
+            the external lane does, and asking the census twice for one socket
+            is a cost with no answer attached.
+
+    Returns:
+        The outside session's name, or "" when there is none, when the branch
+        has a room of its own, or when the census could not be read.
+    """
+    if row is None:
+        try:
+            row = host_fleet.resolve_branch(project, branch)
+        except host_fleet.FleetUnavailable as e:
+            logger.info("[host_api] no census for the outside-room check on %s: %s", branch, e)
+            return ""
+
+    if row is None or row.get("has_room"):
+        return ""
+
+    return str(row.get("outside_room") or "").strip()
 
 
 def _census_root(project: str) -> str:
@@ -1225,11 +1287,11 @@ def create_app() -> Any:
                     target = "watch (every branch)"
                 session = host_attach.open_monitor(branch, cwd=host_reads.repo_root())
             else:
-                target, cwd, scope, room = _room_for(branch, project, external, shell, seated)
+                target, cwd, scope, room, attach_only = _room_for(branch, project, external, shell, seated)
                 # ONE spawn site, whichever lane resolved it — a per-poll spawn
                 # here is the leak test_the_session_is_created_once_per_socket
                 # pins by counting this very call.
-                session = host_attach.open_attach(branch, cwd=cwd, scope=scope, room=room)
+                session = host_attach.open_attach(branch, cwd=cwd, scope=scope, room=room, attach_only=attach_only)
         except (host_verbs.VerbRefused, host_attach.AttachRefused) as e:
             logger.warning("[host_api] socket refused for %s: %s", branch or "<no branch>", e)
             _audit_socket_refusal(websocket, str(e))

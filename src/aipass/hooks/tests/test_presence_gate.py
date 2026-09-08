@@ -8,11 +8,14 @@ from aipass.hooks.apps.handlers.security import presence_gate
 
 
 def _make_mocks(our_pid: int | None = 1000, occupant=None, all_sessions=None):
-    """Build presence + cc_sessions mocks for the gate."""
-    presence_mock = MagicMock()
-    presence_mock._resolve_session_pid.return_value = our_pid
+    """Build the cc_sessions mock the gate imports.
 
+    One module now answers both halves — who we are (resolve_session_pid) and who
+    else is here (find_occupant). Anything else the gate reaches for raises, so a
+    stray import shows up as a failure rather than a silently satisfied MagicMock.
+    """
     cc_mock = MagicMock()
+    cc_mock.resolve_session_pid.return_value = our_pid
     cc_mock.find_occupant.return_value = occupant
     # Real list, not a MagicMock: the gate iterates this to find its own
     # session, and a non-iterable would be swallowed by the gate's own
@@ -20,13 +23,11 @@ def _make_mocks(our_pid: int | None = 1000, occupant=None, all_sessions=None):
     cc_mock.read_all_sessions.return_value = list(all_sessions or [])
 
     def import_router(name):
-        if "presence" in name and "cc_sessions" not in name:
-            return presence_mock
         if "cc_sessions" in name:
             return cc_mock
         raise ImportError(name)
 
-    return presence_mock, cc_mock, import_router
+    return cc_mock, import_router
 
 
 _OCCUPANT = {
@@ -68,14 +69,14 @@ class TestResolveBranch:
 
 class TestHandle:
     def test_no_occupant_allows(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=None)
+        _, router = _make_mocks(our_pid=1000, occupant=None)
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):
             with patch("importlib.import_module", side_effect=router):
                 result = presence_gate.handle({})
         assert result["exit_code"] == 0
 
     def test_occupant_blocks(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -88,7 +89,7 @@ class TestHandle:
         assert "5000" in parsed["reason"]
 
     def test_block_includes_session_info(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -110,14 +111,14 @@ class TestHandle:
         assert result["stdout"] == ""
 
     def test_claude_agent_type_not_skipped(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=None)
+        _, router = _make_mocks(our_pid=1000, occupant=None)
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):
             with patch("importlib.import_module", side_effect=router):
                 result = presence_gate.handle({"agent_type": "claude"})
         assert result["exit_code"] == 0
 
     def test_main_agent_not_skipped(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=None)
+        _, router = _make_mocks(our_pid=1000, occupant=None)
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):
             with patch("importlib.import_module", side_effect=router):
                 result = presence_gate.handle({"agent_type": "main"})
@@ -136,7 +137,7 @@ class TestHandle:
         assert result["stdout"] == ""
 
     def test_exclude_pid_passed_to_find_occupant(self):
-        _, cc_mock, router = _make_mocks(our_pid=1000, occupant=None)
+        cc_mock, router = _make_mocks(our_pid=1000, occupant=None)
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):
             with patch("importlib.import_module", side_effect=router):
                 presence_gate.handle({})
@@ -144,7 +145,7 @@ class TestHandle:
         assert cc_mock.find_occupant.call_args[1]["exclude_pid"] == 1000
 
     def test_no_session_pid_allows(self):
-        _, _, router = _make_mocks(our_pid=None, occupant=None)
+        _, router = _make_mocks(our_pid=None, occupant=None)
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):
             with patch("importlib.import_module", side_effect=router):
                 result = presence_gate.handle({})
@@ -154,7 +155,7 @@ class TestHandle:
         branch_dir = tmp_path / "devpulse"
         branch_dir.mkdir()
         (branch_dir / ".trinity").mkdir()
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -166,7 +167,7 @@ class TestHandle:
         assert "reclaim" in parsed["reason"]
 
     def test_observe_only_logs_but_allows(self):
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             patch.object(presence_gate, "_OBSERVE_ONLY", True),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -177,7 +178,7 @@ class TestHandle:
 
     def test_observe_only_plays_no_sound(self):
         """Audio for a decision the gate is NOT making is worse noise than the log line."""
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             patch.object(presence_gate, "_OBSERVE_ONLY", True),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -188,7 +189,7 @@ class TestHandle:
 
     def test_observe_only_records_at_info_not_warning(self):
         """Declining to act is chosen behavior — compass #277. Evidence kept, escalation dropped."""
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             patch.object(presence_gate, "_OBSERVE_ONLY", True),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -201,7 +202,7 @@ class TestHandle:
 
     def test_real_block_still_warns(self):
         """GUARD: only the observe-only path was quietened."""
-        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -228,7 +229,7 @@ class TestRemedyIsSatisfiable:
     }
 
     def _handle(self, occupant):
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant)
+        _, router = _make_mocks(our_pid=1000, occupant=occupant)
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -284,7 +285,7 @@ class TestSecondSeatIsRefusedInWords:
     def test_refusal_names_the_occupant_and_the_way_in(self, tmp_path):
         occupant = _seat(5000, 1_000_000_000_000, sid="abc12345")
         ours = _seat(1000, 1_000_000_900_000)
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -301,7 +302,7 @@ class TestSecondSeatIsRefusedInWords:
         """Five weeks of soak logged only the occupant — unanswerable evidence."""
         occupant = _seat(5000, 1_000_000_000_000)
         ours = _seat(1000, 1_000_000_900_000, sid="newseat1")
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -314,7 +315,7 @@ class TestSecondSeatIsRefusedInWords:
     def test_observe_only_logs_the_arriver(self, tmp_path):
         occupant = _seat(5000, 1_000_000_000_000)
         ours = _seat(1000, 1_000_000_900_000, sid="newseat1")
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             patch.object(presence_gate, "_OBSERVE_ONLY", True),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -336,7 +337,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
     def test_the_incumbent_is_allowed_through(self, tmp_path):
         occupant = _seat(5000, 1_000_000_900_000)  # arrived later
         ours = _seat(1000, 1_000_000_000_000)  # we were here first
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -348,7 +349,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
     def test_the_newer_seat_is_the_one_refused(self, tmp_path):
         occupant = _seat(5000, 1_000_000_000_000)
         ours = _seat(1000, 1_000_000_900_000)
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -364,7 +365,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
         newer = _seat(2000, 1_000_000_900_000, sid="newer")
         refused = 0
         for me, them in ((older, newer), (newer, older)):
-            _, _, router = _make_mocks(our_pid=me["pid"], occupant=them, all_sessions=[older, newer])
+            _, router = _make_mocks(our_pid=me["pid"], occupant=them, all_sessions=[older, newer])
             with (
                 _blocking(),
                 patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -378,7 +379,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
         """Fail toward refusing the arriver, never toward letting both through."""
         occupant = _seat(5000, 1_000_000_000_000)
         ours = {"pid": 1000, "sessionId": "x", "cwd": "/tmp/branch", "kind": "interactive"}
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
@@ -388,7 +389,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
 
     def test_no_session_file_of_our_own_is_not_incumbency(self, tmp_path):
         occupant = _seat(5000, 1_000_000_000_000)
-        _, _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[occupant])
+        _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[occupant])
         with (
             _blocking(),
             patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),

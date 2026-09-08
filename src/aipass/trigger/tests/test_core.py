@@ -83,6 +83,7 @@ def trigger_cls():
     Trigger._log_watcher_started = False
     Trigger._handler_failures = {}
     Trigger._disabled_handlers = set()
+    Trigger._alias_warned = set()
     return Trigger
 
 
@@ -806,3 +807,147 @@ def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monk
     assert result is True
     printed.assert_called_once()
     fired.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Deprecated event aliases — one release of grace, and it must be audible
+# ---------------------------------------------------------------------------
+
+
+class TestDeprecatedEventAliases:
+    """A renamed event keeps working for one release and says it is retired."""
+
+    def test_old_name_reaches_a_handler_on_the_new_name(self, trigger_cls):
+        """The whole point: `file_deleted` is delivered to `profile_write_failed`.
+
+        Without this, renaming the event silently stops delivery for the three
+        fire sites in @aipass and @daemon that still use the old name.
+        """
+        handler = MagicMock()
+        trigger_cls.on("profile_write_failed", handler)
+
+        summary = trigger_cls.fire("file_deleted", path="/store.json")
+
+        handler.assert_called_once()
+        assert summary["handlers"] == 1
+        assert summary["ran"] == 1
+
+    def test_summary_names_the_event_that_actually_ran(self, trigger_cls):
+        """A caller reading the summary back must not be sent hunting.
+
+        Reporting `file_deleted` would name an event with no handlers under it.
+        """
+        trigger_cls.on("profile_write_failed", MagicMock())
+
+        summary = trigger_cls.fire("file_deleted", path="/store.json")
+
+        assert summary["event"] == "profile_write_failed"
+
+    def test_a_handler_registered_on_the_old_name_still_hears_the_new_one(self, trigger_cls):
+        """The alias resolves on registration too, not only on fire."""
+        handler = MagicMock()
+        trigger_cls.on("file_deleted", handler)
+
+        trigger_cls.fire("profile_write_failed", path="/store.json")
+
+        handler.assert_called_once()
+
+    def test_off_under_the_old_name_actually_unregisters(self, trigger_cls):
+        """on(old) + off(old) must cancel out.
+
+        Resolving only in on() would register on the new name and remove
+        nothing, leaving a handler no caller can detach.
+        """
+        handler = MagicMock()
+        trigger_cls.on("file_deleted", handler)
+        trigger_cls.off("file_deleted", handler)
+
+        summary = trigger_cls.fire("profile_write_failed")
+
+        assert summary["handlers"] == 0
+        handler.assert_not_called()
+
+    def test_the_deprecation_is_logged_once_per_process(self, trigger_cls, monkeypatch):
+        """Silent forwarding is how a rename never finishes — say it, but once.
+
+        Once per name, not once per fire: this event fires on a write-failure
+        path that can repeat, and a warning per occurrence would be its own
+        noise source in a branch that watches logs for errors.
+        """
+        from aipass.trigger.apps.modules import core
+
+        warned = MagicMock()
+        monkeypatch.setattr(core.logger, "warning", warned)
+
+        core.Trigger.fire("file_deleted")
+        core.Trigger.fire("file_deleted")
+        core.Trigger.fire("file_deleted")
+
+        assert warned.call_count == 1
+        message = str(warned.call_args)
+        assert "file_deleted" in message
+        assert "profile_write_failed" in message
+
+    def test_an_unaliased_event_passes_straight_through(self, trigger_cls):
+        """The table is a rename list, not a whitelist — everything else is untouched."""
+        handler = MagicMock()
+        trigger_cls.on("error_detected", handler)
+
+        summary = trigger_cls.fire("error_detected", branch="flow")
+
+        assert summary["event"] == "error_detected"
+        handler.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Module identity — the delitem + re-import shape must not fork the bus
+# ---------------------------------------------------------------------------
+
+
+def test_reimport_does_not_fork_the_trigger_class(trigger_cls):
+    """Every import site in this process resolves to ONE core module.
+
+    19 test files here force a fresh import with
+    `monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.core")`.
+    Trigger keeps its handler registry in CLASS-level state, so a second
+    module object parked under a second sys.modules key would give two
+    registries — handlers registered on one, fired through the other, and the
+    whole suite still green because each file only ever sees its own copy.
+
+    Measured clean on 3.12.3 across the full suite in one process. The floor
+    is 3.10 and this box cannot run it, so this is a canary in CI, not a
+    claim about 3.10.
+    """
+    import importlib
+    import sys
+
+    name = "aipass.trigger.apps.modules.core"
+    module = sys.modules[name]
+
+    assert importlib.import_module(name) is module
+    assert module.Trigger is trigger_cls
+    assert module.__name__ == name, f"loaded under a second key: {module.__name__}"
+
+    # The same file must not also be live under another key. MagicMock stand-ins
+    # answer __file__ with a mock, which never equals a real path string.
+    duplicates = [
+        key
+        for key, mod in list(sys.modules.items())
+        if key != name and getattr(mod, "__file__", None) == module.__file__
+    ]
+    assert duplicates == [], f"core.py is also loaded as {duplicates}"
+
+
+def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls):
+    """The identity check restated as behaviour: register on one ref, read on another.
+
+    This is the failure a fork would actually cause — worth pinning directly,
+    because an identity assertion alone tells you nothing about what breaks.
+    """
+    from aipass.trigger.apps.modules.core import Trigger as reimported
+
+    handler = MagicMock()
+    trigger_cls.on("identity_probe", handler)
+
+    assert "identity_probe" in reimported._handlers
+    assert handler in reimported._handlers["identity_probe"]

@@ -96,7 +96,7 @@ STANDARD_NAME = "mock_drift"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Keyword arguments that make a mock refuse unknown attributes. Any one of them
 #: acquits the patch outright, because refusing unknown attributes is the exact

@@ -73,6 +73,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -86,6 +87,12 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules import host_serve as host_serve_module
+
+
+# A stand-in the status tests hand to a mocked log_path(). Nothing ever opens
+# it, but it is minted under the platform temp dir rather than written /tmp so
+# the literal reads the same on the Windows runner as it does here.
+STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.log"
 
 
 # Patch targets
@@ -384,11 +391,9 @@ class TestIssueToken:
         assert host_tokens.verify_token(first) is not None
         assert host_tokens.verify_token(second) is not None
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
     def test_token_file_is_0600(self, store: Path) -> None:
         """The store sits at 0600 like every other secret this branch writes."""
-        if sys.platform == "win32":
-            pytest.skip("POSIX permissions")
-
         host_tokens.issue_token("pixel-8")
         path = store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json"
 
@@ -872,9 +877,9 @@ class TestIssueTokenCommand:
         told = str(quiet_module["error"].call_args)
         assert "revoke" in told.lower(), f"the token was minted and the operator was not told to revoke it: {told}"
 
-    def test_missing_label_refused(self, store: Path, quiet_module: dict) -> None:
+    def test_missing_label_refused(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
         """A label is required before anything is minted."""
-        handle_command("host-api", ["issue-token", "--out", "/tmp/x.token"])
+        handle_command("host-api", ["issue-token", "--out", str(tmp_path / "x.token")])
 
         quiet_module["error"].assert_called_once()
         assert host_tokens.list_tokens() == []
@@ -986,11 +991,17 @@ class TestDetachStatusAndStop:
 
         A refusal that happens inside a detached child is a refusal the
         operator reads about in a log file, if at all — so it surfaces here.
+
+        It also leaves non-zero, for the same reason the foreground path does:
+        the launcher is what the caller's exit code comes from, so a launcher
+        that refuses and reports success is a launcher nothing can detect.
         """
         detachable.serve_detached.side_effect = host_config.BindRefused("wildcards are refused")
 
-        handle_command("host-api", ["serve", "--detach"])
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("host-api", ["serve", "--detach"])
 
+        assert exit_info.value.code == 1
         quiet_module["error"].assert_called_once()
 
     def test_an_unknown_subcommand_still_reaches_the_error(
@@ -1044,7 +1055,7 @@ class TestDetachStatusAndStop:
         # than deciding from a record. This test found the move by failing
         # loudly, which is the good version of that.
         detachable.server_state.return_value = {"state": "none", "record": None, "reason": ""}
-        detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
+        detachable.log_path.return_value = STANDIN_LOG
 
         handle_command("host-api", ["status"])
 
@@ -1062,7 +1073,7 @@ class TestDetachStatusAndStop:
                 "pid": 4242,
                 "host": "127.0.0.1",
                 "port": 8790,
-                "log": "/tmp/host_api_serve.log",
+                "log": str(STANDIN_LOG),
                 "started": "2026-08-19 18:00:00",
             },
         }
@@ -1091,7 +1102,7 @@ class TestDetachStatusAndStop:
             "record": None,
             "reason": "systemctl is here but did not answer",
         }
-        detachable.log_path.return_value = Path("/tmp/host_api_serve.log")
+        detachable.log_path.return_value = STANDIN_LOG
 
         handle_command("host-api", ["status"])
 
@@ -1154,10 +1165,38 @@ class TestServeCommand:
         """A refused bind must surface as an error, not a traceback, and above
         all must not reach a listener."""
         with patch.object(host_server, "serve", side_effect=host_config.BindRefused("nope")) as mock_serve:
-            handle_command("host-api", ["serve", "--host", "0.0.0.0"])
+            with pytest.raises(SystemExit):
+                handle_command("host-api", ["serve", "--host", "0.0.0.0"])
 
         mock_serve.assert_called_once()
         quiet_module["error"].assert_called_once()
+
+    def test_a_refused_bind_exits_non_zero_so_systemd_can_retry(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+    ) -> None:
+        """
+        The exit CODE, not just the message — this one is load-bearing.
+
+        The unit runs `Restart=on-failure` with a 60-attempt, 5s-apart window
+        put there for one case: at boot this server can come up before
+        tailscaled has assigned the tailnet address it binds. Exiting 0 makes
+        systemd read SUCCESS and decline to restart, which silently disarms all
+        sixty attempts — measured 2026-09-07, the unit gave up at 12:19:16 and
+        the address arrived at 12:19:22, six seconds later, with nothing to
+        retry. Two of the last six boots died that way.
+
+        So the message assertion above is not enough. A refusal that prints
+        perfectly and exits 0 is exactly the shape that made this survive: the
+        README claimed the process exited non-zero, so nobody checked.
+        """
+        with patch.object(host_server, "serve", side_effect=host_config.BindRefused("nope")):
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("host-api", ["serve", "--host", "0.0.0.0"])
+
+        assert exit_info.value.code == 1, "a refused bind must exit non-zero or Restart=on-failure never fires"
 
     def test_non_numeric_port_refused_before_serving(
         self,

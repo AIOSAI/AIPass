@@ -53,6 +53,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.handlers.shadow_cycle import cycle, mail, score
 from aipass.seedgo.apps.handlers.test_inventory import report, roots, twins
 from aipass.seedgo.apps.modules import inventory
@@ -100,6 +102,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.error(f"[SHADOW_CYCLE] the cycle failed: {type(exc).__name__}: {exc}")
         error(f"shadow-cycle failed: {type(exc).__name__}: {exc}")
         console.print("[dim]No cycle document was published and no mail was sent.[/dim]")
+        raise CommandRefused(refusal.EXIT_UNPROVEN, "shadow-cycle")
 
     return True
 

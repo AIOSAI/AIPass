@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (47/47) | **Tests:** 1463 test functions across 47 files; pytest expands to 1561 cases, 1561 pass | **Functions:** 240 public (217 tested)
-**Last Updated:** 2026-09-05
+**Seedgo:** 100% (47/47) | **Tests:** 1470 test functions across 47 files; pytest expands to 1569 cases, 1569 pass | **Functions:** 243 public (219 tested)
+**Last Updated:** 2026-09-07
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -274,6 +274,7 @@ api/
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
 │   │   ├── host/statics.py (bundle cache policy), lifetime.py (detached serve), refusals.py (unreadable-root memory), autostart.py (the systemd unit renderer)
 │   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
+│   │   ├── host/read_cache.py (single-flight + TTL for expensive reads — the 09-07 stampede cure)
 │   │   ├── host/pump.py (the attach socket's two directions), settings.py (the desktop's two gears), memory_config.py (@memory's limits, served)
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py       # The fleet's ONE json service, bound to prax — byte-identical in every branch, checked by hash
@@ -630,9 +631,23 @@ spelling rather than erroring, so a rate limit in the wrong section is an absenc
 wearing a config's clothes. The window is deliberately generous — 60 attempts,
 5s apart, inside 10 minutes — because at boot this server can come up before
 tailscaled has assigned the address it binds, and that failure is indistinguishable
-from a fatal misconfiguration: it exits non-zero immediately. Generous enough to
-outlast a slow network, still finite, so an impossible bind ends as a unit in
-`failed` that says so rather than retrying forever into a growing log.
+from a fatal misconfiguration. Generous enough to outlast a slow network, still
+finite, so an impossible bind ends as a unit in `failed` that says so rather than
+retrying forever into a growing log.
+
+**That window has never once fired, and this paragraph used to say why it would.**
+It claimed a refused bind "exits non-zero immediately". It exits **`0`** — measured
+2026-09-07 by running `serve` against an address this machine does not hold. The
+unit is `Restart=on-failure`, so systemd sees `status=0/SUCCESS`, correctly declines
+to restart, and the boot race this whole window was built to absorb ends with the
+server quietly dead. The journal has it twice: `Started 12:19:10` → dead `12:19:16`,
+and tailscaled reached `Running` at **12:19:22**, six seconds after the unit gave up
+— one retry would have caught it. Same shape on 09-05 at 10:28. Two of the last six
+boots, so the face goes dark after roughly one reboot in three and waits for a human,
+which is the exact failure autostart exists to end. The cure is an exit code, not a
+wider window; it is the `Known issues` exit-`0` item, and this is that item's real
+cost. Reported to @devpulse 09-07, unfixed here because the exit-code lane is
+blocked on Patrick's fleet-wide ruling.
 
 The unit and `serve --detach` build their argv from one function, `serve_argv()`.
 Two ways to start one server is how a fix lands in one of them and the other
@@ -1257,14 +1272,35 @@ corpus · ruff, format and pyright clean.
   (`api_key.py:164`). So `get-key openai` and `validate openai` reach a key store that is
   never used to call anything. The OpenAI SDK here is transport for OpenRouter, not an
   OpenAI integration.
-- **Error paths exit `0`** — a failed command reports success to the shell, so
-  `drone @api validate && ...` proceeds on failure. Re-measured tonight: `get-key openai`
-  and `validate openai` both print a red failure and exit `0`. Unknown commands correctly
-  exit `1`. Blocked on Patrick's fleet-wide ruling; see APLAN-0013.
+- **Error paths exit `0` everywhere except `serve`.** A failed command reports success to
+  the shell, so `drone @api validate && ...` proceeds on failure; `get-key openai` and
+  `validate openai` both print a red failure and exit `0`. Unknown commands correctly exit
+  `1`. The `serve` path was carved out of this and **fixed on 09-07** (below); the rest is
+  still blocked on Patrick's fleet-wide ruling, see APLAN-0013.
 - **Google auth libraries are optional deps** — commands fail with install instructions if
   missing. Verified importable tonight (`google.auth`, `googleapiclient`).
 - **No rate limiting on OpenRouter calls** (S117 finding). Verified tonight: zero
   rate-limit, throttle or backoff code in `handlers/openrouter/` or `openrouter_client.py`.
+
+*Fixed 2026-09-07 (FPLAN-0492 wave 4), both from one night's incidents:*
+
+- **A refused bind now exits `1`.** All three refusal sites in `host_serve.py` —
+  foreground, detached, and the launcher — call `sys.exit(1)`. The unit is
+  `Restart=on-failure` with a 60-attempt window built for exactly the boot race where
+  tailscaled has not yet assigned the address, and a zero exit had silently disarmed all
+  sixty: measured 09-07, the unit gave up at 12:19:16 and the address arrived at 12:19:22.
+  Two of the last six boots died that way. The README had claimed this path "exits
+  non-zero immediately", which is why nobody checked the mechanism.
+- **The git-changes lane coalesces.** `read_cache.py` holds the single-flight + TTL
+  mechanism (1.5s, keyed on `(branch, project, grain)`); `git_reads.py` asks the question
+  and owns the key, and `fleet.py` still carries its own copy of the same shape for
+  @baud's snapshot — folding that one in is the obvious follow-up, not done here. Before:
+  every `/v1/git-changes?branch=<X>` spawned its own `drone @git status --json`, and on
+  09-07 at 12:17 thirty-one hit the lane's 30s timeout in the same second. Measured that
+  day: one call alone 0.5s, 20 concurrent 13.8s median, 31 concurrent 17.9s on an idle
+  machine — 60% of the budget at rest, which is why boot-window load pushed it over. The
+  cure was coalescing, never a longer timeout: raising the ceiling only makes a slow
+  screen slower while leaving the N execs in place.
 
 *Retired 2026-09-05:* this list carried "backup branch credential migration pending
 (`~/.aipass/` → `~/.secrets/aipass/`, legacy dir still present)" for months. It is
@@ -1278,6 +1314,6 @@ audit refresh; the README kept it standing until tonight.
 
 ---
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-07*
 
 [← Back to AIPass](../../../README.md)

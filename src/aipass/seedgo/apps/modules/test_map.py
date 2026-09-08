@@ -35,6 +35,8 @@ from aipass.cli.apps.modules import error
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 # Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
@@ -99,7 +101,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             f"Branch name must use @ prefix: '@{branch_arg}'",
             suggestion=f"Usage: drone @seedgo test_map @{branch_arg}",
         )
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, branch_arg)
 
     branch_name = normalize_branch_arg(branch_arg)
 
@@ -116,7 +118,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             f"Branch not found: @{branch_name}",
             suggestion="Run: drone systems",
         )
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, branch_name)
 
     branch_path = branch_entry["path"]
 
@@ -205,7 +207,7 @@ def print_help() -> None:
     console.print("[yellow]What It Excludes:[/yellow]")
     console.print("  [dim]• Private functions (_name)[/dim]")
     console.print("  [dim]• CLI routing (handle_command, print_introspection, print_help, main)[/dim]")
-    console.print("  [dim]• json_handler standard functions (covered by test_quality checker)[/dim]")
+    console.print("  [dim]• json_handler standard functions (covered by seedgo's json contract suite)[/dim]")
     console.print()
 
     console.print("[yellow]Examples:[/yellow]")

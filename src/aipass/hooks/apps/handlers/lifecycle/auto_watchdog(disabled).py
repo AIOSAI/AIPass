@@ -1,14 +1,24 @@
 # =================== AIPass ====================
-# Name: auto_watchdog.py
-# Version: 1.0.0
-# Description: Reminds agent to arm watchdog after dispatch (PostToolUse)
+# Name: auto_watchdog(disabled).py
+# Version: 1.0.1
+# Description: RETIRED 2026-09-07 (FPLAN-0495 item 3) — was a PostToolUse dispatch reminder
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-21
-# Modified: 2026-05-21
+# Modified: 2026-09-07
 # =============================================
 
-"""Checks for dispatch commands and reminds the agent to arm the watchdog."""
+"""RETIRED. Checks for dispatch commands and reminds the agent to arm the watchdog.
+
+Disabled 2026-09-07 (FPLAN-0495 item 3). It fired on every PostToolUse Bash
+call to pattern-match one command shape and inject a reminder — a per-tool-call
+cost for a nudge the dispatch lane no longer needs.
+
+Retirement is two moves, and the rename alone is not one of them: the entry in
+.aipass/hooks.json and .aipass/project_hooks.json names this handler by DOTTED
+PATH, so the file had to be renamed AND both entries flipped to enabled=false.
+Archive after a session cycle proves nothing was connected.
+"""
 
 import json
 import re

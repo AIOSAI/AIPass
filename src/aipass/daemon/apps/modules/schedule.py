@@ -19,6 +19,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 
 
 def print_introspection():
@@ -45,7 +46,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    # The migration notice is still the right GUIDANCE, so it prints - but a
+    # retired subcommand did not do what the caller asked, and exiting 0 told
+    # their `&&` that it did. Notice first, then refuse by name.
     json_handler.log_operation("schedule_command_retired", {"args": args[:2]})
-    logger.info("[schedule] Retired CLI invoked")
+    logger.info("[schedule] Retired CLI invoked with %r", args[0])
     print_introspection()
+    gate("schedule", args, usage="drone @daemon schedule   (retired — see drone @daemon run --help)")
     return True

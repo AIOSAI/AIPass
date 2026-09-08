@@ -724,12 +724,26 @@ class TestHooksEntryPoint:
         result = handle_command("nonexistent", [])
         assert result is False
 
-    def test_status_command_returns_true(self):
+    def test_status_with_no_config_exits_one_through_the_entry_point(self):
+        """The routed `status` refusal reaches the shell as exit 1 (FPLAN-0507).
+
+        This pin used to assert True with a patch on the LOADER's name, which
+        hookstatus binds at import — so the patch bit only when hookstatus was
+        first imported inside the patch window. In the full suite an earlier
+        import had already bound the real function, the patch was inert, the
+        real config was found and True came back; alone, or on a fresh xdist
+        worker (the Linux CI on 8769a799), the patch bit and the test pinned
+        the exit-0 defect FPLAN-0507 had just cured. Patch the name hookstatus
+        actually calls, and pin the cured outcome.
+        """
         from aipass.hooks.apps.hooks import handle_command
 
-        with patch("aipass.hooks.apps.handlers.config.loader.find_project_config", return_value=None):
-            result = handle_command("status", [])
-        assert result is True
+        with (
+            patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            handle_command("status", [])
+        assert exit_info.value.code == 1
 
     def test_log_command_returns_true(self):
         from aipass.hooks.apps.hooks import handle_command
@@ -977,17 +991,38 @@ class TestCliRouting:
                 return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
             ),
         ):
-            handle_command("status", [])
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("status", [])
+
+        # Exit 1, not 0: rewritten 2026-09-07 (canary refusal sweep). Showing
+        # nothing and reporting success is the defect, not the message.
+        assert exit_info.value.code == 1
         captured = capsys.readouterr()
         assert "No .aipass/hooks.json" in captured.err
 
     def test_version_output(self, capsys):
-        from aipass.hooks.apps.hooks import main
+        """Read from the header, never hardcoded.
+
+        This asserted a literal "1.1.0" while the file header said 1.2.0 — the
+        second of two tests pinning the stale value they existed to catch
+        (todo 16, fixed 2026-09-07). Its twin lives in test_cli_routing.py and
+        covers both flags; this one keeps the claim on the engine-routed path.
+        """
+        import re
+
+        from aipass.hooks.apps import hooks as entry
+
+        header = re.search(
+            r"^# Version:\s*(\S+)",
+            Path(entry.__file__).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        assert header is not None, "apps/hooks.py has no '# Version:' header line"
 
         with patch("sys.argv", ["hooks", "--version"]):
-            main()
+            entry.main()
         captured = capsys.readouterr()
-        assert "1.1.0" in captured.out
+        assert header.group(1) in captured.out
 
 
 class TestConfigDataContracts:

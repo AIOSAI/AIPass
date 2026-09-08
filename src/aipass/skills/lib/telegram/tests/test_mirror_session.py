@@ -19,7 +19,6 @@ Covers:
 """
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -208,7 +207,8 @@ class TestCreateBotMirror:
             patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.start_bot_process", return_value=True),
             patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.launch_mirror_session", return_value=True),
             patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.start_service", return_value=True),
-            patch("aipass.skills.lib.telegram.apps.handlers.bot_factory._BOT_CONFIG_DIR", Path("/tmp/test_bots")),
+            # BOT_CONFIG_DIR is redirected per test by the conftest autouse fixture;
+            # the tests that read the written file override it with their own tmp_path.
         ]
         mocks = {}
         started = []
@@ -225,7 +225,7 @@ class TestCreateBotMirror:
         """Config written with shared_session, attach_only, chat_id."""
         from aipass.skills.lib.telegram.apps.handlers.bot_factory import create_bot
 
-        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory._BOT_CONFIG_DIR", tmp_path):
+        with patch("aipass.skills.lib.telegram.apps.handlers.config.BOT_CONFIG_DIR", tmp_path):
             result = create_bot(
                 bot_id="api",
                 bot_token="123:FAKE",
@@ -247,7 +247,7 @@ class TestCreateBotMirror:
         """launch_mirror_session called when shared_session + attach_only."""
         from aipass.skills.lib.telegram.apps.handlers.bot_factory import create_bot
 
-        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory._BOT_CONFIG_DIR", tmp_path):
+        with patch("aipass.skills.lib.telegram.apps.handlers.config.BOT_CONFIG_DIR", tmp_path):
             create_bot(
                 bot_id="api",
                 bot_token="123:FAKE",
@@ -262,7 +262,7 @@ class TestCreateBotMirror:
         """Mirror bot started via start_service, not start_bot_process."""
         from aipass.skills.lib.telegram.apps.handlers.bot_factory import create_bot
 
-        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory._BOT_CONFIG_DIR", tmp_path):
+        with patch("aipass.skills.lib.telegram.apps.handlers.config.BOT_CONFIG_DIR", tmp_path):
             create_bot(
                 bot_id="api",
                 bot_token="123:FAKE",
@@ -278,7 +278,7 @@ class TestCreateBotMirror:
         """Non-mirror bot still uses start_bot_process."""
         from aipass.skills.lib.telegram.apps.handlers.bot_factory import create_bot
 
-        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory._BOT_CONFIG_DIR", tmp_path):
+        with patch("aipass.skills.lib.telegram.apps.handlers.config.BOT_CONFIG_DIR", tmp_path):
             create_bot(
                 bot_id="api",
                 bot_token="123:FAKE",

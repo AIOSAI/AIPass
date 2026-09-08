@@ -187,29 +187,8 @@ class TestHandle:
     def test_block_rm_rf(self):
         self._assert_blocked(self._bash("rm -rf /tmp/x"))
 
-    def test_block_rm_fr(self):
-        self._assert_blocked(self._bash("rm -fr /tmp/x"))
-
-    def test_block_rm_rfv(self):
-        self._assert_blocked(self._bash("rm -rfv /tmp/x"))
-
-    def test_block_rm_recursive_long(self):
-        self._assert_blocked(self._bash("rm --recursive /tmp/x"))
-
-    def test_block_rm_uppercase_r(self):
-        self._assert_blocked(self._bash("rm -R /tmp/x"))
-
-    def test_block_rm_r(self):
-        self._assert_blocked(self._bash("rm -r /tmp/x"))
-
-    def test_allow_drone_rm(self):
-        self._assert_allowed(self._bash("drone rm /tmp/x"))
-
     def test_allow_non_recursive_rm(self):
         self._assert_allowed(self._bash("rm file.txt"))
-
-    def test_allow_rm_force_only(self):
-        self._assert_allowed(self._bash("rm -f file.txt"))
 
     def test_block_compound_cd_and_rm(self):
         self._assert_blocked(self._bash("cd /etc && rm -rf ."))
@@ -219,9 +198,6 @@ class TestHandle:
 
     def test_block_subshell_rm(self):
         self._assert_blocked(self._bash("echo $(rm -rf /tmp/x)"))
-
-    def test_block_sudo_rm_rf(self):
-        self._assert_blocked(self._bash("sudo rm -rf /tmp/x"))
 
     def test_block_absolute_path_rm(self):
         self._assert_blocked(self._bash("/usr/bin/rm -rf /tmp/x"))
@@ -255,9 +231,6 @@ class TestHandle:
 
     def test_block_variable_target(self):
         self._assert_blocked(self._bash("rm -rf $DIR"))
-
-    def test_block_multiple_targets(self):
-        self._assert_blocked(self._bash("rm -rf /tmp/a /tmp/b"))
 
 
 class TestDeletionRecord:
@@ -407,15 +380,25 @@ class TestDeletionRecord:
 class TestAllowDenyUnchanged:
     """Canary: the record must not move a single allow/deny decision."""
 
+    # Nine handle-level rows folded in here 2026-09-07 (DPLAN-0323 contested
+    # band). Six were already carried by this matrix verbatim. The last three
+    # were NOT end-to-end anywhere — -fr, a sudo prefix, and two targets after
+    # the flag — so their inputs moved in rather than being dropped: a merge
+    # keeps every claim, and clause-level pins alone would have left the wiring
+    # from handle() down to the scan unpinned for those three.
     MATRIX = [
         ("rm -rf /tmp/x", 2),
+        ("rm -fr /tmp/x", 2),
         ("rm -r /tmp/x", 2),
         ("rm -R /tmp/x", 2),
         ("rm --recursive /tmp/x", 2),
         ("rm -rfv /tmp/x", 2),
+        ("rm -rf /tmp/a /tmp/b", 2),
+        ("sudo rm -rf /tmp/x", 2),
         ("ls && rm -rf build", 2),
         ("rm notes.txt", 0),
         ("rm -f notes.txt", 0),
+        ("rm -f file.txt", 0),
         ("drone rm /tmp/x", 0),
         ("drone rm -rf /tmp/x", 0),
         ("echo 'rm -rf /tmp/x'", 0),

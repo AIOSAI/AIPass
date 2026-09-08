@@ -115,3 +115,128 @@ class TestCatchupStateMigration:
 
         assert mod.CATCHUP_STATE_FILE.exists()
         assert not mod.LEGACY_CATCHUP_STATE_FILE.exists()
+
+
+class TestCatchupOccurrenceCounting:
+    """A burst must not read as one line (FPLAN-0492 wave 5)."""
+
+    @staticmethod
+    def _write_log(tmp_path: Path, lines: list) -> Path:
+        log = tmp_path / "flow_ops.log"
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return log
+
+    @staticmethod
+    def _line(ts: str, message: str = "connection timed out") -> str:
+        return f"{ts} | flow.runner | ERROR | {message}"
+
+    def test_repeat_lines_are_counted_not_dropped(self, tmp_path: Path) -> None:
+        """37 identical lines produce ONE entry carrying count 37.
+
+        Measured live 2026-09-07: a 37-line burst reached the registry as
+        count 2. The dedup key has no timestamp, so every line after the
+        first was skipped outright and the payload said `count=1`.
+        """
+        mod = _import_startup()
+        import time
+        from datetime import datetime
+
+        lines = [self._line(f"2026-09-07 10:{i // 60:02d}:{i % 60:02d}") for i in range(37)]
+        log = self._write_log(tmp_path, lines)
+
+        errors: list = []
+        by_hash: dict = {}
+        ok = mod._scan_single_log_file(
+            log,
+            datetime(2026, 9, 7, 0, 0, 0),
+            set(),
+            errors,
+            time.monotonic(),
+            by_hash,
+        )
+
+        assert ok is True
+        assert len(errors) == 1, "one distinct error, not 37 events"
+        assert errors[0]["count"] == 37
+
+    def test_first_and_last_seen_span_the_burst(self, tmp_path: Path) -> None:
+        """The stamps bracket the burst, so the notification can show its shape."""
+        mod = _import_startup()
+        import time
+        from datetime import datetime
+
+        log = self._write_log(
+            tmp_path,
+            [
+                self._line("2026-09-07 10:00:00"),
+                self._line("2026-09-07 10:00:30"),
+                self._line("2026-09-07 10:05:00"),
+            ],
+        )
+
+        errors: list = []
+        mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), set(), errors, time.monotonic(), {})
+
+        assert errors[0]["count"] == 3
+        assert errors[0]["first_seen"] == "2026-09-07T10:00:00"
+        assert errors[0]["last_seen"] == "2026-09-07T10:05:00"
+
+    def test_distinct_errors_keep_separate_counts(self, tmp_path: Path) -> None:
+        """Counting a repeat must not merge two different errors."""
+        mod = _import_startup()
+        import time
+        from datetime import datetime
+
+        log = self._write_log(
+            tmp_path,
+            [
+                self._line("2026-09-07 10:00:00", "connection timed out"),
+                self._line("2026-09-07 10:00:01", "connection timed out"),
+                self._line("2026-09-07 10:00:02", "disk full"),
+            ],
+        )
+
+        errors: list = []
+        mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), set(), errors, time.monotonic(), {})
+
+        assert len(errors) == 2
+        by_message = {e["message"]: e["count"] for e in errors}
+        assert by_message == {"connection timed out": 2, "disk full": 1}
+
+    def test_a_hash_from_a_previous_run_stays_dropped(self, tmp_path: Path) -> None:
+        """Repeats are counted against THIS scan only — old state still suppresses.
+
+        Nothing collected this scan can be bumped for a hash carried over from
+        persisted state, and re-emitting it would re-dispatch an error the
+        previous run already handled.
+        """
+        mod = _import_startup()
+        import time
+        from datetime import datetime
+
+        log = self._write_log(tmp_path, [self._line("2026-09-07 10:00:00")] * 5)
+        old_hash = mod._generate_error_hash("flow.runner", "connection timed out")
+
+        errors: list = []
+        mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), {old_hash}, errors, time.monotonic(), {})
+
+        assert errors == []
+
+    def test_the_storm_guard_still_measures_distinct_errors(self, tmp_path: Path) -> None:
+        """MAX_ERRORS_PER_SCAN counts entries, so repeats cannot widen it."""
+        mod = _import_startup()
+        import time
+        from datetime import datetime
+
+        limit = mod.MAX_ERRORS_PER_SCAN
+        lines = []
+        for i in range(limit + 10):
+            lines.append(self._line("2026-09-07 10:00:00", f"failure number {i}"))
+            lines.append(self._line("2026-09-07 10:00:01", f"failure number {i}"))
+        log = self._write_log(tmp_path, lines)
+
+        errors: list = []
+        ok = mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), set(), errors, time.monotonic(), {})
+
+        assert ok is False, "the limit must still stop the scan"
+        assert len(errors) == limit

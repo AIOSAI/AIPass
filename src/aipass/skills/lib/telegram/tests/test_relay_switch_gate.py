@@ -201,20 +201,20 @@ class TestUnreadableStateFailsClosed:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_switch_raising_anything_sends_nothing(self, relay_by_path, bot_dirs, state_dir):
-        """Any failure to tell — not just the declared one — stays silent."""
+        """Any failure to tell — not just the declared one — stays silent.
+
+        A bare RuntimeError is the strongest single case here, so it is the only
+        one: SwitchStateUnreadable subclasses RuntimeError, so every catch clause
+        that would swallow this one swallows the declared exception too. The
+        declared path is exercised for real by test_corrupt_state_file_sends_nothing,
+        which feeds a genuinely corrupt document to the real read_state().
+        """
         with patch.object(sh, "is_enabled", side_effect=RuntimeError("boom")):
             with patch.object(relay_by_path, "urlopen") as mock_url:
                 result = relay_by_path.handle(_hook_payload(bot_dirs["work"]))
 
         mock_url.assert_not_called()
         assert result == {"stdout": "", "exit_code": 0}
-
-    def test_declared_unreadable_sends_nothing(self, relay_by_path, bot_dirs, state_dir):
-        with patch.object(sh, "is_enabled", side_effect=sh.SwitchStateUnreadable("unreadable")):
-            with patch.object(relay_by_path, "urlopen") as mock_url:
-                relay_by_path.handle(_hook_payload(bot_dirs["work"]))
-
-        mock_url.assert_not_called()
 
 
 # =============================================

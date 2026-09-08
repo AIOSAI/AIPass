@@ -216,6 +216,34 @@ def load_registry(registry_path):
     return _default_registry_schema()
 
 
+def registry_is_writable_document(registry_path) -> bool:
+    """Is this registry safe to run a read-modify-write cycle against?
+
+    ``load_registry`` answers a MISSING file and an UNREADABLE one the same way
+    — an empty document — because a reader has nothing better to say. A WRITER
+    does: appending one branch to that empty document and saving it replaces a
+    live project's whole ``branches`` list, and its ``metadata`` (credential
+    included) with a default. Measured 2026-09-07 on a temp project: a registry
+    holding 3 branches, corrupted mid-file, came back from ``add_to_registry``
+    holding 1 and no ``metadata.id``.
+
+    Missing is not unreadable. A missing registry is a project being created
+    (the create lane's own case, and it stays allowed); an unreadable one is a
+    project whose file we failed to parse, and every branch in it is still real.
+
+    Returns:
+        True when the file does not exist (nothing to lose) or parses into a
+        registry-shaped dict. False when it exists but cannot be read or is not
+        a JSON object — the caller must refuse to write.
+    """
+    registry_path = Path(registry_path)
+    if not registry_path.exists():
+        return True
+
+    data = json_handler.read_json(registry_path)
+    return isinstance(data, dict)
+
+
 def resolve_project_credential(registry_path) -> str:
     """Return the project credential to stamp on a citizen being created here.
 
@@ -362,6 +390,20 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         # the caller's — leaving the passport claiming one credential and the
         # registry carrying another. Two mints, one project, no agreement.
         registry_existed = registry_path.exists()
+
+        # A registry that exists but cannot be parsed is not an empty registry.
+        # Refusing here is the whole guard: past this line the branch list is
+        # rebuilt from what load_registry returned, and for an unreadable file
+        # that is nothing at all.
+        if not registry_is_writable_document(registry_path):
+            logger.error(
+                "[registry] %s exists but could not be read as a registry document — refusing to add %s. "
+                "Writing would replace every branch it holds with this one entry and drop metadata.id.",
+                registry_path.name,
+                branch_name,
+            )
+            return False
+
         registry = load_registry(registry_path)
 
         # A registry the caller is creating adopts the caller's credential (the
@@ -398,7 +440,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         else:
             branches.append(entry)
         registry["branches"] = branches
-        registry["metadata"]["total_branches"] = len(branches_as_list(branches))
+        registry.setdefault("metadata", {})["total_branches"] = len(branches_as_list(branches))
 
         json_handler.log_operation("registry_updated", data={"branch": branch_name})
 

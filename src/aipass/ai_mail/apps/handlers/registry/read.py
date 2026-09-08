@@ -206,6 +206,42 @@ RESIDENCY_CORE = "core"
 RESIDENCY_RESIDENT = "resident"
 
 
+def _has_dot_component(path: Path, relative_to: Path) -> bool:
+    """Whether any component of *path* below *relative_to* is dot-prefixed.
+
+    The single reader for the dot rule. Both discovery halves under projects/
+    need it and only one of them had it: ``resident_registry_paths`` filtered,
+    ``get_project_tree_branches`` — the ADMIN bridge — did not, so a probe on a
+    synthetic tree returned ``@archive`` for ``projects/.archive/`` (DPLAN-0319
+    fixture, parked; reported as my todo #10 since 2026-08-28).
+
+    The two halves reaching different answers is the defect worth naming, not
+    the missing line: they glob the same tree for the same kind of file and the
+    admin one is the wider seat, so of the two it is the WORSE one to leave
+    open. Sharing the rule is what stops them drifting apart again.
+
+    ``pathlib`` globs match hidden directories — unlike the ``glob`` module —
+    so the filter is load-bearing rather than belt-and-braces. It stays separate
+    from the depth rule on purpose: on the live tree the parked projects are
+    refused by both, so either alone looks unnecessary until the other goes.
+
+    A path outside *relative_to* cannot be judged by this rule and is not
+    refused by it; the caller's glob is what decides reach.
+
+    Args:
+        path: Candidate registry path.
+        relative_to: Directory the components are counted from.
+
+    Returns:
+        True when any component below *relative_to* starts with a dot.
+    """
+    try:
+        parts = path.relative_to(relative_to).parts
+    except ValueError:
+        return False
+    return any(part.startswith(".") for part in parts)
+
+
 def declared_residency(branch_path: Path) -> Optional[str]:
     """What the passport at *branch_path* declares itself to be.
 
@@ -265,7 +301,7 @@ def resident_registry_paths(repo_root: Path) -> List[Path]:
 
     found: List[Path] = []
     for path in registries_in(projects, RESIDENT_REGISTRY_GLOB):
-        if any(part.startswith(".") for part in path.relative_to(projects).parts):
+        if _has_dot_component(path, projects):
             continue
         found.append(path)
     return found
@@ -385,6 +421,13 @@ def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
     bridge's discovery half and is called ONLY for verified-admin callers; for
     everyone else resolution must not widen (FPLAN-0401 phase 5).
 
+    DOT-PREFIXED PROJECTS ARE REFUSED, through the same ``_has_dot_component``
+    the resident half uses. Until FPLAN-0492 this half had no such filter and
+    the two disagreed: a probe on a synthetic tree carrying ``projects/baud``
+    and ``projects/.archive`` returned BOTH, so ``@archive`` became an
+    addressable seat for the admin lane. Parked archives are not citizens, and
+    the widest seat in the branch was the one admitting them.
+
     Args:
         repo_root: Repository root containing the projects/ tree.
 
@@ -392,8 +435,13 @@ def get_project_tree_branches(repo_root: Path) -> Dict[str, str]:
         Dict mapping email address to absolute path string.
         Empty dict when there is no projects/ tree.
     """
+    root = Path(repo_root)
+    projects = root / RESIDENT_PROJECTS_DIR
     result: Dict[str, str] = {}
-    for reg_file in registries_in(Path(repo_root), PROJECT_TREE_REGISTRY_GLOB):
+    for reg_file in registries_in(root, PROJECT_TREE_REGISTRY_GLOB):
+        if _has_dot_component(reg_file, projects):
+            logger.debug("[registry] bridge skipped dot-prefixed project registry %s", reg_file)
+            continue
         result.update(_branches_from_registry(reg_file))
     return result
 

@@ -71,7 +71,7 @@ STANDARD_NAME = "unentered_assert"
 
 #: Directories a project keeps tests in. Tried in order; a project matching
 #: none of them gets a whole-tree walk, which is what an unknown target needs.
-TEST_DIRS: tuple = ("tests", "test")
+TEST_DIRS: tuple = corpus.TEST_DIRS
 
 #: Calls that establish an emptiness floor when they appear in an assertion
 #: before a loop. `assert len(rows) == 3` proves the loop body runs; without a

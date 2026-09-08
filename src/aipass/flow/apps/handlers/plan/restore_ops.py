@@ -18,7 +18,7 @@ Usage:
     from aipass.flow.apps.handlers.plan.restore_ops import recover_plan_from_backup, restore_plan_impl
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from shutil import copy2
 from datetime import datetime, timezone
 from typing import Dict, Any, List
@@ -59,6 +59,32 @@ def _find_repo_root() -> Path:
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
 MODULE_NAME = "restore_plan"
+
+
+def _recorded_is_absolute(recorded: str) -> bool:
+    """Is a path RECORDED IN THE REGISTRY absolute — in either dialect?
+
+    The registries are shared across install histories, so a row written on
+    Windows is read on POSIX and the other way round. ``Path.is_absolute()``
+    answers for the HOST, which means ``C:\\plans`` reads as relative on Linux
+    and ``/srv/plans`` reads as relative on Windows — and a relative record is
+    resolved against the local tree, so an unrecognised absolute path used to
+    land the file under FLOW_ROOT silently, somewhere its own header never
+    named. Asking both dialects by name is the only host-independent answer
+    (ruling 2026-09-07, FPLAN-0492 wave 4).
+
+    Note the asymmetry that makes both checks necessary: ``PureWindowsPath``
+    accepts a POSIX-absolute path (it reads ``/srv`` as drive-relative and
+    ``is_absolute()`` is False), while ``PurePosixPath`` refuses a drive letter
+    outright — neither dialect alone covers the other.
+
+    Args:
+        recorded: The location string as read from the plan header or registry.
+
+    Returns:
+        True when either dialect calls it absolute.
+    """
+    return PurePosixPath(recorded).is_absolute() or PureWindowsPath(recorded).is_absolute()
 
 
 # =============================================
@@ -122,7 +148,16 @@ def recover_plan_from_backup(
 
         # CRITICAL: Convert relative paths to absolute paths
         # If location is relative (like "flow"), resolve it
-        if not original_location.startswith("/"):
+        if _recorded_is_absolute(original_location):
+            # An absolute record names a real directory or nothing at all.
+            # Re-homing it to FLOW_ROOT would file the plan somewhere its own
+            # header never said, so a vanished one is refused by name.
+            if not Path(original_location).is_dir():
+                return False, (
+                    f"Recorded location '{original_location}' for {plan_file.stem} no longer exists — "
+                    f"refusing to restore somewhere else; recreate the directory or edit the plan header"
+                )
+        else:
             # Relative path - resolve against _PKG_ROOT
             if original_location == "flow":
                 original_location = str(FLOW_ROOT)

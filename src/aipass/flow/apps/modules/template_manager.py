@@ -45,6 +45,7 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # JSON handler for operation tracking
+from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -64,6 +65,11 @@ from aipass.flow.apps.handlers.template.registry_ops import (
 # =============================================
 
 MODULE_NAME = "template_manager"
+
+# The four verbs this module claims. handle_command answers help for exactly
+# these — a command we do not own must fall through to the next module, help
+# flag or not.
+TEMPLATE_COMMANDS = ("templates", "register", "unregister", "scan")
 
 # =============================================
 # INTROSPECTION
@@ -201,36 +207,62 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     Returns:
         True if command was recognized, False if not
+
+    Raises:
+        SystemExit: Code 1 when a door was handed an argument it does not read
+            (ruling 2026-09-07). The gate decides; this is where it is shown.
     """
-    # ---- templates ----
-    if command == "templates":
-        if not args:
+    if not args:
+        # `templates` with nothing after it IS the listing — print_introspection
+        # loads the registry and renders the types. The old code reached the
+        # same display a second way, by ignoring whatever token followed the
+        # verb, which is the door the 2026-09-07 ruling closes; the log line
+        # moved here so listing still leaves its audit record.
+        if command == "templates":
+            json_handler.log_operation("templates_listed", {"command": command, "args": args})
             print_introspection()
             return True
 
-        # Intercept help ANYWHERE in the sequence, before arg parsing
-        if wants_help(args):
-            print_help()
-            return True
-
-        # Log the operation
-        json_handler.log_operation(
-            "templates_listed",
-            {"command": command, "args": args},
-        )
-
-        registry = load_registry()
-        _display_registered_types(registry)
+    # Help is answered HERE, before any verb reads its arguments — one gate for
+    # all four verbs. It used to sit inside each branch of _route(); a reader
+    # (human or checker) looking at handle_command could not then see that
+    # `--help` never reaches business logic, which is exactly the property
+    # being claimed.
+    if command in TEMPLATE_COMMANDS and wants_help(args):
+        print_help()
         return True
+
+    try:
+        return _route(command, args)
+    except UnknownArgument as exc:
+        error(exc.message, suggestion=exc.usage)
+        raise SystemExit(1) from exc
+
+
+def _route(command: str, args: List[str]) -> bool:
+    """Dispatch the four template verbs. See :func:`handle_command`.
+
+    Args:
+        command: Command name.
+        args: Additional arguments.
+
+    Returns:
+        True if command was recognized, False if not.
+
+    Note:
+        Help never arrives here — handle_command answers it for all four verbs
+        before delegating, so every branch below sees real arguments only.
+    """
+    # ---- templates ----
+    if command == "templates":
+        # Reached only WITH arguments — the empty case is the listing, handled
+        # in handle_command. `templates` reads nothing after the verb, and
+        # ignoring a token here printed the listing under a name the caller
+        # never asked for, with exit 0.
+        refuse_extra(args, door="templates")
 
     # ---- register ----
     if command == "register":
-        # Help gate BEFORE the arity check -- otherwise `register --help` is
-        # just a short arg list and prints a usage error instead of help
-        if wants_help(args):
-            print_help()
-            return True
-
         if not args or len(args) < 2:
             error("Usage: drone @flow register <dir> <PREFIX>")
             console.print()
@@ -240,6 +272,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
         dir_name = args[0]
         prefix = args[1]
+        if args[2:]:
+            refuse_extra(args[2:], door=f"register {dir_name} {prefix}")
 
         # Validate PREFIX convention: uppercase and ends with PLAN
         if not prefix.isupper() or not prefix.endswith("PLAN"):
@@ -270,12 +304,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # ---- unregister ----
     if command == "unregister":
-        # Help gate BEFORE the arity check -- `unregister --help` previously
-        # reached remove_type() with '--help' as the type name
-        if wants_help(args):
-            print_help()
-            return True
-
         if not args:
             error("Usage: drone @flow unregister <dir>")
             console.print()
@@ -284,6 +312,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             return True
 
         dir_name = args[0]
+        if args[1:]:
+            refuse_extra(args[1:], door=f"unregister {dir_name}")
 
         # Log the operation
         json_handler.log_operation(
@@ -304,9 +334,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # ---- scan ----
     if command == "scan":
-        if wants_help(args):
-            print_help()
-            return True
+        if args:
+            refuse_extra(args, door="scan")
 
         # Log the operation
         json_handler.log_operation(

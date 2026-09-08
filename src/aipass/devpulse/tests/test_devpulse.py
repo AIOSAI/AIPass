@@ -43,10 +43,30 @@ class TestCLIRouting:
         result = devpulse_module._handle_command("-V", [])
         assert result is True
 
-    def test_unknown_command_returns_false(self):
-        """Unrecognized command returns False."""
+    def test_unknown_command_returns_false(self, capsys):
+        """Unrecognized command returns False AND names the token on stderr.
+
+        Patrick's unknown-argument ruling (fleet sweep 2026-09-07): fail
+        non-zero and say which token was refused. Until 09-07 devpulse
+        returned False with nothing printed — exit 1, empty stderr.
+        """
         result = devpulse_module._handle_command("nonexistent_unknown_command", [])
         assert result is False
+        err = capsys.readouterr().err
+        assert "Unknown command: nonexistent_unknown_command" in err
+        assert "--help" in err
+
+    def test_unknown_flag_is_refused_by_name(self, capsys):
+        """An unknown flag is refused like an unknown verb — named, not swallowed."""
+        result = devpulse_module._handle_command("--definitely-not-a-flag", [])
+        assert result is False
+        assert "Unknown command: --definitely-not-a-flag" in capsys.readouterr().err
+
+    def test_unknown_command_offers_a_close_match(self, capsys):
+        """A near-miss of a real module name gets a did-you-mean."""
+        result = devpulse_module._handle_command("watchdg", [])
+        assert result is False
+        assert "Did you mean: watchdog?" in capsys.readouterr().err
 
     @patch.object(devpulse_module, "print_help")
     def test_print_help_called_on_help_flag(self, mock_print_help):
@@ -127,7 +147,8 @@ class TestHandleCommandGuard:
         assert isinstance(result, bool)
         assert result is True
 
-    def test_handle_command_unknown_returns_false(self):
-        """Unknown commands return False through the guard."""
+    def test_handle_command_unknown_returns_false(self, capsys):
+        """Unknown commands return False through the guard, and say so."""
         result = devpulse_module.handle_command("bogus_invalid_command", [])
         assert result is False
+        assert "bogus_invalid_command" in capsys.readouterr().err

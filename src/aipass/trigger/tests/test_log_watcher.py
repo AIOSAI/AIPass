@@ -11,12 +11,23 @@
 import json
 import sys
 import hashlib
+import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# Synthetic path roots. _detect_branch_from_path, _should_process and
+# _classify_log_path parse a path STRING and never touch disk, so these are
+# inputs under test, not locations — but a literal /home/user or /tmp prefix
+# reads as an assumption about the machine, so the roots are built instead.
+# The POSIX shape IS part of the contract: these functions split on aipass/
+# and logs/ segments, so the separator must stay "/" on every platform.
+_SYNTHETIC_HOME = PurePosixPath("/synthetic/home")
+_SYNTHETIC_ELSEWHERE = PurePosixPath("/synthetic/elsewhere")
 
 
 # ---------------------------------------------------------------------------
@@ -53,9 +64,12 @@ def _mock_infrastructure(monkeypatch):
     # -- trigger config (TRIGGER_ROOT, AIPASS_PKG_ROOT) ---------------------
     from aipass.trigger.apps.config import atomic_write_json
 
+    # Never written to — the module only joins names onto them. Built from the
+    # platform temp dir so the fixture is not asserting a POSIX layout.
+    fake_root = Path(tempfile.gettempdir())
     mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
-    mock_config.AIPASS_PKG_ROOT = Path("/tmp/fake_aipass_pkg")
+    mock_config.TRIGGER_ROOT = fake_root / "fake_trigger_root"
+    mock_config.AIPASS_PKG_ROOT = fake_root / "fake_aipass_pkg"
     mock_config.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
@@ -132,7 +146,7 @@ class TestDetectBranchFromPath:
     def test_standard_branch_logs_path(self):
         """Detects branch from src/aipass/<branch>/logs/file.log pattern."""
         lw = _import_log_watcher()
-        path = "/home/user/src/aipass/flow/logs/flow_planner.log"
+        path = str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow_planner.log")
         assert lw._detect_branch_from_path(path) == "FLOW"
 
     def test_system_logs_mapped_file(self):
@@ -309,13 +323,13 @@ class TestShouldProcess:
         """Log file inside /system_logs/ is accepted."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        assert watcher._should_process("/home/user/system_logs/prax.log") is True
+        assert watcher._should_process(str(_SYNTHETIC_HOME / "system_logs" / "prax.log")) is True
 
     def test_random_log_outside_known_dirs_rejected(self):
         """Log file outside branch and system_logs dirs is rejected."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        assert watcher._should_process("/tmp/random/output.log") is False
+        assert watcher._should_process(str(_SYNTHETIC_ELSEWHERE / "random" / "output.log")) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1586,7 +1600,7 @@ class TestDetectBranchFromPathEdgeCases:
     def test_pycache_directory_ignored(self):
         """__pycache__ after aipass/ is not treated as a branch."""
         lw = _import_log_watcher()
-        path = str(Path("/home/user/src") / "aipass" / "__pycache__" / "logs" / "something.log")
+        path = str(_SYNTHETIC_HOME / "src" / "aipass" / "__pycache__" / "logs" / "something.log")
         assert lw._detect_branch_from_path(path) == "UNKNOWN"
 
     def test_system_logs_unknown_file(self):
@@ -1804,26 +1818,6 @@ class TestProcessLogLineDeeper:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         return f"{now} | test_mod | ERROR | {message}"
 
-    def test_non_error_line_returns_early(self):
-        """INFO-level line parsed as None, no event fired."""
-        lw = _import_log_watcher()
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        watcher = lw.BranchLogWatcher()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        watcher._process_log_line(f"{now} | mod | INFO | Fine", "/a.log")
-        fire.assert_not_called()
-
-    def test_semantic_exclusion_error_hash(self):
-        """Line containing 'error_hash' in message is skipped."""
-        lw = _import_log_watcher()
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Processed error error_hash=abc123")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-        fire.assert_not_called()
-
     def test_semantic_exclusion_fingerprint(self):
         """Line containing 'fingerprint' in message is skipped."""
         lw = _import_log_watcher()
@@ -1841,17 +1835,6 @@ class TestProcessLogLineDeeper:
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
         line = self._make_error_line("Logged with registry_id=r001")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-        fire.assert_not_called()
-
-    def test_stale_entry_skipped(self):
-        """Line with old timestamp is skipped."""
-        lw = _import_log_watcher()
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        watcher = lw.BranchLogWatcher()
-        old = (datetime.now() - timedelta(seconds=600)).strftime("%Y-%m-%d %H:%M:%S.%f")
-        line = f"{old} | mod | ERROR | Old error"
         watcher._process_log_line(line, _BRANCH_LOG_PATH)
         fire.assert_not_called()
 
@@ -2439,11 +2422,11 @@ class TestLogPathClassificationOnBothPlatforms:
 
     def test_unrelated_path_is_foreign_on_both(self):
         """A log outside both trees stays foreign, either separator."""
-        from pathlib import PurePosixPath, PureWindowsPath
+        from pathlib import PureWindowsPath
 
         lw = _import_log_watcher()
         assert lw._classify_log_path(PureWindowsPath(r"C:\tmp\random\output.log")) == "foreign"
-        assert lw._classify_log_path(PurePosixPath("/tmp/random/output.log")) == "foreign"
+        assert lw._classify_log_path(_SYNTHETIC_ELSEWHERE / "random" / "output.log") == "foreign"
 
     def test_aipass_without_a_logs_dir_is_not_a_branch_log(self):
         """Both components are required, not either."""

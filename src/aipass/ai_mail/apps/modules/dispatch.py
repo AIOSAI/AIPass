@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch.status import load_dispatch_log, check_pid_status, calculate_age
@@ -151,7 +151,8 @@ def _orchestrate_register() -> bool:
         )
         console.print(f"           {entry.get('subject') or '(no subject)'}")
         console.print(
-            f"           [dim]sent {entry.get('ts', '?')} · expected by {entry.get('expected_by', '?')}[/dim]"
+            f"           [dim]sent {entry.get('ts', '?')} · expected by {entry.get('expected_by', '?')} · "
+            f"monitor {_monitor_phrase(entry)}[/dim]"
         )
 
     overdue = sum(1 for e in entries if e.get("overdue"))
@@ -160,7 +161,31 @@ def _orchestrate_register() -> bool:
             f"\n[yellow]{overdue} past its expected-by with no completion record — "
             f"the monitor for it is not running.[/yellow]"
         )
+
+    # warning(), not error(): this is a READER. error() would set the process
+    # failure flag and make `dispatch register` exit non-zero merely for
+    # reporting what it found, which breaks every caller that reads it to decide
+    # something. warning() carries the same severity to stderr without the flag.
+    dead = sum(1 for e in entries if e.get("monitor_alive") is False)
+    if dead:
+        warning(f"{dead} whose monitor process is GONE — visible now rather than at expected-by.")
     return True
+
+
+def _monitor_phrase(entry: dict) -> str:
+    """How this row's monitor reads to a human, including when it cannot be told.
+
+    Three answers, printed as three phrases. "unknown" is not a hedge here: it
+    is every row written before the pid was recorded, and the systemd-scope
+    spawn path which never learns one. Printing those as "dead" would show a
+    screen full of deaths for dispatches that merely predate the field.
+    """
+    alive = entry.get("monitor_alive")
+    if alive is True:
+        return f"[green]alive[/green] (pid {entry.get('monitor_pid')})"
+    if alive is False:
+        return f"[red]GONE[/red] (pid {entry.get('monitor_pid')})"
+    return "[dim]unknown — no pid recorded[/dim]"
 
 
 def _orchestrate_status() -> bool:

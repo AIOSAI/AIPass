@@ -105,7 +105,10 @@ def _handle_whoami(args: List[str]) -> bool:
         branch_info = get_caller_branch()
 
         if not branch_info:
-            warning("Could not detect your branch identity. Run from a branch directory.")
+            # error(), not warning(): this is a refusal - whoami could not
+            # answer - and only error() marks the command failed, which is what
+            # resolve_exit() reads (canary's warning-refusal sweep 2026-09-07).
+            error("Could not detect your branch identity. Run from a branch directory.")
             return True
 
         name = branch_info.get("name", "unknown")

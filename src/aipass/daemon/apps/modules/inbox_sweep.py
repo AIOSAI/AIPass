@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-11
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -17,6 +17,15 @@ Rules:
   - at most one wake per branch per sweep
   - managers are never woken (they read mail live) — reported as skipped
   - MAX_WAKES caps a single pass; deferred branches are named, not dropped
+
+SCOPE — A CITIZEN IS A CITIZEN. The sweep looks wherever the fleet definition
+looks: src/aipass/* framework branches, projects/*/ residents and the federated
+externals alike, because find_stale_inboxes() walks discovery's active branch
+map and that map is @memory's fleet.fleet_branches(). It is NOT a read of
+AIPASS_REGISTRY.json, which is what this docstring and the introspection panel
+used to say — FPLAN-0460 widened the scope and left both texts describing the
+narrow version. Measured 2026-09-07: 28 citizens, 18 core + 4 under projects/ +
+6 external. Pinned by TestSweepScopeIsTheWholeFleet.
 """
 
 import time
@@ -25,6 +34,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.monitoring.inbox_scanner import (
     DEFAULT_STALE_HOURS,
     find_stale_inboxes,
@@ -55,8 +65,8 @@ def print_introspection():
     console.print("[dim]Wakes branches sitting on mail unread past 24h[/dim]")
     console.print()
     console.print("[yellow]Reads:[/yellow]")
-    console.print("  [cyan]*[/cyan] src/aipass/*/.ai_mail.local/inbox.json [dim](per-branch mailboxes)[/dim]")
-    console.print("  [cyan]*[/cyan] AIPASS_REGISTRY.json [dim](active branches)[/dim]")
+    console.print("  [cyan]*[/cyan] <citizen>/.ai_mail.local/inbox.json [dim](per-branch mailboxes)[/dim]")
+    console.print("  [cyan]*[/cyan] the fleet definition [dim](@memory's fleet gateway — every registry)[/dim]")
     console.print()
     console.print("[yellow]Wakes via:[/yellow]")
     console.print("  [cyan]*[/cyan] wake_branch() [dim](ai_mail dispatch — direct import)[/dim]")
@@ -271,6 +281,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args and args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate(
+        "inbox-sweep",
+        args,
+        flags=("--dry-run",),
+        value_flags=("--hours", "--limit"),
+        usage="drone @daemon inbox-sweep [--dry-run] [--hours N] [--limit N]",
+    )
 
     dry_run = "--dry-run" in args
     stale_hours = _parse_int_flag(args, "--hours", DEFAULT_STALE_HOURS)

@@ -16,6 +16,8 @@ autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # =============================================
 # HELPERS
@@ -101,6 +103,27 @@ def test_handle_command_no_args_shows_system_status(mock_prax_infrastructure, mo
     # System status prints "PRAX System Status"
     calls = [str(c) for c in mock_prax_infrastructure.console.print.call_args_list]
     assert any("System Status" in c for c in calls)
+
+
+def test_handle_command_unknown_sub_argument_is_refused(mock_prax_infrastructure, monkeypatch):
+    """An unknown sub-argument is refused by name — the quietest swallow of the set.
+
+    `status bogus` printed the normal status block with no complaint and exited
+    0, so a typo'd subcommand was indistinguishable from the real thing
+    (@devpulse's fleet CLI sweep, 2026-09-07).
+    """
+    from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+
+    _ensure_sync_mock(monkeypatch)
+    handle_command, _, _ = _fresh_import()
+
+    with pytest.raises(UnknownArgument) as refusal:
+        handle_command("status", ["bogus"])
+
+    assert refusal.value.verb == "status"
+    assert refusal.value.token == "bogus"
+    calls = [str(c) for c in mock_prax_infrastructure.console.print.call_args_list]
+    assert not any("System Status" in c for c in calls), "the refused command still ran"
 
 
 def test_handle_command_wrong_command(mock_prax_infrastructure, monkeypatch):

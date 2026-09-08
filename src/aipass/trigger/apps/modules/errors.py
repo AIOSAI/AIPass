@@ -177,7 +177,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    from aipass.cli.apps.modules import console, error
+    from aipass.cli.apps.modules import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -213,8 +213,14 @@ def handle_command(command: str, args: list) -> bool:
         json_handler.log_operation("error_command", {"subcommand": sub})
         return result
 
-    error(f"Unknown subcommand: {sub}", suggestion="Run 'drone @trigger errors help' for available commands")
-    return True
+    # Refuse through the ONE gate rather than here. Printing the refusal and
+    # returning True told the entry point "handled", so `errors <nonsense>`
+    # named the token and still exited 0 — a refusal that reports success is
+    # indistinguishable from a command that worked, and no caller can branch
+    # on it (Patrick's standing ruling, FPLAN-0492). Returning False lets
+    # trigger.py name the WHOLE invocation and exit 1, which is also the more
+    # informative message: `errors <nonsense>`, not `<nonsense>` alone.
+    return False
 
 
 # ---------------------------------------------------------------------------

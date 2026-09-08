@@ -15,6 +15,7 @@ Auto-discovery architecture:
 - No manual imports or routing needed
 """
 
+import difflib
 import os
 import sys
 import importlib
@@ -35,7 +36,7 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, resolve_exit, reset_command_state
+from aipass.cli.apps.modules import err_console, error, resolve_exit, reset_command_state
 
 console = err_console
 
@@ -128,13 +129,26 @@ def print_help():
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
-    """Route command to appropriate module."""
+    """Route command to appropriate module.
+
+    An unknown command or flag is refused BY NAME (Patrick's standing ruling:
+    fail with a message naming the token, never silently, never a default).
+    Until 2026-09-07 this returned False with nothing printed — exit 1, empty
+    stdout and stderr — which the fleet sweep of that morning classified as
+    REFUSES-SILENT: the right exit code with no explanation for a human.
+    """
     for module in modules:
         try:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
             logger.error(f"[DEVPULSE] Module {module.__name__} error: {e}")
+    known = sorted(module.__name__.split(".")[-1] for module in modules)
+    error(f"Unknown command: {command}")
+    close = difflib.get_close_matches(command.lstrip("-"), known, n=1)
+    if close:
+        err_console.print(f"Did you mean: {close[0]}?")
+    err_console.print(f"Known commands: {', '.join(known)}. Run: drone @devpulse --help")
     return False
 
 

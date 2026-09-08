@@ -6,24 +6,26 @@ Catches silent handler drift. Every branch's `apps/handlers/json/json_handler.py
 
 ## What Is Checked
 
-### 1. Handler Capability (one must be true, strongest evidence first)
+### 1. Handler Capability (one accept path, and only one)
 
 - **The canonical shim, by hash:** `sha256(file)` equals the bytes pinned in
   DPLAN-0325 section 3. This is the endpoint of the migration and the only path
   that proves anything: identical bytes are checked by identity, so a shim
-  cannot drift by one character without saying so. Every path below asks
-  whether a spelling appears *somewhere* in the file, which a docstring
-  satisfies — measured 2026-09-03, a file whose entire content was a docstring
-  saying it does NOT call `ensure_json_exists` passed the old check.
-- **Binds the one service (transitional):** carries
-  `from aipass.prax import json_handler` and no branch tokens — no
-  `{branch}_json`, no `_JSON_DIR`, no `MAX_LOG_ENTRIES`, no `_create_default`,
-  no `JsonHandler(`. Accepts a shim whose bytes differ cosmetically while the
-  sweep is in flight; retires with part B.
-- **Shared shim (retiring):** imports from `aipass.aipass.shared.json_handler`
-  (the v3.0.0 pattern).
-- **Standalone with triplet surface:** defines or re-exports
-  `ensure_module_jsons` and/or `ensure_json_exists`.
+  cannot drift by one character without saying so.
+
+Three transitional shapes were accepted while the fleet sweep ran — the service
+import with no branch tokens, the shared `aipass.aipass.shared.json_handler`
+wiring (the v3.0.0 pattern), and a standalone handler defining
+`ensure_module_jsons` / `ensure_json_exists`. **All three retired when the sweep
+finished; the checker has had a single accept path since, and all 18 handlers
+hash to the one shim.** They are recorded here as history rather than deleted,
+because each was a way in and a reader should be able to tell a closed door from
+a door that was never there.
+
+Each of them asked whether a spelling appeared *somewhere* in the file, which a
+docstring satisfies — measured 2026-09-03, a file whose entire content was a
+docstring saying it does NOT call `ensure_json_exists` passed the old check.
+That is the defect the hash ended.
 
 A handler that only defines `log_operation()` without the triplet-creating functions is a **log-only fork** — it can write operation logs but cannot create config or data files. This is the exact failure case that caused memory's 25-log / 0-config / 0-data drift.
 

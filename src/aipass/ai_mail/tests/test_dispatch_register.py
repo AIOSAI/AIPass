@@ -9,8 +9,13 @@ properties that fact depends on — append-only, never production, honest about
 what it cannot parse.
 """
 
+import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +31,25 @@ def repo(tmp_path):
 
 def _lines(repo_root):
     return (repo_root / ".aipass" / register.REGISTER_FILENAME).read_text(encoding="utf-8").strip().splitlines()
+
+
+def _only_open_row(repo_root):
+    """The single outstanding row, asserted to be single so a fold bug cannot hide."""
+    rows = register.outstanding(repo_root=repo_root)
+    assert len(rows) == 1, f"expected exactly one open row, got {len(rows)}"
+    return rows[0]
+
+
+def _a_pid_that_is_gone():
+    """A pid that certainly does not exist: spawn a process and reap it.
+
+    Not a large made-up number — pids wrap, and a test that assumes 999999 is
+    free is a test that fails on a busy box for a reason nobody will believe.
+    Waiting on a real child guarantees the pid is dead when we look.
+    """
+    proc = subprocess.Popen([sys.executable, "-c", ""])
+    proc.wait()
+    return proc.pid
 
 
 class TestWrittenBeforeAnythingSpawns:
@@ -104,6 +128,288 @@ class TestAppendOnly:
 
         still_open = register.outstanding(repo_root=repo)
         assert [e["subject"] for e in still_open] == ["two"]
+
+
+class TestTheMonitorPidMakesADeathVisibleEarly:
+    """FPLAN-0499 phase 2. Without a pid on the row a dead monitor is invisible
+    until ``expected_by`` — HARD_TIMEOUT, two hours. With one, a reader sees the
+    process is gone on the next watchdog pass, five minutes.
+
+    The tri-state is the load-bearing part. "No pid recorded" is every row
+    written before this landed, plus the systemd-scope spawn path which never
+    learns a pid; reporting those as dead would have announced a death for the
+    whole backlog the moment it shipped.
+    """
+
+    def test_a_row_whose_pid_is_gone_reports_monitor_alive_false(self, repo):
+        """The brief's pin: a dead monitor is visible on the row itself."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+        dead_pid = _a_pid_that_is_gone()
+
+        assert register.record_monitor_pid(dispatch_id, dead_pid, repo_root=repo) is True
+
+        row = _only_open_row(repo)
+        assert row["monitor_pid"] == dead_pid
+        assert row["monitor_alive"] is False, "a vanished monitor must read as dead, not unknown"
+
+    def test_a_live_monitor_reports_alive(self, repo):
+        """Our own process stands in for a living monitor — it demonstrably exists."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+
+        assert _only_open_row(repo)["monitor_alive"] is True
+
+    def test_a_row_with_no_pid_is_unknown_not_dead(self, repo):
+        """The distinction the whole tri-state exists for.
+
+        Every row written before this feature has no pid. If absence read as
+        False, shipping it would have announced a death for each one.
+        """
+        register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+
+        row = _only_open_row(repo)
+        assert "monitor_pid" not in row
+        assert row["monitor_alive"] is None, "an unannotated row cannot be called dead"
+
+    def test_the_annotation_appends_and_leaves_the_promise_intact(self, repo):
+        """Append-only is the module's one discipline; the annotation obeys it."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+
+        lines = _lines(repo)
+        assert len(lines) == 2, "the annotation is a SECOND record, never a rewrite"
+        assert "monitor_pid" not in json.loads(lines[0]), "the original promise is untouched"
+        assert json.loads(lines[1])["monitor_pid"] == os.getpid()
+
+    def test_the_annotation_keeps_the_row_open_and_its_fields(self, repo):
+        """Annotating must not close the dispatch or lose what it promised."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "Build it", 7200, repo_root=repo)
+        assert dispatch_id
+        before = _only_open_row(repo)
+
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+
+        after = _only_open_row(repo)
+        assert after["dispatch_id"] == dispatch_id
+        assert after["status"] == register.STATUS_OUTSTANDING
+        assert after["subject"] == "Build it"
+        assert after["expected_by"] == before["expected_by"], "the deadline must not move"
+
+    def test_an_already_closed_dispatch_is_not_resurrected_by_a_late_pid(self, repo):
+        """A late annotation must not reopen finished work.
+
+        The monitor writes its completion and exits; an annotation arriving
+        after that would otherwise append a fresh `outstanding` record and the
+        dispatch would read as open forever.
+        """
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+        register.close_dispatch(dispatch_id, "completed", repo_root=repo)
+
+        assert register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo) is False
+        assert register.outstanding(repo_root=repo) == []
+
+    def test_an_unknown_dispatch_id_is_refused(self, repo):
+        register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+
+        assert register.record_monitor_pid("no-such-id", os.getpid(), repo_root=repo) is False
+
+    @pytest.mark.parametrize("bad", [0, -1, None, "1234"])
+    def test_a_pid_that_is_not_a_positive_int_is_refused(self, repo, bad):
+        """A zero pid is what the systemd-scope path carries — it is not a pid."""
+        dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
+        assert dispatch_id
+
+        assert register.record_monitor_pid(dispatch_id, bad, repo_root=repo) is False
+        assert _only_open_row(repo)["monitor_alive"] is None
+
+    @pytest.mark.parametrize("bad", [0, -1, None, "1234"])
+    def test_monitor_alive_cannot_be_told_for_a_non_pid(self, bad):
+        assert register.monitor_alive(bad) is None
+
+    # ── The Windows leg, runnable on every platform through a fake kernel32.
+    # The Windows matrix on 6d764980 went red on the two liveness pins above:
+    # the first cut answered None on win32, so a watchdog there could never
+    # see a dead monitor. These pin the mapping of the Win32 answers onto the
+    # tri-state without needing the platform.
+
+    @pytest.mark.parametrize(
+        ("handle", "exit_code", "last_error", "expected"),
+        [
+            (1, register._STILL_ACTIVE, 0, True),
+            (1, 0, 0, False),
+            (0, None, register._ERROR_INVALID_PARAMETER, False),
+            (0, None, register._ERROR_ACCESS_DENIED, True),
+            (0, None, 6, None),
+        ],
+        ids=["opened-and-running", "opened-but-exited", "no-such-pid", "exists-not-ours", "other-error-unknown"],
+    )
+    def test_the_windows_leg_maps_win32_answers_onto_the_tri_state(
+        self, monkeypatch, handle, exit_code, last_error, expected
+    ):
+        closed: list[int] = []
+        opened_with: list[tuple] = []
+
+        def _exit_code_into(_h, out):
+            out.contents.value = exit_code
+            return 1
+
+        # Attributes named as Win32 names them — the probe calls them by these names.
+        fake_kernel32 = SimpleNamespace(
+            OpenProcess=lambda access, inherit, pid: opened_with.append((access, inherit, pid)) or handle,
+            GetExitCodeProcess=_exit_code_into,
+            CloseHandle=lambda h: closed.append(h) or 1,
+        )
+        monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
+        monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
+
+        assert register._monitor_alive_windows(4242) is expected
+        assert opened_with == [(register._PROCESS_QUERY_LIMITED_INFORMATION, False, 4242)]
+        assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
+
+    def test_on_win32_monitor_alive_asks_the_windows_leg_and_never_signals(self, monkeypatch):
+        """Signal 0 is TerminateProcess on Windows — the router must not reach os.kill."""
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(register, "_monitor_alive_windows", lambda pid: "windows-leg")
+        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
+
+        assert register.monitor_alive(4242) == "windows-leg"
+
+
+class TestAReplyClosesTheRow:
+    """FPLAN-0499 phase 2, and the incident that shaped it.
+
+    At 17:15 on 2026-09-07 the watchdog announced DEAD for @api's dispatch
+    641dddbb because the row hit its two-hour expected_by — while @api had
+    replied on that thread at 16:45 and its work was landed. The reply was the
+    completion evidence and nothing read it.
+
+    MATCHING IS BY THREAD, NOT BY THE AGENT'S DISPATCH STAMP. The same incident
+    is why: @api's stamped id sat on its 15:16 report-first PLAN, sent before
+    the work was done, while the real completion at 16:45 carried a different
+    stamp because the agent had been resumed under a new dispatch id. The stamp
+    would have closed the row early and still missed the completion.
+    """
+
+    def test_a_reply_on_the_thread_closes_the_dispatch(self, repo):
+        dispatch_id = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+        assert dispatch_id
+
+        closed = register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+        assert closed == dispatch_id
+        assert register.outstanding(repo_root=repo) == []
+
+    def test_the_close_names_the_reply_as_the_reason(self, repo):
+        """ "The agent said it was done" and "the monitor saw it exit" are
+        different facts, and a reader that cannot tell them apart cannot spot a
+        dispatch that reported but never terminated."""
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+        register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+        assert json.loads(_lines(repo)[-1])["status"] == register.STATUS_REPLIED
+
+    def test_a_report_first_plan_does_not_close_the_row(self, repo):
+        """THE REGRESSION THIS RULE EXISTS TO AVOID.
+
+        @api's plan mail was a fresh subject, not a reply on the brief's thread.
+        Closing on it would stop the watchdog watching a dispatch whose work has
+        not started — which is worse than the false DEAD it replaces.
+        """
+        register.open_dispatch("@devpulse", "@api", "Your brief - ONE ROOM step 1", 7200, repo_root=repo)
+
+        closed = register.close_on_reply(
+            "@api", "@devpulse", "FPLAN-0492 wave 4 - @api PLAN (report-first, before building)", repo_root=repo
+        )
+
+        assert closed is None
+        assert len(register.outstanding(repo_root=repo)) == 1, "a plan is not a completion"
+
+    def test_a_resumed_agent_still_closes_its_original_row(self, repo):
+        """The live case: the completion carried a DIFFERENT dispatch stamp.
+
+        The thread is the only link that survives a resume, which is exactly why
+        the stamp cannot be the matcher.
+        """
+        original = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+        assert original
+
+        closed = register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+        assert closed == original
+
+    def test_a_third_party_reply_does_not_close_it(self, repo):
+        """A dispatch is a promise between two named seats."""
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+        assert register.close_on_reply("@trigger", "@devpulse", "RE: Your brief", repo_root=repo) is None
+        assert len(register.outstanding(repo_root=repo)) == 1
+
+    def test_a_reply_to_someone_else_does_not_close_it(self, repo):
+        """Answering a third party says nothing to the seat that promised it."""
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+        assert register.close_on_reply("@api", "@trigger", "RE: Your brief", repo_root=repo) is None
+        assert len(register.outstanding(repo_root=repo)) == 1
+
+    def test_a_different_thread_does_not_close_it(self, repo):
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+        assert register.close_on_reply("@api", "@devpulse", "RE: something else", repo_root=repo) is None
+        assert len(register.outstanding(repo_root=repo)) == 1
+
+    def test_a_bare_wake_has_no_thread_to_reply_on(self, repo):
+        """An empty subject can never be matched — stated, not silently missing."""
+        register.open_dispatch("@trigger", "@api", "", 7200, repo_root=repo)
+
+        assert register.close_on_reply("@api", "@trigger", "RE: ", repo_root=repo) is None
+        assert len(register.outstanding(repo_root=repo)) == 1
+
+    def test_closing_appends_and_leaves_the_promise_readable(self, repo):
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+        register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+        lines = _lines(repo)
+        assert len(lines) == 2
+        assert json.loads(lines[0])["status"] == register.STATUS_OUTSTANDING, "the promise stays in the file"
+
+    def test_a_second_reply_closes_nothing(self, repo):
+        """Idempotent: the row is already closed, so there is nothing to close."""
+        register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+        register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+        assert register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo) is None
+
+    def test_only_the_matching_thread_closes(self, repo):
+        """Two dispatches to the same target: the subject decides which ends."""
+        first = register.open_dispatch("@devpulse", "@api", "one", 7200, repo_root=repo)
+        second = register.open_dispatch("@devpulse", "@api", "two", 7200, repo_root=repo)
+        assert first and second
+
+        register.close_on_reply("@api", "@devpulse", "RE: one", repo_root=repo)
+
+        assert [r["dispatch_id"] for r in register.outstanding(repo_root=repo)] == [second]
+
+    @pytest.mark.parametrize(
+        "subject,expected",
+        [
+            ("RE: Your brief", "your brief"),
+            ("RE: RE: Your brief", "your brief"),
+            ("  re:   Your brief  ", "your brief"),
+            ("Your brief", "your brief"),
+            ("", ""),
+        ],
+    )
+    def test_thread_subject_strips_every_re_marker(self, subject, expected):
+        """A reply to a reply stacks the prefix; one strip would split the thread."""
+        assert register.thread_subject(subject) == expected
 
 
 class TestCrashCoverageWithoutPolling:

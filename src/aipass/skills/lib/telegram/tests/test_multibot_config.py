@@ -7,6 +7,8 @@ Covers:
 - Bot operations (bot_operations.py): parse_create_args, format_bot_details, format_bot_table
 """
 
+import json
+import logging
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -822,7 +824,7 @@ class TestCreateBotRoundTrip:
 
         mock_validate_token.return_value = {"username": "test_bot", "id": 123}
 
-        monkeypatch.setattr(bot_factory, "_BOT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
 
         secrets_store = {}
 
@@ -867,10 +869,10 @@ class TestCreateBotRoundTrip:
         monkeypatch,
     ):
         """create_bot returns None and logs error if set_secret raises."""
-        from aipass.skills.lib.telegram.apps.handlers import bot_factory
+        from aipass.skills.lib.telegram.apps.handlers import bot_factory, config as tg_config
 
         mock_validate_token.return_value = {"username": "test_bot", "id": 123}
-        monkeypatch.setattr(bot_factory, "_BOT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
 
         def failing_set_secret(*args, **kwargs):
             raise OSError("permission denied")
@@ -882,6 +884,154 @@ class TestCreateBotRoundTrip:
             bot_token="222:BBB-test-token",
         )
         assert result is None
+
+
+# =============================================
+# THE SPLIT: secrets hold the token and nothing else
+# =============================================
+
+
+class TestSecretStoreCarriesOnlyTheToken:
+    """todo 205 / CodeQL #111 — a secret store is not a filing cabinet.
+
+    create_bot used to hand the WHOLE ten-key bot config to the secret store,
+    nine keys of which are not secret at all. Everything downstream then had to
+    treat branch_name and work_dir as credentials, and a scanner following the
+    document into prax's audit-log write reported a clear-text sink for a value
+    that was never a secret. These tests pin the split at both ends: what the
+    secret store is handed, and what the plain file is handed.
+    """
+
+    def test_split_is_the_whole_rule(self):
+        """split_bot_config divides strictly on SECRET_FIELDS — pure, no I/O."""
+        full = {"bot_token": "1:AAA", "bot_id": "b", "branch_name": "api", "chat_id": 42}
+
+        secret, plain = tg_config.split_bot_config(full)
+
+        assert secret == {"bot_token": "1:AAA"}
+        assert plain == {"bot_id": "b", "branch_name": "api", "chat_id": 42}
+        assert set(secret) | set(plain) == set(full), "the split must lose nothing"
+
+    def test_non_secret_keys_names_every_stray(self):
+        """The check a reviewer can run on any document, in one call."""
+        assert tg_config.non_secret_keys({"bot_token": "1:AAA"}) == []
+        assert tg_config.non_secret_keys({"bot_token": "1:AAA", "branch_name": "api", "chat_id": 42}) == [
+            "branch_name",
+            "chat_id",
+        ]
+
+    def test_the_telethon_app_credential_is_left_alone(self, tmp_path, monkeypatch):
+        """A real secret that is not a bot token must not be swept out of the store.
+
+        telegram/telethon_config holds the Telegram APP credential and lives
+        under the same provider as the bots. The first dry run of the migration
+        over the live store proposed moving api_id and api_hash to a plain
+        file; naming them as secrets is what stops that.
+        """
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
+        app_credential = {"api_id": 12345, "api_hash": "abc123def"}
+        monkeypatch.setattr(tg_config, "_get_secret", lambda bot_id: dict(app_credential))
+
+        assert tg_config.non_secret_keys(app_credential) == []
+
+        report = tg_config.migrate_bot_config("telethon_config")
+        assert report["moved"] == []
+        assert report["reason"] == "already split"
+
+    def test_write_bot_config_refuses_a_token(self, tmp_path, monkeypatch):
+        """The plain file is the other half — a token reaching it is refused, not written."""
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
+
+        assert tg_config.write_bot_config("leaky", {"bot_id": "leaky", "bot_token": "1:AAA"}) is False
+        assert not (tmp_path / "leaky.json").exists()
+
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.start_bot_process", return_value=True)
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.enable_service", return_value=True)
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.set_bot_commands", return_value=True)
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.register_bot", return_value=True)
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.validate_token")
+    @patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.ensure_registry")
+    def test_create_bot_hands_the_secret_store_only_the_token(
+        self,
+        mock_ensure_registry,
+        mock_validate_token,
+        mock_register,
+        mock_set_commands,
+        mock_enable,
+        mock_start,
+        tmp_path,
+        monkeypatch,
+    ):
+        """THE PIN: the document handed to set_secret carries no non-secret key."""
+        from aipass.skills.lib.telegram.apps.handlers import bot_factory
+
+        mock_validate_token.return_value = {"username": "test_bot", "id": 123}
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
+
+        handed = {}
+
+        def capturing_set_secret(provider, slug, value, *, as_json=False):
+            handed[f"{provider}/{slug}"] = value
+            return tmp_path / f"{slug}.json"
+
+        monkeypatch.setattr(bot_factory, "_api_set_secret", capturing_set_secret)
+
+        result = bot_factory.create_bot(
+            bot_id="split_bot",
+            bot_token="333:CCC-test-token",
+            branch_name=None,
+            allowed_user_ids=[42],
+            chat_id=99,
+        )
+        assert result is not None
+
+        document = handed["telegram/split_bot"]
+        assert tg_config.non_secret_keys(document) == [], f"non-secret keys reached the secret store: {document}"
+        assert document == {"bot_token": "333:CCC-test-token"}
+
+        # ...and the other nine keys did land, in the ordinary config file.
+        written = json.loads((tmp_path / "split_bot.json").read_text(encoding="utf-8"))
+        assert "bot_token" not in written
+        assert written["bot_id"] == "split_bot"
+        assert written["chat_id"] == 99
+        assert written["allowed_user_ids"] == [42]
+
+    def test_a_legacy_document_still_loads_and_says_so(self, tmp_path, monkeypatch, caplog):
+        """Bots deployed before the split keep working — and are named on every load."""
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
+        legacy = {"bot_id": "old", "bot_token": "1:AAA", "branch_name": "api", "work_dir": "/srv/api"}
+        monkeypatch.setattr(tg_config, "_get_secret", lambda bot_id: dict(legacy))
+
+        with caplog.at_level(logging.WARNING):
+            loaded = tg_config.load_bot_config("old")
+
+        assert loaded == legacy, "a legacy bot must not stop working"
+        assert "non-secret key" in caplog.text
+        assert "branch_name" in caplog.text
+
+    def test_migrate_moves_the_strays_and_leaves_the_token(self, tmp_path, monkeypatch):
+        """The cure for an already-deployed bot: config to the file, token stays put."""
+        monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path)
+        legacy = {"bot_id": "old", "bot_token": "1:AAA", "branch_name": "api", "chat_id": 7}
+        monkeypatch.setattr(tg_config, "_get_secret", lambda bot_id: dict(legacy))
+
+        shrunk = {}
+        monkeypatch.setattr(
+            tg_config,
+            "_api_set_secret",
+            lambda provider, slug, value, *, as_json=False: shrunk.update({slug: value}),
+        )
+
+        dry = tg_config.migrate_bot_config("old")
+        assert dry["migrated"] is False and dry["moved"] == ["bot_id", "branch_name", "chat_id"]
+        assert shrunk == {}, "a dry run writes nothing"
+        assert not (tmp_path / "old.json").exists()
+
+        real = tg_config.migrate_bot_config("old", dry_run=False)
+        assert real["migrated"] is True
+        assert shrunk["old"] == {"bot_token": "1:AAA"}
+        written = json.loads((tmp_path / "old.json").read_text(encoding="utf-8"))
+        assert written == {"bot_id": "old", "branch_name": "api", "chat_id": 7}
 
 
 # =============================================
@@ -947,17 +1097,22 @@ class TestCommandMenuSync:
         from aipass.skills.lib.telegram.apps.handlers.telegram_standards import build_botfather_commands
 
         expected = build_botfather_commands()
-        with patch.object(bot_factory, "set_bot_commands") as mock_set:
-            with patch.object(bot_factory, "validate_token", return_value={"username": "t", "id": 1}):
-                with patch.object(bot_factory, "ensure_registry"):
-                    with patch.object(bot_factory, "register_bot", return_value=True):
-                        with patch.object(bot_factory, "_api_set_secret", return_value=None):
-                            with patch.object(bot_factory, "enable_service"):
-                                with patch.object(bot_factory, "start_bot_process", return_value=True):
-                                    bot_factory._BOT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-                                    bot_factory.create_bot("sync_test", "999:ZZZ-token")
+        # One flat with-block, not seven nested ones. The config dir needs no
+        # mkdir here either: write_bot_config creates it, under the temp dir the
+        # conftest redirects it to — this test used to mkdir the REAL
+        # ~/.aipass/telegram_bots and leave a sync_test.json behind in it.
+        with (
+            patch.object(bot_factory, "set_bot_commands") as mock_set,
+            patch.object(bot_factory, "validate_token", return_value={"username": "t", "id": 1}),
+            patch.object(bot_factory, "ensure_registry"),
+            patch.object(bot_factory, "register_bot", return_value=True),
+            patch.object(bot_factory, "_api_set_secret", return_value=None),
+            patch.object(bot_factory, "enable_service"),
+            patch.object(bot_factory, "start_bot_process", return_value=True),
+        ):
+            bot_factory.create_bot("sync_test", "999:ZZZ-token")
 
-            mock_set.assert_called_once_with("999:ZZZ-token", expected)
+        mock_set.assert_called_once_with("999:ZZZ-token", expected)
 
 
 class TestBaseBotStartupMenu:

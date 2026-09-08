@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-15
-# Modified: 2026-08-31
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -99,19 +99,39 @@ def _already_ran_this_hour(last_run: Optional[str], now: datetime) -> bool:
         return False
 
 
-def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job is due (within +/-15 min window)."""
+# Half-width of a windowed schedule's firing window, in minutes. Daily, rotation
+# and hourly all fire inside +/-this, and _window_closed_today() measures the far
+# edge from the same name — so widening the window cannot move the fire while
+# leaving the catch-up reading the old edge.
+WINDOW_MINUTES = 15
+
+MINUTES_PER_DAY = 1440
+
+
+def _target_minutes(schedule: dict) -> Optional[int]:
+    """Minutes past midnight of a daily/rotation job's target time.
+
+    Returns None when the field cannot be read, which every caller treats as
+    "this schedule states no window" rather than as a window at 00:00.
+    """
     target_time = schedule.get("time", "00:00")
     try:
         target_h, target_m = map(int, target_time.split(":"))
     except (ValueError, AttributeError) as e:
         logger.info("[runstate] Daily time parse failed for %r: %s", target_time, e)
+        return None
+    return target_h * 60 + target_m
+
+
+def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
+    """Check if a daily job is due (within +/-15 min window)."""
+    target_minutes = _target_minutes(schedule)
+    if target_minutes is None:
         return False
     current_minutes = now.hour * 60 + now.minute
-    target_minutes = target_h * 60 + target_m
     minutes_diff = abs(current_minutes - target_minutes)
-    minutes_diff = min(minutes_diff, 1440 - minutes_diff)
-    if minutes_diff > 15:
+    minutes_diff = min(minutes_diff, MINUTES_PER_DAY - minutes_diff)
+    if minutes_diff > WINDOW_MINUTES:
         return False
     return not _already_ran_today(last_run, now)
 
@@ -126,7 +146,7 @@ def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bo
         return False
     minutes_diff = abs(now.minute - target_m)
     minutes_diff = min(minutes_diff, 60 - minutes_diff)
-    if minutes_diff > 15:
+    if minutes_diff > WINDOW_MINUTES:
         return False
     return not _already_ran_this_hour(last_run, now)
 
@@ -162,6 +182,204 @@ def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> boo
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Once due_date parse failed for %r: %s", due_date, e)
         return False
+
+
+# =============================================
+# CLOSED WINDOWS — catch-up and the MISSED record
+# =============================================
+
+# Per-job opt-in, read from the job's ``schedule`` block alongside ``type`` and
+# ``time``. Absent means off, which is every job that exists today.
+CATCH_UP_FIELD = "catch_up"
+
+# Schedule types that fire inside a daily window and can therefore MISS one.
+_DAILY_TYPES = frozenset({"daily", "rotation"})
+
+# Runstate key: the calendar date whose miss has already been reported, so the
+# MISSED line is written once per job per day rather than on every tick for the
+# rest of the day.
+MISSED_MARKER = "missed_logged_for"
+
+
+def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
+    """True when TODAY's daily window has closed with nothing run inside it.
+
+    This is the single fact both new behaviours read. The MISSED line reports
+    it for every daily job; ``catch_up`` additionally makes it a reason to fire.
+    Keeping them on one predicate is what guarantees a caught-up run and its log
+    line can never disagree about whether the window was actually missed.
+
+    MEASURED FROM THE SAME TIMESTAMP AS DUE-NESS. Callers pass ``_due_from()``,
+    so a fire that FAILED inside the window leaves the window genuinely unrun -
+    which is the honest reading, and the one that lets catch_up retry it.
+
+    A WINDOW WHOSE TAIL CROSSES MIDNIGHT NEVER CLOSES inside its own calendar
+    day (``time`` later than 23:44), so there is no instant at which today's
+    miss is certain. Those are refused rather than guessed: a false MISSED line
+    accuses a job that may still fire in the next few minutes, and a false
+    catch-up double-fires it.
+    """
+    target_minutes = _target_minutes(schedule)
+    if target_minutes is None:
+        return False
+
+    close_minutes = target_minutes + WINDOW_MINUTES
+    if close_minutes >= MINUTES_PER_DAY:
+        return False
+
+    if now.hour * 60 + now.minute <= close_minutes:
+        return False
+
+    return not _already_ran_today(last_run, now)
+
+
+def _is_catch_up_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
+    """True when an opted-in daily job should fire late, after its closed window."""
+    if not schedule.get(CATCH_UP_FIELD):
+        return False
+    return window_closed_unrun(schedule, last_run, now)
+
+
+def is_catch_up_fire(job: dict, runstate: dict, now: Optional[datetime] = None) -> bool:
+    """Would firing *job* at *now* be a catch-up rather than a window run?
+
+    Asked by the scheduler immediately before it fires, so the runstate row can
+    record WHICH kind of run it was. A reader that only sees ``last_run`` cannot
+    tell a job that ran at its slot from one that ran nine hours late, and those
+    two say very different things about the health of the host.
+    """
+    schedule = job.get("schedule", {})
+    if schedule.get("type") not in _DAILY_TYPES:
+        return False
+    if now is None:
+        now = datetime.now()
+    state = get_job_state(runstate, job["owner"], job["id"])
+    return _is_catch_up_due(schedule, _due_from(state), now)
+
+
+def missed_window(job: dict, runstate: dict, now: Optional[datetime] = None) -> bool:
+    """Did *job* miss today's window, catch_up or not?
+
+    Independent of the opt-in on purpose: a job nobody chose to catch up still
+    missed its window, and the operator needs to be told. Reports state only -
+    :func:`note_missed_window` owns the once-per-day bookkeeping.
+    """
+    schedule = job.get("schedule", {})
+    if schedule.get("type") not in _DAILY_TYPES:
+        return False
+    if now is None:
+        now = datetime.now()
+    state = get_job_state(runstate, job["owner"], job["id"])
+    return window_closed_unrun(schedule, _due_from(state), now)
+
+
+def note_missed_window(runstate: dict, owner: str, job_id: str, now: Optional[datetime] = None) -> bool:
+    """Stamp today's miss as reported. True when this call is the FIRST for today.
+
+    The scheduler ticks about every two minutes, so an unguarded MISSED line
+    would repeat ~500 times between a closed window and midnight and drown the
+    log it exists to inform.
+    """
+    if now is None:
+        now = datetime.now()
+    key = job_key(owner, job_id)
+    entry = runstate.setdefault("jobs", {}).setdefault(key, {})
+    today = now.date().isoformat()
+    if entry.get(MISSED_MARKER) == today:
+        return False
+    entry[MISSED_MARKER] = today
+    return True
+
+
+def window_label(schedule: dict) -> str:
+    """Human name for the window a MISSED line is reporting, e.g. "03:00 +/-15m"."""
+    return f"{schedule.get('time', '??:??')} +/-{WINDOW_MINUTES}m"
+
+
+# =============================================
+# INTERVAL SLOTS — a rhythm before the first run
+# =============================================
+
+# Per-job, in the ``schedule`` block. An ISO instant naming ONE occurrence of the
+# rhythm the owner wants ("2026-09-06T03:00:00"); the interval supplies the rest.
+# Chosen over a weekday+time shape because it needs no vocabulary of its own, it
+# is exactly what a hand-seeded runstate row already holds, and it stays correct
+# for intervals that are not a whole number of days.
+SLOT_FIELD = "slot"
+
+
+def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
+    """The slot occurrence to seed ``last_run`` with, or None if unreadable.
+
+    Rolled forward by whole intervals rather than used verbatim, so a slot left
+    in the past keeps its PHASE without making the job instantly overdue: the
+    anchor names the rhythm, not a one-off date. A slot still in the future is
+    seeded one interval BEHIND itself, so the first fire lands exactly on it.
+    """
+    try:
+        anchor = datetime.fromisoformat(slot)
+    except (ValueError, TypeError) as e:
+        logger.warning("[runstate] Unreadable slot %r: %s", slot, e)
+        return None
+
+    if interval <= 0:
+        logger.warning("[runstate] Slot %r with non-positive interval %r, not seeding", slot, interval)
+        return None
+
+    if anchor > now:
+        return anchor - timedelta(minutes=interval)
+
+    steps = int((now - anchor).total_seconds() / 60 // interval)
+    return anchor + timedelta(minutes=steps * interval)
+
+
+def needs_slot_seed(job: dict, runstate: dict) -> bool:
+    """True for an enabled interval job that has never actually RUN.
+
+    KEYED ON ``last_run``, NOT ON THE PRESENCE OF A ROW, and the difference is
+    the whole defect. A blocked fire creates a runstate row carrying
+    ``last_blocked_at`` and no ``last_run`` (see :func:`record_job_blocked`), so
+    a "no row" test would refuse to seed exactly the job that most needs it -
+    @seedgo's weekly cycle was enabled unseeded, blocked twice at 01:34 and
+    01:40, and only its own branch lock kept the week from locking to 01:34
+    Monday. A job that has never run has no rhythm to preserve.
+    """
+    if not job.get("enabled", True):
+        return False
+    if job.get("schedule", {}).get("type") != "interval":
+        return False
+    return not get_job_state(runstate, job["owner"], job["id"]).get("last_run")
+
+
+def seed_interval_slot(runstate: dict, job: dict, now: Optional[datetime] = None) -> Optional[str]:
+    """Seed a never-run interval job's ``last_run`` from its declared slot.
+
+    Returns the seeded ISO timestamp, or None when the job declares no readable
+    slot - in which case today's behaviour stands and the job fires on the next
+    tick. Callers warn on None; the decision to fire immediately is not silent.
+    """
+    schedule = job.get("schedule", {})
+    slot = schedule.get(SLOT_FIELD)
+    if not slot:
+        return None
+
+    if now is None:
+        now = datetime.now()
+
+    anchor = _slot_anchor(slot, schedule.get("interval_minutes", 60), now)
+    if anchor is None:
+        return None
+
+    seeded = anchor.isoformat()
+    key = job_key(job["owner"], job["id"])
+    entry = runstate.setdefault("jobs", {}).setdefault(key, {})
+    entry["last_run"] = seeded
+    entry["next_run"] = _calc_next_run(schedule, seeded)
+    entry["seeded_from_slot"] = slot
+
+    logger.info("[runstate] Seeded %s from slot %s -> last_run %s", key, slot, seeded)
+    json_handler.log_operation("seed_interval_slot", {"key": key, "slot": slot})
+    return seeded
 
 
 # A failed fire buys a short pause, not the rest of the period. The scheduler
@@ -289,10 +507,18 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
     schedule = job.get("schedule", {})
     sched_type = schedule.get("type", "")
 
+    # Both daily forms gain the OPT-IN catch-up: due inside the window as
+    # always, and additionally due once the window has closed unrun for a job
+    # whose owner asked for that. _already_ran_today bounds both arms, so a
+    # caught-up run can never double-fire the day it lands in.
     checkers = {
-        "daily": lambda: _is_daily_due(schedule, since_success, now),
+        "daily": lambda: _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now),
         # A rotation job is a daily job that picks a different target each night.
-        "rotation": lambda: _is_daily_due(schedule, since_success, now),
+        # It opts in the same way: a missed night woken late still hands the
+        # night to a steward, which is the point of the rotation.
+        "rotation": lambda: (
+            _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
+        ),
         "hourly": lambda: _is_hourly_due(schedule, since_success, now),
         "interval": lambda: _is_interval_due(schedule, last_run, now),
         "once": lambda: _is_once_due(schedule, completed, now),
@@ -400,8 +626,15 @@ def update_job_runstate(
     job_id: str,
     schedule: dict,
     timestamp: Optional[str] = None,
+    caught_up: bool = False,
 ) -> None:
-    """Update runstate for a job after successful firing."""
+    """Update runstate for a job after successful firing.
+
+    ``caught_up`` records that this run happened AFTER its window closed rather
+    than inside it. Written on every success, cleared to None on the ordinary
+    path, because a stale marker left over from last week's catch-up would
+    report a healthy job as chronically late.
+    """
     if timestamp is None:
         timestamp = datetime.now().isoformat()
 
@@ -412,6 +645,7 @@ def update_job_runstate(
     entry["last_status"] = "success"
     entry["last_success_at"] = timestamp
     entry["last_error"] = None
+    entry["caught_up"] = timestamp if caught_up else None
 
     if schedule.get("type") == "once":
         entry["completed"] = timestamp

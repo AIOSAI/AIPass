@@ -188,9 +188,17 @@ def _run_subcommand(subcommand: str, args: list) -> bool:
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
-    if subcommand in ["--help", "-h", "help"] or subcommand not in _SUBCOMMANDS:
+    if subcommand in ["--help", "-h", "help"]:
         print_help()
         return True
+
+    # An unknown subcommand used to print help and return True — help is what a
+    # working command looks like, so `escalation nonsense` exited 0 and never
+    # named the token. Returning False routes it through the ONE gate in
+    # trigger.py, which names the whole invocation and exits 1 (Patrick's
+    # standing ruling, FPLAN-0492).
+    if subcommand not in _SUBCOMMANDS:
+        return False
 
     if wants_help(args):
         print_help()

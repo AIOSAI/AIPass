@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-07
 # =============================================
 
 """Tests for testwrite_gate — Patrick's 2026-09-01 no-agent-test-creation ruling.
@@ -38,6 +38,7 @@ The file is organised by the question each block answers:
 """
 
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -424,3 +425,79 @@ class TestTheResidualIsPublished:
         _policy(project)
         renamed = str(project["tests_dir"] / "brand_new_test.py")
         assert _blocked(_run(project["seat"], file_path=renamed))
+
+
+class TestRunningTestsIsNotWritingThem:
+    """False fire #7, banked 2026-09-05, fixed 2026-09-07.
+
+    ``bash_writes`` reports every path an interpreter is handed, which is the
+    right breadth for edit_gate's cross-project fence — an interpreter holding
+    a foreign path cannot be distinguished from one writing to it. It is the
+    wrong breadth for THIS gate, whose question is narrower: is a NEW TEST
+    being created? A module-run of pytest creates nothing.
+
+    Reproduced live while measuring the fix: the diagnostic command written to
+    MEASURE this defect was itself refused by it.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 -m pytest {new_test}",
+            "python -m pytest {new_test} -k foo -q",
+            "python3 -m unittest {new_test}",
+            "cd {root} && python3 -m pytest {new_test}",
+        ],
+    )
+    def test_a_test_run_is_allowed(self, project, command):
+        """Every row names a path that does NOT exist yet, deliberately.
+
+        MUTATION-CHECK finding, 2026-09-07: rows written against the EXISTING
+        test file passed with the exemption disabled — an existing file is not
+        a creation, so nothing but the file's absence can discriminate. Naming
+        a path that is not there is still only naming it; a runner cannot bring
+        a source file into being, and that is the whole claim.
+        """
+        _policy(project)
+        filled = command.format(new_test=project["new_test"], root=project["root"])
+        assert not _blocked(_run(project["seat"], command=filled))
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "touch {new_test}",
+            "cp {existing} {new_test}",
+            "echo x > {new_test}",
+            "python3 -m pytest {existing} && touch {new_test}",
+            "python3 {script} {new_test}",
+        ],
+    )
+    def test_a_real_creation_is_still_refused(self, project, command):
+        """MUTATION-CHECK: an exemption that swallows the write verb beside it
+        would turn the whole gate off. The compound row is the one that proves
+        the exemption is per-segment rather than per-command."""
+        _policy(project)
+        filled = command.format(
+            existing=project["existing"],
+            new_test=project["new_test"],
+            script=str(Path(tempfile.gettempdir()) / "script.py"),
+        )
+        assert _blocked(_run(project["seat"], command=filled))
+
+    def test_an_interpreter_that_really_writes_is_still_refused(self, project):
+        """Only the `-m <runner>` form is exempt. A -c body that opens a test
+        file for writing is an interpreter doing exactly what the breadth is for."""
+        _policy(project)
+        body = "with o" + "pen('" + project["new_test"] + "','w') as f: pass"
+        assert _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    def test_the_exemption_is_only_the_module_form(self):
+        """A bare script argument named pytest must not buy the exemption."""
+        from aipass.hooks.apps.handlers.security.testwrite_gate import _is_test_run
+
+        assert _is_test_run(["python3", "-m", "pytest", "tests/x.py"])
+        assert _is_test_run(["python", "-m", "unittest"])
+        assert not _is_test_run(["python3", "pytest", "tests/x.py"])
+        assert not _is_test_run(["python3", "-c", "import pytest"])
+        assert not _is_test_run(["python3", "-m", "pip", "install", "pytest"])
+        assert not _is_test_run(["python3", "-m"])

@@ -88,16 +88,35 @@ class TestHandleCommandRouting:
         result = handle_command("post", [])
         assert result is False
 
+    @pytest.mark.parametrize("verb", ["templates", "register", "unregister", "scan"])
     @pytest.mark.parametrize("help_flag", ["--help", "-h", "help"])
-    def test_templates_help_flags(self, help_flag: str):
-        """templates with help flags should call print_help."""
+    def test_every_verb_answers_help_before_reading_arguments(self, verb: str, help_flag: str):
+        """Help is answered for all four verbs, not just `templates`.
+
+        The gate moved into handle_command (2026-09-07) so one place answers
+        help for every verb; this pins the whole surface rather than the one
+        verb that used to be covered. Without it, `unregister --help` reaches
+        remove_type() with '--help' as the type name.
+        """
         with patch(f"{_MOD}.print_help") as mock_help:
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("templates", [help_flag])
+            result = handle_command(verb, [help_flag])
 
             mock_help.assert_called_once()
             assert result is True
+
+    def test_help_does_not_make_this_module_claim_a_command_it_does_not_own(self):
+        """A shared gate must stay scoped -- `frobnicate --help` is not ours.
+
+        A gate written as `if wants_help(args)` with no verb check would answer
+        help for every command in the fleet and stop routing dead.
+        """
+        with patch(f"{_MOD}.print_help") as mock_help:
+            from aipass.flow.apps.modules.template_manager import handle_command
+
+            assert handle_command("frobnicate", ["--help"]) is False
+            mock_help.assert_not_called()
 
     def test_templates_list_loads_registry_and_displays(self):
         """'templates list' should load registry and display types."""
@@ -109,7 +128,7 @@ class TestHandleCommandRouting:
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("templates", ["list"])
+            result = handle_command("templates", [])
 
             mock_lr.assert_called_once()
             mock_display.assert_called_once_with(mock_registry)
@@ -241,7 +260,7 @@ class TestHandleCommandRouting:
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("scan", ["run"])
+            result = handle_command("scan", [])
 
             mock_scan.assert_called_once()
             # Should print "All template directories are registered"
@@ -264,7 +283,7 @@ class TestHandleCommandRouting:
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("scan", ["run"])
+            result = handle_command("scan", [])
 
             mock_scan.assert_called_once()
             mock_warn.assert_called_once()
@@ -296,12 +315,12 @@ class TestHandleCommandRouting:
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("templates", ["list"])
+            result = handle_command("templates", [])
 
             assert result is True  # Command was handled
             mock_jh.log_operation.assert_called_once_with(
                 "templates_listed",
-                {"command": "templates", "args": ["list"]},
+                {"command": "templates", "args": []},
             )
 
     def test_json_handler_called_on_scan(self):
@@ -313,7 +332,7 @@ class TestHandleCommandRouting:
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("scan", ["run"])
+            result = handle_command("scan", [])
 
             assert result is True  # Command was handled
             mock_jh.log_operation.assert_called_once_with(

@@ -41,6 +41,14 @@ from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeGua
 #: than a house convention, because a generic pack has no house.
 TEST_FILE_GLOBS: tuple = ("test_*.py", "*_test.py")
 
+#: Where a project is asked for its tests before the whole tree is walked.
+#: DECLARED ONCE, HERE. Each of the eleven rules carried its own identical copy
+#: of this tuple until 2026-09-07, so "what this pack measures" had eleven
+#: answers that only happened to agree, and the banner reporting that size
+#: would have been a twelfth. `build` falls back to the whole tree when neither
+#: directory exists, so this narrows the walk and never decides it.
+TEST_DIRS: tuple = ("tests", "test")
+
 #: Directories that never hold a project's own tests. Walking them wastes time
 #: and, worse, scores a project on its dependencies' test suites.
 SKIP_DIRS: frozenset = frozenset(
@@ -166,11 +174,22 @@ def _walk(root: Path, patterns: Sequence[str]) -> List[Path]:
     directories are the user's business, not the walker's; only what is inside
     the project can be vendored. Measured before the fix: a project checked out
     beneath a directory named `build`, holding tests/test_a.py, collected 0 units.
+
+    A DOT DIRECTORY IS PRUNED TOO, and for the same reason SKIP_DIRS is spelled
+    from pytest's list rather than this house's: pytest's default
+    `norecursedirs` begins with `.*`, so nothing under a dotted directory is
+    ever collected, and a pack that scores what pytest cannot run scores
+    fiction. Measured before the fix: the fleet walk parsed
+    `apps/handlers/events/.archive/plan_file.py` - retired code kept for the
+    record - and printed that file's `SyntaxWarning: invalid escape sequence
+    '\\d'` on the auditor's own stderr, unattributable because ast.parse names
+    no file.
     """
     found: List[Path] = []
     for pattern in patterns:
         for path in root.rglob(pattern):
-            if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+            parts = path.relative_to(root).parts[:-1]
+            if any(part in SKIP_DIRS or part.startswith(".") for part in parts):
                 continue
             if path.is_file():
                 found.append(path)
@@ -362,3 +381,24 @@ def _is_oracle_name(name: str) -> bool:
     """True when a dotted call name reads as an oracle."""
     tail = name.rsplit(".", 1)[-1]
     return tail in ORACLE_CALL_NAMES or tail.startswith("assert_")
+
+
+# =============================================================================
+# CORPUS SIZE
+# =============================================================================
+
+
+def measure(branch_path: Union[str, Path]) -> int:
+    """How many test files this pack reads in a project. The banner's number.
+
+    The audit engine's own `files_checked` counts apps/**/*.py, and not one
+    rule in this pack opens those files - all eleven are branch-level and walk
+    test units themselves. Printing that count over these scores stated a size
+    for a corpus that was never read, so the pack answers for itself instead
+    (`pack.json` -> `corpus.measured_by`).
+
+    Files, not units: a file that fails to parse still counts as a file the
+    pack tried to read, and `Corpus.unparseable` keeps its name.
+    """
+    scanned = build(Path(branch_path), test_dirs=TEST_DIRS)
+    return len(scanned.files) + len(scanned.unparseable)

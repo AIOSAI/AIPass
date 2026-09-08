@@ -158,14 +158,6 @@ def test_start_sets_event_callback():
     watcher.set_event_callback.assert_called_once_with(trigger.fire)
 
 
-def test_start_calls_start_branch_log_watcher():
-    """start() calls start_branch_log_watcher."""
-    mod = _import_module()
-    mod.start()
-    watcher = _get_log_watcher()
-    watcher.start_branch_log_watcher.assert_called_once()
-
-
 def test_start_failure_returns_false():
     """start() returns False when start_branch_log_watcher returns None."""
     mod = _import_module()
@@ -202,14 +194,6 @@ def test_status_returns_dict_from_handler():
     assert result["watchdog_available"] is True
     assert result["seen_hashes_count"] == 0
     assert result["aipass_root"] == "/fake/path"
-
-
-def test_status_calls_get_watcher_status():
-    """status() delegates to get_watcher_status handler."""
-    mod = _import_module()
-    mod.status()
-    watcher = _get_log_watcher()
-    watcher.get_watcher_status.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

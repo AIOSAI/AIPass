@@ -9,15 +9,18 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1399 test functions across 48 files in `tests/test_*.py`; pytest expands them to **1433 cases**, 1433 passed / 0 skipped, measured 2026-09-05 from both rootdirs (branch and repo root)
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1410 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1447 cases**, 1447 passed / 0 skipped, measured 2026-09-07 from both rootdirs (branch and repo root)
 
 > Two numbers because they answer different questions: `def test_` counts what
 > was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
 > single `@pytest.mark.parametrize` in `test_refused_sends.py` turns 18 functions
 > into 25 cases. Per-file counts in the tests listing below are **collected
 > cases**, not `def` lines; the two agree in most files and do not in the
-> parametrized ones. `tests/` holds 49 files total — 48 test modules plus
-> `conftest.py`, which is why the count read 49 until tonight.
+> parametrized ones. `tests/` holds 49 `.py` files total — 47 test modules plus
+> `conftest.py` and `__init__.py`. The previous edition wrote that same 49 as
+> "48 modules plus `conftest.py`" and simply forgot `__init__.py`; the total was
+> right and the breakdown was not, which is the harder half to catch because
+> the number a reader checks still adds up.
 >
 > **UNVERIFIED — fresh-checkout skips.** A previous edition claimed 4
 > live-hygiene tests skip on a fresh checkout (2 in `test_live_mailbox_hygiene.py`,
@@ -339,8 +342,15 @@ available; it simply was not being asked for.
 ```
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "sender": "@devpulse", "target": "@ai_mail",
  "subject": "...", "expected_by": "<iso>", "status": "outstanding"}
+{"dispatch_id": "<uuid4>", "ts": "<iso>", ..., "status": "outstanding", "monitor_pid": 12345}
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "status": "completed", "report_path": "..."}
 ```
+
+The middle line is the **pid annotation** (FPLAN-0499 phase 2): a second
+`outstanding` record appended once the spawn returns a pid, which `open_dispatch`
+could not know because it deliberately runs *before* the spawn. Same append-only
+discipline as closing — the promise is never rewritten, and the fold takes the
+later record.
 
 ### Crash coverage without a process — and its two-hour latency
 
@@ -354,6 +364,44 @@ Honest cost, named rather than found later: the deleted r3 daemon spotted a stal
 lock in ten minutes. This spots a dead monitor in two hours. That is a deliberate
 trade of detection latency for zero idle cost. `drone @ai_mail dispatch register`
 lists what is open and flags what is overdue.
+
+**The two-hour latency is now the fallback, not the only signal.** Rows carrying a
+`monitor_pid` also expose `monitor_alive` on read — the process is checked in
+`/proc` at the moment someone looks, never stored, because a stored liveness is
+stale the instant it is written. A dead monitor is therefore visible on the next
+watchdog pass (five minutes) instead of at `expected_by`.
+
+`monitor_alive` is **three-valued and the third value matters**: `True` alive,
+`False` gone, `None` cannot be told. `None` covers every row written before this
+landed and the systemd-scope spawn path, which never learns a pid. Reporting those
+as `False` would have announced a death for the entire historic backlog the moment
+it shipped, so readers must treat `None` as "fall back to `overdue`" — which is
+exactly the behaviour every row had before.
+
+### A reply closes the row
+
+An agent's own reply is the strongest completion evidence the system has, and
+nothing read it: rows whose agent had already reported by mail sat outstanding,
+went overdue, and were announced as dead monitors for work reported hours earlier.
+A reply now closes its dispatch (`status: "completed (replied)"`, distinct from the
+monitor's own `completed` so a reader can tell "the agent said so" from "the process
+exited"). Only the row's **target** can close it — a third party replying on the
+thread says nothing about whether the dispatched agent finished.
+
+**Matched by thread, not by the agent's dispatch stamp**, and the incident that
+settled it is worth keeping. On 2026-09-07 at 17:15 the watchdog announced DEAD
+for @api's dispatch `641dddbb` on its two-hour `expected_by` — while @api had
+replied on that thread at 16:45 and its work was landed. Matching on the stamp
+would not have fixed it and would have made it worse: @api's stamped id sat on
+its 15:16 *report-first plan*, sent an hour and a half before the work was done,
+while the real completion carried a different stamp entirely because the agent
+had been resumed under a new dispatch id. The stamp closes too early and still
+misses the completion; the thread is the one link that survives a resume, and a
+report-first plan is not a reply on it.
+
+A dispatch with an **empty subject** — a bare wake — has no thread and can never
+be matched. Its row keeps `expected_by` as its only signal, which is honest
+rather than a gap: there is nothing for the agent to reply *to*.
 
 ### The report is durable; delivery is opportunistic
 

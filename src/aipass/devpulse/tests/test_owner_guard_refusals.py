@@ -71,3 +71,38 @@ def test_admin_grant_unknown_verb_marks_the_command_failed(capsys, marks):
     assert admin_grant_module.handle_command("admin_grant", ["frobnicate"]) is True
     capsys.readouterr()
     assert marks
+
+
+# ── The three rows canary's fleet sweep found UNDER the cured guard (2026-09-07):
+# verify / keygen / mint refused in a yellow Rich print once the guard had passed,
+# so `admin_grant verify && <next>` ran the next step on an unverified grant.
+
+
+def test_admin_grant_verify_refusal_marks_the_command_failed(capsys, marks):
+    with patch.object(admin_grant_module, "verify_admin_grant", return_value=(False, "no signed privilege block")):
+        assert admin_grant_module.handle_command("admin_grant", ["verify"]) is True
+    out = capsys.readouterr()
+    assert marks, "a REFUSED verify must mark the command failed, not exit 0"
+    assert "REFUSED" in out.err + out.out
+
+
+def test_admin_grant_verify_success_stays_unmarked(capsys, marks):
+    with patch.object(admin_grant_module, "verify_admin_grant", return_value=(True, "5/5 legs hold")):
+        assert admin_grant_module.handle_command("admin_grant", ["verify"]) is True
+    capsys.readouterr()
+    assert marks == []
+
+
+@pytest.mark.parametrize(
+    ("verb", "door"),
+    [("keygen", "generate_key"), ("mint", "mint_grant")],
+)
+def test_admin_grant_ceremony_refusal_past_the_guard_marks_the_command_failed(capsys, marks, verb, door):
+    """The owner IS the caller, the guard passes, and the ceremony itself refuses."""
+    with (
+        patch.object(admin_grant_module, "_guard_caller", return_value=True),
+        patch.object(admin_grant_module, door, return_value=(False, "key already exists")),
+    ):
+        assert admin_grant_module.handle_command("admin_grant", [verb]) is True
+    capsys.readouterr()
+    assert marks, f"a REFUSED '{verb}' past the guard must mark the command failed, not exit 0"

@@ -1259,31 +1259,10 @@ def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv):
 # --- _kill_process tests (named per spec) ----------------------------------
 
 
-def test_kill_process_sigterm_success():
-    """terminate() succeeds within timeout — no SIGKILL needed."""
-    mock_proc = MagicMock()
-    mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(return_value=None)
-    mock_proc.kill = MagicMock()
-
-    _kill_process(mock_proc, "@test")
-
-    mock_proc.terminate.assert_called_once()
-    mock_proc.wait.assert_called_once_with(timeout=10)
-    mock_proc.kill.assert_not_called()
-
-
-def test_kill_process_sigkill_fallback():
-    """terminate() times out — falls back to kill()."""
-    mock_proc = MagicMock()
-    mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None])
-    mock_proc.kill = MagicMock()
-
-    _kill_process(mock_proc, "@test")
-
-    mock_proc.terminate.assert_called_once()
-    mock_proc.kill.assert_called_once()
+# _kill_process's two outcomes are pinned once, at test_kill_process_terminate_succeeds
+# and test_kill_process_terminate_timeout_falls_back_to_sigkill. This file carried a
+# second line-for-line copy of both, 640 lines apart under SIGTERM/SIGKILL names
+# (DPLAN-0323 contested band, merged FPLAN-0492).
 
 
 # --- Max-turns detection (named per spec) ----------------------------------
@@ -1524,9 +1503,16 @@ def test_env_vars_setup(monkeypatch, main_argv):
 
 
 def test_get_jsonl_projects_dir():
-    """Verifies path encoding: / replaced with -, _ replaced with -."""
-    result = _get_jsonl_projects_dir("/home/user/my_project")
-    expected = Path.home() / ".claude" / "projects" / "-home-user-my-project"
+    """Verifies path encoding: / replaced with -, _ replaced with -.
+
+    The sample cwd is deliberately NOT home-shaped. It used to be
+    "/home/user/my_project", which the hardcoded-path guard reads as this
+    machine's real home; the encoding under test cares only about the
+    separators, so a neutral path exercises it identically and lets both the
+    input and the expected answer stay written out as literals.
+    """
+    result = _get_jsonl_projects_dir("/srv/data/my_project")
+    expected = Path.home() / ".claude" / "projects" / "-srv-data-my-project"
     assert result == expected
 
 
@@ -2772,9 +2758,8 @@ def test_cleanup_own_lock_preserves_foreign_pid(tmp_path):
     assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == foreign_pid
 
 
-def test_cleanup_own_lock_missing_file_noop(tmp_path):
-    """No error when the lock file doesn't exist."""
-    _cleanup_own_lock(str(tmp_path / ".dispatch.lock"))
+# The missing-lock no-op is pinned once, at test_cleanup_own_lock_missing_noop.
+# A second copy sat here under a longer name (DPLAN-0323, merged FPLAN-0492).
 
 
 def test_cleanup_own_lock_unreadable_json_preserved(tmp_path):
@@ -3069,8 +3054,16 @@ def pointer_home(tmp_path, monkeypatch):
 
 
 def _plant_transcript(branch_path, session_id):
-    """Create the transcript file Claude would have written for a session."""
+    """Create the transcript file Claude would have written for a session.
+
+    ``transcript_file`` returns None when this machine cannot name its home
+    directory — an absent answer rather than a path. Asserted rather than
+    assumed: every caller here runs under the fake-home fixture, so a None means
+    that fixture did not take, and failing on the assert names that cause
+    instead of an AttributeError on the next line.
+    """
     transcript = mod.session_pointer.transcript_file(branch_path, session_id)
+    assert transcript is not None, "fake home not in effect — transcript_file could not name a path"
     transcript.parent.mkdir(parents=True, exist_ok=True)
     transcript.write_text("{}\n", encoding="utf-8")
     return transcript

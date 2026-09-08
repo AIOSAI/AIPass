@@ -23,6 +23,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.module_root import module_file
 
 _DAEMON_ROOT = module_file(__file__).parents[2]
@@ -180,6 +181,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args and args[0] in ("--help", "-h"):
         print_help()
         return True
+
+    gate(command, args, usage=f"drone @daemon {command}")
 
     if command == "install-timer":
         exit_code = _install()

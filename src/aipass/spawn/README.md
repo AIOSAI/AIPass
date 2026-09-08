@@ -50,7 +50,7 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 Both classes mint from the **one** template, `templates/citizen/` — full 3-layer scaffold:
 .trinity/, .aipass/, apps/ (modules/ + handlers/ incl. json shim), tests/, docs/, logs/ —
-50 files, 24 dirs. The class is a *behavioral* label in `identity.citizen_class`, not a
+49 files, 24 dirs. The class is a *behavioral* label in `identity.citizen_class`, not a
 choice of scaffold shape (DPLAN-0319), which is why the template directory is named for
 what it is rather than for a class.
 
@@ -281,7 +281,7 @@ spawn/
 │   ├── plugins/                         # Package marker — no plugins shipped
 │   └── integrations/                    # Package marker — no integrations shipped
 ├── templates/
-│   ├── citizen/                         # The one citizen template (50 files, 24 dirs)
+│   ├── citizen/                         # The one citizen template (49 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
 ├── tests/                               # 28 test files, 801 test functions (956 cases)
 ├── spawn_json/                          # JSON tracking directory
@@ -327,8 +327,49 @@ no snapshot phase.
 
 1. **Resolve** — Branch path from the registry, citizen class from its passport, template directory from the class
 2. **Directories** — Walk the template's directories and create any the branch is missing
-3. **Files** — Walk the template's files and decide per file: missing → add (placeholders replaced, atomically written) · existing `.py` → **skip by design** · existing `.json` → deep merge (existing values win) · `passport.json` → heal against a narrow allowlist only (DPLAN-0262) · create-only paths → skip entirely
+3. **Files** — Walk the template's files and decide per file: missing → add (placeholders replaced, atomically written) · existing `.py` → **skip by design** · existing `.json` → deep merge (existing values win, plus the list policy below) · `passport.json` → heal against a narrow allowlist only (DPLAN-0262) · create-only paths → skip entirely
 4. **Refresh** — Regenerate `.branch_meta.json` with current state
+
+**The list policy (FPLAN-0492).** `deep_merge` is additive for KEYS and
+existing-wins for VALUES, and a non-empty list is a value: a list entry ADDED to a
+template after a branch was born never reached that branch. Measured on @vera —
+the template's `.registry_ignore.json` grew from two `ignore_files` entries to
+four, and an update would have left the branch at two while adding the notes block
+that describes four. Both halves of that behaviour are wanted, for different
+lists, so the split is declared by name in `_TEMPLATE_OWNED_LISTS`:
+
+- **Template-owned lists are additive.** Today that is `.spawn/.registry_ignore.json`
+  → `ignore_files`, `ignore_patterns`, `patterns`. They are copy-engine machinery —
+  spawn writes them, spawn reads them, and a missing entry is a scaffold that does
+  not work. Template entries the branch lacks are appended; the branch's own entries
+  and their order are never touched, so the list is only ever grown, never reordered
+  or pruned, and a second pass reports `unchanged`.
+- **Every other list stays existing-wins**, which is `deep_merge`'s default and
+  needs no code. That includes `.claude/settings.local.json` permissions, which read
+  like template-owned safety rules and are not: measured 2026-09-07 across 18
+  branches, 2 differ from the template — @devpulse by 17 deny rules, because it is
+  the one citizen allowed to write the repository history, and @drone by 3. A union
+  would have re-denied the fleet's only publishing lane. Permission drift is a
+  branch's own posture; it is handled by hand, never merged.
+
+**The passport heal is not a migration.** It repairs three derived fields
+(`branch_info.email`, `branch_info.git_branch`, `identity.traits`) and every one of
+them exists in schema 1.0.0 and 2.0.0 alike, so a 1.0 passport gains no 2.0 shape
+and no version bump from an update — measured on @vera's live 1.0.0 passport,
+2026-09-07, which comes back `unchanged`. Changing schema is `migrate-passports`'
+job and it either completes (every field the target schema requires,
+`schema_version` bumped in the same write) or raises `PassportMigrationError`;
+there is no partial write. `tests/test_update.py` pins both halves, including the
+rule that any field added to the heal allowlist must exist in every schema version
+it can meet.
+
+The heal also answers "did anything change?" about the DOCUMENT, not about how it
+was spelled. Passports written with `ensure_ascii=True` carry an escape where the
+heal's serialiser writes the character itself; the old text comparison rewrote
+every such passport (with a backup) on every single update while changing not one
+field — measured on @vera's passport, 120 bytes of diff, zero fields. 0 of the 18
+core passports were affected (all 2.0.0, all written by the migration lane); it
+bites the externals.
 
 Create-only (never re-added, never overwritten): everything under `.trinity/`
 except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
@@ -347,9 +388,10 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**956 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-05 from the
-repo root and from the branch directory (same tally both ways). Counted the way seedgo's
-readme rule counts: **801 `def test_` functions; pytest expands them to 956 cases.**
+**957 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-07 from the
+repo root in the CI shape (`-c pyproject.toml --rootdir=.`), 8m58s. The branch-directory
+tally is **not re-run since 2026-09-05**, when both rootdirs agreed. Counted the way
+seedgo's readme rule counts: **811 `def test_` functions; pytest expands them to 957 cases.**
 
 There is no longer a skip. `test_scaffold.py` moved to `tests/.archive/` during the
 DPLAN-0325 sweep — it still ships in the template (a newborn gets it), but spawn's own
@@ -432,14 +474,29 @@ The `.trinity` seeds are now derived from those gold templates, and
 `tests/test_birth_receipt.py` pins them byte-for-byte — the pin goes red the
 moment @memory bumps, which is the only honest way to hold a copy.
 
-Two starter test suites ship at birth (`tests/test_cli_routing.py`,
-`tests/test_json_handler.py`) because `test_quality` cannot reach 100 without
-real tests. They are listed in the template's `.spawn/.registry_ignore.json`:
-seedgo's architecture baseline treats every template file as a structural
-requirement of **every** branch of that class, so adding them without that entry
-dropped 9 existing branches to 99% and red-boarded the gate. Measured, not
-assumed — the exclusion is what keeps a template addition from being a fleet-wide
-mandate.
+One starter test suite ships at birth (`tests/test_cli_routing.py`) so a newborn
+owns real, readable tests from day one. The `test_quality` standard that once
+scored it retired 2026-09-07 (DPLAN-0323). It is listed in the template's
+`.spawn/.registry_ignore.json`: seedgo's architecture baseline treats every
+template file as a structural requirement of **every** branch of that class, so
+adding it without that entry dropped 9 existing branches to 99% and red-boarded
+the gate. Measured, not assumed — the exclusion is what keeps a template addition
+from being a fleet-wide mandate.
+
+`tests/test_json_handler.py` shipped beside it until 2026-09-07, when it was
+archived to `tests/.archive/deleted_2026-09-07_template_test_json_handler.py`
+(FPLAN-0492, Patrick's ruling). Its six shim-pin tests were the last live copy of
+six identities the fleet had just folded into two parametrised tests in @seedgo's
+json handler contract suite (89 instances across 16 files, FPLAN-0491); the
+template stamped them into every newborn, so keeping it would have regrown the
+twins one citizen at a time. **A newborn loses no coverage**, measured 2026-09-07
+by minting a throwaway citizen: that suite discovers subjects by globbing the
+installed package for `*/apps/handlers/json/json_handler.py`, the newborn ships
+that exact path, and its shim hashes to the pinned canonical (`3456b766…`) — so it
+joins the parametrised run (18 branches today) the moment it lives under
+`src/aipass/`. The one gap, stated rather than papered over: a citizen minted into
+ANOTHER project's tree is outside that glob and gets no contract coverage from it.
+`tests/test_template_hygiene.py` now pins the file's ABSENCE from the template.
 
 ---
 
@@ -454,13 +511,15 @@ mandate.
 
 ## Metrics
 
-- **Seedgo:** 100% on every scored category, 2026-09-05 (`drone @seedgo audit aipass @spawn`,
-  29 production files measured — `apps/` only, `tests/` not in the corpus). 16 live bypass rules.
+- **Seedgo:** 100% on every one of the 46 scored categories, 2026-09-07 (`drone @seedgo audit
+  aipass @spawn`, 29 production files measured — `apps/` only, `tests/` not in the corpus);
+  0 violations, 0 failed checks, 0 type errors. 16 live bypass rules.
   The old "98% without bypasses" figure is **unverified** — not re-measured since 2026-08-25 and
   it would need all 16 lifted to re-measure honestly.
-- **Tests:** 956 passed, 0 skipped, 0 failed (2026-09-05, both rootdirs) — 801 test functions
+- **Tests:** 957 passed, 0 skipped, 0 failed (2026-09-07, repo root, CI shape) — 811 test functions
+- **Public functions:** 94, of which 87 are tested (seedgo's test-opportunity count, 2026-09-07)
 - **Production files:** 29 in `apps/` (seedgo's corpus); 19 handlers, 9 modules, entry point
-- **Template registry:** 50 files, 24 dirs (citizen — the one template both classes mint from),
+- **Template registry:** 49 files, 24 dirs (citizen — the one template both classes mint from),
   manifest verified against disk 2026-09-05: every declared file present, nothing untracked but
   the manifest itself
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
@@ -468,6 +527,6 @@ mandate.
 
 ---
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-07*
 
 [← Back to AIPass](../../../README.md)

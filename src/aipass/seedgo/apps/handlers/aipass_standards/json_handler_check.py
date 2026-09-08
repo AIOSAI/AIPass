@@ -16,10 +16,11 @@ that passes json_structure (code wiring) but cannot create config or
 data files.
 
 Three checks:
-1. Handler capability — the canonical shim by HASH, or the service import
-   with no branch tokens (transitional), or the retiring shared shim
-   import, or a triplet-creating surface (ensure_module_jsons /
-   ensure_json_exists).
+1. Handler capability — the canonical shim by HASH, and nothing else. Three
+   transitional shapes were accepted while the fleet sweep ran (the service
+   import with no branch tokens, the retiring shared shim import, and a
+   triplet-creating surface); the sweep finished and `_capability_verdict`
+   has had one accept path since.
 2. Template capability — the same rule applied to a branch that ships
    templates/citizen/apps/handlers/json/json_handler.py. The file every
    future citizen is born with was audited by nothing until DPLAN-0325.

@@ -70,6 +70,7 @@ from aipass.commons.apps.commons import (
     route_command,
     ensure_database,
 )
+from aipass.cli.apps.modules.display import error as cli_error, command_failed
 
 
 # ===========================================================================
@@ -230,6 +231,89 @@ def test_route_command_returns_bool():
     mock_module.handle_command.return_value = False
     result = route_command("test", [], [mock_module])
     assert isinstance(result, bool)
+
+
+# ===========================================================================
+# Exit Status: a printed refusal exits non-zero (Patrick's ruling 2026-09-07)
+# ===========================================================================
+
+
+def test_main_returns_nonzero_when_a_handled_command_refused():
+    """A module that handled the command but refused must exit non-zero.
+
+    The defect this pins: handle_command() answers *handled*, not *succeeded*,
+    so a refusal returned True and main() turned that into exit 0 -
+    `thread not_a_real_subarg_xyz` printed "Invalid post_id" and reported
+    success to the shell that called it. 2 is the fleet's code for
+    handled-but-failed (cli's resolve_exit), 1 is reserved for unhandled.
+    """
+
+    def refusing_module(command, args):
+        # What post.py does with a non-integer post_id: print through cli's
+        # error(), which marks the command failed, then report it as handled.
+        # Driven through the real error() on purpose - setting the flag by hand
+        # would still pass if error() stopped marking, the exact regression.
+        with patch("aipass.cli.apps.modules.display.err_console"):
+            cli_error("Invalid post_id - must be an integer")
+        return True
+
+    mock_module = MagicMock()
+    mock_module.handle_command.side_effect = refusing_module
+    with (
+        patch.object(sys, "argv", ["commons", "thread", "not_a_real_subarg_xyz"]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch.object(commons_main, "discover_modules", return_value=[mock_module]),
+    ):
+        assert main() == 2
+
+
+def test_main_returns_zero_when_a_handled_command_did_not_refuse():
+    """The other half of the contract: a clean run still exits 0.
+
+    Without this, a seam that simply always returned 1 would satisfy the test
+    above and break every successful command in the fleet.
+    """
+    mock_module = MagicMock()
+    mock_module.handle_command.return_value = True
+    with (
+        patch.object(sys, "argv", ["commons", "feed"]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch.object(commons_main, "discover_modules", return_value=[mock_module]),
+    ):
+        assert main() == 0
+
+
+def test_cli_error_marks_the_command_failed():
+    """The seam commons relies on: cli's error() marks, main() reads.
+
+    Commons owns no refusal machinery of its own - all 62 of its error() call
+    sites reach cli's renderer, which sets the flag resolve_exit() consults. If
+    that ever stopped marking, every one of them would silently return to exit
+    0, which is why this branch's suite pins someone else's function.
+    """
+    assert command_failed() is False
+    with patch("aipass.cli.apps.modules.display.err_console"):
+        cli_error("Invalid post_id - must be an integer")
+    assert command_failed() is True
+
+
+def test_unknown_command_names_the_whole_invocation():
+    """An unknown command exits non-zero and names what was actually typed.
+
+    Reporting only the first word hid the token that failed: `thread bogus`
+    used to be reported as "Unknown command: thread", naming a command that
+    plainly exists.
+    """
+    mock_module = MagicMock()
+    mock_module.handle_command.return_value = False
+    with (
+        patch.object(sys, "argv", ["commons", "nosuchverb", "nosucharg"]),
+        patch.object(commons_main, "ensure_database", return_value=True),
+        patch.object(commons_main, "discover_modules", return_value=[mock_module]),
+        patch.object(commons_main, "error") as mock_error,
+    ):
+        assert main() == 1
+        assert "nosuchverb nosucharg" in mock_error.call_args[0][0]
 
 
 def test_ensure_database_returns_bool():

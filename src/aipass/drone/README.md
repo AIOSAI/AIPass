@@ -234,7 +234,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1185 test functions across 32 files; pytest expands to 1272 cases
+└── tests/                         # 1182 test functions across 31 files; pytest expands to 1264 cases
 ```
 
 ### Routing Flow
@@ -582,7 +582,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-**1272 tests pass, 0 skip**, across 32 test files — measured 2026-09-06 from the repo root (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q`). Counted the seedgo readme rule's way: **1185 `def test_` functions**, which parametrization expands to **1272 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1272:
+**1264 tests pass, 0 skip**, across 31 test files — measured 2026-09-07 from the repo root (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q`). Counted the seedgo readme rule's way: **1182 `def test_` functions**, which parametrization expands to **1264 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1264:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -590,23 +590,23 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 | Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 341 |
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
-| Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
-| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 143 |
-| Deletion record | `test_deletion_log.py` | 36 |
+| Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 76 |
+| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 131 |
+| Deletion record | `test_deletion_log.py` | 38 |
 | Broker | `test_broker.py` | 61 |
 | Standards | `test_cli_routing.py` | 81 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 | Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
 | Caller identity provenance | `test_caller_identity_provenance.py` | 17 |
-| Machine output (`--json` doors, `remote`) | `test_git_json_and_remote.py` | 50 |
+| Machine output (`--json` doors, `remote`) | `test_git_json_and_remote.py` | 53 |
 | External roots (declared-roots tier) | `test_external_roots.py` | 28 |
 | Dead-cwd hermeticity | `test_import_dead_cwd.py`, `test_no_cwd_sweep.py` | 38 |
 | Registry case sweep | `test_registry_case_sweep.py` | 8 |
 | Bypass anchors | `test_bypass_anchors.py` | 3 |
 
-**What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
+**What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1272 passed in 203s on 2026-09-06.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1264 passed in 349s on 2026-09-07.
 
 ---
 
@@ -631,7 +631,7 @@ Measured 2026-09-06, all numbers from this tree tonight:
 - Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
 - `apps/drone.py`'s file header says **`Version: 1.2.1`** (line 4) while the runtime constant 42 lines below is `VERSION = "1.1.0"` (line 46) — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). The 08-25 entry recorded this mismatch as `1.1.1`; remeasured 2026-09-05 it is `1.2.1`, so the header has moved twice while the constant stood still. Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. A code fix, out of scope for a README-only pass
 - Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
-- **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 920 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Proposed cleanup of the 211 standing records is with @devpulse and Patrick — they are not being rewritten unilaterally, because a ledger someone edits to look right is worth less than one with a documented wrong patch in it
+- **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 943 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Patrick ruled on 2026-09-07: annotate, do not delete. The 211 rows stand exactly as written and one record-shaped annotation row was appended after them — same 12 keys, `lane` and `outcome` both `annotation`, `entry_count` 211 — so a reader who reaches the store finds the correction in the store's own language rather than in a document they would have to know to look for. A ledger someone edits to look right is worth less than one with a documented wrong patch in it. The annotation row has no writer and no test pinning it: it was appended by hand, once, with @devpulse's sanction, and nothing in the code path can produce another
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---

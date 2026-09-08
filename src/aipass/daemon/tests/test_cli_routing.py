@@ -155,3 +155,109 @@ def test_help_after_junk_arg_does_not_fire_scheduler() -> None:
             result = _daemon_mod.main()
     mock_tick.assert_not_called()
     assert result == 0, "help must exit 0"
+
+
+# ============================================================================
+# Unknown-argument refusal, every verb (FPLAN-0492 wave 2b)
+# ============================================================================
+
+# The gate DECIDES; apps/daemon.py RENDERS. A handler that imported cli
+# services failed seedgo's separation rule, so error() is called from the
+# router and that is where these tests intercept it.
+ROUTER = "aipass.daemon.apps.daemon"
+
+# Every verb daemon.py routes, with the flags it actually defines. branch-health
+# is absent on purpose: it takes a POSITIONAL and gates it in its own module
+# (wave 1), pinned in test_activity_report.py.
+GATED_VERBS = [
+    "update",
+    "queue",
+    "rotation",
+    "activity",
+    "activity-report",
+    "activity_report",
+    "inbox-sweep",
+    "install-timer",
+    "uninstall-timer",
+    "schedule",
+    "actions",
+    "run",
+]
+
+# The legitimate argument forms, which must keep working. A refusal gate that
+# also refuses real flags is a worse bug than the one it cures.
+ACCEPTED = [
+    pytest.param(["update"], id="update-bare"),
+    pytest.param(["queue"], id="queue-bare"),
+    pytest.param(["queue", "--json"], id="queue-json"),
+    pytest.param(["rotation", "--json"], id="rotation-json"),
+    pytest.param(["activity", "--hours", "48"], id="activity-hours"),
+    pytest.param(["activity", "-t", "6"], id="activity-hours-short"),
+    pytest.param(["activity-report", "--json"], id="report-json"),
+    pytest.param(["activity-report", "-j", "--hours", "12"], id="report-json-hours"),
+    pytest.param(["inbox-sweep", "--dry-run", "--hours", "48", "--limit", "2"], id="sweep-all-flags"),
+    pytest.param(["run", "--dry-run"], id="run-dry"),
+    pytest.param(["schedule"], id="schedule-bare"),
+    pytest.param(["actions"], id="actions-bare"),
+]
+
+
+class TestUnknownArgumentIsRefused:
+    """Patrick's standing ruling, pinned per verb.
+
+    An unknown command OR ARGUMENT fails with a non-zero exit and a message
+    naming the token. Before wave 2b these twelve surfaces accepted a trailing
+    argument and silently ignored it, so `drone @daemon queue not_a_verb`
+    rendered the queue and exited 0 — a caller's `&&` reads that as the queue it
+    asked for, and a typo'd flag (`--jsonn`) reads as success while doing
+    something else. Quieter than branch-health's EXIT-0-ON-FAILURE, same defect.
+    """
+
+    @pytest.mark.parametrize("verb", GATED_VERBS)
+    def test_a_stray_positional_is_refused(self, verb) -> None:
+        with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+            with pytest.raises(SystemExit) as exc:
+                _daemon_mod.main()
+        assert exc.value.code == 1, f"{verb} accepted a stray positional"
+
+    @pytest.mark.parametrize("verb", GATED_VERBS)
+    def test_the_refusal_names_the_token(self, verb) -> None:
+        """A refusal that does not name the token leaves a long command line a guess."""
+        with patch(f"{ROUTER}.error") as mock_err:
+            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+                with pytest.raises(SystemExit):
+                    _daemon_mod.main()
+        printed = str(mock_err.call_args)
+        assert "not_a_real_subarg_xyz" in printed, f"{verb} refused without naming the token"
+        assert verb in printed, f"{verb} refused without naming itself"
+
+    @pytest.mark.parametrize("verb", ["queue", "rotation", "activity-report", "inbox-sweep", "run"])
+    def test_a_typo_in_a_real_flag_is_refused(self, verb) -> None:
+        """The case that bites hardest: --jsonn is not --json, and used to be ignored."""
+        with patch.object(sys, "argv", ["daemon", verb, "--jsonn"]):
+            with pytest.raises(SystemExit) as exc:
+                _daemon_mod.main()
+        assert exc.value.code == 1
+
+    @pytest.mark.parametrize("argv", ACCEPTED)
+    def test_the_real_flags_still_work(self, argv) -> None:
+        with patch.object(_daemon_mod.run, "_run_with_lock", return_value=0):
+            with patch.object(_daemon_mod.inbox_sweep, "run_sweep", return_value={}):
+                with patch.object(sys, "argv", ["daemon", *argv]):
+                    result = _daemon_mod.main()
+        assert result == 0, f"{argv} is a legitimate form and must not be refused"
+
+    def test_a_value_flag_does_not_refuse_on_its_own_value(self) -> None:
+        """`--hours 48` must not read 48 as a stray positional.
+
+        The mutation this guards: dropping the two-step skip in
+        unknown_argument() refuses every value flag ever passed.
+        """
+        with patch.object(sys, "argv", ["daemon", "activity", "--hours", "48"]):
+            assert _daemon_mod.main() == 0
+
+    def test_help_outranks_the_gate(self) -> None:
+        """A help request is never an unknown argument, and never exits non-zero."""
+        for verb in GATED_VERBS:
+            with patch.object(sys, "argv", ["daemon", verb, "--help"]):
+                assert _daemon_mod.main() == 0, f"{verb} --help must exit 0"

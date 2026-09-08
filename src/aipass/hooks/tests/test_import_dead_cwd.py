@@ -127,7 +127,7 @@ def _module_names() -> list[str]:
     Discovered, never listed: a hand-written list silently stops covering the
     handler added after it was written.
 
-    Dot-prefixed directories are not packages and are skipped. ``.archive/``
+    Dot-prefixed directories and ``(disabled)`` names are skipped. ``.archive/``
     is the fleet's disposal convention (DPLAN-0325 parked the retired json
     handler there), and its dotted name — ``...json..archive.json_handler`` —
     is a SyntaxError in the generated child script, which killed the probe
@@ -144,6 +144,12 @@ def _module_names() -> list[str]:
         relative = path.relative_to(BRANCH_ROOT.parents[1]).with_suffix("")
         parts = list(relative.parts)
         if any(part.startswith(".") for part in parts):
+            continue
+        # A retired module is marked "(disabled)" in place, and the parentheses
+        # are a SyntaxError in the generated child exactly as ``.archive``'s
+        # dotted name was — same silent kill, different spelling. Skipped for
+        # the same reason: a module nobody imports cannot break an import.
+        if any("(disabled)" in part for part in parts):
             continue
         if parts[-1] == "__init__":
             parts.pop()

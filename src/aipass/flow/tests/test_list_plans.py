@@ -85,17 +85,45 @@ class TestHandleCommandRouting:
             mock_lp.assert_called_once_with("all")
             assert result is True
 
-    def test_unknown_filter_defaults_to_open_with_warning(self):
-        """Unknown filter arg should default to 'open' and emit a warning."""
-        with patch(f"{_MOD}.list_plans") as mock_lp, patch(f"{_MOD}.warning") as mock_warn, patch(f"{_MOD}.console"):
+    def test_unknown_filter_is_refused_by_name_and_exits_non_zero(self):
+        """An unknown filter FAILS — it does not quietly become 'open'.
+
+        Was pinned the other way ("defaults to open with a warning") until the
+        2026-09-07 ruling: listing the open plans because the caller misspelled
+        "closed" answers a question nobody asked, and exit 0 tells a script it
+        got what it asked for. The listing must NOT run — that assertion is
+        what catches a silent return of the default.
+        """
+        with (
+            patch(f"{_MOD}.list_plans") as mock_lp,
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.console"),
+            pytest.raises(SystemExit) as exit_info,
+        ):
             from aipass.flow.apps.modules.list_plans import handle_command
 
-            result = handle_command("list", ["garbage"])
+            handle_command("list", ["garbage"])
 
-            mock_warn.assert_called_once()
-            assert "garbage" in mock_warn.call_args[0][0]
-            mock_lp.assert_called_once_with("open")
-            assert result is True
+        assert exit_info.value.code == 1
+        mock_error.assert_called_once()
+        assert "garbage" in mock_error.call_args[0][0]
+        mock_lp.assert_not_called()
+
+    def test_a_trailing_argument_after_a_valid_filter_is_refused(self):
+        """`list open <typo>` reads nothing after the filter, so it refuses too."""
+        with (
+            patch(f"{_MOD}.list_plans") as mock_lp,
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.console"),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            from aipass.flow.apps.modules.list_plans import handle_command
+
+            handle_command("list", ["open", "stray_token"])
+
+        assert exit_info.value.code == 1
+        assert "stray_token" in mock_error.call_args[0][0]
+        mock_lp.assert_not_called()
 
     def test_json_handler_called_on_filter_commands(self):
         """json_handler.log_operation should be called for filter commands."""

@@ -13,6 +13,11 @@ from unittest.mock import patch
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
 
+# activity_report no longer imports error() at all (FPLAN-0492 wave 2b): a verb
+# RAISES UnknownArgument and apps/daemon.py renders it, so error() is patched on
+# the router and the refusal itself is asserted on the exception.
+ROUTER = "aipass.daemon.apps.daemon"
+
 
 # =============================================
 # handle_command -- routing basics
@@ -21,7 +26,7 @@ MODULE = "aipass.daemon.apps.modules.activity_report"
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestHandleCommandRouting:
     """Tests for handle_command routing and unknown commands."""
@@ -69,7 +74,7 @@ class TestHandleCommandRouting:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestActivityReportCommand:
     """Tests for 'activity-report' command."""
@@ -120,7 +125,7 @@ class TestActivityReportCommand:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestActivityReportAlias:
     """Tests for 'activity_report' underscore alias."""
@@ -149,9 +154,17 @@ class TestActivityReportAlias:
 # =============================================
 
 
+# The roster branch-health resolves against. `_known_branch_names` reads the
+# live registry on disk; a CI checkout has none, so every "known branch" test
+# went red there with SystemExit 1 on b681c085 while passing on the dev
+# machine (devpulse, 2026-09-07). Pin the roster instead of the machine.
+ROSTER = ["DAEMON", "drone"]
+ROSTER_TARGET = f"{MODULE}._known_branch_names"
+
+
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestBranchHealthCommand:
     """Tests for 'branch-health' command."""
@@ -176,27 +189,72 @@ class TestBranchHealthCommand:
     def test_branch_health_with_branch(self, _log, _err, mock_con, _jh):
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        with patch(f"{MODULE}.generate_branch_report", return_value="DRONE report") as mock_br:
-            result = handle_command("branch-health", ["DRONE"])
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="DRONE report") as mock_br:
+                result = handle_command("branch-health", ["DRONE"])
 
         assert result is True
-        mock_br.assert_called_once_with("DRONE", since_hours=24.0)
+        # The CANONICAL name, not the token typed. Resolution moved ahead of the
+        # report so an unknown branch can be refused once with a non-zero exit;
+        # a side effect is that the registry's own spelling is what travels on.
+        # generate_branch_report already re-derived the same name internally.
+        mock_br.assert_called_once_with("drone", since_hours=24.0)
 
     def test_branch_health_with_branch_and_hours(self, _log, _err, mock_con, _jh):
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        with patch(f"{MODULE}.generate_branch_report", return_value="report") as mock_br:
-            result = handle_command("branch-health", ["DRONE", "--hours", "48"])
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="report") as mock_br:
+                result = handle_command("branch-health", ["DRONE", "--hours", "48"])
 
         assert result is True
-        mock_br.assert_called_once_with("DRONE", since_hours=48.0)
+        mock_br.assert_called_once_with("drone", since_hours=48.0)
 
-    def test_branch_health_only_flags_shows_error(self, _log, mock_err, mock_con, _jh):
+    def test_branch_health_only_flags_refuses_non_zero(self, _log, mock_err, mock_con, _jh):
+        """A missing branch name is a refusal, and a refusal exits non-zero.
+
+        Was `assert result is True` — the command printed "requires a branch
+        name" and handed its caller a 0, so `daemon branch-health --hours 48 &&
+        next-thing` ran next-thing.
+        """
+        import pytest
+
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        result = handle_command("branch-health", ["--hours", "48"])
-        assert result is True
-        mock_err.assert_called()
+        with pytest.raises(UnknownArgument) as exc:
+            handle_command("branch-health", ["--hours", "48"])
+        assert exc.value.verb == "branch-health"
+
+    def test_unknown_branch_refuses_non_zero_and_names_the_token(self, _log, mock_err, mock_con, _jh):
+        """@devpulse's 2026-09-07 fleet sweep, row 21: EXIT-0-ON-FAILURE.
+
+        `branch-health not_a_real_subarg_xyz` printed "Branch not found" twice —
+        once from the report, once from the entry-health block — and exited 0.
+        Patrick's standing ruling: an unknown argument FAILS non-zero with the
+        token named. The token has to appear, or the caller cannot tell WHICH
+        argument was rejected.
+        """
+        import pytest
+
+        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
+        from aipass.daemon.apps.modules.activity_report import handle_command
+
+        with patch(f"{MODULE}.generate_branch_report") as mock_br:
+            with pytest.raises(UnknownArgument) as exc:
+                handle_command("branch-health", ["not_a_real_subarg_xyz"])
+
+        # Refused BEFORE any report is generated — one refusal, not two blocks.
+        mock_br.assert_not_called()
+        assert exc.value.token == "not_a_real_subarg_xyz"
+
+    def test_a_known_branch_resolves_case_insensitively(self, _log, _err, mock_con, _jh):
+        from aipass.daemon.apps.modules.activity_report import handle_command
+
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="r") as mock_br:
+                assert handle_command("branch-health", ["dRoNe"]) is True
+        mock_br.assert_called_once_with("drone", since_hours=24.0)
 
 
 # =============================================
@@ -373,7 +431,7 @@ class TestRenderEntryHealthDegradation:
 
 @patch(f"{MODULE}.json_handler")
 @patch(f"{MODULE}.console")
-@patch(f"{MODULE}.error")
+@patch(f"{ROUTER}.error")
 @patch(f"{MODULE}.logger")
 class TestBranchHealthWiring:
     """branch-health must actually call @memory's API — the todo's whole point."""
@@ -381,9 +439,10 @@ class TestBranchHealthWiring:
     def test_branch_health_prints_entry_health(self, _log, _err, mock_con, _jh):
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        with patch(f"{MODULE}.generate_branch_report", return_value="base report"):
-            with patch(f"{MODULE}._render_entry_health", return_value="ENTRY HEALTH BLOCK") as mock_render:
-                result = handle_command("branch-health", ["DAEMON"])
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="base report"):
+                with patch(f"{MODULE}._render_entry_health", return_value="ENTRY HEALTH BLOCK") as mock_render:
+                    result = handle_command("branch-health", ["DAEMON"])
 
         assert result is True
         mock_render.assert_called_once_with("DAEMON")
@@ -394,9 +453,10 @@ class TestBranchHealthWiring:
         """Behaviour preservation: the existing report is not displaced by the new block."""
         from aipass.daemon.apps.modules.activity_report import handle_command
 
-        with patch(f"{MODULE}.generate_branch_report", return_value="base report") as mock_gen:
-            with patch(f"{MODULE}._render_entry_health", return_value="block"):
-                handle_command("branch-health", ["DAEMON", "--hours", "48"])
+        with patch(ROSTER_TARGET, return_value=ROSTER):
+            with patch(f"{MODULE}.generate_branch_report", return_value="base report") as mock_gen:
+                with patch(f"{MODULE}._render_entry_health", return_value="block"):
+                    handle_command("branch-health", ["DAEMON", "--hours", "48"])
 
         mock_gen.assert_called_once_with("DAEMON", since_hours=48.0)
         printed = [str(c) for c in mock_con.print.call_args_list]

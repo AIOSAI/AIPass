@@ -53,6 +53,8 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 # Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
@@ -364,7 +366,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if file_path is None:
         error("No file specified", suggestion="Usage: drone @seedgo checklist <file>")
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "checklist with no target")
 
     # Resolve path — try absolute, then repo root, then CWD
     resolved = Path(file_path)
@@ -386,7 +388,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         py_files = [f for f in py_files if not f.name.startswith("_") and "(disabled)" not in f.name]
         if not py_files:
             error("No .py files found in directory", suggestion=f"Directory: {resolved}")
-            return True
+            raise CommandRefused(refusal.EXIT_NO_UNITS, str(resolved))
         console.print(f"\n[bold cyan]Checklist — {resolved.name}/[/bold cyan]  [dim]({len(py_files)} files)[/dim]\n")
         for f in py_files:
             results = run_checklist(str(f), pack_name=pack_name, prototype=prototype)

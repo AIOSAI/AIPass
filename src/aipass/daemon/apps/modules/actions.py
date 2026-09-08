@@ -19,6 +19,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.handlers.cli.arg_gate import gate
 
 
 def print_introspection():
@@ -45,7 +46,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    # Same as schedule: the notice is the guidance, the exit code is the verdict.
     json_handler.log_operation("actions_command_retired", {"args": args[:2]})
-    logger.info("[actions] Retired CLI invoked")
+    logger.info("[actions] Retired CLI invoked with %r", args[0])
     print_introspection()
+    gate("actions", args, usage="drone @daemon actions   (retired — see drone @daemon run --help)")
     return True

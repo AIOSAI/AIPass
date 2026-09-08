@@ -28,14 +28,19 @@ once it has claimed.
     drone @seedgo audit-tests @backup --budget 300
     drone @seedgo audit-tests @backup --prove-refusal    canary point C
 
-THE EXIT CODE IS A SHELL CONVENIENCE, NEVER THE VERDICT. `seedgo.py` returns 0
-whenever a route returns truthy, and drone flattens non-zero to a boolean, so
-a consumer reading only the exit code CANNOT tell a refusal from a pass. The
-artifact's `status` field and the `REFUSED:` line printed here are the
-load-bearing signals.
+A REFUSAL NOW REACHES THE SHELL; A SCORE STILL DOES NOT. Until 2026-09-07 this
+verb returned truthy for everything and `seedgo.py` turned that into exit 0, so
+a consumer reading the exit code could not tell a refusal from a pass - the
+artifact's `status` field and the `REFUSED:` line were the only load-bearing
+signals. They still are for the VERDICT: a scored group that failed exits 0,
+because this lane is advisory and a non-zero there would make it a gate nobody
+ruled it to be. What changed is the other half: a refusal (`REFUSAL_CODES` -
+the harness could not run, no units, no adapter, budget spent, an argument
+nobody recognised) leaves with its own code, per Patrick's standing ruling from
+the 2026-09-07 fleet sweep.
 """
 
-from typing import List
+from typing import List, NoReturn
 
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
@@ -43,6 +48,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit_tests import refusal, render, runner
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.modules import CommandRefused
 
 #: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("audit-tests", "audit_tests")
@@ -86,6 +92,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.error(f"[AUDIT-TESTS] the lane failed: {type(exc).__name__}: {exc}")
         error(f"audit-tests failed: {type(exc).__name__}: {exc}")
         console.print("[dim]No artifact was written. This is a lane failure, not a measurement.[/dim]")
+        # The lane's own vocabulary: a harness that could not prove it was
+        # entitled to publish. Exiting 0 here reported the crash as a run.
+        raise CommandRefused(refusal.EXIT_UNPROVEN, "audit-tests")
 
     return True
 
@@ -97,18 +106,21 @@ def _run(args: List[str]) -> None:
         # Before the missing-target message, because a token nobody read is the
         # more specific fact: it may well BE the target, misspelt.
         _refuse_unknown_argument(unrecognized[0], args)
-        return
     if not argument:
         error("audit-tests needs a target: @branch, a directory, or 'aipass' for every citizen")
-        return
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "audit-tests with no target")
 
     json_handler.log_operation("lane_invoked", {"target": argument, "options": sorted(options)})
     results, worst = runner.run(argument, options)
     _report(results, worst)
+    if worst in refusal.REFUSAL_CODES:
+        # Refusals only. EXIT_SCORED_FAILED stays a 0 on purpose - see the
+        # module docstring: this lane advises, it does not gate.
+        raise CommandRefused(worst, argument)
 
 
-def _refuse_unknown_argument(token: str, args: List[str]) -> None:
-    """Refuse a token this verb never claimed, and print the fix (Law ARGV).
+def _refuse_unknown_argument(token: str, args: List[str]) -> NoReturn:
+    """Refuse a token this verb never claimed, print the fix, and carry the code out (Law ARGV).
 
     The same five lines as the audit verb's, deliberately: display belongs to
     the verb, and a handler that printed for both would be a handler carrying a
@@ -123,6 +135,7 @@ def _refuse_unknown_argument(token: str, args: List[str]) -> None:
     console.print(f"[dim]law: {refused.law}   exit code: {refused.code}[/dim]")
     for line in refused.detail:
         console.print(f"  [dim]{line}[/dim]")
+    raise CommandRefused(refused.code, token)
 
 
 def _parse(args: List[str]) -> tuple:

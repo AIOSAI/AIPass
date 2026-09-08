@@ -122,7 +122,7 @@ flow/
 │       ├── mbank/               # Memory archival and plan processing
 │       ├── runner/              # Lock file operations for background processes
 │       ├── json/                # The fleet json shim — binds aipass.prax.json_handler (DPLAN-0325)
-│       ├── json_templates/      # Seed JSON payloads — NO readers left, see Known Issues
+│       ├── cli/                 # help_flags.py + arg_gate.py — the two whole-command gates
 │       ├── summary/             # EMPTY — only generate.py(disabled) remains
 │       ├── config/              # EMPTY — package marker only, no code
 │       └── events/              # EMPTY — package marker only, no code
@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 978 test functions across 28 files (1018 cases)
+├── tests/                       # 980 test functions across 28 files (1023 cases)
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -160,6 +160,19 @@ flow/
 | capture_plans | CPLAN | cplan_registry.json | default |
 
 Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNNN auto-increments per type.
+
+**Where a prefix comes from.** `_derive_prefix()` (`handlers/template/registry_ops.py`)
+drops a trailing `plans` segment, takes one initial per remaining word, and adds
+`PLAN`: `dev_plans` → `DPLAN`, `team_dev_plans` → `TDPLAN`. The rule is
+deterministic — the same directory name yields the same prefix on every install,
+and all seven directories above derive exactly the prefix their registry row
+holds (pinned against the live registry, not a table in a test). It used to read
+the FIRST word only, so `team_dev_plans` derived `TPLAN` on a fresh clone while
+this machine held `TDPLAN` from an earlier manual registration, and every
+existing `TDPLAN-NNNN` file was unreadable there (ruled 2026-09-07). Only a
+COLLISION still consults what is registered: a second directory wanting a taken
+prefix widens to its first two letters, then returns None for manual
+registration.
 
 ### Adding a New Plan Type
 1. Create a directory in `templates/` with one or more `.md` template files
@@ -449,6 +462,71 @@ controls.
 
 ---
 
+## Unknown Arguments Fail — One Gate, Every Door
+
+Patrick's standing ruling (fleet CLI sweep 2026-09-07): an unknown command or
+argument FAILS — non-zero exit, a message naming the token, a did-you-mean when
+one is close. It never proceeds as if a default were meant.
+
+Flow's verbs and flags were already clean; its SUB-arguments were the sweep's
+worst class. `drone @flow list not_a_filter` warned and then printed the open
+plans with exit 0 — an answer to a question nobody asked, and a script reading
+success. Measured across every door flow owns, before the cure: six ran real
+work on an unread token (`aggregate` performed the cross-branch write), two
+named the token but still exited 0, and `registry` refused correctly then
+printed a second, contradictory "Unknown command: registry" with the whole help
+screen under it.
+
+`handlers/cli/arg_gate.py` DECIDES and raises `UnknownArgument` carrying the
+door, the token, the message and the cure line; each module renders it through
+`cli.error` and exits 1. The split is forced by two standards that meet here: a
+handler may not import cli services, and the entry point may not import
+handlers — so the decision cannot render itself and `flow.py` cannot catch it.
+One decision, one vocabulary, nine doors.
+
+| Door | Before | After |
+|------|--------|-------|
+| `list <bogus>` | exit 0, listed the open plans | exit 1, names the filter |
+| `list open <extra>` | exit 0, ignored | exit 1 |
+| `templates <bogus>` / `scan <bogus>` | exit 0, ignored | exit 1 |
+| `aggregate <bogus>` | exit 0, **ran the write** | exit 1, before any write |
+| `post <bogus>` | exit 0, ran the archival pass | exit 1 |
+| `registry <bogus>` | exit 1 + a contradictory second message | exit 1, one message |
+| `close <bogus>` / `restore <bogus>` | exit 0 under a correct refusal | exit 1 |
+
+A refusing door must not swallow `--help`. In `template_manager` the four
+verbs each held their own help gate; routing them through a shared `_route()`
+left `handle_command` with no visible help interception at all — seedgo's
+introspection check caught it, and the guarantee was genuinely harder to read.
+The gate now sits once in `handle_command`, scoped to the four verbs it owns
+(`frobnicate --help` still falls through to the next module), and is pinned
+across verb × flag rather than for `templates` alone.
+
+Two notes. `aggregate run` and `scan run` were accepted-and-ignored sub-verbs —
+undocumented, in no caller, alive only in the tests — and are now refused.
+`register` / `unregister` with MISSING arguments still print a usage error and
+exit 0: that is arity, not an unknown argument, and it is reported rather than
+changed.
+
+### What "absolute" means in a shared registry
+
+`recover_plan_from_backup` reads the plan header's `**Location**:` line to decide
+where a restored file lands. It tested that with `startswith("/")`, which is the
+HOST's answer, not the record's: the registries are shared across install
+histories, so a row written on Windows is read on POSIX and back. `C:\plans`
+failed that test, fell into the relative branch, failed to resolve, and the
+plan landed under `FLOW_ROOT` — a directory its own header never named.
+
+`_recorded_is_absolute()` asks both dialects by name (`PurePosixPath` OR
+`PureWindowsPath`), and the asymmetry is why both are needed: `PureWindowsPath`
+accepts a POSIX-absolute path as drive-relative, while `PurePosixPath` refuses a
+drive letter outright. A vanished absolute record is now **refused by name**
+rather than re-homed — recreate the directory or edit the header (ruled
+2026-09-07). Pinned in `tests/test_restore_ops.py` for the drive-letter, UNC,
+vanished-POSIX, live-POSIX and relative cases, none of which read the host.
+
+---
+
 ## Close Pipeline
 
 On `drone @flow close` — the console prints five numbered steps, with vector
@@ -573,6 +651,10 @@ aggregation untouched, plus anything auto-closed during the run.
 
 ## Status
 
+Re-measured 2026-09-07 for FPLAN-0492 wave 4 (five build items; every figure in
+Quality below re-run tonight). The pass before it — the docs-only truth pass —
+is recorded here:
+
 Verified 2026-09-05, claim by claim, against the tree as it stands tonight
 (FPLAN-0490 round 2, **docs-only** — no code changed in this pass). Green and
 re-measured: the suite from both rootdirs, every command form in the Commands
@@ -587,20 +669,22 @@ both first two entries under Known Issues.
 
 ## Quality
 
-- **Seedgo:** 100% on all 47 categories, no type errors — 45 production files measured (`drone @seedgo audit aipass @flow`)
-- **Tests:** **978 test functions in 28 files** (`def test_` in `tests/test_*.py`); pytest expands them to **1018 cases**, and tonight **1018 passed / 0 skipped** from BOTH rootdirs — branch `pytest.ini`, and `-c pyproject.toml --rootdir=.` from the repo root. **99 of 100** public functions tested (`drone @seedgo test_map @flow`). *Unverified tonight:* the second marker world. `AIPASS_REGISTRY.json` is present and machine-local on this box, and denying it means moving a live file, so only the registry-present world was run; the bare-checkout leg was last measured 2026-08-31.
-- **Source files:** 45 tracked by seedgo (62 `.py` under `apps/`, excluding `__pycache__` and `.archive/`; seedgo excludes `__init__.py` markers)
+- **Seedgo:** 100% on all 47 categories, no type errors — 46 production files measured (`drone @seedgo audit aipass @flow`)
+- **Tests:** **980 test functions in 28 files** (`def test_` in `tests/test_*.py`); pytest expands them to **1023 cases**, and tonight **1023 passed / 0 skipped** from BOTH rootdirs — branch `pytest.ini`, and `-c pyproject.toml --rootdir=.` from the repo root. **99 of 100** public functions tested (`drone @seedgo test_map @flow`). *Unverified tonight:* the second marker world. `AIPASS_REGISTRY.json` is present and machine-local on this box, and denying it means moving a live file, so only the registry-present world was run; the bare-checkout leg was last measured 2026-08-31.
+- **Source files:** 46 tracked by seedgo (62 `.py` under `apps/`, excluding `__pycache__` and `.archive/`; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (`.seedgo/bypass.json`; 74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **855 rows across the 8 registry files, 28 open, 827 closed** (854 / 28 / 826 excluding the orphaned `pbplan` registry)
 - **Dead-cwd:** 0 of 62 modules die on import with no readable working directory, in both injected worlds (`tests/test_import_dead_cwd.py`, 47 tests, green tonight)
-- **Last audit:** 2026-09-05 (every figure on this list re-measured tonight, not carried forward)
+- **Last audit:** 2026-09-07 — 100% overall, every one of the 47 categories at 100 (every figure on this list re-measured tonight, not carried forward)
 
 The test count fell from the 1013-in-31-files figure this README carried on
 2026-08-31 because the DPLAN-0325 json sweep moved three files into
 `tests/.archive/` (47 test functions between them, 09-02 and 09-04) and added the
 canonical wiring test `test_json_handler.py` (6). Tonight's number is measured off
 the tree; the old one is replaced rather than reconciled, because it is not
-re-derivable from what is here now.
+re-derivable from what is here now. The 2026-09-07 wave then added ten cases —
+the unknown-argument refusals, the absoluteness pins, the TDPLAN derivation and
+the help gate across all four template verbs — bringing it to 1023.
 
 ### Known Issues
 - **`--version` prints `FLOW v2.2.1` while this README's header says 2.6.0.**
@@ -608,13 +692,14 @@ re-derivable from what is here now.
   version constant exists in the branch, so `--version` cannot drift back into
   agreement on its own. Reported to @devpulse rather than changed here: this pass
   was docs-only, and picking which number is true is a decision, not a typo fix.
-- **`apps/handlers/json_templates/` has no readers left.** Found 2026-09-05, a
-  leftover of the DPLAN-0325 json sweep. The seed payloads it holds were replaced
-  by `_default_document()` inside `@prax`'s `json_service.py` (a default in a file
-  can go missing; one in code cannot), and a fleet grep for `json_templates`
-  outside `.archive/` returns only `@seedgo`'s own checker text — where the
-  standard is that such a directory is itself the defect. Nothing in flow imports
-  or reads it. Reported, not removed: docs-only pass.
+- ~~`apps/handlers/json_templates/` has no readers left.~~ **Archived
+  2026-09-07** to `apps/handlers/.archive/json_templates_archived_2026-09-07/`
+  (moved, never deleted — @devpulse's ruling). Re-measured before moving: 23
+  fleet-wide mentions of `json_templates`, every one of them a skip-list entry
+  in another branch's scanner, and zero readers of flow's directory. The seed
+  payloads it held were replaced by `_default_document()` inside `@prax`'s
+  `json_service.py` — a default that lives in a file can go missing; one in code
+  cannot.
 - **309 of 827 closed plans have no archived copy and cannot be restored.**
   Fixed 2026-08-22: `restore` now falls back to `.backup/processed_plans/` when
   the file is **not at** the registered `file_path`. Note the correction — the

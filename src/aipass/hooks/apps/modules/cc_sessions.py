@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.2.1
+# Version: 3.3.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-08-23
+# Modified: 2026-09-07
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -15,7 +15,8 @@ These are resume-aware (sessionId updated on /resume), exit-aware (deleted on
 clean exit, stale-swept by CC itself), and the authoritative source of which
 sessions are live for a given working directory.
 
-Used by presence_gate to source truth instead of PRESENCE.central.json.
+Used by presence_gate to source truth instead of PRESENCE.central.json, and owns
+session-PID resolution (resolve_session_pid) since presence.py was retired.
 
 Exposed as `drone @hooks sessions` (list) and
 `drone @hooks sessions reclaim [@branch]` (proper-stop cleanup).
@@ -64,6 +65,58 @@ HELP_COMMANDS = [
     ("sessions", "List all CC sessions (PID · branch · short-id · kind · age)"),
     ("sessions reclaim [@branch]", "Properly stop sessions — clean slate"),
 ]
+
+
+def _get_ppid_portable(pid: int) -> int | None:
+    """Get parent PID portably (Linux + macOS). Returns None on failure."""
+    import subprocess as _sp
+
+    try:
+        result = _sp.run(
+            ["ps", "-o", "ppid=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return int(result.stdout.strip())
+    except (OSError, ValueError, _sp.TimeoutExpired) as exc:
+        logger.info("[%s] ppid lookup failed for PID %d: %s", __name__, pid, exc)
+    return None
+
+
+def _has_session_file(pid: int) -> bool:
+    """Check whether CC holds a session file for this PID.
+
+    Reads through CC_SESSIONS_DIR rather than Path.home() directly: on a machine
+    that cannot name its own home, _claude_home() already degraded to a path that
+    cannot exist, so this answers False instead of raising RuntimeError up into
+    the caller's except-and-allow.
+    """
+    return (CC_SESSIONS_DIR / f"{pid}.json").is_file()
+
+
+def resolve_session_pid() -> int | None:
+    """Walk the parent process chain to find the persistent claude session PID.
+
+    The hook runs as an ephemeral subprocess — os.getpid() gives a PID that dies
+    in milliseconds. The owning claude session is an ancestor that owns a
+    ~/.claude/sessions/<pid>.json file (CC binary is version-named, so comm
+    matching is unreliable).
+    """
+    pid = os.getpid()
+    ancestors = []
+    for _ in range(12):
+        ancestors.append(str(pid))
+        if _has_session_file(pid):
+            logger.info("[%s] Resolved session PID: %d (chain: %s)", __name__, pid, " -> ".join(ancestors))
+            return pid
+        ppid = _get_ppid_portable(pid)
+        if not ppid or ppid == pid or ppid <= 1:
+            break
+        pid = ppid
+    logger.info("[%s] No session-file ancestor found (chain: %s)", __name__, " -> ".join(ancestors))
+    return None
 
 
 def _pid_alive_windows(pid: int) -> bool:

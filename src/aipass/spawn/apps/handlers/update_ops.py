@@ -61,6 +61,35 @@ _SKIP_TRACKING = frozenset(
     }
 )
 
+# THE LIST POLICY (FPLAN-0492, 2026-09-07)
+# -----------------------------------------
+# deep_merge is additive for KEYS and existing-wins for VALUES, and a non-empty
+# list counts as a value: an existing list is kept whole, so a list entry ADDED
+# to a template after a branch was born never reaches that branch. Measured on
+# @vera: the template's .registry_ignore.json grew from two ignore_files entries
+# to four, and an update --apply would have left the branch at two while adding
+# the notes block that describes four.
+#
+# Both halves of that behaviour are wanted, for different lists, so the split is
+# declared by name rather than guessed:
+#
+#   TEMPLATE-OWNED lists (below) are additive. They are copy-engine machinery —
+#   spawn writes them, spawn reads them, and a missing entry is a scaffold that
+#   does not work. Template entries the branch lacks are appended; the branch's
+#   own entries and their order are never touched, so a list is only ever grown.
+#
+#   EVERY OTHER LIST stays existing-wins, which is deep_merge's default and
+#   needs no code here. That includes .claude/settings.local.json permissions:
+#   they read like template-owned safety rules, and they are not. Measured
+#   2026-09-07 across 18 branches, 2 differ from the template — @devpulse by 17
+#   deny rules, because it is the one citizen allowed to write the repository
+#   history, and @drone by 3. A union would have re-denied the fleet's only
+#   publishing lane. Permission drift is a branch's own posture; it is reported
+#   by hand, never merged.
+_TEMPLATE_OWNED_LISTS: dict[str, tuple[str, ...]] = {
+    ".spawn/.registry_ignore.json": ("ignore_files", "ignore_patterns", "patterns"),
+}
+
 # passport.json is the one .trinity/ file that heals (DPLAN-0262 fix phase) — every
 # other .trinity/ file (local.json, observations.json, README.md) stays create-only
 # under _NEVER_UPDATE_PREFIXES above.
@@ -206,7 +235,15 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
                 logger.info("[update] SKIP .py: %s", resolved_path)
 
         elif dest.suffix == ".json":
-            result = _merge_json(template_file, dest, replacements, dry_run, trace, branch_dir / ".spawn" / ".recovery")
+            result = _merge_json(
+                template_file,
+                dest,
+                replacements,
+                dry_run,
+                trace,
+                branch_dir / ".spawn" / ".recovery",
+                resolved_path,
+            )
             if result == "updated":
                 counts["updates"] += 1
                 updates_detail.append({"template_path": rel_path, "branch_path": resolved_path})
@@ -389,6 +426,16 @@ def _heal_passport(
 
         existing_text = dest.read_text(encoding="utf-8")
         existing_data = json.loads(existing_text)
+        # The document as it was, parsed independently — the "did the heal change
+        # anything" question is about the DOCUMENT, not about how it was spelled on
+        # disk. Comparing serialised text answered a different question and got it
+        # wrong for every passport containing a non-ASCII character: those files
+        # were written with escapes (\u2014) and this heal re-serialises with
+        # ensure_ascii=False, so the texts never matched and an untouched passport
+        # was rewritten (and backed up) on every single update. Measured on
+        # @vera's 1.0.0 passport, 2026-09-07: heal returned "updated" with 120
+        # bytes of diff and not one changed field.
+        original_document = json.loads(existing_text)
 
         legacy_traits = existing_data.pop("traits", None)
 
@@ -405,7 +452,7 @@ def _heal_passport(
 
         merged_text = json.dumps(existing_data, indent=2, ensure_ascii=False) + "\n"
 
-        if merged_text == existing_text:
+        if existing_data == original_document:
             if trace:
                 logger.info("[update] Passport unchanged: %s", dest)
             return "unchanged"
@@ -423,6 +470,34 @@ def _heal_passport(
         return "error"
 
 
+def _grow_template_owned_lists(merged: dict, template_data: dict, dotted_keys: tuple[str, ...]) -> None:
+    """Append template list entries the branch is missing, in place.
+
+    Only the keys the caller names are touched, and only when both sides really
+    hold lists. Existing entries keep their position and duplicates are never
+    introduced: the branch's list is grown, never reordered and never pruned —
+    an entry a branch deliberately removed does come back, which is exactly what
+    "the template owns this list" means and why the set is declared by name.
+    """
+    for dotted in dotted_keys:
+        section: Any = merged
+        template_section: Any = template_data
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            if not isinstance(section, dict) or not isinstance(template_section, dict):
+                break
+            section = section.get(part)
+            template_section = template_section.get(part)
+        leaf = parts[-1]
+        if not isinstance(section, dict) or not isinstance(template_section, dict):
+            continue
+        existing_list = section.get(leaf)
+        template_list = template_section.get(leaf)
+        if not isinstance(existing_list, list) or not isinstance(template_list, list):
+            continue
+        section[leaf] = existing_list + [item for item in template_list if item not in existing_list]
+
+
 def _merge_json(
     template_file: Path,
     dest: Path,
@@ -430,8 +505,13 @@ def _merge_json(
     dry_run: bool,
     trace: bool,
     backup_dest: Path | None = None,
+    resolved_path: str = "",
 ) -> str:
     """Deep-merge a template JSON file into the branch copy.
+
+    ``resolved_path`` is the branch-relative path this file lands on. It selects
+    the template-owned list policy — see _TEMPLATE_OWNED_LISTS. Callers that omit
+    it get deep_merge's plain existing-wins behaviour for every list.
 
     Returns "updated", "unchanged", or "error".
     """
@@ -444,6 +524,9 @@ def _merge_json(
         existing_data = json.loads(existing_text)
 
         merged = deep_merge(template_data, existing_data)
+        owned_lists = _TEMPLATE_OWNED_LISTS.get(resolved_path)
+        if owned_lists and isinstance(merged, dict) and isinstance(template_data, dict):
+            _grow_template_owned_lists(merged, template_data, owned_lists)
         merged_text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
 
         if merged_text == existing_text:

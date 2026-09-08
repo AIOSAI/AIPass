@@ -33,6 +33,7 @@ Functions:
     cmd_autostart() - Render the boot unit and print the host-side install steps
 """
 
+import sys
 from typing import List, Optional
 
 from aipass.cli.apps.modules import console, header, success, error, warning
@@ -102,6 +103,22 @@ def cmd_serve(args: List[str]) -> None:
         _serve_detached(host, port)
         return
 
+    _serve_foreground(host, port)
+
+
+def _serve_foreground(host: Optional[str], port: Optional[int]) -> None:
+    """
+    Run the server in this process until it stops.
+
+    Sits beside `_serve_detached` rather than inside `cmd_serve` so the two
+    ways to start a server keep their refusal handling in one place — they
+    share the D1 exit rule below, and eighty lines of argv parsing between
+    them is how one of the two quietly stops obeying it.
+
+    Args:
+        host: Bind address override, already parsed.
+        port: Port override, already parsed.
+    """
     try:
         host_server.serve(host=host, port=port)
     except host_config.BindRefused as e:
@@ -109,6 +126,14 @@ def cmd_serve(args: List[str]) -> None:
         logger.error("[host_api] bind refused, server not started: %s", e)
         error("Bind refused — server not started", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
+        # Non-zero because the UNIT is listening. This ran under
+        # Restart=on-failure with a 60-attempt window built for exactly the
+        # boot race where tailscaled has not yet assigned the address — and a
+        # zero exit silently disarmed all sixty. Measured 2026-09-07: the unit
+        # gave up at 12:19:16, the address arrived at 12:19:22, and nothing
+        # retried. A restart policy that reads as protection and provides none
+        # is worse than no policy, because it is the reason nobody looks.
+        sys.exit(1)
     except RuntimeError as e:
         logger.error("[host_api] server could not start: %s", e)
         error(str(e))
@@ -143,7 +168,9 @@ def _serve_detached(host: Optional[str], port: Optional[int]) -> None:
         logger.error("[host_api] bind refused, nothing detached: %s", e)
         error("Bind refused — server not started", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-        return
+        # Same exit rule as the foreground path: a launcher that refuses and
+        # reports success is a launcher whose caller cannot tell it refused.
+        sys.exit(1)
     except host_lifetime.LifetimeError as e:
         logger.warning("[host_api] detached serve refused: %s", e)
         error(str(e))
@@ -279,7 +306,9 @@ def cmd_autostart(args: List[str]) -> None:
         logger.error("[host_api] bind refused, no unit written: %s", e)
         error("Bind refused — no unit written", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-        return
+        # An operator scripting `autostart && systemctl --user enable ...` must
+        # not reach the enable step when no unit was rendered.
+        sys.exit(1)
     except OSError as e:
         logger.error("[host_api] the unit could not be written: %s", e)
         error(f"The unit could not be written: {e}")

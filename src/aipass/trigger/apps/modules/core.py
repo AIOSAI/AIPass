@@ -50,9 +50,31 @@ def print_introspection():
     console.print()
 
 
+# Renamed events, old name -> current name. An entry buys the fleet ONE release:
+# both names keep working, the old one logs a deprecation, and the entry is
+# deleted in the release after.
+#
+# file_deleted -> profile_write_failed (FPLAN-0492 wave 5, ruled by @devpulse):
+#   the event fires when a profile write fails and json_handler cleans up its
+#   own temp file. The store is not deleted, so the old name described the
+#   opposite of what happened.
+#
+#   MEASURED 2026-09-07 and reported to @devpulse: three fire sites carry the
+#   old name and ONE of them is a genuine deletion —
+#   daemon/apps/modules/timer_install.py:157 fires it right after unlink()ing a
+#   systemd unit. Aliasing relabels that fire as a profile write failure, which
+#   is the same class of lie the rename exists to remove. Its owner needs a
+#   name that says "a file was deleted"; this table cannot tell the two apart,
+#   because it keys on the name, not the caller.
+DEPRECATED_EVENT_ALIASES = {
+    "file_deleted": "profile_write_failed",
+}
+
+
 class Trigger:
     """Event bus for AIPass system"""
 
+    _alias_warned = set()  # deprecated names already logged, once per process
     _handlers = {}
     _history = []  # Optional: track recent events
     _initialized = False
@@ -98,6 +120,26 @@ class Trigger:
         pass
 
     @classmethod
+    def _canonical(cls, event: str) -> str:
+        """Resolve a deprecated event name to the name that replaced it.
+
+        One release of grace: a firer or a handler still using the old name
+        keeps working and gets told, once per name per process, that it is on
+        borrowed time. Unknown names pass straight through — this is a rename
+        table, not a whitelist.
+        """
+        replacement = DEPRECATED_EVENT_ALIASES.get(event)
+        if replacement is None:
+            return event
+        if event not in cls._alias_warned:
+            cls._alias_warned.add(event)
+            logger.warning(
+                f"[TRIGGER] Event '{event}' is deprecated and will be removed next release; "
+                f"delivered as '{replacement}'. Update the fire site and any Trigger.on() registration."
+            )
+        return replacement
+
+    @classmethod
     def on(cls, event: str, handler: Callable):
         """Register handler for event, at most once.
 
@@ -111,13 +153,21 @@ class Trigger:
         about a one-off. Registering the same callable twice for one event has
         no legitimate meaning — an event fires a handler once.
         """
+        # Registering under a retired name lands on the current one, so a
+        # handler wired the old way still hears events fired the new way.
+        event = cls._canonical(event)
         handlers = cls._handlers.setdefault(event, [])
         if handler not in handlers:
             handlers.append(handler)
 
     @classmethod
     def off(cls, event: str, handler: Callable):
-        """Remove handler"""
+        """Remove handler.
+
+        Resolves the alias too — otherwise `on("old")` then `off("old")` would
+        register on the current name and unregister nothing.
+        """
+        event = cls._canonical(event)
         if event in cls._handlers and handler in cls._handlers[event]:
             cls._handlers[event].remove(handler)
 
@@ -188,6 +238,12 @@ class Trigger:
         completed" from "every handler raised" from "nothing was listening".
         Callers are free to ignore it; the CLI does not.
         """
+        # Resolve a retired name BEFORE the recursion guard, so the summary a
+        # caller reads back names the event that actually ran — a deferred fire
+        # reporting the old name would send them looking for handlers that are
+        # registered somewhere else.
+        event = cls._canonical(event)
+
         # If already firing, queue this event for later (prevents recursion, enables nesting)
         if cls._firing:
             cls._deferred_queue.append((event, data))

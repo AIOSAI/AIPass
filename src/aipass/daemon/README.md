@@ -88,7 +88,7 @@ daemon/
 │   │       └── data_loader.py         # Data loading for status digests
 │   ├── extensions/             # Extension point for additional capabilities
 │   ├── integrations/           # Private branch-local wrappers — gitignored except its README
-│   ├── json_templates/         # JSON template definitions (default/: config, data, log)
+│   ├── .archive/                      # json_templates (no readers, archived 2026-09-07)
 │   └── plugins/
 │       ├── __init__.py                # discover_plugins() — ORPHANED, no live caller
 │       └── .archive/                  # ALL plugins archived: heartbeat, daily_audit,
@@ -100,8 +100,55 @@ daemon/
 ├── dropbox/                    # Incoming file drops
 ├── logs/                       # Prax log output
 ├── tools/                      # Branch verification utilities
-└── tests/                      # Test suite — 473 test functions in 19 files (pytest expands to 495)
+└── tests/                      # Test suite — 531 test functions in 19 files (pytest expands to 594)
 ```
+
+---
+
+## Unknown arguments are refused (2026-09-07, FPLAN-0492 wave 2b)
+
+Patrick's standing ruling: **an unknown command or argument fails with a non-zero exit and a
+message naming the token.** Never default, never silently ignore.
+
+Every verb below routes its arguments through one shared gate,
+`apps/handlers/cli/arg_gate.py`. An unexpected positional or an unrecognised flag is refused by
+name on stderr, the usage line follows, exit is 1, and **nothing the verb was asked to do runs**.
+
+```
+$ drone @daemon queue not_a_real_subarg_xyz
+❌ queue: unknown argument 'not_a_real_subarg_xyz'
+
+Usage: drone @daemon queue [--json]
+$ echo $?
+1
+```
+
+The gate knows two kinds of flag, because they consume different amounts of argv: boolean flags
+stand alone (`--json`), value flags swallow the token after them (`--hours 48`) — and that token
+must not then be judged a stray positional. A help request outranks the gate and always exits 0.
+
+Twelve surfaces are gated (`update`, `queue`, `rotation`, `activity`, `activity-report`,
+`activity_report`, `inbox-sweep`, `install-timer`, `uninstall-timer`, `schedule`, `actions`,
+`run`), plus `branch-health`, which gates a positional in its own module. Each has a pin in
+`tests/test_cli_routing.py`, and each pin was mutation-checked: disable that verb's refusal and
+its pin goes red.
+
+The two retired verbs behave slightly differently and deliberately: bare `schedule` / `actions`
+still print the migration notice and exit 0, because that notice is the right guidance. A retired
+*subcommand* (`schedule create x`) prints the notice **and then refuses** — it did not create
+anything, and exiting 0 told the caller's `&&` that it had.
+
+The gate is a **handler**, so it decides and does not print: it raises `UnknownArgument`, and the
+router in `apps/daemon.py` renders it once — one message shape for twelve verbs. The router may
+not import a handler (seedgo *encapsulation*), so the exception is re-exported through
+`apps/modules/__init__.py`; the router talks to the modules layer, the modules layer talks to the
+handler. `gate()` is called **outside** each module's `try`, because a module that catches its own
+refusal turns exit 1 back into exit 0 — `update` did exactly that before this was fixed.
+
+**No test suite in this branch is parked.** Every `tests/test_*.py` file runs in CI; the only
+disabled files under `apps/` are archived, carry a `(disabled)` marker, and are not tests. If a
+suite ever has to be parked, the rule is: say so here, name the file, name the reason, and name
+what has to be true to un-park it — a silently skipped suite reads as coverage that does not exist.
 
 ---
 
@@ -207,11 +254,47 @@ The trust model behind the fleet definition remains asymmetric on purpose: a pas
 
 | Type | Fields | Due when |
 |------|--------|----------|
-| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. Fires immediately if never run. |
+| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. |
 | `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per day. |
 | `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per hour. |
 | `once` | `due_date: "YYYY-MM-DD"` | Date <= today, then marks completed. |
 | `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See below. |
+
+### Optional schedule fields (2026-09-07, FPLAN-0492 ruling 6)
+
+Both live inside the job's `schedule` block, next to `type` and `time`. Both are
+opt-in: absent means today's behaviour, which is what every existing job gets.
+
+| Field | Applies to | Effect |
+|-------|-----------|--------|
+| `slot` | `interval` | An ISO instant naming **one occurrence** of the rhythm you want (`"2026-09-06T03:00:00"`). A job that has never run is seeded from it, so its first fire lands on the next slot instead of the next tick. |
+| `catch_up` | `daily`, `rotation` | When the window closed with no run, the first tick after it fires the job once and stamps `caught_up` on the runstate row. |
+
+**Why `slot` exists.** An interval job with no `last_run` is due on the very next
+tick, and that tick's minute becomes its rhythm forever. @seedgo enabled a weekly
+cycle at 01:34 on 2026-09-07 before its slot was seeded; `run.log` shows two blocked
+attempts (01:34:52, 01:40:20) and only @seedgo's own branch lock kept the week from
+locking to 01:34 Monday instead of Sunday 03:00. With a slot the "seed first, then
+enable" ordering trap disappears — the job can be enabled in any order.
+
+Seeding is keyed on an **absent `last_run`, not an absent runstate row**, and the
+difference is the whole cure: a blocked fire creates a row carrying `last_blocked_at`
+and no `last_run`, so a row-keyed test would refuse to seed exactly the job that most
+needs it. A past slot keeps its *phase* — it is rolled forward by whole intervals, not
+used verbatim, so a stale anchor never makes a job instantly overdue. A job with no
+slot keeps today's behaviour and says so in `run.log` at WARNING.
+
+**`catch_up` is bounded by `_already_ran_today`**, so a caught-up run can never
+double-fire the day it lands in, and it never widens the window backwards — a job is
+still not due *before* its window opens. A daily window whose tail crosses midnight
+(`time` later than 23:44) never closes inside its own calendar day and is refused
+rather than guessed at, in both directions.
+
+**The `MISSED` line** is written to `run.log` for every daily job whose window closed
+unrun — independent of `catch_up`, because a job nobody opted in still missed its
+window and that is the fact you need in order to decide whether to opt it in. Stamped
+once per job per day (`missed_logged_for`), since a ~2-minute tick would otherwise
+repeat the same miss ~500 times before midnight.
 
 ### Wake options
 
@@ -260,7 +343,7 @@ meet that fence, and it ships disabled. Every other target is unaffected.
 
 ### Staggering
 
-No native offset field. To stagger jobs, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
+Interval jobs have `slot` (above) — declare the hour you want and the first fire lands on it. For the other types, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
 
 ---
 
@@ -269,6 +352,8 @@ No native offset field. To stagger jobs, seed different `last_run` values in `da
 Replies never wake their recipient, so a reply landing in a sleeping branch's inbox stays invisible until something looks. `inbox-sweep` is that something.
 
 It reads every active branch's `.ai_mail.local/inbox.json`, finds mailboxes holding `new` (unread) mail older than the threshold, and wakes each owner via `wake_branch()` so the mail finally gets read.
+
+**Scope: a citizen is a citizen.** The sweep looks wherever the fleet definition looks — `src/aipass/*` framework branches, `projects/*/` residents and the federated externals alike — because it walks discovery's active branch map and that map is @memory's `fleet.fleet_branches()`. Measured 2026-09-07: **28 citizens, 18 core + 4 under `projects/` + 6 external**; that morning's sweep listed @baud, @finch, @earmark, @aipass_site and @wren among its stale mailboxes. FPLAN-0460 widened this when it deleted daemon's private registry read; the module docstring and the introspection panel still said "AIPASS_REGISTRY.json" until 2026-09-07 and now say what the code does. Pinned by `TestSweepScopeIsTheWholeFleet`.
 
 | Rule | Behaviour |
 |------|-----------|
@@ -285,7 +370,11 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Memory Entry Health (via @memory)
 
-`branch-health <BRANCH>` closes with an entry-health block sourced from @memory's public API,
+`branch-health <BRANCH>` resolves the branch name case-insensitively against the registry
+**before** it generates anything, so `drone`, `DRONE` and `dRoNe` all reach the same report and
+an unknown name is refused once — non-zero, with the token named — instead of rendering two
+"not found" blocks and exiting 0 (@devpulse fleet sweep 2026-09-07, row 21). A missing branch
+name is a refusal on the same terms. It closes with an entry-health block sourced from @memory's public API,
 `get_branch_health(branch_name)` — entry-count (is a `.trinity` file over its rollover trigger)
 and entry-size (is any entry over its character cap).
 
@@ -417,12 +506,18 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-All numbers below measured 2026-09-05.
+All numbers below re-measured 2026-09-07 (FPLAN-0492 wave 2b), not carried.
 
-- **473 test functions** across 19 test files; parametrization expands these to **495 cases**
-  (`python3 -m pytest tests/ -q` → `495 passed in 37.07s`, 0 failed, 0 skipped)
+- **531 test functions** across 19 test files; parametrization expands these to **594 cases**
+  (`.venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q` →
+  `594 passed in 42.88s`, 0 failed, 0 skipped)
+- Re-run with `activity_collector.get_branch_paths` forced to `[]` — the CI condition, where a
+  checkout has no registry — also **594 passed**. Any test that exercises a name gate pins the
+  roster it resolves against; the dev machine's registry is not a fixture (learned from CI red
+  on b681c085, cured in 5c132a5e)
 - 10/10 modules covered — every module under `apps/modules/` is imported by at least one live test file
-- **47 of 51 public functions tested** (seedgo's count; was 46/50 before the pair-5 sweep)
+- **57 of 61 public functions tested** (seedgo's count; was 47/51 before ruling 6 added
+  the catch-up, MISSED and slot surfaces, and 54/58 before wave 2b added the argument gate)
 - Seedgo audit **100%**, every scored category at 100 including Trinity, with 22 bypass rows
 - The bypass list holds **22 rows**. The `apps/daemon_wakeup.py` *encapsulation* row added by
   a6956b0f is **gone** — seedgo cured the derivation (251f2eb9) and Encapsulation now scores 100
@@ -431,7 +526,7 @@ All numbers below measured 2026-09-05.
 - *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
   emptying the list is a seedgo-side change, out of scope for a docs pass.
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-07*
 
 ---
 [← Back to AIPass](../../../README.md)

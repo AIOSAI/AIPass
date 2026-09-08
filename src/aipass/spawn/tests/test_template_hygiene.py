@@ -70,6 +70,38 @@ def test_copy_engine_skips_artifact_dirs():
     assert ARTIFACT_DIRS <= set(SKIP_NAMES)
 
 
+RETIRED_TEMPLATE_TESTS = ("test_json_handler.py",)
+
+
+@pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
+@pytest.mark.parametrize("filename", RETIRED_TEMPLATE_TESTS)
+def test_retired_starter_tests_are_not_reintroduced(class_name, filename):
+    """A retired starter suite must not come back — the template stamps every newborn.
+
+    test_json_handler.py shipped six shim-pin tests into every citizen until
+    2026-09-07. The fleet folded all 89 instances of those six identities into
+    two parametrised tests in @seedgo's json handler contract suite (FPLAN-0491),
+    and this template was the last place the stamp still lived, so it went to
+    spawn's tests/.archive/ under FPLAN-0492. Coverage did not go with it: that
+    suite discovers shims by globbing the installed package for
+    apps/handlers/json/json_handler.py, and a newborn's shim is byte-identical to
+    the pinned canonical at mint (measured 2026-09-07 on a throwaway citizen:
+    sha256 3456b766, the pinned value), so it is picked up by the next contract
+    run without shipping a copy of the tests.
+
+    This pins the ABSENCE. Re-adding the file here would regrow the twins one
+    citizen at a time, which is exactly the shape the fold was undoing.
+    """
+    template = get_template_dir(class_name)
+
+    found = [str(path.relative_to(template)) for path in template.rglob(filename)]
+
+    assert found == [], (
+        f"{class_name} template ships retired starter tests: {found} — "
+        "these claims live in @seedgo's json handler contract suite now"
+    )
+
+
 def test_spawn_package_ships_no_artifact_dirs():
     """Belt and braces: the installed package itself carries no cache dirs under templates/."""
     templates_root = Path(aipass.spawn.__file__).parent / "templates"

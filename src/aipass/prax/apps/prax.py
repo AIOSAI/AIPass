@@ -20,7 +20,7 @@ from pathlib import Path
 # Standard library imports
 import argparse
 import importlib
-from typing import List, Callable
+from typing import Callable, List
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -34,6 +34,20 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services
 from aipass.cli.apps.modules import console, error, warning
+
+# Unknown-argument gate (decides; this file renders and sets the exit code).
+# Imported from the modules layer — an entry point never reaches into handlers.
+from aipass.prax.apps.modules import (
+    UnknownArgument,
+    did_you_mean,
+    refuse,
+    unknown_option,
+)
+
+# Options prax itself defines. Anything else dashed in the top-level slot is a
+# typo or a flag meant for a command that was never named — either way it is
+# refused by name rather than dropped on the floor.
+TOP_LEVEL_OPTIONS = ("--help", "-h", "--version", "-V")
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -166,6 +180,10 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
         try:
             if handler(command, args):
                 return True
+        except UnknownArgument:
+            # A refusal is an answer, not a handler failure — main renders it
+            # and exits 1. Swallowing it here is the exit-0 bug it exists to fix.
+            raise
         except Exception as e:
             logger.error("Handler failed: %s", e)
             error(f"Handler failed: {e}")
@@ -179,8 +197,17 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
 # =============================================================================
 
 
-def main():
-    """Main entry point"""
+def main() -> int:
+    """Main entry point — renders any unknown-argument refusal and exits 1."""
+    try:
+        return _run()
+    except UnknownArgument as exc:
+        error(str(exc), suggestion=exc.usage or None)
+        return 1
+
+
+def _run() -> int:
+    """Parse the command line and route it. Refusals are raised, never returned."""
     parser = argparse.ArgumentParser(
         description="PRAX - System-Wide Logging Infrastructure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -212,8 +239,15 @@ Examples:
 
     parsed_args, remaining = parser.parse_known_args()
 
-    # If no command provided, show introspection or top-level help
+    # If no command provided, show introspection or top-level help.
+    # The stray-flag check comes FIRST: argparse hands unrecognised flags back
+    # instead of erroring, so `drone @prax --not-a-flag` used to print the
+    # self-map and exit 0 — output byte-identical to a clean run.
     if not parsed_args.command:
+        stray = unknown_option(remaining, TOP_LEVEL_OPTIONS)
+        if stray is not None:
+            nearest = did_you_mean(stray, TOP_LEVEL_OPTIONS)
+            refuse("prax", stray, f"drone @prax {nearest}" if nearest else "drone @prax --help")
         if parsed_args.show_help:
             print_help()
         else:

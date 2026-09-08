@@ -30,7 +30,7 @@ from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
 
 # Sibling imports
-from .config import _get_secret
+from .config import load_bot_config
 
 # =============================================
 # PUBLIC API
@@ -53,7 +53,9 @@ def send_telegram_notification(
     Returns:
         True if sent successfully, False otherwise
     """
-    config = _get_secret("scheduler")
+    # Merged loader, not the raw secret: chat_id is ordinary config and lives
+    # in the plain file, only the token comes out of the secret store.
+    config = load_bot_config("scheduler")
     bot_token = config.get("bot_token") if config else None
     chat_id = config.get("chat_id") if config else None
 

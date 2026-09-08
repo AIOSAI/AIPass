@@ -13,7 +13,7 @@
     {
       "file": "apps/modules/init_flow.py",
       "standard": "modules",
-      "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract."
+      "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract. Re-measured 2026-09-07 (FPLAN-0492 wave 6) after the hand-rolled json writer was replaced by the fleet service: the file is still 1210 lines and the rule is LIVE IN BOTH LANES without this row (audit Modules 95%, checklist modules FAIL). The writer was never what this row was carrying."
     },
     {
       "file": "apps/modules/doctor.py",

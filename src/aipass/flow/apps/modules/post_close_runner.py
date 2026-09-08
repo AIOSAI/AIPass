@@ -32,6 +32,7 @@ if sys.platform == "win32":
 
 
 from aipass.cli.apps.modules import console, error, success, warning
+from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.mbank.process import process_closed_plans
@@ -72,6 +73,15 @@ def handle_command(command: str, args: list) -> bool:
     if wants_help(args):
         print_help()
         return True
+
+    # `post` reads nothing after the verb. It used to run the archival and
+    # vectorisation pass regardless and report success, so a typo'd flag did
+    # real work under a name the caller never asked for (ruling 2026-09-07).
+    try:
+        refuse_extra(args, door="post")
+    except UnknownArgument as exc:
+        error(exc.message, suggestion=exc.usage)
+        raise SystemExit(1) from exc
 
     # Log the operation
     json_handler.log_operation("post_close_processed", {"command": command, "args": args})

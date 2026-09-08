@@ -30,7 +30,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -117,34 +116,115 @@ def _read_local_json() -> dict:
         return {}
 
 
-def _fire_file_deleted(path: str) -> None:
-    """Fire trigger event for temp file deletion, ignoring ImportError."""
+def _fire_profile_write_failed(path: str) -> None:
+    """Fire the write-failure trigger event, ignoring an absent trigger branch.
+
+    Named for the failed write, not the cleanup: the deletion of the temp file
+    is a consequence of the failure, not the event worth signalling. Was
+    ``file_deleted`` until 2026-09-07; @trigger delivers that name as a
+    deprecated alias for one release.
+    """
     try:
         from aipass.trigger.apps.modules.core import trigger
 
-        trigger.fire("file_deleted", path=path, reason="write_failure_cleanup")
+        trigger.fire("profile_write_failed", path=path, reason="write_failure_cleanup")
     except ImportError as exc:
-        logger.warning("[init_flow] trigger unavailable for file_deleted event: %s", exc)
+        logger.warning("[init_flow] trigger unavailable for profile_write_failed event: %s", exc)
 
 
 def _write_local_json(data: dict) -> None:
-    """Write init progress file atomically via temp-file rename."""
+    """Write the init progress file through the fleet json service.
+
+    The service's save is atomic -- temp file, fsync, then a retried replace --
+    and it unlinks its own temp file on any exception, which is the durability
+    the hand-rolled mkstemp/json.dump/os.replace writer provided, kept. The
+    directory is still created here: the progress file lives in the USER's
+    project (``cwd/.aipass/``), not in this branch's json dir, so nothing else
+    guarantees the parent exists on a fresh machine.
+
+    What the service does NOT do is raise: it answers False and logs. Callers
+    of this writer are written against OSError, and a silently-failed save
+    would make a lost init stage look exactly like a saved one, so the False is
+    turned back into the OSError -- the same shape ``profile.py`` settled on.
+    """
     local_json = _get_local_json_path()
-    dir_ = local_json.parent
-    dir_.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(dir_), prefix=".local_", suffix=".json.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, local_json)
-    except OSError as exc:
-        logger.warning("[init_flow] write failed, cleaning up %s: %s", tmp_path, exc)
-        _fire_file_deleted(tmp_path)
-        try:
-            os.unlink(tmp_path)
-        except OSError as _ue:
-            logger.warning("[init_flow] temp file cleanup failed: %s", _ue)
-        raise
+    local_json.parent.mkdir(parents=True, exist_ok=True)
+    if json_handler.write_json(local_json, data):
+        return
+    logger.warning("[init_flow] init_progress.json write failed: %s", local_json)
+    _fire_profile_write_failed(str(local_json))
+    raise OSError(f"[init_flow] could not write {local_json}")
+
+
+def _get_test_write_policy_path() -> Path:
+    """Resolve the test-write policy file from CWD (user's project)."""
+    return Path.cwd() / ".aipass" / "test_write_policy.json"
+
+
+# The fleet default, verbatim from @hooks 2026-09-07 (they own the format; the
+# shape was confirmed against their live file and their validator before this
+# landed). Their reader consumes exactly three keys -- agent_test_writing,
+# allow, block_test_edits -- and ignores the rest, which are documentary.
+#
+# agent_test_writing is the STRING "off", never a boolean: their validator
+# refuses true/false. allow is ALWAYS empty here: it is the canary-exemption
+# list and entries land there only by a Patrick/devpulse ruling, so an init that
+# pre-seeded one would grant an exemption nobody granted.
+_TEST_WRITE_POLICY_DEFAULT = {
+    "_comment": (
+        "Test-write policy — read by aipass.hooks handlers/security/testwrite_gate.py. "
+        "Deliberately NOT a key in hooks.json: that file is hash-enrolled in the trust "
+        "registry, so every edit to it darks every hook until a human re-runs 'aipass "
+        "trust'. A switch meant to be flipped cannot live in a file whose every edit "
+        "disables the engine that reads it."
+    ),
+    "version": "1.0.0",
+    "agent_test_writing": "off",
+    "allow": [],
+    "block_test_edits": False,
+    "note": (
+        "Patrick ruled 2026-09-01 (devpulse DPLAN-0323): agents are stripped of "
+        "self-directed test creation while @seedgo's test_quality v5 pack lands, because "
+        "the corpus being culled (tests written to satisfy a checker rather than to pin a "
+        "defect) regrows faster than a standards pack can cull it. OFF blocks CREATION of "
+        "new test files under any tests/ directory; edits to existing tests stay allowed "
+        "so a red test can still be fixed. Canary trial = add one branch name to allow[]. "
+        "Fleet back on = agent_test_writing: on. Read it live with: drone @hooks testwrite"
+    ),
+}
+
+
+def _stamp_test_write_policy(dry_run: bool = False) -> bool:
+    """Write the test-write policy on a fresh install. True when a file was written.
+
+    CREATE-ONLY, never clobber (@hooks' explicit call): an existing policy may
+    hold a deliberate local flip -- a branch in ``allow[]``, or the gate switched
+    on for a trial -- and re-running init must not silently repeal a ruling.
+
+    Not a security fix, and worth stating plainly because the framing invites the
+    opposite reading: @hooks' gate already fails CLOSED when this file is absent,
+    so test creation is refused either way. What the stamp buys is a readable,
+    flippable state -- ``drone @hooks testwrite`` prints OFF instead of refusing,
+    and a human edits a field instead of authoring a file from an error message.
+
+    Written through the json service, which is atomic: a half-written policy is
+    malformed JSON, and @hooks' gate fails closed on THAT too, refusing test
+    creation machine-wide until someone repairs it.
+    """
+    policy = _get_test_write_policy_path()
+    if policy.exists():
+        logger.info("[init_flow] test-write policy already present, leaving it: %s", policy)
+        return False
+    if dry_run:
+        console.print(f"[yellow]\\[dry-run][/yellow] would stamp test-write policy at {policy}")
+        return False
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    if not json_handler.write_json(policy, _TEST_WRITE_POLICY_DEFAULT):
+        logger.warning("[init_flow] test-write policy write failed: %s", policy)
+        warning(f"Could not write the test-write policy at {policy} — run 'aipass doctor'.")
+        return False
+    logger.info("[init_flow] stamped test-write policy: %s", policy)
+    return True
 
 
 def _get_setup_progress() -> dict:
@@ -239,6 +319,8 @@ def stage_1_welcome(dry_run: bool = False) -> Dict[str, Any]:
         console.print("[yellow]\\[dry-run][/yellow] No state will be written, no subprocesses launched.")
     console.print()
     console.print(render_step_header(1, TOTAL_STAGES, "Welcome"))
+    if _stamp_test_write_policy(dry_run=dry_run):
+        console.print("[dim]Test-write policy stamped (gate off) — 'drone @hooks testwrite' to read it.[/dim]")
     _save_stage(1, dry_run=dry_run)
     return {}
 
@@ -918,6 +1000,10 @@ def print_help() -> None:
     console.print("[bold cyan]aipass init[/bold cyan] — guided first-run setup")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
+    console.print(
+        "  [green]aipass init \\[target] \\[name][/green]        "
+        "[dim]# instant project scaffold in target (default: cwd)[/dim]"
+    )
     console.print("  [green]aipass init run[/green]                      [dim]# interactive[/dim]")
     console.print("  [green]aipass init run --non-interactive[/green]    [dim]# CI/headless[/dim]")
     console.print("  [green]aipass init run --name YourName[/green]      [dim]# pre-fill name[/dim]")

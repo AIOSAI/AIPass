@@ -44,6 +44,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, report, roots, shape, twins
 
 #: Exact tokens this module claims. Never a prefix match.
@@ -80,6 +82,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.error(f"[INVENTORY] the verb failed: {type(exc).__name__}: {exc}")
         error(f"test-inventory failed: {type(exc).__name__}: {exc}")
         console.print("[dim]Nothing was published. This is a tool failure, not a measurement.[/dim]")
+        raise CommandRefused(refusal.EXIT_UNPROVEN, "test-inventory")
 
     return True
 

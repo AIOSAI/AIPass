@@ -12,6 +12,26 @@ cold machine: real GitHub clone, one-command install, no local state. The runner
 - When a check goes red, find the one root cause before counting the reds
   (one bootstrap refusal once cascaded into 8 FAILs).
 
+## The one flow (Patrick's ruling 2026-08-28: "we can't be making up different flow every test"; standardized 2026-09-07)
+
+There is exactly one docker test flow. Every container test in this repo is this
+flow with a different `/verify.sh`; nobody invents a second one per test.
+
+- **One image:** `aipass-test:latest`, built from `Dockerfile.test` at the repo root:
+  `docker build -f Dockerfile.test -t aipass-test:latest .` Rebuild it only when the
+  Dockerfile changes; the image carries no repo state — the script clones dev from
+  GitHub at run time, so a five-week-old image still tests today's dev.
+- **Ephemeral containers only:** always `docker run --rm`. No named, long-lived
+  container is part of the flow. A container you need to keep for a post-mortem is
+  named `aipass-verify-<YYYY-MM-DD>` and removed the same day.
+- **Runners:** `tests/docker_dev_verify.sh` (the dev-branch cold-machine verify) and
+  `tests/docker_owner_verify.sh` (the owner model). Same invocation, different script.
+- **Never** `docker cp` into a container, never `docker exec` a fix into one — a fix is
+  pushed to dev and the run repeated (the script clones from GitHub).
+- Leftovers seen 2026-09-07 and cleared: the exited `aipass-dev` container (an
+  interactive walk from 2026-08, stale for five weeks) — removed. The `aipass-ready`
+  image (three months old, pre-bridge) is not part of the flow.
+
 ## Run it
 
 ```

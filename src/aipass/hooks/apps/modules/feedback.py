@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: feedback.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Feedback pulse toggle — on/off control for periodic feedback ask
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-18
-# Modified: 2026-07-18
+# Modified: 2026-09-07
 # =============================================
 
 """Feedback pulse toggle — on/off control for the periodic feedback ask via drone @hooks feedback."""
 
+import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -56,6 +57,30 @@ def print_introspection() -> None:
     CONSOLE.print(f"[bold cyan]feedback[/bold cyan] — Feedback pulse ({status})")
 
 
+def _require_sentinel() -> Path:
+    """Return the sentinel path, or refuse with a non-zero exit.
+
+    Both toggles used to print "No .aipass/ directory found" and return True,
+    which hooks.main() turns into exit 0 — `drone @hooks feedback off` reported
+    success having toggled nothing, twice over. Patrick's standing ruling: a
+    refusal exits non-zero and names the reason.
+
+    One seam rather than the same fix twice: the two arms asked the identical
+    question, and a cure applied per-arm is a cure that drifts per-arm.
+
+    Returns:
+        The sentinel path. Never returns when there is no project.
+
+    Raises:
+        SystemExit: 1, when no ``.aipass/`` directory is above the cwd.
+    """
+    sentinel = _sentinel()
+    if sentinel is None:
+        CONSOLE.print("[yellow]No .aipass/ directory found[/yellow]")
+        sys.exit(1)
+    return sentinel
+
+
 def handle_command(command: str, args: list) -> bool:
     """Route feedback commands from drone @hooks."""
     if command == "feedback":
@@ -74,20 +99,14 @@ def handle_command(command: str, args: list) -> bool:
             return True
 
         if sub == "off":
-            sentinel = _sentinel()
-            if sentinel is None:
-                CONSOLE.print("[yellow]No .aipass/ directory found[/yellow]")
-                return True
+            sentinel = _require_sentinel()
             sentinel.touch()
             json_handler.log_operation("feedback_toggle", {"state": "off"})
             CONSOLE.print("[yellow]Feedback pulse DISABLED[/yellow]")
             return True
 
         if sub == "on":
-            sentinel = _sentinel()
-            if sentinel is None:
-                CONSOLE.print("[yellow]No .aipass/ directory found[/yellow]")
-                return True
+            sentinel = _require_sentinel()
             if sentinel.exists():
                 sentinel.unlink()
             json_handler.log_operation("feedback_toggle", {"state": "on"})

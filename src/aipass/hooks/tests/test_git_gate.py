@@ -85,9 +85,6 @@ class TestGitGateReadAllowed:
     def test_git_archive(self):
         _assert_allowed(_bash("git archive HEAD"))
 
-    def test_git_archive_with_args(self):
-        _assert_allowed(_bash("git archive --format=tar HEAD"))
-
     def test_git_count_objects(self):
         _assert_allowed(_bash("git count-objects -v"))
 
@@ -112,9 +109,6 @@ class TestGitGateGlobalOptions:
 
     def test_git_no_pager_log(self):
         _assert_allowed(_bash("git --no-pager log"))
-
-    def test_git_paginate_diff(self):
-        _assert_allowed(_bash("git --paginate diff"))
 
     def test_git_c_config_status(self):
         _assert_allowed(_bash("git -c core.pager=less status"))
@@ -238,15 +232,6 @@ class TestGitGateChaining:
     def test_read_with_non_git_allowed(self):
         _assert_allowed(_bash("git ls-files && echo done"))
 
-    def test_non_git_then_read_allowed(self):
-        _assert_allowed(_bash("echo start && git status"))
-
-    def test_three_reads_allowed(self):
-        _assert_allowed(_bash("git status && git log && git diff"))
-
-    def test_two_reads_one_write_blocked(self):
-        _assert_blocked(_bash("git status && git log && git push"))
-
 
 class TestGitGateWordBoundary:
     """Word-boundary and quote handling."""
@@ -261,7 +246,21 @@ class TestGitGateWordBoundary:
         _assert_allowed(_bash("echo 'git push'"))
 
     def test_drone_git_allowed(self):
+        """KEPT and STRENGTHENED 2026-09-07, not merged (DPLAN-0323 contested band).
+
+        The row arrived on the merge walk because it could not fail: the verb
+        was ``status``, which is allowlisted, so removing the ``@`` lookbehind
+        at git_gate.py:21 left the result allowed either way. That is a coverage
+        GAP wearing the name of a passing test, and deleting it would have left
+        the gap while removing the reminder.
+
+        The write verb is what pins the lookbehind: a drone-routed push is the
+        sanctioned route and must stay allowed, while the raw form is refused.
+        Measured both, 2026-09-07.
+        """
         _assert_allowed(_bash("drone @git status"))
+        _assert_allowed(_bash("drone @git push"))
+        _assert_blocked(_bash("git push"))
 
     def test_path_git_not_matched(self):
         _assert_allowed(_bash("/usr/bin/git push"))

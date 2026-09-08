@@ -51,7 +51,7 @@ def register_path() -> "Path":
 
 
 def outstanding_dispatches(repo_root: "Path | None" = None) -> "list[dict]":
-    """Every dispatch still open, newest first, each carrying an ``overdue`` bool.
+    """Every dispatch still open, newest first, with ``overdue`` and ``monitor_alive``.
 
     The register's reconstruction has ONE owner, and this is it. The rule that
     "later records win" is the whole append-only contract, and a second

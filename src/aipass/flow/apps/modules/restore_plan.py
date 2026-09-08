@@ -275,14 +275,19 @@ def handle_command(command: str, args: List[str]) -> bool:
     # 2. VALIDATE: Check for parsing errors
     if error:
         console.print(format_restore_usage_error())
-        return True  # Command was handled (error already displayed)
+        # Handled, and FAILED — same ruling as close (2026-09-07). Exiting 0
+        # after refusing tells a caller the plan was reopened.
+        raise SystemExit(1)
 
     # 3. EXECUTE: Run workflow orchestrator
-    restore_plan(plan_num=plan_num)
+    restored = restore_plan(plan_num=plan_num)
 
-    # 4. RETURN: True = command was handled (even if the operation failed,
-    #    the error has already been displayed -- returning False would cause
-    #    flow.py to print a spurious "Unknown command" message)
+    # 4. RETURN: handled is not the same as succeeded — same ruling as close.
+    #    Returning False here is still wrong: flow.py reads that as "no module
+    #    claimed this command" and prints a contradictory second message.
+    if not restored:
+        raise SystemExit(1)
+
     return True
 
 

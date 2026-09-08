@@ -71,7 +71,7 @@
       "timeout": 45
     },
     "auto_watchdog": {
-      "enabled": true,
+      "enabled": false,
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle",
       "matcher": "Bash"
     }

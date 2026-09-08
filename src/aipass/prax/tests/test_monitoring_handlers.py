@@ -842,16 +842,11 @@ def _import_unified_stream():
 class TestPrintEvent:
     """Tests for print_event()."""
 
-    def test_prints_to_console(self):
-        """print_event() should call console.print."""
-        mod = _import_unified_stream()
-        mod.print_event("file", "PRAX", "file.py modified")
-        mod.console.print.assert_called()
-
     def test_includes_branch_name(self):
-        """Output should include the branch name."""
+        """One line reaches the console and it carries the branch name."""
         mod = _import_unified_stream()
         mod.print_event("log", "SEEDGO", "audit complete")
+        mod.console.print.assert_called_once()
         call_args = mod.console.print.call_args[0][0]
         assert "SEEDGO" in call_args
 

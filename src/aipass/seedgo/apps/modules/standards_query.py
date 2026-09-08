@@ -41,7 +41,9 @@ from aipass.cli.apps.modules import error, warning
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+from aipass.seedgo.apps.modules import CommandRefused
 
 # =============================================================================
 # COMMAND NAMES
@@ -242,7 +244,10 @@ def _display_content(pack_name: str, standard_name: str, content_file: Path) -> 
     content = _load_content(content_file, standard_name)
     json_handler.log_operation("standard_queried", {"pack": pack_name, "standard": standard_name})
     if not content:
-        return
+        # `_load_content` already said why on stdout. Returning quietly here
+        # had the process exit 0 on a standard it never printed - a caller
+        # piping this into a doc build could not tell empty from broken.
+        raise CommandRefused(refusal.EXIT_UNPROVEN, f"{pack_name}/{standard_name}")
 
     console.print()
     # Handle both str and List[str] return types from content handlers
@@ -287,7 +292,7 @@ def _handle_alias(args: List[str]) -> bool:
     if not matches:
         error(f"Unknown standard: '{standard_name}'")
         _show_all_standards()
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, standard_name)
 
     # Two packs claiming one name: refuse to guess, show the explicit form.
     if len(matches) > 1:
@@ -297,7 +302,7 @@ def _handle_alias(args: List[str]) -> bool:
         for pack_name, _ in matches:
             console.print(f"  [green]drone @seedgo {QUERY_COMMAND} {pack_name} {standard_name}[/green]")
         console.print()
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, standard_name)
 
     pack_name, content_file = matches[0]
     _display_content(pack_name, standard_name, content_file)
@@ -348,7 +353,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         for name in packs:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, pack_name)
 
     # No second arg = list standards in pack
     if len(args) < 2:
@@ -365,7 +370,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         for name in standards:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, standard_name)
 
     # Load and display content
     _display_content(pack_name, standard_name, standards[standard_name])

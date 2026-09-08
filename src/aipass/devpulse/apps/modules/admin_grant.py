@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_grant.py
 # Description: Admin grant module — birth-cert privilege ceremony CLI (FPLAN-0401)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-08-22
+# Modified: 2026-09-07
 # =============================================
 
 """
@@ -96,7 +96,10 @@ def _cmd_verify() -> None:
     if ok:
         console.print(f"[green]VERIFIED[/green] — {reason}")
     else:
-        console.print(f"[yellow]REFUSED[/yellow] — {reason}")
+        # error, not a yellow print: a refusal that exits 0 lets
+        # `admin_grant verify && <next>` run the next step on an unverified
+        # grant (canary's fleet sweep 2026-09-07, devpulse row 1).
+        error(f"REFUSED — {reason}")
 
 
 def _cmd_keygen(args: list[str]) -> None:
@@ -107,7 +110,7 @@ def _cmd_keygen(args: list[str]) -> None:
         console.print(f"[green]OK[/green] — {message}")
         console.print("[dim]Next: admin_grant mint, then the @spawn grant-admin registry flag.[/dim]")
     else:
-        console.print(f"[yellow]REFUSED[/yellow] — {message}")
+        error(f"REFUSED — {message}")  # same reason as verify: a refusal exits non-zero
 
 
 def _cmd_mint() -> None:
@@ -118,7 +121,7 @@ def _cmd_mint() -> None:
         console.print(f"[green]OK[/green] — {message}")
         console.print("[dim]Next: @spawn grant-admin registry flag, then admin_grant verify.[/dim]")
     else:
-        console.print(f"[yellow]REFUSED[/yellow] — {message}")
+        error(f"REFUSED — {message}")  # same reason as verify: a refusal exits non-zero
 
 
 def _wants_help(args: list[str]) -> bool:
