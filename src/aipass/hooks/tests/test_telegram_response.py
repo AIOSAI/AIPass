@@ -1704,11 +1704,23 @@ class TestWriteDeliveryLog:
         assert "delivery_failed" in record["culprit"]
 
     def test_log_write_failure_does_not_raise(self):
+        """An unwritable delivery log is reported, not swallowed and not raised.
+
+        Had no oracle: it called _write_delivery_log inside a mocked logger and
+        asserted nothing. A version that caught the OSError and dropped it on
+        the floor passed identically to one that reported it - and "the record
+        silently stopped being written" is the failure this whole file exists
+        to make impossible.
+        """
         from aipass.hooks.apps.handlers.notification.telegram_response import _write_delivery_log
 
         impossible = Path("/dev/null/impossible/log.jsonl")
-        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=impossible):
+        with patch(LOGGER_PATCH) as mock_logger, patch(f"{MOD}._get_delivery_log", return_value=impossible):
             _write_delivery_log("hi", ["hi"], [{"idx": 0, "ok": True, "text": "hi"}], "s")
+
+        assert mock_logger.warning.call_count == 1
+        assert "delivery log write failed" in mock_logger.warning.call_args[0][0]
+        assert not impossible.exists()
 
 
 # ===========================================================================

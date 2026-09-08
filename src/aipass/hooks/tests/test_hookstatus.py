@@ -239,8 +239,14 @@ class TestMasterSwitchOff:
 class TestPrintIntrospection:
     """Module introspection tests."""
 
-    def test_prints_without_error(self):
-        """Introspection runs without raising."""
+    def test_prints_without_error(self, capsys):
+        """Introspection names the module and what it is.
+
+        "Runs without raising" was the whole test and it asserted nothing, so
+        an introspection that printed nothing at all was green.
+        """
         from aipass.hooks.apps.modules.hookstatus import print_introspection
 
         print_introspection()
+
+        assert "hookstatus — Read-only hook config viewer" in capsys.readouterr().err

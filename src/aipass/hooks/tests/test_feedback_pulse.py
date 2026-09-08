@@ -40,9 +40,12 @@ class TestFeedbackPulseHandler:
             "aipass.hooks.apps.handlers.prompt.feedback_pulse._STATE_DIR",
             tmp_path,
         ):
-            for i in range(10):
-                result = self._handler()({"session_id": "test-session"})
-                assert result["stdout"] == "", f"Turn {i} should not fire"
+            outputs = [self._handler()({"session_id": "test-session"})["stdout"] for _ in range(10)]
+
+        # One assertion over the whole run, not one inside the loop: the old
+        # shape asserted nothing at all if the iterable ever came up empty, and
+        # said nothing about HOW MANY of the first ten turns stayed silent.
+        assert outputs == [""] * 10
 
     def test_fires_on_turn_10(self, tmp_path):
         result = {"stdout": "", "exit_code": 0}
@@ -90,12 +93,14 @@ class TestFeedbackPulseHandler:
                 return_value=False,
             ),
         ):
-            for i in range(11):
+            for _ in range(11):
                 self._handler()({"session_id": "test-skip"})
 
-            for i in range(9):
-                result = self._handler()({"session_id": "test-skip"})
-                assert result["stdout"] == "", f"Turn {11 + i} should not fire"
+            outputs = [self._handler()({"session_id": "test-skip"})["stdout"] for _ in range(9)]
+
+        # Turns 11 through 19 inclusive - nine of them, all silent. The count is
+        # half the claim and the old in-loop assert carried none of it.
+        assert outputs == [""] * 9
 
     def test_disabled_returns_empty(self, tmp_path):
         result = {"stdout": "", "exit_code": 0}

@@ -81,14 +81,25 @@ class TestHandleCommand:
 class TestPrintIntrospection:
     """Module introspection tests."""
 
-    def test_prints_without_error(self):
+    def test_prints_without_error(self, capsys):
+        """Unmuted, introspection reports ACTIVE.
+
+        The pair below had no oracle - both called print_introspection and
+        asserted nothing, so they passed identically whichever way is_muted
+        answered. The mute state IS the thing introspection exists to report.
+        """
         from aipass.hooks.apps.modules.hooksound import print_introspection
 
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=False):
             print_introspection()
 
-    def test_shows_muted_status(self):
+        assert "hooksound — Hook sound control (ACTIVE)" in capsys.readouterr().err
+
+    def test_shows_muted_status(self, capsys):
+        """Muted, introspection reports MUTED - the other half of the pair."""
         from aipass.hooks.apps.modules.hooksound import print_introspection
 
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=True):
             print_introspection()
+
+        assert "hooksound — Hook sound control (MUTED)" in capsys.readouterr().err

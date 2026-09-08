@@ -153,8 +153,8 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1758 test functions across 51 files; pytest expands to 1840 cases (1838 pass, 2 skipped — 1 env, 1 win32-only)
-    └── parked/                  # 2 retired suites + a collect_ignore_glob conftest — kept for revival, never run
+└── tests/                       # 1756 test functions across 51 files; pytest expands to 1838 cases (1836 pass, 2 skipped — 1 env, 1 win32-only)
+    └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 
 ## How It Works
@@ -261,8 +261,9 @@ Wire a new per-handler entry with the name as it appears in `hooks.json`.
 Its arming path is owner-only, which made it a refusal for 17 of 18 citizens. Retired under
 FPLAN-0495 item 3:
 
-1. `apps/handlers/lifecycle/auto_watchdog.py` → `auto_watchdog(disabled).py`; its tests parked under
-   `tests/parked/`. The dotted-path entry in both configs names the old module, so the rename alone
+1. `apps/handlers/lifecycle/auto_watchdog.py` → `auto_watchdog(disabled).py`; its tests were parked under
+   `tests/parked/` and archived to `tests/.archive/` on 2026-09-08 (FPLAN-0513) after a clean session
+   cycle, along with `presence`'s. `tests/parked/` no longer exists. The dotted-path entry in both configs names the old module, so the rename alone
    disables nothing — the flip below is what retires it.
 2. `"enabled": false` in **both** `.aipass/hooks.json` and `.aipass/project_hooks.json`. One line
    changed per file; nothing else was touched.

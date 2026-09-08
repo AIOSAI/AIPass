@@ -118,8 +118,13 @@ class TestHandle:
 
         expected_tz = datetime.now().astimezone().strftime("%Z")
         result = handle({})
-        if expected_tz:
-            assert expected_tz in result["stdout"]
+        # The guard is gone. %Z on an aware datetime always names the host's
+        # zone - it is empty only for a naive one, which astimezone() rules
+        # out - so "if expected_tz:" could not be false, and if it ever HAD
+        # been false the test would have passed having compared nothing and
+        # the run would not have said which happened. Asserted, so it says.
+        assert expected_tz != ""
+        assert expected_tz in result["stdout"]
 
     def test_no_cadence_gating_fires_on_repeated_calls(self):
         from aipass.hooks.apps.handlers.prompt.temporal import handle

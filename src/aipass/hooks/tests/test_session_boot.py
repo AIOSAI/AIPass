@@ -398,9 +398,19 @@ class TestStopSession:
 
 
 class TestMain:
-    def test_success(self):
-        with patch.object(session_boot, "boot", return_value={"exit_code": 0, "action": "started"}):
-            session_boot.main()
+    def test_success(self, capsys):
+        """A successful boot exits silently - main() calls boot once and returns.
+
+        Had no oracle: main() was called and nothing was checked, so a main()
+        that never reached boot at all, or that wrote to stderr on the happy
+        path, passed. The sibling below pins the failure leg; this pins the one
+        it has to be different from.
+        """
+        with patch.object(session_boot, "boot", return_value={"exit_code": 0, "action": "started"}) as mock_boot:
+            assert session_boot.main() is None
+
+        assert mock_boot.call_count == 1
+        assert capsys.readouterr().err == ""
 
     def test_failure_exits(self):
         import pytest
@@ -1223,6 +1233,15 @@ class TestPickerOffersChatsNotProcesses:
             {"pid": 2, "sessionId": "bg-b", "cwd": str(tmp_path), "kind": "bg"},
         ]
         result, mock_exec = self._boot(tmp_path, live, "1")
+
+        # OFFERED is half the claim and the capture was already being asked for
+        # to prove it - then never read. The picker printing nothing while the
+        # resume still worked would have passed, and "no live process holds it,
+        # and it must still be pickable" is a statement about the MENU.
+        menu = capsys.readouterr().err
+        assert "The one he wanted" in menu
+        assert "61 msgs" in menu
+
         cmd = mock_exec.call_args[0][3]
         assert "--resume" in cmd and "dead-chat" in cmd
 

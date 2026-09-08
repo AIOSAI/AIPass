@@ -58,6 +58,18 @@ class TestWantsHelpPredicate:
     def test_non_help_args(self):
         assert wants_help(["reclaim", "@hooks"]) is False
 
+    def test_help_flags_table_is_the_three_spellings(self):
+        """Arms the parametrized row below, which reads HELP_FLAGS at collection.
+
+        An emptied or shortened HELP_FLAGS makes that row collect zero cases,
+        which pytest reports as SKIPPED and the summary line reads green - the
+        table would vanish and the suite would say nothing. The count is what
+        notices a table that came back one entry short; the value is what
+        notices a spelling silently swapped.
+        """
+        assert len(HELP_FLAGS) == 3
+        assert set(HELP_FLAGS) == {"--help", "-h", "help"}
+
     @pytest.mark.parametrize("token", HELP_FLAGS)
     def test_is_help_flag(self, token):
         assert is_help_flag(token) is True

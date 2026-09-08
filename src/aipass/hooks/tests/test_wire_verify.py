@@ -398,5 +398,11 @@ class TestRenderResults:
 
 
 class TestPrintIntrospection:
-    def test_runs_without_error(self):
+    def test_runs_without_error(self, capsys):
+        """Introspection names the module and what it checks.
+
+        Was a bare call with no oracle: nothing printed would have passed.
+        """
         wire_verify.print_introspection()
+
+        assert "wire_verify — Provider ↔ project hook wiring checker" in capsys.readouterr().err

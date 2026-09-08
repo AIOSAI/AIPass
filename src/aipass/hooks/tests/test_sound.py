@@ -83,6 +83,13 @@ class TestSpeak:
         mock_sub.run.assert_not_called()
 
     def test_speak_graceful_on_timeout(self):
+        """A piper timeout is caught and named in the log, never raised.
+
+        Had no oracle: "graceful" was asserted by the absence of a traceback, so
+        a speak() that never reached piper at all - a guard returning early, a
+        patch that stopped biting - passed exactly the same. The log line is
+        what proves the except leg is the one that ran.
+        """
         import subprocess as real_sub
         from aipass.hooks.apps.sound import speak
 
@@ -92,6 +99,7 @@ class TestSpeak:
             patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
             patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
             patch("aipass.hooks.apps.sound.tempfile") as mock_tmp,
+            patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
@@ -103,7 +111,11 @@ class TestSpeak:
 
             speak("test")
 
+        assert mock_sub.run.call_count == 1
+        mock_logger.info.assert_called_once_with("[HOOKS] speak: piper timed out")
+
     def test_speak_graceful_on_os_error(self):
+        """A missing piper binary is caught and the reason carried into the log."""
         from aipass.hooks.apps.sound import speak
 
         with (
@@ -112,6 +124,7 @@ class TestSpeak:
             patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
             patch("aipass.hooks.apps.sound.subprocess.run", side_effect=OSError("broken")),
             patch("aipass.hooks.apps.sound.tempfile") as mock_tmp,
+            patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_bin.exists.return_value = True
             mock_voice.exists.return_value = True
@@ -120,6 +133,11 @@ class TestSpeak:
             mock_tmp.NamedTemporaryFile.return_value = mock_file
 
             speak("test")
+
+        assert mock_logger.info.call_count == 1
+        template, exc = mock_logger.info.call_args[0]
+        assert template == "[HOOKS] speak: playback error: %s"
+        assert str(exc) == "broken"
 
 
 class TestPlay:
@@ -165,16 +183,28 @@ class TestPlay:
         mock_sub.Popen.assert_not_called()
 
     def test_play_graceful_on_os_error(self):
+        """A missing player is caught and the reason carried into the log.
+
+        Had no oracle. Note the file-not-found leg logs a DIFFERENT line, so
+        pinning the template is what separates "the player is missing" from
+        "the sound file is missing" - two failures with one silent outcome.
+        """
         from aipass.hooks.apps.sound import play
 
         with (
             patch("aipass.hooks.apps.sound.is_muted", return_value=False),
             patch("aipass.hooks.apps.sound.subprocess.Popen", side_effect=OSError("no aplay")),
+            patch("aipass.hooks.apps.sound.logger") as mock_logger,
         ):
             mock_path = MagicMock()
             mock_path.exists.return_value = True
 
             play(mock_path)
+
+        assert mock_logger.info.call_count == 1
+        template, exc = mock_logger.info.call_args[0]
+        assert template == "[HOOKS] play: playback error: %s"
+        assert str(exc) == "no aplay"
 
 
 class TestMuteWritePair:

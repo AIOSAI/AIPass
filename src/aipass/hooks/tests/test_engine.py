@@ -790,12 +790,30 @@ class TestErrorResilience:
         assert config is None
 
     def test_log_write_failure_does_not_crash(self, tmp_path, mock_logger):
-        # A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
-        # via append_jsonl's Path(...).parent.mkdir — use a real tmp path.
+        """A failed log write is reported and swallowed, never raised.
+
+        Had no oracle: the call sat alone and anything that did not raise was a
+        pass - including a version that dropped the OSError silently. Crash
+        isolation is the point of this handler, but a hook whose diagnostics
+        die quietly is the one failure nobody would ever see.
+
+        A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
+        via append_jsonl's Path(...).parent.mkdir - use a real tmp path.
+        """
         log_file = tmp_path / "engine.jsonl"
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-                _log({"event": "Test"})
+        # The report goes through diagnostics' own logger, not engine's - the
+        # mock_logger fixture patches engine.logger and would be blind here,
+        # which is exactly the "assert on the wrong seam" trap.
+        with (
+            patch("builtins.open", side_effect=OSError("disk full")),
+            patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file),
+            patch("aipass.hooks.apps.handlers.config.diagnostics.logger") as diag_logger,
+        ):
+            _log({"event": "Test"})
+
+        assert not log_file.exists()
+        assert diag_logger.error.call_count == 1
+        assert "log write failed" in diag_logger.error.call_args[0][0]
 
 
 class TestDataStructureContracts:
@@ -804,11 +822,9 @@ class TestDataStructureContracts:
     def test_config_has_hooks_enabled_key(self, sample_hooks_config):
         assert "hooks_enabled" in sample_hooks_config
 
-    def test_config_event_values_are_dicts(self, sample_hooks_config):
-        for key, val in sample_hooks_config.items():
-            if key == "hooks_enabled":
-                continue
-            assert isinstance(val, dict)
+    # test_config_event_values_are_dicts archived 2026-09-08 (FPLAN-0513) to
+    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - it
+    # asserted a property of the conftest literal, never touching the engine.
 
     def test_log_entry_has_required_fields(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "test.jsonl"
@@ -913,9 +929,9 @@ class TestConftest:
         assert "command" in hook
         assert "matcher" in hook
 
-    def test_hooks_config_file_is_valid_json(self, hooks_config_file):
-        content = json.loads(hooks_config_file.read_text())
-        assert isinstance(content, dict)
+    # test_hooks_config_file_is_valid_json archived 2026-09-08 (FPLAN-0513) to
+    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - the
+    # fixture writes the file with json.dumps, so the round trip was a tautology.
 
     def test_temp_test_dir_exists(self, temp_test_dir):
         assert temp_test_dir.exists()
@@ -978,7 +994,14 @@ class TestCliRouting:
 
         print_help()
         captured = capsys.readouterr()
-        for cmd, _ in hs_cmds + hst_cmds + eng_cmds:
+        # The floor, per module and not in total. Auto-discovery is the claim,
+        # so a module that stopped declaring HELP_COMMANDS has to red here - and
+        # a total-only floor would let hooksound go empty while engine's rows
+        # kept the count up. A floor and not the exact counts (3/1/1 today):
+        # adding a help command must not red a test about discovery.
+        assert min(len(hs_cmds), len(hst_cmds), len(eng_cmds)) >= 1
+        commands = hs_cmds + hst_cmds + eng_cmds
+        for cmd, _ in commands:
             assert cmd in captured.out
 
     def test_output_capture_status(self, capsys):
@@ -1028,9 +1051,9 @@ class TestCliRouting:
 class TestConfigDataContracts:
     """Additional data structure contract tests."""
 
-    def test_config_keys_are_strings(self, sample_hooks_config):
-        for key in sample_hooks_config:
-            assert isinstance(key, str)
+    # test_config_keys_are_strings archived 2026-09-08 (FPLAN-0513) to
+    # tests/.archive/archived_2026-09-08_engine_fixture_contracts.py - same
+    # species: it asserted a property of the conftest literal.
 
     def test_hook_def_has_command_key(self, sample_hooks_config):
         hook = sample_hooks_config["UserPromptSubmit"]["test_hook"]
@@ -1052,11 +1075,22 @@ class TestPathContracts:
     """Tests for path-returning functions."""
 
     def test_paths_return_path(self):
+        """BRANCH_ROOT resolves to this branch, not to whatever the cwd was.
+
+        The isinstance pair this replaces could not fail: both names are built
+        from Path literals at import, so they are Paths whether or not they
+        point anywhere. That mattered here more than most - BRANCH_ROOT is
+        resolved at import time, and the known gotcha in this branch is exactly
+        an import-time resolve that reads the cwd (ntpath.realpath on Windows).
+        A type check is blind to a BRANCH_ROOT pointing at the caller's
+        directory; a landmark under it is not.
+        """
         from aipass.hooks.apps.modules.engine import BRANCH_ROOT
         from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
 
-        assert isinstance(BRANCH_ROOT, Path)
-        assert isinstance(LOG_FILE, Path)
+        assert BRANCH_ROOT.name == "hooks"
+        assert (BRANCH_ROOT / "apps" / "modules" / "engine.py").is_file()
+        assert LOG_FILE == BRANCH_ROOT / "logs" / "engine.jsonl"
 
 
 class TestErrorResilienceExtended:
@@ -1491,13 +1525,20 @@ class TestJsonHandlerNotApplicable:
         assert log_file.exists()
 
     def test_log_validate_json_output(self, temp_test_dir, mock_logger):
+        """Two _log calls append two JSON lines, in call order, both readable.
+
+        Was a loop of isinstance over however many lines happened to be there:
+        an appender that dropped the second entry, or wrote nothing at all, left
+        the loop with one line or zero and the test still green. The count is
+        the floor and the event values are the oracle.
+        """
         log_file = temp_test_dir / "validate.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "A", "ts": 1.0})
             _log({"event": "B", "ts": 2.0})
-        for line in log_file.read_text().strip().split("\n"):
-            entry = json.loads(line)
-            assert isinstance(entry, dict)
+        lines = log_file.read_text().strip().split("\n")
+        assert len(lines) == 2
+        assert [json.loads(line)["event"] for line in lines] == ["A", "B"]
 
     def test_log_get_path(self):
         from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
