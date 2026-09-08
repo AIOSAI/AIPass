@@ -777,9 +777,20 @@ def test_find_repo_root_returns_none_without_a_registry(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _register_row(target: str, dispatch_id: str, overdue: bool = True, sender: str = SEAT) -> dict:
-    """One row in the shape @ai_mail's outstanding_dispatches door returns."""
-    return {
+def _register_row(
+    target: str,
+    dispatch_id: str,
+    overdue: bool = True,
+    sender: str = SEAT,
+    monitor_alive: bool | None = None,
+    monitor_pid: int | None = None,
+) -> dict:
+    """One row in the shape @ai_mail's outstanding_dispatches door returns.
+
+    ``monitor_alive`` is tri-state exactly as ai_mail serves it (FPLAN-0499
+    phase 2): True alive, False gone, None never learned a pid.
+    """
+    row = {
         "dispatch_id": dispatch_id,
         "ts": "2026-09-07T12:00:12.016287-07:00",
         "sender": sender,
@@ -788,7 +799,11 @@ def _register_row(target: str, dispatch_id: str, overdue: bool = True, sender: s
         "expected_by": "2026-09-07T14:00:12.016287-07:00",
         "status": "outstanding",
         "overdue": overdue,
+        "monitor_alive": monitor_alive,
     }
+    if monitor_pid is not None:
+        row["monitor_pid"] = monitor_pid
+    return row
 
 
 def _register(monkeypatch, rows: list[dict]) -> list[int]:
@@ -848,6 +863,67 @@ def test_a_dispatch_inside_its_timeout_is_silent(tmp_path, capsys, monkeypatch):
     root = _repo(tmp_path)
     _write_feed(root, [])
     _register(monkeypatch, [_register_row("prax", "357433b4-d402-4319-8cf9-5a2d6df28abb", overdue=False)])
+
+    result = wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
+
+    assert result["dead"] == 0
+    assert "DEAD" not in capsys.readouterr().out
+
+
+def test_a_gone_monitor_is_announced_before_the_hard_timeout(tmp_path, capsys, monkeypatch):
+    """FPLAN-0499 phase 2: ai_mail records the monitor's pid and derives
+    ``monitor_alive`` from /proc at read time. A gone pid is a death NOW — the
+    wire must not wait the two hours for ``expected_by``."""
+    root = _repo(tmp_path)
+    _write_feed(root, [])
+    _register(
+        monkeypatch,
+        [
+            _register_row(
+                "prax", "70da6e9c-3e56-46a3-a867-cd014e23e7cd", overdue=False, monitor_alive=False, monitor_pid=4242
+            )
+        ],
+    )
+
+    result = wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
+
+    out = capsys.readouterr().out
+    assert result["dead"] == 1
+    assert "DEAD @prax [70da6e9c] dispatched 09-07 12:00" in out
+    assert "monitor (pid 4242) is gone before the hard timeout 09-07 14:00" in out
+    assert "Re-dispatch in continue mode" in out
+
+
+def test_a_row_that_never_learned_a_pid_falls_back_to_overdue(tmp_path, capsys, monkeypatch):
+    """``monitor_alive`` None is every row written before phase 2 and the
+    systemd-scope path: not dead, not alive, unknown. Folding it into dead would
+    announce the whole historic backlog at once, so None keeps the overdue rule."""
+    root = _repo(tmp_path)
+    _write_feed(root, [])
+    _register(
+        monkeypatch,
+        [
+            _register_row("drone", "bc7fe224-7a4a-4a64-8869-08c29716ce75", overdue=False, monitor_alive=None),
+            _register_row("api", "641dddbb-0000-4000-8000-000000000000", overdue=True, monitor_alive=None),
+        ],
+    )
+
+    result = wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
+
+    out = capsys.readouterr().out
+    assert result["dead"] == 1
+    assert "DEAD @drone" not in out
+    assert "DEAD @api [641dddbb]" in out
+    assert "no completion by 09-07 14:00, the hard timeout" in out
+
+
+def test_a_live_monitor_inside_its_timeout_is_silent(tmp_path, capsys, monkeypatch):
+    root = _repo(tmp_path)
+    _write_feed(root, [])
+    _register(
+        monkeypatch,
+        [_register_row("skills", "5ed35b24-1111-4000-8000-000000000000", overdue=False, monitor_alive=True)],
+    )
 
     result = wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
 

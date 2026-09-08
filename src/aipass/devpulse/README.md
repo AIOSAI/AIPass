@@ -112,7 +112,11 @@ ever wake you — the report just queues.
 monitor died — host reboot, OOM, kill — can never report, so the receiver announces
 it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once
 (no agent is polled, no process is armed) and pushes one line per dispatch of yours
-that is past `expected_by` (ai_mail's hard timeout — a live monitor cannot overrun it):
+whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and
+checks `/proc` at read time — a death is announced within one cadence, wording
+"its monitor (pid N) is gone before the hard timeout"), or past `expected_by`
+(ai_mail's hard timeout — a live monitor cannot overrun it). `monitor_alive` is
+tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
 
 ```
 DEAD @prax [70da6e9c] dispatched 09-07 12:00 "..." — no completion by 09-07 14:00, the hard timeout: its monitor died (reboot, OOM, kill). Re-dispatch in continue mode.

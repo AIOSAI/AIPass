@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-08-19
 # Modified: 2026-09-07
 # =============================================
@@ -147,6 +147,11 @@ _DELIVER_KINDS = ("dispatch",)
 # minutes, no agent polled, no process armed, and a stdout line only when a
 # death is found. Overdue is THEIR reading: expected_by is dispatch_monitor's
 # hard timeout, which a live monitor cannot overrun (dispatches.py).
+#
+# Phase 2 (2026-09-07 17:40, ai_mail 35147916): the register now carries the
+# monitor's pid and serves ``monitor_alive`` derived from /proc at read time,
+# so a death is announced within one cadence instead of at the two-hour
+# timeout. Tri-state — see _is_dead for why None is NOT dead.
 DEAD_CHECK_SECONDS = 300.0
 
 # Announced once EVER per dispatch, not once per wire: a re-sign-in after the
@@ -446,11 +451,28 @@ def _clock(stamp: object) -> str:
         return str(stamp or "?")
 
 
+def _is_dead(entry: dict) -> bool:
+    """Dead = the monitor's pid is gone (``monitor_alive`` False, known within one
+    check) OR the row is past ai_mail's hard timeout (``overdue``).
+
+    ``monitor_alive`` is tri-state on purpose (FPLAN-0499 phase 2): ``None`` means
+    the register never learned a pid — every row written before 2026-09-07 and
+    the systemd-scope spawn path — and those fall back to ``overdue`` exactly as
+    before. Folding ``None`` into dead would announce the whole backlog at once.
+    """
+    return entry.get("monitor_alive") is False or bool(entry.get("overdue"))
+
+
 def _format_dead(entry: dict) -> str:
     subject = str(entry.get("subject") or "").strip()
+    head = f'DEAD {entry.get("target", "?")} [{_dead_key(entry)[:8]}] dispatched {_clock(entry.get("ts"))} "{subject}"'
+    if entry.get("monitor_alive") is False:
+        return (
+            f"{head} — its monitor (pid {entry.get('monitor_pid', '?')}) is gone before the hard timeout "
+            f"{_clock(entry.get('expected_by'))}: reboot, OOM or kill. Re-dispatch in continue mode."
+        )
     return (
-        f"DEAD {entry.get('target', '?')} [{_dead_key(entry)[:8]}] dispatched {_clock(entry.get('ts'))} "
-        f'"{subject}" — no completion by {_clock(entry.get("expected_by"))}, the hard timeout: '
+        f"{head} — no completion by {_clock(entry.get('expected_by'))}, the hard timeout: "
         "its monitor died (reboot, OOM, kill). Re-dispatch in continue mode."
     )
 
@@ -473,7 +495,7 @@ def _announce_dead(root: Path, seat: str, announced: list[str]) -> int:
         logger.warning("[watchdog.wire] dead check skipped, register unreadable: %s", exc)
         return 0
     fresh = [
-        row for row in rows if row.get("overdue") and _dispatches.is_mine(row, seat) and _dead_key(row) not in announced
+        row for row in rows if _is_dead(row) and _dispatches.is_mine(row, seat) and _dead_key(row) not in announced
     ]
     for row in fresh:
         _stdout_event(_format_dead(row))
