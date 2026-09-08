@@ -1186,6 +1186,14 @@ def wake_branch(
 
             monitor_pid = process.pid
 
+            # Annotate the register row with the pid we just learned (FPLAN-0499
+            # phase 2). open_dispatch ran above the spawn on purpose and could
+            # not know this; without it a dead monitor is invisible until
+            # expected_by, two hours out. Best-effort by design — the dispatch
+            # is already running and a lost annotation must not cancel it.
+            if dispatch_id:
+                register.record_monitor_pid(dispatch_id, monitor_pid)
+
             # Update lock with real monitor PID
             lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
             lock_data = {

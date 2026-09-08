@@ -89,20 +89,20 @@ def test_prepend_dispatch_header_preserves_message():
     assert message in result
 
 
-def test_prepend_dispatch_header_logs_operation(
+@pytest.mark.parametrize("flag", [False, True])
+def test_prepend_dispatch_header_logs_the_no_memory_save_flag(
     _suppress_log_operation: MagicMock,
+    flag: bool,
 ):
-    """prepend_dispatch_header calls json_handler.log_operation."""
-    mod.prepend_dispatch_header("test", no_memory_save=False)
-    _suppress_log_operation.log_operation.assert_called_once_with("prepend_dispatch_header", {"no_memory_save": False})
+    """The audit payload carries whichever no_memory_save it was called with.
 
-
-def test_prepend_dispatch_header_logs_no_memory_save_flag(
-    _suppress_log_operation: MagicMock,
-):
-    """Log call captures no_memory_save=True when set."""
-    mod.prepend_dispatch_header("test", no_memory_save=True)
-    _suppress_log_operation.log_operation.assert_called_once_with("prepend_dispatch_header", {"no_memory_save": True})
+    This was two tests asserting the same call with the flag flipped
+    (DPLAN-0323, merged FPLAN-0492). BOTH VALUES SURVIVE THE MERGE as
+    parameters: the pair is one behaviour over two inputs, and dropping either
+    row would leave the payload free to hardcode the other.
+    """
+    mod.prepend_dispatch_header("test", no_memory_save=flag)
+    _suppress_log_operation.log_operation.assert_called_once_with("prepend_dispatch_header", {"no_memory_save": flag})
 
 
 def test_prepend_dispatch_header_empty_message():

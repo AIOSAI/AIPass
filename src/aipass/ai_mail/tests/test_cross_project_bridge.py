@@ -22,11 +22,13 @@ reply is always deliverable to the mail it answers.
 import json
 import os
 from pathlib import Path
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.registry.read as reg
 from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
 from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
 
@@ -102,6 +104,36 @@ class TestProjectTreeBranches:
             encoding="utf-8",
         )
         assert "@stray" not in get_project_tree_branches(repo)
+
+    def test_a_dot_prefixed_project_is_refused(self, repo):
+        """projects/.archive/ is depth-legal, so ONLY the dot filter can refuse it.
+
+        The fixture for this was written during DPLAN-0319 and parked; the gap it
+        described was live until FPLAN-0492. ``pathlib`` globs match hidden
+        directories — unlike the ``glob`` module — so ``projects/*/*_REGISTRY.json``
+        walked straight into the archive and handed the ADMIN lane ``@archive`` as
+        an addressable seat. The resident half filtered; this half did not.
+
+        Asserting the healthy seats survive in the same test on purpose: a filter
+        that refuses everything would satisfy the negative alone.
+
+        THE REGISTRY SITS ONE LEVEL DOWN, at projects/.archive/*_REGISTRY.json,
+        and that placement is the whole test. My first draft nested it a level
+        deeper and the mutation pass caught it: with the filter broken the test
+        still passed, because the DEPTH rule was refusing it and the dot rule was
+        never reached. A pin that two rules can satisfy tests neither.
+        """
+        archive = repo / "projects" / ".archive"
+        archive.mkdir(parents=True)
+        (archive / "MARKETSTAND_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "MARKETSTAND", "email": "@marketstand", "path": str(archive)}]}),
+            encoding="utf-8",
+        )
+
+        found = get_project_tree_branches(repo)
+
+        assert "@marketstand" not in found, "a parked archive is not an addressable citizen"
+        assert "@baud" in found and "@earmark" in found, "the live projects must still resolve"
 
 
 class TestResolveBranchWidening:
@@ -488,8 +520,6 @@ class TestReplyProofMailboxResolution:
 # carry it. The widening applies ONLY behind the five-leg admin verification;
 # an ordinary citizen's @all stays fleet-only, unchanged.
 
-import aipass.ai_mail.apps.handlers.registry.read as reg
-
 
 class TestResidentDiscovery:
     """Discovery is registry-led, shallow, and refuses dot-prefixed components.
@@ -502,7 +532,7 @@ class TestResidentDiscovery:
     """
 
     @staticmethod
-    def _project(root, project, branch, *, residency="resident", status="active", nested=""):
+    def _project(root, project, branch, *, residency: Optional[str] = "resident", status="active", nested=""):
         """Plant one project: a registry naming a branch, and that branch's passport."""
         proj = root / "projects" / project
         rel = f"src/{branch}"

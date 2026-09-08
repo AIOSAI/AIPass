@@ -41,6 +41,8 @@ register at its own ``.aipass/``, discovered exactly the way the feed is.
 
 from __future__ import annotations
 
+import os
+import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -64,6 +66,67 @@ REGISTER_KEEP_LINES = 1000
 
 # Record statuses. "outstanding" is written at send; anything else closes it.
 STATUS_OUTSTANDING = "outstanding"
+
+# Written when the dispatched agent reports back by mail. Distinct from the
+# monitor's own completion status on purpose: a reader can tell "the agent
+# said it was done" from "the monitor saw the process exit", and when only the
+# first of those ever arrives, that is itself the interesting fact.
+STATUS_REPLIED = "completed (replied)"
+
+# The monitor's pid, recorded onto the row once the spawn returns it. Absent on
+# every row written before FPLAN-0499 phase 2, and absent on the systemd-scope
+# path which never learns a pid — see monitor_alive below for why that stays a
+# THIRD answer rather than collapsing into "dead".
+MONITOR_PID_KEY = "monitor_pid"
+
+
+def monitor_alive(pid: Optional[int]) -> Optional[bool]:
+    """Whether the monitor process *pid* still exists. None when it cannot be told.
+
+    THREE ANSWERS, NOT TWO, and the third is the point. "No pid was recorded"
+    and "the pid is gone" are different facts: the first describes a row this
+    branch never annotated (every row written before FPLAN-0499 phase 2, and
+    the systemd-scope spawn path, which learns no pid), the second is a dead
+    monitor. Collapsing them to False would announce a death for every historic
+    row the moment this shipped — the same collapse the register refuses for an
+    unreadable file and ``session_pointer`` refuses for an unnameable home.
+
+    Linux reads /proc directly: it is a stat, it needs no subprocess, and
+    ``outstanding()`` calls this once per open row. ``check_pid_status`` in
+    status.py answers a similar question by shelling out to ``ps``; that cost
+    is fine per-command and not fine per-row, which is why this is separate
+    rather than a call into it.
+
+    Elsewhere on POSIX there is no /proc, so signal 0 is the portable probe —
+    it delivers nothing and only checks reachability. EPERM means the process
+    EXISTS and is not ours, which is alive for our purposes. On Windows neither
+    is available and the honest answer is None.
+
+    Args:
+        pid: The recorded monitor pid, or None when the row carries none.
+
+    Returns:
+        True if the process exists, False if it is gone, None if unknowable.
+    """
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+
+    if sys.platform.startswith("linux"):
+        return Path("/proc", str(pid)).exists()
+
+    if sys.platform == "win32":
+        return None
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        logger.warning("[register] could not probe monitor pid %s: %s", pid, exc)
+        return None
+    return True
 
 
 def register_file(repo_root: Optional[Path] = None) -> Path:
@@ -161,6 +224,174 @@ def open_dispatch(
     return dispatch_id
 
 
+def record_monitor_pid(
+    dispatch_id: str,
+    monitor_pid: int,
+    repo_root: Optional[Path] = None,
+) -> bool:
+    """Annotate an open dispatch with the pid of the monitor now running it.
+
+    Called AFTER the spawn, because that is when the pid first exists —
+    ``open_dispatch`` deliberately runs before it. Until this landed the row
+    carried no way to tell a dead monitor from a slow agent, so a death was
+    only visible when ``expected_by`` passed: HARD_TIMEOUT, two hours. With the
+    pid on the row a reader can see the process is gone within one watchdog
+    cadence instead.
+
+    APPEND, NEVER REWRITE. This writes a SECOND ``outstanding`` record with the
+    same ``dispatch_id``, exactly as ``close_dispatch`` writes a closing one —
+    ``outstanding()`` folds by id and the later record wins, so the annotation
+    lands without the promise ever disappearing from the file. Rewriting the
+    first record would break the one discipline this module is built on.
+
+    Args:
+        dispatch_id: The id minted by open_dispatch.
+        monitor_pid: The spawned monitor's process id.
+        repo_root: Re-root the register (tests, other projects).
+
+    Returns:
+        True when the annotation was appended. False when it was not — the
+        dispatch is already running and must not be cancelled over a lost
+        annotation, so callers log and carry on. The cost of False is only that
+        this row falls back to expected_by for its death detection.
+    """
+    if not dispatch_id or not isinstance(monitor_pid, int) or monitor_pid <= 0:
+        logger.warning(
+            "[register] refusing to record monitor pid %r for dispatch %r — need a positive pid and an id",
+            monitor_pid,
+            dispatch_id,
+        )
+        return False
+
+    try:
+        current = _find_open_record(dispatch_id, repo_root)
+    except OSError as exc:
+        logger.warning("[register] cannot read register to annotate dispatch %s: %s", dispatch_id, exc)
+        return False
+
+    if current is None:
+        logger.warning(
+            "[register] no open record for dispatch %s — monitor pid %s not recorded",
+            dispatch_id,
+            monitor_pid,
+        )
+        return False
+
+    record = dict(current)
+    record[MONITOR_PID_KEY] = monitor_pid
+    record["status"] = STATUS_OUTSTANDING
+
+    if not _append(record, repo_root):
+        logger.warning(
+            "[register] could not annotate dispatch %s with monitor pid %s — the row keeps "
+            "expected_by as its only death signal",
+            dispatch_id,
+            monitor_pid,
+        )
+        return False
+
+    return True
+
+
+def thread_subject(subject: str) -> str:
+    """A subject reduced to the thread it belongs to.
+
+    Strips any number of leading ``RE:`` markers and normalises case and edge
+    whitespace, so "RE: RE: Your brief" and "your brief" name the same thread.
+    Repeated rather than single: a reply to a reply stacks the prefix, and a
+    single strip would put the second round on a different thread from the first.
+    """
+    text = str(subject or "").strip()
+    lowered = text.lower()
+    while lowered.startswith("re:"):
+        text = text[3:].strip()
+        lowered = text.lower()
+    return lowered
+
+
+def close_on_reply(
+    replier: str,
+    recipient: str,
+    subject: str,
+    repo_root: Optional[Path] = None,
+) -> Optional[str]:
+    """Close an open dispatch because its TARGET replied ON ITS THREAD.
+
+    The gap this fills, with the case that proved it: at 17:15 on 2026-09-07 the
+    watchdog announced DEAD for @api's dispatch 641dddbb because the row hit its
+    two-hour ``expected_by`` — while @api had replied on that very thread at
+    16:45 and its work was landed. The reply was the completion evidence and
+    nothing read it.
+
+    MATCHED BY THREAD, NOT BY THE AGENT'S DISPATCH STAMP, and that choice is the
+    whole correctness of this function. The same incident shows why: @api's
+    stamped id sat on its 15:16 REPORT-FIRST PLAN mail, sent an hour and a half
+    before the work was finished, while its actual completion at 16:45 carried a
+    different stamp entirely (the agent had been resumed under a new dispatch
+    id). Closing on the stamp would have retired a live dispatch early AND still
+    missed the real completion. The thread is the stable link across a resume,
+    and a report-first plan is not a reply on it.
+
+    ONLY THE TARGET CAN CLOSE IT, and only by answering the seat that promised
+    it. A dispatch is a promise between two named seats; a third party replying
+    on the thread says nothing about whether the dispatched agent finished.
+
+    A dispatch with an EMPTY subject — a bare wake — has no thread and can never
+    be matched here. That is honest rather than a gap: there is nothing for the
+    agent to reply *to*, so its row keeps ``expected_by`` as its only signal.
+
+    Args:
+        replier: The seat sending the reply, e.g. "@api".
+        recipient: Who the reply is addressed to — must be the dispatch's sender.
+        subject: The reply's subject, ``RE:`` prefixes and all.
+        repo_root: Re-root the register (tests, other projects).
+
+    Returns:
+        The dispatch id that was closed, or None when the reply matched no open
+        row. None is not an error and must not raise: a reply that closes
+        nothing is still a reply and must be delivered.
+    """
+    thread = thread_subject(subject)
+    if not replier or not recipient or not thread:
+        return None
+
+    try:
+        rows = outstanding(repo_root=repo_root)
+    except OSError as exc:
+        logger.warning("[register] cannot read register to close a dispatch on reply: %s", exc)
+        return None
+
+    for row in rows:
+        if str(row.get("target", "")) != str(replier):
+            continue
+        if str(row.get("sender", "")) != str(recipient):
+            continue
+        if thread_subject(row.get("subject", "")) != thread:
+            continue
+
+        dispatch_id = str(row.get("dispatch_id", ""))
+        if dispatch_id and close_dispatch(dispatch_id, STATUS_REPLIED, repo_root=repo_root):
+            return dispatch_id
+        return None
+
+    return None
+
+
+def _find_open_record(dispatch_id: str, repo_root: Optional[Path]) -> Optional[Dict]:
+    """The newest still-open record for *dispatch_id*, or None if it is not open.
+
+    Folds the same way ``outstanding()`` does — a closing record removes the id
+    — so an already-closed dispatch is correctly not found rather than
+    resurrected by an annotation arriving late.
+    """
+    found: Optional[Dict] = None
+    for record in jsonl_records(register_file(repo_root), strict=True):
+        if record.get("dispatch_id") != dispatch_id:
+            continue
+        found = record if record.get("status") == STATUS_OUTSTANDING else None
+    return found
+
+
 def close_dispatch(
     dispatch_id: str,
     status: str,
@@ -215,9 +446,17 @@ def outstanding(repo_root: Optional[Path] = None, now: Optional[datetime] = None
         now: Comparison instant, injectable so a test does not race the clock
 
     Returns:
-        Open entries, each gaining an ``overdue`` bool. An entry whose
-        ``expected_by`` cannot be parsed is returned with ``overdue`` False and
-        the reason logged — an unreadable timestamp is not evidence of a crash.
+        Open entries, each gaining an ``overdue`` bool and a ``monitor_alive``
+        tri-state. An entry whose ``expected_by`` cannot be parsed is returned
+        with ``overdue`` False and the reason logged — an unreadable timestamp
+        is not evidence of a crash.
+
+        ``monitor_alive`` is True/False/None: the monitor's process exists, is
+        gone, or cannot be told (no pid on the row, or an unsupported platform).
+        A False is a death visible within one watchdog cadence rather than at
+        ``expected_by`` two hours later. A None is not a death — readers must
+        fall back to ``overdue`` for those rows, which is exactly the behaviour
+        every row had before FPLAN-0499 phase 2.
 
     Raises:
         OSError: when the register EXISTS but cannot be read. A missing register
@@ -247,6 +486,10 @@ def outstanding(repo_root: Optional[Path] = None, now: Optional[datetime] = None
     for entry in open_entries.values():
         entry = dict(entry)
         entry["overdue"] = _is_overdue(entry, moment)
+        # Derived at READ time, never stored: a pid's liveness is a fact about
+        # the machine right now, and a stored answer would be stale the instant
+        # it was written. Same reasoning as overdue, which is also computed here.
+        entry["monitor_alive"] = monitor_alive(entry.get(MONITOR_PID_KEY))
         result.append(entry)
 
     return sorted(result, key=lambda e: str(e.get("ts", "")), reverse=True)
