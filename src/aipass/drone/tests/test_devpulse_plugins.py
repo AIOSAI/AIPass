@@ -508,7 +508,11 @@ class TestGitModuleRouting:
         from aipass.drone.apps.modules.git_module import get_help
 
         help_text = get_help("fix")
-        assert "broken" in help_text.lower() or "fix" in help_text.lower()
+        # The headline the verb actually prints, plus one action from its table.
+        # Both `or` clauses this replaces held, and the second held on the verb
+        # name alone — get_help("fix") could have returned the generic help.
+        assert help_text.startswith("git fix [--dry-run] — Detect and fix broken git states [owner]")
+        assert "Stuck rebase   → git rebase --abort" in help_text
 
     def test_get_introspective_includes_plugins(self) -> None:
         from aipass.drone.apps.modules.git_module import get_introspective

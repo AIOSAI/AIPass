@@ -24,6 +24,18 @@ from aipass.drone.apps.handlers.rm_handler import (
     safe_delete,
 )
 
+#: The canonical POSIX temp root, SPELLED BY THE RUNNING PLATFORM rather than
+#: written down. ``rm_handler.get_allowed_roots`` carves it out on POSIX only
+#: (``Path("/tmp")`` behind a ``sys.platform != "win32"`` gate), so it genuinely
+#: is the subject of the three tests below — but a rooted literal is
+#: DRIVE-RELATIVE under ntpath, where ``Path("/tmp").resolve()`` is ``D:\tmp``,
+#: so a written-down root claims something different on the other half of the
+#: matrix. ``os.sep`` is "/" wherever these tests are allowed to run.
+POSIX_TMP = Path(os.sep, "tmp")
+
+#: Why the POSIX-only units skip. Spelled once: three tests share the reason.
+_POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win32 platforms only"
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -80,10 +92,25 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
-    def test_includes_slash_tmp(self):
-        roots = get_allowed_roots()
-        if sys.platform != "win32":
-            assert Path("/tmp").resolve() in roots
+    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
+    def test_includes_slash_tmp(self, tmp_path, monkeypatch):
+        """The POSIX carve-out puts the canonical tmp root in roots by itself.
+
+        $TMPDIR IS MOVED OFF THE CARVE-OUT FIRST, and that is the whole test.
+        Measured with the carve-out deleted from ``get_allowed_roots`` and this
+        machine's default $TMPDIR (which IS /tmp): the unit stayed GREEN, because
+        the system-temp candidate was quietly supplying the root the carve-out
+        was being credited for. Pointed somewhere else, only the carve-out can
+        put /tmp in the list.
+        """
+        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        tempfile.tempdir = None
+        try:
+            roots = get_allowed_roots()
+            assert tmp_path.resolve() in roots
+            assert POSIX_TMP.resolve() in roots
+        finally:
+            tempfile.tempdir = None
 
     def test_includes_project_root_when_in_project(self, project_dir, monkeypatch):
         monkeypatch.chdir(project_dir)
@@ -96,20 +123,20 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
+    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     def test_tmpdir_and_slash_tmp_both_present_when_different(self, monkeypatch):
         """When $TMPDIR != /tmp, both must appear in roots."""
-        if sys.platform != "win32":
-            fake_tmpdir = "/tmp/claude-9999"
-            os.makedirs(fake_tmpdir, exist_ok=True)
-            try:
-                monkeypatch.setenv("TMPDIR", fake_tmpdir)
-                tempfile.tempdir = None
-                roots = get_allowed_roots()
-                resolved_roots = {r for r in roots}
-                assert Path("/tmp").resolve() in resolved_roots
-                assert Path(fake_tmpdir).resolve() in resolved_roots
-            finally:
-                tempfile.tempdir = None
+        fake_tmpdir = POSIX_TMP / "claude-9999"
+        fake_tmpdir.mkdir(exist_ok=True)
+        try:
+            monkeypatch.setenv("TMPDIR", str(fake_tmpdir))
+            tempfile.tempdir = None
+            roots = get_allowed_roots()
+            resolved_roots = set(roots)
+            assert POSIX_TMP.resolve() in resolved_roots
+            assert fake_tmpdir.resolve() in resolved_roots
+        finally:
+            tempfile.tempdir = None
 
     def test_roots_are_deduplicated(self):
         roots = get_allowed_roots()
@@ -137,7 +164,11 @@ class TestCheckContainment:
 
     def test_refuses_outside_path(self, tmp_path):
         root = tmp_path.resolve()
-        outside = Path("/etc/passwd").resolve()
+        # A SIBLING of the root, not a rooted literal. /etc/passwd stood in for
+        # "somewhere outside the fence" and was never the subject here; written
+        # down it is also drive-relative under ntpath, so the line meant a
+        # different thing on the other half of the matrix.
+        outside = (tmp_path.parent / f"{tmp_path.name}_outside" / "secret.txt").resolve()
         allowed, reason = check_containment(outside, [root])
         assert allowed is False
         assert "outside allowed roots" in reason
@@ -249,19 +280,19 @@ class TestAllowDeletion:
         results = safe_delete([str(target)])
         assert results[0][1] is True
 
+    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     @pytest.mark.usefixtures("_patch_roots")
     def test_slash_tmp_literal_allowed(self):
         """Literal POSIX tmp path must succeed even if $TMPDIR differs."""
-        if sys.platform != "win32":
-            target = Path("/tmp") / f"rm_test_{os.getpid()}"
-            target.mkdir(exist_ok=True)
-            try:
-                results = safe_delete([str(target)])
-                assert results[0][1] is True
-                assert not target.exists()
-            finally:
-                if target.exists():
-                    shutil.rmtree(target)
+        target = POSIX_TMP / f"rm_test_{os.getpid()}"
+        target.mkdir(exist_ok=True)
+        try:
+            results = safe_delete([str(target)])
+            assert results[0][1] is True
+            assert not target.exists()
+        finally:
+            if target.exists():
+                shutil.rmtree(target)
 
     @pytest.mark.usefixtures("_patch_roots")
     def test_tmpdir_env_allowed(self):
@@ -656,15 +687,25 @@ class TestRmModule:
         result = handle_command(None, None)
         assert result is True
 
-    def test_print_introspection(self):
+    def test_print_introspection(self, capsys):
+        """The self-map names the module and points at --help."""
         from aipass.drone.apps.modules.rm import print_introspection
 
         print_introspection()
 
-    def test_print_help(self):
+        printed = capsys.readouterr().out
+        assert "Contained Safe-Delete" in printed
+        assert "--help" in printed
+
+    def test_print_help(self, capsys):
+        """--help states the usage line and the containment rule it enforces."""
         from aipass.drone.apps.modules.rm import print_help
 
         print_help()
+
+        printed = capsys.readouterr().out
+        assert "Usage: drone rm" in printed
+        assert "Carve-outs" in printed
 
     def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
         """A refusal is an error: handle_command reports False, the CLI exits 1.

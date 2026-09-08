@@ -346,7 +346,10 @@ class TestSyncHandler:
             result = sync_main()
 
         assert result["success"] is False
-        assert "checkout main" in result["message"].lower() or "overwritten" in result["message"].lower()
+        # The handler's own line, carrying git's stderr verbatim. Both clauses of
+        # the `or` this replaces held: the first on the handler's prefix, the
+        # second on the stderr this test wrote itself.
+        assert result["message"] == "Failed to checkout main: error: Your local changes would be overwritten"
 
     def test_sync_pull_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pull failure returns success=False."""
@@ -463,7 +466,11 @@ class TestSyncDev:
             result = sync_main()
 
         assert result["success"] is False
-        assert "fast-forward" in result["message"].lower() or "diverged" in result["message"].lower()
+        # The refusal in full, including the door it points at. Both clauses of
+        # the `or` this replaces held.
+        assert result["message"] == (
+            "Dev has diverged from main — cannot fast-forward. Use 'drone @git fix' to resolve."
+        )
 
     def test_sync_dev_autostash(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Sync on dev with --autostash stashes and pops."""

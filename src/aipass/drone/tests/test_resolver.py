@@ -312,7 +312,13 @@ class TestListBranches:
         assert result[0].lower() == "@alpha"
 
     def test_entries_have_at_prefix(self, populated_registry):
+        # The floor is asserted BEFORE the loop: a list_branches that returned
+        # nothing would walk an empty loop and pass having checked no prefix at
+        # all. TWO, not the fixture's three — measured: an unfiltered
+        # list_branches drops GAMMA, which populated_registry writes as
+        # archived, so the bare call is not "every branch in the registry".
         result = list_branches()
+        assert len(result) == 2
         for entry in result:
             assert entry.startswith("@")
 

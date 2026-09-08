@@ -139,6 +139,10 @@ class TestRecordContents:
         safe_delete([str(target)])
 
         record = read_records(project)[0]
+        # The floor is asserted BEFORE the loop. REQUIRED is a class attribute
+        # and could be emptied without a single assertion firing; a loop over
+        # nothing is a silent pass, and the run reads identical either way.
+        assert len(self.REQUIRED) == 9
         for field in self.REQUIRED:
             assert field in record, f"record is missing {field!r}"
 

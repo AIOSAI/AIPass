@@ -103,7 +103,13 @@ class TestTimeout:
                 cwd=str(temp_test_dir),
                 timeout=1,
             )
-        assert isinstance(exc_info.value.__cause__, subprocess.TimeoutExpired)
+        cause = exc_info.value.__cause__
+        assert isinstance(cause, subprocess.TimeoutExpired)
+        # The TYPE alone says nothing about WHICH timeout fired. Pin the
+        # deadline this call passed and the command it was watching, so a wrapper
+        # that chained some other TimeoutExpired would not pass.
+        assert cause.timeout == 1
+        assert cause.cmd[0] == sys.executable
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +198,11 @@ class TestFileNotFoundWrapping:
                 [],
                 cwd=str(temp_test_dir),
             )
-        assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+        cause = exc_info.value.__cause__
+        assert isinstance(cause, FileNotFoundError)
+        # Which file was not found is the whole claim; the type is shared with
+        # every missing cwd and every missing script.
+        assert cause.filename == "this_executable_does_not_exist_xyz"
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +238,11 @@ class TestOSErrorWrapping:
                     ["-c", "pass"],
                     cwd=str(temp_test_dir),
                 )
-            assert isinstance(exc_info.value.__cause__, OSError)
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, OSError)
+            # The chained object is the one Popen raised, not a fresh OSError
+            # built by the wrapper — only its message can tell those apart.
+            assert str(cause) == "mock OS failure"
 
 
 # ---------------------------------------------------------------------------
