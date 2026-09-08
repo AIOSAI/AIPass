@@ -609,13 +609,29 @@ def test_handle_command_on_extra_args_ignored():
 # ---------------------------------------------------------------------------
 
 
-def test_output_capture_print_help(capsys):
-    """output_capture: print_help output can be captured via capsys."""
+def test_print_help_names_every_verb_the_router_accepts():
+    """Help lists all seven medic verbs — a verb the router takes but help hides is a defect.
+
+    This asked for capsys and then read nothing, and its own comment admitted
+    why: aipass.cli.apps.modules is a MagicMock under this file's fixture, so
+    stdout is empty no matter what print_help does. The fixture was decoration
+    on an empty capture. The mocked console's call args are the real output,
+    and the verb list is taken from the router rather than retyped, so adding a
+    verb without documenting it is what turns this red.
+    """
     medic = _import_medic()
+
     medic.print_help()
-    # capsys captures stdout — Rich console may bypass stdout, but the
-    # capsys fixture inclusion satisfies the output_capture pattern
-    _captured = capsys.readouterr()
+
+    console = _get_console()
+    output = "\n".join(_get_print_str_args(console))
+    routed = ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute"]
+    # Floors the loop: an empty list would make every assertion below vacuous
+    # and the unit would pass by never running. Seven is the gate list in
+    # handle_command (medic.py:494), counted 2026-09-08.
+    assert len(routed) == 7
+    for verb in routed:
+        assert f"[bold]{verb}[/bold]" in output, f"medic help never documents the '{verb}' verb"
 
 
 def test_output_capture_status_contains_all_fields():

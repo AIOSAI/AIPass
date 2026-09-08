@@ -384,7 +384,12 @@ class TestThePosixLockArmIsRealToo:
     """
 
     def test_four_threads_never_hold_it_at_once(self, tmp_path):
-        if config.sys.platform == "win32":  # pragma: no cover - POSIX arm only
+        # sys, not config.sys: the machine decides whether this runs, and the
+        # subject under test does not get a vote. Reaching the same value
+        # through config meant the module I am testing sat between me and the
+        # platform fact — one attribute rename away from deciding my own
+        # collection (seedgo self_skip, 2026-09-08).
+        if sys.platform == "win32":  # pragma: no cover - POSIX arm only
             pytest.skip("POSIX arm; the win32 arm is pinned by injection above")
 
         doc = tmp_path / "doc.json"

@@ -195,14 +195,19 @@ def test_handle_command_start_success():
     watcher.start_log_watcher.assert_called_once()
 
 
-def test_handle_command_start_not_started_is_reported_without_the_error_channel():
-    """handle_command('start', []) explains the ruling instead of erroring.
+def test_handle_command_start_not_started_refuses_through_the_error_channel():
+    """handle_command('start', []) refuses through error(), never warning().
 
-    Rewritten 2026-08-14. It previously asserted error("Failed to start log
-    watcher"), which pinned the pre-ruling behaviour: with the centralized
-    observer now withdrawn by decision, that assertion would have made the
-    correct implementation look like a regression, and the error() channel
-    would have kept telling operators a decision was a fault.
+    Rewritten TWICE, and the middle version is the lesson. On 2026-08-14 this
+    asserted error() was NOT called, on the reasoning that a withdrawn observer
+    is a decision rather than a fault. True, and beside the point: the channel
+    is also the exit code. warning() leaves cli's failure flag unset, main()
+    resolves to 0, and `start && <next>` proceeds with no watcher — so this
+    test was not silent about the defect, it was agreeing with it. The cure is
+    to rewrite the assertion, not to add a second one beside it.
+
+    aipass.cli.apps.modules is a MagicMock under this file's fixture, so capsys
+    sees nothing. The mock's own call args are the honest oracle.
     """
     mod = _import_module()
     watcher = _get_log_watcher()
@@ -210,11 +215,12 @@ def test_handle_command_start_not_started_is_reported_without_the_error_channel(
     result = mod.handle_command("start", [])
     assert result is True
     cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_not_called()
-    printed = " ".join(str(c) for c in _get_console().print.call_args_list) + " ".join(
-        str(c) for c in cli_modules.warning.call_args_list
-    )
-    assert "one owner" in printed and "branch_log_events" in printed
+    cli_modules.error.assert_called_once()
+    cli_modules.warning.assert_not_called()
+    message = str(cli_modules.error.call_args[0][0])
+    assert "one owner" in message, f"the refusal must name the reason, got: {message}"
+    printed = " ".join(str(c) for c in _get_console().print.call_args_list) + str(cli_modules.error.call_args)
+    assert "branch_log_events" in printed
 
 
 def test_handle_command_stop():
@@ -399,13 +405,16 @@ def test_help_flag_survives_module_name_routing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_start_command_names_the_owner_instead_of_reporting_failure():
-    """`log_events start` declining is a ruling, not a fault.
+def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure():
+    """`log_events start` declining is a ruling, and it still exits non-zero.
 
-    start_log_watcher() now always returns None because branch_log_events owns
-    system_logs (Patrick, 2026-08-14). Printing "Failed to start log watcher"
-    would read as a broken watcher and send whoever typed it hunting a bug
-    that is a decision.
+    start_log_watcher() always returns None because branch_log_events owns
+    system_logs (Patrick, 2026-08-14). Both halves of that are pinned here and
+    they used to be treated as one: the wording must not read as a broken
+    watcher ("Failed to start" sends the reader hunting a bug that is a
+    decision), AND the refusal must travel on the channel that reaches the
+    shell. Rewritten 2026-09-08 — the old version asserted the wording while
+    the exit code said the watcher was running.
     """
     mod = _import_module()
     watcher = _get_log_watcher()
@@ -415,11 +424,12 @@ def test_start_command_names_the_owner_instead_of_reporting_failure():
 
     assert result is True
     cli_modules = sys.modules["aipass.cli.apps.modules"]
-    printed = " ".join(str(c) for c in cli_modules.error.call_args_list) + " ".join(
-        str(c) for c in _get_console().print.call_args_list
-    )
+    cli_modules.warning.assert_not_called()
+    message = str(cli_modules.error.call_args[0][0])
+    printed = str(cli_modules.error.call_args) + " ".join(str(c) for c in _get_console().print.call_args_list)
     assert "branch_log_events" in printed, f"Expected the owner named, got: {printed[:300]}"
     assert "Failed to start" not in printed, "Declining by ruling must not read as a failure"
+    assert "not failed" in message, f"the refusal must say which it is, got: {message}"
 
 
 def test_declining_to_start_is_not_logged_as_an_error():

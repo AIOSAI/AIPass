@@ -88,10 +88,32 @@ class TestHandleMemoryPoolAutoProcessedSuccess:
 
         fire_event.assert_not_called()
 
-    def test_none_defaults(self) -> None:
-        """Handles all-None parameters gracefully."""
+    def test_absent_pool_and_rollover_log_as_unknown_not_as_a_crash(self) -> None:
+        """Missing sections collapse to the documented defaults, and still log.
+
+        `pool = pool or {}` is the whole reason a firer may omit them, and the
+        payload it produces is the point: absent is reported as zero counts and
+        a named "unknown" status, never as a silently missing key. Surviving
+        the call proved only that .get was not reached on None — it passed
+        equally if the handler returned early and logged nothing at all.
+        """
         mod = _import_module()
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+
         mod.handle_memory_pool_auto_processed(success=True)
+
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "memory_pool_auto_processed",
+            {
+                "success": True,
+                "files_processed": 0,
+                "total_chunks": 0,
+                "pool_status": "unknown",
+                "rollover_status": "unknown",
+            },
+        )
 
     def test_empty_pool_noop(self) -> None:
         """Zero files processed logs correctly."""
@@ -179,12 +201,28 @@ class TestHandleMemoryPoolAutoProcessedFailure:
 
         assert fire_event.call_args[1]["branch"] == "memory"
 
-    def test_failure_without_fire_event(self) -> None:
-        """Handles failure gracefully when fire_event callback not available."""
+    def test_a_failure_with_no_fire_event_still_records_the_failure(self) -> None:
+        """No callback means no dispatch — it must not also mean no record.
+
+        fire_event arrives through **kwargs, so it is optional by construction
+        and every caller that forgets it lands here. The danger is not the
+        crash this unit used to rule out; it is the handler treating an absent
+        callback as nothing to do and dropping the failure on the floor, which
+        would leave a memory pool error with no trace anywhere.
+        """
         mod = _import_module()
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+
         mod.handle_memory_pool_auto_processed(
             success=False,
             error="something broke",
+        )
+
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "memory_pool_auto_processed",
+            {"success": False, "error": "something broke"},
         )
 
     def test_writes_handler_log_on_failure(self, tmp_path: Path) -> None:

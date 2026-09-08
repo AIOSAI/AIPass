@@ -28,7 +28,7 @@ from typing import List, Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services for formatted output
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -207,6 +207,13 @@ def print_help(modules: List[Any]):
 def main():
     """Main entry point - routes commands or shows help"""
 
+    # A refusal has to reach the shell. error() sets a process-level failure
+    # flag in cli, but nothing here ever read it, so every module that refused
+    # through error() still exited 0 and no caller's && could branch on it
+    # (canary's fleet sweep 2026-09-07). Reset at the door so a previous
+    # in-process command cannot colour this one, then resolve at the exit.
+    reset_command_state()
+
     # Discover available modules
     modules = discover_modules()
 
@@ -242,7 +249,10 @@ def main():
 
     # Route to modules
     if route_command(command, remaining_args, modules):
-        return 0
+        # Handled is not the same as succeeded. resolve_exit gives 0 for a
+        # clean run and 2 when the module refused through error() — which is
+        # how `log_events start` now tells a caller the watcher is not there.
+        return resolve_exit(True)
     else:
         # Name the whole invocation, not just the first word. No module claimed
         # `medic nonsense`, so this branch reported "Unknown command: medic" —

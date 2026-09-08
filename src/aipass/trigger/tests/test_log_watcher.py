@@ -1055,8 +1055,15 @@ class TestOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_called_once_with("/some/branch/logs/core.log")
 
-    def test_handles_read_exception(self):
-        """IOError during _read_new_lines is handled without raising."""
+    def test_a_read_failure_is_reported_and_costs_only_that_event(self):
+        """IOError is swallowed — but it is named, and the watcher keeps watching.
+
+        Not raising was the whole assertion, and a bare `except: pass` passes
+        it. Two things make the swallow legitimate instead of a black hole: the
+        failure reaches the log with the file that caused it, and the next
+        event on the same watcher is still processed. A watcher that silently
+        stopped reading after one bad event would look identical otherwise.
+        """
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
         watcher._should_process = MagicMock(return_value=True)
@@ -1064,7 +1071,18 @@ class TestOnModified:
         event = MagicMock()
         event.is_directory = False
         event.src_path = "/some/core.log"
+
         watcher.on_modified(event)
+
+        warned: MagicMock = lw.logger.warning  # type: ignore[assignment]
+        warned.assert_called_once()
+        reported = str(warned.call_args)
+        assert "/some/core.log" in reported, f"the failing file must be named, got: {reported}"
+        assert "disk error" in reported, f"the cause must be named, got: {reported}"
+
+        watcher._read_new_lines.side_effect = None
+        watcher.on_modified(event)
+        assert watcher._read_new_lines.call_count == 2
 
 
 # ---------------------------------------------------------------------------

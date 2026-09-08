@@ -148,7 +148,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    from aipass.cli.apps.modules import console, success, warning
+    from aipass.cli.apps.modules import console, error, success
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -176,13 +176,19 @@ def handle_command(command: str, args: list) -> bool:
             success("Log watcher started")
             console.print(f"   Monitoring: {SYSTEM_LOGS_DIR}")
         else:
-            # Not a fault: the centralized observer is withdrawn by ruling, so
-            # saying "failed" would send the reader hunting a broken watcher.
-            warning("Not started — system_logs has one owner")
+            # Still not a fault — but "not a fault" was never a reason to exit
+            # 0. Exiting 0 told `drone @trigger log_events start && <next>`
+            # that a watcher was running, and the caller proceeded without one
+            # (canary's sweep 2026-09-07; @daemon took this line first at
+            # schedule.py:50-52). The message names the reason rather than
+            # inventing a failure: withdrawn by ruling, not broken.
+            error(
+                "Not started — withdrawn by ruling, not failed: system_logs has one owner",
+                suggestion="Run 'drone @trigger branch_log_events status' for the watcher that does cover it",
+            )
             console.print("   Owner: [cyan]branch_log_events[/cyan] — same directory, with branch attribution")
             console.print(f"   [dim]{SYSTEM_LOGS_DIR}[/dim]")
             console.print("   [dim]Patrick's ruling 2026-08-14 — double-watching minted duplicate signatures[/dim]")
-            console.print("   [dim]Coverage: drone @trigger branch_log_events status[/dim]")
     elif command == "stop":
         stop()
         success("Log watcher stopped")

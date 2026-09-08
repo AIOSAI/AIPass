@@ -920,7 +920,14 @@ class TestWatcherOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_called_once_with(str(logs_dir / "app.log"))
 
-    def test_handles_read_exception(self):
+    def test_a_read_failure_is_reported_and_costs_only_that_event(self):
+        """IOError is swallowed — but it is named, and the watcher keeps watching.
+
+        The whole unit was the call itself, which a bare `except: pass` passes
+        just as well. This observer is the one feeding error_detected, so a
+        swallow that says nothing is the shape where system_logs goes unread
+        and the board stays green. Named cause, and the next event still lands.
+        """
         wlw = _import_watchers_lw()
         logs_dir = Path("/fake/system_logs")
         wlw.SYSTEM_LOGS_DIR = logs_dir
@@ -929,7 +936,18 @@ class TestWatcherOnModified:
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(logs_dir / "app.log")
+
         watcher.on_modified(event)
+
+        warned: MagicMock = wlw.logger.warning  # type: ignore[assignment]
+        warned.assert_called_once()
+        reported = str(warned.call_args)
+        assert str(logs_dir / "app.log") in reported, f"the failing file must be named: {reported}"
+        assert "disk error" in reported, f"the cause must be named, got: {reported}"
+
+        watcher._read_new_lines.side_effect = None
+        watcher.on_modified(event)
+        assert watcher._read_new_lines.call_count == 2
 
 
 # ---------------------------------------------------------------------------
