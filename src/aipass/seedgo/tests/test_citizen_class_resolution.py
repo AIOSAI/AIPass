@@ -292,6 +292,10 @@ class TestGatewayIsTheOnlySource:
             + sorted(class_registry.FORBIDDEN_CLASSES)
             + ["wizard", ""]
         )
+        # Floor, not a mirror: the counts belong to spawn, so this asserts the
+        # registries are populated rather than pinning what they hold. With them
+        # empty the walk below would only exercise the two literals above.
+        assert class_registry.CITIZEN_CLASSES, "spawn registers no citizen class - the walk proves nothing"
         for value in known:
             resolved, refusal = architecture_check._resolve_template_dir(value)
             expected = spawn_gateway.get_template_dir(value).name if class_registry.validate_class(value) else None
@@ -328,7 +332,9 @@ class TestResolutionSeamMatchesSpawn:
         templates/, this fails here instead of silently scoring the fleet against
         a directory that no longer exists.
         """
-        for citizen_class in class_registry.get_available_classes():
+        available = class_registry.get_available_classes()
+        assert available, "spawn registers no citizen class - there is no root to agree about"
+        for citizen_class in available:
             spawn_dir = spawn_gateway.get_template_dir(citizen_class).resolve()
             assert spawn_dir.parent == architecture_check.SPAWN_TEMPLATES_DIR.resolve()
 
@@ -343,7 +349,9 @@ class TestResolutionSeamMatchesSpawn:
         Live-state, deliberately: the gateway can resolve perfectly and still
         name a directory nobody shipped.
         """
-        for citizen_class in class_registry.get_available_classes():
+        available = class_registry.get_available_classes()
+        assert available, "spawn registers no citizen class - no template dir is being checked"
+        for citizen_class in available:
             dir_name = spawn_gateway.get_template_dir(citizen_class).name
             live = architecture_check.SPAWN_TEMPLATES_DIR / dir_name
             assert live.is_dir(), f"resolved template dir is missing on disk: {live}"

@@ -57,8 +57,16 @@ ITS HONEST LIMITS, all of them in the direction of FEWER flags:
     assignments, and the moment it does that it starts nominating the whole fleet.
   - `from os.path import realpath` then `realpath("/tmp")` is invisible: the call
     target is a bare name, and the module gate wants a dotted receiver whose last
-    segment ends in `path` (`os.path`, `ntpath`, `posixpath`). `import os.path as
-    osp` defeats it for the same reason.
+    segment ends in `path`. `import os.path as osp` defeats it for the same reason.
+  - a resolver reached through a module that NAMES ITS DIALECT - `ntpath.abspath`,
+    `posixpath.realpath` - is acquitted from 2026-09-07. It was convicted until
+    then, and that was this file contradicting its own premise: the hazard is that
+    `os.path` MEANS a different module per host, so the line means two things. A
+    call that spells `ntpath` means one thing everywhere, on every leg, and is the
+    cure a flagged site gets rewritten INTO. Measured across 22 branches before
+    the change: 5 rows fleet-wide, of which this acquits 2 - both in this pack's
+    own hazard demonstration - and no other branch moves, because @drone's three
+    are all the receiver arm, which is untouched.
   - it walks TEST UNITS, so a literal resolved in a fixture, in a module-level
     constant or in a helper the unit calls is not seen. Nothing here follows a
     call.
@@ -112,6 +120,13 @@ RESOLVER_FUNCTIONS: frozenset = frozenset({"realpath", "abspath"})
 #: `posixpath` and `ntpath` all end in it; `registry`, `shutil` and `helper` do
 #: not, and a `helper.abspath(...)` is somebody else's method.
 RESOLVER_MODULE_SUFFIX: str = "path"
+
+#: The path modules that name their dialect out loud. `os.path` is an ALIAS -
+#: it is `posixpath` on one leg of the matrix and `ntpath` on the other, which
+#: is the entire hazard. These two are not: `ntpath.abspath("/x")` returns the
+#: same string on every host, because the module IS the answer to "which
+#: platform". Convicting them convicts the fix.
+DIALECT_MODULES: frozenset = frozenset({"ntpath", "posixpath", "macpath"})
 
 #: The method whose receiver is read rather than whose name is trusted.
 RESOLVE_METHOD: str = "resolve"
@@ -184,7 +199,10 @@ def _argument_literal(call: ast.Call, func: ast.Attribute) -> Optional[ast.Const
     """
     if func.attr not in RESOLVER_FUNCTIONS or not call.args:
         return None
-    if not corpus.dotted_name(func.value).endswith(RESOLVER_MODULE_SUFFIX):
+    module = corpus.dotted_name(func.value)
+    if not module.endswith(RESOLVER_MODULE_SUFFIX):
+        return None
+    if module in DIALECT_MODULES:
         return None
     return rooted_literal(call.args[0])
 

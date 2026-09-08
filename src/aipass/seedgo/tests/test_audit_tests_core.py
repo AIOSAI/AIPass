@@ -138,6 +138,8 @@ class TestSpineDocuments:
         assert document["score"] is None
 
     def test_every_spine_group_declares_a_tier(self):
+        assert len(spine.CORE_SPINE) == 4
+
         for name in spine.CORE_SPINE:
             assert spine.spine_document(name)["tier"]
 
@@ -146,6 +148,8 @@ class TestRev4Contracts:
     """The contracts bind groups that do not exist yet. That is the point."""
 
     def test_kill_cause_contract_is_attached_to_every_bound_group(self):
+        assert len(spine.KILL_CAUSE_BOUND) == 3
+
         for name in spine.KILL_CAUSE_BOUND:
             assert "kill_cause" in spine.contract_for(name)
 
@@ -195,6 +199,8 @@ class TestRefusalVocabulary:
         assert refusal.worst_code([0, 99]) == 99
 
     def test_every_refusal_cites_a_law(self):
+        assert len(refusal.REFUSAL_CODES) == 6
+
         for code in refusal.REFUSAL_CODES:
             assert refusal.Refusal(code=code, reason="x").law
 
@@ -442,7 +448,11 @@ class TestEnforce:
         assert caught.value.law == "S8"
 
     def test_enforce_is_silent_on_a_lawful_document(self):
-        laws.enforce(_lawful_document())
+        """Silent means all three: no problems found, nothing raised, None handed back."""
+        document = _lawful_document()
+
+        assert laws.validate(document) == []
+        assert laws.enforce(document) is None
 
     def test_validate_reports_every_problem_at_once(self):
         """One reason per attempt would make fixing an artifact a guessing game."""
@@ -464,9 +474,14 @@ class TestSpineIsLawfulByConstruction:
         assert spine.spine_document("ai_advisory")["kind"] == "nominate_only"
 
     def test_no_other_spine_group_claims_a_kind(self):
-        for name in spine.CORE_SPINE:
-            if spine.SPINE_TIERS[name] != "ai":
-                assert "kind" not in spine.spine_document(name)
+        # Both populations are named, so a spine that lost its ai tier - or one
+        # that grew a second `kind` - fails here rather than passing an `if`
+        # nothing entered.
+        ai_tier = [name for name in spine.CORE_SPINE if spine.SPINE_TIERS[name] == "ai"]
+        claiming_a_kind = [name for name in spine.CORE_SPINE if "kind" in spine.spine_document(name)]
+
+        assert ai_tier == ["ai_advisory"]
+        assert claiming_a_kind == ["ai_advisory"]
 
     def test_a_document_built_only_from_the_spine_passes_every_law(self):
         groups = {name: spine.spine_document(name) for name in spine.CORE_SPINE}
@@ -612,7 +627,11 @@ class TestCarrierRecorder:
         carrier_window(tmp_path)
         (tmp_path / "state.json").write_text("{}", encoding="utf-8")
 
-        assert m10.stop_carrier_recording() == m10.stop_carrier_recording()
+        first = m10.stop_carrier_recording()
+        second = m10.stop_carrier_recording()
+
+        assert first == ({str(tmp_path / "state.json"): "open"}, 0)
+        assert second == first
 
 
 class TestCarrierSubtraction:

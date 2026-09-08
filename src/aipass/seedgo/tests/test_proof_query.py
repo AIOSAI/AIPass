@@ -124,7 +124,14 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs():
-    """print_introspection produces console output."""
+    """print_introspection prints the module banner and the pack roster.
+
+    "console.print was called" is not an oracle: it holds for a function that
+    prints one blank line, and it held while nothing else was measured. The two
+    strings pinned here were read off a real run (2026-09-07) and they are the
+    two the introspection contract owes a reader — WHICH module answered, and
+    the heading under which its discovered packs are listed.
+    """
     import sys
     from aipass.seedgo.apps.modules.proof_query import print_introspection
 
@@ -132,12 +139,20 @@ def test_print_introspection_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
+    assert "proof_query Module" in printed, f"introspection never named the module: {printed!r}"
+    assert "Discovered Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
 
 
 def test_print_help_runs():
-    """print_help produces console output."""
+    """print_help prints its banner and the pack+proof usage line.
+
+    Same reason as the introspection test above: `console.print.called` passes
+    for any function that prints anything at all. The usage line is the one a
+    reader comes to help FOR — the three-argument form that shows one proof's
+    content — so that is what is pinned, read off a real run (2026-09-07).
+    """
     import sys
     from aipass.seedgo.apps.modules.proof_query import print_help
 
@@ -145,8 +160,10 @@ def test_print_help_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
+    assert "Proof Query Module" in printed, f"help never named the module: {printed!r}"
+    assert "proof_query <pack> <proof>" in printed, f"help never showed the pack+proof form: {printed!r}"
 
 
 def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):

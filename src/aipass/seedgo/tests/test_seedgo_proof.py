@@ -127,7 +127,14 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs():
-    """print_introspection produces console output."""
+    """print_introspection headers SEEDGO PROOF and lists the proof packs.
+
+    "console.print OR header was called" is not an oracle — it holds for a
+    function that prints one blank line and nothing else, and it is what stood
+    here while nothing was measured. Both strings were read off a real run
+    (2026-09-07): the header is unconditional, and the pack heading is the line
+    that only appears when discovery actually found something to list.
+    """
     import sys
     from aipass.seedgo.apps.modules.seedgo_proof import print_introspection
 
@@ -135,12 +142,21 @@ def test_print_introspection_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
+    headers = [call.args[0] for call in mock_cli.header.call_args_list if call.args]
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
+    assert headers == ["SEEDGO PROOF"], f"introspection headed itself {headers!r}"
+    assert "Available Proof Packs:" in printed, f"introspection never listed the packs: {printed!r}"
 
 
 def test_print_help_runs():
-    """print_help produces console output."""
+    """print_help prints its banner and the handler interface it demands.
+
+    Same reason as the introspection test above. The second string is the one
+    piece of help a handler author cannot work without — the signature every
+    proof handler must define — so an edit that drops the interface section
+    turns this red instead of passing on "something was printed".
+    """
     import sys
     from aipass.seedgo.apps.modules.seedgo_proof import print_help
 
@@ -148,8 +164,10 @@ def test_print_help_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
+    assert "Seedgo Proof Module" in printed, f"help never named the module: {printed!r}"
+    assert "scan(pack_dir: Path) -> dict" in printed, f"help never showed the handler signature: {printed!r}"
 
 
 # ---------------------------------------------------------------------------

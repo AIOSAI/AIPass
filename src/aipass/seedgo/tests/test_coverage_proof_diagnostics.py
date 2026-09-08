@@ -299,11 +299,9 @@ class TestIsDocstring:
 
         source = 'x = "not a docstring"\n'
         tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "not a docstring":
-                assert _is_docstring(node, tree) is False
-                return
-        pytest.fail("Did not find string constant in AST")
+        constants = [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "not a docstring"]
+        assert len(constants) == 1, f"expected exactly one string constant in the AST, got {constants}"
+        assert _is_docstring(constants[0], tree) is False
 
     def test_function_docstring(self):
         """Detects function-level docstring."""
@@ -943,8 +941,14 @@ class TestPluginIntegrityScan:
 
         result = scan(pack_dir)
         flagged_mod = [m for m in result["modules"] if m["label"] == "standards_audit.py"][0]
+        findings = flagged_mod["findings"]
+        # Measured: one line yields two findings of different kinds -- dedup must
+        # keep both, not collapse them. An empty list here would make the walk
+        # below a silent pass, so the floor is the exact count.
+        assert len(findings) == 2, f"expected the AST and the regex finding, got {findings}"
+        assert {f["kind"] for f in findings} == {"ast_string_literal", "hardcoded_branch"}
         keys: set[tuple[object, ...]] = set()
-        for finding in flagged_mod["findings"]:
+        for finding in findings:
             key = (finding["line"], finding["name"], finding["kind"])
             assert key not in keys, f"Duplicate finding: {key}"
             keys.add(key)
@@ -993,7 +997,10 @@ class TestPluginIntegrityScan:
 
         result = scan(pack_dir)
         issue_text = " ".join(result["issues"])
-        assert "function call" in issue_text or "violation key" in issue_text
+        # Measured from a real scan: the call site and the violation key each get
+        # their own human-readable kind label, so both are pinned.
+        assert "hardcoded function call" in issue_text
+        assert "hardcoded violation key" in issue_text
 
 
 # ===========================================================================

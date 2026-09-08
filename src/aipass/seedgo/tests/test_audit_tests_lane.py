@@ -576,7 +576,10 @@ class TestNominate:
     """Static species nominate; they never score (Law M1)."""
 
     def test_every_nominated_group_carries_no_score(self, tmp_path):
-        for document in adapter.nominate(_spec_for(tmp_path)).values():
+        documents = adapter.nominate(_spec_for(tmp_path))
+        assert len(documents) == 13
+
+        for document in documents.values():
             assert document["score"] is None
 
     def test_every_group_that_did_not_run_says_why(self, tmp_path):
@@ -584,11 +587,16 @@ class TestNominate:
         # not_applicable - which pinned the calendar, not the law. The law is
         # Law S1: a group that did not run carries a reason. A group that DID
         # run is a different document, and both now exist.
-        for name, document in adapter.nominate(_spec_for(tmp_path)).items():
-            if document["status"] == "not_applicable":
-                assert document["reason"], name
+        documents = adapter.nominate(_spec_for(tmp_path))
+        did_not_run = {name for name, document in documents.items() if document["status"] == "not_applicable"}
+        silent = sorted(name for name in did_not_run if not documents[name]["reason"])
+
+        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS)
+        assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
+        assert len(adapter.UNBUILT_EXECUTION_GROUPS) == 2
+
         for name in adapter.UNBUILT_EXECUTION_GROUPS:
             document = adapter.nominate(_spec_for(tmp_path))[name]
             assert document["status"] == "not_applicable" and document["reason"]
@@ -613,7 +621,10 @@ class TestTeardown:
         env.mkdir()
         spec = _spec_for(env)
         adapter.teardown(spec)
-        adapter.teardown(spec)
+        assert not env.exists()
+
+        assert adapter.teardown(spec) is None
+        assert not env.exists()
 
     def test_teardown_refuses_the_home_directory(self, monkeypatch, tmp_path):
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
@@ -621,8 +632,10 @@ class TestTeardown:
         adapter.teardown(_spec_for(tmp_path))
         assert tmp_path.exists()
 
-    def test_teardown_accepts_no_spec_at_all(self):
-        adapter.teardown(None)
+    def test_teardown_accepts_no_spec_at_all(self, tmp_path):
+        """No env was ever built, so teardown returns None having deleted nothing."""
+        assert adapter.teardown(None) is None
+        assert tmp_path.exists()
 
 
 def _spec_for(env_root: Path) -> envcopy.EnvSpec:
@@ -1117,7 +1130,10 @@ class TestVerbIsDiscoverable:
     """
 
     def test_the_verb_module_imports_cleanly(self):
-        importlib.import_module("aipass.seedgo.apps.modules.audit_tests")
+        module = importlib.import_module("aipass.seedgo.apps.modules.audit_tests")
+
+        assert callable(module.handle_command)
+        assert module.COMMANDS == ("audit-tests", "audit_tests")
 
     def test_seedgos_own_discovery_finds_the_verb(self):
         from aipass.seedgo.apps import seedgo as entry

@@ -359,13 +359,20 @@ class TestUnusedFunctionCheck:
 # A file caught mid-save must not sink the branch (FPLAN-0382 ruling d)
 
 
-@patch("aipass.seedgo.apps.handlers.aipass_standards.unused_function_check.json_handler")
-def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_json, tmp_path):
+@patch("aipass.seedgo.apps.handlers.aipass_standards.unused_function_check.json_handler.log_operation")
+def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_path):
     """IndentationError is a SyntaxError, not a TokenError.
 
     Uncaught it escaped check_branch(), and branch_audit scores an escaped exception
     as a flat 0 for the whole branch -- the spurious 'Unused_Function 0%' seen on
     uncached runs, unreproducible because the file is saved correctly by the retry.
+
+    THE PATCH NAMES THE FUNCTION, NOT THE MODULE (MOCK-DRIFT, 2026-09-07). It read
+    `...unused_function_check.json_handler`, which replaces the whole module with a
+    MagicMock answering every attribute - so renaming or deleting `log_operation`
+    left this test green while the checker crashed in production. Patching the
+    attribute keeps the real module in place: the name has to EXIST for the patch
+    to bind, and the pin fails the moment it does not.
     """
     branch = tmp_path / "victim"
     (branch / "apps").mkdir(parents=True)

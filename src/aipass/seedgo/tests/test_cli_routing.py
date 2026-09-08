@@ -132,6 +132,56 @@ def test_route_command_returns_false_for_unknown_command(stub_module):
     assert result is False
 
 
+#: Every spelling the two newest verbs declare, read as literals rather than
+#: from the modules, because a test that imports COMMANDS and asserts against
+#: COMMANDS agrees with itself however the verb is renamed. These four strings
+#: are the contract: `drone @seedgo shadow-cycle` and `drone @seedgo
+#: test-inventory` are what a human and a daemon schedule actually type.
+DECLARED_VERB_SPELLINGS = ("shadow-cycle", "shadow_cycle", "test-inventory", "test_inventory")
+
+
+@pytest.mark.parametrize("verb", DECLARED_VERB_SPELLINGS)
+def test_every_declared_verb_spelling_is_claimed_by_the_real_router(verb, capsys):
+    """The verb reaches its module through the door a caller uses.
+
+    THE SUITE HAD NEVER SAID THESE FOUR WORDS OUT LOUD (entry_point_diff, 33%
+    on 2026-09-07). `test-inventory` appeared in this branch's tests only in a
+    header comment and a docstring, and prose is not a mention: rename the verb
+    in `COMMANDS` and every test still passed, while the daemon job and every
+    typed invocation broke. `shadow-cycle` is the sharper case of the two - it
+    is fired weekly by @daemon from `.daemon/schedule.json`, where the string
+    is spelled out in a prompt no test reads.
+
+    Routed through the REAL `discover_modules()` and the REAL `route_command`,
+    with no stub in the way: the claim under test is that this word, typed at
+    this entry point, finds a module that answers to it. `[]` is the documented
+    no-argument form for both verbs - each prints its introspection and
+    returns True - so the pin costs one render and executes no cycle and no
+    inventory walk.
+    """
+    modules = branch_entry.discover_modules()
+
+    assert branch_entry.route_command(verb, [], modules) is True, f"no discovered module claimed '{verb}'"
+    assert capsys.readouterr().out.strip(), f"'{verb}' routed but rendered nothing"
+
+
+@pytest.mark.parametrize("verb", DECLARED_VERB_SPELLINGS)
+def test_a_near_miss_of_a_declared_verb_is_not_claimed(verb, capsys):
+    """Negative control, and the reason the pin above is not a tautology.
+
+    A router that claimed everything would satisfy every assertion in the test
+    above. Each declared spelling is offered with one trailing character, which
+    is what a prefix match or a substring claim would swallow - and the module
+    docstrings say in writing that the match is never a prefix.
+    """
+    modules = branch_entry.discover_modules()
+
+    assert branch_entry.route_command(f"{verb}s", [], modules) is False, (
+        f"'{verb}s' was claimed by a module that only declares '{verb}'"
+    )
+    capsys.readouterr()
+
+
 def test_route_command_survives_a_raising_module(mock_logger):
     """One exploding module must not take the router down with it."""
 

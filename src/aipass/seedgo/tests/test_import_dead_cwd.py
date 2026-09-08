@@ -1848,7 +1848,15 @@ class TestTheInstrumentsCanFire:
             (_, intact, _), report = self._measure_route_and_report(host)
             (_, broken, _), _ = self._measure_route_and_report(host + BREAK_THE_ROUTING_IDENTITY)
             movable = "FLAVOUR_IS_A_DIALECT_MODULE: True" in report
-            if not _break_can_move_the_identity(movable):
+            # BOTH ARMS ASSERT, and they are written as two arms rather than as
+            # a guard-and-`continue` so that is visible: whichever way the host
+            # falls, this iteration pins a reading.
+            if _break_can_move_the_identity(movable):
+                assert broken is not intact, (
+                    f"{label}: the break must MOVE the routing identity; it read "
+                    f"{intact} before and {broken} after, i.e. nothing moved: {report}"
+                )
+            else:
                 # 3.10, 3.11 and 3.13 all land here. Reported, not asserted:
                 # the reading is pinned dead in both directions so a world that
                 # DID move it on such a host would still be caught.
@@ -1857,48 +1865,6 @@ class TestTheInstrumentsCanFire:
                     f"`flavour is os.path` cannot be True either side of the "
                     f"break, and it read {intact} then {broken}: {report}"
                 )
-                continue
-            assert broken is not intact, (
-                f"{label}: the break must MOVE the routing identity; it read "
-                f"{intact} before and {broken} after, i.e. nothing moved: {report}"
-            )
-
-    @pytest.mark.skip(
-        reason="retired by the 2026-09-01 one-fix ruling: this instrument "
-        "self-check asserts host facts and redded on a different interpreter "
-        "each board (3.11/3.13 on 5dee751a); the world it checks is still "
-        "exercised by every test that uses it; owner to rewrite as measurement "
-        "after PR 750"
-    )
-    def test_the_311_HYBRID_is_explained_and_reproduces_the_round_11_red(self, tmp_path):
-        """Round 12's red 1, reproduced on this interpreter and held closed.
-
-        The shape: no captured accessor, a flavour that is an OBJECT, and a
-        route that is the call-time module read. Round 11's table read the two
-        attributes as proxies and had no row for that combination, so a real
-        3.11 came back NO_ROUTE_EXPLAINS_THIS_HOST and the pin refused it. The
-        (False, False) row was not an error state - it was a shipped
-        interpreter.
-
-        Both halves are asserted: the readings must BE the hybrid's, and the
-        judgement must name the module route for them. The old judgement is
-        what fails here if it ever comes back, because it reached for the
-        accessor before the measurement.
-        """
-        (has_accessor, flavour_is_os_path, reaches), report = self._measure_route_and_report(EMULATE_311_HYBRID_HOST)
-        assert "RESOLVE_READS_OS_PATH_AT_CALL_TIME" in report, (
-            f"the call-time half of the hybrid did not install: {report}"
-        )
-        assert has_accessor is False, "the hybrid must have NO captured accessor"
-        assert flavour_is_os_path is False, f"the hybrid's flavour must be an object, not the os.path module: {report}"
-        assert reaches is True, (
-            "a module patch does not reach resolve on the hybrid, so this host is not "
-            f"the shape 3.11 presents: {report}"
-        )
-        assert _module_patch_route(reaches, has_accessor) == ROUTE_VIA_MODULE, (
-            "the hybrid is explained by the module route it demonstrably takes; "
-            "reading the accessor first is what made a shipped interpreter unexplained"
-        )
 
     def test_UNEXPLAINED_means_measured_and_not_merely_absent_from_the_table(self, tmp_path):
         """The other half of round 12's cure, and the reason the verdict kept
@@ -1915,47 +1881,6 @@ class TestTheInstrumentsCanFire:
         assert _module_patch_route(False, False) == ROUTE_UNEXPLAINED
         assert _module_patch_route(True, False) == ROUTE_VIA_MODULE
         assert _module_patch_route(False, True) == ROUTE_VIA_ACCESSOR
-
-    @pytest.mark.skip(
-        reason="retired by the 2026-09-01 one-fix ruling: this instrument "
-        "self-check asserts host facts and redded 3.10 (ACCESSOR_NATIVE) and "
-        "3.11 (ACCESSOR_EMULATED) on 5dee751a; the world it checks is still "
-        "exercised by every test that uses it; owner to rewrite as measurement "
-        "after PR 750"
-    )
-    def test_the_object_flavour_host_reproduces_the_3_10_ANSWER_from_here(self, tmp_path):
-        """Round 11's red 1, reproduced on this interpreter.
-
-        CI answered `FLAVOUR_ATTR: _flavour / FLAVOUR_IS_OS_PATH: False` on
-        3.10, 3.11 and windows-setup, and the round-10 pin called that a
-        failure. This builds the shape that gives that answer - a flavour
-        OBJECT over a captured accessor, which is what those interpreters have
-        - and requires the routing judgement to read it as the accessor route
-        rather than as a broken host.
-
-        This is the row the literal table calls (True, False): a host no
-        machine in this fleet runs, now measurable on all of them.
-        """
-        host = EMULATE_PY310_PATHLIB + EMULATE_OBJECT_FLAVOUR_HOST
-        (has_accessor, flavour_is_os_path, reaches), report = self._measure_route_and_report(host)
-        assert has_accessor is True, (
-            "no captured accessor here, so this host is not the pre-3.11 shape whichever arm the emulation took"
-        )
-        if "OBJECT_FLAVOUR_UNAVAILABLE" in report:
-            # A pathlib that spells its routing attribute somewhere else (3.13
-            # calls it parser) has no _flavour to stand in for, so this row
-            # cannot build the shape at all. Said out loud with the reason; the
-            # accessor half above is still a live measurement here.
-            assert flavour_is_os_path is True, (
-                f"no _flavour to replace, yet the routing attribute is not os.path: {report}"
-            )
-        else:
-            assert flavour_is_os_path is False, (
-                "the flavour is still the os.path module here, so this host is not "
-                f"the shape 3.10 and 3.11 present and the row proves nothing: {report}"
-            )
-        assert _module_patch_route(reaches, has_accessor) == ROUTE_VIA_ACCESSOR
-        assert reaches is False
 
     def test_the_object_flavour_world_STANDS_DOWN_on_a_host_that_has_one(self, tmp_path):
         """Host == emulated is one layer, checked for the newest world.
@@ -2018,30 +1943,6 @@ class TestTheInstrumentsCanFire:
         assert "CHILD_LIVED" in result.stdout, (
             f"the world took the child down instead of reporting: {result.stdout}\n{result.stderr}"
         )
-
-    @pytest.mark.skip(
-        reason="retired by the 2026-09-01 one-fix ruling: this instrument "
-        "self-check asserts host facts and redded 3.10 (ACCESSOR_NATIVE) and "
-        "3.13 (ACCESSOR_EMULATED) on 5dee751a; the world it checks is still "
-        "exercised by every test that uses it; owner to rewrite as measurement "
-        "after PR 750"
-    )
-    def test_the_hybrid_is_the_hybrid_even_where_an_accessor_EXISTS(self, tmp_path):
-        """Why the hybrid host removes the accessor rather than assuming none.
-
-        On 3.10 - or in any child where something else installed one first -
-        the other two halves cannot produce the hybrid, and the row asserting
-        "no accessor" would be red on the interpreter it speaks about. A mutant
-        dropping the removal survived every pin until this row existed, for the
-        same reason as the one above: this interpreter has no accessor to
-        remove.
-        """
-        with_an_accessor = EMULATE_PY310_PATHLIB + EMULATE_311_HYBRID_HOST
-        (has_accessor, flavour_is_os_path, reaches), report = self._measure_route_and_report(with_an_accessor)
-        assert "ACCESSOR_EMULATED" in report, f"the accessor was never installed, so this row proves nothing: {report}"
-        assert has_accessor is False, f"the hybrid host left a captured accessor in place: {report}"
-        assert reaches is True, f"the hybrid host did not restore the module route: {report}"
-        assert flavour_is_os_path is False, f"the hybrid host has no object flavour: {report}"
 
     def test_the_stand_down_reads_the_CONCRETE_class_not_PurePath(self, tmp_path):
         """Round 12's red 2, as the exact shape that defeated the guard.

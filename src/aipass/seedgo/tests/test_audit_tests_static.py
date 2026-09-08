@@ -879,7 +879,10 @@ class TestContentRendering:
 
     def test_the_markdown_carries_every_exemption(self):
         rendered = render_spec.render_markdown("assertion_shape", assertion_shape_check.SPECIFICATION)
-        for exemption in assertion_shape_check.SPECIFICATION["exempts"]:
+        exemptions = assertion_shape_check.SPECIFICATION["exempts"]
+        assert len(exemptions) == 2
+
+        for exemption in exemptions:
             assert exemption in rendered
 
     def test_every_shipped_md_is_BYTE_IDENTICAL_to_what_the_spec_renders(self):
@@ -899,14 +902,23 @@ class TestContentRendering:
 
     def test_every_shipped_nominator_has_a_content_module_and_a_doc(self):
         pack = Path(nominators.PACK_DIR)
-        for check in sorted(pack.glob("*_check.py")):
+        checks = sorted(pack.glob("*_check.py"))
+        # The count is the declared static half of the pack (11 of the 13
+        # groups the adapter declares); a checker that stops being discovered
+        # would otherwise shrink this loop to a silent pass.
+        assert len(checks) == 11
+
+        for check in checks:
             name = check.stem.removesuffix("_check")
             assert (pack / f"{name}_content.py").is_file(), name
             assert (pack / f"{name}.md").is_file(), name
 
     def test_every_content_module_names_its_function_by_convention(self):
         pack = Path(nominators.PACK_DIR)
-        for content in sorted(pack.glob("*_content.py")):
+        contents = sorted(pack.glob("*_content.py"))
+        assert len(contents) == 11
+
+        for content in contents:
             name = content.stem.removesuffix("_content")
             source = content.read_text(encoding="utf-8")
             assert f"def get_{name}_standards()" in source, name
@@ -1189,7 +1201,11 @@ class TestCacheStamp:
         assert cache.compute_stamp(None, siblings=["a"]) != cache.compute_stamp(None, siblings=["a", "b"])
 
     def test_the_stamp_is_stable_for_the_same_inputs(self):
-        assert cache.compute_stamp(None, siblings=["a"]) == cache.compute_stamp(None, siblings=["a"])
+        """Two independent computations over one input agree - nothing volatile leaks into the key."""
+        first = cache.compute_stamp(None, siblings=["a"])
+        second = cache.compute_stamp(None, siblings=["a"])
+
+        assert first == second
 
     def test_the_stamp_changes_when_a_hashed_file_changes(self, tmp_path):
         (tmp_path / "one.py").write_text("A", encoding="utf-8")

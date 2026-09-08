@@ -135,10 +135,12 @@ def test_run_checklist_file_not_found(tmp_path):
     """run_checklist returns error result for missing file."""
     from aipass.seedgo.apps.modules.checklist import run_checklist
 
-    results = run_checklist(str(tmp_path / "nonexistent.py"))
+    missing = tmp_path / "nonexistent.py"
+    results = run_checklist(str(missing))
     assert len(results) == 1
     assert results[0]["passed"] is False
-    assert "not found" in results[0]["detail"].lower() or "File not found" in results[0]["detail"]
+    assert results[0]["standard"] == "(error)"
+    assert results[0]["detail"] == f"File not found: {missing.resolve()}"
 
 
 def test_run_checklist_non_python_file(tmp_path):
@@ -180,7 +182,8 @@ def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
     results = run_checklist(str(tmp_file))
     assert len(results) == 1
     assert results[0]["passed"] is True
-    assert "throwaway" in results[0]["detail"].lower() or "temp" in results[0]["detail"].lower()
+    assert results[0]["standard"] == "(skip)"
+    assert results[0]["detail"] == "Throwaway path (temp/scratchpad) — skipped"
 
 
 def test_run_checklist_scratchpad_path_skipped(tmp_path):
@@ -194,7 +197,8 @@ def test_run_checklist_scratchpad_path_skipped(tmp_path):
     results = run_checklist(str(f))
     assert len(results) == 1
     assert results[0]["passed"] is True
-    assert "throwaway" in results[0]["detail"].lower() or "scratchpad" in results[0]["detail"].lower()
+    assert results[0]["standard"] == "(skip)"
+    assert results[0]["detail"] == "Throwaway path (temp/scratchpad) — skipped"
 
 
 def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch):
@@ -271,6 +275,9 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
     f = tmp_path / "real_code.py"
     f.write_text("def main(): pass\n", encoding="utf-8")
     results = run_checklist(str(f))
+    # Floor: the audit lane produced exactly one row (the mocked pack discovers
+    # no checkers), so the loop below cannot pass over an empty list.
+    assert len(results) == 1
     # Should NOT get throwaway/prototype skip
     for r in results:
         detail = r.get("detail", "")

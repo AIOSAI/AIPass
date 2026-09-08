@@ -216,6 +216,7 @@ def test_get_deprecated_patterns_returns_dict():
 
     patterns = get_deprecated_patterns()
     assert isinstance(patterns, dict)
+    assert patterns["--verbose"] == "removed from audit (v0.4.0)"
     for key, value in patterns.items():
         assert isinstance(key, str)
         assert isinstance(value, str)
@@ -867,7 +868,8 @@ def test_advisory_leads_with_its_own_unreliability(tmp_path):
     head = " ".join(lines[:2]).lower()
     assert "unverified" in head, lines
     assert "live" in head, "it must name the false-dead direction"
-    assert "never mentions" in head or "blind" in head, "and the rules it cannot see at all"
+    assert "blind the other way" in head, "it must name the false-live direction too"
+    assert "never mentions" in head, "and the rules it cannot see at all"
     assert "do not delete" in head, "it must say what not to do"
     assert "control" in head, "and what to do instead -- measure with bypasses disabled"
     assert "apps/x.py" not in " ".join(lines[:2]), "no conclusion may precede the caveat"

@@ -619,17 +619,33 @@ def test_load_json_default_has_the_container_type_the_json_type_promises(
     This is the contract that makes the previous one useful. A caller writing
     ``for entry in load_json(name, "log")`` must not be handed a dict, and
     ``load_json(name, "data")["k"]`` must not be handed a list. Measured
-    identical on all seventeen document-addressed implementations, and it is
-    the ONLY thing about the default they agree on: the actual default payload
-    for "data" comes in five different key sets across the fleet, so the shape
-    is pinned and the contents deliberately are not.
+    identical on all seventeen document-addressed implementations.
+
+    THE SHAPE IS NOT THE WHOLE CLAIM, and pinning only the shape was the defect
+    here: `isinstance(x, dict)` passes for any dict of garbage, so a handler
+    that answered `{}` to every read satisfied all three lines. What the fleet
+    also agrees on was re-measured on 2026-09-07 across all 22 discovered
+    handlers and is asserted below — an absent log reads back EMPTY rather than
+    as some salvaged remnant, and the mapping default for "config" is a
+    template ADDRESSED to the document that was asked for. The rest of the
+    "data" key set still diverges (two key sets across the fleet) and stays
+    deliberately unpinned.
     """
     module = implementation(branch)
     require_document_addressing(module, branch)
     module, _ = prepared(branch, tmp_path, monkeypatch)
-    assert isinstance(module.load_json("absent_config", "config"), dict)
-    assert isinstance(module.load_json("absent_data", "data"), dict)
-    assert isinstance(module.load_json("absent_log", "log"), list)
+    default_config = module.load_json("absent_config", "config")
+    default_data = module.load_json("absent_data", "data")
+    default_log = module.load_json("absent_log", "log")
+    assert isinstance(default_config, dict)
+    assert isinstance(default_data, dict)
+    assert isinstance(default_log, list)
+    assert default_log == [], f"{branch}: an absent log defaulted to {default_log!r}, not an empty list"
+    assert default_config["module_name"] == "absent_config", (
+        f"{branch}: the config default is not addressed to the document asked for — {default_config!r}"
+    )
+    assert default_config["version"] == "1.0.0", f"{branch}: config default version is {default_config!r}"
+    assert "last_updated" in default_data, f"{branch}: the data default carries no last_updated — {default_data!r}"
 
 
 @pytest.mark.parametrize("branch", parametrized())
@@ -670,6 +686,15 @@ def test_load_json_survives_a_corrupt_document(branch: str, tmp_path: Path, monk
         module, documents = prepared(branch, tmp_path, monkeypatch)
         (documents / "corrupt_config.json").write_text("{not json at all", encoding="utf-8")
         answer = module.load_json("corrupt", "config")
+        # WHAT it regenerates, not merely that the answer has a type. Measured
+        # 2026-09-07 on all 22 discovered handlers: the replacement is a blank
+        # template addressed to the document that was asked for, so a handler
+        # that "recovered" by handing back some other document's contents, or
+        # an empty dict, fails here instead of passing the isinstance below.
+        assert answer["module_name"] == "corrupt", (
+            f"{branch}: corrupt bytes did not regenerate a template for the document asked for — {answer!r}"
+        )
+        assert answer["version"] == "1.0.0", f"{branch}: regenerated template carries {answer!r}"
     else:
         corrupt = tmp_path / "corrupt.json"
         corrupt.write_text("{not json at all", encoding="utf-8")
@@ -787,8 +812,17 @@ def test_get_json_path_answers_a_pathlib_path(branch: str, tmp_path: Path, monke
     module = implementation(branch)
     require_document_addressing(module, branch)
     resolver = expose(module, branch, "get_json_path")
-    module, _ = prepared(branch, tmp_path, monkeypatch)
-    assert isinstance(resolver("addressed", "config"), Path)
+    module, documents = prepared(branch, tmp_path, monkeypatch)
+    answer = resolver("addressed", "config")
+    assert isinstance(answer, Path)
+    # The Path-only surface ANSWERED, not merely typed. `.parts` is an
+    # AttributeError on the str form, so this reads the split the call sites
+    # rely on and pins the two tail segments it comes back with — the document
+    # directory the handler itself named, and the file inside it. Measured
+    # 2026-09-07 on every branch that has the function.
+    assert answer.parts[-2:] == (documents.name, "addressed_config.json"), (
+        f"{branch}: get_json_path resolved to {answer} — expected it inside {documents}"
+    )
 
 
 @pytest.mark.parametrize("branch", parametrized())
@@ -906,9 +940,22 @@ def test_one_branch_is_one_module_however_many_times_it_is_asked_for():
     on 2026-09-07 that ran the write contracts against four Vera-Studio
     citizens' LIVE document directories and left 23 default-template documents
     in each. ``importlib`` caches; so must this.
+
+    THE TWO HANDLES ARE TAKEN INDEPENDENTLY, into named variables, because
+    ``implementation(branch) is implementation(branch)`` written as one
+    expression compares a thing to itself as far as any reader — or any static
+    check — can tell, and would read as a real claim while making none. The
+    floor above the loop is the same floor the discovery test uses and for the
+    same reason: an empty roster would walk this loop zero times and report
+    green, which is precisely the silent pass that let the Vera-Studio writes
+    happen. 22 citizens discovered on this tree, 2026-09-07; the floor stays a
+    floor so retiring one does not turn this red.
     """
+    assert len(BRANCHES) >= 2, f"json_handler discovery found {BRANCHES} under {PACKAGE_ROOT}"
     for branch in BRANCHES:
-        assert implementation(branch) is implementation(branch), (
+        first = implementation(branch)
+        second = implementation(branch)
+        assert first is second, (
             f"{branch} loads a fresh module per call — every redirect in this file would cover a module "
             f"that no contract then writes through, and the writes would land in its live tree"
         )
@@ -2546,15 +2593,24 @@ def test_log_operation_rotates_to_the_modules_declared_cap(
 
     The cap is DECLARED by this contract in the document the handler reads,
     rather than hunted for on the module — see :func:`declare_log_cap` for why
-    the hunt could not work. A branch whose config document has no place to
-    declare it skips by name.
+    the hunt could not work.
+
+    A BRANCH THAT CANNOT ACCEPT THE DECLARATION FAILS HERE, AND USED TO SKIP
+    (SELF-SKIP, 2026-09-07). Measured across the whole 22-branch roster before
+    the change: 44 of 44 parametrisations declared the cap and none skipped, so
+    the skip arm protected nobody and could only ever hide a regression. A
+    branch whose config document has no `config` mapping cannot be held to a cap
+    at all, which is the disk-filler this contract exists to prevent — that is a
+    red with the branch named, not a quiet pass.
     """
     module = implementation(branch)
     require_document_addressing(module, branch)
     log_operation = expose(module, branch, "log_operation")
     module, _ = prepared(branch, tmp_path, monkeypatch)
-    if not declare_log_cap(module, "fifomod", DECLARED_LOG_CAP):
-        pytest.skip(f"{branch}'s config document has no config mapping to declare max_log_entries in")
+    assert declare_log_cap(module, "fifomod", DECLARED_LOG_CAP), (
+        f"{branch}'s config document has no config mapping to declare max_log_entries in, so this "
+        f"contract cannot hold it to a cap - give the document a 'config' object"
+    )
 
     for index in range(DECLARED_LOG_CAP + 5):
         log_operation(f"op_{index}", module_name="fifomod")
@@ -2591,8 +2647,10 @@ def test_log_rotation_keeps_the_newest_entries_and_not_some_other_window(
     require_document_addressing(module, branch)
     log_operation = expose(module, branch, "log_operation")
     module, _ = prepared(branch, tmp_path, monkeypatch)
-    if not declare_log_cap(module, "windowmod", DECLARED_LOG_CAP):
-        pytest.skip(f"{branch}'s config document has no config mapping to declare max_log_entries in")
+    assert declare_log_cap(module, "windowmod", DECLARED_LOG_CAP), (
+        f"{branch}'s config document has no config mapping to declare max_log_entries in, so this "
+        f"contract cannot hold it to a cap - give the document a 'config' object"
+    )
 
     # THE LOG HAS TO ARRIVE ALREADY LONG, and this is the half that took a
     # measurement to see. Appending one entry at a time never distinguishes the

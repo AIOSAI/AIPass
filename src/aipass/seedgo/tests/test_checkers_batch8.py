@@ -714,7 +714,7 @@ def test_command_routing_level_violation():
     result = check_command_routing_level(content, _lines(content), "/fake/path.py")
     assert result is not None
     assert result["passed"] is False
-    assert "ERROR" in result["message"] or "WARNING" in result["message"]
+    assert result["message"] == "Command routing failures logged as ERROR on lines [2] - should be WARNING"
 
 
 # ===========================================================================
@@ -1311,6 +1311,15 @@ def test_constant_naming_exempts_the_pytest_contract_globals():
         check_constant_naming,
     )
 
+    # Floor: the set itself is the contract, so name it. An empty or shrunken
+    # set would make the loop below a silent pass on the exemption it guards.
+    assert sorted(PYTEST_CONTRACT_GLOBALS) == [
+        "collect_ignore",
+        "collect_ignore_glob",
+        "pytest_plugins",
+        "pytestmark",
+    ]
+
     for name in sorted(PYTEST_CONTRACT_GLOBALS):
         content = f'{name} = ["x"]\n'
         assert check_constant_naming(content) is None, (
@@ -1354,9 +1363,10 @@ def test_the_real_conftest_that_reported_it_is_no_longer_nominated():
     if not conftest.is_file():
         pytest.skip(f"the reported file is not at {conftest} on this checkout")
     result = check_constant_naming(conftest.read_text(encoding="utf-8"))
-    assert result is None or result["passed"] is True, (
-        f"the file that produced the counterexample still fails: {result}"
-    )
+    # Measured on this checkout: every lowercase global in that file is a
+    # pytest-contract name, so nothing is nominated at all and the checker
+    # returns no verdict -- not a verdict that happens to pass.
+    assert result is None, f"the file that produced the counterexample still fails: {result}"
 
 
 # ===========================================================================

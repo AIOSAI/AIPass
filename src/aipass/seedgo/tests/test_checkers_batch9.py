@@ -326,7 +326,7 @@ def test_directory_tree_no_tree_section():
 
     result = check_directory_tree(lines, Path("/nonexistent"), "/fake/apps/entry.py")
     assert result["passed"] is True
-    assert "optional" in result["message"].lower() or "No directory" in result["message"]
+    assert result["message"] == "No directory tree block found (optional check)"
 
 
 # ===========================================================================

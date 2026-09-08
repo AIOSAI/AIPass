@@ -41,9 +41,34 @@ never flagged either.
 
 WHAT THIS FILE DELIBERATELY DOES NOT CLAIM.
 
-It does not follow calls. A unit that hands `capsys` to a helper which reads it
-is flagged, and that flag is wrong. Following the call would mean resolving the
-helper across modules, which is an interpreter, not a reader.
+It does not follow calls ACROSS MODULES. Resolving a helper through an import
+means executing the import graph, which is an interpreter and not a reader.
+
+IT DOES FOLLOW THE MODULE-LEVEL DEFS OF ONE FILE, FROM 2026-09-07. A unit that
+hands `capsys` to a helper defined in the same test module, where that helper
+reads `readouterr()` off the parameter it arrived in, HAS read its capture - and
+flagging it said the opposite of the truth. So does a unit whose helper forwards
+the parameter to a SECOND same-file helper that reads it, which is why this
+follows to a fixed point rather than one hop: @devpulse's suite is the one-hop
+spelling (`_output(capsys)`) and @memory's is the two-hop one (`_payload` hands
+its own parameter to `_raw_stdout`). Stopping at one hop would have called 34 of
+@memory's units unfinished while every one of them looks.
+
+The candidate set is the file's own module-level defs, fixed before the loop
+starts, and each pass can only add to a bounded set - so it terminates, and
+recursion is harmless. Nothing is imported, nothing is executed, and a helper
+reached through any other spelling - an import, an attribute, a class method, a
+variable holding the function - is still invisible, on purpose.
+
+  reported by @devpulse (`_output(capsys)` in test_compass_command.py),
+  confirmed here. Measured across 22 branches: 132 rows fleet-wide before, 9
+  after. Two branches move - devpulse 25 to 1 and memory 98 to 1 - plus this
+  one, 2 to 0. Six other branches carry a single row each and keep it, because
+  a helper that does not read the fixture still leaves its caller flagged.
+
+The delegated read is the same shape `no_oracle` already recognises for a
+delegated assertion, so the pack now answers "did somebody look?" the same way
+twice instead of two different ways.
 
 IT DOES NOT COVER `caplog`, DESPITE WHAT THE RULE'S NAME SUGGESTS. `capsys` has
 a read method - a call site a reader can find. `caplog` is read by touching
@@ -72,7 +97,7 @@ pack's own corpus reader. That constraint is the reason the pack exists.
 
 import ast
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
@@ -171,6 +196,129 @@ def _reads_capture(unit: corpus.TestUnit) -> bool:
     return False
 
 
+def capture_readers(tree: ast.Module) -> Dict[str, Set[int]]:
+    """Which same-file helpers read a capture, and out of which parameter.
+
+    THE PART OF THE CALL GRAPH THIS RULE FOLLOWS: module-level defs in ONE file,
+    to a fixed point. A `def _output(capsys)` whose body calls
+    `capsys.readouterr()` is a reader, and so is a `def _payload(verbs, capsys)`
+    that hands its own parameter to `_raw_stdout`, which reads it. Both were
+    found live - @memory's config suite is the two-hop spelling and @devpulse's
+    compass suite is the one-hop - and a rule that followed only the first would
+    have called 34 of @memory's units unfinished when every one of them looks.
+
+    The mapping is keyed by parameter POSITION because that is how the caller
+    passes it: `_payload(verbs, capsys, *args)` reads parameter 1, and a helper
+    that takes the fixture first is a different claim from one that takes it
+    second.
+
+    THE CLOSURE TERMINATES BY CONSTRUCTION and is not a call graph in general.
+    The candidate set is the file's module-level defs, which is finite and fixed
+    before the loop starts; each pass can only ADD positions to a bounded set,
+    so the loop stops when a pass adds none. Recursion and mutual recursion are
+    therefore harmless - they add nothing on the second pass. Nothing is
+    imported, nothing is executed, and no name is resolved outside this tree.
+
+    Only module-level defs are read. A helper nested inside a test is already
+    inside the unit the direct reader walks, and a method on a class would need
+    a receiver resolved, which is the interpreting this rule refuses to do.
+
+    Args:
+        tree: One parsed test module.
+
+    Returns:
+        Helper name -> the parameter positions whose value gets read. Empty
+        when the file defines no such helper, which is the common case.
+    """
+    defs = {node.name: node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    readers: Dict[str, Set[int]] = {}
+    for name, node in defs.items():
+        positions = {index for index, arg in enumerate(node.args.args) if _reads_name(node, arg.arg)}
+        if positions:
+            readers[name] = positions
+
+    changed = True
+    while changed:
+        changed = False
+        for name, node in defs.items():
+            known = readers.get(name, set())
+            forwarded = {
+                index
+                for index, arg in enumerate(node.args.args)
+                if index not in known and _forwards_name(node, arg.arg, readers)
+            }
+            if forwarded:
+                readers[name] = known | forwarded
+                changed = True
+    return readers
+
+
+def _forwards_name(node: ast.AST, name: str, readers: Dict[str, Set[int]]) -> bool:
+    """True when this body hands `name` to a helper that reads what it is given.
+
+    Args:
+        node: The function node to read.
+        name: The parameter name being traced.
+        readers: What is known so far - grows across passes.
+
+    Returns:
+        True if the parameter reaches a reading position of a known reader.
+    """
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call) or not isinstance(child.func, ast.Name):
+            continue
+        for index in readers.get(child.func.id, set()):
+            if index < len(child.args):
+                argument = child.args[index]
+                if isinstance(argument, ast.Name) and argument.id == name:
+                    return True
+    return False
+
+
+def _reads_name(node: ast.AST, name: str) -> bool:
+    """True when this body calls `<name>.readouterr()` somewhere inside it.
+
+    Args:
+        node: The helper's function node.
+        name: The parameter name to look for.
+
+    Returns:
+        True if the parameter is read as a capture.
+    """
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Attribute) or child.attr != READ_METHOD:
+            continue
+        if isinstance(child.value, ast.Name) and child.value.id == name:
+            return True
+    return False
+
+
+def _delegated_reader(unit: corpus.TestUnit, requested: List[str], readers: Dict[str, Set[int]]) -> str:
+    """The same-file helper this unit handed its capture to, or "".
+
+    Args:
+        unit: The test unit to read.
+        requested: The capture fixtures the unit's signature asked for.
+        readers: What `capture_readers` found in this unit's own module.
+
+    Returns:
+        The helper's name, or "" when the unit delegated to nobody.
+    """
+    wanted = set(requested)
+    for node in ast.walk(unit.node):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        positions = readers.get(node.func.id)
+        if not positions:
+            continue
+        for index in positions:
+            if index < len(node.args):
+                argument = node.args[index]
+                if isinstance(argument, ast.Name) and argument.id in wanted:
+                    return node.func.id
+    return ""
+
+
 def _receipt_callee(node: ast.Assert) -> str:
     """The output function this assert takes a receipt from, or "".
 
@@ -250,7 +398,7 @@ def _finding(species: str, unit: corpus.TestUnit, line: int, reason: str) -> Dic
     return {"nodeid": unit.nodeid, "line": line, "species": species, "reason": reason}
 
 
-def unit_flags(unit: corpus.TestUnit) -> List[Dict]:
+def unit_flags(unit: corpus.TestUnit, readers: Dict[str, Set[int]] | None = None) -> List[Dict]:
     """Every capture-never-read finding in one unit, with its evidence.
 
     The public entry point for this rule - the report lane and the tests both
@@ -261,12 +409,17 @@ def unit_flags(unit: corpus.TestUnit) -> List[Dict]:
 
     Args:
         unit: The test unit to judge.
+        readers: What `capture_readers` found in this unit's OWN module. Omitted
+            means "this file defines no capture-reading helper", which is the
+            honest default for a caller holding a unit and no tree - it can only
+            ever produce MORE findings, never fewer, so a caller that does not
+            know cannot accidentally acquit.
 
     Returns:
         Zero or one finding rows.
     """
     requested = _requested_fixtures(unit)
-    if requested and not _reads_capture(unit):
+    if requested and not _reads_capture(unit) and not _delegated_reader(unit, requested, readers or {}):
         return [
             _finding(
                 "CAPTURE-NEVER-READ",
@@ -291,8 +444,12 @@ def find_unread_captures(scanned: corpus.Corpus) -> List[Dict]:
         Finding rows across every unit.
     """
     rows: List[Dict] = []
-    for unit in scanned.units():
-        rows.extend(unit_flags(unit))
+    for parsed in scanned.files:
+        # Read once per FILE, not once per unit. A module with sixty units and
+        # one helper would otherwise re-walk its whole tree sixty times.
+        readers = capture_readers(parsed.tree)
+        for unit in parsed.units:
+            rows.extend(unit_flags(unit, readers))
     return rows
 
 

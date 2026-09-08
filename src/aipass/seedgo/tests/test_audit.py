@@ -10,7 +10,6 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -143,13 +142,36 @@ def test_render_violations_truncates_at_five():
 # ---------------------------------------------------------------------------
 
 
-def test_discover_branches_returns_list():
-    """discover_branches returns a list (possibly empty)."""
-    from aipass.seedgo.apps.handlers.audit.discovery import discover_branches
+def test_discover_branches_returns_list(tmp_path, monkeypatch):
+    """discover_branches returns a list -- of the registry's branches, name-sorted."""
+    import json
 
-    with patch.object(Path, "exists", return_value=False):
-        result = discover_branches()
+    from aipass.seedgo.apps.handlers.audit import discovery
+
+    for name in ("zulu", "alpha"):
+        apps_dir = tmp_path / name / "apps"
+        apps_dir.mkdir(parents=True)
+        (apps_dir / f"{name}.py").write_text("def main(): pass\n", encoding="utf-8")
+    reg_file = tmp_path / "TEST_REGISTRY.json"
+    reg_file.write_text(
+        json.dumps(
+            {
+                "branches": [
+                    {"name": "zulu", "path": str(tmp_path / "zulu")},
+                    {"name": "alpha", "path": str(tmp_path / "alpha")},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(discovery, "_find_registry", lambda: reg_file)
+    monkeypatch.setattr(discovery, "_find_caller_registries", lambda: [])
+
+    result = discovery.discover_branches()
     assert isinstance(result, list)
+    # Registry order is zulu-then-alpha; discover_branches sorts by name.
+    assert [b["name"] for b in result] == ["alpha", "zulu"]
+    assert result[0]["entry_file"] == str(tmp_path / "alpha" / "apps" / "alpha.py")
 
 
 def test_discover_branches_no_registry_returns_empty():
@@ -254,9 +276,15 @@ def test_uppercase_registry_name_no_entry_when_only_uppercase_file(tmp_path):
     reg_file.write_text(json.dumps(registry))
 
     result = _branches_from_registry(reg_file)
-    # On case-insensitive filesystems (macOS/Windows), BACKUP.py might match backup.py
-    # On case-sensitive (Linux), no match → empty result
-    import platform
+    # Case folding is a property of the filesystem, not of the OS name, so ask
+    # the directory the test just wrote instead of guessing from platform.
+    lowercase_resolves = (apps_dir / "backup.py").exists()
 
-    if platform.system() == "Linux":
-        assert len(result) == 0
+    if lowercase_resolves:
+        # Case-insensitive filesystem (default macOS/Windows): BACKUP.py answers
+        # to backup.py, so the branch IS found -- under the lowercase entry name.
+        assert len(result) == 1
+        assert result[0]["entry_file"].endswith("backup.py")
+    else:
+        # Case-sensitive filesystem (Linux): no lowercase entry file, no branch.
+        assert result == []

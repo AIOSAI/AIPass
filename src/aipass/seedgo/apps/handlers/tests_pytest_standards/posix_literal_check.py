@@ -64,6 +64,13 @@ PATH_CONSTRUCTORS: frozenset = frozenset(
 #: Module-level functions that normalise a path against the process state.
 RESOLVER_FUNCTIONS: frozenset = frozenset({"realpath", "abspath"})
 
+#: The path modules that name their dialect out loud. `os.path` is an ALIAS -
+#: posixpath on one leg of the matrix, ntpath on the other - and that aliasing
+#: IS the hazard. `ntpath.abspath("/x")` returns the same string on every host,
+#: so it is the cure a nominated site gets rewritten into, not the defect.
+#: Kept in step with the v5 pack copy, cured there the same day (2026-09-07).
+DIALECT_MODULES: frozenset = frozenset({"ntpath", "posixpath", "macpath"})
+
 SPECIFICATION = {
     "rule": "TAXONOMY section 5 rule 3b - a rooted path literal put through a resolver",
     "species": ["POSIX-LITERAL"],
@@ -155,7 +162,8 @@ def _resolver_function(call: ast.Call) -> Optional[ast.expr]:
         return None
     if call.func.attr not in RESOLVER_FUNCTIONS or not call.args:
         return None
-    if not corpus.dotted_name(call.func.value).endswith("path"):
+    module = corpus.dotted_name(call.func.value)
+    if not module.endswith("path") or module in DIALECT_MODULES:
         return None
     return call.args[0] if _is_rooted_literal(call.args[0]) else None
 

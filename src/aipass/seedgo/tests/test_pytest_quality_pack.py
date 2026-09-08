@@ -2496,6 +2496,208 @@ class TestCaptureNeverReadDetection:
         assert "requests capsys" in rows[0]["reason"]
 
 
+class TestCaptureNeverReadDelegation:
+    """The one level this rule follows: a helper in the same file.
+
+    PACK DEFECT, reported by @devpulse 2026-09-07 and confirmed by measurement:
+    a unit that hands `capsys` to a same-module helper which reads it HAD read
+    its capture, and the rule said the opposite. Measured over 22 branches
+    before the change: 132 rows fleet-wide, 90 acquitted, three branches move.
+    """
+
+    def test_a_same_file_helper_that_reads_the_fixture_acquits_its_caller(self, tmp_path):
+        """The reported shape, exactly as @devpulse wrote it down.
+
+        `_output(capsys)` reads `readouterr()` and hands back what was printed;
+        the unit asserts on the return. Nothing about that unit is unfinished,
+        which is the only thing CAPTURE-NEVER-READ claims.
+        """
+        _write(
+            tmp_path,
+            "tests/test_compass.py",
+            """
+            def _output(capsys):
+                captured = capsys.readouterr()
+                return captured.out + captured.err
+
+            def test_help_flag_shows_usage(capsys):
+                main(["--help"])
+                assert "USAGE" in _output(capsys)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert rows == []
+
+    def test_a_same_file_helper_that_does_NOT_read_the_fixture_still_flags(self, tmp_path):
+        """Negative control, and the reason the acquittal is not a blanket pass.
+
+        `_noop` takes the fixture and never reads it. If the rule acquitted on
+        the CALL rather than on what the helper does, every unit that passes
+        capsys anywhere would be excused and the rule would find nothing at all.
+        """
+        _write(
+            tmp_path,
+            "tests/test_quiet.py",
+            """
+            def _noop(capsys):
+                return None
+
+            def test_help_flag_shows_usage(capsys):
+                main(["--help"])
+                _noop(capsys)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_quiet.py::test_help_flag_shows_usage"]
+
+    def test_the_fixture_has_to_reach_the_parameter_the_helper_actually_reads(self, tmp_path):
+        """Position is the claim. `_pick(marker, capsys)` reads its FIRST argument.
+
+        A mapping keyed by helper name alone would acquit any call to a helper
+        that reads something, whatever was handed to it. Here the helper reads
+        parameter 0 and the unit passes the fixture at position 1, so the
+        capture is still never read and the row must stand.
+        """
+        _write(
+            tmp_path,
+            "tests/test_positions.py",
+            """
+            def _pick(first, second):
+                return first.readouterr().out
+
+            def test_help_flag_shows_usage(capsys):
+                main(["--help"])
+                _pick(marker, capsys)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_positions.py::test_help_flag_shows_usage"]
+
+    def test_a_helper_that_forwards_to_a_second_helper_is_followed_too(self, tmp_path):
+        """@memory's spelling: `_payload` never reads, `_raw_stdout` does.
+
+        Found by measuring after the one-hop version landed - it left 34 of
+        @memory's units flagged, and every one of them looks at its output two
+        calls down. A rule that stops at one hop is not answering "did somebody
+        look", it is answering "did somebody look immediately", which is a
+        different and less useful question.
+
+        The fixture also sits at position 1 here, behind `verbs`, so the closure
+        has to carry the POSITION through the forward and not just the name.
+        """
+        _write(
+            tmp_path,
+            "tests/test_chained.py",
+            """
+            def _raw_stdout(verbs, capsys, *args):
+                capsys.readouterr()
+                _run(verbs, *args)
+                return capsys.readouterr().out
+
+            def _payload(verbs, capsys, *args):
+                return json.loads(_raw_stdout(verbs, capsys, *args))
+
+            def test_whole_stdout_parses(verbs, capsys):
+                assert isinstance(_payload(verbs, capsys, "get"), dict)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert rows == []
+
+    def test_two_helpers_that_call_each_other_and_read_nothing_still_flag(self, tmp_path):
+        """The closure terminates, and terminating is not the same as acquitting.
+
+        Mutual recursion is the input that turns a naive "follow the call" into
+        a hang. Neither helper here ever reads the fixture, so the fixed point
+        is reached with an empty reader set and the caller keeps its finding -
+        the loop stopping is not by itself evidence that anyone looked.
+        """
+        _write(
+            tmp_path,
+            "tests/test_mutual.py",
+            """
+            def _ping(capsys):
+                return _pong(capsys)
+
+            def _pong(capsys):
+                return _ping(capsys)
+
+            def test_help_flag_shows_usage(capsys):
+                main(["--help"])
+                _ping(capsys)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_mutual.py::test_help_flag_shows_usage"]
+
+    def test_a_reader_defined_in_ANOTHER_file_does_not_acquit(self, tmp_path):
+        """The published limit, pinned so it stays a limit and not a regression.
+
+        Following an import means executing the import graph. The helper here is
+        spelled identically to the one two tests up and lives one file over; the
+        rule must not see it, and the honest consequence is a finding a human
+        overrules rather than a resolution this reader cannot make.
+        """
+        _write(
+            tmp_path,
+            "tests/helpers_screen.py",
+            """
+            def _output(capsys):
+                return capsys.readouterr().out
+            """,
+        )
+        _write(
+            tmp_path,
+            "tests/test_imported.py",
+            """
+            from tests.helpers_screen import _output
+
+            def test_help_flag_shows_usage(capsys):
+                main(["--help"])
+                assert "USAGE" in _output(capsys)
+            """,
+        )
+
+        rows = capture_never_read_check.find_unread_captures(corpus.build(tmp_path))
+
+        assert [row["nodeid"] for row in rows] == ["tests/test_imported.py::test_help_flag_shows_usage"]
+
+    def test_unit_flags_without_a_reader_map_can_only_flag_MORE_never_fewer(self, tmp_path):
+        """The default is the safe direction, and a caller cannot acquit by accident.
+
+        `unit_flags` is public and takes a unit; a caller holding no tree passes
+        no reader map. That caller must get the pre-2026-09-07 answer - a
+        finding - rather than a silent acquittal it never asked for.
+        """
+        _write(
+            tmp_path,
+            "tests/test_default.py",
+            """
+            def _output(capsys):
+                return capsys.readouterr().out
+
+            def test_help_flag_shows_usage(capsys):
+                assert "USAGE" in _output(capsys)
+            """,
+        )
+        scanned = corpus.build(tmp_path)
+        unit = next(scanned.units())
+
+        assert [row["species"] for row in capture_never_read_check.unit_flags(unit)] == ["CAPTURE-NEVER-READ"]
+        readers = capture_never_read_check.capture_readers(scanned.files[0].tree)
+        assert capture_never_read_check.unit_flags(unit, readers) == []
+
+
 class TestCaptureNeverReadReceipts:
     """RECEIPT-ONLY: the return value said the call happened, and nothing else."""
 
@@ -3360,6 +3562,58 @@ class TestPosixLiteralDetection:
 
         assert result["violations"] == []
 
+    def test_a_module_that_names_its_dialect_out_loud_is_not_flagged(self, tmp_path):
+        """`ntpath.abspath("/x")` is the CURE this rule sends people to.
+
+        PACK DEFECT, found by the rule convicting its own hazard demonstration
+        (seedgo, 2026-09-07). The premise in this checker's own docstring is that
+        `os.path` MEANS a different module per host, so the line means two
+        things. `ntpath` and `posixpath` are the opposite: the module names the
+        dialect, the answer is fixed on every leg of the matrix, and a nominated
+        site gets rewritten INTO this shape. Convicting it convicted the fix.
+
+        Measured across 22 branches before the change: 5 rows fleet-wide, this
+        acquits 2, and no other branch moves.
+        """
+        _write(
+            tmp_path,
+            "tests/test_dialects.py",
+            """
+            def test_the_two_dialects_disagree():
+                assert ntpath.abspath("D:/x/../tmp") == "D:\\tmp"
+                assert posixpath.realpath("/x/../tmp") == "/tmp"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_the_dialect_acquittal_does_not_reach_os_path(self, tmp_path):
+        """Negative control, and the reason the acquittal above is not a hole.
+
+        A gate spelled "any module ending in path" would take `os.path` with it
+        and delete the whole second arm of the rule. Both spellings sit in one
+        file so the two readings come from the same corpus in one pass: exactly
+        the os.path line is convicted, and it is named.
+        """
+        _write(
+            tmp_path,
+            "tests/test_both.py",
+            """
+            def test_the_alias_is_still_read():
+                assert os.path.abspath("/etc") == "/etc"
+
+            def test_the_dialect_is_not():
+                assert posixpath.abspath("/etc") == "/etc"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert [row["nodeid"] for row in result["violations"]] == ["tests/test_both.py::test_the_alias_is_still_read"]
+
     def test_a_constructor_called_with_no_arguments_is_read_without_crashing(self, tmp_path):
         """`Path().resolve()` is legal Python and the reader must survive it.
 
@@ -3621,6 +3875,109 @@ class TestCoverageSlotDetection:
         assert result["violations"][0]["where"] == "docstring"
         assert result["violations"][0]["species"] == "COVERAGE-SLOT"
         assert "exists for coverage" in result["violations"][0]["reason"]
+
+    def test_a_phrase_inside_quotation_marks_is_named_not_confessed(self, tmp_path):
+        """Quoting a confession is not making one — the data exclusion, one layer up.
+
+        The rule has never flagged a test whose DATA contains the phrase: that
+        test is testing a string. A docstring that writes the phrase between
+        quotation marks is doing the same thing in prose. Measured fleet-wide
+        on 2026-09-07 before the narrowing existed: 11 units matched, and the 5
+        with the match inside quotes were ALL in this very class — the tests of
+        this detector, whose docstrings have to name the phrases it hunts. No
+        other branch moved by one unit.
+        """
+        _write(
+            tmp_path,
+            "tests/test_about_the_rule.py",
+            '''
+            def test_the_detector_reads_a_reason():
+                """A docstring saying "added for coverage" is what this detector hunts."""
+                assert detect(SAMPLE) == "docstring"
+            ''',
+        )
+
+        result = coverage_slot_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+
+    def test_the_same_phrase_without_quotation_marks_is_still_a_confession(self, tmp_path):
+        """Negative control for the quote narrowing, and the reason it is narrow.
+
+        The acquittal above must turn on the quotation marks and nothing else.
+        Same phrase, same position, no quotes: flagged.
+        """
+        _write(
+            tmp_path,
+            "tests/test_plain.py",
+            '''
+            def test_the_writer_flushes():
+                """A docstring saying added for coverage is what this detector hunts."""
+                assert writer.flush() is None
+            ''',
+        )
+
+        result = coverage_slot_check.check_branch(str(tmp_path))
+
+        assert len(result["violations"]) == 1
+        assert result["violations"][0]["where"] == "docstring"
+
+    def test_a_quoted_phrase_does_not_acquit_a_plain_one_later_in_the_same_docstring(self, tmp_path):
+        """The scan reads EVERY match, not the first.
+
+        A docstring that quotes the phrase in its opening line and then confesses
+        in its closing one must still be flagged. Taking the first match and
+        stopping would let a quotation earlier in the paragraph silence a real
+        confession after it — an acquittal bought by word order.
+        """
+        _write(
+            tmp_path,
+            "tests/test_both.py",
+            '''
+            def test_the_writer_flushes():
+                """A docstring saying "for coverage" is the subject here.
+
+                This one was added for coverage.
+                """
+                assert writer.flush() is None
+            ''',
+        )
+
+        result = coverage_slot_check.check_branch(str(tmp_path))
+
+        assert len(result["violations"]) == 1
+
+    def test_to_satisfy_convicts_only_when_the_test_is_the_subject(self, tmp_path):
+        """A bare verb phrase is not a purposive claim.
+
+        The pattern was `to satisfy` with no subject until 2026-09-07, and on
+        that date it convicted five units across three branches of which NONE
+        was a confession: a hypothetical about another test, a rejected design,
+        a guard that was never written, one "cheap to satisfy", and one about
+        editing text to satisfy a cap. Every one of them is prose about
+        something other than why this test exists. Both spellings are asserted
+        here in one place, because the narrowing is only correct if it still
+        reads the confession.
+        """
+        _write(
+            tmp_path,
+            "tests/test_subject.py",
+            '''
+            def test_a_hypothetical_about_other_code():
+                """A guard that edited the measurement to satisfy itself would be lying."""
+                assert guard(sample) is None
+
+            def test_the_real_confession():
+                """This one exists to satisfy the audit."""
+                assert writer.flush() is None
+            ''',
+        )
+
+        result = coverage_slot_check.check_branch(str(tmp_path))
+
+        flagged = [row["nodeid"] for row in result["violations"]]
+        assert len(flagged) == 1, flagged
+        assert flagged[0].endswith("test_the_real_confession")
 
     def test_a_docstring_that_names_coverage_as_its_subject_is_not_flagged(self, tmp_path):
         """THE NARROWING THAT DECIDED THE SHAPE - phrases, never bare words.

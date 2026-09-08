@@ -273,6 +273,35 @@ class TestEverySeedInTheRepo:
     built; the moment a seed lands, each rule reports per branch by name.
     """
 
+    def test_the_population_is_every_citizen_and_not_the_sentinel(self):
+        """The table the three tests below iterate, counted before they run.
+
+        VANISHING-TABLE (empty_parametrize, 2026-09-07). Those three build their
+        cases at COLLECTION time from `_seed_params()`. If the glob ever stops
+        matching - a moved seed directory, a renamed file, a repo root resolved
+        one level off - the table collapses to the single `no-seeds-on-disk`
+        sentinel, every one of them reports SKIPPED, and a suite that is no
+        longer checking a single passport in the fleet still reads green.
+
+        `_seed_params` already refuses to hand back an EMPTY list, which is the
+        right half of the cure and the reason this file was never at risk of the
+        worst spelling. What it cannot do is say whether the rows it produced
+        are the fleet. That claim is here: one seed per citizen, where a citizen
+        is a branch directory carrying `.aipass/`, so the count follows the fleet
+        instead of being a literal somebody has to remember to bump.
+        """
+        root = _repo_root()
+        assert root is not None, "the repo root did not resolve - every seed test below would skip"
+
+        citizens = sorted(d.name for d in (root / "src" / "aipass").iterdir() if (d / ".aipass").is_dir())
+        params = _seed_params()
+
+        assert len(params) == len(citizens), (
+            f"{len(params)} seed(s) for {len(citizens)} citizen(s) - "
+            f"missing: {sorted(set(citizens) - {_branch_of(path.values[0]) for path in params if path.values[0]})}"
+        )
+        assert len(citizens) > 1, "one citizen or none means the glob is not reading the fleet"
+
     @pytest.mark.parametrize("seed", _seed_params())
     def test_the_seed_parses_and_carries_the_2_0_passport_shape(self, seed):
         data = _load(seed)
