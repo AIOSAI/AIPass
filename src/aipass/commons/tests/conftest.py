@@ -38,6 +38,7 @@ except ImportError:
 from pathlib import Path  # noqa: E402
 
 from aipass.commons.apps.handlers.json import json_handler  # noqa: E402
+from aipass.cli.apps.modules.display import reset_command_state  # noqa: E402
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
 # suites the one json service subsumed, and rglobbing into a dot-directory
@@ -68,6 +69,21 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def _clear_command_state():
+    """Start every test with the CLI's failure flag clear.
+
+    A real CLI run is one process per invocation, so the process-level flag in
+    aipass.cli's display module is born clean each time. Pytest runs the whole
+    suite in ONE process, where a test that provokes an error() would otherwise
+    hand its exit code to every test after it. Cleared before and after, so
+    neither direction leaks.
+    """
+    reset_command_state()
+    yield
+    reset_command_state()
 
 
 @pytest.fixture(scope="session")

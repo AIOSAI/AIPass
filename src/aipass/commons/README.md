@@ -38,11 +38,12 @@ drone @commons search "registry"
 drone @commons catchup
 ```
 
-> **Known issue (APLAN-0017, still live 2026-09-06):** a trailing `--help` after a
+> **Known issue (APLAN-0017, still live 2026-09-07):** a trailing `--help` after a
 > command does **not** show help — it runs the command with `--help` as its first
-> argument. `apps/commons.py:377` hands `["--help"]` to each module's
+> argument. `apps/commons.py:380` hands `["--help"]` to each module's
 > `handle_command()`, so any module that does not intercept the flag itself simply
-> executes. Measured tonight: `drone @commons feed --help` printed the feed.
+> executes. Measured 2026-09-07: `drone @commons feed --help` printed the feed and
+> exited 0.
 > `drone @commons prompt --help` posts a real daily prompt (not re-run tonight —
 > it writes). Only `room` is cured (commit `86eddd41`, subcommand help added in
 > `apps/modules/room.py`); `activity` intercepts `--help` in its handler
@@ -185,7 +186,8 @@ drone @commons search "routing proposal"
 
 "Boardroom" is a convention, not a code feature -- the word appears nowhere in the schema or the modules; a boardroom is an ordinary room used for one design thread.
 
-Three boardrooms are on record in `commons.db` tonight (2026-09-06), all created by `devpulse`, each one RFC post plus threaded comments:
+Three boardrooms are on record in `commons.db` (re-measured 2026-09-07, unchanged from the 09-06 count), all created by `devpulse`, each one RFC post plus threaded
+comments:
 
 | Room | Post | Comments | Commenting branches |
 |------|------|----------|---------------------|
@@ -240,7 +242,7 @@ Every module retains its `print_introspection()` function by design. These are N
 commons/
 ├── apps/
 │   ├── commons.py                 # Entry point (Layer 1)
-│   ├── modules/                   # Layer 2: Thin routers (22 modules; .archive/ holds 21 pre-refactor originals)
+│   ├── modules/                   # Layer 2: Thin routers (22 modules; .archive/ holds 22 pre-refactor/withdrawn originals)
 │   │   ├── post.py                # post, thread, delete
 │   │   ├── comment.py             # comment, vote
 │   │   ├── feed.py                # feed
@@ -262,8 +264,8 @@ commons/
 │   │   ├── leaderboard.py         # leaderboard (alias: leaderboards)
 │   │   ├── explore.py             # explore, secrets
 │   │   ├── capsule.py             # capsule, capsules, open
-│   │   └── database.py            # database init, connection management
-│   ├── handlers/                  # Layer 3: Implementation (20 domains)
+│   │   └── database.py            # database init, connection management (service module)
+│   ├── handlers/                  # Layer 3: Implementation (20 domains + 1 root helper)
 │   │   ├── database/              # Schema, CRUD, migrations
 │   │   ├── json/                  # Shim binding the fleet json service (prax-owned)
 │   │   ├── posts/                 # Post operations
@@ -283,9 +285,10 @@ commons/
 │   │   ├── artifacts/             # Artifacts, trading, time capsules
 │   │   ├── social/                # Leaderboards
 │   │   ├── identity/              # Identity detection
-│   │   └── dashboard/             # Dashboard file writer
+│   │   ├── dashboard/             # Dashboard file writer
+│   │   └── module_root.py         # Guarded __file__ resolution (root helper, no domain)
 │   ├── integrations/              # (README only — no code yet)
-│   ├── json_templates/            # Default JSON tracking templates
+│   ├── .archive/json_templates/   # Dead since the json sweep — archived 2026-09-07, see Status
 │   ├── plugins/                   # (README + __init__ only — no plugins yet)
 │   └── logs/                      # Entry-point log output (currently empty)
 ├── tools/                         # Utilities (2 .py + README)
@@ -309,13 +312,35 @@ commons/
 
 ---
 
+## Exit Codes
+
+Patrick's standing ruling (2026-09-07): an unknown command or argument **fails** -- non-zero exit, message naming the token. Commons broke it everywhere at once until
+this wave: `handle_command()` answers *handled*, not *succeeded*, so a module that printed a refusal still returned True and `main()` turned that into exit 0. Measured
+before the cure, `drone @commons thread not_a_real_subarg_xyz` printed `Invalid post_id - must be an integer` and reported success to the shell that called it.
+
+| Outcome | Exit | Example |
+|---------|------|---------|
+| Command ran | 0 | `drone @commons feed` |
+| Command ran but printed a refusal | 2 | `drone @commons thread not_a_real_subarg_xyz`, `drone @commons room join no_such_room`, `whoami` with no detectable branch |
+| No module claimed the command | 1 | `drone @commons nosuchverb nosucharg` -- names the whole invocation, not just the first word |
+
+Commons owns no refusal machinery of its own. The flag lives in `@cli`, which three other branches already use: `error()` calls `mark_command_failed()` for its caller,
+and `resolve_exit(handled)` maps the pair to 0 / 2 / 1 (`cli/apps/modules/display.py:57-81`). Commons' whole share is two lines in `apps/commons.py` -- 
+`reset_command_state()` at the top of `main()`, and `return resolve_exit(handled)` on the routed branch. All 62 existing `error()` call sites across the 21 command
+routers changed behaviour without being edited, and a refusal written tomorrow inherits the exit code for free.
+
+One call site needed changing rather than inheriting: `commons_identity.py::_handle_whoami` announced a failed identity lookup with `warning()`, which prints but never marks, so
+`whoami` reported success while telling you it could not answer (canary's warning-refusal sweep, 2026-09-07). It is an `error()` now.
+
 ## Integration Points
 
 ### Depends On
-- `aipass.prax` -- Logging via `system_logger`. **Hard dependency**: all 75 import sites (75 lines across 75 files under `apps/`) are plain top-level imports with no
+- `aipass.prax` -- Logging via `system_logger`. **Hard dependency**: all 53 import sites (53 lines across 53 live files under `apps/`; a further 24 sit in `.archive/` and
+  are not imported by anything) are plain top-level imports with no
   `try`/`except`, including the entry point (`apps/commons.py:71`). If prax is unavailable, commons does not start.
 - `aipass.cli` -- Console output and headers. Graceful fallback to a plain `rich` Console in all 22 modules (`try`/`except (ImportError, OSError)`) -- but **not** in the
-  entry point `apps/commons.py:72`, which imports it hard. No handler imports `aipass.cli` at all: handlers return dicts and never render.
+  entry point `apps/commons.py:72`, which imports it hard. No handler imports `aipass.cli` at all: handlers return dicts and never render. `error()` is load-bearing
+  beyond rendering: it marks the command failed, which is what decides the exit code. See Exit Codes.
 - SQLite with FTS5 (stdlib)
 
 ### Provides To
@@ -340,23 +365,29 @@ drone @commons --version                        # Version
 
 ## Status / Known Issues
 
-Everything in this section was measured on 2026-09-06 (FPLAN-0490 truth pass). Numbers are counts taken that night, not carried forward.
+Everything in this section was measured on 2026-09-07 (FPLAN-0492 wave 7). Numbers are counts taken that night, not carried forward.
 
-**Test suite:** 473 `def test_` across 21 `tests/test_*.py` files; pytest expands them to **487 cases, 487 passed / 0 skipped** (`python -m pytest src/aipass/commons/tests`,
-27s). The gap between 473 and 487 is parametrization. Three of the 21 files are class-based (`test_commons.py` uses `unittest.TestCase`, `test_lifecycle.py` and
-`test_comments_posts.py` use pytest classes), so 352 of the 473 are top-level functions and 121 are methods.
+**Test suite:** 477 `def test_` across 21 `tests/test_*.py` files; pytest expands them to **491 cases, 491 passed / 0 skipped**, 26s, run from the repo root as
+`.venv/bin/python -m pytest src/aipass/commons -c pyproject.toml --rootdir=. -q -p no:cacheprovider`. The gap between 477 and 491 is parametrization. Three of the 21 files
+are class-based (`test_commons.py` uses `unittest.TestCase`, `test_lifecycle.py` and `test_comments_posts.py` use pytest classes), so 356 of the 477 are top-level
+functions and 121 are methods. Four of the 477 are this wave's exit-code pins, added to the existing `test_cli_and_contracts.py`; the suite has no new files.
 
-**Standards:** `drone @seedgo audit aipass @commons` -- 100% on every scored category. The branch-local bypass registry (`.seedgo/bypass.json`) holds **74 rows**; the row
-naming `increment_counter` / `update_data_metrics` was removed when those functions retired with the old json handler (75 -> 74), and no row names them tonight.
+**Standards:** `drone @seedgo audit aipass @commons --full` -- 100% on every scored category, no type errors. The audit consults 46 categories: v4 `test_quality` was
+archived on 2026-09-07 and is no longer a live standard, so a README that cites a per-category test score is citing a rule that no longer runs. The branch-local bypass
+registry (`.seedgo/bypass.json`) holds **74 rows**; the row naming `increment_counter` / `update_data_metrics` was removed when those functions retired with the old json
+handler (75 -> 74), and no row names them tonight.
 
 **Open issues:**
 
 1. **Trailing `--help` executes the command** (APLAN-0017, live). See the note under Quick Start. `room` is cured; every other command still runs. `prompt --help` posts a
-   real prompt. Not fixed in this pass -- this was a docs-only pass.
-2. **Five routed commands are missing from `drone @commons --help`:** `whoami`, `database`, `unreact`, `reactions`, `push-central`. All five work and all five are
-   documented in the Commands tables above; `print_help()` in `apps/commons.py` just never listed them. The command tables in this README are the complete set (52 command
-   strings across 22 modules), `--help` is the incomplete one.
-3. **`apps/handlers/json/logs/`** is a dormant scaffold directory holding a single `.gitkeep`, dated 2026-03-08 (branch creation). Nothing writes there: a tree-wide grep for
+   real prompt. Not fixed in this pass -- wave 7 changed code, but this defect was not in its brief.
+2. **Five routed commands are missing from `drone @commons --help`:** `whoami`, `database`, `unreact`, `reactions` and `push-central`.
+   All five work and all five are documented in the Commands tables above; `print_help()` in `apps/commons.py` just never listed them. The command tables in this README
+   are the complete set (52 command strings across 22 modules), `--help` is the incomplete one.
+3. **`apps/.archive/json_templates/`** held three unread templates (`default/config.json`, `data.json`, `log.json`) left behind by the json service sweep. Measured before
+   the move: zero references in `apps/`, `tests/` and `tools/`, one in this README's own layout row. Archived rather than deleted on 2026-09-07; `.archive/` is gitignored
+   (Patrick's 2026-08-18 ruling), so in git history this reads as a deletion of the three tracked files.
+4. **`apps/handlers/json/logs/`** is a dormant scaffold directory holding a single `.gitkeep`, dated 2026-03-08 (branch creation). Nothing writes there: a tree-wide grep for
    that path across `apps/`, `tools/` and `tests/` returns zero hits, and the current json handler writes nothing beside itself. It predates the json service sweep and is
    kept, not deleted. `apps/handlers/json/json_handler.py` is now the fleet shim (55 lines, sha256 `3456b766...`) binding `aipass.prax.json_handler`; the branch's own
    pre-sweep handler is parked in `apps/handlers/json/.archive/`.
@@ -367,7 +398,7 @@ was, via live drone calls.
 
 ---
 
-*Last Updated: 2026-09-06*
+*Last Updated: 2026-09-07*
 
 ---
 [← Back to AIPass](../../../README.md)

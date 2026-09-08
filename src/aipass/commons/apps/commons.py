@@ -70,6 +70,7 @@ if hasattr(signal, "SIGPIPE"):
 # Cross-branch imports
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
 from aipass.cli.apps.modules import console, header, error, warning  # noqa: E402
+from aipass.cli.apps.modules.display import reset_command_state, resolve_exit  # noqa: E402
 
 
 # =============================================================================
@@ -342,6 +343,10 @@ def print_introspection(modules: List[Any]) -> None:
 def main() -> int:
     """Main entry point - initializes database and routes commands to modules."""
 
+    # One invocation, one verdict: clear the CLI's process-level failure flag
+    # before anything can print. error() sets it, resolve_exit() reads it.
+    reset_command_state()
+
     # Ensure database is ready
     if not ensure_database():
         error("Failed to initialize The Commons database")
@@ -390,11 +395,19 @@ def main() -> int:
         print_help()
         return 0
 
-    # Route to modules
-    if route_command(command, remaining_args, modules):
-        return 0
+    # Route to modules. Handled is not the same as succeeded: a module that
+    # printed a refusal still returns True, because it DID handle the command.
+    # resolve_exit() is the fleet's one door for that distinction - 0 clean,
+    # 2 handled-but-refused, 1 unhandled - and error() has already set the flag
+    # it reads (Patrick's ruling 2026-09-07: an unknown argument fails).
+    handled = route_command(command, remaining_args, modules)
+    if handled:
+        return resolve_exit(handled)
 
-    error(f"Unknown command: {command}", suggestion="Run 'drone @commons --help' for available commands")
+    # Name the whole invocation: routing cannot tell which half was wrong, and
+    # reporting only the first word hides the token that actually failed.
+    attempted = " ".join([command, *remaining_args])
+    error(f"Unknown command: {attempted}", suggestion="Run 'drone @commons --help' for available commands")
     return 1
 
 
