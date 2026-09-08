@@ -24,7 +24,7 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import NamedTuple, Optional, Tuple, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -57,7 +57,13 @@ _CLAUDE_BIN = _find_claude_bin()
 # Infrastructure paths
 _REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
-CONFIG_FILE = _AI_MAIL_DIR / "safety_config.json"
+# UNTRACKED ON PURPOSE (2026-09-08). This file now holds the Fable grant, and
+# a grant is Patrick's to edit on his machine — the repo must not ship an answer
+# to "who may run Fable". `.ai_mail.local/` is gitignored (root .gitignore:30);
+# the branch root is not, and that is where this pointed until today. Measured
+# before the move: no file existed at EITHER spelling, so `_load_config` had
+# always returned its own defaults and nothing was carried across.
+CONFIG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "safety_config.json"
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 PAUSE_FILE = _REPO_ROOT / ".aipass" / "autonomous_pause"
 MONITOR_SCRIPT = Path(__file__).parent / "dispatch_monitor.py"
@@ -71,9 +77,25 @@ KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
 DEFAULT_MODEL = "opus"
 
 # The passport value that means "never woken by an ordinary caller".
+# THIS DECIDES THE GATE, NOT THE MODEL. Who is woken at all versus mailed is a
+# different question from what they spawn on, and until 2026-09-08 this one
+# constant answered both — which is how a class-based rule ended up expressing
+# a policy about one named seat.
 MANAGER_CLASS = "manager"
-# Patrick, 2026-08-30: "managers are fable thats it, only manager run fable".
-MANAGER_MODEL = "fable"
+
+# Patrick, 2026-09-08: "only devpulse runs on fable (I carry the admin
+# baggage)". SUPERSEDES his 2026-08-30 ruling that managers are Fable
+# (compass #323, superseded by #350). The seat is granted BY NAME because the
+# class could not express it: @vera is manager-class, a project owner, and woke
+# on Fable through the daemon's scheduled lane at 11:31 that morning — the run
+# that produced the ruling. Everyone else, every class, every project, runs
+# DEFAULT_MODEL by default and lighter models on request.
+#
+# The default is the FALLBACK, not the policy: the live grant is read from
+# CONFIG_FILE so Patrick can move a seat without a code change.
+FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
+#: The key in CONFIG_FILE holding the grant, when one has been written.
+FABLE_GRANT_KEY = "fable_allowed"
 
 # The one marking tmux cannot half-apply. A session either exists under this
 # name or new-session failed, so `tmux ls` never shows a daemon wake wearing a
@@ -92,6 +114,20 @@ def is_wake_blocked(target: str) -> bool:
     return f"@{target.lstrip('@').lower()}" in WAKE_BLOCKLIST
 
 
+class ModelDecision(NamedTuple):
+    """What a wake spawns on, and what the caller has to be told about it.
+
+    Two fields because the caller needs both and the answer is one read of the
+    grant. Returning only the model would leave the refusal to be recomputed —
+    or, as the superseded version did, only logged, where the person who typed
+    the command never sees it.
+    """
+
+    model: str
+    #: "" when nothing was refused. Never None: callers test it for truth.
+    refusal: str
+
+
 def _is_fable(model: str) -> bool:
     """True for any spelling of Fable — bare alias, full id, any casing.
 
@@ -102,51 +138,90 @@ def _is_fable(model: str) -> bool:
     return "fable" in model.lower()
 
 
-def resolve_wake_model(citizen_class: str, requested: Optional[str]) -> str:
-    """The model this wake spawns on, per Patrick's ruling of 2026-08-30.
+def _normalise_address(target: str) -> str:
+    """One leading @, lowercase — the spelling the grant is keyed on.
 
-    Two halves, and the second is the one with teeth. A manager ALWAYS gets
-    Fable — the requested model is overridden, not merged, because a schedule
-    naming a model is a preference and the ruling is a policy. Everyone else
-    NEVER gets Fable: their request is honoured as it is today except for that
-    one value, which falls back to DEFAULT_MODEL rather than refusing the wake.
+    Same normalisation `is_wake_blocked` already applies, for the same reason:
+    a policy keyed on an address must not be escapable by typing it differently.
+    """
+    return f"@{target.lstrip('@').lower()}"
 
-    Both overrides are logged. A model silently swapped under a caller is the
-    kind of change nobody can find later, and the log line is the only place a
-    schedule's author learns their wake.model field was not what ran.
 
-    `citizen_class` comes from the passport wake_branch already opens for the
-    manager gate — one read, one source. An unreadable passport arrives here as
-    "", i.e. not a manager, which is the same direction is_manager() fails in:
-    an invented manager would silently move a branch onto Fable.
+def fable_allowed() -> frozenset:
+    """Which addresses may run Fable, per Patrick's ruling of 2026-09-08.
+
+    Read from CONFIG_FILE rather than hardcoded so Patrick can move the grant
+    without a code change and without the repo shipping his answer.
+
+    A MISSING OR MALFORMED CONFIG FALLS BACK TO THE DEFAULT, NOT TO EMPTY. An
+    empty grant would demote @devpulse, which is a policy change; producing one
+    from a typo in an untracked file would mean the wake lane quietly enforcing
+    a ruling nobody made, and the only symptom would be devpulse spawning on
+    opus. Failing toward the written ruling is the recoverable direction.
+
+    An EXPLICIT empty list is honoured, because that is a decision rather than
+    an accident — it is the spelling for revoking the grant from everyone, and
+    it is distinguishable from the key being absent.
+    """
+    config = _read_json(CONFIG_FILE)
+    if not isinstance(config, dict) or FABLE_GRANT_KEY not in config:
+        return FABLE_GRANT_DEFAULT
+    granted = config[FABLE_GRANT_KEY]
+    if not isinstance(granted, list):
+        logger.warning(
+            "[wake] %s in %s is %s, not a list — falling back to the default grant %s",
+            FABLE_GRANT_KEY,
+            CONFIG_FILE,
+            type(granted).__name__,
+            sorted(FABLE_GRANT_DEFAULT),
+        )
+        return FABLE_GRANT_DEFAULT
+    return frozenset(_normalise_address(str(entry)) for entry in granted)
+
+
+def resolve_wake_model(target_email: str, requested: Optional[str]) -> ModelDecision:
+    """The model this wake spawns on, per Patrick's ruling of 2026-09-08.
+
+    SUPERSEDES the 2026-08-30 rule that citizen_class manager means Fable. The
+    class decides nothing here any more: Fable is granted to named seats, and
+    today the grant holds @devpulse alone. A class-based rule could not express
+    "this one manager and no other" — @vera is manager-class and woke on Fable
+    through the scheduled lane on 2026-09-08, which is the run that produced
+    the ruling — so the input changed from the passport's class to the address.
+
+    A REFUSED REQUEST NEVER STALLS THE WAKE. The caller asked for a model, not
+    for a veto: the work proceeds on DEFAULT_MODEL. The refusal is RETURNED as
+    well as logged, because the superseded version only logged it and a log
+    line is not read by the person who typed the command.
+
+    Nothing requested still means DEFAULT_MODEL, for granted seats too. The
+    grant is permission to ask for Fable, not a standing assignment to it.
 
     Args:
-        citizen_class: identity.citizen_class from the target's passport, or ""
+        target_email: the branch being woken, in any spelling of the address
         requested: the caller's model (schedule.json wake.model, --model, None)
 
     Returns:
-        The model string to hand the CLI. Never None — the wake lane names its
-        model rather than inheriting whatever the CLI would have defaulted to,
-        which is exactly how @vera landed on Fable by accident on 2026-08-30.
+        ModelDecision(model, refusal). `refusal` is "" unless Fable was asked
+        for on behalf of a seat that does not hold the grant.
     """
-    if citizen_class == MANAGER_CLASS:
-        if requested and not _is_fable(requested):
-            logger.info(
-                "[wake] manager policy: requested model %r overridden to %s (Patrick 2026-08-30)",
-                requested,
-                MANAGER_MODEL,
-            )
-        return MANAGER_MODEL
+    if not requested:
+        return ModelDecision(DEFAULT_MODEL, "")
 
-    if requested and _is_fable(requested):
-        logger.warning(
-            "[wake] non-manager policy: %r refused — Fable is managers-only, falling back to %s",
-            requested,
-            DEFAULT_MODEL,
-        )
-        return DEFAULT_MODEL
+    if not _is_fable(requested):
+        return ModelDecision(requested, "")
 
-    return requested or DEFAULT_MODEL
+    target = _normalise_address(target_email)
+    if target in fable_allowed():
+        return ModelDecision(requested, "")
+
+    refusal = (
+        f"{target} may not run Fable — {requested!r} refused, waking on "
+        f"{DEFAULT_MODEL} instead (Patrick's ruling 2026-09-08: Fable is "
+        f"granted by name and this seat does not hold the grant)"
+    )
+    logger.warning("[wake] %s", refusal)
+    return ModelDecision(DEFAULT_MODEL, refusal)
 
 
 # ─── Status Step Tracking ───────────────────────────────
@@ -789,7 +864,9 @@ def _spawn_manager_interactive(
 
     `model` arrives already resolved by resolve_wake_model() — the policy lives
     at one site in wake_branch, and this lane naming its own would be a second
-    place for the managers-only-Fable rule to drift.
+    place for the Fable grant to drift. Unchanged by the 2026-09-08 ruling for
+    exactly that reason: the rule this lane obeys moved, and this lane did not
+    have to, because it never held a copy of it.
     """
     if shutil.which("tmux") is None:
         status.fail("tmux", "tmux not found — cannot spawn interactive manager session")
@@ -976,12 +1053,22 @@ def wake_branch(
         logger.info("[wake] Could not read passport for %s: %s", email, exc)
 
     # Step 3b: Model policy, decided ONCE for both spawn lanes. Resolved here
-    # rather than at each spawn site because the passport this gate just read is
-    # the ruling's only input — asking the interactive lane to answer it again
-    # would put the managers-only-Fable rule in two places, and @vera reached
-    # Fable by CLI accident precisely because no site owned the answer.
-    resolved_model = resolve_wake_model(citizen_class, model)
-    status.ok("model", f"{resolved_model} ({citizen_class or 'unclassified'})")
+    # rather than at each spawn site because a second site would be a second
+    # place for the rule to drift, and @vera reached Fable by CLI accident
+    # precisely because no site owned the answer.
+    #
+    # citizen_class is NO LONGER AN INPUT (Patrick, 2026-09-08) and is no longer
+    # named in the step either: printing it beside the model implied it decided
+    # the model, which is exactly the superseded rule. The gate above prints the
+    # class where the class actually matters.
+    decision = resolve_wake_model(email, model)
+    resolved_model = decision.model
+    if decision.refusal:
+        # WARN, not fail: the wake proceeds. This step is the only place the
+        # person who typed the command learns their model was not honoured.
+        status.warn("model", decision.refusal)
+    else:
+        status.ok("model", resolved_model)
 
     # Step 4: Zombie check (pre-flight)
     zombie_count = _clean_zombies()
