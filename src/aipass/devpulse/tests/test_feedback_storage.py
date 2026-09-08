@@ -6,7 +6,6 @@
 """Tests for feedback storage — load, save, generate_id, directory creation."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,11 +23,6 @@ def mock_feedback_dir(tmp_path):
 
 class TestGetInboxPath:
     """Tests for get_inbox_path()."""
-
-    def test_returns_path_object(self, mock_feedback_dir):
-        """Should return a Path instance."""
-        result = storage.get_inbox_path()
-        assert isinstance(result, Path)
 
     def test_returns_inbox_json_under_feedback_dir(self, mock_feedback_dir):
         """Should point to inbox.json inside the feedback directory."""
@@ -126,11 +120,6 @@ class TestSaveInbox:
 
 class TestGenerateId:
     """Tests for generate_id()."""
-
-    def test_returns_string(self):
-        """Should return a string."""
-        result = storage.generate_id()
-        assert isinstance(result, str)
 
     def test_returns_8_chars(self):
         """Should return exactly 8 characters."""

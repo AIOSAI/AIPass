@@ -8,7 +8,6 @@
 
 """Tests for devpulse.py — entry point CLI routing and module discovery."""
 
-import importlib
 from unittest.mock import patch, MagicMock
 
 
@@ -94,24 +93,16 @@ class TestModuleDiscovery:
     """discover_modules() finds modules with handle_command."""
 
     def test_discover_modules_returns_list(self):
-        """Returns a list of discovered modules."""
+        """Returns the four command modules that live in apps/modules/."""
         result = devpulse_module.discover_modules()
-        assert isinstance(result, list)
+        names = {mod.__name__.rsplit(".", 1)[-1] for mod in result}
+        assert {"watchdog", "compass", "feedback", "admin_grant"} <= names
 
     def test_discovered_modules_have_handle_command(self):
         """Each discovered module exposes handle_command."""
         modules = devpulse_module.discover_modules()
-        for mod in modules:
-            assert hasattr(mod, "handle_command")
-
-    def test_reimport_after_mock(self):
-        """Verify module reimport picks up mocked state."""
-        devpulse_module.discover_modules()
-        with patch.object(devpulse_module, "MODULES_DIR", devpulse_module.Path("/nonexistent")):
-            importlib.reload(devpulse_module)
-            reloaded = devpulse_module.discover_modules()
-        importlib.reload(devpulse_module)
-        assert isinstance(reloaded, list)
+        assert modules, "discovery found nothing - the loop below would check nothing"
+        assert all(callable(getattr(mod, "handle_command", None)) for mod in modules)
 
 
 class TestErrorResilience:
@@ -130,7 +121,7 @@ class TestErrorResilience:
         empty.write_text("")
         with patch.object(devpulse_module, "MODULES_DIR", tmp_path):
             result = devpulse_module.discover_modules()
-        assert isinstance(result, list)
+        assert result == []
 
     def test_handle_command_with_empty_args(self):
         """--help with empty args list succeeds."""

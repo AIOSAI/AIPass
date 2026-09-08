@@ -88,7 +88,7 @@ def test_short_help_flag_mid_args_never_executes(mod, cmd, args, capsys):
         result = mod.handle_command(cmd, args)
     assert result is True
     out = _output(capsys).lower()
-    assert "usage" in out or cmd in out
+    assert "usage:" in out
 
 
 def test_compass_value_containing_help_word_still_executes():

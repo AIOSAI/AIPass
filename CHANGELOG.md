@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased] — no stragglers: every v5 pytest_quality row to 100 fleet-wide before the canary trial (FPLAN-0508, DPLAN-0323 phase 7.5)
+
+### Changed
+
+- **devpulse tests** — the branch's own v5 rows closed: eleven either/or assertions (`"usage" in out or cmd in out` and kin) now pin the one string the code prints, measured by running each command; six isinstance-only units pin values, three of them archived to `tests/.archive/` as subsumed by the neighbour that already pinned the exact value; two vacuous loops assert before iterating; five feedback-inbox tests and the wire's never-spawns test read what they print or count what they forbid. `assertion_shape`, `no_oracle`, `unentered_assert` 100; 569 passed from both rootdirs; five mutations red. `capture_never_read` (26 units reading `capsys` through a same-file helper) waits on seedgo's ruling on the rule.
+
 ## [2026-09-07] — the blanket-ruling day: eight owner waves on the contested MERGE rows, the watchdog dead-monitor backstop, the fleet refusal sweep (FPLAN-0492 / FPLAN-0499, merged as PR #758, v2.8.3)
 
 ### Fixed

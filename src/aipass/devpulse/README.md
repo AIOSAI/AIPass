@@ -59,7 +59,7 @@ src/aipass/devpulse/
 │   ├── integrations/            # Extension point (README only)
 │   └── plugins/                 # Plugin extension point (README + empty __init__.py)
 ├── devpulse_json/               # Storage written by @prax's json service through the shim (config/data/log trio per module, 64 files)
-├── tests/                       # 460 test functions across 23 files; pytest expands to 572 cases (569 passed, 3 skipped, 111 s — 2026-09-06)
+├── tests/                       # 466 test functions across 22 files; pytest expands to 571 cases (569 passed, 2 skipped, 46 s — 2026-09-07)
 ├── tools/                       # One-shot scanners & probes (31 scripts) + reports/
 ├── prototypes/                  # Shape-exploration prototypes
 ├── templates/                   # Local templates
@@ -263,7 +263,7 @@ Verified 2026-09-06 (README truth pass round 2, FPLAN-0490 — every command tab
 
 | Signal | Measured 2026-09-07 |
 |---|---|
-| Tests | 455 `def test_` across 22 files; 559 cases, 557 passed / 2 skipped in 744 s under load (`.venv` python, from the repo root in the CI shape: `python -m pytest src/aipass/devpulse -c pyproject.toml --rootdir=.`). Down from 460 / 23 on 09-06: `tests/test_json_handler.py` archived (its six shim pins run for all 18 branches in seedgo's contract suite) and one judged-DELETE row removed from `test_watchdog_agent.py`; up two on 09-07 for the unknown-flag and did-you-mean pins in `test_devpulse.py`. |
+| Tests | 466 `def test_` across 22 files; 571 cases, 569 passed / 2 skipped in 39 s (`.venv` python, from the repo root in the CI shape: `python -m pytest src/aipass/devpulse -c pyproject.toml --rootdir=.`). 2026-09-07 FPLAN-0508 (no stragglers): v5 `pytest_quality` reads 100 on assertion_shape, no_oracle and unentered_assert — eleven either/or assertions now pin the one string the code prints, six isinstance-only units pin values (three of them archived to `tests/.archive/` as subsumed by their neighbours), two vacuous loops assert before iterating, six oracle-less inbox/wire tests read what they print. Earlier: `tests/test_json_handler.py` archived on 09-06 (its six shim pins run for all 18 branches in seedgo's contract suite). |
 | Seedgo | `drone @seedgo audit aipass @devpulse` — Overall 100, every scored category 100 across the **46** consulted entries (v4 `test_quality` retired from the pack 2026-09-07), no type errors; 10 bypass rules in `.seedgo/bypass.json` |
 | json handler | `apps/handlers/json/json_handler.py` is the fleet shim: sha256 `3456b766…`, binds `aipass.prax.json_handler`, adds nothing |
 | Version | `drone @devpulse --version` prints `devpulse 1.0.2` — one `VERSION` constant in `apps/devpulse.py`, kept in step with the file header |

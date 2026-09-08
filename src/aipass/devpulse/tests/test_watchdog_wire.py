@@ -154,10 +154,7 @@ def _plant_entry(store: Path, wtype: str, pid: int, metadata: dict | None = None
     another process looks like."""
     store.parent.mkdir(parents=True, exist_ok=True)
     handle = handle or f"{wtype}-{pid:06x}"
-    try:
-        doc = json.loads(store.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        doc = {"version": 1, "watches": []}
+    doc = json.loads(store.read_text(encoding="utf-8")) if store.exists() else {"version": 1, "watches": []}
     doc["watches"].append(
         {
             "handle": handle,
@@ -405,11 +402,15 @@ def test_wire_never_spawns_anything(tmp_path, monkeypatch):
     store = _store(tmp_path)
     _write_feed(root, [])
 
+    spawn_attempts: list = []
+
     def explode(*a, **kw):
+        spawn_attempts.append(a)
         raise AssertionError(f"the wire must not spawn a process: {a}")
 
     monkeypatch.setattr(subprocess, "Popen", explode)
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+    assert spawn_attempts == []
 
 
 _POSIX_ARGV0 = pytest.mark.skipif(

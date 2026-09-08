@@ -326,13 +326,15 @@ class TestSupersedes:
     def test_migration_idempotent_repeated_connects(self, db):
         """Re-opening the DB re-runs migration harmlessly; column stays present."""
         compass.add_decision("ctx one", "dec one", "good", db_path=db)
+        column_present_per_connect = []
         for _ in range(3):
             conn = store._connect(db)
             try:
                 cols = {r["name"] for r in conn.execute("PRAGMA table_info(decisions)")}
             finally:
                 conn.close()
-            assert "supersedes" in cols
+            column_present_per_connect.append("supersedes" in cols)
+        assert column_present_per_connect == [True, True, True]
 
     def test_migration_adds_column_to_legacy_db(self, db):
         """A pre-supersedes DB gets the column added in via _connect migration."""
@@ -389,7 +391,11 @@ class TestFindConflicts:
         compass.add_decision("special ctx", "a normal decision", "good", db_path=db)
         weird = 'broken " ( ) * : query -term AND OR NOT'
         result = compass.find_conflicts(weird, "more * (text) ^caret", db_path=db)
-        assert isinstance(result, list)  # no exception raised
+        assert result == []  # no token overlaps, and no FTS5 syntax error either
+        # The same syntax characters around a real token still find the row:
+        # sanitising quotes the words, it does not drop them.
+        hits = compass.find_conflicts('special " ( ) * :', "-normal AND OR NOT", db_path=db)
+        assert [hit["decision"] for hit in hits] == ["a normal decision"]
 
     def test_empty_text_returns_empty(self, db):
         """Text with no usable tokens yields no conflicts (and no crash)."""

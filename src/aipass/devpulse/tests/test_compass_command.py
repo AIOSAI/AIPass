@@ -95,7 +95,7 @@ def test_unknown_subcommand_errors(capsys):
     """Unknown subcommand surfaces a clean error, still returns True."""
     assert compass_cmd.handle_command("compass", ["bogus"]) is True
     out = _output(capsys).lower()
-    assert "bogus" in out or "unknown" in out
+    assert "unknown compass subcommand: bogus" in out
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ def test_review_empty_store(capsys, db):
     """review on an empty store reports nothing to review (no crash)."""
     assert compass_cmd.handle_command("compass", ["review", "--db", db]) is True
     out = _output(capsys).lower()
-    assert "no active" in out or "nothing" in out
+    assert "no active decisions to review" in out
 
 
 # ---------------------------------------------------------------------------
