@@ -188,7 +188,23 @@ def test_subcommand_help_on_unknown_command_shows_module_help(monkeypatch, stub_
     returns 0. A help request answered with help is not a refusal, so there is
     nothing here for a non-zero exit to mean. The entry point is not bent to
     fit the test.
+
+    The capture is READ, and it is read on both streams because that is where
+    the output measurably goes: print_module_help() finds no module claiming
+    `nonexistent`, sends its diagnostic through error() to stderr and the
+    pointer to stdout. Asserting only the exit code left the whole printed
+    answer unexamined - a main() that returned 0 and printed nothing at all
+    passed this test.
+
+    The third assertion was written the wrong way round first and measured
+    right: main() DOES offer `nonexistent` to every discovered module before
+    it falls through, and the stub declines by returning False. The help
+    fall-through is what happens after the offer, not instead of it.
     """
     result = _run(monkeypatch, ["nonexistent", "--help"])
 
     assert result == 0
+    captured = capsys.readouterr()
+    assert "Unknown command: nonexistent" in captured.err
+    assert "Run drone @flow --help for available commands" in captured.out
+    assert stub_module.calls == [("nonexistent", ["--help"])]

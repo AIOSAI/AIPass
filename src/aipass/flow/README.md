@@ -135,7 +135,7 @@ flow/
 │   ├── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 │   └── capture_plans/           # CPLAN templates (default)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 980 test functions across 28 files (1023 cases)
+├── tests/                       # 980 test functions across 27 files (1023 cases)
 └── .archive/                    # Archived legacy code + orphaned registries
 ```
 
@@ -670,7 +670,7 @@ both first two entries under Known Issues.
 ## Quality
 
 - **Seedgo:** 100% on all 47 categories, no type errors — 46 production files measured (`drone @seedgo audit aipass @flow`)
-- **Tests:** **980 test functions in 28 files** (`def test_` in `tests/test_*.py`); pytest expands them to **1023 cases**, and tonight **1023 passed / 0 skipped** from BOTH rootdirs — branch `pytest.ini`, and `-c pyproject.toml --rootdir=.` from the repo root. **99 of 100** public functions tested (`drone @seedgo test_map @flow`). *Unverified tonight:* the second marker world. `AIPASS_REGISTRY.json` is present and machine-local on this box, and denying it means moving a live file, so only the registry-present world was run; the bare-checkout leg was last measured 2026-08-31.
+- **Tests:** **980 test functions in 27 files** (`def test_` in `tests/test_*.py`); pytest expands them to **1023 cases**, and tonight **1023 passed / 0 skipped** from BOTH rootdirs — branch `pytest.ini`, and `-c pyproject.toml --rootdir=.` from the repo root. **99 of 102** public functions tested (`drone @seedgo test_map @flow`). *Unverified tonight:* the second marker world. `AIPASS_REGISTRY.json` is present and machine-local on this box, and denying it means moving a live file, so only the registry-present world was run; the bare-checkout leg was last measured 2026-08-31.
 - **Source files:** 46 tracked by seedgo (62 `.py` under `apps/`, excluding `__pycache__` and `.archive/`; seedgo excludes `__init__.py` markers)
 - **Bypass rules:** 59 (`.seedgo/bypass.json`; 74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
 - **Registries:** 7 registered plan types + 1 orphan; **855 rows across the 8 registry files, 28 open, 827 closed** (854 / 28 / 826 excluding the orphaned `pbplan` registry)

@@ -178,8 +178,14 @@ class TestTheBareWorldIsStatedNotInherited:
 
         mock_json_handler.side_effect = explode
 
-        # Must not raise.
-        repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, Path("/nowhere"))
+        # MUST NOT RAISE, and that is now stated rather than merely survived:
+        # _record_fallback returns None, and the exploding handler must
+        # actually have been REACHED. Without the second assertion a
+        # _record_fallback that returned early - never touching the diagnostic
+        # write at all - passed this test while proving nothing about the bare
+        # world it exists for.
+        assert repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, Path("/nowhere")) is None
+        assert mock_json_handler.called
 
 
 # =============================================

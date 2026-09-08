@@ -123,7 +123,7 @@ class TestHandleCommandRouting:
         mock_registry = {"types": {"flow_plans": {"prefix": "FPLAN"}}}
 
         with (
-            patch(f"{_MOD}.load_registry", return_value=mock_registry) as mock_lr,
+            patch(f"{_MOD}.load_registry", return_value=mock_registry, autospec=True) as mock_lr,
             patch(f"{_MOD}._display_registered_types") as mock_display,
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
@@ -155,7 +155,7 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.add_type", return_value=True) as mock_add,
             patch(f"{_MOD}.success") as mock_success,
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -171,7 +171,7 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.add_type", return_value=False) as mock_add,
             patch(f"{_MOD}.error") as mock_error,
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -222,7 +222,7 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.remove_type", return_value=True) as mock_rm,
             patch(f"{_MOD}.success") as mock_success,
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -238,7 +238,7 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.remove_type", return_value=False) as mock_rm,
             patch(f"{_MOD}.error") as mock_error,
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -256,7 +256,7 @@ class TestHandleCommandRouting:
         with (
             patch(f"{_MOD}.scan_unregistered", return_value=[]) as mock_scan,
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -279,7 +279,7 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.scan_unregistered", return_value=unregistered) as mock_scan,
             patch(f"{_MOD}.warning") as mock_warn,
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", spec=True),
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -309,9 +309,9 @@ class TestHandleCommandRouting:
         mock_registry = {"types": {}}
 
         with (
-            patch(f"{_MOD}.load_registry", return_value=mock_registry),
+            patch(f"{_MOD}.load_registry", return_value=mock_registry, autospec=True),
             patch(f"{_MOD}._display_registered_types"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler", spec=True) as mock_jh,
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
@@ -328,7 +328,7 @@ class TestHandleCommandRouting:
         with (
             patch(f"{_MOD}.scan_unregistered", return_value=[]),
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler", spec=True) as mock_jh,
         ):
             from aipass.flow.apps.modules.template_manager import handle_command
 

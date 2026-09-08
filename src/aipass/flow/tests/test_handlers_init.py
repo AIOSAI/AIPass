@@ -186,8 +186,12 @@ class TestGuardBranchAccess:
             "aipass.flow.apps.handlers._find_real_caller",
             return_value=(caller, "from aipass.flow.apps.handlers import x"),
         ):
-            # Should not raise
-            _guard_branch_access()
+            # THE ALLOW IS READ, not merely survived. `_guard_branch_access()`
+            # signals refusal by raising and acceptance by returning None, so
+            # the return value IS the verdict and asserting it makes the allow
+            # visible to a reader instead of implied by the absence of a
+            # traceback.
+            assert _guard_branch_access() is None
 
     def test_blocks_external_branch_import(self):
         """Caller from a different branch raises ImportError."""
@@ -243,7 +247,7 @@ class TestGuardBranchAccess:
         (@trigger restored the walk in their tree and 1058 tests stayed green).
         An earlier version of this docstring said behaviour could not pin it at
         all; @spawn measured the correction (relayed by @devpulse 2026-08-31).
-        Calling the guard DIRECTLY from a ``python -c`` child does reach it, and
+        Calling the guard DIRECTLY from a ``-c`` interpreter child does reach it, and
         ``tests/test_import_dead_cwd.py`` carries both instruments now: the AST
         ban and that behavioural sibling. A regrown walk kills both.
         """
@@ -252,8 +256,10 @@ class TestGuardBranchAccess:
                 "aipass.flow.apps.handlers._find_real_caller",
                 return_value=(None, None),
             ):
-                # Should not raise, in any of the three.
-                _guard_branch_access()
+                # The allow is read in each of the three worlds; returning
+                # None IS the verdict, and an assert says so where a bare call
+                # only hoped for it.
+                assert _guard_branch_access() is None, world
 
     def test_the_caller_none_branch_is_reached_by_a_real_stack(self):
         """Control for the test above: None is reachable without patching.
@@ -300,5 +306,6 @@ class TestGuardBranchAccess:
             "aipass.flow.apps.handlers._find_real_caller",
             return_value=(caller, "import x"),
         ):
-            # Should not raise
-            _guard_branch_access()
+            # Backslashes normalised, so the guard allows: the None return is
+            # the allow, and it is asserted rather than assumed.
+            assert _guard_branch_access() is None
