@@ -846,8 +846,17 @@ class TestTheDeadTemplateLaneIsRetired:
         assert (_MEMORY_ROOT / "tests" / "parked" / "conftest.py").is_file()
 
     def test_the_retired_verbs_refuse_and_name_the_live_lane(self, capsys):
+        """REWRITTEN 2026-09-08: a refusal that exits 0 is half a refusal.
+
+        `is True` says the verb was CLAIMED. It said nothing about the exit code,
+        and under `warning()` that code was 0 — the shape the fleet sweep found.
+        """
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
         for verb in ("push-templates", "diff-templates"):
+            reset_command_state()
             assert templates.handle_command(verb, ["--dry-run"]) is True
+            assert resolve_exit(True) == 2, f"{verb} refused but would exit 0"
             printed = capsys.readouterr().out
             assert "push" in printed.lower()
 

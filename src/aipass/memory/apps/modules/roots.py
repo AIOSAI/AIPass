@@ -36,12 +36,12 @@ from aipass.memory.apps.handlers.monitor import roots_file
 
 
 def _report(ok: bool, message: str) -> None:
-    from aipass.cli.apps.modules import console, warning
+    from aipass.cli.apps.modules import console, error
 
     if ok:
         console.print(f"[green]roots:[/green] {message}")
     else:
-        warning(f"roots: {message}")
+        error(f"roots: {message}")
 
 
 def show_roots() -> None:

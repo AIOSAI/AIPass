@@ -57,7 +57,16 @@ drone @memory search "query" --n 10        # Limit results shown
 drone @memory symbolic                     # PARKED 2026-08-14 — bare prints the ruling, exits 0
 drone @memory symbolic <subcommand>        # …a named subcommand is refused, exits 1
                                            # Curated truth lives in Compass: drone @devpulse compass
+```
 
+The tier is dormant, not untested: **91 test units are kept and skipped** — 76 in
+`tests/test_symbolic_extras.py` (the public functions of the five `symbolic`
+handler modules: hook, storage, deduplicator, chroma_client, retriever) and 15 in `tests/test_vector.py` (the
+`vector/embedder.py` the parked handlers were the only importers of). Both skip at module
+level with the 2026-08-14 ruling as the reason, and both revive with the implementation in
+`tests/parked/symbolic_20260814/` — see that directory's `README.md`.
+
+```
 drone @memory templates spawn-templates    # Propagate the gold templates into @spawn's scaffold sets
 drone @memory templates spawn-templates --dry-run   # …preview it
 drone @memory templates template-status    # Who carries which version — reads each branch's own
@@ -125,7 +134,10 @@ memory/
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
 ├── tests/                       # 1437 test functions on disk across 42 files — 1573 collected,
-│                                #   1573 pass, 2 skip (measured 2026-09-07)
+│                                #   1573 pass, 2 skip (measured 2026-09-08). 91 of the 1437
+│                                #   are the dormant symbolic suite, skipped at module level.
+│   └── parked/                  # 172 more test functions that pytest never collects — the
+│                                #   collection barrier is tests/parked/conftest.py; see its README
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```

@@ -125,8 +125,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import warning
+    from aipass.cli.apps.modules import error
 
-    warning(f"fleet: unknown subcommand '{args[0]}'")
+    error(f"fleet: unknown subcommand '{args[0]}'")
     print_introspection()
     return True

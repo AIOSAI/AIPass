@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Import helper
@@ -163,10 +165,8 @@ class TestCountArchiveFiles:
         monkeypatch.setattr(Path, "glob", broken_glob)
 
         try:
-            cw.count_archive_files()
-            assert False, "Expected Exception"
-        except Exception as exc:
-            assert "Failed to count archive files" in str(exc)
+            with pytest.raises(Exception, match="Failed to count archive files"):
+                cw.count_archive_files()
         finally:
             monkeypatch.setattr(Path, "glob", original_glob)
 
@@ -291,11 +291,8 @@ class TestReadCentralFile:
 
         (central_dir / "MEMORY.central.json").write_text("{{bad json", encoding="utf-8")
 
-        try:
+        with pytest.raises(Exception, match="Failed to read central file"):
             cw.read_central_file()
-            assert False, "Expected Exception"
-        except Exception as exc:
-            assert "Failed to read central file" in str(exc)
 
 
 # ===========================================================================
@@ -343,11 +340,8 @@ class TestWriteCentralFile:
         blocker.write_text("I am a file", encoding="utf-8")
         monkeypatch.setattr(cw, "CENTRAL_FILE", blocker / "subdir" / "impossible.json")
 
-        try:
+        with pytest.raises(Exception, match="Failed to write central file"):
             cw.write_central_file({"test": True})
-            assert False, "Expected Exception"
-        except Exception as exc:
-            assert "Failed to write central file" in str(exc)
 
 
 # ===========================================================================

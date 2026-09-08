@@ -712,8 +712,12 @@ class TestExtractWithMetadata:
         # _extract_items_v2 returns skipped when under limit; extract_with_metadata
         # passes the result dict through unchanged when nothing was extracted
         assert result["success"] is True
-        # Either skipped=True (passthrough) or entries is empty (wrapped)
-        assert result.get("skipped") is True or result.get("count", 0) == 0
+        # The passthrough is the WHOLE contract: skipped stays true, nothing was
+        # counted and nothing was extracted. An `or` between those hid the case
+        # where the dict was rebuilt and only one half survived.
+        assert result["skipped"] is True
+        assert result["count"] == 0
+        assert result["entries"] == []
 
 
 # ===========================================================================
@@ -1150,7 +1154,9 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
         result = ext.extract_items(file_path)
 
         assert result["success"] is False
-        assert "extracted" not in result or not result.get("extracted")
+        # A refused write returns the failure and NOTHING ELSE -- no `extracted`
+        # key at all, so no caller can read partial work out of a dead run.
+        assert sorted(result) == ["error", "success"], sorted(result)
 
 
 class TestTodayIsNotEvidenceAgainstANumberedEntry:

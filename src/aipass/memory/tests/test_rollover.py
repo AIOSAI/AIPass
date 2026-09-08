@@ -193,7 +193,12 @@ class TestMockedCliPackageIsComplete:
 
     def test_every_imported_submodule_is_registered_real(self, monkeypatch):
         _import_rollover(monkeypatch)
-        for name in self._imported_cli_submodules():
+        imported = self._imported_cli_submodules()
+        assert imported == {"help_flags", "json_flag"}, (
+            f"rollover.py's cli submodule imports moved to {sorted(imported)} — an empty or "
+            "shrunken set would make the loop below register nothing and still read green"
+        )
+        for name in imported:
             key = f"aipass.memory.apps.handlers.cli.{name}"
             assert key in sys.modules, f"{key} imported by rollover.py but not registered by the fixture"
             assert not isinstance(sys.modules[key], MagicMock), f"{key} must be the real module, not a mock"
@@ -249,11 +254,19 @@ class TestSubcommands:
         assert "sync-lines" not in rollover._SUBCOMMANDS
         assert rollover.RENAMED_VERBS["sync-lines"] == "report-lines"
 
-    def test_subcommands_values_are_strings(self, monkeypatch):
+    def test_subcommands_are_the_published_five_with_one_line_help(self, monkeypatch):
+        """The map IS the help surface, so its keys and its text both count.
+
+        Was an isinstance sweep: it passed for an empty map and for a map whose
+        every description had been replaced by the empty string. The verbs are
+        named here so a silent removal is red, and the text is required to be a
+        non-empty single line because `--help` prints one row per entry.
+        """
         rollover, _ = _import_rollover(monkeypatch)
+        assert set(rollover._SUBCOMMANDS) == {"run", "status", "check", "report-lines", "push"}
         for key, value in rollover._SUBCOMMANDS.items():
-            assert isinstance(key, str), f"Key {key!r} is not a string"
-            assert isinstance(value, str), f"Value for {key!r} is not a string"
+            assert value.strip(), f"{key} has no description — --help would print a bare verb"
+            assert "\n" not in value, f"{key}'s description spans lines and would break the help table"
 
 
 # ===========================================================================

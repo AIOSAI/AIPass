@@ -130,7 +130,7 @@ def _execute_lint(branch_filter: str | None = None) -> None:
         return
 
     if not branches:
-        warning("No branches found in registry")
+        error("No branches found in registry")
         return
 
     # An unknown branch must not read as a clean bill of health. run_lint

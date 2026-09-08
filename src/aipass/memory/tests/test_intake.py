@@ -311,8 +311,9 @@ class TestChunkContent:
 
         result = mod.chunk_content(content, chunk_size=1000, overlap=100)
 
-        for i, chunk in enumerate(result):
-            assert chunk["chunk_index"] == i
+        # 2500 chars at 1000 with 100 overlap is three chunks; naming the count
+        # is what stops an empty result from making the loop below a silent pass.
+        assert [chunk["chunk_index"] for chunk in result] == [0, 1, 2]
 
     def test_paragraph_break_splitting(self, monkeypatch):
         """Test that paragraph breaks (double newlines) trigger chunk splits."""

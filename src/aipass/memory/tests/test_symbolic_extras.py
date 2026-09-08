@@ -354,7 +354,10 @@ class TestExtractConversationContext:
 
         assert result["success"] is True
         assert isinstance(result["keywords"], list)
-        assert "error" in result["keywords"] or "debug" in result["keywords"]
+        # The pattern matches four words in the sample and dedupes through a
+        # set, so the CONTENT is exact even though the order is not. An `or`
+        # over two of them passed while the other two silently stopped matching.
+        assert set(result["keywords"]) == {"error", "module", "debug", "issue"}
         assert result["analyzed_messages"] == 2
 
     def test_empty_messages_returns_neutral(self):
@@ -1345,7 +1348,9 @@ class TestDeduplicateFragment:
 
         assert result["success"] is True
         assert result["action"] == "ADD"
-        assert "key" in result["reason"].lower() or "unavailable" in result["reason"].lower()
+        assert result["reason"] == (
+            "No OpenRouter API key found (api branch unavailable or key missing), defaulting to ADD"
+        )
 
 
 # ===========================================================================
@@ -1424,7 +1429,7 @@ class TestSearchByVector:
         result = r["search_by_vector"]("")
 
         assert result["success"] is False
-        assert "Query" in result["error"] or "required" in result["error"]
+        assert result["error"] == "Query text required"
 
     def test_handles_missing_collection(self):
         """Verify missing collection returns empty results."""
