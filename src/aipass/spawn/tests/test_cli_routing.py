@@ -72,14 +72,21 @@ class TestCliRouting:
         mock_error.assert_called_once()
 
     def test_command_returns_int(self):
-        """main() always returns an integer exit code."""
+        """main() with no argv prints introspection and exits 0 - the value, not just the type.
+
+        Measured 2026-09-08: exactly 0. A bare invocation is not a refusal, so
+        this is the one door in the file that is SUPPOSED to exit zero, and the
+        number is pinned rather than its type.
+        """
         from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn"]
-            with patch("aipass.spawn.apps.spawn.print_introspection"):
+            with patch("aipass.spawn.apps.spawn.print_introspection") as mock_introspection:
                 result = main()
         assert isinstance(result, int)
+        assert result == 0, result
+        mock_introspection.assert_called_once()
 
 
 class TestCreateHelp:

@@ -385,8 +385,13 @@ class TestFixOwnerIdentity:
 
         data = json.loads(reg.read_text(encoding="utf-8"))
         ids = [b["registry_id"] for b in data["branches"]]
+        # Measured 2026-09-08, not tolerated: BOTH duplicates are re-minted, and the
+        # project credential is left alone. The old `!= shared or != shared` passed
+        # whenever either one moved, which is a world this lane never produces.
         assert ids[0] != ids[1]
-        assert ids[0] != shared_id or ids[1] != shared_id
+        assert shared_id not in ids, f"a stale duplicate survived the mint: {ids}"
+        assert [len(i) for i in ids] == [36, 36], ids
+        assert data["metadata"]["id"] == "proj-id", "the project credential is not a per-citizen uid"
 
     def test_aligns_passports_to_metadata_id(self, tmp_path):
         from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity

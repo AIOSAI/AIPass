@@ -2075,7 +2075,11 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
 
     def test_the_published_exception_carries_its_reason(self):
         """An exemption with no reason is an exemption nobody will re-examine."""
-        for name, reason in self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST.items():
+        exemptions = self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST
+        assert len(exemptions) == 1, (
+            f"the exemption list holds {sorted(exemptions)} - an emptied list would make this sweep silent"
+        )
+        for name, reason in exemptions.items():
             assert reason.strip(), f"{name} is exempt with no reason given"
             assert name in Path(__file__).read_text(encoding="utf-8"), (
                 f"{name} is exempt and no longer exists — a stale exemption is a hole"
@@ -2146,12 +2150,18 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
         assert set(_HOST_FACTS) == {"flavour", "concrete", "accessor", "parsing"}
         assert _HOST_FACTS["concrete"] in ("posix", "nt"), _HOST_FACTS
         assert _HOST_FACTS["flavour"] in ("object", "module", "absent"), _HOST_FACTS
-        # Round 10's fact. Either the host is content with a module-shaped
-        # flavour, or it NAMES what it asked for — "unknown" would mean the
-        # probe could not even install one, which is a fifth state nobody has
-        # seen and would take every world built on it dark without saying why.
-        parsing = _HOST_FACTS["parsing"]
-        assert parsing == "module-tolerant" or parsing.startswith("demands:"), parsing
+        # Round 10's fact, said as a closed set rather than an either/or. The host
+        # is content with a module-shaped flavour, or it NAMES what it asked for —
+        # "unknown" would mean the probe could not even install one, a fifth state
+        # nobody has seen that would take every world built on it dark without
+        # saying why. Stated this way the bare "demands:" with nothing after the
+        # colon fails too, which the old startswith() clause let through.
+        # Measured on this box 2026-09-08: module-tolerant.
+        dialect, colon, demanded = _HOST_FACTS["parsing"].partition(":")
+        assert dialect in ("module-tolerant", "demands"), _HOST_FACTS["parsing"]
+        assert (dialect == "demands") is bool(colon and demanded.strip()), (
+            f"a demanding host must name the attribute it demanded: {_HOST_FACTS['parsing']!r}"
+        )
 
 
 def _drive_row_is_satisfied(os_name: str, anchor_drive: str) -> bool:

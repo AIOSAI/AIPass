@@ -124,7 +124,9 @@ def test_every_class_declares_citizen_id():
     """
     from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 
-    for citizen_class in get_available_classes():
+    classes = get_available_classes()
+    assert len(classes) == 2, f"the class registry offers {classes} - the loop below would check nothing"
+    for citizen_class in classes:
         passport = get_template_dir(citizen_class) / ".trinity" / "passport.json"
         citizenship = json.loads(passport.read_text(encoding="utf-8"))["citizenship"]
 

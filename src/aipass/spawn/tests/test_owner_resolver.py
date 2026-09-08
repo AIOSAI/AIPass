@@ -257,7 +257,10 @@ class TestEnsureProjectHasOwner:
         devpulse_entry = next(b for b in data["branches"] if b["name"] == "devpulse")
         alpha_entry = next(b for b in data["branches"] if b["name"] == "alpha")
         assert devpulse_entry.get("owner") is True
-        assert alpha_entry.get("owner") is None or alpha_entry.get("owner") is not True
+        # Measured 2026-09-08: the non-manager entry is not touched at all — the key is
+        # ABSENT rather than present-and-false, which is the stronger claim the old
+        # two-clause `or` was letting through.
+        assert "owner" not in alpha_entry, f"a non-manager entry was stamped: {alpha_entry}"
 
     def test_noop_when_owner_already_set(self, registry_with_owner):
         from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
@@ -375,8 +378,11 @@ class TestBackfillOwnerAndRegistryId:
 
         data = json.loads(reg.read_text(encoding="utf-8"))
         ids = [b["registry_id"] for b in data["branches"]]
+        # Measured 2026-09-08: both entries are re-minted as uuid4, neither keeps the
+        # shared id. The old `or` passed on a half-cured registry this lane never emits.
         assert ids[0] != ids[1]
-        assert ids[0] != shared_id or ids[1] != shared_id
+        assert shared_id not in ids, f"a duplicate registry_id survived the backfill: {ids}"
+        assert [len(i) for i in ids] == [36, 36], ids
 
     def test_noop_when_already_unique(self, tmp_path):
         from aipass.spawn.apps.handlers.registry import backfill_owner_and_registry_id

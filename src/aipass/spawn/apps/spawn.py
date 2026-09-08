@@ -18,7 +18,7 @@ import sys
 import argparse
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli.apps.modules import console, header, error, warning, reset_command_state, resolve_exit
 
 
 def print_help():
@@ -357,8 +357,30 @@ def print_introspection():
     console.print()
 
 
+def _resolved(code: int) -> int:
+    """Never let a command that called ``error()`` exit 0.
+
+    THE EXIT SEAM (fleet refusal sweep 2026-09-07). ``error()`` marks the process
+    failed, but that mark decides nothing unless somebody reads it — so a handler
+    that refused loudly and returned 0 still exited 0. Every routed command's code
+    passes through here: a non-zero code is its own answer and is returned
+    untouched, and a 0 is re-asked of ``resolve_exit``, which answers 2 when the
+    command reported a failure and 0 when it did not.
+
+    Args:
+        code: The exit code the routed handler returned.
+
+    Returns:
+        The handler's code, or 2 when it returned 0 after calling ``error()``.
+    """
+    return code if code else resolve_exit(True)
+
+
 def main():
     """Main entry point."""
+    # A stale failure flag from an earlier in-process command would otherwise
+    # convict this one — the flag is process-level, and drone routes in-process.
+    reset_command_state()
     args = sys.argv[1:]
 
     if len(args) == 0:
@@ -380,47 +402,47 @@ def main():
         remaining = ["--help"]
 
     if command == "create":
-        return handle_create(remaining)
+        return _resolved(handle_create(remaining))
 
     if command == "update":
         from aipass.spawn.apps.modules.update import handle_update
 
-        return handle_update(remaining)
+        return _resolved(handle_update(remaining))
 
     if command == "delete":
         from aipass.spawn.apps.modules.delete import handle_delete
 
-        return handle_delete(remaining)
+        return _resolved(handle_delete(remaining))
 
     if command == "sync-registry":
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
-        return handle_sync_registry(remaining)
+        return _resolved(handle_sync_registry(remaining))
 
     if command == "regenerate-registry":
         from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 
-        return handle_regenerate_registry(remaining)
+        return _resolved(handle_regenerate_registry(remaining))
 
     if command == "migrate-passports":
         from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
-        return handle_migrate_passports(remaining)
+        return _resolved(handle_migrate_passports(remaining))
 
     if command == "export-seeds":
         from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
 
-        return handle_export_seeds(remaining)
+        return _resolved(handle_export_seeds(remaining))
 
     if command == "repair":
         from aipass.spawn.apps.modules.repair import handle_repair
 
-        return handle_repair(remaining)
+        return _resolved(handle_repair(remaining))
 
     if command == "grant-admin":
         from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
-        return handle_grant_admin(remaining)
+        return _resolved(handle_grant_admin(remaining))
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1

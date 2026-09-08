@@ -775,6 +775,10 @@ class TestPassportHealIsNotAMigration:
         """The structural reason the test above passes — pinned so it stays the reason."""
         from aipass.spawn.apps.handlers.update_ops import _PASSPORT_HEAL_ALLOWLIST
 
+        assert len(_PASSPORT_HEAL_ALLOWLIST) == 3, (
+            f"the heal allowlist holds {_PASSPORT_HEAL_ALLOWLIST} - an emptied one makes this test vacuous "
+            "while the heal above still passes"
+        )
         for section, key in _PASSPORT_HEAL_ALLOWLIST:
             assert key in self.SCHEMA_1_PASSPORT.get(section, {}), (
                 f"{section}.{key} is on the heal allowlist but a schema-1.0.0 passport has no such field — "

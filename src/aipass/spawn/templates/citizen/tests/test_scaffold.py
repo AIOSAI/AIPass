@@ -20,19 +20,41 @@ import pytest
 
 
 def test_conftest_fixtures_available(request):
-    """Verify template conftest fixtures are wired and return expected types.
+    """Verify ``getfixturevalue`` finds the scaffold pair, in whichever world this branch is in.
 
     Established branches replace the template conftest with their own suite
-    fixtures (spawn update never overwrites .py files) — there this smoke test
-    has nothing left to prove, so it skips instead of erroring.
+    fixtures (spawn update never overwrites .py files). This test used to
+    ``pytest.skip`` on that world, which meant every branch that had grown its
+    own conftest ran the stamp as a silent pass — a scope that proves nothing
+    and says nothing about it.
+
+    Both worlds are asserted now. Present: the fixtures hand back the values
+    the template conftest declares. Absent: the replacement is TOTAL, because a
+    conftest offering one half of the pair is a half-edited scaffold, and that
+    is the failure this stamp is worth keeping for.
     """
-    try:
-        temp_test_dir = request.getfixturevalue("temp_test_dir")
-        sample_test_data = request.getfixturevalue("sample_test_data")
-    except pytest.FixtureLookupError:
-        pytest.skip("branch conftest replaced the template scaffold fixtures — real suite covers this")
-    assert temp_test_dir.exists()
-    assert isinstance(sample_test_data, dict)
+    scaffold = {}
+    missing = []
+    for name in ("temp_test_dir", "sample_test_data"):
+        try:
+            scaffold[name] = request.getfixturevalue(name)
+        except pytest.FixtureLookupError:
+            missing.append(name)
+
+    if not missing:
+        assert scaffold["temp_test_dir"].exists(), "temp_test_dir yielded a path that is not on disk"
+        assert scaffold["sample_test_data"]["test_key"] == "test_value", (
+            "sample_test_data no longer carries the document the template conftest declares"
+        )
+        return
+
+    assert len(missing) == 2, (
+        f"half a scaffold: this branch's conftest still offers {sorted(scaffold)} "
+        f"but not {sorted(missing)} — replace the pair or keep the pair"
+    )
+    assert (Path(__file__).parent / "conftest.py").exists(), (
+        "the template conftest was removed and nothing replaced it — this suite has no fixtures at all"
+    )
 
 
 def _inspect_stack_calls(source: str) -> list:

@@ -19,12 +19,19 @@ class TestReturnTypeContracts:
     """Verify functions return documented types."""
 
     def test_command_returns_bool(self):
-        """handle_command returns bool."""
+        """handle_command answers True for a verb it owns - the value, not just the type.
+
+        Measured 2026-09-08: True. The bool is the ROUTED / NOT-ROUTED answer the
+        caller switches on, so a handler that started returning False for its own
+        verb would have passed the old isinstance pin unnoticed.
+        """
         from aipass.spawn.apps.modules.regenerate_registry import handle_command
 
         with patch("aipass.spawn.apps.modules.regenerate_registry.print_introspection"):
             result = handle_command("regenerate-registry", [])
         assert isinstance(result, bool)
+        assert result is True, result
+        assert handle_command("not-a-spawn-verb", []) is False
 
     def test_load_correct_type(self, tmp_path):
         """read_json returns dict for valid file, None for invalid."""
@@ -77,14 +84,25 @@ class TestDataStructureContracts:
         assert "files_copied" in result
 
     def test_returns_dict(self):
-        """spawn_agent always returns a dict."""
+        """The VALUES a successful mint reports, beside the key contract above.
+
+        ``test_config_keys`` pins which keys are present; this pins what they say.
+        Measured 2026-09-08 on a real mint into a temp dir: success True,
+        branch_name upper-cased from the directory, path the target it was given,
+        49 files copied.
+        """
         from aipass.spawn.apps.modules.core import _spawn_agent
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "init_test"
             result = _spawn_agent(str(target))
-        assert isinstance(result, dict)
+            assert isinstance(result, dict)
+            assert result["success"] is True, result.get("error")
+            assert result["branch_name"] == "INIT_TEST", result["branch_name"]
+            assert Path(result["path"]) == target, result["path"]
+            assert result["files_copied"] == 49, result["files_copied"]
+            assert result["validation_issues"] == [], result["validation_issues"]
 
 
 class TestInfrastructureMocking:

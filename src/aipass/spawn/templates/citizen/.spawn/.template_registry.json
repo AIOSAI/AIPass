@@ -411,7 +411,7 @@
       "path": "tests/test_cli_routing.py"
     },
     "f049": {
-      "content_hash": "8b5cac768340",
+      "content_hash": "e7a53600e91e",
       "has_branch_placeholder": false,
       "name": "test_scaffold.py",
       "path": "tests/test_scaffold.py"
@@ -419,7 +419,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-09-07",
+    "last_updated": "2026-09-08",
     "version": "1.0.0"
   }
 }
