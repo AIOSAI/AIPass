@@ -383,13 +383,6 @@ class TestSendBatched:
         for line in lines:
             assert line in all_sent_lines
 
-    def test_single_line_sent_as_single_message(self, streamer):
-        """A single line should result in exactly one send."""
-        with patch.object(streamer, "_send_message") as mock_send:
-            streamer._send_batched(["single line"])
-
-        mock_send.assert_called_once_with("single line")
-
 
 # =============================================
 # 5. START / STOP

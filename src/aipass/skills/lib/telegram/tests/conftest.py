@@ -132,6 +132,22 @@ def _block_network():
         p.stop()
 
 
+@pytest.fixture(autouse=True)
+def _redirect_bot_config_dir(tmp_path, monkeypatch):
+    """Point the non-secret bot config at a temp dir — never ~/.aipass/telegram_bots.
+
+    load_bot_config reads two halves now: the token from the secret store and
+    the rest from a plain file. The secret half is mocked everywhere, but the
+    file half would otherwise be whatever bots this machine really has, so a
+    test named "missing config returns None" would pass or fail depending on
+    whose laptop it ran on. Redirected per test, and per call inside config.py,
+    so nothing is captured at import.
+    """
+    from aipass.skills.lib.telegram.apps.handlers import config as tg_config
+
+    monkeypatch.setattr(tg_config, "BOT_CONFIG_DIR", tmp_path / "_telegram_bots")
+
+
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after."""

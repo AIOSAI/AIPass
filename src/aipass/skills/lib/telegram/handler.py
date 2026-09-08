@@ -28,6 +28,7 @@ _ACTIONS = {
     "create",
     "delete",
     "notify",
+    "migrate-config",
 }
 
 
@@ -142,6 +143,32 @@ def _cmd_notify(args: list) -> dict:
     return _err("Failed to send notification")
 
 
+def _cmd_migrate_config(args: list) -> dict:
+    """Split legacy documents that still keep bot config in the secret store.
+
+    Dry by default: it names what would move and writes nothing. Rewriting a
+    live credential store is a decision, so it takes the word --apply.
+    """
+    from aipass.skills.lib.telegram.apps.handlers.config import list_bot_configs, migrate_bot_config
+
+    apply = "--apply" in args
+    targets = [a for a in args if not a.startswith("-")] or list_bot_configs()
+    if not targets:
+        return _err("No telegram secret documents found")
+
+    lines = []
+    for bot_id in sorted(targets):
+        report = migrate_bot_config(bot_id, dry_run=not apply)
+        verb = "migrated" if report["migrated"] else ("would move" if apply is False else "unchanged")
+        moved = ", ".join(report["moved"]) or "nothing"
+        lines.append(f"{bot_id}: {verb} {len(report['moved'])} key(s) [{moved}] — {report['reason'] or 'ok'}")
+
+    if not apply:
+        lines.append("")
+        lines.append("Dry run — nothing written. Re-run with --apply to split them for real.")
+    return _ok("\n".join(lines))
+
+
 _DISPATCH = {
     "start": _cmd_start,
     "stop": _cmd_stop,
@@ -149,6 +176,7 @@ _DISPATCH = {
     "create": _cmd_create,
     "delete": _cmd_delete,
     "notify": _cmd_notify,
+    "migrate-config": _cmd_migrate_config,
 }
 
 

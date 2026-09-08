@@ -50,6 +50,8 @@ from aipass.skills.apps.handlers.json import json_handler  # noqa: F401
 # Internal imports
 from aipass.api.apps.modules.secrets import set_secret as _api_set_secret
 
+from .config import bot_config_path, split_bot_config, write_bot_config
+
 from .telegram_standards import build_botfather_commands
 
 from .bot_registry import (
@@ -66,8 +68,10 @@ from .bot_registry import (
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 SYSTEMD_DIR = Path.home() / ".config" / "systemd" / "user"
-_BOT_CONFIG_DIR = Path.home() / ".aipass" / "telegram_bots"
 CLAUDE_BIN = str(Path.home() / ".local" / "bin" / "claude")
+
+# Where the non-secret half of a bot config lives is config.py's business, not
+# this file's — one owner, resolved per call by config.bot_config_path().
 
 # Command menu built from telegram_standards (single source of truth)
 
@@ -561,12 +565,12 @@ def create_bot(
             )
             return None
 
-    # Step 4: Build config and persist to @api secrets store + local shadow.
+    # Step 4: Build the config and persist it in two halves — the token to the
+    # secret store, everything else to ordinary config. See config.SECRET_FIELDS.
     ensure_registry()
-    _BOT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     RESOLVED_BOT_NAME = bot_name or f"AIPass {bot_id.replace('_', ' ').title()} Bot"
-    CONFIG_PATH = _BOT_CONFIG_DIR / f"{bot_id}.json"
+    CONFIG_PATH = bot_config_path(bot_id)
 
     config_data = {
         "bot_id": bot_id,
@@ -581,23 +585,23 @@ def create_bot(
         "chat_id": chat_id,
     }
 
-    # Step 4a: Write to @api secrets store (load_bot_config reads from here)
+    secret_data, plain_data = split_bot_config(config_data)
+
+    # Step 4a: Write the credential — and only the credential — to @api secrets.
     try:
-        _api_set_secret("telegram", bot_id, config_data, as_json=True)
-        logger.info("Persisted bot config to @api secrets: telegram/%s", bot_id)
+        _api_set_secret("telegram", bot_id, secret_data, as_json=True)
+        logger.info("Persisted bot token to @api secrets: telegram/%s", bot_id)
     except OSError as e:
-        logger.error("create_bot failed: could not persist config to @api for '%s': %s", bot_id, e)
+        logger.error("create_bot failed: could not persist the token to @api for '%s': %s", bot_id, e)
         return None
 
-    # Step 4b: Write local shadow file (staging artifact, not runtime source)
-    try:
-        CONFIG_PATH.write_text(
-            json.dumps(config_data, indent=2),
-            encoding="utf-8",
-        )
-        logger.info("Wrote bot config shadow: %s", CONFIG_PATH)
-    except OSError as e:
-        logger.warning("Failed to write shadow config (non-fatal): %s", e)
+    # Step 4b: Write the ordinary config. Fatal, not "non-fatal" as it was when
+    # this file was a shadow: it is now half of what load_bot_config reads, and
+    # a bot whose branch and work_dir never landed cannot start.
+    if not write_bot_config(bot_id, plain_data):
+        logger.error("create_bot failed: could not write bot config for '%s' to %s", bot_id, CONFIG_PATH)
+        return None
+    logger.info("Wrote bot config: %s", CONFIG_PATH)
 
     # Step 5: Register in bot registry
     registered = register_bot(

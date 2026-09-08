@@ -48,6 +48,7 @@ drone @skills run telegram status [bot_id]
 drone @skills run telegram create <bot_id> --token <token>
 drone @skills run telegram delete <bot_id>
 drone @skills run telegram notify "message"
+drone @skills run telegram migrate-config [bot_id ...] [--apply]
 ```
 
 ## Control verbs (DPLAN-0270 P1)
@@ -141,7 +142,25 @@ HTTP 429 (rate limit) on `poll_updates` is handled inline — sleep for the `ret
 
 ## Secrets
 
-Bot tokens and config accessed via the in-process `aipass.api.apps.modules.secrets.get_secret` API.
+A bot is described by ten keys and exactly one is a credential. The **token** —
+and nothing else — lives in the secret store, reached through the in-process
+`aipass.api.apps.modules.secrets` API. Everything else (bot_id, bot_name,
+branch_name, work_dir, chat_id, allowed_user_ids, created_at, shared_session,
+attach_only) is **ordinary config** in `~/.aipass/telegram_bots/<bot_id>.json`.
+`config.load_bot_config()` merges the two halves, so callers still get one dict.
+
+`config.SECRET_FIELDS` is the whole rule — a key not named there does not belong
+in a secret store. `telegram/telethon_config` (api_id, api_hash) is an app
+credential, not a bot config: both its keys are secrets and stay put.
+
+Bots created before the split still carry everything in the secret document.
+They keep working — and say so in a warning on every load. To split them:
+
+```bash
+drone @skills run telegram migrate-config            # dry: names what would move
+drone @skills run telegram migrate-config --apply    # writes
+```
+
 State files (offset, lock, registry) stay with the skill in `.local/`.
 
 ## Ported-but-unwired (DPLAN-0220)

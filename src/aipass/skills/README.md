@@ -227,17 +227,17 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 287 test functions in 14 files
-                           #   (pytest expands to 300 cases)
+  tests/                   # Branch suite: 281 test functions in 13 files
+                           #   (pytest expands to 286 cases)
 ```
 
-Counted 2026-09-05. That 287 is the branch suite alone — the figure the seedgo
+Counted 2026-09-07. That 281 is the branch suite alone — the figure the seedgo
 readme rule checks, `def test_` under `tests/`.
 
-The telegram skill carries its own suite under `lib/telegram/tests/`: 28 files
-holding 1086 `def test_` functions, expanding to 1119 cases. Both together run
-1419 passing, 0 skipped — the same number from the branch root and from the
-repo root.
+Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
+1090 `def test_` functions expanding to 1101 cases, and `lib/screen_lock/tests/`
+adds 22. All three together run 1409 passing, 0 skipped — the same number from
+the branch root and from the repo root.
 
 ---
 
@@ -378,17 +378,17 @@ be computed must not be guessed at.
 
 ## Status / Known issues
 
-Everything below was measured on this branch on 2026-09-05. Anything this
+Everything below was measured on this branch on 2026-09-07. Anything this
 branch could not exercise is marked unverified rather than left standing green.
 
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1419 passing, 0 skipped, identical from the branch root and
+stay masked. Suite 1409 passing, 0 skipped, identical from the branch root and
 the repo root. seedgo audit 100 on every CI-scored category.
 
 **Unverified — the telegram skill's runtime.** The skill is discovered, listed
-and gated correctly, and its own 1119-case suite passes. Its *live* behaviour
+and gated correctly, and its own 1101-case suite passes. Its *live* behaviour
 was not exercised: it has been switched OFF since 2026-08-18 (Patrick's ruling,
 DPLAN-0305 — five bots leaked ~2.3GB each), and `drone @skills validate
 telegram` reports its `telethon` dependency missing on this machine. Nothing in
@@ -405,15 +405,25 @@ exemption lapsed. skills is the only branch in the fleet carrying a
 `module_paths.py`, so no other branch is affected. The bypass carries the full
 measurement and comes out when seedgo's clause learns a module-scope importer.
 
-**Known issue — a CI flake under investigation.** On 2026-09-04 the Linux 3.10
-leg stalled inside `lib/telegram/tests/test_suspend.py` and was cancelled at the
-30-minute cap; the same leg passed in 8 minutes an hour earlier. Cause located
-2026-09-05: those tests patch `base_bot.time.time`, and because `base_bot.time`
-*is* the stdlib `time` module, the fake clock is process-global. It returns
-epoch 1000.0, so any deadline captured before the patch reads as ~56 years away
-while the patch is held. The code under test cannot spin — `_check_resume_signal`
-contains no loop — so the wait is in a third party, not here. Fix not yet
-applied; reported to @devpulse.
+**Closed 2026-09-06 — the CI hang.** On 2026-09-04 the Linux 3.10 leg stalled
+inside `lib/telegram/tests/test_suspend.py` and was cancelled at the 30-minute
+cap; the same leg had passed in 8 minutes an hour earlier. Cause: those tests
+patched `base_bot.time.time`, and because `base_bot.time` *is* the stdlib
+`time` module, the fake clock was process-global. It returns epoch 1000.0, so
+any deadline another thread captured beforehand read ~56 years away and that
+thread waited forever. Cured with a seam — `from time import time as _now` —
+and all 32 wall-clock reads in `base_bot.py` moved onto it, so the 23 test
+patch sites now reach one module and nothing else.
+
+**Known issue — five deployed bots still keep config in the secret store.**
+Since 2026-09-07 only the token is written there (`config.SECRET_FIELDS`), but
+the bots created before that carry all ten keys in their secret document. They
+load and run, and warn by name on every load. `drone @skills run telegram
+migrate-config` reports what would move — measured 2026-09-07: api 6 keys, base
+6, devpulse 7, prax_monitor 5, scheduler 6, and `telethon_config` correctly
+untouched because api_id/api_hash are real secrets. `--apply` splits them for
+real. Not run here: rewriting a live credential store is Patrick's call, not a
+headless session's.
 
 ---
 
