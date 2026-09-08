@@ -13,6 +13,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from aipass.aipass.apps.handlers.handoff_platform import (
     build_cli_cmd,
     build_manual_command,
@@ -484,3 +486,41 @@ class TestLaunchHandoff:
         assert "cd /home/user" in cmd
         assert "claude" in cmd
         assert "start" in cmd
+
+
+class TestHandoffCommandRefusal:
+    """The `aipass handoff launch` refusal seam.
+
+    Lives here rather than in a file of its own: the test-write gate refuses new
+    test files, and this is the existing home of handoff coverage. Added
+    2026-09-07 (FPLAN-0492 wave 6) -- canary's sweep named handoff.py:152 as a
+    refusal that exited 0, and it had NO test at all, so nothing pinned either
+    the old outcome or the new one.
+    """
+
+    def test_unknown_cli_refuses_non_zero(self) -> None:
+        """An unrecognised CLI launches nothing, so it cannot exit 0.
+
+        Note the invocation: the refusal is reachable only through `--cli <bad>`.
+        A bare positional is discarded by _parse_launch_args, which leaves the
+        default 'claude' in place and launches normally.
+        """
+        from aipass.aipass.apps.modules.handoff import handle_command
+
+        with patch("aipass.aipass.apps.modules.handoff.error") as err:
+            with patch("aipass.aipass.apps.modules.handoff.do_handoff") as did:
+                with pytest.raises(SystemExit) as exc:
+                    handle_command("handoff", ["launch", "--cli", "banana"])
+
+        assert exc.value.code == 1
+        did.assert_not_called()
+        assert "banana" in err.call_args[0][0]
+
+    def test_known_cli_still_launches(self) -> None:
+        """The counterfactual: a valid CLI is unaffected by the refusal seam."""
+        from aipass.aipass.apps.modules.handoff import handle_command
+
+        with patch("aipass.aipass.apps.modules.handoff.do_handoff") as did:
+            assert handle_command("handoff", ["launch", "--cli", "claude"]) is True
+
+        did.assert_called_once()

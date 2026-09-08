@@ -8,6 +8,7 @@
 
 """Tests for the aipass install module (DPLAN-0233)."""
 
+import os
 import subprocess as _sp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -17,11 +18,14 @@ import pytest
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
     TOTAL_STEPS,
+    _acquire_install_lock,
     _ask_permission_mode,
     _build_install_prompt,
     _clone_repo,
     _end_in_chat,
+    _install_lock_path,
     _looks_like_aipass_tree,
+    _release_install_lock,
     _print_next_steps,
     _registry_user_name,
     _resolve_home,
@@ -71,10 +75,29 @@ class TestResolveHome:
         target = tmp_path / "tools" / "aipass"
         assert _resolve_home(str(target), here=False, non_interactive=False) == target.resolve()
 
-    def test_non_interactive_defaults(self) -> None:
-        """With no AIPASS_HOME, non-interactive falls back to DEFAULT_HOME."""
+    def test_non_interactive_defaults(self, tmp_path: Path) -> None:
+        """From an ordinary directory, non-interactive still falls back to DEFAULT_HOME.
+
+        cwd is pinned explicitly here. It was implicit before 2026-09-07 and the
+        test only passed because the runner happened to sit somewhere that did
+        not matter -- once cwd became load-bearing (FPLAN-0492 wave 6) the
+        unstated dependency turned into a failure.
+        """
         with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
-            assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+            with patch(f"{_MOD}.Path.cwd", return_value=tmp_path):
+                assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+
+    def test_non_interactive_honours_an_aipass_cwd(self, tmp_path: Path) -> None:
+        """Standing in an AIPass tree, a headless install targets THAT tree.
+
+        The defect this pins (banked from the passport 2.0 train): running
+        `aipass install --non-interactive` inside a checkout installed into
+        ~/AIPass instead, silently ignoring where the user was standing.
+        """
+        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
+            with patch(f"{_MOD}.Path.cwd", return_value=tmp_path):
+                assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
 
     def test_uses_valid_env(self, tmp_path: Path) -> None:
         """A valid AIPASS_HOME pointing at a real tree is honoured."""
@@ -84,8 +107,75 @@ class TestResolveHome:
 
     def test_ignores_invalid_env(self, tmp_path: Path) -> None:
         """An AIPASS_HOME that is not an AIPass tree is ignored for the default."""
+        elsewhere = tmp_path / "not_a_tree"
+        elsewhere.mkdir()
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}, clear=False):
-            assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+            with patch(f"{_MOD}.Path.cwd", return_value=elsewhere):
+                assert _resolve_home(None, here=False, non_interactive=True) == DEFAULT_HOME.resolve()
+
+
+class TestInstallLock:
+    """The concurrent-install lock.
+
+    Before 2026-09-07 (FPLAN-0492 wave 6) there was no lock at all: a second
+    install of the same home raced the first through clone and setup.sh and
+    died somewhere in the middle without ever naming the conflict.
+    """
+
+    def test_lock_lives_beside_home_not_inside_it(self, tmp_path: Path) -> None:
+        """The lock must not live in a directory the clone has yet to create."""
+        home = tmp_path / "AIPass"
+        lock = _install_lock_path(home)
+        assert lock.parent == tmp_path
+        assert home not in lock.parents
+
+    def test_second_install_refuses_naming_the_lock(self, tmp_path: Path) -> None:
+        """A live holder makes the second attempt refuse, naming lock and pid."""
+        home = tmp_path / "AIPass"
+        first = _acquire_install_lock(home)
+        assert first is not None
+
+        with patch(f"{_MOD}.error") as err:
+            second = _acquire_install_lock(home)
+
+        assert second is None
+        message = err.call_args[0][0]
+        assert str(_install_lock_path(home)) in message
+        assert str(os.getpid()) in message
+
+    def test_release_frees_the_home(self, tmp_path: Path) -> None:
+        """After release the next install can claim it."""
+        home = tmp_path / "AIPass"
+        lock = _acquire_install_lock(home)
+        _release_install_lock(lock)
+        assert not _install_lock_path(home).exists()
+        assert _acquire_install_lock(home) is not None
+
+    def test_stale_lock_from_a_dead_pid_is_taken_over(self, tmp_path: Path) -> None:
+        """A crashed install must not wedge the home forever."""
+        home = tmp_path / "AIPass"
+        lock = _install_lock_path(home)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
+
+        with patch(f"{_MOD}._pid_alive", return_value=False):
+            claimed = _acquire_install_lock(home)
+
+        assert claimed is not None
+        assert str(os.getpid()) in lock.read_text(encoding="utf-8")
+
+    def test_live_holder_is_never_stolen(self, tmp_path: Path) -> None:
+        """The counterfactual: a lock whose pid IS alive is left alone."""
+        home = tmp_path / "AIPass"
+        lock = _install_lock_path(home)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
+
+        with patch(f"{_MOD}._pid_alive", return_value=True):
+            with patch(f"{_MOD}.error"):
+                assert _acquire_install_lock(home) is None
+
+        assert "999999999" in lock.read_text(encoding="utf-8")
 
 
 class TestCloneRepo:

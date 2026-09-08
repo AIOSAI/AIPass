@@ -144,7 +144,14 @@ class TestWriteDurability:
                     save_profile({"name": "Doomed"})
 
     def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
-        """The file_deleted / write_failure_cleanup event survives the refactor."""
+        """The write-failure event fires under its true name, with the payload kept.
+
+        Renamed from ``file_deleted`` on 2026-09-07: the event fires on a failed
+        write, never on a deletion. @trigger delivers the old name as a
+        deprecated alias for one release, so this asserts the NEW name -- the
+        alias is trigger's contract to keep, not a second name for this module
+        to emit.
+        """
         with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             with self._fail_the_replace():
                 with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
@@ -153,8 +160,10 @@ class TestWriteDurability:
 
         mock_trigger.fire.assert_called_once()
         event, kwargs = mock_trigger.fire.call_args[0][0], mock_trigger.fire.call_args[1]
-        assert event == "file_deleted"
+        assert event == "profile_write_failed"
+        assert event != "file_deleted"
         assert kwargs["reason"] == "write_failure_cleanup"
+        assert kwargs["path"] == str(tmp_store)
 
     def test_successful_save_fires_nothing(self, tmp_store) -> None:
         """The counterfactual: without it the fire-test could pass on any call."""
@@ -307,11 +316,28 @@ class TestSaveProfile:
 
 class TestPrintIntrospection:
     def test_does_not_raise(self, tmp_store) -> None:
-        """print_introspection runs without error."""
+        """print_introspection renders through the REAL console without raising.
+
+        KEPT, not merged, on 2026-09-07 (DPLAN-0323 contested band). It was
+        proposed as redundant against test_outputs_field_names below, and it is
+        not: that sibling PATCHES the console, so Rich never renders and a
+        malformed markup tag reaches nothing. This test does not patch, so it is
+        the only place real Rich rendering of this function is exercised.
+
+        Mutation-proved before the ruling: closing the tag as
+        `[bold cyan]aipass profile[/nonexistent_style_mutation]` fails THIS test
+        and leaves the sibling green. Merging would have deleted the only
+        coverage of a whole class of defect.
+        """
         print_introspection()
 
     def test_outputs_field_names(self, tmp_store, capsys) -> None:
-        """All USER_FIELDS appear in output (Rich strips markup in capsys)."""
+        """print_introspection reaches console.print.
+
+        Docstring corrected 2026-09-07: it claimed all USER_FIELDS appear in the
+        output, which this never checked -- the console is a MagicMock here, so
+        nothing is rendered to check. Named for what it actually pins.
+        """
         with patch("aipass.aipass.apps.modules.profile.console") as mock_console:
             print_introspection()
         assert mock_console.print.called
@@ -323,13 +349,14 @@ class TestPrintIntrospection:
 
 
 class TestPrintHelp:
-    def test_does_not_raise(self) -> None:
-        """print_help runs without error."""
-        with patch("aipass.aipass.apps.modules.profile.console"):
-            print_help()
-
     def test_prints_something(self) -> None:
-        """print_help calls console.print at least once."""
+        """print_help calls console.print at least once.
+
+        Absorbed the sibling `test_does_not_raise` on 2026-09-07 (DPLAN-0323
+        contested band, MERGE). Mutation-checked: making print_help raise killed
+        both tests identically -- same console patch, same call -- so this one
+        subsumed it.
+        """
         with patch("aipass.aipass.apps.modules.profile.console") as mock_console:
             print_help()
         assert mock_console.print.called
@@ -406,25 +433,54 @@ class TestHandleCommand:
         assert all(v is None for v in stored["profile"].values())
 
     def test_clear_cancelled(self, tmp_store) -> None:
-        """'clear' with wrong confirmation does nothing."""
+        """A wrong confirmation clears nothing, so it must not exit 0.
+
+        Rewritten 2026-09-07 (FPLAN-0492 wave 6). This asserted `result is True`
+        -- the assertion that PINNED the defect: the user asked for a clear, the
+        clear did not happen, and the command reported success anyway.
+        """
+        before = tmp_store.read_text() if tmp_store.exists() else None
         with patch("builtins.input", return_value="nope"):
             with patch("aipass.aipass.apps.modules.profile.console"):
-                result = handle_command("profile", ["clear"])
-        assert result is True
+                with pytest.raises(SystemExit) as exc:
+                    handle_command("profile", ["clear"])
+
+        assert exc.value.code == 1
+        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
 
     def test_clear_keyboard_interrupt(self, tmp_store) -> None:
-        """Ctrl-C during clear is handled gracefully."""
+        """Ctrl-C during clear leaves the profile intact and refuses non-zero."""
+        before = tmp_store.read_text() if tmp_store.exists() else None
         with patch("builtins.input", side_effect=KeyboardInterrupt):
             with patch("aipass.aipass.apps.modules.profile.console"):
-                result = handle_command("profile", ["clear"])
-        assert result is True
+                with pytest.raises(SystemExit) as exc:
+                    handle_command("profile", ["clear"])
+
+        assert exc.value.code == 1
+        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
 
     def test_clear_eof_error(self, tmp_store) -> None:
-        """EOFError during clear input is handled gracefully."""
+        """A PIPED clear has no stdin to confirm on: refuse, never report success.
+
+        This is the row canary's sweep named directly -- `aipass profile clear`
+        in a pipe hit EOFError, printed Cancelled and exited 0 while the profile
+        sat untouched, so a script could not tell a clear from a no-op.
+        """
+        before = tmp_store.read_text() if tmp_store.exists() else None
         with patch("builtins.input", side_effect=EOFError):
             with patch("aipass.aipass.apps.modules.profile.console"):
-                result = handle_command("profile", ["clear"])
-        assert result is True
+                with pytest.raises(SystemExit) as exc:
+                    handle_command("profile", ["clear"])
+
+        assert exc.value.code == 1
+        assert (tmp_store.read_text() if tmp_store.exists() else None) == before
+
+    def test_clear_confirmed_still_exits_zero(self, tmp_store) -> None:
+        """The counterfactual: the real clear path must NOT have become a refusal."""
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            with patch("builtins.input", return_value="aipass"):
+                with patch("aipass.aipass.apps.modules.profile.console"):
+                    assert handle_command("profile", ["clear"]) is True
 
     def test_unknown_subcommand_shows_help(self) -> None:
         """Unrecognised subcommand falls through to help (returns True)."""

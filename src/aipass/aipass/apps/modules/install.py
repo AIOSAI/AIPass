@@ -41,6 +41,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -83,7 +84,7 @@ def _looks_like_aipass_tree(home: Path) -> bool:
 
 
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
-    """Decide where AIPass lives — --here / --path / $AIPASS_HOME / prompt / default."""
+    """Decide where AIPass lives — --here / --path / $AIPASS_HOME / cwd / prompt / default."""
     if here:
         return Path.cwd().resolve()
     if path:
@@ -92,9 +93,148 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     if env_home and _looks_like_aipass_tree(Path(env_home).expanduser()):
         return Path(env_home).expanduser().resolve()
     if non_interactive:
+        # Standing INSIDE an AIPass tree and asking for a headless install meant
+        # ~/AIPass until 2026-09-07 (FPLAN-0492 wave 6): the interactive path
+        # offers the prompt where a user can answer with the tree they are in,
+        # and the headless path silently targeted somewhere else. Only an actual
+        # AIPass tree is honoured here, so a bootstrap run from an unrelated
+        # directory still lands on DEFAULT_HOME exactly as before.
+        cwd = Path.cwd().resolve()
+        if _looks_like_aipass_tree(cwd):
+            logger.info("[install] non-interactive: cwd is an AIPass tree, using %s", cwd)
+            return cwd
         return DEFAULT_HOME.resolve()
     raw = _prompt("Where should AIPass live?", str(DEFAULT_HOME))
     return Path(raw).expanduser().resolve()
+
+
+def _install_lock_path(home: Path) -> Path:
+    """The lock guarding one install of `home`.
+
+    Lives in the PARENT, not in `home`: on a fresh machine `home` does not exist
+    until the clone lands, and a lock that only appears after the risky step is
+    no lock at all.
+    """
+    return home.parent / f".{home.name}.install.lock"
+
+
+def _fire_lock_removed(path: Path, reason: str) -> None:
+    """Fire the lock-removal trigger event, ignoring an absent trigger branch."""
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        trigger.fire("file_deleted", path=str(path), reason=reason)
+    except ImportError as exc:
+        logger.warning("[install] trigger unavailable for file_deleted event: %s", exc)
+
+
+def _lock_holder_pid(lock: Path) -> str:
+    """The pid recorded in `lock`, or "" when it is unreadable or malformed."""
+    try:
+        holder = lock.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning("[install] lock %s unreadable: %s", lock, exc)
+        return ""
+    first = holder.split()[0] if holder else ""
+    return first if first.isdigit() else ""
+
+
+def _clear_stale_lock(lock: Path, holder_pid: str) -> bool:
+    """Remove a lock whose holder is gone. True when the lock is now free."""
+    logger.warning("[install] stale lock from dead pid %s, taking over", holder_pid)
+    warning(f"Clearing a stale install lock left by pid {holder_pid}: {lock}")
+    try:
+        lock.unlink()
+    except FileNotFoundError:
+        logger.info("[install] stale lock %s vanished before takeover", lock)
+        return True
+    except OSError as exc:
+        logger.warning("[install] could not clear stale lock: %s", exc)
+        error(f"REFUSED: could not clear the stale install lock at {lock}: {exc}")
+        return False
+    _fire_lock_removed(lock, "stale_install_lock_cleared")
+    return True
+
+
+def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
+    """Claim the install lock for `home`, or return None if another run holds it.
+
+    Refuses by NAMING the lock and its holder rather than dying somewhere deep
+    in a half-finished clone, which is what a second concurrent install used to
+    do (FPLAN-0492 wave 6). A lock whose pid is gone is stale and is taken over,
+    announced -- a crashed install must not wedge the machine forever.
+    """
+    lock = _install_lock_path(home)
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        logger.info("[install] install lock %s already held, inspecting holder", lock)
+        holder_pid = _lock_holder_pid(lock)
+        if _retry and holder_pid and not _pid_alive(int(holder_pid)):
+            if not _clear_stale_lock(lock, holder_pid):
+                return None
+            # _retry=False: one takeover only, so two racing installs that both
+            # see the same stale lock cannot ping-pong clearing each other.
+            return _acquire_install_lock(home, _retry=False)
+        error(
+            f"REFUSED: another install of {home} is already running "
+            f"(lock: {lock}{f', held by pid {holder_pid}' if holder_pid else ''}). "
+            "Wait for it to finish, or delete the lock if you know it is dead."
+        )
+        return None
+    except OSError as exc:
+        logger.warning("[install] could not create lock %s: %s", lock, exc)
+        error(f"REFUSED: could not create the install lock at {lock}: {exc}")
+        return None
+
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(f"{os.getpid()} {datetime.now(timezone.utc).isoformat()}\n")
+    return lock
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when `pid` names a live process, on POSIX and on Windows.
+
+    signal 0 is a POSIX-only probe: on Windows os.kill TERMINATES the target
+    whatever the signal, so a liveness check written that way would kill an
+    unrelated process that happened to reuse the pid.
+    """
+    if sys.platform == "win32":
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("[install] tasklist probe for pid %s failed: %s", pid, exc)
+            return True  # unknown means occupied: never steal a live lock
+        return str(pid) in out.stdout
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    return True
+
+
+def _release_install_lock(lock: Path | None) -> None:
+    """Drop the install lock, never raising — a failed release must not mask the install."""
+    if lock is None:
+        return
+    try:
+        lock.unlink()
+    except FileNotFoundError:
+        logger.info("[install] lock %s already gone at release", lock)
+        return
+    except OSError as exc:
+        logger.warning("[install] could not release lock %s: %s", lock, exc)
+        return
+    _fire_lock_removed(lock, "install_lock_released")
 
 
 def _announce_cloned_branch(home: Path) -> None:
@@ -319,14 +459,20 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     """
     _print_next_steps(home)
 
+    # The doctor preflight runs INSIDE the chat path below, so every early
+    # return here skips it. Patrick's ruling (FPLAN-0492 wave 6): a skipped
+    # preflight is announced with the command that runs it -- never silent.
     if no_chat:
         console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")
+        warning("Health check skipped with the chat — run 'aipass doctor --fix' to check hook wiring.")
         return
     if dry_run:
         console.print("[yellow]\\[dry-run][/yellow] would launch the AIPass concierge welcome chat.")
+        console.print("[yellow]\\[dry-run][/yellow] would run the 'aipass doctor --fix' health check.")
         return
     if not sys.stdin.isatty():
         console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
+        warning("Health check skipped (no TTY) — run 'aipass doctor --fix' to check hook wiring.")
         return
 
     hook_action_items = _run_doctor_preflight()
@@ -438,30 +584,40 @@ def run_install(
             return 1
         logger.warning("[install] --force-global-home override: proceeding with throwaway home %s", home)
 
-    if _looks_like_aipass_tree(home):
-        success(f"AIPass already present at {home} — skipping download")
-    elif not _clone_repo(home, dry_run):
-        warning("Could not fetch AIPass — aborting install.")
+    # Claimed before the first mutating step (clone) and dropped before the
+    # welcome chat: _end_in_chat's launch_inline REPLACES this process and never
+    # returns, so a release after it would never run and would wedge the home.
+    install_lock = _acquire_install_lock(home)
+    if install_lock is None:
         return 1
-    else:
-        success(f"AIPass downloaded to {home}")
 
-    # Step 2 — build the environment via setup.sh
-    console.print()
-    console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
-    if not _run_setup(home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink):
-        warning("Environment build failed — aborting install.")
-        return 1
-    success("Environment ready")
+    try:
+        if _looks_like_aipass_tree(home):
+            success(f"AIPass already present at {home} — skipping download")
+        elif not _clone_repo(home, dry_run):
+            warning("Could not fetch AIPass — aborting install.")
+            return 1
+        else:
+            success(f"AIPass downloaded to {home}")
 
-    # Step 3 — verify the binaries landed
-    console.print()
-    console.print(render_step_header(3, TOTAL_STEPS, "Verifying install"))
-    bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
+        # Step 2 — build the environment via setup.sh
+        console.print()
+        console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
+        if not _run_setup(home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink):
+            warning("Environment build failed — aborting install.")
+            return 1
+        success("Environment ready")
 
-    # Owner/identity retro-trigger — check and self-heal via spawn
-    if not dry_run:
-        _check_and_fix_owner(home)
+        # Step 3 — verify the binaries landed
+        console.print()
+        console.print(render_step_header(3, TOTAL_STEPS, "Verifying install"))
+        bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
+
+        # Owner/identity retro-trigger — check and self-heal via spawn
+        if not dry_run:
+            _check_and_fix_owner(home)
+    finally:
+        _release_install_lock(install_lock)
 
     # Step 4 — end in a welcome chat (no project creation — see module docstring)
     console.print()

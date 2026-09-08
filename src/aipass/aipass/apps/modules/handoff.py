@@ -21,7 +21,7 @@ Usage:
 
 from __future__ import annotations
 
-from aipass.cli.apps.modules import console, success, warning
+from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -149,8 +149,10 @@ def handle_command(command: str, args: list[str]) -> bool:
     if args[0] == "launch":
         cli, cwd, flag_variant = _parse_launch_args(args[1:])
         if cli not in CLI_CHOICES:
-            warning(f"Unknown CLI '{cli}'. Valid options: {', '.join(CLI_CHOICES)}")
-            return True
+            # A refusal: nothing was launched, so this cannot exit 0. The message
+            # names the rejected token and the valid set (FPLAN-0492 wave 6).
+            error(f"Unknown CLI '{cli}'. Valid options: {', '.join(CLI_CHOICES)}")
+            raise SystemExit(1)
         do_handoff(cli=cli, cwd=cwd, flag_variant=flag_variant)
         return True
 

@@ -56,6 +56,7 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
 _PUBLIC_COMMANDS = {
     "adopt": "Turn an existing projects/ directory into a full project",
     "doctor": "System health — structure, registry, hooks, tests",
+    "handoff": "Launch your CLI in a new session",
     "help": "README-backed Q&A — ask about any branch",
     "init": "Guided setup for new users (10 stages, resumable)",
     "install": "One-command bootstrap — clone + setup + init",
@@ -199,6 +200,12 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print("  [green]doctor --fix[/green]                 [dim]Remediation report with repair commands[/dim]")
     console.print("  [green]doctor --json[/green]                [dim]JSON output for structure scan[/dim]")
     console.print("  [green]doctor --cross-os[/green]            [dim]Cross-OS pre-flight check[/dim]")
+    console.print(
+        "  [green]feedback[/green] [dim]\\[on|off][/dim]            [dim]Toggle the feedback reminder pulse[/dim]"
+    )
+    console.print(
+        "  [green]handoff[/green] [dim]\\[launch][/dim]             [dim]Launch your CLI in a new session[/dim]"
+    )
     console.print("  [green]help <question>[/green]              [dim]Search branch documentation (Q&A)[/dim]")
     console.print(
         "  [green]init[/green]                         [dim]Guided setup for new users (10 stages, resumable)[/dim]"

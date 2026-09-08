@@ -65,29 +65,32 @@ def _read_json_file(path: Path) -> dict:
     return result
 
 
-def _fire_file_deleted(path: str) -> None:
+def _fire_profile_write_failed(path: str) -> None:
     """Fire the write-failure trigger event, ignoring an absent trigger branch.
 
-    Same event name and reason as before the handler refactor, so any consumer
-    of this signal sees exactly what it saw when the writer was hand-rolled.
-    Only ``path`` changed meaning, and it had to: json_handler owns its temp
-    file and unlinks it internally, so this module never learns that name. The
-    path is therefore the STORE the failed write targeted, and ``detail`` says
-    plainly that the store itself was not the thing deleted -- an event that
-    named the store under a bare "file_deleted" with no qualifier would read as
-    "the profile was deleted", which is not what happened.
+    The event fires on a FAILED WRITE, never on a deletion, and since 2026-09-07
+    it is named for what it is. It was ``file_deleted`` when the writer was
+    hand-rolled and the temp file this module unlinked was the only thing the
+    name could honestly describe; @trigger delivers that old name as a
+    deprecated alias for one release, so consumers keep working across the
+    rename.
+
+    ``path`` is the STORE the failed write targeted, not a temp file:
+    json_handler owns its temp file and unlinks it internally, so this module
+    never learns that name. ``detail`` keeps saying that the store itself
+    survived, which the name no longer has to carry alone.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
 
         trigger.fire(
-            "file_deleted",
+            "profile_write_failed",
             path=path,
             reason="write_failure_cleanup",
             detail="json_handler removed its own temp file; the store was left untouched",
         )
     except ImportError as exc:
-        logger.warning("[profile] trigger unavailable for file_deleted event: %s", exc)
+        logger.warning("[profile] trigger unavailable for profile_write_failed event: %s", exc)
 
 
 def _write_profile_json(data: dict) -> None:
@@ -107,7 +110,7 @@ def _write_profile_json(data: dict) -> None:
     if json_handler.write_json(_PROFILE_JSON, data):
         return
     logger.warning("[profile] user_profile.json write failed: %s", _PROFILE_JSON)
-    _fire_file_deleted(str(_PROFILE_JSON))
+    _fire_profile_write_failed(str(_PROFILE_JSON))
     raise OSError(f"[profile] could not write {_PROFILE_JSON}")
 
 
@@ -228,15 +231,18 @@ def handle_command(command: str, args: list[str]) -> bool:
         try:
             confirm = input("> ").strip()
         except (KeyboardInterrupt, EOFError) as exc:
+            # No usable stdin (piped, or ctrl-C): the profile was NOT cleared, so
+            # this cannot exit 0. A piped `aipass profile clear` reported success
+            # while clearing nothing until 2026-09-07 (FPLAN-0492 wave 6).
             logger.info("[profile] clear input interrupted: %s", exc)
-            console.print("\n[yellow]Cancelled.[/yellow]")
-            return True
+            error("Cancelled — no confirmation read, profile NOT cleared.")
+            raise SystemExit(1) from exc
         if confirm == "aipass":
             save_profile({f: None for f in USER_FIELDS})
             success("Profile cleared.")
-        else:
-            console.print("[yellow]Cancelled.[/yellow]")
-        return True
+            return True
+        error(f"Cancelled — confirmation was {confirm!r}, not 'aipass'. Profile NOT cleared.")
+        raise SystemExit(1)
 
     print_help()
     return True

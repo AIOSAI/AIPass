@@ -147,6 +147,77 @@ class TestSaveStage:
         stored = json.loads(tmp_local_json.read_text())
         assert "timestamp" in stored["setup_progress"]["stages"]["1"]
 
+    def test_stamps_test_write_policy_in_hooks_shape(self, tmp_local_json) -> None:
+        """A fresh init stamps the policy in the exact shape @hooks' reader validates.
+
+        The three keys their validator consumes (mailed 2026-09-07, checked by
+        them against their live file): agent_test_writing is the STRING "off" --
+        a boolean is REFUSED -- allow is an array, block_test_edits a bool.
+        """
+        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
+
+        policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
+        with patch(
+            "aipass.aipass.apps.modules.init_flow._get_test_write_policy_path",
+            return_value=policy,
+        ):
+            assert _stamp_test_write_policy() is True
+
+        stored = json.loads(policy.read_text())
+        assert stored["agent_test_writing"] == "off"
+        assert not isinstance(stored["agent_test_writing"], bool)
+        assert stored["allow"] == []
+        assert stored["block_test_edits"] is False
+
+    def test_test_write_policy_is_never_clobbered(self, tmp_local_json) -> None:
+        """An existing policy may hold a deliberate flip — init must not repeal it."""
+        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
+
+        policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        local_ruling = '{"agent_test_writing": "on", "allow": ["canary"]}'
+        policy.write_text(local_ruling, encoding="utf-8")
+
+        with patch(
+            "aipass.aipass.apps.modules.init_flow._get_test_write_policy_path",
+            return_value=policy,
+        ):
+            assert _stamp_test_write_policy() is False
+
+        assert policy.read_text(encoding="utf-8") == local_ruling
+
+    def test_write_goes_through_the_json_service(self, tmp_local_json) -> None:
+        """The progress write routes through the fleet service, not a hand-rolled writer.
+
+        Pinned 2026-09-07 (FPLAN-0492 wave 6): this module carried its own
+        mkstemp/json.dump/os.replace writer until the fleet settled on one json
+        service. Asserting the service is CALLED is what stops a future edit
+        quietly reintroducing a second writer beside it.
+        """
+        with patch(
+            "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
+            return_value=True,
+        ) as mock_write:
+            _save_stage(1, {"foo": "bar"})
+
+        mock_write.assert_called_once()
+        written_path, written_data = mock_write.call_args[0][0], mock_write.call_args[0][1]
+        assert Path(written_path) == tmp_local_json
+        assert written_data["setup_progress"]["stages"]["1"]["foo"] == "bar"
+
+    def test_failed_write_raises_instead_of_answering_false(self, tmp_local_json) -> None:
+        """A lost init stage must not look identical to a saved one.
+
+        The service answers False and logs rather than raising; callers here are
+        written against OSError, so the False is turned back into one.
+        """
+        with patch(
+            "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
+            return_value=False,
+        ):
+            with pytest.raises(OSError):
+                _save_stage(1, {})
+
 
 # =============================================================================
 # TestPrintIntrospection
@@ -178,13 +249,15 @@ class TestPrintIntrospection:
 
 
 class TestPrintHelp:
-    def test_does_not_raise(self) -> None:
-        """print_help runs without error."""
-        with patch("aipass.aipass.apps.modules.init_flow.console"):
-            print_help()
-
     def test_calls_console_print(self) -> None:
-        """print_help outputs via console.print."""
+        """print_help outputs via console.print.
+
+        Absorbed the sibling `test_does_not_raise` on 2026-09-07 (DPLAN-0323
+        contested band, MERGE). Mutation-checked before merging: making
+        print_help raise killed BOTH tests identically, because both patched the
+        same console and made the same call -- so this one, which additionally
+        asserts console.print was reached, strictly subsumed it.
+        """
         with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
             print_help()
         assert mock_console.print.called

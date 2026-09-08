@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import subprocess
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -41,11 +41,11 @@ def _run_hooks_feedback(action: str | None) -> int:
         return proc.returncode
     except FileNotFoundError:
         logger.warning("[feedback] drone not found on PATH")
-        warning("drone not found on PATH — cannot reach @hooks.")
+        error("drone not found on PATH — cannot reach @hooks.")
         return 1
     except subprocess.TimeoutExpired:
         logger.warning("[feedback] drone @hooks feedback timed out")
-        warning("drone @hooks feedback timed out.")
+        error("drone @hooks feedback timed out.")
         return 1
 
 
@@ -105,4 +105,5 @@ def handle_command(command: str, args: list[str]) -> bool:
     )
     if rc != 0:
         logger.warning("[feedback] drone @hooks feedback exited %d", rc)
+        raise SystemExit(rc)
     return True
