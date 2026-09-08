@@ -30,7 +30,7 @@ if sys.platform == "win32":
 os.environ.setdefault("AIPASS_BRANCH_NAME", "backup")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header
+from aipass.cli.apps.modules import console, error, header, reset_command_state, resolve_exit
 
 VERSION = "1.0.0"
 MODULE_NAME = "backup"
@@ -162,7 +162,16 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bo
 
 
 def main():
-    """Main entry point - routes commands or shows help."""
+    """Main entry point - routes commands or shows help.
+
+    The exit seam (fleet rule, refusal sweep 2026-09-07): cli's ``error()``
+    marks the process failed, but that flag only reaches an exit code if
+    somebody reads it. ``reset_command_state()`` clears the flag on entry so a
+    long-lived process cannot inherit a previous command's failure, and a
+    routed command returns ``resolve_exit(True)`` -- 0 when nothing errored,
+    2 when a handled command reported an error and used to exit 0 anyway.
+    """
+    reset_command_state()
     args = sys.argv[1:]
 
     if args and args[0] in ("--version", "-V"):
@@ -211,7 +220,7 @@ def main():
 
         handled, failure = route_command(mode, remaining, modules)
         if handled:
-            return 0
+            return resolve_exit(True)
         if failure:
             error(f"{mode} failed -- {failure}")
             return 1
@@ -231,7 +240,7 @@ def main():
 
     handled, failure = route_command(command, remaining, modules)
     if handled:
-        return 0
+        return resolve_exit(True)
 
     if failure:
         error(f"{command} failed -- {failure}")

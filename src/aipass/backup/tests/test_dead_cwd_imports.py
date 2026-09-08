@@ -101,6 +101,27 @@ def _compile_as(caller_file: str, guard) -> None:
     exec(compile("check()", caller_file, "exec"), {"check": guard._guard_branch_access})
 
 
+def _fence_verdict(caller_file: str, guard) -> str | None:
+    """Run the fence as ``caller_file`` and RETURN its decision.
+
+    The admit-side units used to be bare calls: run it, and if nothing raised
+    the test passed. That is a real property but an invisible one -- no oracle
+    a reader (or the v5 no_oracle checker) can see, and the day the fence starts
+    admitting everything the unit stays green for the same reason it was green
+    before. Returning the verdict lets the admit side assert a value the way
+    the refuse side already asserts a raise.
+
+    Returns None when the caller was admitted, or the ImportError text when it
+    was refused. AssertionError from ``_compile_as``'s mint guard is NOT caught:
+    that is the coverage invariant firing, not a fence decision.
+    """
+    try:
+        _compile_as(caller_file, guard)
+    except ImportError as refused:
+        return str(refused)
+    return None
+
+
 def _load_guard_module():
     """Execute the real handlers/__init__.py, guard and all.
 
@@ -381,10 +402,17 @@ class TestFenceStillRefusesForeignCallers:
         assert not guard._is_kin(real_sibling, guard._BRANCH_ROOT)
 
     def test_own_branch_file_is_allowed(self, guard, tmp_path, monkeypatch) -> None:
-        """A file under the branch root passes -- the fence is not always-refuse."""
+        """A file under the branch root passes -- the fence is not always-refuse.
+
+        The admit side is asserted, not merely survived: an always-refuse fence
+        used to be caught here only by the traceback it raised, which is the
+        same shape of green a test that ran nothing reports.
+        """
         fake = _fake_tree(tmp_path)
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(fake / "backup"))
-        self._call_guard_as(guard, str(fake / "backup" / "apps" / "modules" / "snapshot.py"))
+        own = str(fake / "backup" / "apps" / "modules" / "snapshot.py")
+
+        assert _fence_verdict(own, guard) is None
 
     def test_a_real_backup_file_is_kin(self, guard) -> None:
         """The allow side against the REAL root, again without compiling."""
@@ -392,8 +420,13 @@ class TestFenceStillRefusesForeignCallers:
         assert guard._is_kin(real_kin, guard._BRANCH_ROOT)
 
     def test_pseudo_frame_caller_is_allowed(self, guard) -> None:
-        """A <string> frame is skipped, not resolved -- that skip is the cure."""
-        self._call_guard_as(guard, "<string>")
+        """A <string> frame is skipped, not resolved -- that skip is the cure.
+
+        Without the skip the fence resolves "<string>" against the cwd, lands
+        outside the branch and refuses; the verdict is asserted so a regression
+        reads as a failed claim rather than an incidental traceback.
+        """
+        assert _fence_verdict("<string>", guard) is None
 
 
 class TestKinshipSurvivesTheWindowsSpelling:
@@ -467,7 +500,8 @@ class TestKinshipSurvivesTheWindowsSpelling:
         """
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(self.WIN_ROOT))
         monkeypatch.chdir(tmp_path)
-        _compile_as(str(self.WIN_KIN), guard)
+
+        assert _fence_verdict(str(self.WIN_KIN), guard) is None
 
     def test_guard_still_refuses_windows_spelled_foreigner(self, guard, monkeypatch, tmp_path: Path) -> None:
         """Same end-to-end path, refuse side -- the fence still closes."""
@@ -745,8 +779,15 @@ class TestFabricatedFilenamesNeverReachCoverage:
             _compile_as(str(BRANCH_ROOT / "apps" / "never_written.py"), guard)
 
     def test_the_mint_guard_permits_a_pseudo_frame(self, guard) -> None:
-        """Narrowness control: <string> has no source and must stay permitted."""
-        _compile_as("<string>", guard)
+        """Narrowness control: <string> has no source and must stay permitted.
+
+        Two claims in one line, both now asserted: the mint guard does not fire
+        (it would raise AssertionError, which _fence_verdict deliberately lets
+        through) and the fence admits the frame (verdict None). A guard widened
+        until it refused every name would fail the sibling above; a guard
+        widened until it refused pseudo-frames fails here.
+        """
+        assert _fence_verdict("<string>", guard) is None
 
     def test_the_structural_check_can_say_no(self) -> None:
         """Negative control: a checker that cannot convict is not a checker.

@@ -67,11 +67,17 @@ class TestDriveSyncModule:
         result = mod.handle_command(mod.PRIMARY_COMMAND, [])
         assert result is True
 
-    def test_drive_sync_returns_bool(self) -> None:
-        """return_type -- command_returns_bool, returns_bool."""
+    def test_drive_sync_declines_a_verb_that_is_not_its_own(self) -> None:
+        """An unclaimed verb returns False so the router keeps asking.
+
+        The type alone said nothing: True is a bool too, and a module that
+        answered True to every verb would have passed the old isinstance-only
+        pin while swallowing every other module's command. That exact bug was
+        live in display.py once (see test_cli_routing TestUnknownCommandNotSwallowed).
+        """
         mod = _get_drive_module("drive_sync")
         result = mod.handle_command("nonexistent", [])
-        assert isinstance(result, bool)
+        assert result is False
 
 
 class TestDriveCheckModule:
