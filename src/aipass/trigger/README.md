@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through a 7-gate pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-07
 
 ## Quick Start
 
@@ -168,6 +168,35 @@ kept and marked, because those files are still on disk and the distinction is re
 | `cli_header_displayed` | `cli.py` | CLI displays headers | Registration hook |
 | `runaway_log_detected` | `runaway_handler.py` | Prax rate tracker detects sustained high log volume | Per-file cooldown dispatch to responsible branch; gated by VOLUME mutes only (CRITICAL bypasses); UNKNOWN attribution falls back to @prax; writes alert to `.aipass/alerts.json` |
 | `memory_pool_auto_processed` | `memory_pool.py` | @memory's detached child at the point it finishes — `memory/apps/handlers/intake/auto_process.py`, `_fire_completion()` from `run_once()`, on both the success and the failure leg; a run that declines the lock announces nothing, because the holder announces its own | Logs result; on failure fires `error_detected` for Medic dispatch. `status` vocabulary is `ok` / `skipped` / `failed` / `unknown` — `unknown` means the section never reported, and an absent section must derive to it rather than to `ok`, or a crashed run announces that the pool completed (found by @hooks 2026-09-05, cure is @memory's) — and `branch` must be a **registered** citizen — `__global__` is refused by gate 5 and the failure would be lost there. Both published in the handler docstring |
+
+**Renamed — one release of grace:**
+
+| Old name | Current name | State |
+|---|---|---|
+| `file_deleted` | `profile_write_failed` | **Aliased 2026-09-07** (FPLAN-0492 wave 5, ruled by @devpulse). `DEPRECATED_EVENT_ALIASES` in `modules/core.py` resolves the old name in `fire()`, `on()` and `off()`, and logs a deprecation **once per name per process**. The entry is deleted next release |
+
+The old name described the opposite of what happens: the event fires when a **profile
+write fails** and `json_handler` removes its own temp file — the store is never deleted.
+
+Measured 2026-09-07: **zero handlers are registered on either name**, anywhere in the
+fleet, so the alias is precautionary rather than load-bearing. Three fire sites carry
+the old name, none of them in this branch —
+`aipass/apps/modules/profile.py:84`, `aipass/apps/modules/init_flow.py:125` and
+`daemon/apps/modules/timer_install.py:157`. One display consumer keys on the string:
+`prax/apps/handlers/monitoring/unified_stream.py:59` colours `file_deleted` red and
+will need the new key. (`plan_file_deleted` is a different event and is unaffected.)
+
+**@daemon's fire site is not a profile write failure.** `timer_install.py:157` fires
+immediately after `dst.unlink()` removes a systemd unit — a real deletion, accurately
+named. Aliasing relabels it as a profile write failure, which is the same kind of lie
+the rename exists to remove; the table keys on the event name and cannot tell the two
+callers apart. Ruled by @devpulse 2026-09-07: that site "is a different event entirely"
+and gets its own honest name in a @daemon item they queue. Until it moves, its fires
+are relabelled by this table — a known interim, not an oversight.
+
+Renaming the fire calls is **not this branch's work**: @aipass's two sites go into its
+own wave-6 brief. The error registry holds no entry under either name (measured
+2026-09-07), so there was nothing there to update.
 
 **Not wired — files on disk, deliberately unregistered:**
 
@@ -411,7 +440,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1016 test functions in 29 files (pytest expands to 1057)
+├── tests/                          # 1015 test functions in 28 files (pytest expands to 1049)
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -423,13 +452,19 @@ trigger/
 └── trigger_data.json               # Log watcher positions + dedup hashes
 ```
 
-Three package directories under `apps/` are deliberately not drawn above, all spawn
-scaffolding this branch has never used (re-checked 2026-09-05): `extensions/` holds a
+Two package directories under `apps/` are deliberately not drawn above, both spawn
+scaffolding this branch has never used (re-checked 2026-09-07): `extensions/` holds a
 single `__init__.py` with one comment line; `plugins/` holds that plus a README.md
-describing a daemon-plugin pattern this branch never adopted; `json_templates/` holds
-that plus `default/{config,data,log}.json` — dead since the json sweep, because the
-fleet json service generates its defaults **in code** and reads no on-disk template.
-They are named here rather than drawn so the tree keeps showing code that runs.
+describing a daemon-plugin pattern this branch never adopted. They are named here
+rather than drawn so the tree keeps showing code that runs.
+
+A third, `json_templates/`, was retired on 2026-09-07 (FPLAN-0492 wave 5). It carried
+an `__init__.py` and `default/{config,data,log}.json`, dead since the json sweep
+because the fleet json service generates its defaults **in code** and reads no
+on-disk template. Measured at zero references outside its own directory, then moved
+to `apps/.archive/json_templates/` rather than deleted. `.archive/` is gitignored
+with no exceptions, so in git this lands as a deletion of four files; the copy on
+disk is a local recovery path only, and the disposal zone is cleaned without warning.
 
 Branch-root directories the tree also does not draw: `logs/` (prax output plus this
 branch's `.jsonl` trails), `templates/` (the systemd unit template `service_control.py`
@@ -447,8 +482,9 @@ above for exactly that reason: the tree describes what a checkout contains.
 file against the structure its type declares and regenerates it when the shape
 does not match. Since the json sweep (2026-09-03) that owner is the fleet
 service behind the shim, and the default it regenerates from is **in code**
-(`json_service._default_document`), not the on-disk `json_templates/` directory
-this branch still carries. The service recomputes the target directory on every
+(`json_service._default_document`), not an on-disk template directory — the
+`json_templates/` this branch still carried was retired on 2026-09-07 precisely
+because nothing read it. The service recomputes the target directory on every
 call, so nothing here is captured at import.
 Medic state and catch-up state used to live at `trigger_config.json` and
 `trigger_data.json` — both trio names for module `trigger`, both hand-written,
@@ -500,9 +536,14 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-**1016 test functions across 29 test files; pytest expands them to 1057 cases**, all
-passing (`1057 passed`, 0 failed, 0 skipped, 13.8s — measured 2026-09-05 from the
-branch rootdir). Both numbers are published because parametrization moves them apart:
+**1015 test functions across 28 test files; pytest expands them to 1049 cases**, all
+passing (`1049 passed`, 0 failed, 0 skipped, 16.5s — measured 2026-09-07 evening from
+the repo root). It read 1006 / 28 / 1039 earlier the same day; FPLAN-0492 wave 5 added
+the occurrence-counting, alias and module-identity pins and merged 6 of the 7 DPLAN-0323
+duplicate rows. It read 1016 / 29 / 1057 for the two days before that: on 2026-09-07
+01:30 `test_json_handler.py` was archived and four test functions were removed from
+`test_error_detected.py` and `test_log_watcher.py` by an author this branch cannot
+name — see Status / Known issues. Both numbers are published because parametrization moves them apart:
 `def test_` lines are what a reader counts in the files, collected cases are what CI
 reports. Coverage: 103/103 public functions (100%), as reported by
 `drone @seedgo audit aipass @trigger` tonight.
@@ -511,11 +552,11 @@ reports. Coverage: 103/103 public functions (100%), as reported by
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files (29, listed from `ls tests/test_*.py` on 2026-09-05): `test_branch_log_events`,
+Test files (28, listed from `ls tests/test_*.py` on 2026-09-07): `test_branch_log_events`,
 `test_bypass_anchors`, `test_config_migration`, `test_core`, `test_error_detected`,
 `test_error_registry`, `test_error_reporter`, `test_errors`, `test_escalation`,
 `test_escalation_upsert`, `test_event_handlers`, `test_help_flags`, `test_import_dead_cwd`,
-`test_json_durability`, `test_json_handler`, `test_log_events`, `test_log_watcher`,
+`test_json_durability`, `test_log_events`, `test_log_watcher`,
 `test_log_watcher_service`, `test_medic`, `test_medic_state`, `test_memory_pool_handler`,
 `test_pr_status_sync`, `test_reload_sentinel`, `test_runaway_handler`, `test_service_control`,
 `test_startup_handler`, `test_trigger_config_loader`, `test_trigger_entry`,
@@ -524,9 +565,12 @@ Test files (29, listed from `ls tests/test_*.py` on 2026-09-05): `test_branch_lo
 Archived, and no longer in the count: `test_plan_file_handler` and `test_scaffold` (both
 in `tests/.archive/` with the handlers they pinned), plus two files the json sweep retired
 on 2026-09-04 (`deleted_2026-09-04_json_handler.py`, `deleted_2026-09-04_cli_routing.py`).
-`test_json_handler` survives as six wiring tests: the shim has no attributes to patch, so
-what it can pin is that every public name is a *bound method* of the fleet service — the
-service's behaviour is pinned once, fleet-wide, by seedgo's cross-branch contract.
+`test_json_handler` is gone too, archived 2026-09-07 as
+`deleted_2026-09-07_test_json_handler.py`. Its six wiring tests pinned that every public
+name is a bound method of the fleet service; @seedgo now holds that contract fleet-wide
+and checks the shim by hash (`json_handler_check`, canonical shim bytes), so the per-branch
+copy was redundant. That reasoning is mine, reconstructed after the fact — the archival
+carries no note and I did not make it.
 
 The count said "27 modules" and the list named only 24 of them until 2026-08-25; it then
 said 28 and named two files that had since been archived, until this pass. A
@@ -542,15 +586,16 @@ docs-only truth pass — and each one is either owned here or already mailed out
 **Running now:** medic ENABLED, log watcher running under systemd, 12 branches content-muted
 (all auto-expiring inside 24h), 0 volume mutes. Error registry: 476 tracked errors —
 437 `new`, 37 `resolved`, 2 `suppressed`. Lifetime counters: 2116 suppressions, 217 rate
-limits. Suite 1057 passed; audit 100 with bypasses, 98 without.
+limits. Suite 1049 passed; audit 100 with bypasses, 98 without.
 
 | Issue | Where | State |
 |---|---|---|
+| **Unexplained work in my own tree.** On 2026-09-07 01:30–01:32 `test_json_handler.py` was archived to `tests/.archive/deleted_2026-09-07_test_json_handler.py` and four test functions were removed from `test_error_detected.py` (50→49) and `test_log_watcher.py` (164→161). Not my edits, and the archived file carries no note of author or reason | `tests/` | **Reported, not reverted.** Coherent with the fleet json sweep — @seedgo now pins the shim by hash, so a per-branch wiring copy is redundant — but that is reconstruction, not attribution. Suite is green (1039 at the time, 1049 now) and the shim hash is unchanged (`3456b766…`). Raised with @devpulse 2026-09-07 |
 | `error_logged` is advertised as a real event by `log_events --help` and two docstrings, and nothing fires it anywhere in the fleet | `modules/log_events.py:71,135`, `handlers/watchers/log_watcher.py:17`, `events/startup.py:323` | **Open, mine.** Known since 2026-08-25 and still unfixed; the watchers fire `error_detected` and `warning_logged`, and nothing else |
 | ~~`memory_pool_auto_processed` has a registered handler and no firer~~ | `events/memory_pool.py` | **Closed 2026-09-05, same night.** Found here, confirmed by @hooks, cured by @memory. The fire belonged in neither of the two places I offered: @hooks returns the instant a PID exists and cannot see the outcome, so it now fires from the child's own completion point. Verified end-to-end on my side — their exact payload gives `handlers: 1, ran: 1, failed: 0`, and a nested `error_detected` from inside a handler is deferred and then actually delivered, so the medic path is live again |
 | `memory_template_updated` has a registered handler, no firer, and the handler is a stub whose docstring claims a `push_templates()` call it does not make | `events/memory_template_updated.py` | **Open, mine.** DPLAN-0318 |
 | 15 stray `tmp*.tmp` files sit in `trigger_json/`, 14 of them zero-byte, oldest 2026-08-14 | `trigger_json/` | **Open, mine.** Staged temp files whose rename never landed; harmless but unswept, and the sweep belongs in the writer, not in a cron |
-| `apps/json_templates/default/` still ships `config.json`, `data.json`, `log.json` after the json service moved defaults into code | `apps/json_templates/` | **Open, mine.** Dead scaffolding; retiring it is a code change |
+| ~~`apps/json_templates/default/` still ships `config.json`, `data.json`, `log.json` after the json service moved defaults into code~~ | `apps/.archive/json_templates/` | **Closed 2026-09-07** (FPLAN-0492 wave 5). Measured at zero references outside its own directory, then moved to `apps/.archive/` — archived, never deleted. Nothing imported it, so the suite was unchanged by the move |
 | `drone @trigger status` always reports `Active: False` — it describes the CLI process you just started, never the systemd watcher | `modules/branch_log_events.py` | **Open, mine.** APLAN-0008. `medic status` is the command that reads the service |
 | `.aipass/aipass_local_prompt.md` still says "14 events, 14 handlers" and lists `log_events.py` / `branch_log_events.py` shapes from before the retirement | branch prompt | **Open, mine.** Prompt file, out of scope for this docs pass (README + `.trinity` only) |
 

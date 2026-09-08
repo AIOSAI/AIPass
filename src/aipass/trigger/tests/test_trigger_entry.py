@@ -453,3 +453,22 @@ class TestUnknownCommandMessage:
         assert trigger.main() == 1
         printed = [str(c) for c in _mock_error.call_args_list]
         assert any("medic nonsense" in p for p in printed), printed
+
+    @pytest.mark.parametrize("module_name", ["errors", "escalation"])
+    def test_real_module_refuses_unknown_subcommand_through_the_gate(
+        self, monkeypatch: pytest.MonkeyPatch, module_name: str
+    ) -> None:
+        """A real module's unknown subcommand exits 1, not 0.
+
+        `errors` printed its own refusal and returned True; `escalation`
+        printed help and returned True. Both told the entry point "handled",
+        so the invocation exited 0 — a refusal that reports success is
+        indistinguishable from a command that worked (FPLAN-0492). Modules
+        discovered for real here: mocking them away would prove nothing.
+        """
+        trigger = _import_trigger()
+        monkeypatch.setattr(sys, "argv", ["trigger", module_name, "not_a_subcommand_xyz"])
+
+        assert trigger.main() == 1
+        printed = [str(c) for c in _mock_error.call_args_list]
+        assert any(f"{module_name} not_a_subcommand_xyz" in p for p in printed), printed

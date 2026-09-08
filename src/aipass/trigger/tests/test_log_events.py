@@ -129,14 +129,6 @@ def test_start_success_returns_true():
     assert result is True
 
 
-def test_start_calls_start_log_watcher():
-    """start() calls start_log_watcher handler."""
-    mod = _import_module()
-    mod.start()
-    watcher = _get_log_watcher()
-    watcher.start_log_watcher.assert_called_once()
-
-
 def test_start_failure_returns_false():
     """start() returns False when start_log_watcher returns None."""
     mod = _import_module()

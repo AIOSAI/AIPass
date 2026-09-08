@@ -1292,9 +1292,24 @@ class TestCliCommand:
         rendered = " ".join(str(call) for call in cli.console.print.call_args_list)
         assert "escalation Module" in rendered
 
-    def test_unknown_subcommand_shows_help(self, cli) -> None:
-        """An unknown subcommand falls back to help instead of failing silently."""
-        assert cli.module.handle_command("escalation", ["wat"]) is True
+    def test_unknown_subcommand_refuses_rather_than_showing_help(self, cli) -> None:
+        """`escalation wat` returns False so the entry point can exit non-zero.
+
+        This test used to assert the opposite — an unknown subcommand printed
+        help and returned True. Help is what a working command looks like, so
+        the refusal exited 0 and never named the token. Returning False routes
+        it through the ONE gate in trigger.py, which names the whole invocation
+        and exits 1 (Patrick's standing ruling, FPLAN-0492).
+        """
+        assert cli.module.handle_command("escalation", ["wat"]) is False
+
+    def test_help_words_still_reach_help(self, cli, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The refusal must not swallow `help` — it is not an unknown subcommand."""
+        printed = MagicMock()
+        monkeypatch.setattr(cli.module, "print_help", printed)
+
+        assert cli.module.handle_command("escalation", ["help"]) is True
+        printed.assert_called_once()
 
     def test_status_renders_the_configured_recipient(self, cli, cfg) -> None:
         """Status shows where digests actually go, not a hardcoded address."""

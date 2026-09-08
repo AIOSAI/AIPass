@@ -15,6 +15,8 @@ error_reporter, cli display) is mocked via sys.modules before import.
 """
 
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -539,26 +541,25 @@ class TestHandleCommandWrongModule:
 class TestHandleCommandUnknown:
     """Tests for unknown subcommands."""
 
-    def test_unknown_subcommand_shows_error(self):
-        """Unknown subcommand calls the error display with exact message format and suggestion."""
+    def test_unknown_subcommand_refuses_rather_than_reporting_handled(self):
+        """`errors foobar` returns False so the entry point can exit non-zero.
+
+        This test used to assert the opposite: the module printed its own
+        "Unknown subcommand: foobar" and returned True, which told trigger.py
+        the command had been handled — so a refusal exited 0 and no caller
+        could branch on it (Patrick's standing ruling, FPLAN-0492). Returning
+        False routes the refusal through the ONE gate, which names the whole
+        invocation and exits 1.
+        """
         from aipass.trigger.apps.modules.errors import handle_command
 
         mocks = _mocks()
 
         result = handle_command("errors", ["foobar"])
 
-        assert result is True
-        mocks["error_fn"].assert_called_once()
-
-        # Verify the exact message format: "Unknown subcommand: foobar"
-        call_args = mocks["error_fn"].call_args
-        assert call_args[0][0] == "Unknown subcommand: foobar", (
-            f"Expected exact error message 'Unknown subcommand: foobar', got {call_args[0][0]!r}"
-        )
-
-        # Verify suggestion kwarg is passed
-        assert "suggestion" in call_args[1], "Expected 'suggestion' keyword argument"
-        assert "help" in call_args[1]["suggestion"].lower(), "Expected suggestion to mention 'help'"
+        assert result is False
+        # The module must NOT print its own refusal — the gate owns the message.
+        mocks["error_fn"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -580,11 +581,16 @@ class TestReportError:
             "dispatched": False,
         }
 
+        # Never opened — report_error hands the path straight through. Built
+        # from the platform temp dir rather than a literal /tmp so the string
+        # is portable on Windows too.
+        log_path = str(Path(tempfile.gettempdir()) / "flow.log")
+
         result = report_error(
             error_type="ImportError",
             message="No module named 'foo'",
             component="FLOW",
-            log_path="/tmp/flow.log",
+            log_path=log_path,
             severity="high",
         )
 
@@ -592,7 +598,7 @@ class TestReportError:
             error_type="ImportError",
             message="No module named 'foo'",
             component="FLOW",
-            log_path="/tmp/flow.log",
+            log_path=log_path,
             severity="high",
         )
         assert result["fingerprint"] == "deadbeef1234"

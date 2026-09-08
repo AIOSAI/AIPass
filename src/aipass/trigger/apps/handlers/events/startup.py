@@ -113,7 +113,20 @@ def _log_suppression(reason: str) -> None:
 
 
 def _generate_error_hash(source_module: str, message: str) -> str:
-    """Generate 8-char hash for error deduplication."""
+    """Generate 8-char hash for error deduplication.
+
+    Deliberately timestamp-free: the key answers "is this the same error?",
+    not "is this the same line". One event per distinct error is the point —
+    37 identical lines must not become 37 dispatches.
+
+    What the key must NOT do is throw the repeats away. It did until
+    2026-09-07: every line after the first was dropped, so a burst and a
+    single line were indistinguishable and the payload said `count=1`. Gate 3
+    in error_detected needs `count >= 2` before it dispatches, so the loudest
+    errors in the log were the ones held back as "could be transient".
+    _scan_single_log_file now counts every matching line against this key
+    (FPLAN-0492 wave 5, shape ruled by @devpulse).
+    """
     content = f"{source_module}:{message}"
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
@@ -199,14 +212,35 @@ def _detect_branch_from_log(log_file: str) -> str:
         return "UNKNOWN"
 
 
+def _count_repeat(entry: Optional[Dict[str, Any]], line_iso: str) -> None:
+    """Fold one more sighting into an entry already collected this scan.
+
+    `entry` is None when the hash came from a previous run's persisted state —
+    there is no entry here to count against, so the line stays dropped.
+    """
+    if entry is None:
+        return
+    entry["count"] += 1
+    if line_iso > entry["last_seen"]:
+        entry["last_seen"] = line_iso
+    if line_iso < entry["first_seen"]:
+        entry["first_seen"] = line_iso
+
+
 def _scan_single_log_file(
     log_file: Path,
     cutoff: datetime,
     processed_hashes: Set[str],
     errors: List[Dict[str, Any]],
     scan_start: float,
+    by_hash: Dict[str, Dict[str, Any]],
 ) -> bool:
     """Scan a single log file for ERROR entries.
+
+    Args:
+        by_hash: Entries collected so far this scan, keyed by error hash, so a
+            repeat line can be counted instead of dropped. Shared across files
+            — the same error in two logs is one error.
 
     Returns:
         True if scanning should continue, False if a limit was hit.
@@ -238,22 +272,31 @@ def _scan_single_log_file(
             module = parsed["module"]
             message = parsed["message"]
             error_hash = _generate_error_hash(module, message)
+            line_iso = line_ts.isoformat() if line_ts else datetime.now().isoformat()
 
             if error_hash in processed_hashes:
+                _count_repeat(by_hash.get(error_hash), line_iso)
                 continue
 
             branch = _detect_branch_from_log(str(log_file))
-            errors.append(
-                {
-                    "branch": branch,
-                    "module": module,
-                    "message": message,
-                    "log_file": str(log_file),
-                    "error_hash": error_hash,
-                    "timestamp": line_ts.isoformat() if line_ts else datetime.now().isoformat(),
-                    "level": parsed["level"].lower(),
-                }
-            )
+            entry = {
+                "branch": branch,
+                "module": module,
+                "message": message,
+                "log_file": str(log_file),
+                "error_hash": error_hash,
+                "timestamp": line_iso,
+                "level": parsed["level"].lower(),
+                # Occurrence facts. `count` is what gate 3 reads; first/last_seen
+                # are what the notification prints. No severity is derived from
+                # any of them — catch-up has never set severity and still does
+                # not, so the registry default stands (@devpulse's ruling).
+                "count": 1,
+                "first_seen": line_iso,
+                "last_seen": line_iso,
+            }
+            errors.append(entry)
+            by_hash[error_hash] = entry
             processed_hashes.add(error_hash)
 
     return True
@@ -270,9 +313,14 @@ def _scan_system_logs_for_errors(
         - Aborts if total scan time exceeds SCAN_TIME_BUDGET_SECONDS
 
     Returns:
-        List of error dicts with: branch, module, message, log_file, error_hash, timestamp
+        List of error dicts with: branch, module, message, log_file, error_hash,
+        timestamp, level, and the occurrence facts count / first_seen / last_seen.
+        One dict per distinct error, `count` holding how many lines produced it.
     """
     errors: List[Dict[str, Any]] = []
+    # Same list, keyed for O(1) repeat lookup. MAX_ERRORS_PER_SCAN still measures
+    # len(errors), so counting repeats cannot widen the storm guard.
+    by_hash: Dict[str, Dict[str, Any]] = {}
     scan_start = time.monotonic()
 
     if not SYSTEM_LOGS_DIR.exists():
@@ -303,7 +351,7 @@ def _scan_system_logs_for_errors(
             continue
 
         try:
-            should_continue = _scan_single_log_file(log_file, cutoff, processed_hashes, errors, scan_start)
+            should_continue = _scan_single_log_file(log_file, cutoff, processed_hashes, errors, scan_start, by_hash)
             if not should_continue:
                 break
         except Exception as exc:
