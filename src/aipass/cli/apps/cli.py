@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-08
 # =============================================
 
 """
@@ -37,7 +37,7 @@ from rich.panel import Panel
 from rich import box
 
 # CLI modules (showcasing our own services!)
-from aipass.cli.apps.modules.display import console, header, error
+from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
 VERSION = "2.1.0"
 CLI_ROOT = Path(__file__).parent
@@ -270,7 +270,20 @@ def show_version():
 
 
 def main() -> int:
-    """Main entry point - routes to modules."""
+    """Main entry point - routes to modules.
+
+    THE EXIT SEAM (this branch owns it; see README). Three lines, in this order:
+    reset the process failure flag on entry, route, and let resolve_exit() turn
+    the routed outcome into the code. The flag is process-level state that
+    error() trips, so a run that does not reset it inherits the previous
+    command's verdict; and a main() that returns a bare 0 on a truthy route
+    throws away the only thing the flag was recorded for.
+
+    Codes: 0 routed and clean, 2 routed but a refusal went through error(),
+    1 not routed at all. The 1 is decided before the flag is consulted, so a
+    caller's own non-zero is never overwritten by this seam.
+    """
+    reset_command_state()
     modules = discover_modules()
     args = sys.argv[1:]
 
@@ -299,11 +312,35 @@ def main() -> int:
         return 0
 
     # Route to modules
-    if route_command(command, remaining, modules):
-        return 0
+    handled = route_command(command, remaining, modules)
+    if not handled:
+        error(f"Unknown command: {command}", suggestion="Run 'drone @cli --help' for usage")
 
-    error(f"Unknown command: {command}", suggestion="Run 'drone @cli --help' for usage")
-    return 1
+    return resolve_exit(handled)
+
+
+def run_cli() -> int:
+    """Run main() and map an interrupt or an unhandled crash to an exit code.
+
+    Lives here as a function rather than inside the __main__ block so both
+    codes can be pinned by test. The block below was the only home for this
+    logic until 2026-09-08, and no test could reach it there: a contract that
+    only runs inside a script-entry guard is a contract nothing measures.
+
+    Cancellation is 130 — 128 + SIGINT — not 0. It exited 0 until tonight
+    (@canary's fleet refusal sweep, 2026-09-07), which told every caller and
+    every shell that an interrupted run had succeeded.
+    """
+    try:
+        return main()
+    except KeyboardInterrupt:
+        logger.warning("CLI interrupted by user")
+        console.print("\n[yellow]Operation cancelled[/yellow]")
+        return 130
+    except Exception as e:
+        logger.error(f"CLI error: {e}", exc_info=True)
+        error(str(e))
+        return 1
 
 
 if __name__ == "__main__":
@@ -311,13 +348,4 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        logger.warning("CLI interrupted by user")
-        console.print("\n[yellow]Operation cancelled[/yellow]")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"CLI error: {e}", exc_info=True)
-        error(str(e))
-        sys.exit(1)
+    sys.exit(run_cli())

@@ -98,22 +98,60 @@ class TestGuardRefusesForeignBranches:
 
 
 class TestGuardAllowsLegitimateCallers:
-    """The other half of the contract: it must not refuse its own branch."""
+    """The other half of the contract: it must not refuse its own branch.
+
+    Every unit here used to be a bare call — the entire claim was "it did not
+    raise", which a reader cannot see and a checker cannot count. Two oracles
+    now stand in its place. `pytest.fail` says what the guard must LET THROUGH,
+    naming the refusal when one arrives instead of leaving a raw ImportError to
+    be read as a crash. The AIPASS_DEBUG_GUARD trace says what it RECORDED, and
+    that is what distinguishes WHICH arm allowed the caller: the same-branch
+    match and the fail-open return are indistinguishable from outside without
+    it, so a bare call could not tell a working guard from one that had stopped
+    matching branches at all and was passing everything.
+    """
 
     def test_same_branch_caller_allowed(self):
-        with patch("aipass.cli.apps.handlers._find_real_caller", return_value=(OURS, IMPORT_LINE)):
-            _guard_branch_access()
+        """Own branch is allowed — a refusal here locks cli out of its own handlers.
 
-    def test_windows_path_separators_recognised(self):
-        """The guard normalises backslashes — a Windows caller is not foreign."""
+        No trace assertion: TestDebugTracing already pins OURS on stderr, and a
+        second copy would pin the checker, not the guard.
+        """
+        with patch("aipass.cli.apps.handlers._find_real_caller", return_value=(OURS, IMPORT_LINE)):
+            try:
+                _guard_branch_access()
+            except ImportError as refusal:
+                pytest.fail(f"guard refused a caller from its own branch: {refusal}")
+
+    def test_windows_path_separators_recognised(self, capsys):
+        """The guard normalises backslashes — a Windows caller is not foreign.
+
+        The trace assertion is the load-bearing half: it pins that what reached
+        the branch check really was the backslash spelling, so the test proves
+        normalisation rather than proving that a POSIX path was handed in.
+        """
         windows_path = OURS.replace("/", "\\")
         with patch("aipass.cli.apps.handlers._find_real_caller", return_value=(windows_path, IMPORT_LINE)):
-            _guard_branch_access()
+            with patch.dict(os.environ, {"AIPASS_DEBUG_GUARD": "1"}):
+                try:
+                    _guard_branch_access()
+                except ImportError as refusal:
+                    pytest.fail(f"guard refused a Windows-spelled caller from its own branch: {refusal}")
+        assert windows_path in capsys.readouterr().err
 
-    def test_undeterminable_caller_allowed(self):
-        """Fail OPEN when the caller cannot be identified — a REPL is not an attack."""
+    def test_undeterminable_caller_allowed(self, capsys):
+        """Fail OPEN when the caller cannot be identified — a REPL is not an attack.
+
+        The trace pins that the None arm is the one that returned. Without it
+        this unit would pass identically if the guard never looked at the caller.
+        """
         with patch("aipass.cli.apps.handlers._find_real_caller", return_value=(None, None)):
-            _guard_branch_access()
+            with patch.dict(os.environ, {"AIPASS_DEBUG_GUARD": "1"}):
+                try:
+                    _guard_branch_access()
+                except ImportError as refusal:
+                    pytest.fail(f"guard refused an unidentifiable caller: {refusal}")
+        assert "caller_file = None" in capsys.readouterr().err
 
     def test_real_in_branch_import_is_not_blocked(self):
         """End to end, unpatched: this branch importing its own handler works."""

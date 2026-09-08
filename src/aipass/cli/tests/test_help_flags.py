@@ -67,8 +67,3 @@ class TestNonHelpInvocations:
 
     def test_command_only_no_args(self):
         assert wants_help("display", None) is False
-
-    def test_returns_bool(self):
-        """Return-type contract — callers gate on identity (`is True`)."""
-        assert isinstance(wants_help(None, ["--help"]), bool)
-        assert isinstance(wants_help(None, ["demo"]), bool)

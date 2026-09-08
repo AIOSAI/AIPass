@@ -21,6 +21,7 @@ import sys
 import pytest
 
 from aipass.cli.apps import cli as branch_entry
+from aipass.cli.apps.modules import display
 
 
 class _StubModule:
@@ -38,6 +39,20 @@ class _StubModule:
         return command == self.handled_command
 
 
+@pytest.fixture(autouse=True)
+def _clean_failure_flag():
+    """Leave the process-level failure flag as this file found it.
+
+    display.mark_command_failed() sets module state that outlives the test, so a
+    seam test that trips it would otherwise decide the exit code of whatever
+    runs next. main() resets on entry, but run_cli() tests and any future caller
+    that skips main() would not.
+    """
+    display.reset_command_state()
+    yield
+    display.reset_command_state()
+
+
 @pytest.fixture
 def stub_module(monkeypatch):
     """Replace module discovery with a single controllable stub."""
@@ -50,6 +65,15 @@ def _run(monkeypatch, argv):
     """Invoke main() with a synthetic argv."""
     monkeypatch.setattr(sys, "argv", ["cli", *argv])
     return branch_entry.main()
+
+
+def _raise(exc):
+    """Return a no-arg callable that raises `exc` - a main() that goes wrong."""
+
+    def _boom():
+        raise exc
+
+    return _boom
 
 
 # =============================================================================
@@ -159,6 +183,87 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
 
     assert result == 1
     assert "Unknown command" in capsys.readouterr().err
+
+
+# =============================================================================
+# THE EXIT SEAM - reset_command_state / resolve_exit
+#
+# This branch owns these three names, so these are the fleet's contract for
+# them, not just cli's own routing tests. The documented codes: 0 routed and
+# clean, 2 routed but a refusal went through error(), 1 not routed at all.
+# =============================================================================
+
+
+def test_routed_command_that_refuses_exits_two(monkeypatch, capsys):
+    """A routed command that calls error() is handled AND failed -> 2.
+
+    This is the whole point of the seam. Before it was wired, the module below
+    printed a red refusal and main() returned 0, so every shell and every caller
+    read the run as a success.
+    """
+
+    class _Refusing:
+        __name__ = "refusing"
+
+        def handle_command(self, command, args):
+            display.error("probe rejected the input", suggestion="pass a real target")
+            return True
+
+    monkeypatch.setattr(branch_entry, "discover_modules", lambda: [_Refusing()])
+
+    assert _run(monkeypatch, ["probe"]) == 2
+    assert "probe rejected the input" in capsys.readouterr().err
+
+
+def test_unroutable_command_keeps_its_own_one(monkeypatch, stub_module, capsys):
+    """The not-handled 1 is decided before the flag, so error() cannot make it 2.
+
+    resolve_exit() checks handled first. A refusal that was never routed is a 1,
+    and the seam must not upgrade it just because error() also tripped the flag.
+    """
+    assert _run(monkeypatch, ["invalid_command"]) == 1
+
+    assert display.command_failed() is True
+    assert "Unknown command" in capsys.readouterr().err
+
+
+def test_main_resets_a_stale_failure_flag(monkeypatch, stub_module):
+    """A failure recorded before main() must not colour this command's exit code.
+
+    The flag is process-level. Without the reset on entry, one refused command
+    would make every later command in the same process exit 2.
+    """
+    display.mark_command_failed()
+
+    assert _run(monkeypatch, ["probe"]) == 0
+
+
+def test_run_cli_maps_cancellation_to_130(monkeypatch, mock_logger, capsys):
+    """Ctrl-C is 130 (128 + SIGINT), never 0 - a cancelled run is not a success."""
+    monkeypatch.setattr(branch_entry, "main", _raise(KeyboardInterrupt))
+
+    assert branch_entry.run_cli() == 130
+
+    assert "Operation cancelled" in capsys.readouterr().out
+    assert any(level == "warning" for level, _ in mock_logger)
+
+
+def test_run_cli_maps_an_unhandled_crash_to_one(monkeypatch, mock_logger, capsys):
+    """An escaped exception is reported through error() and exits 1."""
+    monkeypatch.setattr(branch_entry, "main", _raise(RuntimeError("boom")))
+
+    assert branch_entry.run_cli() == 1
+
+    assert "boom" in capsys.readouterr().err
+    assert any(level == "error" for level, _ in mock_logger)
+
+
+def test_run_cli_passes_a_clean_run_through(monkeypatch, stub_module):
+    """No interrupt, no crash: run_cli() hands main()'s code straight back."""
+    monkeypatch.setattr(sys, "argv", ["cli", "probe"])
+
+    assert branch_entry.run_cli() == 0
+    assert stub_module.calls == [("probe", [])]
 
 
 # =============================================================================
