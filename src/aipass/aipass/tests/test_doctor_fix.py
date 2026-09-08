@@ -283,11 +283,19 @@ class TestFormatTextReport:
 
 class TestFormatJsonReport:
     def test_valid_json(self) -> None:
-        """Output is valid parseable JSON."""
+        """Parses, and the item survives the round trip intact.
+
+        Value pins added 2026-09-08 (v5 assertion_shape): a dict was true of
+        every report shape, including one that dropped the item it was handed.
+        """
         items = [RemediationItem("critical", "pollution", "dup", "fix1")]
         result = format_json_report(items, "test")
         parsed = json.loads(result)
         assert isinstance(parsed, dict)
+        assert parsed["project"] == "test"
+        assert parsed["issues"] == [
+            {"severity": "critical", "category": "pollution", "description": "dup", "fix_command": "fix1"}
+        ]
 
     def test_json_structure(self) -> None:
         """JSON has expected top-level keys."""

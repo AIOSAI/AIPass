@@ -58,7 +58,7 @@ _ENCODING = "utf-8"
 def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
     """Call handle_command for 'what does drone do' with file I/O mocked."""
     patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler"),
+        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
         patch("builtins.open", mock_open(read_data=readme_content)),
@@ -74,7 +74,7 @@ def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
 def _call_handle_no_match():
     """Call handle_command for unknown keyword with no README path returned."""
     patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler"),
+        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=None),
         patch("aipass.aipass.apps.modules.help_chat.console"),
@@ -90,7 +90,7 @@ def _call_handle_all_stopwords():
     """Call handle_command with a question that reduces to zero keywords."""
     mock_error = MagicMock()
     patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler"),
+        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.console"),
         patch("aipass.aipass.apps.modules.help_chat.error", mock_error),
     ]
@@ -113,7 +113,7 @@ def _capture_depth_offer_prints(readme_path: Path):
     mock_console = MagicMock()
     mock_console.print.side_effect = capture
     patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler"),
+        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
         patch("builtins.open", side_effect=OSError("no file")),
@@ -435,7 +435,7 @@ class TestHandleCommand:
     def test_no_args_returns_true_and_shows_help(self):
         """handle_command('help', []) must return True and print usage help."""
         with patch("aipass.aipass.apps.modules.help_chat.print_help") as mock_help:
-            with patch("aipass.aipass.apps.modules.help_chat.json_handler"):
+            with patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True):
                 result = handle_command("help", [])
         assert result is True
         mock_help.assert_called_once()
@@ -443,7 +443,7 @@ class TestHandleCommand:
     def test_info_flag_calls_introspection(self):
         """--info flag triggers print_introspection."""
         with patch("aipass.aipass.apps.modules.help_chat.print_introspection") as mock_intro:
-            with patch("aipass.aipass.apps.modules.help_chat.json_handler"):
+            with patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True):
                 result = handle_command("help", ["--info"])
         assert result is True
         mock_intro.assert_called_once()
@@ -465,7 +465,13 @@ class TestHandleCommand:
         mock_error.assert_called_once()
 
     def test_depth_offer_always_printed(self):
-        """Depth offer lines must appear even when the README cannot be opened."""
+        """Depth offer lines must appear even when the README cannot be opened.
+
+        The `or` is gone (v5 assertion_shape, 2026-09-08): both clauses were
+        about the same captured text, so either alone carried the assertion.
+        The surviving clause is the one the code prints, measured by running
+        this unit against the real depth-offer path.
+        """
         printed = _capture_depth_offer_prints(_FAKE_README_PATH)
         combined = "\n".join(printed)
-        assert "aipass read" in combined or "deeper" in combined
+        assert "aipass read" in combined

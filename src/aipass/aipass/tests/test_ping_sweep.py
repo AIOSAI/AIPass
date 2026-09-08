@@ -198,7 +198,7 @@ class TestSweepAllBranches:
         """Result has an entry for every branch in BRANCHES."""
         with patch("aipass.aipass.apps.handlers.ping_sweep._discover_branches", return_value=BRANCHES):
             with patch("aipass.aipass.apps.handlers.ping_sweep._send_test_email", return_value=False):
-                with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler"):
+                with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler", autospec=True):
                     results = sweep_all_branches(timeout=1)
         assert set(results.keys()) == set(BRANCHES)
 
@@ -206,7 +206,7 @@ class TestSweepAllBranches:
         """Branches where send fails are marked 'error'."""
         with patch("aipass.aipass.apps.handlers.ping_sweep._discover_branches", return_value=BRANCHES):
             with patch("aipass.aipass.apps.handlers.ping_sweep._send_test_email", return_value=False):
-                with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler"):
+                with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler", autospec=True):
                     results = sweep_all_branches(timeout=1)
         assert all(v == "error" for v in results.values())
 
@@ -215,7 +215,7 @@ class TestSweepAllBranches:
         with patch("aipass.aipass.apps.handlers.ping_sweep._discover_branches", return_value=BRANCHES):
             with patch("aipass.aipass.apps.handlers.ping_sweep._send_test_email", return_value=True):
                 with patch("aipass.aipass.apps.handlers.ping_sweep._wait_for_ack", return_value="timeout") as mock_wait:
-                    with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler"):
+                    with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler", autospec=True):
                         results = sweep_all_branches(timeout=1)
         assert mock_wait.call_count == len(BRANCHES)
         assert all(v == "timeout" for v in results.values())

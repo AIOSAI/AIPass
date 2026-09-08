@@ -88,7 +88,7 @@ should not be parsed
 @pytest.fixture(autouse=True)
 def _stub_handler_json():
     """Suppress json_handler.log_operation side effects in the handler."""
-    with patch(f"{_HANDLER_MOD}.json_handler") as mock:
+    with patch(f"{_HANDLER_MOD}.json_handler", autospec=True) as mock:
         mock.log_operation = MagicMock()
         yield mock
 
@@ -327,7 +327,7 @@ class TestPreflightRunners:
 @pytest.fixture()
 def _stub_preflight_json():
     """Suppress json_handler.log_operation side effects in the preflight module."""
-    with patch(f"{_PREFLIGHT_MOD}.json_handler") as mock:
+    with patch(f"{_PREFLIGHT_MOD}.json_handler", autospec=True) as mock:
         mock.log_operation = MagicMock()
         yield mock
 
@@ -473,7 +473,7 @@ class TestDoctorCrossOsCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handled = handle_command("doctor", ["--cross-os"])
         assert handled is True
@@ -486,7 +486,7 @@ class TestDoctorCrossOsCommand:
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0),
             patch(f"{_DOCTOR_MOD}.run_doctor") as mock_full,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handle_command("doctor", ["--cross-os"])
         mock_full.assert_not_called()
@@ -497,7 +497,7 @@ class TestDoctorCrossOsCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handle_command("doctor", ["--cross-os"])
         mock_run.assert_called_once_with(run_e2e=False)
@@ -508,7 +508,7 @@ class TestDoctorCrossOsCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handle_command("doctor", ["--cross-os", "--e2e"])
         mock_run.assert_called_once_with(run_e2e=True)
@@ -731,7 +731,7 @@ class TestGenerateRunRecord:
         stack.enter_context(
             patch(f"{_RECORD_MOD}.check_hookstatus", return_value=PreflightResult("hookstatus", True, "ok"))
         )
-        stack.enter_context(patch(f"{_RECORD_MOD}.json_handler"))
+        stack.enter_context(patch(f"{_RECORD_MOD}.json_handler", autospec=True))
 
     def test_writes_to_given_path(self, tmp_path) -> None:
         target = tmp_path / "rr.txt"
@@ -786,7 +786,7 @@ class TestDoctorCrossOsRecordCommand:
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.run_cross_os") as mock_plain,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handled = handle_command("doctor", ["--cross-os", "--record", "record.txt"])
         assert handled is True
@@ -798,7 +798,7 @@ class TestDoctorCrossOsRecordCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handle_command("doctor", ["--cross-os", "--record"])
         mock_rec.assert_called_once_with(None, run_e2e=False)
@@ -808,7 +808,7 @@ class TestDoctorCrossOsRecordCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             handle_command("doctor", ["--cross-os", "--record", "--e2e"])
         # --e2e after --record is a flag, not the path -> path None, e2e threaded True.
@@ -819,7 +819,7 @@ class TestDoctorCrossOsRecordCommand:
 
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=1),
-            patch(f"{_DOCTOR_MOD}.json_handler"),
+            patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
         ):
             with pytest.raises(SystemExit):
                 handle_command("doctor", ["--cross-os", "--record", "record.txt"])

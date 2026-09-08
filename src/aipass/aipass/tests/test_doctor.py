@@ -387,11 +387,18 @@ class TestProgressHelpers:
         assert "\n" not in line
 
     def test_make_doctor_progress_returns_progress(self) -> None:
-        """make_doctor_progress returns a Rich Progress instance."""
-        from rich.progress import Progress
+        """The bar is a spinner plus the task description, and it is transient.
+
+        Value pins added 2026-09-08 (v5 assertion_shape): isinstance alone was
+        true of any Progress at all, including one with no spinner and one that
+        never clears itself off the terminal.
+        """
+        from rich.progress import Progress, SpinnerColumn, TextColumn
 
         prog = make_doctor_progress()
         assert isinstance(prog, Progress)
+        assert [type(c) for c in prog.columns] == [SpinnerColumn, TextColumn]
+        assert prog.live.transient is True
 
     def test_render_step_header_shows_step_and_label(self) -> None:
         """Header carries the step counter and the stage label."""
@@ -465,14 +472,14 @@ class TestDoctorHandleCommand:
     def test_doctor_no_errors_returns_true(self) -> None:
         """When run_doctor returns 0 errors, handle_command returns True."""
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0):
-            with patch("aipass.aipass.apps.modules.doctor.json_handler"):
+            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 result = handle_command("doctor", ["--check"])
         assert result is True
 
     def test_doctor_with_errors_raises_system_exit(self) -> None:
         """When run_doctor returns errors, SystemExit(1) is raised."""
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=2):
-            with patch("aipass.aipass.apps.modules.doctor.json_handler"):
+            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 with pytest.raises(SystemExit) as exc_info:
                     handle_command("doctor", ["--check"])
         assert exc_info.value.code == 1
@@ -480,7 +487,7 @@ class TestDoctorHandleCommand:
     def test_verbose_flag_passed_to_run_doctor(self) -> None:
         """--verbose flag is forwarded to run_doctor."""
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as mock_run:
-            with patch("aipass.aipass.apps.modules.doctor.json_handler"):
+            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 handle_command("doctor", ["--verbose"])
         mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False)
 

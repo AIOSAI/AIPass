@@ -36,13 +36,27 @@ class TestDiscoverModules:
     """Tests for the discover_modules function."""
 
     def test_returns_list(self) -> None:
-        """discover_modules always returns a list."""
+        """discover_modules returns the live module set, not merely a list.
+
+        The isinstance got company 2026-09-08 (v5 assertion_shape): on its own
+        it was equally true of the empty list a broken MODULES_DIR returns.
+        Measured on this tree the same day: 11 modules, and the COMMANDs are
+        read off the modules themselves so a new one joins the pin by existing.
+        """
         result = discover_modules()
         assert isinstance(result, list)
+        commands = sorted(str(getattr(m, "COMMAND", "")) for m in result)
+        assert len(result) >= 11, f"discover_modules found {len(result)}: {commands}"
+        assert "doctor" in commands
+        assert "help" in commands
 
     def test_modules_have_handle_command(self) -> None:
         """Every discovered module has a handle_command callable."""
         modules = discover_modules()
+        # THE FLOOR (v5 unentered_assert, 2026-09-08). An empty MODULES_DIR
+        # made this a silent pass: the body never ran and the run said so
+        # nowhere. 11 measured on this tree the same day.
+        assert len(modules) >= 11, f"discover_modules found {len(modules)} - the loop below proves nothing"
         for mod in modules:
             assert hasattr(mod, "handle_command")
             assert callable(mod.handle_command)

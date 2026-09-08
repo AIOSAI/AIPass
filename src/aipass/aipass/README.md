@@ -192,8 +192,8 @@ is the guard.
 ## Tests
 
 1052 test functions across 28 files; pytest expands them to **1081 cases**, all passing —
-`pytest src/aipass/aipass/tests/`. Both numbers measured 2026-09-07 (`def test_` lines in
-`tests/test_*.py` for the first, a real run for the second). The file count read 29 until
+`pytest src/aipass/aipass/tests/`. Both numbers re-measured 2026-09-08 and unchanged (`def test_`
+lines in `tests/test_*.py` for the first, a real run for the second). The file count read 29 until
 that measurement and was never right — `tests/` holds 28 `test_*.py` plus `conftest.py`
 and `__init__.py`.
 

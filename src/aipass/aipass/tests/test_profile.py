@@ -10,7 +10,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -260,16 +260,27 @@ class TestGetUserProfile:
         assert get_user_profile()["name"] == "Store"
 
     def test_returns_empty_dict_on_corrupt_file(self, tmp_store) -> None:
-        """Gracefully handles corrupt JSON."""
+        """Corrupt JSON degrades to the full field set, every value None.
+
+        Value pin added 2026-09-08 (v5 assertion_shape): a dict was true of
+        every degraded return, including one carrying a stale profile read
+        from somewhere else.
+        """
         tmp_store.write_text("NOT JSON")
         result = get_user_profile()
         assert isinstance(result, dict)
+        assert result == {field: None for field in USER_FIELDS}
 
     def test_all_user_fields_present(self, tmp_store) -> None:
-        """All USER_FIELDS keys are present in returned profile."""
+        """All USER_FIELDS keys are present in returned profile.
+
+        The loop became a set comparison 2026-09-08 (v5 unentered_assert): an
+        empty USER_FIELDS made the old body a silent pass, and the set says the
+        same thing without a branch to not enter.
+        """
         result = get_user_profile()
-        for field in USER_FIELDS:
-            assert field in result
+        assert USER_FIELDS, "USER_FIELDS is empty - there is nothing to be present"
+        assert set(USER_FIELDS) <= set(result), f"missing: {set(USER_FIELDS) - set(result)}"
 
 
 # =============================================================================
@@ -295,10 +306,14 @@ class TestSaveProfile:
 
     def test_logs_operation(self, tmp_store) -> None:
         """json_handler.log_operation is called on save."""
-        mock_jh = MagicMock()
-        with patch("aipass.aipass.apps.modules.profile.json_handler", mock_jh):
+        # THE ATTRIBUTE, NOT THE MODULE. Patching the whole shim handed this
+        # unit a MagicMock that invents log_operation, so the assertion below
+        # held even with the real name gone: measured 2026-09-08, this test
+        # stayed green after log_operation was renamed in the shim. Patching
+        # one hop down makes patch() itself raise the day the name moves.
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation") as mock_log:
             save_profile({"name": "Test"})
-        mock_jh.log_operation.assert_called_once()
+        mock_log.assert_called_once()
 
     def test_creates_parent_dirs(self, tmp_path) -> None:
         """Missing aipass_json/ directory is created on write."""
@@ -315,7 +330,7 @@ class TestSaveProfile:
 
 
 class TestPrintIntrospection:
-    def test_does_not_raise(self, tmp_store) -> None:
+    def test_does_not_raise(self, tmp_store, capsys) -> None:
         """print_introspection renders through the REAL console without raising.
 
         KEPT, not merged, on 2026-09-07 (DPLAN-0323 contested band). It was
@@ -328,19 +343,51 @@ class TestPrintIntrospection:
         `[bold cyan]aipass profile[/nonexistent_style_mutation]` fails THIS test
         and leaves the sibling green. Merging would have deleted the only
         coverage of a whole class of defect.
+
+        The oracle added 2026-09-08 (v5 no_oracle): "did not raise" was the
+        whole claim and it was invisible to a reader. Reading the REAL rendered
+        text keeps the property this test exists for -- nothing is patched, so
+        Rich still renders -- and now says what the render has to contain.
         """
         print_introspection()
+        rendered = capsys.readouterr().out
+        # THE HEADER, NOT MERELY THE SUBSTRING. A bare `"aipass profile" in
+        # rendered` survived a mutation that renamed the header outright,
+        # because the set-hint at the bottom carries the same three words
+        # (measured 2026-09-08). The first rendered line is the header.
+        lines = [line.strip() for line in rendered.splitlines() if line.strip()]
+        assert lines[0] == "aipass profile"
+        for field in USER_FIELDS:
+            assert field in rendered, f"{field} is missing from the rendered table"
 
-    def test_outputs_field_names(self, tmp_store, capsys) -> None:
-        """print_introspection reaches console.print.
+    def test_outputs_field_names(self, tmp_store) -> None:
+        """The header, the table and the set-hint all reach console.print.
 
         Docstring corrected 2026-09-07: it claimed all USER_FIELDS appear in the
         output, which this never checked -- the console is a MagicMock here, so
         nothing is rendered to check. Named for what it actually pins.
+
+        capsys dropped 2026-09-08 (v5 capture_never_read): the fixture was in
+        the signature and never read, and it never COULD have been read -- the
+        console is patched, so nothing was ever written to stdout for it to
+        capture. The rendered-text claim lives in the sibling above, which does
+        not patch. What this unit can honestly see is the call args, so that is
+        what it now asserts.
         """
+        from rich.table import Table
+
         with patch("aipass.aipass.apps.modules.profile.console") as mock_console:
             print_introspection()
-        assert mock_console.print.called
+        args = [a for call in mock_console.print.call_args_list for a in call[0]]
+        printed = " ".join(str(a) for a in args)
+        tables = [a for a in args if isinstance(a, Table)]
+        # The header is pinned WITH ITS MARKUP: the bare three words also
+        # appear in the set-hint below, so the loose form survived renaming
+        # the header (measured 2026-09-08).
+        assert "[bold cyan]aipass profile[/bold cyan]" in args
+        assert "aipass profile set <field> <value>" in printed
+        assert len(tables) == 1
+        assert list(tables[0].columns[0].cells) == USER_FIELDS
 
 
 # =============================================================================

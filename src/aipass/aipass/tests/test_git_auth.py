@@ -277,9 +277,20 @@ def test_stale_branch_info_class_is_updated_too(tmp_path: Path) -> None:
 # =============================================================================
 
 
-@pytest.mark.parametrize("root_path", [".", "./", ""])
-def test_refuses_a_repo_root_owner_path(tmp_path: Path, root_path: str) -> None:
-    """Path-binding is at-or-under: a root path would let any directory hold git."""
+@pytest.mark.parametrize(
+    ("root_path", "phrase"),
+    [(".", "project root"), ("./", "project root"), ("", "no directory under")],
+)
+def test_refuses_a_repo_root_owner_path(tmp_path: Path, root_path: str, phrase: str) -> None:
+    """Path-binding is at-or-under: a root path would let any directory hold git.
+
+    The expected phrase rides the parametrize (v5 assertion_shape, 2026-09-08).
+    The old body asserted one string OR the other, and both clauses were about
+    the same message, so either alone carried every case. Measured by running
+    the three cases: "." and "./" are refused as a project root, while the
+    empty path is refused for recording no path at all - two different
+    refusals the single `or` had been hiding behind each other.
+    """
     registry_path = build_project(tmp_path, owner_path=root_path)
     _write(
         tmp_path / ".trinity" / "passport.json",
@@ -291,7 +302,7 @@ def test_refuses_a_repo_root_owner_path(tmp_path: Path, root_path: str) -> None:
         provision_git_auth(tmp_path)
 
     message = str(exc.value)
-    assert "project root" in message or "no directory under" in message
+    assert phrase in message
     assert registry_path.read_text(encoding="utf-8") == before
 
 
