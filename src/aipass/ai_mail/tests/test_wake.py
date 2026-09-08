@@ -627,7 +627,14 @@ def test_default_model_is_opus():
 
 
 def test_known_model_aliases_are_bare_names():
-    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix)."""
+    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix).
+
+    The floor below is the whole point: the only assertion here is inside the
+    loop, so emptying KNOWN_MODEL_ALIASES — which would break every wake — made
+    this unit pass having checked nothing. Four is measured 2026-09-08: sonnet,
+    opus, haiku, fable.
+    """
+    assert len(KNOWN_MODEL_ALIASES) == 4, sorted(KNOWN_MODEL_ALIASES)
     for alias in KNOWN_MODEL_ALIASES:
         assert not alias.startswith("claude-"), f"{alias} should be a bare alias"
 

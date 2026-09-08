@@ -20,7 +20,6 @@ reply is always deliverable to the mail it answers.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
@@ -636,18 +635,38 @@ class TestResidentDiscovery:
         """Behavioural, against THIS machine: the semantics change, not the answer.
 
         projects/* is gitignored — each project is its own repo — so a fresh
-        checkout and CI have no fleet to measure. This pin guards the live
-        machine, not any installed fleet, so it skips loudly rather than
-        reporting a red for a tree that was never cloned.
+        checkout and CI have no fleet to measure.
+
+        THERE IS NO SKIP HERE ANY MORE (self_skip, 2026-09-08). Two skips stood
+        in front of this, and the second asked
+        ``(reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR).is_dir()`` — the
+        directory name came from the code under test, so renaming that constant
+        would not have failed this test, it would have DELETED it, and the board
+        would have stayed green. Rewriting the condition to read the machine was
+        the obvious cure and it is the wrong one: it leaves a fresh clone with a
+        silence where a result should be.
+
+        Both worlds are asserted instead. A machine carrying the tree must
+        resolve exactly these four; a machine without one must resolve NOTHING,
+        which is the answer measured from a temp directory 2026-09-08 and is a
+        real claim about the reader — an implementation that fell back to the
+        core registry when projects/ was absent would fail it. CI and a stranger
+        cloning this public repo now get a pass that means something, and the
+        constant is pinned by an assertion that goes red on a rename instead of
+        a skip that goes quiet on one.
         """
-        if os.environ.get("GITHUB_ACTIONS"):
-            pytest.skip("live-fleet pin: projects/* is gitignored, CI has no fleet to measure")
-        if not (reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR).is_dir():
-            pytest.skip("live-fleet pin: no projects/ tree on this machine")
+        assert reg.RESIDENT_PROJECTS_DIR == "projects", (
+            "the resident tree was renamed — re-aim this pin rather than letting it skip"
+        )
+        projects_tree = reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR
         live = reg.get_resident_branches()
-        assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
-        joined = " ".join(live.values()).lower()
-        assert "marketstand" not in joined and "speakeasy" not in joined
+
+        if projects_tree.is_dir():
+            assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
+            joined = " ".join(live.values()).lower()
+            assert "marketstand" not in joined and "speakeasy" not in joined
+        else:
+            assert live == {}, "no projects/ tree on this machine — nothing may resolve"
 
 
 class TestBroadcastScope:

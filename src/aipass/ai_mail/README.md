@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1410 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1447 cases**, 1447 passed / 0 skipped, measured 2026-09-07 from both rootdirs (branch and repo root)
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1411 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1452 cases**, 1452 passed / 0 skipped, measured 2026-09-08 from both rootdirs (branch and repo root)
 
 > Two numbers because they answer different questions: `def test_` counts what
 > was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
@@ -21,6 +21,19 @@
 > "48 modules plus `conftest.py`" and simply forgot `__init__.py`; the total was
 > right and the breakdown was not, which is the harder half to catch because
 > the number a reader checks still adds up.
+>
+> **HOW THE FIRST NUMBER IS COUNTED, because the spelling changes it** (measured
+> 2026-09-08). A `def test_` search that matches anywhere on a line returns
+> **1412**; one anchored to the start of a line, allowing indentation and
+> `async`, returns **1411**; unindented only returns 690, because most of this
+> suite's units are methods on `Test...` classes. 1411 is the number written
+> above, and it is the honest one: it is what seedgo's pytest_quality corpus
+> reader counts by parsing the AST, so two independent methods agree on it.
+> The 1412 is one `def test_` inside a docstring. The previous edition's 1410
+> agreed with neither method on the day it was written — the corpus read 1412
+> units on 2026-09-07 — so it is corrected here rather than carried, and the
+> method is now written down so the next reader can reproduce it instead of
+> guessing which grep produced it.
 >
 > **UNVERIFIED — fresh-checkout skips.** A previous edition claimed 4
 > live-hygiene tests skip on a fresh checkout (2 in `test_live_mailbox_hygiene.py`,
@@ -1179,7 +1192,7 @@ ai_mail/
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
 └── tests/                      # 48 test modules + conftest.py; 1399 def test_,
-                                # 1433 collected cases (selection below)
+                                # 1452 collected cases (selection below)
     ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -1196,7 +1209,6 @@ ai_mail/
     ├── test_upsert.py          # upsert_key repeat-signal collapsing (40 tests)
     ├── test_central_writer.py  # Central stats aggregation
     ├── test_cli_routing.py     # CLI routing + help/version
-    ├── test_json_handler.py    # Shim WIRING only — behaviour is seedgo's contract
     ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)

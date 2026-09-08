@@ -299,10 +299,16 @@ def test_collect_interactive_input_still_prompts_on_a_terminal():
     branches = [{"email": "@flow", "name": "FLOW"}]
 
     with patch("sys.stdin.isatty", return_value=True):
-        with patch("builtins.input", side_effect=["1", "Subject", EOFError, "y"]):
+        with patch("builtins.input", side_effect=["1", "Subject", EOFError, "y"]) as mock_input:
             result = collect_interactive_input(branches)
 
-    assert result is None or result["to"] == "@flow"
+    # MEASURED 2026-09-08: the third prompt raises EOFError, so the result is
+    # None and ``result["to"]`` was never reached. The ``or`` meant this unit
+    # proved nothing about the guard it is named for. What the guard must not do
+    # is swallow the prompt, so that is what is asserted — and the None it
+    # returns after the cancel is pinned rather than tolerated.
+    assert mock_input.call_count >= 1, "the no-TTY guard must not disable the prompt on a real terminal"
+    assert result is None
 
 
 def test_collect_interactive_input_cancelled_on_eof():

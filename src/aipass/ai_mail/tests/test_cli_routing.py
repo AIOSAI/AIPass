@@ -113,20 +113,45 @@ def fake_module_handled():
 # ---- print_help tests -----------------------------------------------
 
 
-def test_print_help_outputs(capsys):
-    """print_help produces output (output_capture via capsys)."""
-    # print_help uses console.print which is mocked, so we just verify it runs
+def test_print_help_outputs(_mock_infrastructure):
+    """print_help names every command it claims to document.
+
+    This asked for ``capsys`` and never read it, and then had no oracle at all —
+    two flags on one unit. Both come from the same fact: this file's autouse
+    ``_mock_infrastructure`` replaces ``console`` with a MagicMock, so nothing
+    reaches stdout and capsys is structurally blind here. The honest oracle is
+    the mock's own call args, which is what the fixture yields it for.
+
+    The verbs are read off print_help's own COMMANDS block, so a command that is
+    implemented and undocumented still passes — this pins the help against
+    itself rotting, not against the router.
+    """
     print_help()
-    # No exception = success
+
+    printed = " ".join(str(call.args[0]) for call in _mock_infrastructure.print.call_args_list if call.args)
+
+    assert "COMMANDS:" in printed
+    for verb in ("dispatch", "email", "inbox", "view", "reply", "close", "sent", "contacts"):
+        assert f"[cyan]{verb}[/cyan]" in printed, f"{verb} is missing from the help output"
 
 
 # ---- print_introspection tests ---------------------------------------
 
 
-def test_print_introspection_runs():
-    """print_introspection displays module list without error."""
+def test_print_introspection_runs(_mock_infrastructure):
+    """print_introspection reports the count discover_modules actually returned.
+
+    Had no oracle: it called the function and let "did not raise" stand in for
+    "displayed the module list". With an empty discovery the honest claim is
+    that it says zero — a version that printed a hardcoded roster, or swallowed
+    the count, passed the old shape.
+    """
     with patch.object(ai_mail_mod, "discover_modules", return_value=[]):
         print_introspection()
+
+    printed = " ".join(str(call.args[0]) for call in _mock_infrastructure.print.call_args_list if call.args)
+
+    assert "Discovered Modules:[/yellow] 0" in printed, printed
 
 
 # ---- route_command tests --------------------------------------------

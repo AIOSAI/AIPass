@@ -46,10 +46,18 @@ class TestIsWakeBlocked:
         assert is_wake_blocked("@ai_mail") is False
 
     def test_blocklist_is_frozenset(self):
-        """WAKE_BLOCKLIST is a frozenset (immutable, extensible by code change)."""
+        """WAKE_BLOCKLIST is a frozenset, and these are the addresses in it.
+
+        ``isinstance`` alone said nothing about WHO is blocked — an empty
+        frozenset passed it, and so did one that had quietly grown to cover half
+        the fleet. The membership is the thing worth knowing: exactly one
+        address is blocked from being woken, measured 2026-09-08, and widening
+        that set is a decision that should have to edit this line.
+        """
         from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST
 
         assert isinstance(WAKE_BLOCKLIST, frozenset)
+        assert WAKE_BLOCKLIST == frozenset({"@devpulse"}), sorted(WAKE_BLOCKLIST)
 
     def test_devpulse_in_blocklist(self):
         """@devpulse is present in WAKE_BLOCKLIST."""

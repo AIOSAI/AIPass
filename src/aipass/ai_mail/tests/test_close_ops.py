@@ -10,7 +10,7 @@
 
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.email.close_ops as mod
 
@@ -130,12 +130,20 @@ def test_batch_close_post_ops_all_fns_called(tmp_path: Path):
 
 
 def test_batch_close_post_ops_none_fns(tmp_path: Path):
-    """None functions are skipped without error."""
+    """None callables are SKIPPED, and the skip is silent.
+
+    Had no oracle — the call was the whole test, so "did not raise" was doing
+    the work. But not raising is also what a version that swallowed a real
+    TypeError would do. The two limbs each log a warning when they run and fail,
+    so an untouched logger is the evidence that neither limb was entered.
+    """
     branch_path = tmp_path / "branch"
     branch_path.mkdir()
 
-    # Should not raise
-    mod.batch_close_post_ops(branch_path, None, None)
+    with patch.object(mod, "logger") as mock_logger:
+        mod.batch_close_post_ops(branch_path, None, None)
+
+    mock_logger.warning.assert_not_called()
 
 
 def test_batch_close_post_ops_central_exception_suppressed(tmp_path: Path):

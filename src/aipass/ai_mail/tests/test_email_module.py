@@ -1580,7 +1580,11 @@ class TestGetBranchInfoFn:
         from aipass.ai_mail.apps.modules.email_send import _get_branch_info_fn
 
         result = _get_branch_info_fn()
-        assert result is None or callable(result)
+        # MEASURED 2026-09-08: the import succeeds here and a real function comes
+        # back, so ``result is None`` never held — the ``or`` let the failure
+        # this unit is named for pass as success.
+        assert callable(result)
+        assert result.__name__ == "get_branch_info_from_registry"
 
     def test_get_branch_info_fn_import_error(self, monkeypatch):
         """Returns None on ImportError."""

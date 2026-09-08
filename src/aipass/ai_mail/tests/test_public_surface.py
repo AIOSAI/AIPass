@@ -39,6 +39,8 @@ import sys
 
 from pathlib import Path
 
+import pytest
+
 import aipass.ai_mail as ai_mail
 import aipass.ai_mail.apps.handlers.notify as notify
 
@@ -75,7 +77,16 @@ class TestFeedPathDoor:
         assert ai_mail.FEED_PATH == redirected
 
     def test_feed_path_returns_a_path_not_a_string(self):
-        assert isinstance(ai_mail.feed_path(), Path)
+        """A Path — and an ABSOLUTE one, which is the half nothing else pins.
+
+        @api resolves this door from their own cwd, so a relative Path would be
+        a different file for every caller. ``isinstance`` alone passed for any
+        Path at all, including one built from a bare filename.
+        """
+        resolved = ai_mail.feed_path()
+
+        assert isinstance(resolved, Path)
+        assert resolved.is_absolute(), resolved
 
     def test_the_feed_lives_where_the_contract_says(self):
         """<repo root>/.aipass/notifications.jsonl — the documented location."""
@@ -113,12 +124,17 @@ class TestFeedPathDoor:
         assert result.stdout.strip() == "1"
 
     def test_unknown_attribute_still_raises_attribute_error(self):
-        """PEP 562 __getattr__ must not swallow real typos."""
-        try:
+        """PEP 562 __getattr__ must not swallow real typos.
+
+        The try/except/return shape read as no oracle to the checker and it was
+        right to: a bare ``return`` on success is invisible, and the only
+        assert-shaped thing in the body was the failure path. pytest.raises says
+        the same thing in the spelling the rule recognises, and additionally
+        pins the message — a bare AttributeError from somewhere inside the
+        import machinery would have satisfied the old shape.
+        """
+        with pytest.raises(AttributeError, match="no_such_thing"):
             ai_mail.no_such_thing  # type: ignore[attr-defined]
-        except AttributeError:
-            return
-        raise AssertionError("a missing attribute must still raise AttributeError")
 
     def test_the_door_is_advertised_in_dunder_all(self):
         assert "feed_path" in ai_mail.__all__
@@ -150,7 +166,16 @@ class TestRegisterDoor:
         assert path.parent.name == ".aipass"
 
     def test_register_path_returns_a_path_not_a_string(self):
-        assert isinstance(ai_mail.register_path(), Path)
+        """The feed door's own lesson, reused: a Path, and an absolute one.
+
+        @devpulse's wire reads the register through this door from their branch,
+        not from mine. A relative Path resolves against THEIR cwd and finds
+        nothing, and ``isinstance`` could not tell the two apart.
+        """
+        resolved = ai_mail.register_path()
+
+        assert isinstance(resolved, Path)
+        assert resolved.is_absolute(), resolved
 
     def test_register_path_resolves_fresh_at_call_time(self, monkeypatch, tmp_path):
         """A function, not a frozen constant — the feed's own lesson, reused."""
