@@ -38,8 +38,15 @@ class TestHandleCommand:
 
     def test_help_flag(self, capsys):
         result = handle_command("run", ["--help"])
+        out = capsys.readouterr().out
         assert result is True
         assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
+        # The capture was requested and never read: a True receipt says the call
+        # returned, not that anything was printed. run's help is its own — the
+        # heading names this verb, so a router that answered with some other
+        # module's help would fail here instead of passing on the receipt.
+        assert "run — Decentralized Scheduler Tick" in out, f"run --help printed: {out[:200]!r}"
+        assert "USAGE:" in out, "run --help must print a USAGE: block"
 
 
 class TestRunTick:

@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-08
 
 ---
 
@@ -506,11 +506,11 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-All numbers below re-measured 2026-09-07 (FPLAN-0492 wave 2b), not carried.
+All numbers below re-measured 2026-09-08 (FPLAN-0508 wave 7), not carried.
 
 - **531 test functions** across 19 test files; parametrization expands these to **594 cases**
   (`.venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q` →
-  `594 passed in 42.88s`, 0 failed, 0 skipped)
+  `594 passed in 25.15s`, 0 failed, 0 skipped)
 - Re-run with `activity_collector.get_branch_paths` forced to `[]` — the CI condition, where a
   checkout has no registry — also **594 passed**. Any test that exercises a name gate pins the
   roster it resolves against; the dev machine's registry is not a fixture (learned from CI red
@@ -526,7 +526,7 @@ All numbers below re-measured 2026-09-07 (FPLAN-0492 wave 2b), not carried.
 - *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
   emptying the list is a seedgo-side change, out of scope for a docs pass.
 
-*Last Updated: 2026-09-07*
+*Last Updated: 2026-09-08*
 
 ---
 [← Back to AIPass](../../../README.md)

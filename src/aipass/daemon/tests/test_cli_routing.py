@@ -109,9 +109,13 @@ def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
         _daemon_mod.main()
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "Help output must be capturable on stdout"
-    assert "USAGE" in captured.out or "daemon" in captured.out.lower(), (
-        "Captured help output must contain usage information"
-    )
+    # Was `"USAGE" in out or "daemon" in out.lower()`. Both clauses hold on the
+    # real banner, so the `or` bought nothing: either half alone kept the unit
+    # green. Measured by running main() under --help — the banner prints the
+    # heading, then the literal `USAGE:` line, then the command forms. Pinned
+    # to what the code actually emits.
+    assert "USAGE:" in captured.out, f"help must print the USAGE: block, got: {captured.out[:200]!r}"
+    assert "DAEMON - Branch Management System" in captured.out, "help must print the DAEMON banner heading"
 
 
 def test_version_flag() -> None:
@@ -258,6 +262,9 @@ class TestUnknownArgumentIsRefused:
 
     def test_help_outranks_the_gate(self) -> None:
         """A help request is never an unknown argument, and never exits non-zero."""
+        # The floor. An empty GATED_VERBS would make the loop below a silent
+        # pass: twelve is what wave 2b landed, counted from the list above.
+        assert len(GATED_VERBS) == 12, f"the gate covers twelve verbs, this list names {len(GATED_VERBS)}"
         for verb in GATED_VERBS:
             with patch.object(sys, "argv", ["daemon", verb, "--help"]):
                 assert _daemon_mod.main() == 0, f"{verb} --help must exit 0"

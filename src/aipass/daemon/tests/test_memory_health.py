@@ -623,5 +623,13 @@ class TestRealTrinityFiles:
         with patch.object(mh.json_handler, "log_operation"):
             result = mh.get_memory_health_status(str(self.BRANCH_ROOT), "DAEMON")
 
+        # The floor, and it pins names rather than a count. An empty
+        # structure_checks would make the loop a silent pass, and a health
+        # status that quietly stopped checking one of the two files would shrink
+        # the dict while every remaining entry still read valid.
+        assert sorted(result["structure_checks"]) == [
+            ".trinity/local.json",
+            ".trinity/observations.json",
+        ], f"structure_checks covered {sorted(result['structure_checks'])}"
         for check in result["structure_checks"].values():
             assert check["valid"] is True, f"real branch structure issue: {check['issues']}"

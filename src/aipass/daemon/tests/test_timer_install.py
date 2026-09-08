@@ -40,9 +40,17 @@ class TestHandleCommand:
         assert handle_command("unknown", []) is False
 
     def test_help_flag(self, capsys):
-        """Help flag prints usage and returns True."""
+        """install-timer --help prints this module's own usage and returns True."""
         result = handle_command("install-timer", ["--help"])
+        out = capsys.readouterr().out
         assert result is True
+        # The capture was requested and never read, so the docstring's "prints
+        # usage" half was never checked. The heading names both verbs this
+        # module owns; another module's help would not carry it.
+        assert "install-timer / uninstall-timer — Daemon Scheduler Timer" in out, (
+            f"install-timer --help printed: {out[:200]!r}"
+        )
+        assert "USAGE:" in out, "install-timer --help must print a USAGE: block"
 
 
 class TestRunSystemctl:
