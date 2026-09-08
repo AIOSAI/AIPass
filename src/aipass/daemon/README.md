@@ -100,7 +100,7 @@ daemon/
 ├── dropbox/                    # Incoming file drops
 ├── logs/                       # Prax log output
 ├── tools/                      # Branch verification utilities
-└── tests/                      # Test suite — 531 test functions in 19 files (pytest expands to 594)
+└── tests/                      # Test suite — 532 test functions in 19 files (pytest expands to 596)
 ```
 
 ---
@@ -504,15 +504,81 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ---
 
+## The suite may not move host state (2026-09-08, FPLAN-0524)
+
+**Patrick's ruling, his words:** *"tests can't disable processes, they should restore to exact
+same state before the test. The test is fine and good that it can enter something."*
+
+**What went wrong.** `tests/test_cli_routing.py` runs the real router over every verb in
+`GATED_VERBS`, and two of those verbs are `install-timer` and `uninstall-timer`. With the argument
+gate in place the refusal comes first and the verb never runs — so the committed suite was safe.
+Without it (a red-first run, or any mutation run that disables the gate) `_install()` and
+`_uninstall()` executed against the user's real systemd. `journalctl --user` recorded seven
+Started/Stopped pairs across four such runs on 2026-09-07, ending on a **Stop at 11:46:40**.
+Nothing ticked for twenty-three hours: `@vera/release-watch` and `@daemon/inbox-sweep` both missed
+their windows, and no MISSED line could be written, because writing one takes a tick. The suite
+reported `594 passed` every time.
+
+**The seal.** `tests/conftest.py` holds `_seal_timer_host_state` — **autouse, unconditional**,
+patching the three seams by which `timer_install` can change host state:
+
+| seam | what it covers |
+|---|---|
+| `_run_systemctl` | every stop / disable / enable / start / daemon-reload |
+| `_UNIT_DIR` | where unit files are copied to and unlinked from |
+| `_STATE_DIR` | the `~/.aipass` mkdir |
+
+Session-wide rather than on the two rows that bit, because the defect is not *"two rows reach
+systemd"* — it is *"a test can reach systemd at all"*, and the next verb added to `GATED_VERBS`
+would inherit the hole silently. `TestRunSystemctl` is unaffected: it binds `_run_systemctl` by
+direct import at module load, so it still exercises the real function against a patched
+`subprocess.run`.
+
+**The sentinel.** `_host_state_sentinel` (session-scoped, autouse) snapshots the live timer at
+session start and asserts it unchanged at session end. It is the backstop for a route nobody has
+thought of yet — a test that shells `drone @daemon uninstall-timer`, a helper calling `systemctl`
+directly. It does **not** restore: a sentinel that quietly put the timer back would hide the
+defect it exists to report. Proven by mutation — with the end-of-session reading doctored to
+`active: inactive`, the run reports `14 passed, 1 error`. A suite can no longer pass and take the
+scheduler down in the same run.
+
+**If a test must reach the real timer**, it takes the `timer_host_state` fixture and only that: it
+records `is-enabled` / `is-active` / the unit-file list, restores exactly what it recorded in a
+`finally`, and then asserts the restore matched. Idempotent by construction — it restores *to a
+recorded state* rather than toggling. No test needs it today; it is the contract for the next one.
+
+### Making a mutation run safe
+
+A mutation run is the dangerous case, because the whole point of one is to disable a guard and see
+what still passes — and the guard being disabled is often the one holding the verb back.
+
+- **A harness that shells out to `pytest` is safe with nothing to remember.** The seal is autouse
+  and session-scoped, so every subprocess run inherits it. This is the shape used for FPLAN-0524's
+  own four mutations.
+- **A harness that imports `timer_install` and calls a verb directly is not.** It bypasses the
+  conftest entirely and must take `timer_host_state`, or patch the three seams itself.
+- **Say plainly what changed:** the FPLAN-0492 wave 2b harness (2026-09-07) had neither. It
+  replaced the gate call and ran the pins in-process, which is exactly how the scheduler ended up
+  uninstalled. The rule above is the line that changes.
+
+Every mutation in FPLAN-0524 was chosen so the assertion is exercised without the destructive path
+ever running: the gate patch removed (proves the verb executes), `shutil.copy2` disabled (proves
+the sealed-dir assertion is live), the test's `live_dir` redirected (proves the live comparison
+bites), and the sentinel's end reading doctored (proves the session fails). The unsealed world was
+**not** re-run to prove it dangerous — 2026-09-07's journal already measured that, and repeating
+the damage to re-derive a known fact is not evidence, it is a second outage.
+
+---
+
 ## Test Suite
 
-All numbers below re-measured 2026-09-08 (FPLAN-0508 wave 7), not carried.
+All numbers below re-measured 2026-09-08 (FPLAN-0524), not carried.
 
-- **531 test functions** across 19 test files; parametrization expands these to **594 cases**
+- **532 test functions** across 19 test files; parametrization expands these to **596 cases**
   (`.venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q` →
-  `594 passed in 25.15s`, 0 failed, 0 skipped)
+  `596 passed in 23.65s`, 0 failed, 0 skipped; **596 passed in 26.05s** from the branch directory)
 - Re-run with `activity_collector.get_branch_paths` forced to `[]` — the CI condition, where a
-  checkout has no registry — also **594 passed**. Any test that exercises a name gate pins the
+  checkout has no registry — also **596 passed**. Any test that exercises a name gate pins the
   roster it resolves against; the dev machine's registry is not a fixture (learned from CI red
   on b681c085, cured in 5c132a5e)
 - 10/10 modules covered — every module under `apps/modules/` is imported by at least one live test file

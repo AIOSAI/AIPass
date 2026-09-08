@@ -41,7 +41,13 @@ class TestHandleCommand:
 
     def test_help_flag(self, capsys):
         """install-timer --help prints this module's own usage and returns True."""
-        result = handle_command("install-timer", ["--help"])
+        # The seam, named here even though --help returns before the gate and
+        # before _install() ever runs. conftest's autouse seal already covers
+        # this, but both guards live outside the unit, and a reader arriving at
+        # "handle_command('install-timer', ...)" has to prove the short-circuit
+        # for themselves before they can believe nothing happened.
+        with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
+            result = handle_command("install-timer", ["--help"])
         out = capsys.readouterr().out
         assert result is True
         # The capture was requested and never read, so the docstring's "prints
