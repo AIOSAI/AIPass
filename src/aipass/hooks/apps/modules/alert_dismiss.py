@@ -1,16 +1,17 @@
 # =================== AIPass ====================
 # Name: alert_dismiss.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Dismiss alerts from .aipass/alerts.json via drone @hooks dismiss
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-09-07
 # =============================================
 
 """Dismiss alerts from .aipass/alerts.json by ID."""
 
 import json
+import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -108,5 +109,12 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("Removes the alert with the given ID from .aipass/alerts.json.")
         return True
 
-    _dismiss_alert(args[0])
+    # _dismiss_alert computes the right answer at five sites and every False
+    # used to die on this line: `drone @hooks dismiss nosuchid` printed "not
+    # found" and exited 0, so a script could not tell a dismissal from a miss.
+    # Patrick's standing ruling — a refusal exits non-zero and names the reason.
+    # Idiom is wire_verify.py:221-224; sys.exit rather than a return because
+    # handle_command's bool means "I routed this", not "it worked".
+    if not _dismiss_alert(args[0]):
+        sys.exit(1)
     return True

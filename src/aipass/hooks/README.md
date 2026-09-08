@@ -29,16 +29,16 @@ drone @hooks --help              # Full help reference
 | Command | What it does |
 |---|---|
 | `drone @hooks` | Show branch structure (auto-discovered modules) |
-| `drone @hooks status` | Show hook config for current project |
+| `drone @hooks status` | Show hook config for current project — **exits 1** when there is no config to show |
 | `drone @hooks engine` | Show connected handlers — **works, but is absent from `--help`** (see Status) |
 | `drone @hooks log` | Tail recent hook activity (last 20 JSONL entries) |
 | `drone @hooks hooksound` | Show current sound mute status |
 | `drone @hooks hooksound off` | Mute all hook sounds |
 | `drone @hooks hooksound on` | Unmute all hook sounds |
 | `drone @hooks feedback` | Show feedback pulse status (enabled/disabled) |
-| `drone @hooks feedback off` | Disable feedback pulse for this project |
-| `drone @hooks feedback on` | Enable feedback pulse for this project |
-| `drone @hooks dismiss <alert-id>` | Remove an alert from `.aipass/alerts.json` |
+| `drone @hooks feedback off` | Disable feedback pulse for this project — **exits 1** outside an AIPass project |
+| `drone @hooks feedback on` | Enable feedback pulse for this project — **exits 1** outside an AIPass project |
+| `drone @hooks dismiss <alert-id>` | Remove an alert from `.aipass/alerts.json` — **exits 1** when the id is not found |
 | `drone @hooks cadence` | Show prompt injection cadence config and state |
 | `drone @hooks diagnostics_state` | Show recorded post-edit diagnostics and re-check them live |
 | `drone @hooks sessions` | List live Claude Code sessions (PIDs) |
@@ -153,7 +153,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1757 test functions across 51 files; pytest expands to 1838 cases (1837 pass, 1 env-skipped)
+└── tests/                       # 1758 test functions across 51 files; pytest expands to 1840 cases (1838 pass, 2 skipped — 1 env, 1 win32-only)
     └── parked/                  # 2 retired suites + a collect_ignore_glob conftest — kept for revival, never run
 ```
 

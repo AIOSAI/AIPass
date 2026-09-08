@@ -11,6 +11,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 SAMPLE_CONFIG = {
     "hooks_enabled": True,
     "UserPromptSubmit": {
@@ -158,9 +160,12 @@ class TestConfigAbsent:
             ),
             patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
         ):
-            result = handle_command("status", [])
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("status", [])
 
-        assert result is True
+        # Rewritten 2026-09-07 (canary refusal sweep): this asserted `is True`,
+        # i.e. exit 0, for a command that rendered no status at all.
+        assert exit_info.value.code == 1
         assert "No .aipass/hooks.json found" in buf.getvalue()
 
     def test_untrusted_config_reports_the_real_refusal(self):
@@ -183,9 +188,13 @@ class TestConfigAbsent:
             ),
             patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
         ):
-            result = handle_command("status", [])
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("status", [])
 
-        assert result is True
+        # The loudest row of the five: this reason means NO HOOKS RUN HERE, and
+        # it exited 0. That is the shape that hid a live trust break for two
+        # hours on 2026-09-07 — every surface said so, none said it in an exit code.
+        assert exit_info.value.code == 1
         output = buf.getvalue()
         assert "not enrolled in the trust registry" in output
         assert "aipass trust /proj" in output

@@ -78,10 +78,24 @@ class TestDismissNeverDismissesOnHelp:
             assert alert_dismiss.handle_command("dismiss", ["some-alert-id", "-h"]) is True
         target.assert_not_called()
 
-    def test_real_dismiss_still_runs(self):
-        with patch.object(alert_dismiss, "_dismiss_alert") as target:
+    def test_real_dismiss_still_runs_and_carries_the_outcome(self):
+        """Strengthened 2026-09-07 (canary refusal sweep), not merged away.
+
+        The old body patched _dismiss_alert with a bare MagicMock and asserted
+        `is True`. A MagicMock is truthy, so it passed whether or not the exit
+        code was wired — it could not fail in either direction, which is why the
+        exit-0 defect survived under a green test. Both legs are now pinned:
+        a real dismissal routes True, a refusal exits 1.
+        """
+        with patch.object(alert_dismiss, "_dismiss_alert", return_value=True) as target:
             assert alert_dismiss.handle_command("dismiss", ["some-alert-id"]) is True
         target.assert_called_once_with("some-alert-id")
+
+        with patch.object(alert_dismiss, "_dismiss_alert", return_value=False) as target:
+            with pytest.raises(SystemExit) as exit_info:
+                alert_dismiss.handle_command("dismiss", ["missing-id"])
+        assert exit_info.value.code == 1
+        target.assert_called_once_with("missing-id")
 
     def test_bare_word_at_position_zero_is_help_not_an_alert_id(self):
         """`dismiss help` reads as the question — the contract puts bare help at slot 0."""

@@ -977,7 +977,12 @@ class TestCliRouting:
                 return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
             ),
         ):
-            handle_command("status", [])
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("status", [])
+
+        # Exit 1, not 0: rewritten 2026-09-07 (canary refusal sweep). Showing
+        # nothing and reporting success is the defect, not the message.
+        assert exit_info.value.code == 1
         captured = capsys.readouterr()
         assert "No .aipass/hooks.json" in captured.err
 
