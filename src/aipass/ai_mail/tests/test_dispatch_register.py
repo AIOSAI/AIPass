@@ -15,6 +15,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -230,6 +231,54 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
     @pytest.mark.parametrize("bad", [0, -1, None, "1234"])
     def test_monitor_alive_cannot_be_told_for_a_non_pid(self, bad):
         assert register.monitor_alive(bad) is None
+
+    # ── The Windows leg, runnable on every platform through a fake kernel32.
+    # The Windows matrix on 6d764980 went red on the two liveness pins above:
+    # the first cut answered None on win32, so a watchdog there could never
+    # see a dead monitor. These pin the mapping of the Win32 answers onto the
+    # tri-state without needing the platform.
+
+    @pytest.mark.parametrize(
+        ("handle", "exit_code", "last_error", "expected"),
+        [
+            (1, register._STILL_ACTIVE, 0, True),
+            (1, 0, 0, False),
+            (0, None, register._ERROR_INVALID_PARAMETER, False),
+            (0, None, register._ERROR_ACCESS_DENIED, True),
+            (0, None, 6, None),
+        ],
+        ids=["opened-and-running", "opened-but-exited", "no-such-pid", "exists-not-ours", "other-error-unknown"],
+    )
+    def test_the_windows_leg_maps_win32_answers_onto_the_tri_state(
+        self, monkeypatch, handle, exit_code, last_error, expected
+    ):
+        closed: list[int] = []
+        opened_with: list[tuple] = []
+
+        def _exit_code_into(_h, out):
+            out.contents.value = exit_code
+            return 1
+
+        # Attributes named as Win32 names them — the probe calls them by these names.
+        fake_kernel32 = SimpleNamespace(
+            OpenProcess=lambda access, inherit, pid: opened_with.append((access, inherit, pid)) or handle,
+            GetExitCodeProcess=_exit_code_into,
+            CloseHandle=lambda h: closed.append(h) or 1,
+        )
+        monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
+        monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
+
+        assert register._monitor_alive_windows(4242) is expected
+        assert opened_with == [(register._PROCESS_QUERY_LIMITED_INFORMATION, False, 4242)]
+        assert closed == ([handle] if handle else []), "an opened handle is closed exactly once, an unopened one never"
+
+    def test_on_win32_monitor_alive_asks_the_windows_leg_and_never_signals(self, monkeypatch):
+        """Signal 0 is TerminateProcess on Windows — the router must not reach os.kill."""
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(register, "_monitor_alive_windows", lambda pid: "windows-leg")
+        monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
+
+        assert register.monitor_alive(4242) == "windows-leg"
 
 
 class TestAReplyClosesTheRow:

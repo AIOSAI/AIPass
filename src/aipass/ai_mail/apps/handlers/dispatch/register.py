@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-09-07
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -79,6 +79,87 @@ STATUS_REPLIED = "completed (replied)"
 # THIRD answer rather than collapsing into "dead".
 MONITOR_PID_KEY = "monitor_pid"
 
+# Win32 answers the OpenProcess probe below maps onto the tri-state.
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
+_ERROR_ACCESS_DENIED = 5
+_ERROR_INVALID_PARAMETER = 87
+
+
+def _kernel32():
+    """The Win32 kernel handle with its signatures set.
+
+    Separate from the probe so a test on any platform can stand a fake in
+    for it: the signatures are set HERE, on the real library, because a fake
+    object's bound methods cannot carry ``argtypes``.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return kernel32
+
+
+def _last_win32_error() -> int:
+    """The error the last Win32 call left, read the way ctypes recommends."""
+    import ctypes
+
+    return ctypes.get_last_error()  # type: ignore[attr-defined]
+
+
+def _monitor_alive_windows(pid: int) -> Optional[bool]:
+    """The Windows leg of ``monitor_alive``: OpenProcess, never a signal.
+
+    ``os.kill(pid, 0)`` is NOT a probe on Windows — any signal number other
+    than the two console events is TerminateProcess, so the portable POSIX
+    idiom would kill the monitor it was asking after. This is the probe prax's
+    ``instance_lock`` already uses, kept here rather than imported because
+    that one is private and folds "exists but not ours" into dead, which is
+    the wrong answer for a row: a monitor this token cannot open is still
+    running.
+
+    Found by the Windows matrix on 6d764980: the first cut answered None on
+    win32 and the two liveness pins went red there — a watchdog that could
+    never see a dead monitor on one of the three platforms it ships to.
+
+    Args:
+        pid: A positive int, already checked by the caller.
+
+    Returns:
+        True if the process exists (including one this token may not open),
+        False if there is no such process or it has exited, None on any
+        other error.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = _kernel32()
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        err = _last_win32_error()
+        if err == _ERROR_INVALID_PARAMETER:
+            return False
+        if err == _ERROR_ACCESS_DENIED:
+            return True
+        logger.warning("[register] could not probe monitor pid %s: win32 error %s", pid, err)
+        return None
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.pointer(exit_code)):
+            logger.warning(
+                "[register] could not read monitor pid %s exit state: win32 error %s", pid, _last_win32_error()
+            )
+            return None
+        return exit_code.value == _STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
 
 def monitor_alive(pid: Optional[int]) -> Optional[bool]:
     """Whether the monitor process *pid* still exists. None when it cannot be told.
@@ -99,8 +180,9 @@ def monitor_alive(pid: Optional[int]) -> Optional[bool]:
 
     Elsewhere on POSIX there is no /proc, so signal 0 is the portable probe —
     it delivers nothing and only checks reachability. EPERM means the process
-    EXISTS and is not ours, which is alive for our purposes. On Windows neither
-    is available and the honest answer is None.
+    EXISTS and is not ours, which is alive for our purposes. Windows has
+    neither, and signal 0 there is a kill, so it gets its own leg:
+    ``_monitor_alive_windows`` asks OpenProcess.
 
     Args:
         pid: The recorded monitor pid, or None when the row carries none.
@@ -115,7 +197,7 @@ def monitor_alive(pid: Optional[int]) -> Optional[bool]:
         return Path("/proc", str(pid)).exists()
 
     if sys.platform == "win32":
-        return None
+        return _monitor_alive_windows(pid)
 
     try:
         os.kill(pid, 0)

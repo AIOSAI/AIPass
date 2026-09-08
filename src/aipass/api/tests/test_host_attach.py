@@ -1786,6 +1786,7 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert room == "aipass-42", "the snapshot's own name must be used verbatim"
         assert attach_only is True
 
+    @pty_required
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self) -> None:
         """
         The WIRING, not just the resolution — and this pin exists because a
@@ -1808,6 +1809,7 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert "new-session" not in argv, "this lane must not be able to create a room"
         assert "-A" not in argv, "attach-or-create is exactly what put a blank terminal on the phone"
 
+    @pty_required
     def test_without_the_flag_a_named_room_is_still_attach_or_create(self) -> None:
         """
         The regression guard for the pin above. The shell lane names its own
