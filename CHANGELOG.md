@@ -11,6 +11,8 @@ PyPI version — not the changelog header.
 
 ## [Unreleased] — no stragglers: every v5 pytest_quality row to 100 fleet-wide before the canary trial (FPLAN-0508, DPLAN-0323 phase 7.5)
 
+Fleet re-audit 2026-09-08 03:52, uncached, one branch at a time: 17 branches read 100 on every score-bearing v5 rule; api reads 99 on one `unentered_assert` row ruled a judged false positive and forwarded to seedgo. Ten owner waves, every landing verified from devpulse's seat and committed path-scoped; nothing deleted, removals archived with reason headers; six pack notes to seedgo. The canary trial (DPLAN-0323 phase 8) is unblocked and waits on Patrick's go.
+
 ### Fixed
 
 - **api: seven refusals exited 0 — `caller-usage`, `track`, `get-key`, `validate`, `get-secret`, `models` with nothing configured, and `host-api revoke-token <unknown id>` (FPLAN-0492, the fleet refusal sweep; the item stood since 08-13 and was re-measured six-for-six on 08-28).** `main()` clears cli's process-level failure flag before routing and returns `resolve_exit(handled)`: 1 unrecognised, 2 recognised-and-refused, 0 only when nothing printed an error. All 63 `error()` sites were read first for one that prints a failure on a still-successful path; there were none. `revoke-token` on an unknown id was the branch's one warning-channel refusal and names the id through `error()` now. Measured from the shell before and after; five mutations red; seven pins added to `test_host_attach.py` (1589 cases).
