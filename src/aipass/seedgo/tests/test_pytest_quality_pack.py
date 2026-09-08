@@ -3806,6 +3806,372 @@ class TestPosixLiteralBranchCheck:
         assert "NOT measured" in named[0]["message"]
 
 
+class TestPosixLiteralRenderedAndReturnedPaths:
+    """Arms 3 and 4 - the REVERSE shape, and the split that keeps arm 3 honest.
+
+    Arms 1 and 2 are about a rooted literal put through a resolver. These two are
+    the mirror image: a Path rendered to TEXT and compared with a literal that
+    spells the separator forward. Four rows went red on the first Linux/Windows
+    matrix run and not one of them held a rooted literal or a resolver.
+
+    THE SPLIT IS THE HEART OF ARM 3, and it is measured rather than argued. The
+    first fleet run of the undivided arm returned 64 rows, 27 of them on this
+    branch, and most of this branch's are correct portable code: `corpus._relpath`
+    (corpus.py:202) returns `path.relative_to(root).as_posix()`, so every test
+    asserting on a relpath it produced is reading a string that is posix on every
+    host, forever, on purpose. That fact is off-screen from any AST reader of the
+    TEST - which is why a value the code under test RETURNED only nominates, while
+    a rendering the test wrote down on the line the reader is looking at scores.
+
+    Each test names the one-line mutation of `posix_literal_check` it was confirmed
+    RED against.
+    """
+
+    def test_a_path_the_test_rendered_itself_is_scored(self, tmp_path):
+        """RENDERED-PATH: the TEST chose the dialect, on the line under the reader's eye.
+
+        `str()` of a Path spells the separator the HOST's way - `pkg/gamma.py`
+        here, `pkg\\gamma.py` there - so nothing off-screen can make this literal
+        right and the row moves the number. This half found ZERO rows fleet-wide,
+        which the dossier says out loud rather than hiding: nobody here writes
+        `str(p) == "a/b.py"` in a test yet. It is kept because it is the shape the
+        cure turns INTO if the cure is done wrong. Mutation caught:
+        `RENDER_BUILTINS: frozenset = frozenset({"str", "repr", "format",
+        "ascii"})` becoming the same set without `"str"`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_scanner.py",
+            """
+            def test_the_relative_path_is_reported(tmp_path):
+                entry = collect(tmp_path)
+                assert str(entry.path) == "pkg/gamma.py"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["RENDERED-PATH"]
+        assert result["nominations"] == []
+        assert result["score"] == 0
+        assert row["literal"] == "pkg/gamma.py"
+        assert row["rendering"] == "str()"
+        assert "only right on the leg of the matrix it was written on" in row["reason"]
+
+    def test_an_f_string_is_the_same_rendering_spelled_shorter(self, tmp_path):
+        """An f-string calls `__format__`, which for a Path is the host's dialect.
+
+        `f"{p}"` and `str(p)` produce the same string and the same defect, and a
+        rule that read only the builtin would teach the fleet to spell the bug in
+        the shorter form. The species has to stay RENDERED-PATH - the test still
+        wrote the rendering down. Mutation caught: `return "f-string" if
+        pathish_expression(node) else ""` in `_written_rendering` becoming
+        `return ""`, which drops the f-string half of the scoring arm and leaves
+        `str()` looking healthy.
+        """
+        _write(
+            tmp_path,
+            "tests/test_scanner.py",
+            """
+            def test_the_relative_path_is_reported(tmp_path):
+                entry = collect(tmp_path)
+                assert f"{entry.path}" == "pkg/gamma.py"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["RENDERED-PATH"]
+        assert result["violations"][0]["rendering"] == "f-string"
+        assert result["score"] == 0
+
+    def test_a_path_searched_for_inside_a_rendered_call_record_is_scored(self, tmp_path):
+        """REPR-HAYSTACK: the haystack is not the argument, it is a rendering of it.
+
+        `str(mock.call_args)` runs every argument through `repr()`, and `repr()`
+        of a Windows path DOUBLES the separator - so even a needle built
+        correctly, `str(logs_dir / "app.log")`, cannot be found in there. Both
+        scored rows the first fleet run produced were this species. Mutation
+        caught: `MOCK_CALL_RECORDS: frozenset = frozenset({"call_args",
+        "call_args_list", "mock_calls", "await_args", "await_args_list",
+        "method_calls"})` becoming the same set without `"call_args"`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_log_watcher.py",
+            """
+            def test_the_log_path_is_warned_about(logs_dir):
+                with patch("apps.watcher.logger.warning") as warned:
+                    run_it()
+                assert str(logs_dir / "app.log") in str(warned.call_args)
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
+        assert result["score"] == 0
+        assert row["record"] == "warned.call_args"
+        assert "DOUBLES a backslash separator" in row["reason"]
+        assert "warned.call_args.args[n]" in row["reason"]
+
+    def test_a_rendered_record_is_followed_one_hop_through_a_local_name(self, tmp_path):
+        """ONE HOP, FIRST BINDING ONLY - and it is the shape every fleet site uses.
+
+        `reported = str(warned.call_args)` on one line and the assertion on the
+        next is how all four of the CI rows are written; a reader that only saw
+        the rendering inside the comparison would call every one of them clean.
+        Following further would mean tracking flow, and a name rebound later
+        keeps its first reading, which is the direction that under-reports.
+        Mutation caught: `if isinstance(node, ast.Name) and node.id in bindings:
+        return _renders_a_call_record(bindings[node.id])` in `_rendered_record`
+        becoming `return ""`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_log_watcher.py",
+            """
+            def test_the_log_path_is_warned_about(logs_dir):
+                with patch("apps.watcher.logger.warning") as warned:
+                    run_it()
+                reported = str(warned.call_args)
+                assert str(logs_dir / "app.log") in reported
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
+        assert result["violations"][0]["record"] == "warned.call_args"
+
+    def test_a_value_the_code_under_test_returned_nominates_and_moves_no_number(self, tmp_path):
+        """RETURNED-PATH: reported in its own line, `passed: True`, never scored.
+
+        The comparison came BACK from the code under test - a dict subscript -
+        and whether the producer normalised the separator is off-screen. This is
+        the SAME AST SHAPE as the rows that broke CI; what separates them lives
+        in production, which this pack does not read for this rule. Sixty-eight
+        of the 70 fleet rows are this species, so letting it score would have
+        dropped eight branches' numbers over code that is mostly right. Mutation
+        caught: `SCORING_SPECIES: tuple = (SPECIES_POSIX_LITERAL,
+        SPECIES_RENDERED_PATH, SPECIES_REPR_HAYSTACK)` becoming the same tuple
+        with `SPECIES_RETURNED_PATH` appended.
+        """
+        _write(
+            tmp_path,
+            "tests/test_scanner.py",
+            """
+            def test_the_relative_path_is_reported(tmp_path):
+                result = collect(tmp_path)
+                assert result["relative_path"] == "pkg/gamma.py"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+        line = result["checks"][1]
+        row = result["nominations"][0]
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+        assert result["checks"][0]["passed"] is True
+        assert line["name"] == "Path provenance nominations"
+        assert line["passed"] is True
+        assert "reported only - not scored, not counted as failing" in line["message"]
+        assert row["species"] == "RETURNED-PATH"
+        assert row["rendering"] == "subscript"
+        assert "NOMINATION ONLY, not scored" in row["reason"]
+
+    def test_a_nomination_does_not_move_a_number_a_scored_row_already_set(self, tmp_path):
+        """THE SPLIT, PINNED AS ARITHMETIC: same denominator, same answer.
+
+        Two two-unit projects with the SAME single RENDERED-PATH row. The
+        second's other unit is a RETURNED-PATH nomination instead of a clean
+        unit, and the score has to be identical - 50 both times - or the
+        nomination is a penalty wearing a report's name. Mutation caught: `scored
+        = [row for row in rows if row["species"] in SCORING_SPECIES]` in
+        `split_rows` becoming `scored = list(rows)`, which reports 0 for the
+        second project.
+        """
+        rendered_unit = (
+            "def test_the_relative_path_is_rendered(tmp_path):\n"
+            "    entry = collect(tmp_path)\n"
+            '    assert str(entry.path) == "pkg/gamma.py"\n'
+        )
+        clean_unit = 'def test_a_clean_unit(tmp_path):\n    assert (tmp_path / "a").parent == tmp_path\n'
+        returned_unit = (
+            "def test_the_relative_path_is_returned(tmp_path):\n"
+            "    result = collect(tmp_path)\n"
+            '    assert result["relative_path"] == "pkg/gamma.py"\n'
+        )
+        _write(tmp_path / "clean", "tests/test_scanner.py", rendered_unit + "\n\n" + clean_unit)
+        _write(tmp_path / "nominating", "tests/test_scanner.py", rendered_unit + "\n\n" + returned_unit)
+
+        clean = posix_literal_check.check_branch(str(tmp_path / "clean"))
+        nominating = posix_literal_check.check_branch(str(tmp_path / "nominating"))
+
+        assert clean["score"] == 50
+        assert nominating["score"] == 50
+        assert len(nominating["nominations"]) == 1
+        assert len(nominating["violations"]) == len(clean["violations"]) == 1
+
+    def test_a_pack_assertion_on_a_corpus_rendered_relpath_is_never_scored(self, tmp_path):
+        """THE 27-ROW FALSE-POSITIVE FAMILY, AND IT IS THIS FILE'S OWN TESTS.
+
+        `corpus._relpath` (corpus.py:202) returns
+        `path.relative_to(root).as_posix()`. Every nodeid and every relpath this
+        pack reports is therefore POSIX on every host, forever, on purpose - so
+        `"tests/test_x.py" in named[0]["message"]` is correct, portable code that
+        cannot go red on any runner. The first fleet run of the undivided arm
+        returned 64 rows and 27 were on this branch, sixteen of them in this very
+        file. They are the SAME AST SHAPE as the rows that broke CI; the
+        difference is that prax's `scanner.py:57` renders with `str()` and
+        seedgo's `corpus.py:202` renders with `.as_posix()`, and no AST reader of
+        the TEST can see either. So the row nominates and the number does not
+        move - which is the only reason this pack can score its own test file at
+        100. Mutation caught: `SCORING_SPECIES` gaining `SPECIES_RETURNED_PATH`,
+        which drops this branch's own pins to 0 for being right.
+        """
+        _write(
+            tmp_path,
+            "tests/test_pack_shapes.py",
+            """
+            def test_the_unreadable_file_is_named(tmp_path):
+                result = check_branch(str(tmp_path))
+                named = [c for c in result["checks"] if c["name"] == "Corpus readable"]
+                assert "tests/test_broken.py" in named[0]["message"]
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["score"] == 100
+        assert result["violations"] == []
+        assert [r["species"] for r in result["nominations"]] == ["RETURNED-PATH"]
+        assert result["nominations"][0]["literal"] == "tests/test_broken.py"
+
+    def test_as_posix_inside_the_comparison_acquits_the_whole_site(self, tmp_path):
+        """`.as_posix()` says "posix on purpose", and it is the cure this arm teaches.
+
+        A site rewritten into `.as_posix()` on both sides is exactly what the
+        finding asks for, so convicting it would convict the fix - the same
+        reasoning that acquits `ntpath` and `posixpath` in arm 2. `os.sep`,
+        `os.path.join` and `os.fspath` are acquitted with it: each of them NAMES
+        the separator instead of assuming one. Mutation caught:
+        `POSIX_SPELLING_METHOD: str = "as_posix"` becoming `"as_posix_"`, which
+        matches nothing and puts every cured site back in the report.
+        """
+        _write(
+            tmp_path,
+            "tests/test_scanner.py",
+            """
+            def test_the_relative_path_is_reported(tmp_path):
+                entry = collect(tmp_path)
+                assert entry.path.as_posix() == "pkg/gamma.py"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+    def test_a_returned_value_in_a_unit_that_never_touches_a_path_is_not_read(self, tmp_path):
+        """THE WEAKEST EVIDENCE THIS RULE USES, AND IT IS USED ON PURPOSE.
+
+        A subscript into a result dict cannot prove its value ever was a Path, so
+        when the key is not path-ish the arm falls back to asking whether the
+        unit works with paths AT ALL. It is circumstantial, it is written down as
+        circumstantial, and it is the second reason this half does not score.
+        Without it `payload["body"] == "a/b.txt"` in a unit that never touches
+        the filesystem is a nomination, and the arm reports the fleet's message
+        bodies. Mutation caught: `return "subscript" if builds_path or
+        _pathish_subscript(node) else ""` in `_returned_value` becoming `return
+        "subscript"`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_payloads.py",
+            """
+            def test_the_payload_body_is_echoed():
+                assert payload["body"] == "a/b.txt"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_rooted_literal_belongs_to_arms_one_and_two_and_not_to_arm_three(self, tmp_path):
+        """497 of the 501 rooted literals measured fleet-wide are DATA.
+
+        A rooted literal is arms 1-2's subject - a root put through a resolver -
+        and reading it here as well would put five hundred sites into arm 3's
+        report to catch four that arms 1-2 already hold. Arm 4 is the one place
+        the root is allowed, because inside a rendered repr the root is not the
+        hazard and the separator is. Mutation caught: `return path_run(text,
+        allow_rooted=False)` in `relative_path_run` becoming `allow_rooted=True`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_scanner.py",
+            """
+            def test_the_absolute_path_is_reported(tmp_path):
+                entry = collect(tmp_path)
+                assert str(entry.path) == "/srv/pkg/gamma.py"
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+    def test_the_check_line_widens_when_a_rendering_row_is_in_the_list(self, tmp_path):
+        """THE SENTENCE FOLLOWS THE SPECIES, or it describes a finding that is not there.
+
+        A project flagged only by arms 1-2 keeps the resolver sentence it has
+        always had. The moment a rendering row joins the list, "put a rooted path
+        literal through a resolver" would be describing a finding that is neither
+        rooted nor resolved, and a reader sent looking for a resolver finds
+        nothing. Mutation caught: `if species == {SPECIES_POSIX_LITERAL}:` in
+        `_flagged_message` becoming `if True:`, which prints the resolver
+        sentence over a REPR-HAYSTACK row.
+        """
+        _write(
+            tmp_path / "mixed",
+            "tests/test_mixed.py",
+            """
+            def test_a_constructed_root_is_resolved():
+                assert Path("/srv/data").resolve() in roster
+
+
+            def test_the_relative_path_is_reported(tmp_path):
+                entry = collect(tmp_path)
+                assert str(entry.path) == "pkg/gamma.py"
+            """,
+        )
+        _write(
+            tmp_path / "resolver_only",
+            "tests/test_roots.py",
+            """
+            def test_a_constructed_root_is_resolved():
+                assert Path("/srv/data").resolve() in roster
+            """,
+        )
+
+        mixed = posix_literal_check.check_branch(str(tmp_path / "mixed"))
+        alone = posix_literal_check.check_branch(str(tmp_path / "resolver_only"))
+
+        assert "2/2 test units spell a path in one platform's dialect" in mixed["checks"][0]["message"]
+        assert "1/1 test units put a rooted path literal through a resolver" in alone["checks"][0]["message"]
+
+
 # =============================================================================
 # COVERAGE SLOT - THE TEST THAT SAYS OUT LOUD WHY IT EXISTS
 # =============================================================================
@@ -6263,3 +6629,2301 @@ class TestHostStateBranchCheck:
         assert len(named) == 1
         assert "tests/test_broken.py" in named[0]["message"]
         assert "NOT measured" in named[0]["message"]
+
+
+# =============================================================================
+# FRESH CLONE - WOULD THIS TEST PASS ON A MACHINE THAT HAS ONLY WHAT THE REPO SHIPS
+# =============================================================================
+
+from aipass.seedgo.apps.handlers.pytest_quality_standards import fresh_clone_check  # noqa: E402
+
+# NOTHING IN THIS SECTION READS THE LIVE CHECKOUT, and the rule under test is the
+# reason that has to be written down rather than assumed. A pin for a checker
+# about `.trinity`, `projects/`, `find_repo_root()` and `Path(__file__).parents[1]`
+# is the one place in this file where a real read of the branch tree would look
+# like ordinary setup. There is none: every project below is source TEXT written
+# into tmp_path, and every assertion is about what the CHECKER reported over that
+# text. No fleet count, no branch name, no live registry, nothing outside the
+# fixture directory - a pin for THIS rule that broke this rule would be the joke
+# telling itself, and it would also be red on the fresh clone CI now runs.
+
+#: Six units that are clone-safe for six DIFFERENT reasons - sandbox root,
+#: sandbox handed out by a fixture chain, a spelling the unit builds, a negated
+#: template region, a skip guard, and a machine root carrying a literal. Written
+#: this way on purpose: a project whose clean units were clean for the SAME
+#: reason would still score 100 with five of the six acquittals deleted.
+_CLONE_SAFE_UNITS = """
+BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def hosted_baud(repo_root):
+    return repo_root
+
+
+@pytest.fixture
+def repo_root(tmp_path):
+    (tmp_path / "projects").mkdir()
+    return tmp_path
+
+
+def test_a_tree_with_no_projects_resolves_nothing(tmp_path):
+    assert not (tmp_path / "projects" / "baud" / "registry.json").exists()
+
+
+def test_the_registry_lists_what_the_fixture_built(hosted_baud):
+    assert not (hosted_baud / "projects" / "baud" / "registry.json").exists()
+
+
+def test_a_planted_passport_is_read_back(tmp_path):
+    (tmp_path / ".trinity").mkdir()
+    assert not (tmp_path / ".trinity" / "passport.json").exists()
+
+
+def test_the_template_ships_its_passport():
+    tpl = get_template_dir()
+    assert (tpl / ".trinity" / "passport.json").is_file()
+
+
+def test_the_local_file_is_a_document():
+    local_file = BRANCH_ROOT / ".trinity" / "local.json"
+    if not local_file.exists():
+        pytest.skip("no live .trinity/local.json in this checkout")
+    assert json.loads(local_file.read_text())["branch"] == "daemon"
+
+
+def test_the_sample_document_parses():
+    sample = Path(__file__).parent / "fixtures" / "sample.json"
+    assert json.loads(sample.read_text()) == {"branch": "daemon"}
+"""
+
+#: The two rows CI went red on, transcribed from fresh_clone.md. One per species
+#: that the fleet actually produced - the ai_mail `if`/`else` and the daemon
+#: class-constant handed bare to production.
+_HOST_DEPENDENT_UNITS = """
+def test_the_live_fleet_still_resolves_its_four_residents():
+    projects_tree = reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR
+    live = reg.get_resident_branches()
+    if projects_tree.is_dir():
+        assert set(live) == {"@baud", "@earmark"}
+    else:
+        assert live == {}, "no projects/ tree on this machine"
+
+
+def test_the_branch_reports_the_two_documents_it_holds():
+    result = mh.get_memory_health_status(str(BRANCH_ROOT), "DAEMON")
+    assert sorted(result["structure_checks"]) == [".trinity/local.json"]
+"""
+
+
+def _clone_safe_project(root: Path) -> Path:
+    """Six units, every one of them green on a stranger's machine."""
+    _write(root, "tests/test_fresh_clone_shapes.py", _CLONE_SAFE_UNITS)
+    return root
+
+
+def _fresh_clone_project(root: Path) -> Path:
+    """The same six clean units with the two fleet rows appended - eight, two flagged.
+
+    One file rather than two, because the acquittals and the findings have to
+    survive in each other's company: `sandbox_fixtures` and
+    `fixture_built_spellings` are read once per FILE, and a per-file reader that
+    only ever saw clean files would never be caught confusing them.
+    """
+    _write(root, "tests/test_fresh_clone_shapes.py", _CLONE_SAFE_UNITS + "\n\n" + _HOST_DEPENDENT_UNITS)
+    return root
+
+
+class TestFreshCloneDetection:
+    """The three species, and the structural readings each one needs to see them.
+
+    Each test names the one-line mutation of `fresh_clone_check` it was confirmed
+    RED against, so a later reader can check the pin still bites rather than
+    trusting that it once did.
+    """
+
+    def test_a_path_the_repo_refuses_to_ship_and_the_unit_never_builds_is_flagged(self, tmp_path):
+        """IGNORED_PATH, and this shape is a proof that EVAPORATES rather than one that breaks.
+
+        `**/*_json/` is ignored, so a clone has nothing under `daemon_json/` -
+        and the assertion cannot go red there. It stays green forever, having
+        stopped checking anything, which is worse than a loud failure because
+        nobody finds out. The finding has to name the segment or a reader cannot
+        tell which part of the path is the problem. Mutation caught:
+        `IGNORED_SEGMENT_SUFFIXES: tuple = ("_json",)` becoming
+        `IGNORED_SEGMENT_SUFFIXES: tuple = ()`, which leaves every runtime-JSON
+        directory in the fleet invisible while the other two species look healthy.
+        """
+        _write(
+            tmp_path,
+            "tests/test_migration.py",
+            """
+            def test_the_original_data_files_are_gone():
+                daemon_root = Path(__file__).resolve().parents[1]
+                assert not (daemon_root / "daemon_json" / "schedule.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["IGNORED_PATH"]
+        assert row["nodeid"] == "tests/test_migration.py::test_the_original_data_files_are_gone"
+        assert "daemon_json" in row["detail"]
+        assert ".gitignore" in row["detail"]
+
+    def test_an_ignored_needle_is_read_segment_wise_and_never_as_a_substring(self, tmp_path):
+        """`logs` is a directory, `catalogs.py` is a module, and one letter apart is not a rule.
+
+        Both units below reach a path on the filesystem and only one of them
+        names an ignored directory. A substring reading would convict the second
+        for the four letters at the end of its filename, which is the kind of
+        false positive that gets a whole standard switched off. Mutation caught:
+        `if segment in IGNORED_SEGMENTS or segment in IGNORED_FILE_NAMES:` in
+        `is_ignored_segment` becoming `if any(s in segment for s in
+        IGNORED_SEGMENTS) or segment in IGNORED_FILE_NAMES:`, which flags both.
+        """
+        _write(
+            tmp_path,
+            "tests/test_audit.py",
+            """
+            def test_the_audit_log_is_written():
+                root = Path(__file__).resolve().parents[1]
+                assert (root / "logs" / "audit.json").exists()
+
+
+            def test_the_catalog_module_is_shipped():
+                root = Path(__file__).resolve().parents[1]
+                assert (root / "apps" / "catalogs.py").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["nodeid"] for row in result["violations"]] == ["tests/test_audit.py::test_the_audit_log_is_written"]
+        assert "'logs'" in result["violations"][0]["detail"]
+
+    def test_an_oracle_that_is_a_runtime_if_on_the_machine_is_flagged(self, tmp_path):
+        """BOTH_WORLDS: two assertions, two claims, and only one of them ever runs.
+
+        Whichever arm this host selects is the only arm anybody reads; the other
+        is prose wearing an assert. Nothing here names an ignored spelling, so
+        the row can only come from the `if`/`else` reading and not from arm one
+        riding along. Mutation caught: `if not isinstance(node, ast.If) or not
+        node.orelse:` in `_both_worlds` becoming `if not isinstance(node,
+        ast.If) or node.orelse:`, which walks past every branch that has the
+        second arm this species is made of.
+        """
+        _write(
+            tmp_path,
+            "tests/test_handlers.py",
+            """
+            def test_the_handler_registry_matches_this_checkout():
+                apps_tree = find_branch_root() / "apps"
+                if apps_tree.is_dir():
+                    assert sorted(handler_names()) == ["json_handler", "ruff_handler"]
+                else:
+                    assert handler_names() == []
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["BOTH_WORLDS"]
+        assert (
+            result["violations"][0]["nodeid"]
+            == "tests/test_handlers.py::test_the_handler_registry_matches_this_checkout"
+        )
+        assert "asserts in both arms" in result["violations"][0]["detail"]
+
+    def test_a_bare_machine_root_handed_to_production_under_a_written_expectation_is_flagged(self, tmp_path):
+        """DERIVED_EXPECTED at its plainest: the host chose the value, the author typed it down.
+
+        `find_repo_root()` answers a question about this checkout, and the list
+        on the right of the compare was read off one terminal. Nothing about the
+        READER is wrong; what is wrong is writing down what it happened to
+        return here. Mutation caught: `"find_repo_root",` deleted from
+        MACHINE_ROOT_CALLS, which is the single commonest spelling of the
+        species and leaves the arm reporting nothing on this shape.
+        """
+        _write(
+            tmp_path,
+            "tests/test_registry.py",
+            """
+            def test_the_registry_lists_the_three_branches():
+                root = find_repo_root()
+                assert collect_branches(root) == ["@daemon", "@devpulse", "@seedgo"]
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["DERIVED_EXPECTED"]
+        assert "find_repo_root" in result["violations"][0]["detail"]
+        assert "collect_branches" in result["violations"][0]["detail"]
+
+    def test_a_machine_root_reached_through_a_module_level_constant_is_resolved_one_hop(self, tmp_path):
+        """ONE HOP, MODULE HALF - a reader that only knew local names calls this clean.
+
+        The root is never spelled inside the unit at all: the unit says `ROOT`
+        and the module says what `ROOT` is. This is the same single hop
+        `host_state` spends to read a `parametrize` list, and without it the
+        commonest way a test file names its own checkout is invisible. Mutation
+        caught: `module_scope = _bound_names_in_body(parsed.tree.body)` in
+        `find_host_dependent` becoming `module_scope = {}`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_registry.py",
+            """
+            ROOT = Path(__file__).resolve().parents[1]
+
+
+            def test_the_registry_lists_the_three_branches():
+                assert collect_branches(ROOT) == ["@daemon", "@devpulse", "@seedgo"]
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["DERIVED_EXPECTED"]
+        assert "Path(__file__).parents[...]" in result["violations"][0]["detail"]
+
+    def test_a_directory_listed_for_its_contents_is_read_through_its_receiver(self, tmp_path):
+        """A LISTING METHOD'S WORLD IS THE THING ON ITS LEFT, not something in its parentheses.
+
+        `Path.cwd().iterdir()` hands production nothing and describes the whole
+        machine anyway, so a reader that only inspected call ARGUMENTS would
+        call the loudest shape of this species clean. Mutation caught: `if tail
+        in LISTING_METHODS and isinstance(call.func, ast.Attribute): return
+        [call.func.value]` in `_world_arguments` becoming `... return []`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_tree.py",
+            """
+            def test_the_working_tree_holds_the_three_documents():
+                assert sorted(p.name for p in Path.cwd().iterdir()) == ["a.json", "b.json", "c.json"]
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["DERIVED_EXPECTED"]
+        assert "iterdir" in result["violations"][0]["detail"]
+
+
+class TestFreshCloneTheTwoRowsCIWentRedOn:
+    """The rule's own evidence, transcribed - and each red row beside its green sibling.
+
+    A standard derived from two measured failures has to be able to reproduce
+    them, or the derivation is a story. Both files below are the shape CI ran on
+    2026-09-08, and in both of them the SAME file also contains code that gets it
+    right - which is what makes each row a defect rather than a style opinion.
+    """
+
+    def test_row_one_the_live_fleet_resolver_is_flagged_and_its_tmp_path_sibling_is_not(self, tmp_path):
+        """@ai_mail row 1, and the green sibling twelve lines above it in the real file.
+
+        Same resolver, called two ways. The red one calls it with ZERO arguments
+        and lets the host answer, then guards itself with `is_dir()` - which is
+        TRUE on a clone, because `!projects/README.md` puts the directory there
+        empty, so CI walked into the arm expecting four residents. The green one
+        passes `tmp_path` and builds the tree it reads. One argument is the whole
+        difference and both halves have to be pinned, or a narrowing that
+        acquitted the red row would look like a win. Mutation caught:
+        `_asserts_in(node.orelse)` in `_both_worlds` becoming `_asserts_in([])`,
+        which stops the else arm counting as a second oracle and clears the row
+        the rule was written for.
+        """
+        _write(
+            tmp_path,
+            "tests/test_cross_project_bridge.py",
+            """
+            class TestTheResidentTree:
+                def test_the_live_fleet_still_resolves_its_four_residents(self):
+                    projects_tree = reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR
+                    live = reg.get_resident_branches()
+                    if projects_tree.is_dir():
+                        assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
+                    else:
+                        assert live == {}, "no projects/ tree on this machine - nothing may resolve"
+
+                def test_a_passport_cannot_add_a_branch_no_registry_lists(self, tmp_path):
+                    stray = tmp_path / "projects" / "ghost" / "src" / "ghost" / ".trinity"
+                    stray.mkdir(parents=True)
+                    assert reg.get_resident_branches(tmp_path) == {}
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["BOTH_WORLDS"]
+        assert result["violations"][0]["nodeid"] == (
+            "tests/test_cross_project_bridge.py::TestTheResidentTree::"
+            "test_the_live_fleet_still_resolves_its_four_residents"
+        )
+        assert result["score"] == 50
+
+    def test_row_two_the_class_constant_root_is_flagged_and_its_skip_guarded_siblings_are_not(self, tmp_path):
+        """@daemon row 2: BRANCH_ROOT is a CLASS attribute, and two green siblings prove the shape.
+
+        The root is assigned in the class body and referenced as
+        `self.BRANCH_ROOT` in every method under it, so a reader that only knew
+        module-level names would have called the red unit clean while it handed
+        the live branch root to production. The two siblings carry an existence
+        guard and a `pytest.skip`; they read the same machine and step aside
+        when it is not theirs, which is `self_skip`'s business and not this
+        rule's. Mutation caught: `scope.update(classes.get(unit.class_name,
+        {}))` in `unit_scope` becoming `scope.update({})`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_memory_health.py",
+            """
+            class TestRealTrinityFiles:
+                BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+                def test_real_branch_reports_no_structure_issues(self):
+                    result = mh.get_memory_health_status(str(self.BRANCH_ROOT), "DAEMON")
+                    assert sorted(result["structure_checks"]) == [
+                        ".trinity/local.json",
+                        ".trinity/observations.json",
+                    ]
+
+                def test_the_local_file_is_a_document(self):
+                    local_file = self.BRANCH_ROOT / ".trinity" / "local.json"
+                    if not local_file.exists():
+                        pytest.skip("no live .trinity/local.json in this checkout")
+                    assert json.loads(local_file.read_text())["branch"] == "daemon"
+
+                def test_the_observations_file_is_a_document(self):
+                    observations = self.BRANCH_ROOT / ".trinity" / "observations.json"
+                    if not observations.exists():
+                        pytest.skip("no live .trinity/observations.json in this checkout")
+                    assert json.loads(observations.read_text())["entries"] == []
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["DERIVED_EXPECTED"]
+        assert result["violations"][0]["nodeid"] == (
+            "tests/test_memory_health.py::TestRealTrinityFiles::test_real_branch_reports_no_structure_issues"
+        )
+        assert "get_memory_health_status" in result["violations"][0]["detail"]
+
+
+class TestFreshCloneAcquittals:
+    """The difference between a rule and a nuisance - each one a measured false positive.
+
+    The first run of this checker over the fleet produced 41 rows and the
+    calibrated run produces 6. Every narrowing below took correct code off that
+    list, and every one of them is a line a later edit could delete without any
+    other test noticing. These are those tests.
+    """
+
+    def test_a_path_rooted_at_tmp_path_is_the_test_s_own_world(self, tmp_path):
+        """NAMING AN IGNORED SPELLING ON PURPOSE IS THE CURE, so it must not be the finding.
+
+        A test that builds `tmp_path / "projects" / "ghost"` is modelling the
+        directory a clone has and ships nothing; pytest made that directory and
+        pytest removes it. If the sandbox reading fails, the rule convicts the
+        exact shape its own fix advice produces and there is nothing left to
+        recommend. Mutation caught: `if _names_under(spine) & sandbox or
+        _rooted_in_a_negated_region(spine, scope):` in `_ignored_path` becoming
+        `if _rooted_in_a_negated_region(spine, scope):`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_registry.py",
+            """
+            def test_a_stray_passport_resolves_nothing(tmp_path):
+                assert not (tmp_path / "projects" / "ghost" / ".trinity" / "passport.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_tuple_unpack_of_a_sandbox_helper_binds_every_name_it_makes(self, tmp_path):
+        """NINE ROWS, @spawn AND @memory, and every one of them this single line.
+
+        `project, reg = _make_project(tmp_path, ...)` binds two names off one
+        sandbox-rooted call. A reader that only understood a bare `Name` target
+        saw `project` appear from nowhere and called a temp directory live host
+        state. Unpacking is generous - if any element is the sandbox, all of
+        them carry the acquittal - and generous is the safe direction for a rule
+        that accuses. Mutation caught: `for child in ast.walk(target):` in
+        `_target_names` becoming `for child in [target]:`, which is the
+        bare-Name reading that produced those nine rows.
+        """
+        _write(
+            tmp_path,
+            "tests/test_spawn.py",
+            """
+            def test_the_minted_citizen_carries_no_archive(tmp_path):
+                project, reg = _make_project(tmp_path, "ghost")
+                assert not (project / ".trinity" / "passport.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_temp_test_dir_is_carried_by_name_because_the_fleet_template_roots_it_at_tmp_path(self, tmp_path):
+        """A NAMED EXCEPTION WITH A REASON, and the reason is what has to survive an edit.
+
+        `temp_test_dir` is not a pytest builtin. It is the fleet's own sandbox -
+        `test_dir = tmp_path / "test_workspace"` in this pack's own conftest
+        template, copied into branch conftests fleet-wide - and a conftest
+        fixture is invisible to this reader by published limit. So the one name
+        the whole fleet shares is listed beside the builtins. Measured: 1 @drone
+        row. Mutation caught: `"temp_test_dir",` in SANDBOX_SEEDS becoming
+        `"temp_test_dir_never",`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_drone.py",
+            """
+            def test_project_root_message_does_not_claim_a_passport(temp_test_dir):
+                assert not (temp_test_dir / "projects" / "ghost" / ".trinity").is_dir()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_nested_def_s_parameters_carry_the_sandbox_the_unit_already_built(self, tmp_path):
+        """@memory's test_missing_file_skipped: the world is tmp_path all the way down.
+
+        The unit builds a directory under `tmp_path`, puts its string into a
+        dict, and hands that dict to a stand-in it defined three lines earlier.
+        The only thing a static reader can see inside the stand-in is a
+        parameter name - and a stand-in the test wrote is the test's own scope.
+        Mutation caught: `bound |= _nested_parameter_names(unit_node)` in
+        `_sandbox_names` becoming `bound |= set()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_memory.py",
+            """
+            def test_missing_file_skipped(tmp_path):
+                branch_dir = tmp_path / "src" / "aipass" / "empty_branch"
+                branch_dir.mkdir(parents=True)
+                mock_branches = [{"name": "empty_branch", "path": str(branch_dir)}]
+
+                def mock_get_path(branch, mem_type):
+                    p = Path(branch["path"]) / ".trinity" / "local.json"
+                    return p if p.exists() else None
+
+                assert collect(mock_branches, mock_get_path) == []
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_nested_def_in_a_unit_that_names_no_sandbox_is_still_a_row(self, tmp_path):
+        """THE GATE IS THE POINT - the pin above is worthless without this one.
+
+        Spelled as a gate rather than a blanket precisely so that a stand-in
+        reading real host state keeps its finding. Same file, same nested `def`,
+        same `.trinity` read; the only difference is that the unit never names a
+        sandbox, and the path in the dict is a machine path the author typed.
+        Without this pin, widening the acquittal into a blanket - which is the
+        obvious simplification of the two-line gate - passes every other test in
+        this class. Mutation caught: `if _names_under(unit_node) & bound:` in
+        `_sandbox_names` becoming `if True:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_memory.py",
+            """
+            def test_missing_file_skipped():
+                mock_branches = [{"name": "daemon", "path": "/srv/aipass/src/aipass/daemon"}]
+
+                def mock_get_path(branch, mem_type):
+                    p = Path(branch["path"]) / ".trinity" / "local.json"
+                    return p if p.exists() else None
+
+                assert collect(mock_branches, mock_get_path) == []
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["IGNORED_PATH"]
+        assert result["violations"][0]["nodeid"] == "tests/test_memory.py::test_missing_file_skipped"
+
+    def test_a_spelling_the_unit_builds_itself_is_a_world_it_made(self, tmp_path):
+        """THE CURE THE RULE TEACHES SECOND: build the tree, then read it.
+
+        A `mkdir` on a path carrying the same ignored segment means the world
+        under the assertion is the world the test made, on any machine, whatever
+        it is rooted at. Convicting this shape would leave a branch no way to
+        please the checker except by deleting the assertion. Mutation caught:
+        `if on_receiver and tail in BUILDING_METHODS:` in `_call_role` becoming
+        `if on_receiver and tail in set():`, which stops `mkdir`, `write_text`
+        and `touch` counting as construction at all.
+        """
+        _write(
+            tmp_path,
+            "tests/test_health.py",
+            """
+            def test_a_planted_observation_file_is_read_back():
+                home = Path(__file__).resolve().parents[1] / "fixtures" / "branch"
+                (home / ".trinity").mkdir(parents=True, exist_ok=True)
+                assert not (home / ".trinity" / "observations.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_spelling_a_same_file_fixture_builds_acquits_the_units_that_request_it(self, tmp_path):
+        """THE BUILD IS ROUTINELY ONE FRAME UP, which is where pytest users put it.
+
+        The fixture makes the directory and the unit reads it; neither half is
+        wrong and neither half is complete on its own. Read once per FILE rather
+        than once per unit, because a rule the audit engine runs on eighteen
+        branches cannot afford to re-parse six fixtures for each of a file's
+        four hundred units. Mutation caught: `built |= (fixture_built or
+        {}).get(name, set())` in `unit_flags` becoming `built |= set()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_planted.py",
+            """
+            @pytest.fixture
+            def planted():
+                home = Path(__file__).resolve().parents[1] / "fixtures"
+                (home / ".trinity").mkdir(parents=True, exist_ok=True)
+                return home
+
+
+            def test_the_planted_tree_is_read_back(planted):
+                assert not (planted / ".trinity" / "observations.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_sandbox_handed_out_through_a_chain_of_fixtures_is_followed_to_a_fixed_point(self, tmp_path):
+        """SIX @ai_mail ROWS, and a single hop would still miss every one of them.
+
+        `hosted_baud` requests `repo_root`, and `repo_root` is the one that
+        requests `tmp_path`; the unit then reads `projects/` under a directory
+        that is two frames from the sandbox. Declared out of order here on
+        purpose - the fixed point must not depend on a fixture being defined
+        after the one it uses, which a single ordered pass would. Mutation
+        caught: `& (SANDBOX_SEEDS | found)):` in `sandbox_fixtures` becoming `&
+        SANDBOX_SEEDS):`, which finds `repo_root` and never reaches
+        `hosted_baud`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_cross_project_bridge.py",
+            """
+            @pytest.fixture
+            def hosted_baud(repo_root):
+                return repo_root
+
+
+            @pytest.fixture
+            def repo_root(tmp_path):
+                return tmp_path
+
+
+            def test_the_registry_lists_what_the_tree_holds(hosted_baud):
+                assert not (hosted_baud / "projects" / "baud" / "registry.json").exists()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_path_reached_through_a_negated_region_is_shipped_on_purpose(self, tmp_path):
+        """FLAGGING A TEMPLATE PASSPORT IS EXACTLY BACKWARDS - the ignore file re-admits it.
+
+        The root `.gitignore`'s only `!` lines put
+        `src/aipass/spawn/templates/*/.trinity/**` back, with a comment saying a
+        template must ship WHOLE. A frozen needle list cannot express a
+        negation, so the negated REGION is spelled by the root's name instead
+        and read one hop through the unit's own assignment. Measured: 7 @spawn
+        rows, every one a template passport read. Mutation caught:
+        `NEGATED_ROOT_SPELLINGS: tuple = ("template",)` becoming
+        `NEGATED_ROOT_SPELLINGS: tuple = ()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_spawn.py",
+            """
+            def test_the_template_ships_its_passport():
+                tpl = get_template_dir()
+                assert (tpl / ".trinity" / "passport.json").is_file()
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_skip_guarded_unit_belongs_to_self_skip_and_is_left_alone_here(self, tmp_path):
+        """ONE DEFECT MUST NOT PRODUCE TWO FINDINGS UNDER TWO STANDARDS.
+
+        A test carrying `pytest.skip` behind an existence check has already
+        declared that it reads the host; whether that skip is honest is
+        `self_skip`'s question. A fleet that gets two findings for one line
+        starts discounting both, and the unit below is otherwise a textbook
+        IGNORED_PATH - it reads `.trinity/local.json` off a class-constant
+        branch root. Mutation caught: `return bool(calls & SKIP_CALLS) and
+        bool(_existence_probe(unit.node))` in `skip_guarded` becoming `return
+        bool(calls & set()) and bool(_existence_probe(unit.node))`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_memory_health.py",
+            """
+            class TestRealTrinityFiles:
+                BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+                def test_the_local_file_is_a_document(self):
+                    local_file = self.BRANCH_ROOT / ".trinity" / "local.json"
+                    if not local_file.exists():
+                        pytest.skip("no live .trinity/local.json in this checkout")
+                    assert json.loads(local_file.read_text())["branch"] == "daemon"
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_machine_root_carrying_a_literal_segment_is_not_a_candidate_at_all(self, tmp_path):
+        """BARE IS THE WHOLE NARROWING, and this is the half that keeps fixtures legal.
+
+        `Path(__file__).parent / "fixtures" / "sample.json"` is machine-rooted
+        and perfectly fresh-clone safe: the repo SHIPS that file, so every
+        machine reads the same bytes. What is not safe is handing a DIRECTORY to
+        production and pinning what production found in it. Without this clause
+        every fixture-file test in the fleet is a DERIVED_EXPECTED row. Mutation
+        caught: `if not seed or any(_holds_a_literal(form) for form in forms):`
+        in `bare_machine_root` becoming `if not seed:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_fixtures.py",
+            """
+            def test_the_sample_document_parses():
+                sample = Path(__file__).parent / "fixtures" / "sample.json"
+                assert json.loads(sample.read_text()) == {"branch": "daemon"}
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_an_unclimbed_dunder_file_is_the_running_test_which_the_repo_ships(self, tmp_path):
+        """SEVEN ROWS ACROSS @backup, @commons AND @devpulse, all of them correct code.
+
+        `__file__` alone names the running test file, and the repo ships it by
+        definition - it IS the test. Only `.parent`, `.parents` or
+        `os.path.dirname` reaches a directory whose contents are this checkout's
+        business. `module_file(__file__)` is a resolver handed its own module
+        path and runs identically on a clone. Mutation caught: `if
+        _climbs_to_a_directory(expr) and any(` in `_machine_root_seed` becoming
+        `if any(`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_backup.py",
+            """
+            def test_the_module_reader_names_the_handlers_it_was_given():
+                assert sorted(declared_handlers(__file__)) == ["json_handler", "ruff_handler"]
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_property_assertion_is_not_an_expected_value_and_a_written_list_is(self, tmp_path):
+        """FOUR FAMILIES CAME OFF THE FLEET FOR THIS ONE WORD, and it is what makes the species name true.
+
+        Both projects hand the same bare machine root to the same production
+        call. The first asserts that two implementations agree - which answers
+        the same on every machine, because nobody wrote a machine's answer down.
+        The second pins a list read off one terminal. Only the second is a
+        DERIVED_EXPECTED, and pinning only the clean half would let a mutation
+        that reports nothing at all look like a narrowing. Mutation caught: `if
+        any(_is_written_down(side) for side in [child.left,
+        *child.comparators]):` in `pins_a_written_expectation` becoming `if
+        True:`, which flags the property assertion too.
+        """
+        properties, written = tmp_path / "properties", tmp_path / "written"
+        _write(
+            properties,
+            "tests/test_drone.py",
+            """
+            def test_the_two_readers_agree_on_this_checkout():
+                root = find_repo_root()
+                assert collect_branches(root) == collect_branches_v2(root)
+            """,
+        )
+        _write(
+            written,
+            "tests/test_drone.py",
+            """
+            def test_the_two_readers_agree_on_this_checkout():
+                root = find_repo_root()
+                assert collect_branches(root) == ["@daemon", "@devpulse", "@seedgo"]
+            """,
+        )
+
+        clean = fresh_clone_check.check_branch(str(properties))
+        flagged = fresh_clone_check.check_branch(str(written))
+
+        assert clean["violations"] == []
+        assert [row["species"] for row in flagged["violations"]] == ["DERIVED_EXPECTED"]
+
+    def test_a_spelling_handed_to_a_parser_is_a_string_and_not_a_directory_this_unit_opened(self, tmp_path):
+        """ELEVEN CORRECT @ai_mail UNITS, convicted on the first run for a path they never reached.
+
+        The path has to be REACHED on the filesystem - `exists`, `iterdir`,
+        `read_text`, `open`, `os.listdir` - not merely spelled. A machine-rooted
+        string handed to a PARSER is data being fed to the code under test, and
+        the parser is what the test is about. Reading spellings rather than
+        reaches is the single largest false-positive family this rule has.
+        Mutation caught: `if _role_of(literal, parents, uses) != "read":` in
+        `_ignored_path` becoming `if False:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_inbox.py",
+            """
+            def test_the_inbox_document_parses():
+                document = parse_document(Path("/srv/aipass/branch/.ai_mail.local/inbox.json"))
+                assert document["branch"] == "daemon"
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_an_existence_branch_that_asserts_in_only_one_arm_is_not_two_oracles(self, tmp_path):
+        """BOTH arms have to assert, or the shape is an ordinary guard and not a second claim.
+
+        A branch whose else arm calls `pytest.fail` states ONE thing: the
+        directory must be there. That is a test with one oracle, which is what
+        this rule is asking for everywhere else - reporting it would mean the
+        rule flags the strict version of its own advice. Mutation caught: `if
+        not (_asserts_in(node.body) and _asserts_in(node.orelse)):` in
+        `_both_worlds` becoming `if not _asserts_in(node.body):`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_bridge.py",
+            """
+            def test_the_apps_tree_resolves_what_it_holds():
+                apps_tree = find_repo_root() / "apps"
+                if apps_tree.is_dir():
+                    assert set(handler_names()) == {"json_handler"}
+                else:
+                    pytest.fail("no apps tree on this machine")
+            """,
+        )
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+
+class TestFreshCloneBranchCheck:
+    """The scoring-API contract, and the two paths where silence reads as clean."""
+
+    def test_the_score_is_the_share_of_units_that_read_only_what_the_repo_ships(self, tmp_path):
+        """The number is clean-over-total, counted per unit, and six acquittals hold it up.
+
+        Two of the eight units are the rows CI went red on; the other six are
+        clean for six DIFFERENT reasons, so a mutation that collapses any single
+        acquittal moves this number and cannot hide behind the other five. An
+        inverted numerator still moves plausibly with a tree, which is why the
+        pin carries the sentence a reader gets as well as the number. Mutation
+        caught: `score = int(((total - len(flagged)) / total) * 100)` becoming
+        `score = int((len(flagged) / total) * 100)`, which reports 25 where the
+        honest answer is 75.
+        """
+        result = fresh_clone_check.check_branch(str(_fresh_clone_project(tmp_path)))
+
+        assert result["score"] == 75
+        assert len(result["violations"]) == 2
+        assert (
+            "2/8 test units take their answer from state a fresh clone does not have" in result["checks"][0]["message"]
+        )
+
+    def test_a_project_whose_every_unit_builds_its_own_world_scores_one_hundred(self, tmp_path):
+        """A CLEAN PROJECT HAS TO SAY SO IN ITS OWN WORDS, not merely produce no rows.
+
+        Zero rows and a 100 are the easy half; the sentence is the half a reader
+        actually sees on a board, and a check that printed the flagged wording
+        with an empty list after it would read as a broken rule rather than a
+        clean project. All six clone-safe shapes are here at once, which is also
+        the only place any of them is asserted in the company of the others.
+        Mutation caught: the message ternary's `if not flagged` becoming `if
+        flagged`, which prints "0/6 test units take their answer from state a
+        fresh clone does not have: " over a project that has none.
+        """
+        result = fresh_clone_check.check_branch(str(_clone_safe_project(tmp_path)))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+        assert result["checks"][0]["passed"] is True
+        assert result["checks"][0]["message"] == "6/6 test units read only what the repo ships"
+
+    def test_a_unit_carrying_two_species_is_one_row_and_two_units_carrying_one_each_are_two(self, tmp_path):
+        """A SCORE THAT CAN GO NEGATIVE IS ONE NOBODY BELIEVES TWICE.
+
+        The first project holds ONE unit that branches on the machine AND pins a
+        written-down value off a bare root - both species, one place for a
+        reader to go and look. The second project splits those same two shapes
+        across two units. One row against two is the whole claim, and the second
+        project is what stops a mutation that simply reports less from passing
+        as the per-unit rule. Mutation caught: `if row["nodeid"] not in seen:`
+        in `find_host_dependent` becoming `if True:`, which returns two rows for
+        the single unit and would let one path-heavy test drive a project below
+        zero.
+        """
+        together, apart = tmp_path / "together", tmp_path / "apart"
+        _write(
+            together,
+            "tests/test_health.py",
+            """
+            def test_the_branch_reports_its_documents():
+                root = find_repo_root()
+                if (root / "apps").is_dir():
+                    assert read_health(root) == ["ok"]
+                else:
+                    assert read_health(root) == []
+            """,
+        )
+        _write(
+            apart,
+            "tests/test_health.py",
+            """
+            def test_the_branch_reports_what_this_checkout_holds():
+                if find_repo_root().is_dir():
+                    assert read_health() == ["ok"]
+                else:
+                    assert read_health() == []
+
+
+            def test_the_health_reader_names_the_documents():
+                assert read_health(find_repo_root()) == ["ok"]
+            """,
+        )
+
+        one_unit = fresh_clone_check.check_branch(str(together))
+        two_units = fresh_clone_check.check_branch(str(apart))
+
+        assert [row["species"] for row in one_unit["violations"]] == ["BOTH_WORLDS"]
+        assert one_unit["score"] == 0
+        assert [row["species"] for row in two_units["violations"]] == ["BOTH_WORLDS", "DERIVED_EXPECTED"]
+
+    def test_the_result_passes_and_stays_advisory_even_when_units_are_flagged(self, tmp_path):
+        """A REPORT IS NOT A VERDICT - this rule nominates and a human decides.
+
+        Top-level `passed` must stay True while flags exist and `advisory` must
+        stay True, so a caller can tell the two apart; the standard name and the
+        violations list are the rest of the contract every rule in this pack
+        answers. A flagged site may be perfectly safe for a reason this checker
+        cannot see - a project that ships the directory anyway, a CI stage that
+        populates it first - which is exactly why it must not fail a board.
+        Mutation caught: `"passed": True,` becoming `"passed": not flagged,` in
+        the scored return, which turns an advisory into a board failure on every
+        branch that has one of these sites.
+        """
+        result = fresh_clone_check.check_branch(str(_fresh_clone_project(tmp_path)))
+
+        assert result["passed"] is True
+        assert result["advisory"] is True
+        assert result["standard"] == "FRESH_CLONE"
+        assert result["checks"][0]["name"] == "Fresh clone survivable"
+        assert result["checks"][0]["passed"] is False
+        assert sorted(result) == ["advisory", "checks", "passed", "score", "standard", "violations"]
+
+    def test_a_project_with_no_test_files_is_not_applicable_not_zero_quality(self, tmp_path):
+        """ZERO TESTS MEASURED IS NOT ZERO QUALITY FOUND.
+
+        A 0 blames a project for a fact about its layout and a 100 claims a
+        measurement that never happened. Each check in this pack carries its own
+        copy of the early return, so each one has to be pinned - and losing it
+        here does not return a wrong number, it divides by zero and takes the
+        caller with it. Mutation caught: `"not_applicable": True,` becoming
+        `"not_applicable": False,` in the `total == 0` return.
+        """
+        _write(tmp_path, "apps/registry.py", "def find_repo_root():\n    return Path.cwd()")
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+
+        assert result["not_applicable"] is True
+        assert result["passed"] is True
+        assert result["score"] == 0
+        assert "no test files found" in result["checks"][0]["message"]
+
+    def test_an_unparseable_test_file_is_named_beside_a_scored_result(self, tmp_path):
+        """AN UNREAD FILE FLAGS NOTHING, so for THIS rule silence biases toward clean.
+
+        The early-return path carries the unreadable line by construction; the
+        scored path has to append it deliberately, and dropping that one line
+        leaves a branch with a healthy number and no hint that a file was never
+        read at all. The message has to say NOT measured, not merely name the
+        file. Mutation caught: `checks.extend(unreadable)` becoming
+        `checks.extend([])`.
+        """
+        _fresh_clone_project(tmp_path)
+        _write(tmp_path, "tests/test_broken.py", "def test_broken(:\n    assert True")
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+        named = [check for check in result["checks"] if check["name"] == "Corpus readable"]
+
+        assert result["score"] == 75
+        assert len(named) == 1
+        assert "tests/test_broken.py" in named[0]["message"]
+        assert "NOT measured" in named[0]["message"]
+
+    def test_only_twelve_flagged_units_are_named_and_the_rest_are_counted(self, tmp_path):
+        """A CHECK MESSAGE PRINTING HUNDREDS OF LINES IS ONE NOBODY READS.
+
+        Fourteen flagged units, twelve named, and the remainder stated as a
+        number rather than dropped - a truncation that did not say it had
+        truncated would understate a branch's problem to every reader of the
+        board while the score stayed honest. The violations list itself is never
+        truncated, because the report artifact is where the full list lives.
+        Mutation caught: `MAX_REPORTED: int = 12` becoming `MAX_REPORTED: int =
+        24`, which names all fourteen and prints no remainder.
+        """
+        units = "\n\n\n".join(
+            f"def test_row_{index:02d}():\n"
+            f"    root = find_repo_root()\n"
+            f'    assert collect_branches(root) == ["row-{index:02d}"]'
+            for index in range(14)
+        )
+        _write(tmp_path, "tests/test_many.py", units)
+
+        result = fresh_clone_check.check_branch(str(tmp_path))
+        message = result["checks"][0]["message"]
+
+        assert len(result["violations"]) == 14
+        assert message.count("::test_row_") == 12
+        assert message.endswith("(+2 more)")
+
+
+# =============================================================================
+# PLATFORM ORACLE - IS THE VERDICT ABOUT THE CODE, OR ABOUT THE HOST
+# =============================================================================
+
+from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check  # noqa: E402
+
+# NOTHING IN THIS SECTION ASKS THIS MACHINE ANYTHING, and the rule under test is
+# the reason that has to be written down rather than assumed. A pin for a checker
+# about listing order, mode bits, TEMP short names and `Path.cwd` is the one place
+# in this file where a real `rglob` over the repo, a real `chmod`, a real
+# `/dev/null` write or a real `os.getcwd()` would read as ordinary setup. There is
+# none: every project below is source TEXT written into tmp_path, and every
+# assertion is about what the CHECKER reported over that text. No `os.name`, no
+# `sys.platform`, no separator and no directory order read from the running host,
+# on any line - a pin for THIS rule that broke this rule would be the joke telling
+# itself, and it would also be the first thing to go red on the Windows leg.
+
+#: The two rows the rule was written for, transcribed from platform_oracle.md.
+#: @skills sorting Paths off an rglob, and @hooks asking the kernel for an
+#: ENOTDIR by using /dev/null as a DIRECTORY. Both score.
+_ORACLE_SCORED_UNITS = """
+def test_the_two_files_are_laid_down(tmp_path):
+    files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+    assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+
+
+def test_the_unwritable_log_is_reported():
+    impossible = Path("/dev/null/impossible/log.jsonl")
+    with patch(LOGGER_PATCH) as mock_logger:
+        _write_delivery_log(impossible)
+    assert mock_logger.warning.call_count == 1
+"""
+
+#: One row per nominate-only species, each transcribed from the branch the
+#: dossier measured it on - @drone's subprocess launch, @spawn's
+#: TemporaryDirectory equality, @prax's sealed cwd behind a `_patch` alias.
+#: NONE of these may move a number.
+_ORACLE_NOMINATED_UNITS = """
+def test_the_missing_executable_is_named():
+    with pytest.raises(RuntimeError) as exc_info:
+        run_executor("this_executable_does_not_exist_xyz")
+    cause = exc_info.value.__cause__
+    assert cause.filename == "this_executable_does_not_exist_xyz"
+
+
+def test_the_agent_reports_where_it_landed():
+    with tempfile.TemporaryDirectory() as td:
+        target = Path(td) / "init_test"
+        landed = _spawn_agent(str(target))
+        assert Path(landed["path"]) == target
+
+
+def test_the_dashboard_names_the_branch(tmp_path, capsys):
+    with _patch("pathlib.Path.cwd", return_value=tmp_path):
+        mod._handle_refresh([])
+    assert tmp_path.name.upper() in capsys.readouterr().out
+"""
+
+#: Three units that are clean for three DIFFERENT reasons - a sort with an
+#: explicit key, a failure injected at a patched seam, a sandbox rebound through
+#: a resolver. Written this way on purpose: a project whose clean units were
+#: clean for the SAME reason would still score 100 with two of the three
+#: acquittals deleted.
+_ORACLE_CLEAN_UNITS = """
+def test_the_listing_is_sorted_by_a_key(tmp_path):
+    files = sorted((p for p in tmp_path.rglob("*") if p.is_file()), key=str)
+    assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+
+
+def test_the_write_failure_is_injected_at_the_seam(tmp_path):
+    target = tmp_path / "delivery.jsonl"
+    with patch("apps.writer.Path.write_text", side_effect=OSError("no")):
+        with patch(LOGGER_PATCH) as mock_logger:
+            _write_delivery_log(target)
+    assert mock_logger.warning.call_count == 1
+
+
+def test_the_sandbox_is_resolved_before_it_is_compared(tmp_path):
+    tmp_path = tmp_path.resolve()
+    landed = _spawn_agent(str(tmp_path))
+    assert Path(landed["path"]) == tmp_path / "init_test"
+"""
+
+
+def _platform_oracle_project(root: Path) -> Path:
+    """Eight units: two that score, three that only nominate, three that are clean.
+
+    ONE FILE RATHER THAN THREE, because the acquittals, the scored rows and the
+    nominations have to survive in each other's company. The split this rule
+    lives or dies by is a claim about a project holding all three kinds at once,
+    and a per-species reader that only ever saw one kind of file would never be
+    caught letting a nomination leak into the number.
+    """
+    _write(
+        root,
+        "tests/test_platform_shapes.py",
+        _ORACLE_SCORED_UNITS + "\n\n" + _ORACLE_NOMINATED_UNITS + "\n\n" + _ORACLE_CLEAN_UNITS,
+    )
+    return root
+
+
+def _oracle_nominations_only_project(root: Path) -> Path:
+    """Three units, one per nominate-only species, and nothing that scores."""
+    _write(root, "tests/test_platform_shapes.py", _ORACLE_NOMINATED_UNITS)
+    return root
+
+
+def _oracle_clean_project(root: Path) -> Path:
+    """Three units, no finding of any species at all."""
+    _write(root, "tests/test_platform_shapes.py", _ORACLE_CLEAN_UNITS)
+    return root
+
+
+class TestPlatformOracleDetection:
+    """The five species, and the structural readings each one needs to see them.
+
+    Each test names the one-line mutation of `platform_oracle_check` it was
+    confirmed RED against, so a later reader can check the pin still bites rather
+    than trusting that it once did.
+    """
+
+    def test_a_sorted_listing_compared_with_a_list_literal_is_flagged(self, tmp_path):
+        """THE ROW THIS RULE WAS WRITTEN FOR - sorted() did not save it.
+
+        `sorted()` over PATH objects uses `PurePath.__lt__`, which is
+        case-SENSITIVE on POSIX and case-FOLDED under ntpath: POSIX puts
+        `SKILL.md` first because `'S' < 'h'`, Windows folds the case and hands
+        back the other order. Production laid down the same two files on both
+        legs; the pin is what disagreed. The finding has to name the listing call
+        or a reader cannot tell which side came from the filesystem. Mutation
+        caught: `LISTING_CALLS: frozenset = frozenset({"iterdir", "listdir",
+        "glob", "rglob", "scandir", "walk"})` becoming the same set without
+        `"rglob"`, which acquits the exact shape the rule exists for.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["LISTING_ORDER"]
+        assert row["nodeid"] == "tests/test_template.py::test_the_two_files_are_laid_down"
+        assert "rglob" in row["detail"]
+        assert "2-element list literal" in row["detail"]
+
+    def test_a_listing_compared_without_a_binding_hop_is_read_directly(self, tmp_path):
+        """THE HOP IS AN EXTENSION OF THE READING, NOT THE WHOLE OF IT.
+
+        `_listing_names` exists because the fleet row binds `files` on one line
+        and compares it on the next, and a reader built only for that shape would
+        miss the same defect written in one line. Both readings have to be live
+        or the arm is one refactor of the corpus away from silence. Mutation
+        caught: `return _listing_call(node) or _inherited_listing(node, listing)`
+        in `_listing_source` becoming `return _inherited_listing(node, listing)`,
+        which keeps the hop and loses the direct read.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                assert sorted(tmp_path.iterdir()) == [tmp_path / "SKILL.md", tmp_path / "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["LISTING_ORDER"]
+        assert "iterdir" in result["violations"][0]["detail"]
+
+    def test_a_listing_reached_only_through_a_bound_name_is_still_read(self, tmp_path):
+        """ONE HOP, AND THE LISTING'S OWN SPELLING TRAVELS WITH THE NAME.
+
+        The row walks its rglob result twice - `files = sorted(...)` and then
+        `for f in files` - so a set-valued reading had two names to choose from
+        and named the loop variable. A reader told the other side "came from f"
+        has been told nothing, which is why `_listing_names` is a dict. Mutation
+        caught: `for name in sorted(_names_under(value) & set(named)): return
+        named[name]` in `_inherited_listing` becoming `return ""`, which drops
+        the hop and leaves the fleet's only LISTING_ORDER row invisible.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                names = [f.name for f in files]
+                assert names == ["SKILL.md", "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["LISTING_ORDER"]
+        assert "rglob" in result["violations"][0]["detail"]
+
+    def test_a_posix_device_path_used_as_an_injector_is_flagged(self, tmp_path):
+        """MODE_INJECTOR, and the fleet row is purer than a chmod.
+
+        `/dev/null/impossible/log.jsonl` is null used as a DIRECTORY, which is an
+        ENOTDIR only POSIX has to give. Windows has no such semantics, so the
+        write SUCCEEDS, nothing is reported, and the must-warn assertion sees
+        ZERO calls while the code under test behaves perfectly - a claim that
+        silently inverts rather than one that goes red. Mutation caught:
+        `DEVICE_PATH_PREFIXES: tuple = ("/dev/null/", "/dev/full", "/dev/zero/",
+        "/proc/", "/sys/")` becoming `DEVICE_PATH_PREFIXES: tuple = ()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_telegram_response.py",
+            """
+            def test_the_unwritable_log_is_reported():
+                impossible = Path("/dev/null/impossible/log.jsonl")
+                with patch(LOGGER_PATCH) as mock_logger:
+                    _write_delivery_log(impossible)
+                assert mock_logger.warning.call_count == 1
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
+        assert "/dev/null/impossible/log.jsonl" in row["detail"]
+        assert "patched seam" in row["detail"]
+
+    def test_a_chmod_to_a_mode_with_no_owner_write_bit_is_flagged(self, tmp_path):
+        """The other half of MODE_INJECTOR: the kernel is asked for a favour.
+
+        Windows ignores POSIX mode bits for the owner, so `0o444` refuses nothing
+        there and the `pytest.raises` under it fails on a runner where production
+        is fine. The mode is read as the LAST positional argument, which covers
+        `os.chmod(p, m)` and `p.chmod(m)` in one reading. Mutation caught:
+        `return "" if node.value & OWNER_WRITE_BIT else oct(node.value)` in
+        `_readonly_mode` becoming `return ""`, which makes every integer mode in
+        the fleet writable and silences the arm's whole int branch.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_read_only_target_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o444)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
+        assert "chmod to 0o444" in result["violations"][0]["detail"]
+
+    def test_a_stat_constant_carrying_no_write_name_is_flagged(self, tmp_path):
+        """The mode arm's second reading: a symbolic mode, read by its NAMES.
+
+        `S_IREAD | S_IRGRP` is `0o440` and a reader that only understood integer
+        literals would call it clean - which is the spelling a careful author
+        reaches for precisely because it says what it means. The names are read
+        rather than evaluated, because this rule never asks the running machine
+        anything. The dotted spelling has its own pin below, because for one
+        afternoon it was a hole. Mutation caught: `_mode_spellings`'s
+        `if name.startswith("S_I")` becoming `if name.startswith("S_X")`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_read_only_mode_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(S_IREAD | S_IRGRP)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
+        assert "S_IREAD" in result["violations"][0]["detail"]
+
+    def test_the_same_mode_written_with_its_module_prefix_is_flagged_the_same(self, tmp_path):
+        """TWO SPELLINGS OF ONE MODE, AND THE DEFECT THIS PIN WAS BORN FROM.
+
+        Found while pinning this arm, 2026-09-08: `_names_under` collects bare
+        names and dotted CALL targets - which is what its seven other readers
+        want - and no plain attribute, so `stat.S_IREAD | stat.S_IRGRP` reached
+        the mode reading as the single name `stat` and came back clean. The two
+        units below differ in NOTHING but that prefix; before the cure the bare
+        one scored 0 and the dotted one scored 100, while `platform_oracle.md`
+        printed the dotted form as the shape it flags. Cured with a reader of its
+        own, `_mode_spellings`, so the other seven call sites did not move.
+        Mutation caught: `_mode_spellings`'s `elif isinstance(child,
+        ast.Attribute): found.add(child.attr)` deleted - the dotted unit goes
+        clean again and this pin goes red while the bare pin above stays green.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_read_only_mode_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(stat.S_IREAD | stat.S_IRGRP)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+
+            def test_a_mode_that_keeps_the_write_bit_is_not_reported(tmp_path):
+                target = tmp_path / "other.jsonl"
+                target.chmod(stat.S_IRUSR | stat.S_IWUSR)
+                _write_delivery_log(target)
+                assert target.read_text()
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
+        assert result["violations"][0]["nodeid"].endswith("test_a_read_only_mode_is_reported")
+        assert "S_IREAD" in result["violations"][0]["detail"]
+
+    def test_an_assertion_on_an_os_filled_exception_attribute_is_nominated(self, tmp_path):
+        """OSERROR_ATTRIBUTE, and the hop that reaches @drone's row.
+
+        `cause = exc_info.value.__cause__` puts the OS-filled exception in a
+        SECOND name and the assertion is written against that one, so a reader
+        that only knew the `pytest.raises` capture would call it clean. The
+        finding has to spell out what `.filename` does on the other leg -
+        "it differs" is not something a reader can act on - and this row is
+        NOMINATED, never scored. Mutation caught: `OSERROR_ATTRIBUTES: frozenset
+        = frozenset({"filename", "filename2", "strerror", "errno", "winerror"})`
+        becoming the same set without `"filename"`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_executor.py",
+            """
+            def test_the_missing_executable_is_named():
+                with pytest.raises(RuntimeError) as exc_info:
+                    run_executor("this_executable_does_not_exist_xyz")
+                cause = exc_info.value.__cause__
+                assert cause.filename == "this_executable_does_not_exist_xyz"
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        row = result["nominations"][0]
+
+        assert result["violations"] == []
+        assert [r["species"] for r in result["nominations"]] == ["OSERROR_ATTRIBUTE"]
+        assert row["nodeid"] == "tests/test_executor.py::test_the_missing_executable_is_named"
+        assert "filename=None" in row["detail"]
+
+    def test_an_unresolved_temp_path_equality_is_nominated(self, tmp_path):
+        """UNRESOLVED_TMP_PATH, minted outside the pytest fixture.
+
+        @spawn's row uses `tempfile.TemporaryDirectory()`, not `tmp_path`, and
+        the hazard is identical: the Windows runner's TEMP is an 8.3 short name
+        (`RUNNER~1`) until something resolves it, the code under test resolves
+        what it hands back, and `Path == Path` compares TEXT. A reader seeded
+        only with the pytest fixture names would call the row clean. Mutation
+        caught: `TEMPDIR_MAKERS: frozenset = frozenset({...})` becoming
+        `TEMPDIR_MAKERS: frozenset = frozenset()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_contracts.py",
+            """
+            def test_the_agent_reports_where_it_landed():
+                with tempfile.TemporaryDirectory() as td:
+                    target = Path(td) / "init_test"
+                    landed = _spawn_agent(str(target))
+                    assert Path(landed["path"]) == target
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert [r["species"] for r in result["nominations"]] == ["UNRESOLVED_TMP_PATH"]
+        assert "8.3 short name" in result["nominations"][0]["detail"]
+
+    def test_a_sealed_cwd_beside_a_rendered_name_is_nominated(self, tmp_path):
+        """SHALLOW_SANDBOX: the seam is one level too shallow.
+
+        Sealing `cwd` onto a temp directory does not seal what is ABOVE it. On
+        Windows TEMP lives under the user profile, so a production walk upward
+        can reach the profile directory and the rendered name comes back
+        `RUNNERADMIN`; `/tmp` has no such ancestor, which is why the same unit is
+        green here forever. It NOMINATES, because whether production walks up is
+        a fact about production and this checker reads test units. Mutation
+        caught: `CWD_SEAM_NEEDLES: tuple = ("Path.cwd", "os.getcwd", "getcwdb",
+        "pathlib.Path.cwd")` becoming `CWD_SEAM_NEEDLES: tuple = ()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_operations.py",
+            """
+            def test_the_dashboard_names_the_branch(tmp_path, capsys):
+                with _patch("pathlib.Path.cwd", return_value=tmp_path):
+                    mod._handle_refresh([])
+                assert tmp_path.name.upper() in capsys.readouterr().out
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert [r["species"] for r in result["nominations"]] == ["SHALLOW_SANDBOX"]
+        assert "pathlib.Path.cwd" in result["nominations"][0]["detail"]
+
+    def test_a_locally_aliased_patch_still_counts_as_a_seal(self, tmp_path):
+        """SHALLOW_SANDBOX MEASURED ZERO BEFORE THIS, and the alias is why.
+
+        The two rows this species exists for are written `from unittest.mock
+        import patch as _patch`, because the units already take a `monkeypatch`
+        fixture and the author wanted the two spellings to read apart. A reader
+        keyed on the exact name `patch` saw no seal at all and called both rows
+        clean - the arm reported 0 and looked healthy. Mutation caught: `return
+        tail in {"patch", "object", "dict"} or tail.endswith("_patch")` in
+        `_is_patching_call` becoming `return tail in {"patch", "object", "dict"}`,
+        which takes the arm back to the zero it started at.
+        """
+        _write(
+            tmp_path,
+            "tests/test_operations.py",
+            """
+            def test_the_dashboard_names_the_branch(tmp_path, capsys):
+                with _patch("pathlib.Path.cwd", return_value=tmp_path):
+                    mod._handle_refresh([])
+                assert tmp_path.name.upper() in capsys.readouterr().out
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["nominations"]] == ["SHALLOW_SANDBOX"]
+
+    def test_a_dispatch_call_is_not_read_as_a_patch(self, tmp_path):
+        """THE ALIAS TEST IS `_patch`, NOT `patch`, AND THE DIFFERENCE IS `dispatch`.
+
+        `endswith("patch")` is the obvious way to catch the alias and it also
+        catches every `dispatch(...)` in the fleet - a verb this house uses for
+        sending work, not for sealing a seam. The underscore is what tells the
+        two apart, and it is one character wide, which is exactly the kind of
+        detail a later edit tidies away. Mutation caught:
+        `tail.endswith("_patch")` becoming `tail.endswith("patch")`, which turns
+        this unit into a SHALLOW_SANDBOX nomination it has no business being.
+        """
+        _write(
+            tmp_path,
+            "tests/test_operations.py",
+            """
+            def test_the_refresh_is_dispatched(tmp_path, capsys):
+                with dispatch("pathlib.Path.cwd", return_value=tmp_path):
+                    mod._handle_refresh([])
+                assert tmp_path.name.upper() in capsys.readouterr().out
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+
+class TestPlatformOracleTheSplit:
+    """TWO SPECIES SCORE, THREE NOMINATE - the design this rule lives or dies by.
+
+    Each of the three nominate-only arms, written as a convicting arm, flags
+    correct code: an assertion on `.errno` is often right, an unresolved
+    `tmp_path` comparison is usually right on the host that wrote it, and a
+    sealed `cwd` is only a defect when production walks up. So they are reported
+    in their own check line, with `passed: True`, and they move NO number. The
+    first time a fleet watches its score drop for a test that was right, the
+    score stops being read - and then the arms that ARE sound stop being read
+    with it. Every pin in this class is a different angle on that one claim.
+    """
+
+    def test_a_project_whose_only_findings_are_nominations_scores_one_hundred(self, tmp_path):
+        """THE SPLIT, PINNED HEAD ON: three nominations, three units, 100.
+
+        All three nominate-only species are present and every one of them is a
+        place to look rather than a charge. If any of them reached the
+        arithmetic, this project would report 0 and three branches that wrote
+        correct tests would watch their number collapse. Mutation caught:
+        `SCORING_SPECIES: tuple = ("LISTING_ORDER", "MODE_INJECTOR")` becoming
+        `("LISTING_ORDER", "MODE_INJECTOR", "UNRESOLVED_TMP_PATH")`, which is the
+        single most plausible future edit to this file and reports 66.
+        """
+        result = platform_oracle_check.check_branch(str(_oracle_nominations_only_project(tmp_path)))
+
+        assert result["score"] == 100
+        assert result["violations"] == []
+        assert len(result["nominations"]) == 3
+        assert sorted(r["species"] for r in result["nominations"]) == [
+            "OSERROR_ATTRIBUTE",
+            "SHALLOW_SANDBOX",
+            "UNRESOLVED_TMP_PATH",
+        ]
+
+    def test_the_nominations_have_their_own_check_line_and_that_line_passes(self, tmp_path):
+        """A NOMINATION IS A PLACE TO LOOK, AND THE CHECK LINE HAS TO SAY SO.
+
+        Reported in a line of its own, `passed: True`, and the message states in
+        words that these rows are not scored and not counted as failing - because
+        a reader who sees three findings in a check line and no explanation will
+        read them as three failures whatever the number says. Mutation caught:
+        `"passed": True,` in the non-empty branch of `_nomination_check` becoming
+        `"passed": not nominated,`, which turns every nomination into a failing
+        check line while the score stays honest - the worst of both.
+        """
+        result = platform_oracle_check.check_branch(str(_oracle_nominations_only_project(tmp_path)))
+        line = result["checks"][1]
+
+        assert line["name"] == "Platform nominations"
+        assert line["passed"] is True
+        assert "3/3 test units are NOMINATED" in line["message"]
+        assert "not scored, not counted as failing" in line["message"]
+
+    def test_the_scored_line_stays_true_when_only_nominations_were_found(self, tmp_path):
+        """The SCORED line is about the scored species and about nothing else.
+
+        A project whose only findings are nominations has to read as what it is -
+        three units that decide on the code - because the first check line is the
+        one a board renders. Letting a nomination fail it would move the verdict
+        without moving the number, which is worse than either alone: the number
+        would say 100 and the board would say red. Mutation caught: `"passed":
+        not scored,` becoming `"passed": not scored and not nominated,`.
+        """
+        result = platform_oracle_check.check_branch(str(_oracle_nominations_only_project(tmp_path)))
+        line = result["checks"][0]
+
+        assert line["passed"] is True
+        assert "3/3 test units decide on the code rather than on the host" in line["message"]
+
+    def test_a_nomination_does_not_move_a_number_a_scored_row_already_set(self, tmp_path):
+        """SAME DENOMINATOR, SAME NUMERATOR, SAME ANSWER - the arithmetic angle.
+
+        Two two-unit projects, each with the SAME single scored row. The second
+        one's other unit carries a nomination instead of being clean, and the
+        score has to be identical: 50 both times. Holding the unit count fixed is
+        what makes this pin about the split rather than about the denominator -
+        a project that merely grew would move the number honestly. Mutation
+        caught: `score = int(((total - len(scored)) / total) * 100)` becoming
+        `score = int(((total - len(scored) - len(nominated)) / total) * 100)`,
+        which reports 0 for the second project and 50 for the first.
+        """
+        clean_partner = tmp_path / "clean"
+        nominating_partner = tmp_path / "nominating"
+        _write(
+            clean_partner,
+            "tests/test_shapes.py",
+            _ORACLE_SCORED_UNITS.split("def test_the_unwritable_log_is_reported")[0]
+            + '\n\ndef test_a_clean_unit(tmp_path):\n    assert (tmp_path / "a").parent == tmp_path\n',
+        )
+        _write(
+            nominating_partner,
+            "tests/test_shapes.py",
+            _ORACLE_SCORED_UNITS.split("def test_the_unwritable_log_is_reported")[0]
+            + "\n\n"
+            + _ORACLE_NOMINATED_UNITS.split("def test_the_agent_reports_where_it_landed")[0],
+        )
+
+        clean = platform_oracle_check.check_branch(str(clean_partner))
+        nominating = platform_oracle_check.check_branch(str(nominating_partner))
+
+        assert clean["score"] == 50
+        assert nominating["score"] == 50
+        assert len(nominating["nominations"]) == 1
+        assert len(nominating["violations"]) == len(clean["violations"]) == 1
+
+    def test_the_failing_count_and_the_score_are_computed_from_the_scored_species_alone(self, tmp_path):
+        """Eight units, two scored, three nominated - and the number is 75, not 37.
+
+        The whole project in one reading: the two scoring rows charge, the three
+        nominations are named in their own line, and the three clean units hold
+        three different acquittals up. Both sentences are pinned, because a
+        reader gets the sentence before the number. Mutation caught: `scored =
+        [r for r in rows if r["species"] in SCORING_SPECIES]` in `split_rows`
+        becoming `scored = list(rows)`, which reports 37 and prints "5/8 test
+        units would decide differently" over three tests that are right.
+        """
+        result = platform_oracle_check.check_branch(str(_platform_oracle_project(tmp_path)))
+
+        assert result["score"] == 75
+        assert len(result["violations"]) == 2
+        assert len(result["nominations"]) == 3
+        assert "2/8 test units would decide differently on another platform" in result["checks"][0]["message"]
+        assert "3/8 test units are NOMINATED" in result["checks"][1]["message"]
+
+    def test_a_unit_that_scores_and_nominates_appears_in_both_lines(self, tmp_path):
+        """DEDUPED SEPARATELY, AND THAT IS THE POINT OF THE SPLIT.
+
+        One unit sorts an rglob against a list literal AND compares an
+        unresolved sandbox path with something production handed back. It is one
+        unit to charge and two things to look at. Collapsing the nomination
+        behind the scored row would lose the second, and the nomination line is
+        not a penalty - it is the reason a reader knows to check the second line
+        of the same test. Mutation caught: `nominated = [r for r in rows if
+        r["species"] not in SCORING_SPECIES]` becoming `nominated = [r for r in
+        rows if r["species"] not in SCORING_SPECIES and r["nodeid"] not in
+        {s["nodeid"] for s in scored}]`, which is exactly the "tidy up the
+        duplicate" edit this docstring exists to refuse.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_listing_and_the_landing_are_both_checked(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+                landed = _spawn_agent(str(tmp_path))
+                assert Path(landed["path"]) == tmp_path / "init_test"
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        nodeid = "tests/test_template.py::test_the_listing_and_the_landing_are_both_checked"
+
+        assert [r["nodeid"] for r in result["violations"]] == [nodeid]
+        assert [r["nodeid"] for r in result["nominations"]] == [nodeid]
+        assert result["score"] == 0
+
+    def test_two_scoring_species_in_one_unit_are_one_row_and_not_two(self, tmp_path):
+        """A SCORE THAT CAN GO NEGATIVE IS ONE NOBODY BELIEVES TWICE.
+
+        One unit carrying both scoring species is one unit a reader has to go and
+        look at, not two. Counting findings instead of units lets a single
+        loop-heavy test drive a two-unit project below zero. Mutation caught: `if
+        row["nodeid"] in seen: continue` in `_dedupe_by_unit` becoming `if False:
+        continue`, which reports two rows for one unit and scores 0 where the
+        honest answer is 50.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_listing_and_the_refusal_are_both_checked(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o444)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+
+
+            def test_a_clean_unit(tmp_path):
+                assert (tmp_path / "a").parent == tmp_path
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert len(result["violations"]) == 1
+        assert result["violations"][0]["species"] == "LISTING_ORDER"
+        assert result["score"] == 50
+
+
+class TestPlatformOracleAcquittals:
+    """Every narrowing that cost a measured false positive, pinned by name.
+
+    An arm that convicts correct code is how a standard gets switched off. Each
+    test below is one of the narrowings the dossier paid for in rows - the
+    LISTING_ORDER 5-to-1, the OSERROR_ATTRIBUTE 4-to-2, the UNRESOLVED_TMP_PATH
+    84-to-83 - and losing any of them puts correct code back in the report.
+    """
+
+    def test_a_sorted_with_an_explicit_key_is_not_a_listing_order_row(self, tmp_path):
+        """ANY key at all, and that is a statement about what a key DOES.
+
+        Supplying one displaces `PurePath.__lt__` entirely, which is the whole
+        hazard - the spellings that appear in real cures are `key=str` and
+        `key=lambda p: p.name`, and a key that sorts by size is just as
+        deterministic. This is the acquittal a flagged site is rewritten INTO, so
+        convicting it would be teaching a rewrite into something the rule also
+        flags. Mutation caught: `if any(kw.arg == "key" for kw in
+        call.keywords):` in `_sort_is_neutral` becoming `if any(kw.arg == "cmp"
+        for kw in call.keywords):`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                files = sorted((p for p in tmp_path.rglob("*") if p.is_file()), key=str)
+                assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_sort_over_names_rather_than_paths_is_not_a_listing_order_row(self, tmp_path):
+        """THE NARROWING THAT TOOK THIS ARM FROM FIVE ROWS TO ONE.
+
+        `sorted(p.name for p in d.glob(...))` never touches `PurePath.__lt__` at
+        all - it sorts STRINGS, which is byte order on every host. Four of the
+        five rows measured before this narrowing were @memory sorting `.name` off
+        a glob, and two of those four are that branch's own case-folding pins,
+        which handle both hosts explicitly and are the most portable code in the
+        corpus. Mutation caught: `STRING_VALUED_ATTRIBUTES: frozenset =
+        frozenset({"name", "stem", "suffix"})` becoming `frozenset()`, which puts
+        all four back.
+        """
+        _write(
+            tmp_path,
+            "tests/test_entries.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                names = sorted(p.name for p in tmp_path.glob("*"))
+                assert names == ["SKILL.md", "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_set_comparison_carries_no_order_to_disagree_about(self, tmp_path):
+        """The cheapest cure there is: compare the set.
+
+        A set does not have an order and a Counter does not read one, so the
+        filesystem's arbitrary order cannot reach the claim. It is the first cure
+        the rule's own message recommends, which makes flagging it the one
+        mistake this arm must never make. Mutation caught: `UNORDERED_WRAPPERS:
+        frozenset = frozenset({"set", "frozenset", "Counter"})` becoming
+        `frozenset()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_the_two_files_are_laid_down(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                assert set(f.name for f in files) == ["SKILL.md", "handler.py"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_one_element_literal_cannot_disagree_about_order(self, tmp_path):
+        """One element has no order, whatever the filesystem hands back.
+
+        The floor is two, and it is not a heuristic: a single-element list is the
+        same list in every dialect, so flagging it would be reporting a
+        divergence that cannot happen. Mutation caught: `if literal is None or
+        len(literal.elts) < 2:` becoming `... len(literal.elts) < 1:`, which
+        flags every one-file listing assertion in the fleet.
+        """
+        _write(
+            tmp_path,
+            "tests/test_template.py",
+            """
+            def test_only_one_file_is_laid_down(tmp_path):
+                files = sorted(p for p in tmp_path.rglob("*") if p.is_file())
+                assert [f.name for f in files] == ["SKILL.md"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_ast_walk_is_not_a_directory_listing(self, tmp_path):
+        """`walk` is in LISTING_CALLS and `ast.walk` lists no directory.
+
+        Every checker in this pack calls `ast.walk`, and so does every test that
+        reads one - so a rule keyed on the verb alone would flag its own author's
+        code first and the fleet's AST tooling second. The root is read and
+        refused by name. Mutation caught: `NOT_LISTING_ROOTS: frozenset =
+        frozenset({"ast", "os.path", "json", "re"})` becoming `frozenset()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_reader.py",
+            """
+            def test_every_node_is_visited(tree):
+                nodes = [n for n in ast.walk(tree)]
+                assert [type(n).__name__ for n in nodes] == ["Module", "FunctionDef"]
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_patched_write_seam_named_by_its_target_is_never_a_mode_injector_row(self, tmp_path):
+        """THE ONE ACQUITTAL THAT IS NOT NEGOTIABLE, read from the patch TARGET.
+
+        Injecting at the seam is the cure this arm teaches, so an arm that could
+        flag the cure would be teaching a rewrite into something it also flags -
+        and a fleet that discovers that stops taking the rewrite. The unit here
+        still holds everything the arm looks for on the failure side, chmod
+        included; only the injection has moved onto a patched `write_text`, and
+        the `side_effect` is assigned on a later line so that this pin rests on
+        the TARGET reading alone. Mutation caught: `WRITE_SEAMS: frozenset =
+        frozenset({... "write_text", "write_bytes", ...})` becoming the same set
+        without `"write_text"`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_the_write_failure_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o444)
+                with patch("apps.writer.Path.write_text") as writer:
+                    writer.side_effect = IOError("no")
+                    with patch(LOGGER_PATCH) as mock_logger:
+                        _write_delivery_log(target)
+                assert mock_logger.warning.call_count == 1
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_an_os_error_side_effect_on_any_patch_is_never_a_mode_injector_row(self, tmp_path):
+        """The second half of the same acquittal: the seam named by its side_effect.
+
+        The cure is also written `patch(seam, side_effect=OSError(...))` on a
+        seam this rule's WRITE_SEAMS list has never heard of - a module's own
+        private store, a helper, a client. The failure is still portable, still
+        raised on every host, and still nothing to do with the filesystem's mood.
+        Read from the `side_effect=` keyword rather than from the target, which
+        is why it needs its own pin: the target reading acquits this unit not at
+        all. Mutation caught: `if keyword.arg == "side_effect" and
+        _names_under(keyword.value) & OSERROR_TYPES:` in
+        `_seam_injects_the_failure` becoming `if keyword.arg == "side_effects"
+        and _names_under(keyword.value) & OSERROR_TYPES:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_the_write_failure_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o444)
+                with patch("apps.writer._store", side_effect=OSError("no")):
+                    with patch(LOGGER_PATCH) as mock_logger:
+                        _write_delivery_log(target)
+                assert mock_logger.warning.call_count == 1
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_dev_null_exactly_is_a_sink_and_not_an_injector(self, tmp_path):
+        """`/dev/null` is correct, common and portable through `os.devnull`.
+
+        The trailing slash in the prefix is the whole distinction: it is
+        `/dev/null/something` - null used as a DIRECTORY - that provokes the
+        ENOTDIR this arm is about, and Windows has no such semantics to provoke.
+        Writing TO the sink is ordinary code that works everywhere. Mutation
+        caught: the first element of `DEVICE_PATH_PREFIXES` becoming
+        `"/dev/null"` without its trailing slash, which flags every sink write in
+        the fleet.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_the_sink_swallows_the_output():
+                with patch(LOGGER_PATCH) as mock_logger:
+                    _write_delivery_log(Path("/dev/null"))
+                assert mock_logger.warning.call_count == 1
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_mode_that_keeps_the_owner_write_bit_is_not_an_injector(self, tmp_path):
+        """An ordinary chmod is not a platform oracle - only a read-only one is.
+
+        `0o644` refuses nothing on either host, so nothing about the unit's
+        verdict changes with the platform. The arm is about a mode that asks the
+        kernel to fail, not about the verb `chmod`. Mutation caught: `return ""
+        if node.value & OWNER_WRITE_BIT else oct(node.value)` becoming `return
+        oct(node.value)`, which flags every chmod in the fleet including the
+        ones that grant permission.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_writable_target_is_still_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o644)
+                with pytest.raises(OSError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_stat_constant_carrying_a_write_name_is_not_an_injector(self, tmp_path):
+        """Any name with a W in it is a write bit, and a writable mode refuses nothing.
+
+        The symbolic half of the same acquittal the integer half gets: a mode
+        that grants the owner a write bit provokes no OSError on any host, so
+        nothing about the unit's verdict changes with the platform. Reading the
+        W out of the NAME rather than evaluating the constant is what keeps this
+        rule from importing `stat` and asking this interpreter for a number - a
+        portability rule that consulted the host would report a different
+        standard on every leg of the matrix. Mutation caught: `if any("W" in
+        _tail(n) for n in spellings):` becoming `if any("Z" in _tail(n) for n in
+        spellings):`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_writable_mode_is_still_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(S_IREAD | S_IWUSR)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_boolean_mode_is_refused_by_name_rather_than_read_as_mode_one(self, tmp_path):
+        """`isinstance(True, int)` is True in Python, and mode 1 has no write bit.
+
+        A boolean handed to a chmod-shaped call is a test doing something else
+        entirely, and reading it as an integer mode makes it a read-only mode by
+        accident - a finding manufactured out of Python's own numeric tower.
+        Refused by name, before the bit test. Mutation caught: `if
+        isinstance(node.value, bool) or not isinstance(node.value, int):`
+        becoming `if not isinstance(node.value, int):`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_flag_is_not_a_mode(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(True)
+                with pytest.raises(OSError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_an_injector_with_no_failure_oracle_is_not_a_row(self, tmp_path):
+        """The species is a FAILURE injected by the filesystem's mood.
+
+        A unit that makes a file read-only and then asserts on a VALUE is not
+        claiming anything about an error, so there is nothing for the other
+        platform to invert. Without this half the arm would flag every
+        permissions fixture in the fleet on the strength of the verb alone.
+        Mutation caught: `if not injectors or not _asserts_on_failure(unit):`
+        becoming `if not injectors:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_read_only_target_still_reads(tmp_path):
+                target = tmp_path / "log.jsonl"
+                target.chmod(0o444)
+                assert target.read_text() == ""
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_unit_that_manufactures_its_own_os_error_is_not_nominated(self, tmp_path):
+        """THE NARROWING THAT TOOK OSERROR_ATTRIBUTE FROM FOUR ROWS TO TWO.
+
+        The attribute is only OS-filled when the OS filled it. A stand-in the
+        unit installs and raises from puts the test's OWN literal in `.errno`,
+        and a literal is the same number on every platform because the test wrote
+        it down. Two of the four rows measured were exactly this shape - @spawn's
+        and this branch's own atomic-write retry pins - and both are portable
+        code. Mutation caught: `if not captured or
+        _unit_manufactures_the_error(unit.node):` becoming `if not captured:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_atomic_write.py",
+            """
+            def test_the_retry_reports_the_cross_device_link(monkeypatch, tmp_path):
+                def refuse(src, dst):
+                    raise OSError(errno.EXDEV, "invalid cross-device link")
+
+                monkeypatch.setattr(os, "replace", refuse)
+                with pytest.raises(OSError) as exc_info:
+                    atomic_write(tmp_path / "a.json", "{}")
+                assert exc_info.value.errno == errno.EXDEV
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["violations"] == []
+
+    def test_a_sandbox_rebound_through_a_resolver_cures_every_comparison_below_it(self, tmp_path):
+        """`tmp_path = tmp_path.resolve()` as the first line is the template's cure.
+
+        After it, every later comparison in the unit is already resolved without
+        saying so on its own line - so a reader that only looked at the
+        comparison would flag the unit that TOOK the cure, and the cure is the
+        one thing the finding tells a reader to do. Mutation caught: `if
+        _sandbox_is_resolved_once(unit.node, sandbox):` in
+        `unresolved_tmp_path_rows` becoming `if False:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_contracts.py",
+            """
+            def test_the_agent_reports_where_it_landed(tmp_path):
+                tmp_path = tmp_path.resolve()
+                target = tmp_path / "init_test"
+                landed = _spawn_agent(str(target))
+                assert Path(landed["path"]) == target
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+    def test_a_path_the_test_built_itself_is_not_nominated(self, tmp_path):
+        """POSITIVE EVIDENCE, NOT THE ABSENCE OF IT - the 84-to-83 narrowing.
+
+        The first version asked only "is this name NOT sandbox-derived", which is
+        a different question and answers yes for anything the reader failed to
+        recognise. Both sides here were built by the TEST, walking its own
+        `parents` list; neither ever went through production's resolver, so both
+        are the same unresolved text and an 8.3 short name cannot separate them.
+        Mutation caught: `return _traces_to_the_subject(node, values, spies,
+        set())` in `_came_out_of_the_subject` becoming `return True`, which is
+        the first version's reading exactly.
+        """
+        _write(
+            tmp_path,
+            "tests/test_walk.py",
+            """
+            def test_the_walk_finds_its_own_parent(tmp_path):
+                parent_dir = tmp_path / "a"
+                found = None
+                for candidate in [parent_dir, *parent_dir.parents]:
+                    if candidate.name == "a":
+                        found = candidate
+                assert found == parent_dir
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+    def test_a_furnished_sandbox_is_not_a_shallow_sandbox_row(self, tmp_path):
+        """A unit that lays its own marker down is not relying on an ancestor.
+
+        An upward walk stops INSIDE a sandbox that holds what the walk is looking
+        for, so the rendered name is the sandbox's own and no profile directory
+        can reach it. It is also the cheapest cure available to a flagged site,
+        which is the second reason it must never be the thing the arm flags.
+        Mutation caught: `SANDBOX_MARKER_CALLS: frozenset = frozenset({"mkdir",
+        "touch", "write_text", "write_bytes", "symlink_to", "makedirs"})`
+        becoming `frozenset()`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_operations.py",
+            """
+            def test_the_dashboard_names_the_branch(tmp_path, capsys):
+                (tmp_path / "DASHBOARD.local.json").write_text("{}")
+                with _patch("pathlib.Path.cwd", return_value=tmp_path):
+                    mod._handle_refresh([])
+                assert tmp_path.name.upper() in capsys.readouterr().out
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+    def test_a_cwd_seam_that_never_names_the_sandbox_is_not_a_seal(self, tmp_path):
+        """The sandbox has to be NAMED by the seal, or it is a different test.
+
+        `patch("pathlib.Path.cwd")` handed a Mock never puts the process anywhere
+        real, so no ancestor walk can escape into a user profile - there is no
+        walk and no profile, only a stand-in. Flagging it would nominate every
+        unit in the fleet that stubs `Path.cwd` for any reason at all. Mutation
+        caught: `if any(_is_sandbox_path(kw.value, sandbox) for kw in
+        node.keywords) or _names_under(node) & sandbox:` in `_cwd_seam_sealed`
+        becoming `if True:`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_operations.py",
+            """
+            def test_the_dashboard_names_the_branch(tmp_path, capsys):
+                with _patch("pathlib.Path.cwd", return_value=Mock()):
+                    mod._handle_refresh([])
+                assert tmp_path.name.upper() in capsys.readouterr().out
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["nominations"] == []
+        assert result["score"] == 100
+
+
+class TestPlatformOracleBranchCheck:
+    """The scoring-API contract, and the two paths where silence reads as clean."""
+
+    def test_a_project_with_nothing_to_find_scores_one_hundred_and_says_so(self, tmp_path):
+        """Three clean units, three different acquittals, one honest number.
+
+        The clean sentence is pinned beside the number because it is what a
+        reader sees first, and the nominations line has to be present and empty
+        rather than absent - a missing line reads as a rule that did not run.
+        Mutation caught: `f"{total - len(scored)}/{total} test units decide on
+        the code rather than on the host"` becoming `f"{len(scored)}/{total} ..."`,
+        which prints 0/3 over a project where all three are right.
+        """
+        result = platform_oracle_check.check_branch(str(_oracle_clean_project(tmp_path)))
+
+        assert result["score"] == 100
+        assert result["violations"] == []
+        assert result["nominations"] == []
+        assert "3/3 test units decide on the code rather than on the host" in result["checks"][0]["message"]
+        assert "0/3 test units carry a platform nomination" in result["checks"][1]["message"]
+
+    def test_the_result_carries_the_scoring_api_shape_and_stays_advisory(self, tmp_path):
+        """SHADOW MODE GATES NOTHING - this rule reports and a human decides.
+
+        Top-level `passed` must stay True while flags exist and `advisory` must
+        stay True, so a caller can tell a report from a verdict. The two extra
+        keys this rule carries - `violations` AND `nominations` - are part of the
+        contract too: a report lane that only read `violations` would print two
+        rows and lose the three a reader was told to go and look at. Mutation
+        caught: `"passed": True,` becoming `"passed": not scored,` in the scored
+        return, which turns an uncalibrated advisory into a board failure.
+        """
+        result = platform_oracle_check.check_branch(str(_platform_oracle_project(tmp_path)))
+
+        assert result["passed"] is True
+        assert result["advisory"] is True
+        assert result["standard"] == "PLATFORM_ORACLE"
+        assert result["checks"][0]["passed"] is False
+        assert sorted(result) == [
+            "advisory",
+            "checks",
+            "nominations",
+            "passed",
+            "score",
+            "standard",
+            "violations",
+        ]
+
+    def test_a_project_with_no_test_files_is_not_applicable_not_zero_quality(self, tmp_path):
+        """ZERO TESTS MEASURED IS NOT ZERO QUALITY FOUND.
+
+        A 0 blames a project for a fact about its layout and a 100 claims a
+        measurement that never happened. Each check in this pack carries its own
+        copy of the early return, so each one has to be pinned - and losing it
+        here does not return a wrong number, it divides by zero and takes the
+        caller with it. Mutation caught: `"not_applicable": True,` becoming
+        `"not_applicable": False,` in the `total == 0` return.
+        """
+        _write(tmp_path, "apps/writer.py", "def write_log(path):\n    return path")
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["not_applicable"] is True
+        assert result["passed"] is True
+        assert result["score"] == 0
+        assert "no test files found" in result["checks"][0]["message"]
+
+    def test_a_project_whose_only_test_file_is_broken_is_not_reported_as_having_no_tests(self, tmp_path):
+        """A broken file must never read as an absent one - the ordering pin.
+
+        An unparseable file contributes no units, so it cannot lower a score, and
+        silence about it reads as a clean result. This is the one path where
+        nothing else can catch it: the message a caller sees must say the file
+        was present and unreadable, not that the project has never written a
+        test. Mutation caught: the `measured` ternary's `if not
+        scanned.unparseable` becoming `if True`, which makes the two cases
+        indistinguishable.
+        """
+        _write(tmp_path, "tests/test_unreadable_shapes.py", "def test_broken(:\n    assert True")
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert result["not_applicable"] is True
+        assert "no test files found" not in result["checks"][0]["message"]
+        assert "unparseable" in result["checks"][0]["message"]
+        assert any("test_unreadable_shapes.py" in check["message"] for check in result["checks"])
+
+    def test_an_unparseable_file_is_named_beside_a_scored_result(self, tmp_path):
+        """AN UNREAD FILE FLAGS NOTHING, so for THIS rule silence biases toward clean.
+
+        The early-return path carries the unreadable line by construction; the
+        scored path has to append it deliberately, and dropping that one line
+        leaves a branch with a healthy number and no hint that a file was never
+        read at all. The message has to say NOT measured, not merely name the
+        file. Mutation caught: `checks.extend(unreadable)` becoming
+        `checks.extend([])`.
+        """
+        _platform_oracle_project(tmp_path)
+        _write(tmp_path, "tests/test_unreadable_shapes.py", "def test_broken(:\n    assert True")
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        named = [check for check in result["checks"] if check["name"] == "Corpus readable"]
+
+        assert result["score"] == 75
+        assert len(named) == 1
+        assert "test_unreadable_shapes.py" in named[0]["message"]
+        assert "NOT measured" in named[0]["message"]
+
+    def test_only_twelve_flagged_units_are_named_and_the_rest_are_counted(self, tmp_path):
+        """A CHECK MESSAGE PRINTING HUNDREDS OF LINES IS ONE NOBODY READS.
+
+        Fourteen flagged units, twelve named, and the remainder stated as a
+        number rather than dropped - a truncation that did not say it had
+        truncated would understate a branch's problem to every reader of the
+        board while the score stayed honest. The violations list itself is never
+        truncated, because the report artifact is where the full list lives.
+        Mutation caught: `MAX_REPORTED: int = 12` becoming `MAX_REPORTED: int =
+        24`, which names all fourteen and prints no remainder.
+        """
+        units = "\n\n\n".join(
+            f"def test_row_{index:02d}(tmp_path):\n"
+            f"    files = sorted(p for p in tmp_path.rglob('*') if p.is_file())\n"
+            f'    assert [f.name for f in files] == ["SKILL.md", "row-{index:02d}.py"]'
+            for index in range(14)
+        )
+        _write(tmp_path, "tests/test_many_listings.py", units)
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+        message = result["checks"][0]["message"]
+
+        assert len(result["violations"]) == 14
+        assert message.count("::test_row_") == 12
+        assert message.endswith("(+2 more)")

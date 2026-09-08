@@ -100,6 +100,39 @@ def test_the_registry_still_exposes_build():
 
 That version fails on the rename. The skip version disappears on it.
 
+### Build the world — do not assert both of them
+
+**Patrick's ruling, 2026-09-08.** The cure for a machine-dependent skip is a
+**fixture-built world**: make the thing the test needs, then assert one answer.
+It is *not* "assert both worlds". A test that asks the machine what it is and
+then asserts something different in each arm has not removed the dependency — it
+has moved it from the collector into the oracle, where it is harder to see and
+where the board goes green either way.
+
+The measurement is two rows, both of them cures written against this rule, and
+both of them red on the first Linux/Windows CI matrix:
+
+- `ai_mail/tests/test_cross_project_bridge.py:664` branches on
+  `projects_tree.is_dir()` and asserts in **both** arms — four resident branches
+  on a machine that carries the tree, `{}` on one that does not. Two contracts,
+  one test, and whichever one runs is the one the host chose.
+- `daemon/tests/test_memory_health.py:630` asserts on the real branch's
+  `.trinity/local.json` and `.trinity/observations.json`. `.trinity/` is
+  `.gitignore` line 28, so a fresh clone does not have them and the assertion is
+  about this developer's disk, not about the code.
+
+Both replaced a `pytest.skip` with an `if`. The skip was at least honest about
+being conditional. The fixture is the answer to both: build a `projects/` tree
+under `tmp_path` and assert the four names; write the two `.trinity` files the
+health reader is supposed to read and assert on those.
+
+**These two rules do not double-convict.** A machine-dependent condition guarding
+a `pytest.skip` is **self_skip's** business — that is a test that evaporates. A
+machine-dependent *assertion* with no skip in sight is **`fresh_clone`'s** — see
+`fresh_clone.md`, which asks whether a test would pass on a machine holding only
+what the repo ships, and which is the rule that convicts the both-worlds shape.
+Neither reads the other's evidence, so a row belongs to exactly one of them.
+
 ## The module scope is measured
 
 `pytest.skip(..., allow_module_level=True)` removes an entire file and belongs to
