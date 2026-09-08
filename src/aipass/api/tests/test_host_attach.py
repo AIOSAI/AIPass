@@ -1791,8 +1791,7 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert room == "aipass-42", "the snapshot's own name must be used verbatim"
         assert attach_only is True
 
-    @pty_required
-    def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self) -> None:
+    def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
         """
         The WIRING, not just the resolution — and this pin exists because a
         mutation proved the wiring was unprotected.
@@ -1803,7 +1802,17 @@ class TestOneRoomHonoursAnOutsideSeat:
         the process that actually gets spawned. A resolution nobody acts on is
         the same blank terminal with more paperwork, so this drives the real
         door and reads the argv `_spawn_pty` was handed.
+
+        Both preflights are FORCED rather than skipped — the precedent this
+        file already set for the fence tests. The subject here is argv
+        composition, which is string work no PTY takes part in, and
+        `_spawn_pty` is patched so nothing can spawn regardless. This carried
+        `@pty_required` for one day (17f1e773, after the Windows matrix went
+        red on it); a skip there leaves exactly the wiring a mutation already
+        escaped unmeasured on half the fleet.
         """
+        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
+        monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
             spawn.return_value = (MagicMock(pid=4242), 7)
             with patch(PATCH_ATTACH_LOGGER), patch(PATCH_ATTACH_JSON):
@@ -1814,14 +1823,18 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert "new-session" not in argv, "this lane must not be able to create a room"
         assert "-A" not in argv, "attach-or-create is exactly what put a blank terminal on the phone"
 
-    @pty_required
-    def test_without_the_flag_a_named_room_is_still_attach_or_create(self) -> None:
+    def test_without_the_flag_a_named_room_is_still_attach_or_create(self, monkeypatch) -> None:
         """
         The regression guard for the pin above. The shell lane names its own
         room and MUST still be able to create it — if this ever goes red
         alongside that one passing, attach-only has escaped its one case and
         every shell is now refusing to open.
+
+        Runs on every platform for the same reason its twin does: a guard that
+        skips where the thing it guards still runs is not a guard.
         """
+        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
+        monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
             spawn.return_value = (MagicMock(pid=4242), 7)
             with patch(PATCH_ATTACH_LOGGER), patch(PATCH_ATTACH_JSON):

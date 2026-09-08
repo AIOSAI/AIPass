@@ -5,8 +5,33 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (47/47) | **Tests:** 1483 test functions across 47 files; pytest expands to 1582 cases, 1582 pass | **Functions:** 243 public (223 tested)
-**Last Updated:** 2026-09-07
+**Seedgo:** 100% (47/47) | **Tests:** 1491 test functions across 47 files; pytest expands to 1589 cases, 1589 pass | **Functions:** 243 public (223 tested)
+**Last Updated:** 2026-09-08
+
+*EVERY REFUSAL THIS BRANCH PRINTED REPORTED SUCCESS. A module returning True
+from `handle_command` means "I recognised this command", never "it worked", and
+`main()` returned 0 on any truthy route — so `drone @api validate` printed a red
+cross for a missing key and exited 0, and `drone @api validate && <next>`
+proceeded on the failure. Six commands were measured that way on 2026-08-28 and
+the item sat open for twenty-six days waiting on a fleet ruling, because the fix
+breaks any consumer that reads the code. The ruling came 09-07 — a refusal exits
+non-zero and names the token or reason — and the cure is cli's existing
+machinery rather than a new one of ours: `error()` already raised a
+process-level failure flag that nothing here ever read. `main()` clears that
+flag before routing (it is process-level, so a previous command or an imported
+branch printing its own error would otherwise be read as OUR failure) and
+resolves the exit from it: 1 unrecognised, 2 recognised-and-refused, 0 only when
+nothing printed an error. All six now exit 2, measured; unknown-command stays 1;
+`list-providers`, `stats`, `session`, `--help` and the bare introspection stay
+0. All 63 `error()` call sites were read first, looking for one that prints a
+failure and still succeeds overall — a per-item error inside a loop would have
+started exiting 2 wrongly. There were none: this branch had already been using
+`warning()` for "no tokens issued" and "no usage data" and reserving `error()`
+for real refusals, which is the only reason a one-line seam was safe. The one
+site that broke that rule was `revoke-token` on an unknown id, a yellow note
+four lines below the `error()` its own sibling refusal used; it names the id
+through the error channel now, because an operator scripting `revoke-token <id>
+&& <next>` was being told a device was off when it was not.*
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY
 EXISTED IN CI. seedgo scored the file lane's statics module with 4 unresolved
@@ -1272,15 +1297,36 @@ corpus · ruff, format and pyright clean.
   (`api_key.py:164`). So `get-key openai` and `validate openai` reach a key store that is
   never used to call anything. The OpenAI SDK here is transport for OpenRouter, not an
   OpenAI integration.
-- **Error paths exit `0` everywhere except `serve`.** A failed command reports success to
-  the shell, so `drone @api validate && ...` proceeds on failure; `get-key openai` and
-  `validate openai` both print a red failure and exit `0`. Unknown commands correctly exit
-  `1`. The `serve` path was carved out of this and **fixed on 09-07** (below); the rest is
-  still blocked on Patrick's fleet-wide ruling, see APLAN-0013.
 - **Google auth libraries are optional deps** — commands fail with install instructions if
   missing. Verified importable tonight (`google.auth`, `googleapiclient`).
 - **No rate limiting on OpenRouter calls** (S117 finding). Verified tonight: zero
   rate-limit, throttle or backoff code in `handlers/openrouter/` or `openrouter_client.py`.
+
+*Fixed 2026-09-08 (FPLAN-0492, canary's fleet refusal sweep):*
+
+- **Error paths no longer exit `0`.** This item stood from 2026-08-13 and was re-measured
+  six-for-six on 08-28. `main()` now clears cli's process-level failure flag before
+  routing and returns `resolve_exit(handled)`: **1** unrecognised, **2**
+  recognised-and-refused, **0** only when nothing printed an error. Measured after, from
+  the shell, status read from the command itself:
+
+  | command | before | after |
+  |---|---|---|
+  | `drone @api caller-usage` | 0 | **2** |
+  | `drone @api track` | 0 | **2** |
+  | `drone @api get-key` | 0 | **2** |
+  | `drone @api validate` | 0 | **2** |
+  | `drone @api get-secret` | 0 | **2** |
+  | `drone @api models` | 0 | **2** |
+  | `drone @api host-api revoke-token <unknown>` | 0 | **2** |
+  | `drone @api definitelynotacommand` | 1 | 1 |
+  | `list-providers` · `stats` · `session` · `--help` · bare | 0 | 0 |
+
+  `revoke-token` on an unknown id was the branch's one `warning()`-channel refusal
+  (canary's sweep row) and is an `error()` naming the id now. All 63 `error()` call sites
+  were read before the seam went in, looking for one that prints a failure on a path that
+  still succeeds; there were none, which is the only reason this was a one-line change.
+  Five mutations, each red.
 
 *Fixed 2026-09-07 (FPLAN-0492 wave 4), both from one night's incidents:*
 
@@ -1314,6 +1360,6 @@ audit refresh; the README kept it standing until tonight.
 
 ---
 
-*Last Updated: 2026-09-07*
+*Last Updated: 2026-09-08*
 
 [← Back to AIPass](../../../README.md)

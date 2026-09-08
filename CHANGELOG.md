@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased] — no stragglers: every v5 pytest_quality row to 100 fleet-wide before the canary trial (FPLAN-0508, DPLAN-0323 phase 7.5)
 
+### Fixed
+
+- **api: seven refusals exited 0 — `caller-usage`, `track`, `get-key`, `validate`, `get-secret`, `models` with nothing configured, and `host-api revoke-token <unknown id>` (FPLAN-0492, the fleet refusal sweep; the item stood since 08-13 and was re-measured six-for-six on 08-28).** `main()` clears cli's process-level failure flag before routing and returns `resolve_exit(handled)`: 1 unrecognised, 2 recognised-and-refused, 0 only when nothing printed an error. All 63 `error()` sites were read first for one that prints a failure on a still-successful path; there were none. `revoke-token` on an unknown id was the branch's one warning-channel refusal and names the id through `error()` now. Measured from the shell before and after; five mutations red; seven pins added to `test_host_attach.py` (1589 cases).
+
 ### Changed
 
 - **devpulse tests** — the branch's own v5 rows closed: eleven either/or assertions (`"usage" in out or cmd in out` and kin) now pin the one string the code prints, measured by running each command; six isinstance-only units pin values, three of them archived to `tests/.archive/` as subsumed by the neighbour that already pinned the exact value; two vacuous loops assert before iterating; five feedback-inbox tests and the wire's never-spawns test read what they print or count what they forbid. `assertion_shape`, `no_oracle`, `unentered_assert` 100; 569 passed from both rootdirs; five mutations red. `capture_never_read` (26 units reading `capsys` through a same-file helper) closed when seedgo taught the rule to follow the helper; the one real row left, `test_router_timer_wake_in` asking for `capsys` it never read, drops the parameter. devpulse reads 100 on every v5 rule.
