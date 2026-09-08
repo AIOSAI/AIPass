@@ -99,21 +99,26 @@ class TestFindRealCaller:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
-    def test_filepath_is_string_or_none(self) -> None:
-        """First element is either a resolved path string or None."""
-        filepath, _ = _find_real_caller()
-        assert filepath is None or isinstance(filepath, str)
+    def test_the_caller_it_finds_from_here_is_this_file(self) -> None:
+        """
+        Called from this file, it resolves to THIS file — no guard, no or-None.
 
-    def test_import_line_is_string_or_none(self) -> None:
-        """Second element is either a code-context string or None."""
-        _, import_line = _find_real_caller()
-        assert import_line is None or isinstance(import_line, str)
+        Three tests used to share this call and none of them could fail. Two
+        asserted `x is None or isinstance(x, str)`, which is true of None and
+        true of every string, so the guard returning None for everything
+        passed both. The third asserted the real thing behind
+        `if filepath is not None:` — a branch that a broken resolver never
+        enters, so the one test that knew the answer skipped itself exactly
+        when it mattered.
 
-    def test_caller_resolves_to_this_file(self) -> None:
-        """When invoked from here the resolved caller should be this test file."""
-        filepath, _ = _find_real_caller()
-        if filepath is not None:
-            assert Path(filepath).name == "test_handler_guard.py"
+        There is no uncertainty to guard here: this test IS a real file with a
+        real frame, so a None is a defect and is asserted as one.
+        """
+        filepath, import_line = _find_real_caller()
+
+        assert filepath is not None, "the guard could not resolve a caller from a real test file"
+        assert Path(filepath).name == "test_handler_guard.py"
+        assert isinstance(import_line, str), "a resolved frame must carry its code context"
 
 
 # =============================================
@@ -132,7 +137,21 @@ class TestGuardBranchAccess:
             "_find_real_caller",
             return_value=(fake_caller, "from aipass.api.apps.handlers import x"),
         ):
-            _guard_branch_access()  # no exception expected
+            # The oracle is the CONTRAST, not the silence: acceptance here is
+            # the absence of a raise, so a guard emptied to `pass` would have
+            # satisfied a bare call. A foreign caller through the same door on
+            # the same mock must still be refused, and that is what makes the
+            # pass-through mean something.
+            assert _guard_branch_access() is None
+
+        foreign = "/home/user/Projects/AIPass/src/aipass/baud/apps/modules/thing.py"
+        with patch.object(
+            _guard_mod,
+            "_find_real_caller",
+            return_value=(foreign, "from aipass.api.apps.handlers import x"),
+        ):
+            with pytest.raises(ImportError, match="ACCESS DENIED"):
+                _guard_branch_access()
 
     def test_blocks_non_api_branch_caller(self) -> None:
         """Caller outside /api/ triggers ImportError with ACCESS DENIED."""
@@ -153,4 +172,8 @@ class TestGuardBranchAccess:
             return_value=(None, None),
         ):
             with patch("inspect.stack", return_value=[]):
-                _guard_branch_access()  # no exception expected
+                # An unresolvable caller is ALLOWED, deliberately: refusing what
+                # cannot be identified would break every legitimate entry the
+                # frame walk cannot see. Asserted rather than left implicit, so
+                # the day that policy flips this test says so.
+                assert _guard_branch_access() is None

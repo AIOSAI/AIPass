@@ -201,6 +201,12 @@ class TestReadRoutesRunOffTheEventLoop:
         with patch(PATCH_SERVER_LOGGER):
             rows = {path: endpoint for path, _methods, endpoint in self._v1_routes()}
 
+        # The floor first: an empty LOOP_SAFE_GETS makes the loop body never
+        # run and this test pass while measuring nothing (seedgo
+        # unentered_assert, 2026-09-07). The exemption list emptying itself is
+        # exactly the change that must not go unnoticed.
+        assert LOOP_SAFE_GETS, "the loop-safe exemption list is empty — nothing was checked"
+
         for path in LOOP_SAFE_GETS:
             assert inspect.iscoroutinefunction(rows[path]), f"{path} is in LOOP_SAFE_GETS but no longer async"
 
@@ -858,7 +864,17 @@ class TestThePumpPoolIsBoundedOutLoud:
             session.hangup()
 
         # The slot is back: a fresh reservation succeeds where the cap is one.
+        #
+        # The oracle is the CONTRAST, and it has to be, because a successful
+        # reservation returns None — refusal is a raise. A bare call proved
+        # nothing (seedgo's no_oracle rule, 2026-09-07): a hangup that released
+        # NOTHING and a hangup that released TWICE both left that line silent.
+        # So the cap is exercised in both directions: one reservation fits, and
+        # the next does not.
         host_attach._reserve_session("baud-next")
+
+        with pytest.raises(host_attach.AttachUnavailable):
+            host_attach._reserve_session("baud-one-too-many")
 
     def test_a_failed_spawn_gives_the_thread_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No session will be built to own that reservation.

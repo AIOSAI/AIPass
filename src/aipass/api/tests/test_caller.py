@@ -70,7 +70,7 @@ class TestDetectCallerCategory:
         path = Path("/a/b/c/d/flow/e/f/g/handler.py")
         assert detect_caller_category(path) == "flow"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_exception_returns_unknown(self, mock_logger):
         """If an exception occurs, should return 'unknown' and log error."""
         bad_path = MagicMock(spec=Path)

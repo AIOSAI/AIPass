@@ -36,7 +36,7 @@ class TestBuildService:
         assert result is None
 
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_auth_not_available_returns_none(self, mock_auth: MagicMock, _mock_build: MagicMock) -> None:
         """When auth module reports unavailable, returns None."""
@@ -48,7 +48,7 @@ class TestBuildService:
         assert result is None
 
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_auth_fails_returns_none(self, mock_auth: MagicMock, _mock_build: MagicMock) -> None:
         """When authenticate returns None, returns None."""
@@ -60,9 +60,9 @@ class TestBuildService:
         result = build_service("drive", "v3")
         assert result is None
 
-    @patch(f"{_SF}.json_handler")
+    @patch(f"{_SF}.json_handler", autospec=True)
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_success_returns_service(
         self,
@@ -84,9 +84,9 @@ class TestBuildService:
         assert result is mock_service
         mock_build.assert_called_once_with("drive", "v3", credentials=mock_creds)
 
-    @patch(f"{_SF}.logger")
+    @patch(f"{_SF}.logger", autospec=True)
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_build_exception_returns_none(
         self,
@@ -126,7 +126,7 @@ class TestBuildThreadSafeService:
         assert result is None
 
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_load_credentials_fails_returns_none(self, mock_auth: MagicMock, _mock_build: MagicMock) -> None:
         """When load_credentials returns None, returns None."""
@@ -140,9 +140,9 @@ class TestBuildThreadSafeService:
         result = build_thread_safe_service("drive", "v3")
         assert result is None
 
-    @patch(f"{_SF}.logger")
+    @patch(f"{_SF}.logger", autospec=True)
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_expired_creds_refresh_fails_returns_none(
         self,
@@ -167,7 +167,7 @@ class TestBuildThreadSafeService:
         assert result is None
 
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_creds_not_valid_returns_none(self, mock_auth: MagicMock, _mock_build: MagicMock) -> None:
         """When creds are not expired but not valid either, returns None."""
@@ -186,7 +186,7 @@ class TestBuildThreadSafeService:
         assert result is None
 
     @patch(f"{_SF}.build")
-    @patch(f"{_SF}.auth")
+    @patch(f"{_SF}.auth", autospec=True)
     @patch(f"{_SF}.GOOGLE_BUILD_AVAILABLE", True)
     def test_success_returns_service(self, mock_auth: MagicMock, mock_build: MagicMock) -> None:
         """Valid creds produce a service object."""

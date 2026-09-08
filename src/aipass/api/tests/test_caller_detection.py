@@ -37,7 +37,7 @@ from aipass.api.apps.handlers.openrouter.caller import (
 class TestDetectFlowCaller:
     """Tests for caller._detect_flow_caller()."""
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_returns_flow_dict(self, _mock_logger: MagicMock) -> None:
         """Given a path with 'flow', returns dict with category='flow'."""
         frame_path = Path("/home/user/projects/aipass/src/aipass/flow/engine.py")
@@ -48,7 +48,7 @@ class TestDetectFlowCaller:
         assert result["caller_path"] == frame_path
         assert result["detection_method"] == "stack"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_json_folder_points_to_flow_json(self, _mock_logger: MagicMock) -> None:
         """json_folder should be <flow_root>/flow_json."""
         frame_path = Path("/home/user/projects/aipass/src/aipass/flow/sub/engine.py")
@@ -57,7 +57,7 @@ class TestDetectFlowCaller:
         expected_json = Path("/home/user/projects/aipass/src/aipass/flow") / "flow_json"
         assert result["json_folder"] == expected_json
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_exception_returns_fallback(self, _mock_logger: MagicMock) -> None:
         """If parts.index raises, should fall back to _create_fallback_info."""
         bad_path = MagicMock(spec=Path)
@@ -77,7 +77,7 @@ class TestDetectFlowCaller:
 class TestDetectPraxCaller:
     """Tests for caller._detect_prax_caller()."""
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_returns_prax_dict(self, _mock_logger: MagicMock) -> None:
         """Given a path with 'prax', returns dict with category='prax'."""
         frame_path = Path("/home/user/projects/aipass/src/aipass/prax/monitor.py")
@@ -88,7 +88,7 @@ class TestDetectPraxCaller:
         assert result["caller_path"] == frame_path
         assert result["detection_method"] == "stack"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_json_folder_points_to_prax_json(self, _mock_logger: MagicMock) -> None:
         """json_folder should be <prax_root>/prax_json."""
         frame_path = Path("/home/user/projects/aipass/src/aipass/prax/sub/monitor.py")
@@ -97,7 +97,7 @@ class TestDetectPraxCaller:
         expected_json = Path("/home/user/projects/aipass/src/aipass/prax") / "prax_json"
         assert result["json_folder"] == expected_json
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_exception_returns_fallback(self, _mock_logger: MagicMock) -> None:
         """If an exception occurs, should fall back."""
         bad_path = MagicMock(spec=Path)
@@ -117,7 +117,7 @@ class TestDetectPraxCaller:
 class TestCreateFallbackInfo:
     """Tests for caller._create_fallback_info()."""
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_returns_fallback_dict(self, _mock_logger: MagicMock) -> None:
         """Fallback info should have detection_method='fallback' and json_folder=None."""
         frame_path = Path("/some/random/script.py")
@@ -128,7 +128,7 @@ class TestCreateFallbackInfo:
         assert result["caller_path"] == frame_path
         assert result["json_folder"] is None
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_category_from_detect_caller_category(self, _mock_logger: MagicMock) -> None:
         """Fallback delegates category detection to detect_caller_category."""
         flow_path = Path("/a/flow/thing.py")
@@ -136,7 +136,7 @@ class TestCreateFallbackInfo:
 
         assert result["category"] == "flow"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_unknown_category_fallback(self, _mock_logger: MagicMock) -> None:
         """Path without flow/prax yields category='unknown'."""
         other_path = Path("/tmp/some_tool.py")
@@ -185,8 +185,8 @@ class TestDetectCallerFromStack:
 class TestGetCallerInfo:
     """Tests for caller.get_caller_info()."""
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler")
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler", autospec=True)
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     @patch("aipass.api.apps.handlers.openrouter.caller.inspect.stack")
     def test_detects_flow_frame(
         self,
@@ -207,8 +207,8 @@ class TestGetCallerInfo:
         assert result["category"] == "flow"
         assert result["caller_name"] == "engine"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler")
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler", autospec=True)
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     @patch("aipass.api.apps.handlers.openrouter.caller.inspect.stack")
     def test_detects_prax_frame(
         self,
@@ -229,8 +229,8 @@ class TestGetCallerInfo:
         assert result["category"] == "prax"
         assert result["caller_name"] == "monitor"
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler")
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.json_handler", autospec=True)
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     @patch("aipass.api.apps.handlers.openrouter.caller.inspect.stack")
     def test_returns_none_when_no_match(
         self,
@@ -249,7 +249,7 @@ class TestGetCallerInfo:
 
         assert result is None
 
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger")
+    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     @patch("aipass.api.apps.handlers.openrouter.caller.inspect.stack")
     def test_returns_none_on_exception(
         self,

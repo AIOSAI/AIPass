@@ -76,14 +76,16 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
+from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules import host_serve as host_serve_module
@@ -258,9 +260,24 @@ class TestValidateBind:
         assert "not available" in str(exc.value).lower()
 
     def test_loopback_accepted(self) -> None:
-        """127.0.0.1 is the Phase 1 target and must pass cleanly."""
+        """
+        127.0.0.1 is the Phase 1 target and must pass cleanly.
+
+        The call used to stand alone: an implicit "did not raise", which the
+        checker is right to call no oracle at all.
+
+        The gate returns None by design — acceptance is the ABSENCE of a
+        refusal — so there is no value to read back. The oracle is the
+        contrast: the same call under the same LOOPBACK_ONLY setting accepts
+        loopback and refuses the tailnet-shaped address, which is a claim
+        about the gate and not merely about this one call not raising. A gate
+        emptied to `pass` now fails the second half.
+        """
         with patch(PATCH_CONFIG_LOGGER):
-            host_config.validate_bind("127.0.0.1", 8787)
+            assert host_config.validate_bind("127.0.0.1", 8787) is None
+
+            with pytest.raises(host_config.BindRefused):
+                host_config.validate_bind(TAILNET_SHAPED, 8787)
 
     def test_tailnet_shaped_address_still_refused_when_gate_lifted_but_absent(self) -> None:
         """Lifting the gate does not lower the standard: the machine must hold it."""
@@ -655,6 +672,170 @@ class TestScopeEnforcement:
         assert response.status_code == 200
 
 
+@fastapi_required
+class TestTheDeclaredRoutesAnswerThroughTheRealApp:
+    """
+    Four routes that were declared and never reached by a test.
+
+    Found by seedgo's entry_point_diff on 2026-09-07, and it was right: the
+    settings handler sat at 97% while not one of its six routes had ever been
+    executed through the app. That is the gap this branch's own APLAN-0013 N1b
+    item names, and a handler that is well tested behind a route nobody calls
+    is exactly the shape a coverage number cannot show you.
+
+    These go through the REAL app — create_app, the real dependency, the real
+    auth — and assert the documented status. The handlers underneath are
+    mocked, deliberately: what is unpinned is the wiring, not the logic, and a
+    route test that also exercises the handler cannot say which of the two
+    broke.
+    """
+
+    @pytest.fixture
+    def routed(self, store: Path):
+        """The real app plus a read token and an operate token for it."""
+        from fastapi.testclient import TestClient
+
+        with patch(PATCH_SERVER_LOGGER):
+            _, read_raw = host_tokens.issue_token("phone", "read")
+            _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            yield client, read_raw, operate_raw
+
+    def test_agent_settings_reads_through_the_route(self, routed: Any) -> None:
+        """GET /v1/agent-settings answers 200 with the handler's document."""
+        api, read_raw, _ = routed
+        owned = {"model": "opus", "outputStyle": None, "statusLine": None}
+
+        with patch.object(host_server.host_reads, "resolve_branch_root"):
+            with patch.object(host_server.host_settings, "read_agent_settings", return_value=owned) as reader:
+                response = api.get(
+                    "/v1/agent-settings",
+                    params={"branch": "demo"},
+                    headers={"Authorization": f"Bearer {read_raw}"},
+                )
+
+        assert response.status_code == 200
+        assert response.json() == owned
+        reader.assert_called_once()
+
+    def test_agent_settings_refuses_a_patch_that_is_not_an_object(self, routed: Any) -> None:
+        """
+        POST /v1/agent-settings answers 400 when `patch` is not a JSON object.
+
+        The route's own guard, before any handler runs — so this is the one
+        piece of that endpoint that genuinely lives in the route and could not
+        be pinned anywhere else.
+        """
+        api, _, operate_raw = routed
+
+        response = api.post(
+            "/v1/agent-settings",
+            json={"branch": "demo", "patch": "not-an-object"},
+            headers={"Authorization": f"Bearer {operate_raw}"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "settings_refused"
+
+    def test_baud_settings_reads_through_the_route(self, routed: Any) -> None:
+        """GET /v1/baud-settings answers 200 with BAUD's whole document."""
+        api, read_raw, _ = routed
+        document = {"theme": "dark", "fontSize": 14}
+
+        with patch.object(host_server.host_reads, "repo_root"):
+            with patch.object(host_server.host_settings, "read_baud_settings", return_value=document) as reader:
+                response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 200
+        assert response.json() == document
+        reader.assert_called_once()
+
+    def test_baud_settings_answers_503_when_the_document_cannot_be_read(self, routed: Any) -> None:
+        """A SettingsUnavailable becomes 503, not a 500 traceback at the phone."""
+        api, read_raw, _ = routed
+        broken = host_settings.SettingsUnavailable("the settings file is not readable")
+
+        with patch.object(host_server.host_reads, "repo_root"):
+            with patch.object(host_server.host_settings, "read_baud_settings", side_effect=broken):
+                response = api.get("/v1/baud-settings", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "settings_unavailable"
+
+    def test_hooks_sound_reads_the_live_flag_through_the_route(self, routed: Any) -> None:
+        """GET /v1/hooks-sound answers 200 and reports the flag as a bool."""
+        api, read_raw, _ = routed
+
+        with patch.object(host_server.host_settings, "hooks_sound_get", return_value=True) as reader:
+            response = api.get("/v1/hooks-sound", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 200
+        assert response.json() == {"active": True}
+        reader.assert_called_once()
+
+    def test_hooks_sound_refuses_a_non_boolean_active(self, routed: Any) -> None:
+        """
+        POST /v1/hooks-sound answers 400 unless `active` is a real boolean.
+
+        A string "false" is the dangerous input here: truthy in most languages
+        the phone could be written in, and it must not read as "on".
+        """
+        api, _, operate_raw = routed
+
+        response = api.post(
+            "/v1/hooks-sound",
+            json={"active": "false"},
+            headers={"Authorization": f"Bearer {operate_raw}"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "settings_refused"
+
+    def test_projects_answers_the_census_through_the_route(self, routed: Any) -> None:
+        """GET /v1/projects answers 200 with @baud's project census."""
+        api, read_raw, _ = routed
+        census = {"projects": [{"name": "AIPass", "path": "/somewhere"}]}
+
+        with patch.object(host_server.host_fleet, "list_projects", return_value=census) as lister:
+            response = api.get("/v1/projects", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 200
+        assert response.json() == census
+        lister.assert_called_once()
+
+    def test_projects_answers_503_when_the_fleet_binary_is_unreachable(self, routed: Any) -> None:
+        """
+        A FleetUnavailable becomes 503, and this is the arm that matters.
+
+        The switcher menu going empty and the switcher menu failing are two
+        different sentences on the phone, and only one of them is honest when
+        the binary did not answer.
+        """
+        api, read_raw, _ = routed
+        broken = host_fleet.FleetUnavailable("the fleet binary did not answer")
+
+        with patch.object(host_server.host_fleet, "list_projects", side_effect=broken):
+            response = api.get("/v1/projects", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "fleet_unavailable"
+
+    def test_every_one_of_these_routes_is_behind_the_auth(self, routed: Any) -> None:
+        """
+        None of the four is public, checked in one place.
+
+        Parametrised into one unit rather than four: the claim is about the
+        SET, and a per-route test would let one of them quietly leave the set
+        without anything going red.
+        """
+        api, _, _ = routed
+        declared = ["/v1/agent-settings", "/v1/baud-settings", "/v1/hooks-sound", "/v1/projects"]
+
+        unguarded = [route for route in declared if api.get(route).status_code != 401]
+
+        assert unguarded == [], f"these routes answered without a token: {unguarded}"
+
+
 # =============================================
 # CLI — modules/host_api.py
 # =============================================
@@ -745,6 +926,40 @@ class TestTheSpellingOurOwnSelfMapAdvertises:
         served.assert_not_called()
 
 
+class TestRevokeTokenCommandRefuses:
+    """A revoke that revoked nothing is a refusal, not a note.
+
+    Until 2026-09-08 an unknown id printed a yellow `warning()` and the command
+    exited 0 (canary's fleet sweep, api's single row). An operator scripting
+    `revoke-token <id> && <next>` was told the device was off when it was not
+    — and the sibling refusal four lines above it, "Token id required", was
+    already using `error()`. Two refusals in one function on two channels.
+    """
+
+    def test_an_unknown_id_refuses_through_the_error_channel(self, store: Path, quiet_module: dict) -> None:
+        """error() is what carries the failure to the exit seam; warning() does not."""
+        handle_command("host-api", ["revoke-token", "no-such-id"])
+
+        quiet_module["error"].assert_called_once()
+        quiet_module["warning"].assert_not_called()
+        quiet_module["success"].assert_not_called()
+
+    def test_the_refusal_names_the_id_it_could_not_find(self, store: Path, quiet_module: dict) -> None:
+        """A refusal that does not name the token sends the reader to the store to guess."""
+        handle_command("host-api", ["revoke-token", "no-such-id"])
+
+        assert "no-such-id" in quiet_module["error"].call_args.args[0]
+
+    def test_a_real_revocation_still_succeeds_silently(self, store: Path, quiet_module: dict) -> None:
+        """The refusal channel must not fire on the path that actually revokes."""
+        record, _raw = host_tokens.issue_token("pixel-8", scope="read")
+
+        handle_command("host-api", ["revoke-token", record["id"]])
+
+        quiet_module["error"].assert_not_called()
+        quiet_module["success"].assert_called_once()
+
+
 class TestIssueTokenCommand:
     """The CLI's issuance discipline."""
 
@@ -767,14 +982,22 @@ class TestIssueTokenCommand:
         assert receipt.is_file(), "no receipt was written and nothing said so"
         assert host_tokens.verify_token(receipt.read_text(encoding="utf-8")) is not None
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
     def test_the_default_receipt_is_still_0600(self, store: Path, quiet_module: dict) -> None:
-        """The mode is the point of the file, not a property of --out."""
+        """
+        The mode is the point of the file, not a property of --out.
+
+        The platform check was an `if` INSIDE the body until 2026-09-07, so on
+        Windows the test ran, asserted nothing and reported green — a pass that
+        means "not measured" is worse than a skip that says so. As a marker the
+        two assertions below always run whenever this test runs at all.
+        """
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         receipt = store / "host_api" / "pixel-8.token"
-        if sys.platform != "win32":
-            assert stat.S_IMODE(os.stat(receipt).st_mode) == 0o600
-            assert stat.S_IMODE(os.stat(receipt.parent).st_mode) == 0o700
+
+        assert stat.S_IMODE(os.stat(receipt).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(receipt.parent).st_mode) == 0o700
 
     def test_the_raw_value_is_still_never_printed(self, store: Path, quiet_module: dict) -> None:
         """S49, checked against the console rather than assumed from the shape.
@@ -1297,15 +1520,36 @@ class TestFlagParsing:
 class TestIntrospection:
     """The module's self-map stays honest about the phase gate."""
 
-    def test_introspection_runs_without_error(self, store: Path) -> None:
-        """Bare `drone @api host-api` must never raise."""
-        with patch(PATCH_MOD_CONSOLE), patch(PATCH_MOD_HEADER), patch(PATCH_CONFIG_LOGGER):
+    def test_introspection_names_the_serve_verb(self, store: Path) -> None:
+        """
+        Bare `drone @api host-api` prints a self-map that names its verbs.
+
+        This was a bare call with no assertion. A self-map is a map, so what
+        is worth pinning is that it still names something it routes — an
+        introspection that had lost its body ran perfectly well.
+        """
+        with patch(PATCH_MOD_CONSOLE) as mock_console, patch(PATCH_MOD_HEADER), patch(PATCH_CONFIG_LOGGER):
             host_api_module.print_introspection()
 
-    def test_help_runs_without_error(self) -> None:
-        """Help output is Rich markup and must render."""
-        with patch(PATCH_MOD_CONSOLE):
+        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        assert "serve" in printed
+
+    def test_help_names_every_subcommand_it_routes(self) -> None:
+        """
+        Help output is Rich markup and must name the four verbs.
+
+        Also a bare call before 2026-09-07. SUBCOMMANDS is the set host_serve
+        actually claims, so the help is checked against it rather than against
+        a list written twice — a verb added to the router and forgotten in the
+        help is exactly the drift this catches.
+        """
+        with patch(PATCH_MOD_CONSOLE) as mock_console:
             host_api_module.print_help()
+
+        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        missing = [verb for verb in host_serve_module.SUBCOMMANDS if verb not in printed]
+
+        assert missing == [], f"help does not name these routed verbs: {missing}"
 
     def test_config_command_reports_refusal_without_raising(self, store: Path, quiet_module: dict) -> None:
         """`host-api config` on a bad address warns rather than exploding."""
@@ -1333,11 +1577,3 @@ class TestCrossBranchApi:
             host_api_module.serve(host="127.0.0.1", port=9000)
 
         mock_serve.assert_called_once_with(host="127.0.0.1", port=9000)
-
-
-class TestSeedgoCoverage:
-    """Keeps the unused-import checker honest about MagicMock usage."""
-
-    def test_magicmock_is_available(self) -> None:
-        """Sanity anchor for the shared fixture style."""
-        assert isinstance(MagicMock(), MagicMock)

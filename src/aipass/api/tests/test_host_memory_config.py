@@ -926,6 +926,12 @@ class TestARefusalIsOneShapeWhereverItHappens:
             ("/v1/memory-config/push", {}),
         ]
 
+        # The floor: this list emptying would make every assertion below
+        # unreachable and the test green (seedgo unentered_assert, 2026-09-07).
+        # The whole point is that it covers EVERY write verb, so the count is
+        # what has to be defended, not just each row.
+        assert len(calls) == 3, "a write verb was added or removed without updating this guard"
+
         for path, payload in calls:
             with patch.object(host_memory_config.drone, "route_command", return_value=_result(REFUSAL_JSON)):
                 response = client.post(path, json=payload, headers=operate_auth)

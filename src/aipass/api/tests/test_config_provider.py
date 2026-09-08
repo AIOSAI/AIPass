@@ -32,7 +32,7 @@ from aipass.api.apps.handlers.config import provider as config_provider
 class TestMergeConfigs:
     """Tests for config.provider.merge_configs()."""
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_simple_merge_adds_new_key(self, mock_jh):
         """New key in updates should appear in base."""
         base = {"a": 1}
@@ -43,7 +43,7 @@ class TestMergeConfigs:
         assert result["a"] == 1
         assert result["b"] == 2
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_simple_merge_overwrites_existing_key(self, mock_jh):
         """Existing key should be overwritten by updates."""
         base = {"a": 1}
@@ -53,7 +53,7 @@ class TestMergeConfigs:
 
         assert result["a"] == 99
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_nested_dict_merges_recursively(self, mock_jh):
         """Nested dicts should merge recursively, preserving untouched keys."""
         base = {"a": 1, "b": {"c": 2, "d": 3}}
@@ -66,7 +66,7 @@ class TestMergeConfigs:
         assert result["b"]["d"] == 3
         assert result["e"] == 4
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_modifies_base_in_place(self, mock_jh):
         """merge_configs should modify base dict in-place."""
         base = {"a": 1}
@@ -77,7 +77,7 @@ class TestMergeConfigs:
         assert result is base
         assert base["b"] == 2
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_returns_same_object_as_base(self, mock_jh):
         """Return value should be the same object as the input base."""
         base = {"x": "original"}
@@ -87,7 +87,7 @@ class TestMergeConfigs:
 
         assert result is base
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_non_dict_value_overwrites_dict(self, mock_jh):
         """Non-dict update value should overwrite existing dict value."""
         base = {"a": {"nested": True}}
@@ -97,7 +97,7 @@ class TestMergeConfigs:
 
         assert result["a"] == "flat_string"
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_dict_value_overwrites_non_dict(self, mock_jh):
         """Dict update value should overwrite existing non-dict value."""
         base = {"a": "flat_string"}
@@ -107,7 +107,7 @@ class TestMergeConfigs:
 
         assert result["a"] == {"nested": True}
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_empty_updates_leaves_base_unchanged(self, mock_jh):
         """Empty updates dict should not change base."""
         base = {"a": 1, "b": 2}
@@ -118,7 +118,7 @@ class TestMergeConfigs:
 
         assert base == original
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_deeply_nested_merge(self, mock_jh):
         """Three levels of nesting should all merge correctly."""
         base = {"level1": {"level2": {"level3": "old", "keep": "yes"}}}
@@ -129,7 +129,7 @@ class TestMergeConfigs:
         assert result["level1"]["level2"]["level3"] == "new"
         assert result["level1"]["level2"]["keep"] == "yes"
 
-    @patch("aipass.api.apps.handlers.config.provider.json_handler")
+    @patch("aipass.api.apps.handlers.config.provider.json_handler", autospec=True)
     def test_logs_operation_on_merge(self, mock_jh):
         """merge_configs should call json_handler.log_operation."""
         base = {"a": 1}
@@ -148,7 +148,7 @@ class TestMergeConfigs:
 class TestGetValidationRulesConfigProvider:
     """Tests for config.provider.get_validation_rules()."""
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_openrouter_rules(self, mock_logger):
         """openrouter should have prefix 'sk-or-v1-' and min_length 40."""
         rules = config_provider.get_validation_rules("openrouter")
@@ -157,7 +157,7 @@ class TestGetValidationRulesConfigProvider:
         assert rules["prefix"] == "sk-or-v1-"
         assert rules["min_length"] == 40
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_openai_rules(self, mock_logger):
         """openai should have prefix 'sk-' and min_length 40."""
         rules = config_provider.get_validation_rules("openai")
@@ -166,14 +166,14 @@ class TestGetValidationRulesConfigProvider:
         assert rules["prefix"] == "sk-"
         assert rules["min_length"] == 40
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_unknown_provider_returns_none(self, mock_logger):
         """Unknown provider should return None (no generic fallback)."""
         rules = config_provider.get_validation_rules("unknown_provider")
 
         assert rules is None
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_unknown_provider_logs_info(self, mock_logger):
         """Unknown provider should log an info message."""
         config_provider.get_validation_rules("nonexistent")
@@ -181,16 +181,27 @@ class TestGetValidationRulesConfigProvider:
         mock_logger.info.assert_called_once()
         assert "nonexistent" in mock_logger.info.call_args[0][0]
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_known_provider_does_not_log(self, mock_logger):
         """Known provider should not trigger the info log."""
         config_provider.get_validation_rules("openrouter")
 
         mock_logger.info.assert_not_called()
 
-    @patch("aipass.api.apps.handlers.config.provider.logger")
-    def test_return_type_is_dict_for_known(self, mock_logger):
-        """Known providers should return a dict."""
-        for name in ["openrouter", "openai"]:
-            rules = config_provider.get_validation_rules(name)
-            assert isinstance(rules, dict), f"Expected dict for {name}"
+    @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
+    def test_known_providers_keep_prefixes_that_tell_them_apart(self, mock_logger):
+        """
+        The handler and the module must agree, value for value.
+
+        This asserted isinstance(dict) only, which is true of any answer at
+        all. What matters is that the two providers do NOT share a prefix:
+        this is the layer api_key.get_validation_rules reads through, so the
+        two collapsing here would silently let an OpenAI key validate as an
+        OpenRouter one. Measured 2026-09-07.
+        """
+        openrouter = config_provider.get_validation_rules("openrouter")
+        openai = config_provider.get_validation_rules("openai")
+
+        assert openrouter == {"prefix": "sk-or-v1-", "min_length": 40}
+        assert openai == {"prefix": "sk-", "min_length": 40}
+        assert openrouter != openai, "the two providers collapsed onto one rule"

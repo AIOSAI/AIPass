@@ -33,7 +33,7 @@ from aipass.api.apps.modules import openrouter_client
 class TestGetApiKey:
     """Tests for fetch_api_key() — key retrieval from secrets file (single source)."""
 
-    @patch("aipass.api.apps.handlers.auth.keys.json_handler")
+    @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
     def test_key_from_secrets_file(self, mock_jh, tmp_path):
         """Key found in ~/.secrets/aipass/.env is returned after validation."""
         secrets_dir = tmp_path / ".secrets" / "aipass"
@@ -51,7 +51,7 @@ class TestGetApiKey:
         assert result == "sk-or-v1-fake-test-key-do-not-use-aabbccdd0011"
         mock_jh.log_operation.assert_called_once()
 
-    @patch("aipass.api.apps.handlers.auth.keys.json_handler")
+    @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
     def test_no_key_found_returns_none(self, mock_jh, tmp_path):
         """Returns None when no secrets file exists."""
         with patch("aipass.api.apps.handlers.auth.keys.Path") as mock_path_cls:
@@ -60,7 +60,7 @@ class TestGetApiKey:
 
         assert result is None
 
-    @patch("aipass.api.apps.handlers.auth.keys.json_handler")
+    @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
     def test_invalid_key_format_returns_none(self, mock_jh, tmp_path):
         """Key in secrets with wrong prefix returns None."""
         secrets_dir = tmp_path / ".secrets" / "aipass"

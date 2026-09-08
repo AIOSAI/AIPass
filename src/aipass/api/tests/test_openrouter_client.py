@@ -36,7 +36,7 @@ _MOD = "aipass.api.apps.modules.openrouter_client"
 # =============================================
 
 
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_returns_false_for_unknown(mock_console, mock_header, mock_jh):
@@ -50,7 +50,7 @@ def test_handle_command_returns_false_for_unknown(mock_console, mock_header, moc
 
 
 @patch(f"{_MOD}.test_connection")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_test(mock_console, mock_header, mock_jh, mock_test):
@@ -64,7 +64,7 @@ def test_handle_command_routes_test(mock_console, mock_header, mock_jh, mock_tes
 
 
 @patch(f"{_MOD}.list_models")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_models(mock_console, mock_header, mock_jh, mock_list):
@@ -78,7 +78,7 @@ def test_handle_command_routes_models(mock_console, mock_header, mock_jh, mock_l
 
 
 @patch(f"{_MOD}.check_status")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_status(mock_console, mock_header, mock_jh, mock_status):
@@ -92,7 +92,7 @@ def test_handle_command_routes_status(mock_console, mock_header, mock_jh, mock_s
 
 
 @patch(f"{_MOD}.make_call")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_call(mock_console, mock_header, mock_jh, mock_call):
@@ -111,7 +111,7 @@ def test_handle_command_routes_call(mock_console, mock_header, mock_jh, mock_cal
 
 
 @patch(f"{_MOD}.print_help")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_help_gate(mock_console, mock_header, mock_jh, mock_help):
@@ -126,7 +126,7 @@ def test_handle_command_help_gate(mock_console, mock_header, mock_jh, mock_help)
 
 
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_call_no_args_executes(mock_console, mock_header, mock_jh, mock_error):
@@ -146,7 +146,7 @@ def test_handle_command_call_no_args_executes(mock_console, mock_header, mock_jh
 
 
 @patch(f"{_MOD}.test_connection")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_logs_operation(mock_console, mock_header, mock_jh, mock_test):
@@ -165,8 +165,8 @@ def test_handle_command_logs_operation(mock_console, mock_header, mock_jh, mock_
 
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_test_connection_success(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
@@ -195,7 +195,7 @@ def test_test_connection_success(mock_console, mock_header, mock_keys, mock_mode
 
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error, mock_success):
@@ -219,8 +219,8 @@ def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error
 
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_models, mock_error, mock_success):
@@ -249,8 +249,8 @@ def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_
 
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, mock_success, mock_error):
@@ -284,7 +284,7 @@ def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, 
 
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error, mock_success):
@@ -306,8 +306,8 @@ def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error, mo
 
 
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_limits_to_10(mock_console, mock_header, mock_keys, mock_models, mock_success):
@@ -341,8 +341,8 @@ def test_list_models_limits_to_10(mock_console, mock_header, mock_keys, mock_mod
 
 
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_all_flag_shows_everything(mock_console, mock_header, mock_keys, mock_models, mock_success):
@@ -375,8 +375,8 @@ def test_list_models_all_flag_shows_everything(mock_console, mock_header, mock_k
 # =============================================
 
 
-@patch(f"{_MOD}.client")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.client", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_check_status_with_key(mock_console, mock_header, mock_keys, mock_client):
@@ -398,8 +398,8 @@ def test_check_status_with_key(mock_console, mock_header, mock_keys, mock_client
     assert "2/5" in all_output
 
 
-@patch(f"{_MOD}.client")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.client", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_check_status_no_key(mock_console, mock_header, mock_keys, mock_client):
@@ -422,7 +422,7 @@ def test_check_status_no_key(mock_console, mock_header, mock_keys, mock_client):
 # =============================================
 
 
-@patch(f"{_MOD}.client")
+@patch(f"{_MOD}.client", autospec=True)
 def test_get_response_delegates_to_handler(mock_client):
     """get_response passes through to client.get_response and returns its result."""
     from aipass.api.apps.modules import openrouter_client
@@ -451,7 +451,7 @@ def test_get_response_delegates_to_handler(mock_client):
     assert result["model"] == "anthropic/claude-3.5-sonnet"
 
 
-@patch(f"{_MOD}.client")
+@patch(f"{_MOD}.client", autospec=True)
 def test_get_response_returns_none_on_failure(mock_client):
     """get_response returns None when client handler returns None."""
     from aipass.api.apps.modules import openrouter_client
@@ -469,8 +469,8 @@ def test_get_response_returns_none_on_failure(mock_client):
 
 
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_formats_million_context(mock_console, mock_header, mock_keys, mock_models, mock_success):
@@ -494,8 +494,8 @@ def test_list_models_formats_million_context(mock_console, mock_header, mock_key
 
 
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_formats_thousand_context(mock_console, mock_header, mock_keys, mock_models, mock_success):
@@ -519,8 +519,8 @@ def test_list_models_formats_thousand_context(mock_console, mock_header, mock_ke
 
 
 @patch(f"{_MOD}.success")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_formats_free_pricing(mock_console, mock_header, mock_keys, mock_models, mock_success):
@@ -562,7 +562,7 @@ def test_make_call_no_model_shows_error(mock_console, mock_header, mock_error):
 
 
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_call_no_args_shows_error(mock_console, mock_header, mock_jh, mock_error):
@@ -582,8 +582,8 @@ def test_handle_command_call_no_args_shows_error(mock_console, mock_header, mock
 
 
 @patch(f"{_MOD}.error")
-@patch(f"{_MOD}.models")
-@patch(f"{_MOD}.keys")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_list_models_fetch_failure(mock_console, mock_header, mock_keys, mock_models, mock_error):
@@ -604,8 +604,8 @@ def test_list_models_fetch_failure(mock_console, mock_header, mock_keys, mock_mo
 # =============================================
 
 
-@patch(f"{_MOD}.keys")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.keys", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
 def test_handle_command_propagates_exception(mock_console, mock_header, mock_jh, mock_keys):
@@ -651,7 +651,7 @@ def test_create_client_returns_none_for_none_key():
     assert create_client(None) is None  # type: ignore[arg-type]
 
 
-@patch(f"{_CLIENT_MOD}.json_handler")
+@patch(f"{_CLIENT_MOD}.json_handler", autospec=True)
 @patch(f"{_CLIENT_MOD}.OpenAI")
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_success(mock_openai_cls, mock_jh):
@@ -672,7 +672,7 @@ def test_create_client_success(mock_openai_cls, mock_jh):
     )
 
 
-@patch(f"{_CLIENT_MOD}.json_handler")
+@patch(f"{_CLIENT_MOD}.json_handler", autospec=True)
 @patch(f"{_CLIENT_MOD}.OpenAI")
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
@@ -727,7 +727,7 @@ class TestTrailingHelpDoesNotExecute:
         with (
             patch(f"{_MOD}.print_help") as mock_help,
             patch(f"{_MOD}.make_call") as mock_call,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             assert handle_command("call", ["how do I get help", "--model", "x"]) is True
 

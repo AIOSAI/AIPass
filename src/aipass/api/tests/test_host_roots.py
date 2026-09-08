@@ -106,6 +106,7 @@ Tests — routes:
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -255,6 +256,11 @@ class TestTheRootKinds:
             host_reads.resolve_root("elsewhere", "demo")
 
         said = str(exc.value)
+
+        # ROOT_KINDS emptying would make this loop vacuous and the test green
+        # while the refusal named nothing at all.
+        assert host_reads.ROOT_KINDS, "the vocabulary is empty — the refusal was checked against nothing"
+
         for kind in host_reads.ROOT_KINDS:
             assert kind in said
 
@@ -428,6 +434,10 @@ class TestTheFenceCoversEveryRoot:
         with pytest.raises(host_reads.ReadRefused):
             host_reads.read_file("VERA-STUDIO", "/etc/passwd", root=host_reads.ROOT_PROJECT)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="constructing a symlink needs a privilege the CI account may not hold",
+    )
     def test_symlink_out_of_home_refused(self, world: dict) -> None:
         """The post-resolution check — the only gate that sees a symlink out.
 
@@ -437,10 +447,12 @@ class TestTheFenceCoversEveryRoot:
         one turns the whole class red (mutation-checked 2026-08-18).
         """
         link = world["home"] / "escape.txt"
-        try:
-            link.symlink_to(world["root"] / "secret.txt")
-        except (OSError, NotImplementedError):
-            pytest.skip("this platform cannot construct a symlink here")
+        # No try/except around the symlink: a machine that CAN make one and
+        # then fails to must go red rather than skip. Windows is decided by the
+        # marker above, which reads sys.platform — the machine — instead of
+        # letting an OSError from the subject's own fixture turn the gate that
+        # carries this class into a silent green (seedgo self_skip, 2026-09-07).
+        link.symlink_to(world["root"] / "secret.txt")
 
         with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.read_file("", "escape.txt", root=host_reads.ROOT_HOME)
@@ -562,6 +574,11 @@ class TestTheFloorTravels:
         path that exists on disk. This is the whole feature in one assertion."""
         answer = host_reads.list_dir(root=host_reads.ROOT_HOME)
 
+        # A listing that came back EMPTY would satisfy the loop below without
+        # composing a single path — the whole feature unmeasured, reported
+        # green (seedgo unentered_assert, 2026-09-07).
+        assert answer["entries"], "the listing was empty, so no floor+path join was ever performed"
+
         for entry in answer["entries"]:
             assert (Path(answer["floor"]) / entry["path"]).exists()
 
@@ -632,7 +649,13 @@ class TestTheRoster:
     def test_every_published_row_resolves(self, world: dict) -> None:
         """The roster cannot advertise a floor the fence would refuse: a row
         the picker draws and the browse then denies is worse than no row."""
-        for row in host_reads.list_roots()["roots"]:
+        published = host_reads.list_roots()["roots"]
+
+        # A roster that published NOTHING would pass this loop trivially, and a
+        # picker with no rows is a defect rather than a vacuous success.
+        assert published, "the roster advertised no roots at all"
+
+        for row in published:
             assert host_reads.resolve_root(row["kind"], row["name"]).is_dir()
 
 

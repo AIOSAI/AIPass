@@ -494,7 +494,12 @@ class TestThePumpMovesRealBytes:
         while not data and time.monotonic() < deadline:
             data = cat_session.read()
 
-        assert isinstance(data, bytes)
+        # isinstance alone was true of b"" as well, so a pump that timed out and
+        # returned nothing passed this (seedgo assertion_shape, 2026-09-07). The
+        # loop above already waits for data, so an empty read here is a real
+        # failure and is asserted as one.
+        assert data, "the pump returned nothing within five seconds"
+        assert isinstance(data, bytes), f"the pump decoded to text: {type(data).__name__}"
 
     def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any) -> None:
         """

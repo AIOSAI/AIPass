@@ -38,10 +38,10 @@ _MOD = "aipass.api.apps.modules.google_client"
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -55,10 +55,10 @@ def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -74,10 +74,10 @@ def test_handle_command_returns_false_non_google_provider(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -99,10 +99,10 @@ def test_handle_command_routes_validate_google(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -124,10 +124,10 @@ def test_handle_command_routes_reauth_google(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -144,10 +144,10 @@ def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _fact
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -169,10 +169,10 @@ def test_handle_command_google_introspection(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -193,10 +193,10 @@ def test_handle_command_unknown_command_returns_false(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -221,10 +221,10 @@ def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mo
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -244,10 +244,10 @@ def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mo
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -267,10 +267,10 @@ def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry,
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -286,10 +286,10 @@ def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, 
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -306,10 +306,10 @@ def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -337,10 +337,10 @@ def test_get_google_service_with_custom_scopes(
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -358,10 +358,10 @@ def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory,
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -378,10 +378,10 @@ def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -405,10 +405,10 @@ def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _f
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -426,10 +426,10 @@ def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _f
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -451,10 +451,10 @@ def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _f
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -472,10 +472,10 @@ def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -497,24 +497,34 @@ def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
 def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
-    """api_call_with_retry() delegates to google_retry.api_call_with_retry."""
+    """
+    api_call_with_retry() delegates to google_retry.api_call_with_retry.
+
+    The keyword is max_retries, and this test said `retries` until 2026-09-07.
+    It passed for years because the module patch was an unspecced MagicMock
+    that accepts any signature: the wrapper is *args/**kwargs, so nothing
+    between the test and the real function ever checked the name. Under
+    autospec it raises TypeError, which is the drift seedgo's mock_drift rule
+    exists to surface — the test was documenting a parameter production does
+    not have, and anyone who copied it would have written a TypeError.
+    """
     from aipass.api.apps.modules import google_client
 
     mock_callable = MagicMock()
     mock_retry.api_call_with_retry.return_value = "result"
 
-    result = google_client.api_call_with_retry(mock_callable, retries=3)
+    result = google_client.api_call_with_retry(mock_callable, max_retries=3)
 
-    mock_retry.api_call_with_retry.assert_called_once_with(mock_callable, retries=3)
+    mock_retry.api_call_with_retry.assert_called_once_with(mock_callable, max_retries=3)
     assert result == "result"
 
 
@@ -524,10 +534,10 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -551,10 +561,10 @@ def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _fa
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -572,10 +582,10 @@ def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _r
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -594,10 +604,10 @@ def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _ret
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -618,10 +628,10 @@ def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retr
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -647,10 +657,10 @@ def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _re
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -668,10 +678,10 @@ def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _ret
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -692,10 +702,10 @@ def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _fa
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -721,10 +731,10 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
 
 
 @patch(f"{_MOD}.console")
-@patch(f"{_MOD}.google_auth")
-@patch(f"{_MOD}.google_factory")
-@patch(f"{_MOD}.google_retry")
-@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.google_auth", autospec=True)
+@patch(f"{_MOD}.google_factory", autospec=True)
+@patch(f"{_MOD}.google_retry", autospec=True)
+@patch(f"{_MOD}.json_handler", autospec=True)
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
@@ -747,7 +757,7 @@ def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _r
 _AUTH = "aipass.api.apps.handlers.google.auth"
 
 
-@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
 @patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
@@ -769,7 +779,7 @@ def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
     mock_json.log_operation.assert_called_once_with("credentials_loaded", {"source": str(mock_creds_path)})
 
 
-@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
 @patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
@@ -812,8 +822,8 @@ def test_load_credentials_no_file(mock_creds_path):
     assert result is None
 
 
-@patch(f"{_AUTH}.logger")
-@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.logger", autospec=True)
+@patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
 @patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
@@ -902,7 +912,7 @@ def test_refresh_credentials_no_refresh_token():
     assert result is False
 
 
-@patch(f"{_AUTH}.logger")
+@patch(f"{_AUTH}.logger", autospec=True)
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.Request")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
@@ -1000,7 +1010,7 @@ def test_run_oauth_flow_no_client_secret(mock_secret_path):
     assert result is None
 
 
-@patch(f"{_AUTH}.logger")
+@patch(f"{_AUTH}.logger", autospec=True)
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
 @patch(f"{_AUTH}.CLIENT_SECRET_PATH")

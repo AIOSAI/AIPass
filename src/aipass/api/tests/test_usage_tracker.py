@@ -57,7 +57,7 @@ def _base_patches():
 
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_returns_false_for_unknown(mock_jh, mock_header, mock_console):
     """Unknown commands must return False without logging."""
     from aipass.api.apps.modules import usage_tracker
@@ -71,7 +71,7 @@ def test_handle_command_returns_false_for_unknown(mock_jh, mock_header, mock_con
 @patch(f"{PATCH_ROOT}.track_usage")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_routes_track(mock_jh, mock_header, mock_console, mock_track):
     """'track' with args should call track_usage(args)."""
     from aipass.api.apps.modules import usage_tracker
@@ -85,7 +85,7 @@ def test_handle_command_routes_track(mock_jh, mock_header, mock_console, mock_tr
 @patch(f"{PATCH_ROOT}.show_stats")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_routes_stats_standalone(mock_jh, mock_header, mock_console, mock_show):
     """'stats' is standalone -- routes before introspection gate, no args needed."""
     from aipass.api.apps.modules import usage_tracker
@@ -99,7 +99,7 @@ def test_handle_command_routes_stats_standalone(mock_jh, mock_header, mock_conso
 @patch(f"{PATCH_ROOT}.show_session")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_routes_session_standalone(mock_jh, mock_header, mock_console, mock_show):
     """'session' is standalone -- routes before introspection gate, no args needed."""
     from aipass.api.apps.modules import usage_tracker
@@ -113,7 +113,7 @@ def test_handle_command_routes_session_standalone(mock_jh, mock_header, mock_con
 @patch(f"{PATCH_ROOT}.show_caller_usage")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_routes_caller_usage(mock_jh, mock_header, mock_console, mock_show):
     """'caller-usage' with args routes to show_caller_usage."""
     from aipass.api.apps.modules import usage_tracker
@@ -127,7 +127,7 @@ def test_handle_command_routes_caller_usage(mock_jh, mock_header, mock_console, 
 @patch(f"{PATCH_ROOT}.cleanup_data")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_routes_cleanup(mock_jh, mock_header, mock_console, mock_cleanup):
     """'cleanup' with args routes to cleanup_data."""
     from aipass.api.apps.modules import usage_tracker
@@ -141,7 +141,7 @@ def test_handle_command_routes_cleanup(mock_jh, mock_header, mock_console, mock_
 @patch(f"{PATCH_ROOT}.print_help")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_help_gate(mock_jh, mock_header, mock_console, mock_help):
     """--help flag triggers print_help and returns True."""
     from aipass.api.apps.modules import usage_tracker
@@ -157,7 +157,7 @@ def test_handle_command_help_gate(mock_jh, mock_header, mock_console, mock_help)
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_track_no_args_executes(mock_jh, mock_header, mock_console, mock_error):
     """'track' with empty args should execute (show error), not show introspection."""
     from aipass.api.apps.modules import usage_tracker
@@ -171,7 +171,7 @@ def test_handle_command_track_no_args_executes(mock_jh, mock_header, mock_consol
 
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 def test_handle_command_logs_operation(mock_jh, mock_header, mock_console):
     """handle_command should call json_handler.log_operation for valid commands."""
     from aipass.api.apps.modules import usage_tracker
@@ -189,7 +189,7 @@ def test_handle_command_logs_operation(mock_jh, mock_header, mock_console):
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_stats_with_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_stats prints stats when aggregation returns data."""
     from aipass.api.apps.modules import usage_tracker
@@ -216,7 +216,7 @@ def test_show_stats_with_data(mock_agg, mock_header, mock_console, mock_warning)
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_stats_no_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_stats shows warning when no data available."""
     from aipass.api.apps.modules import usage_tracker
@@ -243,7 +243,7 @@ def test_show_stats_no_data(mock_agg, mock_header, mock_console, mock_warning):
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_session_with_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_session prints session data when available."""
     from aipass.api.apps.modules import usage_tracker
@@ -267,7 +267,7 @@ def test_show_session_with_data(mock_agg, mock_header, mock_console, mock_warnin
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_session_no_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_session shows warning when no session data."""
     from aipass.api.apps.modules import usage_tracker
@@ -294,7 +294,7 @@ def test_show_session_no_data(mock_agg, mock_header, mock_console, mock_warning)
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_caller_usage_with_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_caller_usage prints caller data when available."""
     from aipass.api.apps.modules import usage_tracker
@@ -319,7 +319,7 @@ def test_show_caller_usage_with_data(mock_agg, mock_header, mock_console, mock_w
 @patch(f"{PATCH_ROOT}.warning")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_caller_usage_no_data(mock_agg, mock_header, mock_console, mock_warning):
     """show_caller_usage shows warning when no data found."""
     from aipass.api.apps.modules import usage_tracker
@@ -341,7 +341,7 @@ def test_show_caller_usage_no_data(mock_agg, mock_header, mock_console, mock_war
 @patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.aggregation")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
 def test_show_caller_usage_no_args(mock_agg, mock_header, mock_console, mock_error):
     """show_caller_usage calls error() when called with empty args."""
     from aipass.api.apps.modules import usage_tracker
@@ -362,7 +362,7 @@ def test_show_caller_usage_no_args(mock_agg, mock_header, mock_console, mock_err
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup")
+@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 def test_cleanup_success(mock_cleanup_handler, mock_header, mock_console, mock_success, mock_error, mock_path_cls):
     """cleanup_data calls success() with count when handler returns > 0."""
     from aipass.api.apps.modules import usage_tracker
@@ -385,7 +385,7 @@ def test_cleanup_success(mock_cleanup_handler, mock_header, mock_console, mock_s
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup")
+@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 def test_cleanup_nothing_to_clean(
     mock_cleanup_handler, mock_header, mock_console, mock_success, mock_warning, mock_path_cls
 ):
@@ -409,7 +409,7 @@ def test_cleanup_nothing_to_clean(
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup")
+@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 def test_cleanup_default_30_days(
     mock_cleanup_handler, mock_header, mock_console, mock_success, mock_error, mock_path_cls
 ):
@@ -435,7 +435,7 @@ def test_cleanup_default_30_days(
 @patch(f"{PATCH_ROOT}.success")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
-@patch(f"{PATCH_ROOT}.cleanup")
+@patch(f"{PATCH_ROOT}.cleanup", autospec=True)
 def test_cleanup_custom_days(mock_cleanup_handler, mock_header, mock_console, mock_success, mock_error, mock_path_cls):
     """cleanup_data parses custom days from args."""
     from aipass.api.apps.modules import usage_tracker
@@ -459,8 +459,8 @@ def test_cleanup_custom_days(mock_cleanup_handler, mock_header, mock_console, mo
 # =============================================
 
 
-@patch(f"{PATCH_ROOT}.aggregation")
-@patch(f"{PATCH_ROOT}.json_handler")
+@patch(f"{PATCH_ROOT}.aggregation", autospec=True)
+@patch(f"{PATCH_ROOT}.json_handler", autospec=True)
 @patch(f"{PATCH_ROOT}.header")
 @patch(f"{PATCH_ROOT}.console")
 def test_handle_command_propagates_exception(mock_console, mock_header, mock_jh, mock_agg):

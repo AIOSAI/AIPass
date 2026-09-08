@@ -5,7 +5,7 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (47/47) | **Tests:** 1470 test functions across 47 files; pytest expands to 1569 cases, 1569 pass | **Functions:** 243 public (219 tested)
+**Seedgo:** 100% (47/47) | **Tests:** 1483 test functions across 47 files; pytest expands to 1582 cases, 1582 pass | **Functions:** 243 public (223 tested)
 **Last Updated:** 2026-09-07
 
 *THE BOARD WAS RED FOR THIS BRANCH IN THREE PLACES AND ONE OF THEM ONLY

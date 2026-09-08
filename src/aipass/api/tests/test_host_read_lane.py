@@ -494,10 +494,18 @@ class TestReadFile:
         blob = fake_repo["branch"] / "blob.bin"
         blob.write_bytes(b"\xff\xfe\x00\x01")
 
-        with pytest.raises(host_reads.ReadRefused):
+        with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.read_file("demo", "blob.bin")
 
-        assert True
+        # `assert True` sat here until 2026-09-07 — an assertion that cannot
+        # fail, decorating a raises block that was already the real oracle.
+        # Replaced with the thing the raises block does NOT check: that the
+        # refusal says what was wrong, so a caller is not left guessing whether
+        # the path or the bytes were the problem.
+        said = str(exc.value)
+
+        assert "Not UTF-8 text" in said, f"the refusal does not say the file was not text: {said}"
+        assert "blob.bin" in said, f"the refusal does not name the file it refused: {said}"
 
     def test_matching_project_accepted(self, fake_repo: dict) -> None:
         """Naming the seated project explicitly is fine."""

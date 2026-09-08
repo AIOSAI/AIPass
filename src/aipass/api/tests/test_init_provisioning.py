@@ -101,13 +101,15 @@ def test_auto_creates_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     nested_dir = _json_dir_as_path(tmp_path)
     assert not nested_dir.exists()
 
-    try:
-        result = json_handler.ensure_json_exists("autodir", "config")
-        assert nested_dir.exists()
-        assert result is True
-        assert (nested_dir / "autodir_config.json").exists()
-    except (FileNotFoundError, OSError):
-        pytest.skip("Branch does not auto-create missing directories")
+    # No try/except: auto-creation is the CONTRACT this test exists to hold, so
+    # a handler that cannot build the chain must go red. Catching OSError and
+    # skipping meant the one failure worth knowing about reported itself as a
+    # green skip (seedgo self_skip, 2026-09-07).
+    result = json_handler.ensure_json_exists("autodir", "config")
+
+    assert nested_dir.exists(), "the handler did not build the missing parent directories"
+    assert result is True
+    assert (nested_dir / "autodir_config.json").exists()
 
 
 def test_no_overwrite_on_second_call(tmp_path: Path) -> None:

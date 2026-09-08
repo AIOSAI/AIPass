@@ -36,6 +36,7 @@ per-request writes that window stops being theoretical, so the write is atomic �
 a reader sees the old file or the new one, never half of either.
 """
 
+import importlib.util
 import json
 import os
 import sys
@@ -436,6 +437,17 @@ class TestOlderRecordsStillWork:
 # ==============================================
 
 
+# find_spec, not host_server.is_available(): the skip must read the MACHINE, not
+# the code under test. Asking the subject whether to run means a renamed or
+# broken is_available() turns these two into silent skips — seedgo's self_skip
+# rule, 2026-09-07, and it is the same shape that once made 75 tests evaporate.
+fastapi_installed = pytest.mark.skipif(
+    importlib.util.find_spec("fastapi") is None,
+    reason="the [host] extra is not installed",
+)
+
+
+@fastapi_installed
 class TestTheServerTouchesOnEveryAuthenticatedRequest:
     """Wiring: the field is worthless if nothing writes it."""
 
@@ -443,17 +455,14 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
         """Where 'last_used' actually comes from."""
         from aipass.api.apps.handlers.host import server as host_server
 
-        if not host_server.is_available():
-            pytest.skip("the [host] extra is not installed")
-
         from fastapi.testclient import TestClient
 
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
 
-        with patch("aipass.api.apps.handlers.host.server.logger"):
-            with patch("aipass.api.apps.handlers.host.server.json_handler"):
-                with patch("aipass.api.apps.handlers.host.face.json_handler"):
-                    with patch("aipass.api.apps.handlers.host.face.logger"):
+        with patch("aipass.api.apps.handlers.host.server.logger", autospec=True):
+            with patch("aipass.api.apps.handlers.host.server.json_handler", autospec=True):
+                with patch("aipass.api.apps.handlers.host.face.json_handler", autospec=True):
+                    with patch("aipass.api.apps.handlers.host.face.logger", autospec=True):
                         client = TestClient(host_server.create_app(), raise_server_exceptions=False)
                         client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
 
@@ -463,17 +472,14 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
         """A rejected token was not used — it was presented and refused."""
         from aipass.api.apps.handlers.host import server as host_server
 
-        if not host_server.is_available():
-            pytest.skip("the [host] extra is not installed")
-
         from fastapi.testclient import TestClient
 
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
 
-        with patch("aipass.api.apps.handlers.host.server.logger"):
-            with patch("aipass.api.apps.handlers.host.server.json_handler"):
-                with patch("aipass.api.apps.handlers.host.face.json_handler"):
-                    with patch("aipass.api.apps.handlers.host.face.logger"):
+        with patch("aipass.api.apps.handlers.host.server.logger", autospec=True):
+            with patch("aipass.api.apps.handlers.host.server.json_handler", autospec=True):
+                with patch("aipass.api.apps.handlers.host.face.json_handler", autospec=True):
+                    with patch("aipass.api.apps.handlers.host.face.logger", autospec=True):
                         client = TestClient(host_server.create_app(), raise_server_exceptions=False)
                         client.get("/v1/whoami", headers={"Authorization": "Bearer wrong"})
 
