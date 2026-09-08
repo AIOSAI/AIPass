@@ -8,6 +8,7 @@
 
 """Tests for devpulse.py — entry point CLI routing and module discovery."""
 
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 
@@ -67,6 +68,26 @@ class TestCLIRouting:
         assert result is False
         assert "Did you mean: watchdog?" in capsys.readouterr().err
 
+    def test_a_module_that_raises_is_reported_by_name_not_as_unknown(self, capsys):
+        """A module exception names the module and the exception, never "Unknown command".
+
+        Measured 2026-09-08: `compass query "opt-in"` raised
+        sqlite3.OperationalError inside the module; route_command logged it
+        and fell through to "Unknown command: compass / Did you mean: compass?"
+        — handled=False, the real message in a log nobody reads.
+        """
+
+        def _raise(command, args):
+            raise RuntimeError("no such column: in")
+
+        broken = SimpleNamespace(__name__="aipass.devpulse.apps.modules.compass", handle_command=_raise)
+        result = devpulse_module.route_command("compass", ["query", "opt-in"], [broken])
+        assert result is True
+        err = capsys.readouterr().err
+        assert "compass failed on 'compass': RuntimeError: no such column: in" in err
+        assert "Unknown command" not in err
+        assert "Did you mean" not in err
+
     @patch.object(devpulse_module, "print_help")
     def test_print_help_called_on_help_flag(self, mock_print_help):
         """--help invokes print_help."""
@@ -108,12 +129,20 @@ class TestModuleDiscovery:
 class TestErrorResilience:
     """Graceful handling of edge cases."""
 
-    def test_route_command_catches_module_errors(self):
-        """Module exceptions are caught, returns False."""
+    def test_route_command_catches_module_errors(self, capsys):
+        """Module exceptions are caught, reported by name, and count as handled.
+
+        Rewritten 2026-09-08: this pinned ``False`` - the fall-through that
+        rendered a module crash as "Unknown command". The crash is now the
+        module's failure (True, exit 2 through resolve_exit), named on stderr.
+        """
         bad_module = MagicMock(__name__="bad_module")
         bad_module.handle_command.side_effect = Exception("boom")
         result = devpulse_module.route_command("test", [], [bad_module])
-        assert result is False
+        assert result is True
+        err = capsys.readouterr().err
+        assert "bad_module failed on 'test': Exception: boom" in err
+        assert "Unknown command" not in err
 
     def test_empty_file_modules_dir(self, tmp_path):
         """discover_modules handles empty_file in modules directory."""

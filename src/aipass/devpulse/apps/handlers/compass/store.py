@@ -162,17 +162,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
 _FTS_WORD = re.compile(r"\w+", re.UNICODE)
 
 
-def _sanitize_fts_query(text: Optional[str]) -> Optional[str]:
+def _sanitize_fts_query(text: Optional[str], join: str = " OR ") -> Optional[str]:
     """Turn arbitrary text into a safe FTS5 MATCH expression, or None.
 
-    Returns an ``OR`` of the text's word tokens, each quoted as a string
-    literal so FTS5 syntax characters can never reach the parser. Returns None
-    when there are no usable tokens (caller should skip the search).
+    Returns the text's word tokens, each quoted as a string literal so FTS5
+    syntax characters can never reach the parser, joined by ``join``: ``" OR "``
+    (the default, recall and conflict advisories - any token matches) or
+    ``" "`` (FTS5's implicit AND - every token must match, the user-query
+    contract). Returns None when there are no usable tokens (caller should
+    skip or refuse the search).
     """
     tokens = _FTS_WORD.findall(text or "")
     if not tokens:
         return None
-    return " OR ".join(f'"{t}"' for t in tokens)
+    return join.join(f'"{t}"' for t in tokens)
 
 
 def _resolve_db_path(db_path: Optional[Path | str]) -> Path:
@@ -308,7 +311,10 @@ def query_decisions(
     lets callers render both pointer directions.
 
     Args:
-        query: FTS5 match query (keywords).
+        query: Free text. Its word tokens are quoted FTS5 literals joined by
+            implicit AND (see :func:`_sanitize_fts_query`), so every word must
+            match and hyphens, quotes, parentheses and the words AND/OR/NOT
+            are searched for, never parsed.
         rating: Optional exact rating filter (one of VALID_RATINGS).
         limit: Max rows to return (default 5).
         include_archived: When True, lift the ``status = 'active'`` filter so
@@ -321,7 +327,8 @@ def query_decisions(
         rating, all useful fields, and the computed ``superseded_by`` pointer.
 
     Raises:
-        ValueError: On empty query, bad rating filter, or non-positive limit.
+        ValueError: On empty query, a query with no word tokens, bad rating
+            filter, or non-positive limit.
     """
     if not query or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -330,6 +337,15 @@ def query_decisions(
     if limit <= 0:
         raise ValueError(f"limit must be a positive integer, got {limit!r}")
 
+    # The raw text used to reach MATCH untouched, so `compass query "opt-in"`
+    # died in FTS5's parser ("no such column: in") and the router reported it
+    # as an unknown command (2026-09-08). Same defusing as recall/find_conflicts
+    # but joined by FTS5's implicit AND, so "old choice" still means both words
+    # (the contract every caller of this function was written against).
+    match = _sanitize_fts_query(query, join=" ")
+    if match is None:
+        raise ValueError(f"query has no searchable words (letters, digits, underscore): {query!r}")
+
     select_cols = ", ".join(f"d.{c}" for c in _DECISION_COLUMNS)
     sql = f"""
         SELECT {select_cols}
@@ -337,7 +353,7 @@ def query_decisions(
         JOIN decisions d ON d.id = f.rowid
         WHERE decisions_fts MATCH ?
     """
-    params: list = [query.strip()]
+    params: list = [match]
     if not include_archived:
         sql += " AND d.status = 'active'"
     if rating is not None:

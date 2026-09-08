@@ -142,7 +142,18 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
             if module.handle_command(command, args):
                 return True
         except Exception as e:
-            logger.error(f"[DEVPULSE] Module {module.__name__} error: {e}")
+            # A module that RAISED is a defect in that module, not an unknown
+            # command. Until 2026-09-08 this logged and fell through to
+            # "Unknown command: compass / Did you mean: compass?" — the
+            # honest message (compass query "opt-in" died in FTS5's parser)
+            # went to the log nobody was reading.
+            name = module.__name__.split(".")[-1]
+            logger.error(f"[DEVPULSE] Module {name} error on '{command}': {e}")
+            error(
+                f"{name} failed on '{command}': {type(e).__name__}: {e}",
+                suggestion=f"A defect in the {name} module, not an unknown command. Run: drone @devpulse {name} --help",
+            )
+            return True
     known = sorted(module.__name__.split(".")[-1] for module in modules)
     error(f"Unknown command: {command}")
     close = difflib.get_close_matches(command.lstrip("-"), known, n=1)
