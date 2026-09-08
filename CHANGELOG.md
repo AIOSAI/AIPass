@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased] — after the clampdown (opened 2026-09-07, retitled at the next merge)
+## [2026-09-07] — the blanket-ruling day: eight owner waves on the contested MERGE rows, the watchdog dead-monitor backstop, the fleet refusal sweep (FPLAN-0492 / FPLAN-0499, merged as PR #758, v2.8.3)
 
 ### Fixed
 - **aipass: six refusals exited 0 — `feedback` with drone missing or hooks timing out (the rc from @hooks was computed and discarded), `handoff --cli <bad>`, and `profile clear` on a piped EOF or a wrong confirmation, which reported success while clearing nothing (FPLAN-0492 wave 6 / FPLAN-0506, canary's sweep rows).** All exit 1 through `raise SystemExit`, aipass's own idiom (it never consults cli's `resolve_exit`); the three green tests that asserted `result is True` were rewritten in place, `handoff.py:152` had no test at all and gained one in the existing platform file, and counterfactual pins keep the success paths at 0. A seventh row (`feedback` unknown option, `~97`) exits 0 still and is aipass's next wave.

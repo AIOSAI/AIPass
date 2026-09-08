@@ -288,7 +288,6 @@ commons/
 │   │   ├── dashboard/             # Dashboard file writer
 │   │   └── module_root.py         # Guarded __file__ resolution (root helper, no domain)
 │   ├── integrations/              # (README only — no code yet)
-│   ├── .archive/json_templates/   # Dead since the json sweep — archived 2026-09-07, see Status
 │   ├── plugins/                   # (README + __init__ only — no plugins yet)
 │   └── logs/                      # Entry-point log output (currently empty)
 ├── tools/                         # Utilities (2 .py + README)
