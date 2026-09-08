@@ -124,22 +124,47 @@ class TestRefresh:
             mock_parse.assert_not_called()
 
     def test_handles_missing_registry(self, tmp_path):
-        """Missing registry file does not crash."""
+        """No registry means refresh returns early — quietly, and without scanning.
+
+        Absent is not broken: no lock file is parsed, the cache the monitor is
+        already attributing events with is left alone, and nothing is logged,
+        because a repo root with no registry is a normal state and not a
+        failure to report.
+        """
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
             setattr(mod, "_pid_cache_last_refresh", 0.0)
+            mod._pid_cache.clear()
+            mod._pid_cache["FLOW"] = 4242
 
-        mod.refresh(repo_root=tmp_path)
+        with patch.object(mod, "parse_lock_pid") as mock_parse, patch.object(mod, "logger") as log:
+            assert mod.refresh(repo_root=tmp_path) is None
+
+        mock_parse.assert_not_called()
+        log.info.assert_not_called()
+        assert mod._pid_cache == {"FLOW": 4242}
 
     def test_handles_exception_in_refresh(self, tmp_path):
-        """Exception during refresh is caught and logged."""
+        """A corrupt registry is caught, reported, and costs no cached PID.
+
+        The scan is abandoned mid-flight, so the guarantee that matters is that
+        the previously cached mapping survives: a half-read registry must not
+        leave the monitor attributing events to nobody.
+        """
         mod = _import_pid_cache()
         with mod._pid_cache_lock:
             setattr(mod, "_pid_cache_last_refresh", 0.0)
+            mod._pid_cache.clear()
+            mod._pid_cache["FLOW"] = 4242
 
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text("{corrupt", encoding="utf-8")
-        mod.refresh(repo_root=tmp_path)
+
+        with patch.object(mod, "logger") as log:
+            assert mod.refresh(repo_root=tmp_path) is None
+
+        assert mod._pid_cache == {"FLOW": 4242}
+        assert log.info.call_args.args[0] == "[pid_cache] Refresh failed: %s"
 
 
 class TestGetPidForBranch:

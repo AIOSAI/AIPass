@@ -22,7 +22,7 @@ Covers:
 
 import json
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -507,11 +507,15 @@ class TestEmitWatcherEvent:
     """Test watcher event emission."""
 
     def test_emit_returns_early_when_no_queue(self):
-        """Does nothing when event queue is None."""
+        """No queue means no event is ever built — the early return is visible, not silent."""
         mod = _import_monitor()
         setattr(mod, "_event_queue", None)
-        # Should not raise
-        mod._emit_watcher_event("error", "test error")
+
+        assert mod._emit_watcher_event("error", "test error") is None
+
+        # The consequence of the early return: the event was never constructed,
+        # so nothing was handed to a queue that does not exist.
+        mod.MonitoringEvent.assert_not_called()
 
     def test_emit_error_level_has_priority_1(self):
         """Error level events get priority 1."""
@@ -709,7 +713,7 @@ class TestFileWatcherWorker:
         mock_emit.assert_called_once()
 
     def test_observer_none_returns_early(self):
-        """Worker returns early when observer startup fails."""
+        """A failed observer startup ends the worker before the watch loop is ever entered."""
         mod = _import_monitor()
         setattr(mod, "_event_queue", MagicMock())
 
@@ -726,9 +730,17 @@ class TestFileWatcherWorker:
                 },
             ),
             patch.object(mod, "_get_watch_directories", return_value=[("fakedir", True)]),
-            patch.object(mod, "_start_observer_with_fallback", return_value=None),
+            patch.object(mod, "_start_observer_with_fallback", return_value=None) as mock_start,
+            patch.object(mod, "_emit_watcher_event") as mock_emit,
+            patch("time.sleep") as mock_sleep,
         ):
-            mod._file_watcher_worker()
+            assert mod._file_watcher_worker() is None
+
+        # It got as far as trying to start, then stopped: no watch loop ran, and
+        # the "no directories" warning belongs to the other early return, not this one.
+        mock_start.assert_called_once()
+        mock_sleep.assert_not_called()
+        mock_emit.assert_not_called()
 
     def test_worker_runs_loop_and_stops_observer(self, tmp_path):
         """Worker runs sleep loop and stops observer on stop_event."""
@@ -877,17 +889,27 @@ class TestLogWatcherWorker:
         mock_lw.start_log_watcher.assert_not_called()
 
     def test_returns_early_on_watcher_failure(self):
-        """Worker returns when log watcher startup fails."""
+        """A refused startup returns before the try/finally, so nothing is torn down."""
         mod = _import_monitor()
-        setattr(mod, "_event_queue", MagicMock())
+        queue = MagicMock()
+        setattr(mod, "_event_queue", queue)
 
-        with patch.object(mod, "_start_log_watcher_with_fallback", return_value=False):
+        with patch.object(mod, "_start_log_watcher_with_fallback", return_value=False) as mock_start:
             mock_lw = MagicMock()
-            with patch.dict(
-                sys.modules,
-                {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
+            with (
+                patch.dict(
+                    sys.modules,
+                    {"aipass.prax.apps.handlers.monitoring.log_watcher": mock_lw},
+                ),
+                patch("time.sleep") as mock_sleep,
             ):
-                mod._log_watcher_worker()
+                assert mod._log_watcher_worker() is None
+
+        mock_start.assert_called_once_with(queue)
+        # The sibling test proves a successful start reaches stop_log_watcher via
+        # `finally`. Returning before the `try` means that teardown never runs.
+        mock_lw.stop_log_watcher.assert_not_called()
+        mock_sleep.assert_not_called()
 
     def test_worker_runs_loop_and_stops(self):
         """Worker runs sleep loop and calls stop_log_watcher on stop_event."""
@@ -956,7 +978,7 @@ class TestInteractiveLoop:
     """Test interactive command loop."""
 
     def test_non_tty_passive_mode(self):
-        """Non-TTY mode runs passive loop until stop event."""
+        """Without a TTY the loop says so, sleeps in half-seconds, and leaves quietly."""
         mod = _import_monitor()
         mod._stop_event.clear()
 
@@ -971,12 +993,18 @@ class TestInteractiveLoop:
 
         with (
             patch.object(sys.stdin, "isatty", return_value=False),
-            patch("time.sleep", side_effect=_sleep),
+            patch("time.sleep", side_effect=_sleep) as mock_sleep,
         ):
-            mod._interactive_loop()
+            assert mod._interactive_loop() is None
+
+        mod.logger.info.assert_called_once_with("[monitor] No TTY detected - passive mode (Ctrl+C to stop)")
+        assert call_count == 2, "the loop must re-check the stop event, not sleep once and leave"
+        assert mock_sleep.call_args_list == [call(0.5), call(0.5)]
+        # A clean stop-event exit is not an interruption: nothing is printed.
+        mod.console.print.assert_not_called()
 
     def test_non_tty_keyboard_interrupt(self):
-        """Non-TTY mode handles KeyboardInterrupt gracefully."""
+        """Ctrl+C in passive mode prints the stopping banner and returns without setting the stop event."""
         mod = _import_monitor()
         mod._stop_event.clear()
 
@@ -984,7 +1012,12 @@ class TestInteractiveLoop:
             patch.object(sys.stdin, "isatty", return_value=False),
             patch("time.sleep", side_effect=KeyboardInterrupt),
         ):
-            mod._interactive_loop()
+            assert mod._interactive_loop() is None
+
+        mod.console.print.assert_called_once_with("\n[yellow]Stopping monitoring...[/yellow]")
+        mod.logger.info.assert_any_call("[monitor] Stopped by user (passive mode)")
+        # _run_monitor's own finally owns the stop event; the loop only leaves.
+        assert mod._stop_event.is_set() is False
 
     @pytest.mark.parametrize("alias", ["quit", "exit", "q"])
     def test_tty_quit_command(self, alias):
@@ -1018,7 +1051,7 @@ class TestInteractiveLoop:
         mock_console.print.assert_called_once_with("[yellow]Stopping monitoring...[/yellow]")
 
     def test_tty_keyboard_interrupt(self):
-        """TTY mode handles KeyboardInterrupt gracefully."""
+        """Ctrl+C at the prompt breaks the loop after one read and says so on the console."""
         mod = _import_monitor()
         mod._stop_event.clear()
 
@@ -1026,7 +1059,7 @@ class TestInteractiveLoop:
 
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", side_effect=KeyboardInterrupt),
+            patch("builtins.input", side_effect=KeyboardInterrupt) as mock_input,
             patch.dict(
                 sys.modules,
                 {
@@ -1034,10 +1067,17 @@ class TestInteractiveLoop:
                 },
             ),
         ):
-            mod._interactive_loop()
+            assert mod._interactive_loop() is None
+
+        mock_input.assert_called_once()
+        # The interrupt beat the parser to it, so no line was ever dispatched.
+        mock_filter.parse_command.assert_not_called()
+        mod.console.print.assert_called_once_with("\n[yellow]Stopping monitoring...[/yellow]")
+        mod.logger.info.assert_called_once_with("[monitor] Stopped by user")
+        assert mod._stop_event.is_set() is False
 
     def test_tty_eof_error(self):
-        """TTY mode handles EOFError gracefully."""
+        """A closed stdin ends the loop silently — logged, but nothing printed at the user."""
         mod = _import_monitor()
         mod._stop_event.clear()
 
@@ -1045,7 +1085,7 @@ class TestInteractiveLoop:
 
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", side_effect=EOFError),
+            patch("builtins.input", side_effect=EOFError) as mock_input,
             patch.dict(
                 sys.modules,
                 {
@@ -1053,7 +1093,13 @@ class TestInteractiveLoop:
                 },
             ),
         ):
-            mod._interactive_loop()
+            assert mod._interactive_loop() is None
+
+        mock_input.assert_called_once()
+        mod.logger.info.assert_called_once_with("[monitor] EOF received, stopping interactive loop")
+        # Unlike Ctrl+C, EOF is not announced: a piped-in stdin ending is not news.
+        mod.console.print.assert_not_called()
+        assert mod._stop_event.is_set() is False
 
     def test_tty_dispatches_interactive_cmd(self):
         """TTY mode dispatches non-quit commands to _handle_interactive_cmd."""
@@ -1178,14 +1224,20 @@ class TestGetWatchDirectoriesEdgeCases:
     """Test edge cases in _get_watch_directories."""
 
     def test_corrupted_registry_json(self, tmp_path):
-        """Corrupted registry JSON logs warning and continues."""
+        """A registry that will not parse contributes no watches, and the log names the reason."""
         mod = _import_monitor()
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text("{bad json!!}", encoding="utf-8")
 
         with patch("pathlib.Path.home", return_value=tmp_path / "fakehome"):
             result = mod._get_watch_directories(tmp_path)
+
         assert isinstance(result, list)
+        # No branch dirs from the broken registry, no CLI session dirs under a
+        # home that does not exist — the whole answer is the empty list.
+        assert result == []
+        mod.logger.warning.assert_called_once()
+        assert "Could not read the branch registry (JSONDecodeError)" in mod.logger.warning.call_args.args[0]
 
     def test_includes_codex_sessions(self, tmp_path):
         """~/.codex/sessions is included when it exists."""
@@ -1279,7 +1331,11 @@ class TestBannerTruth:
     def test_scoped_banner_drops_the_all_branches_claim(self):
         mod = _import_monitor()
         _run_scoped(mod, ["devpulse"])
-        for line in _printed(mod):
+        lines = _printed(mod)
+        # The floor: a banner that printed nothing would pass the loop below in silence.
+        assert len(lines) >= 1, "the scoped run printed no banner at all - the loop below proves nothing"
+        assert any("DEVPULSE" in line for line in lines), "the scope must still be named somewhere"
+        for line in lines:
             assert "all branches" not in line, f"scoped run still claims all branches: {line}"
             assert "no filters" not in line, f"scoped run still claims no filters: {line}"
 

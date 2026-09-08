@@ -90,9 +90,16 @@ class TestShouldIgnorePath:
     """Tests for filtering.should_ignore_path."""
 
     def test_returns_bool(self, filtering_module):
-        """should_ignore_path must return a bool."""
+        """should_ignore_path answers True or False, and the answer tracks the path."""
         result = filtering_module.should_ignore_path(Path("/some/normal/file.py"))
         assert isinstance(result, bool)
+        # Which bool: False for a path holding no ignored component, True once
+        # one of the configured patterns appears in it.
+        assert result is False
+        assert filtering_module.should_ignore_path(Path("/some/.venv/file.py")) is True
+        # Matching is per path COMPONENT, not substring: a directory that merely
+        # starts with an ignored name is still walked.
+        assert filtering_module.should_ignore_path(Path("/some/node_modules_backup/file.py")) is False
 
     def test_ignores_git_directory(self, filtering_module):
         """.git paths should be ignored."""
@@ -269,13 +276,21 @@ class TestDiscoverPythonModules:
     """Tests for scanner.discover_python_modules."""
 
     def test_returns_dict(self, scanner_module, tmp_path, mock_config_load):
-        """discover_python_modules must return a dict."""
+        """discover_python_modules returns the discovered modules keyed by stem."""
         mock_config_load.ECOSYSTEM_ROOT = tmp_path
         # Reload so the module picks up the patched ECOSYSTEM_ROOT
         scanner_module = importlib.reload(scanner_module)
 
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "gamma.py").write_text("# gamma\n", encoding="utf-8")
+
         result = scanner_module.discover_python_modules()
         assert isinstance(result, dict)
+        # Which dict: keyed by the file stem, valued by the metadata record --
+        # the path is stored relative to ECOSYSTEM_ROOT, and it is enabled.
+        assert set(result) == {"gamma"}
+        assert result["gamma"]["relative_path"] == "pkg/gamma.py"
+        assert result["gamma"]["enabled"] is True
 
     def test_discovers_files_in_ecosystem(self, scanner_module, tmp_path, mock_config_load):
         """Should discover .py files placed under ECOSYSTEM_ROOT."""

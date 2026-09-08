@@ -11,20 +11,24 @@
 
 ## Status
 
-Every claim below was re-checked against the code on **2026-09-07** (FPLAN-0492
-wave 3; the 09-05 truth pass is its predecessor). Numbers in this file are
-measurements taken on this machine, not estimates: where a number is a
-single-machine reading rather than a property of the system, it says so.
+Every claim below was re-checked against the code on **2026-09-08** (FPLAN-0512;
+the 09-07 gate wave and the 09-05 truth pass are its predecessors). Numbers in
+this file are measurements taken on this machine, not estimates: where a number
+is a single-machine reading rather than a property of the system, it says so.
 Anything that could not be verified is marked **UNVERIFIED** in place rather
 than left standing green.
 
 - **Tests:** 1404 test functions across 36 files; pytest expands them to 1487
-  cases, all passing from both rootdirs.
+  cases, all passing from both rootdirs. Re-measured 2026-09-08: the FPLAN-0512
+  wave rewrote 80 units in place and added none, so all three counts are
+  unchanged from 09-07.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
-  category.
-- **Last structural change:** FPLAN-0492 wave 3 (2026-09-07) — the
-  unknown-argument gate: six verbs that swallowed an unknown token now refuse it
-  by name and exit non-zero. Described under Command Routing.
+  category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
+  rules.
+- **Last structural change:** FPLAN-0512 (2026-09-08) — the exit seam: a
+  handler that printed an error used to exit 0, and now exits 2. Described under
+  Command Routing. The same wave closed prax's six open v5 test-quality rules by
+  giving 80 nominated test units a real oracle.
 
 ---
 
@@ -827,6 +831,30 @@ modules import the gate directly; the entry point imports it re-exported through
 Help still wins over the gate everywhere: `wants_help(args)` runs first, so
 `status sync -h` and `dashboard refrsh --help` explain themselves rather than
 failing. A question is never a bad argument.
+
+### The exit seam
+
+The gate above covers refusals prax *raises*. It does not cover the other way a
+command fails: a handler that routes fine, prints an error, and returns. cli's
+`error()` sets a process-level failure flag, but a flag only becomes an exit
+code where somebody reads it — and `main()` returned a bare `0` on any routed
+command, so `error()` changed the colour on screen and nothing else.
+
+Closed 2026-09-08 (FPLAN-0512, the fleet rule @devpulse landed in memory first):
+`main()` calls `reset_command_state()` at entry, and `_run()` returns
+`resolve_exit(True)` instead of `0` when `route_command` handles the command.
+A handler that called `error()` now exits **2**; an unknown token still exits 1;
+a clean run still exits 0. The reset is at the entry point so a flag left set by
+an earlier in-process run cannot leak into the next.
+
+Measured after the change: `dashboard refresh @nosuchbranch` → **2** (it printed
+`Branch 'NOSUCHBRANCH' not found in registry` and exited **0** before), `status`
+→ **0**.
+
+The one caller this changed is `dashboard refresh --all`. A partial refresh —
+some branches updated, some failed — announced itself through `warning()`, which
+does not set the flag, so a run that left branches stale exited 0. It now goes
+through `error()`.
 
 ## How It Works
 

@@ -172,20 +172,43 @@ def _calculators():
     ]
 
 
+#: The parametrize table, built once at the moment the decorators below read it.
+#: A table computed at collection time can come back EMPTY, and pytest reports an
+#: empty parametrize as SKIPPED — five lines that ran nothing while the summary
+#: stayed green. This is the whole point of the file: FOUR near-identical copies
+#: of one calculator, and the drift between them is what lost the list guard. The
+#: names are spelled out so a copy that is renamed, moved or deleted fails
+#: collection loudly instead of quietly shrinking the table it is tested through.
+CALCULATOR_NAMES = (
+    "status.calculate_quick_status",
+    "refresh._calculate_quick_status",
+    "operations._calculate_quick_status_standalone",
+    "template_pusher._calculate_quick_status",
+)
+
+CALCULATORS = _calculators()
+
+assert len(CALCULATORS) == len(CALCULATOR_NAMES), (
+    f"expected {len(CALCULATOR_NAMES)} quick_status calculators, collected {len(CALCULATORS)}"
+)
+assert tuple(name for name, _calc in CALCULATORS) == CALCULATOR_NAMES
+assert all(callable(calc) for _name, calc in CALCULATORS)
+
+
 class TestListShapedActivePlans:
     """flow's own section shape must not raise in any copy of the calculator."""
 
-    @pytest.mark.parametrize("name,calc", _calculators())
+    @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_list_shape_does_not_raise(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {})
         assert calc(FLOW_LIST_SECTION, branch)["active_plans"] == 2, name
 
-    @pytest.mark.parametrize("name,calc", _calculators())
+    @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_int_shape_still_works(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {})
         assert calc({"flow": {"active_plans": 3}}, branch)["active_plans"] == 3, name
 
-    @pytest.mark.parametrize("name,calc", _calculators())
+    @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_missing_flow_section_is_zero(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {})
         assert calc({}, branch)["active_plans"] == 0, name
@@ -266,7 +289,7 @@ class TestActionRequiredMatchesItsOwnSummary:
     field Patrick's card reads for 'needs attention'.
     """
 
-    @pytest.mark.parametrize("name,calc", _calculators())
+    @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_todos_alone_require_action(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {}, todos=1)
         (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": []}), encoding="utf-8")
@@ -274,7 +297,7 @@ class TestActionRequiredMatchesItsOwnSummary:
         assert result["todo_count"] == 1, name
         assert result["action_required"] is True, name
 
-    @pytest.mark.parametrize("name,calc", _calculators())
+    @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_all_clear_requires_no_action(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {}, todos=0)
         (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": []}), encoding="utf-8")

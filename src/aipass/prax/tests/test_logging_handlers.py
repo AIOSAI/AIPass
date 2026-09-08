@@ -25,7 +25,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 
 # =============================================
@@ -79,9 +79,14 @@ class TestDirectRotatingFileHandlerDoRollover:
                 exc_info=None,
             )
             handler.emit(record)
-            backup = tmp_path / "test.log.1"
-            assert backup.exists() or log_file.exists()
             handler.close()
+
+            # Rotation moved the old bytes aside and the record landed in a
+            # fresh file — both halves are pinned, so an emit that silently
+            # skipped the rollover cannot read green.
+            backup = tmp_path / "test.log.1"
+            assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
+            assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
 
     def test_do_rollover_os_error_suppressed(self, mock_prax_infrastructure, tmp_path):
         """A failed rotation is swallowed and logged — PermissionError is an OSError, one clause catches both."""
@@ -137,12 +142,20 @@ class TestDirectRotatingFileHandlerDoRollover:
 class TestGetCallingModulePath:
     """Tests for introspection.py get_calling_module_path()."""
 
-    def test_returns_path_or_none(self, mock_prax_infrastructure):
-        """get_calling_module_path returns a string path or None."""
+    def test_returns_this_test_files_path(self, mock_prax_infrastructure):
+        """The first non-prax-internal frame is this test file, so that is the path.
+
+        Only one answer is reachable here: the stack walk skips introspection.py
+        itself and the next frame up is this module, whose path matches none of
+        the _PRAX_INTERNAL_MARKERS. Pinned to the file rather than tolerated as
+        "a string or None".
+        """
         from aipass.prax.apps.handlers.logging import introspection
 
         result = introspection.get_calling_module_path()
-        assert result is None or isinstance(result, str)
+        assert isinstance(result, str)
+        assert result == __file__
+        assert Path(result).name == "test_logging_handlers.py"
 
     def test_returns_none_when_no_external_caller(self, mock_prax_infrastructure):
         """Returns None when _find_external_caller_path returns None."""
@@ -693,8 +706,15 @@ class TestCreateConfigFile:
             config_path = tmp_path / "nonexistent_dir" / "config.json"
             ops.CONFIG_FILE = config_path
 
-            # Should not raise even when file creation fails
+            # Not raising is the weak half. The observable consequence is that
+            # no file appears and the failure is reported once as a warning.
             ops.create_config_file()
+
+            assert not config_path.exists()
+            assert not config_path.parent.exists()
+            mock_direct_logger.info.assert_not_called()
+            mock_direct_logger.warning.assert_called_once()
+            assert mock_direct_logger.warning.call_args[0][0] == "Failed to create config file: %s"
 
 
 # =============================================
@@ -740,8 +760,14 @@ class TestEnhancedGetLogger:
             sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
             import aipass.prax.apps.handlers.logging.override as ov
 
-            result = ov.enhanced_getLogger("some.name")
+            result = ov.enhanced_getLogger("prax.test.known")
             assert isinstance(result, logging.Logger)
+            # WHICH logger comes back, and what was done to it: the stdlib
+            # logger for the requested name, wearing the individual logger's
+            # handlers and cut off from the root logger.
+            assert result.name == "prax.test.known"
+            assert result.handlers == mock_individual_logger.handlers
+            assert result.propagate is False
             mock_setup.setup_individual_logger.assert_called_once_with("test_module")
 
     def test_returns_original_logger_for_unknown_module(self, mock_prax_infrastructure):
@@ -766,8 +792,14 @@ class TestEnhancedGetLogger:
             sys.modules.pop("aipass.prax.apps.handlers.logging.override", None)
             import aipass.prax.apps.handlers.logging.override as ov
 
-            result = ov.enhanced_getLogger("some.name")
+            result = ov.enhanced_getLogger("prax.test.unknown")
             assert isinstance(result, logging.Logger)
+            # The same stdlib logger the caller asked for, handed back
+            # untouched: no handlers copied onto it, propagation left alone.
+            assert result.name == "prax.test.unknown"
+            assert result is ov._original_getLogger("prax.test.unknown")
+            assert result.handlers == []
+            assert result.propagate is True
             mock_setup.setup_individual_logger.assert_not_called()
 
     def test_debug_prints_when_enabled(self, mock_prax_infrastructure):
@@ -1058,7 +1090,13 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
             )
             handler.emit(record)
             handler.close()
-            assert log_file.exists() or (tmp_path / "rollover_test.log.1").exists()
+
+            # One outcome is reachable here, not two: the file is over
+            # maxBytes, so the old bytes move to .log.1 and the record lands in
+            # a fresh .log. Both halves pinned.
+            backup = tmp_path / "rollover_test.log.1"
+            assert backup.read_text(encoding="utf-8") == "data\n"
+            assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
 
     def test_do_rollover_permission_error_suppressed(self, mock_prax_infrastructure, tmp_path):
         """PermissionError during rollover is caught, not raised."""
@@ -1085,12 +1123,22 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
                 encoding="utf-8",
             )
 
-            with patch(
-                "logging.handlers.RotatingFileHandler.doRollover",
-                side_effect=PermissionError("locked"),
+            with (
+                patch(
+                    "logging.handlers.RotatingFileHandler.doRollover",
+                    side_effect=PermissionError("locked"),
+                ),
+                patch.object(setup_mod, "logger") as mock_logger,
             ):
                 handler.doRollover()
             handler.close()
+
+            # "It did not raise" is half the contract. The other half: the
+            # skipped rotation is reported once, and no backup was produced.
+            mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
+            assert str(mock_logger.warning.call_args[0][1]) == "locked"
+            assert not (tmp_path / "perm_test.log.1").exists()
+            assert log_file.read_text(encoding="utf-8") == "data\n"
 
 
 # =============================================
@@ -1359,16 +1407,32 @@ class TestCreateTerminalHandler:
         return fmt
 
     def test_returns_stream_handler(self, mock_prax_infrastructure, tmp_path):
-        """Returns a StreamHandler instance."""
+        """Returns a StreamHandler carrying config's DEFAULT_LOG_LEVEL."""
         fmt = self._import_formatting(tmp_path)
         handler = fmt.create_terminal_handler()
         assert isinstance(handler, logging.StreamHandler)
+        # _import_formatting sets DEFAULT_LOG_LEVEL to DEBUG; the handler must
+        # be gated at exactly that, not left at NOTSET.
+        assert handler.level == logging.DEBUG
 
     def test_handler_has_terminal_formatter(self, mock_prax_infrastructure, tmp_path):
-        """Handler uses TerminalFormatter."""
+        """Handler uses TerminalFormatter, and it renders the prax terminal line."""
         fmt = self._import_formatting(tmp_path)
         handler = fmt.create_terminal_handler()
         assert isinstance(handler.formatter, fmt.TerminalFormatter)
+
+        record = logging.LogRecord(
+            name="captured_my_mod",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+        # The format string that matters is the one the formatter produces, not
+        # the "%(message)s" default it never uses.
+        assert handler.format(record) == "[SYSTEM] my_mod - INFO: hello"
 
     def test_handler_writes_to_stdout(self, mock_prax_infrastructure, tmp_path):
         """Handler stream is sys.stdout."""

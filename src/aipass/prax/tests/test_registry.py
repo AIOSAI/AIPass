@@ -78,8 +78,17 @@ class TestLoadModuleRegistry:
 
     def test_returns_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        modules = {"prax": {"relative_path": "src/aipass/prax", "size": 1024}}
+        load_mod.REGISTRY_FILE.write_text(
+            json.dumps({"registry_version": "1.0.0", "modules": modules, "statistics": {"total_modules": 1}}),
+            encoding="utf-8",
+        )
+
         result = load_mod.load_module_registry()
         assert isinstance(result, dict)
+        # Which dict: the file's "modules" section and nothing else -- the
+        # version and statistics wrappers are not handed to the caller.
+        assert result == modules
 
     def test_empty_dict_when_file_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Missing registry file should return empty dict."""
@@ -174,7 +183,7 @@ class TestSaveModuleRegistry:
         assert prax_json_dir.is_dir()
 
     def test_writes_valid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """Saved file should contain valid JSON."""
+        """Saved file should parse back as JSON carrying what was handed in."""
         save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
         modules = {"test_mod": {"relative_path": "test/mod.py", "size": 100}}
 
@@ -182,6 +191,8 @@ class TestSaveModuleRegistry:
 
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
         assert isinstance(data, dict)
+        # "Valid JSON" is only half the promise: what went in has to come back.
+        assert data["modules"] == modules
 
     def test_saved_structure_has_required_keys(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saved JSON should contain registry_version, timestamp, modules, statistics."""
@@ -295,13 +306,18 @@ class TestSaveModuleRegistry:
         """
         save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
 
-        for i in range(20):
-            result = save_mod.save_module_registry({f"mod_{i}": {"path": f"p{i}"}})
+        writes = [{f"mod_{i}": {"path": f"p{i}"}} for i in range(20)]
+        # The floor: an empty write list would send the loop below through
+        # zero iterations and report green having read the file never.
+        assert len(writes) == 20
+
+        for payload in writes:
+            result = save_mod.save_module_registry(payload)
             assert result is True
             # Every single write must leave the file fully parseable - this
             # is what atomic rename guarantees even under real concurrency.
             data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
-            assert data["modules"] == {f"mod_{i}": {"path": f"p{i}"}}
+            assert data["modules"] == payload
 
 
 # =============================================

@@ -33,7 +33,7 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error, warning, reset_command_state, resolve_exit
 
 # Unknown-argument gate (decides; this file renders and sets the exit code).
 # Imported from the modules layer — an entry point never reaches into handlers.
@@ -198,7 +198,16 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
 
 
 def main() -> int:
-    """Main entry point — renders any unknown-argument refusal and exits 1."""
+    """Main entry point — renders any unknown-argument refusal and exits 1.
+
+    THE EXIT SEAM. `error()` sets a process-level failure flag in cli, but the
+    flag only reaches an exit code where someone calls `resolve_exit()`. Prax
+    used to return a bare 0 on any routed command, so a refusal printed in red
+    and still exited 0 — indistinguishable from success to a caller reading
+    `$?`. The state is reset here, at the one entry point, so a flag left set by
+    an earlier in-process run cannot leak into this one.
+    """
+    reset_command_state()
     try:
         return _run()
     except UnknownArgument as exc:
@@ -269,9 +278,11 @@ Examples:
     if parsed_args.show_help:
         all_args = ["--help"] + all_args
 
-    # Route command to appropriate handler
+    # Route command to appropriate handler. A routed command is not the same as
+    # a successful one: `resolve_exit` reads the failure flag `error()` set, so a
+    # handler that printed a refusal exits 2 rather than 0.
     if route_command(parsed_args.command, all_args, handlers):
-        return 0
+        return resolve_exit(True)
     else:
         error(f"Unknown command: {parsed_args.command}")
         return 1

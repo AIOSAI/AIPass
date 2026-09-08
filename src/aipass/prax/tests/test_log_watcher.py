@@ -383,10 +383,28 @@ class TestLogWatcherLifecycle:
         assert getattr(mod, "_log_observer") is None
 
     def test_stop_noop_when_not_running(self):
+        """Nothing is running, so no teardown is attempted.
+
+        Two ways to be "not running", both no-ops: no observer at all, and an
+        observer whose thread has already died. Neither may be stopped or
+        joined — a join(timeout=5.0) on a dead observer is five seconds of the
+        caller's shutdown spent on nothing.
+        """
         mod = _import_log_watcher()
+
         setattr(mod, "_log_observer", None)
-        # Should not raise
+        assert mod.stop_log_watcher() is None
+        assert getattr(mod, "_log_observer") is None
+
+        dead = MagicMock()
+        dead.is_alive.return_value = False
+        setattr(mod, "_log_observer", dead)
+
         mod.stop_log_watcher()
+
+        dead.stop.assert_not_called()
+        dead.join.assert_not_called()
+        assert getattr(mod, "_log_observer") is dead
 
     def test_is_active_true_when_alive(self):
         mod = _import_log_watcher()

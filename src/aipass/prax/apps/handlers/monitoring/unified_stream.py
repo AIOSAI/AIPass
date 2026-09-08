@@ -56,7 +56,21 @@ def _plain(text: str) -> str:
 COLORS = {
     "file_created": "green",
     "file_modified": "yellow",
+    # file_deleted is the WATCHDOG event for a real unlink and stays. Trigger's
+    # bus renamed its own file_deleted to profile_write_failed (FPLAN-0492 wave
+    # 5); a bus event reaching this table under the new name had no colour, so
+    # the key is ADDED rather than swapped — the two streams mean different things.
+    #
+    # HONEST CAVEAT, measured 2026-09-08 (FPLAN-0512): nothing reads this table.
+    # `print_event` colours by BRANCH_COLORS and LEVEL_COLORS; COLORS has no
+    # reader in prax, no `__all__` entry, and no importer in any other branch.
+    # So the new key is inert today and cannot be mutation-checked — no test can
+    # go red for it, because no behaviour depends on it. It is here so the table
+    # is correct if it is ever wired up. Reported to @devpulse rather than
+    # quietly wiring COLORS into the formatter, which would be a display change
+    # nobody asked for.
     "file_deleted": "red",
+    "profile_write_failed": "red",
     "file_moved": "blue",
     "log_info": "white",
     "log_warning": "yellow",
