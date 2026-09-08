@@ -144,7 +144,10 @@ class TestNoArgs:
         """no_args_triggers: calling with None produces introspection output."""
         handle_command(None)
         captured = capsys.readouterr()
-        assert "skills" in captured.out.lower() or "Entry Point" in captured.out
+        # The old either/or passed on either half; None routes to
+        # print_introspection, so pin the banner that proves it did.
+        assert "skills Entry Point" in captured.out
+        assert "Connected Modules:" in captured.out
 
 
 class TestPrintHelp:
@@ -156,7 +159,11 @@ class TestPrintHelp:
 
         print_help()
         captured = capsys.readouterr()
-        assert "Usage" in captured.out or "Commands" in captured.out
+        # Both halves of the old `or` were about the same output, so it could
+        # not fail. print_help emits both blocks - pin both.
+        assert "Usage:" in captured.out
+        assert "Commands:" in captured.out
+        assert "drone @skills <command> [args]" in captured.out
 
     def test_print_help_via_command(self, capsys):
         """print_help: handle_command('--help') produces output."""
@@ -174,7 +181,8 @@ class TestPrintIntrospection:
 
         print_introspection()
         captured = capsys.readouterr()
-        assert "Entry Point" in captured.out or "skills" in captured.out.lower()
+        assert "skills Entry Point" in captured.out
+        assert "Run 'drone @skills --help' for usage information" in captured.out
 
     def test_print_introspection_lists_modules(self, capsys):
         """print_introspection: lists connected modules."""
@@ -182,7 +190,11 @@ class TestPrintIntrospection:
 
         print_introspection()
         captured = capsys.readouterr()
-        assert "modules/" in captured.out or "discovery" in captured.out.lower()
+        assert "modules/" in captured.out
+        # Every module the introspection claims to connect, named. A module
+        # dropped from the listing fails here instead of passing on "modules/".
+        for module in ("discovery.py", "loader.py", "runner.py", "creator.py", "validator.py", "switch.py"):
+            assert module in captured.out, f"introspection does not list {module}"
 
 
 class TestOutputCapture:
@@ -198,7 +210,9 @@ class TestOutputCapture:
         """output_capture: --version produces version string."""
         handle_command("--version")
         captured = capsys.readouterr()
-        assert "SKILLS" in captured.out or "1.0.0" in captured.out
+        # The banner is one literal in skills.py; the old `or` passed on either
+        # half of it, so a half-broken version line read green.
+        assert captured.out.strip() == "SKILLS v1.0.0"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""

@@ -210,6 +210,9 @@ class TestDiscoverSkillsInPath:
     def test_skill_dict_structure(self):
         catalog_path = Path(__file__).resolve().parent.parent / "lib"
         skills = discover_skills_in_path(catalog_path, "builtin")
+        # The floor: without it an empty lib/ makes the loop below a silent
+        # pass. Seven built-in skills ship in lib/ (measured).
+        assert len(skills) == 7, f"lib/ discovery returned {len(skills)} skills, expected 7"
         for skill in skills:
             assert "name" in skill
             assert "description" in skill
