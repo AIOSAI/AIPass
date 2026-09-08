@@ -34,7 +34,7 @@ The design was the defect. This pack is the correction.
 |---|---|
 | substring match over raw text | AST, every time |
 | comments and docstrings score | only code counts |
-| 51 pattern items, all mandatory | eleven independent rules |
+| 51 pattern items, all mandatory | twelve independent rules |
 | one number, no evidence | every flag carries its nodeid, line and calls |
 | gated the board at 100 | **advisory** — reports, never fails |
 | AIPass-specific | generic: stdlib-only, lifts onto any Python project |
@@ -54,6 +54,7 @@ The design was the defect. This pack is the correction.
 | `entry_point_diff` | does production declare a verb no test names? |
 | `coverage_slot` | does this test confess, in prose, to existing for coverage? |
 | `docstring_pin` | does the docstring name a symbol the test actually calls? |
+| `host_state` | does this test leave the machine the way it found it? |
 
 ## Two design commitments
 
