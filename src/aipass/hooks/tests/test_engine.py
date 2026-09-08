@@ -724,12 +724,26 @@ class TestHooksEntryPoint:
         result = handle_command("nonexistent", [])
         assert result is False
 
-    def test_status_command_returns_true(self):
+    def test_status_with_no_config_exits_one_through_the_entry_point(self):
+        """The routed `status` refusal reaches the shell as exit 1 (FPLAN-0507).
+
+        This pin used to assert True with a patch on the LOADER's name, which
+        hookstatus binds at import — so the patch bit only when hookstatus was
+        first imported inside the patch window. In the full suite an earlier
+        import had already bound the real function, the patch was inert, the
+        real config was found and True came back; alone, or on a fresh xdist
+        worker (the Linux CI on 8769a799), the patch bit and the test pinned
+        the exit-0 defect FPLAN-0507 had just cured. Patch the name hookstatus
+        actually calls, and pin the cured outcome.
+        """
         from aipass.hooks.apps.hooks import handle_command
 
-        with patch("aipass.hooks.apps.handlers.config.loader.find_project_config", return_value=None):
-            result = handle_command("status", [])
-        assert result is True
+        with (
+            patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            handle_command("status", [])
+        assert exit_info.value.code == 1
 
     def test_log_command_returns_true(self):
         from aipass.hooks.apps.hooks import handle_command
