@@ -12,10 +12,12 @@ on:
   pull_request:
     branches: [main, dev]
 
-# A new push to the same ref cancels the stale in-flight run.
+# One run per ref at a time; a RUNNING run is never cancelled, a new push
+# queues behind it. Was cancel-in-progress: true until 2026-09-08, which erased
+# every Windows verdict across eight rapid landings (RPLAN-0004, finding 2.5).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
