@@ -1076,9 +1076,12 @@ class TestOnModified:
 
         warned: MagicMock = lw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        reported = str(warned.call_args)
-        assert "/some/core.log" in reported, f"the failing file must be named, got: {reported}"
-        assert "disk error" in reported, f"the cause must be named, got: {reported}"
+        # Assert on the call's own arguments, not a repr of the call — repr
+        # doubles backslashes in a Windows path, so a path search through it
+        # can never match even a correctly-built expected string.
+        reported_args = warned.call_args.args
+        assert "/some/core.log" == reported_args[1], f"the failing file must be named, got: {reported_args}"
+        assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"
 
         watcher._read_new_lines.side_effect = None
         watcher.on_modified(event)

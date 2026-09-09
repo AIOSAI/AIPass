@@ -289,7 +289,7 @@ class TestDiscoverPythonModules:
         # Which dict: keyed by the file stem, valued by the metadata record --
         # the path is stored relative to ECOSYSTEM_ROOT, and it is enabled.
         assert set(result) == {"gamma"}
-        assert result["gamma"]["relative_path"] == "pkg/gamma.py"
+        assert Path(result["gamma"]["relative_path"]) == Path("pkg/gamma.py")
         assert result["gamma"]["enabled"] is True
 
     def test_discovers_files_in_ecosystem(self, scanner_module, tmp_path, mock_config_load):

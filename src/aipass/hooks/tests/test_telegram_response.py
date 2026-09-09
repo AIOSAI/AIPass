@@ -1703,7 +1703,7 @@ class TestWriteDeliveryLog:
         assert record["match"] is False
         assert "delivery_failed" in record["culprit"]
 
-    def test_log_write_failure_does_not_raise(self):
+    def test_log_write_failure_does_not_raise(self, tmp_path):
         """An unwritable delivery log is reported, not swallowed and not raised.
 
         Had no oracle: it called _write_delivery_log inside a mocked logger and
@@ -1711,16 +1711,26 @@ class TestWriteDeliveryLog:
         the floor passed identically to one that reported it - and "the record
         silently stopped being written" is the failure this whole file exists
         to make impossible.
+
+        The failure is injected at the seam the function itself calls
+        (``append_jsonl``), not through the filesystem's mood: a POSIX-only
+        path like `/dev/null/impossible/...` or a chmod'd directory never
+        raises on Windows, which ignores owner mode bits, so the write would
+        silently succeed there and the "must warn" assertion would never fire.
         """
         from aipass.hooks.apps.handlers.notification.telegram_response import _write_delivery_log
 
-        impossible = Path("/dev/null/impossible/log.jsonl")
-        with patch(LOGGER_PATCH) as mock_logger, patch(f"{MOD}._get_delivery_log", return_value=impossible):
+        log_path = tmp_path / "delivery.jsonl"
+        with (
+            patch(LOGGER_PATCH) as mock_logger,
+            patch(f"{MOD}._get_delivery_log", return_value=log_path),
+            patch(f"{MOD}.append_jsonl", side_effect=OSError("disk full")),
+        ):
             _write_delivery_log("hi", ["hi"], [{"idx": 0, "ok": True, "text": "hi"}], "s")
 
         assert mock_logger.warning.call_count == 1
         assert "delivery log write failed" in mock_logger.warning.call_args[0][0]
-        assert not impossible.exists()
+        assert not log_path.exists()
 
 
 # ===========================================================================

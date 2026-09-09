@@ -631,42 +631,37 @@ class TestResidentDiscovery:
         (stray / "passport.json").write_text(json.dumps({"citizenship": {"residency": "resident"}}), encoding="utf-8")
         assert reg.get_resident_branches(tmp_path) == {}
 
-    def test_the_live_fleet_still_resolves_its_four_residents(self):
-        """Behavioural, against THIS machine: the semantics change, not the answer.
+    def test_a_built_fleet_of_four_residents_all_resolve(self, tmp_path):
+        """Behavioural, against a tree this test builds — not against THIS machine.
 
         projects/* is gitignored — each project is its own repo — so a fresh
-        checkout and CI have no fleet to measure.
+        checkout and CI have no fleet to read (fresh_clone, 2026-09-08). The
+        previous version of this test read the real projects/ tree and, when
+        that tree was absent, fell back to asserting the empty dict — two
+        oracles for one test, and the one a fresh clone or CI actually hits was
+        never proven against a real multi-project shape.
 
-        THERE IS NO SKIP HERE ANY MORE (self_skip, 2026-09-08). Two skips stood
-        in front of this, and the second asked
-        ``(reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR).is_dir()`` — the
-        directory name came from the code under test, so renaming that constant
-        would not have failed this test, it would have DELETED it, and the board
-        would have stayed green. Rewriting the condition to read the machine was
-        the obvious cure and it is the wrong one: it leaves a fresh clone with a
-        silence where a result should be.
-
-        Both worlds are asserted instead. A machine carrying the tree must
-        resolve exactly these four; a machine without one must resolve NOTHING,
-        which is the answer measured from a temp directory 2026-09-08 and is a
-        real claim about the reader — an implementation that fell back to the
-        core registry when projects/ was absent would fail it. CI and a stranger
-        cloning this public repo now get a pass that means something, and the
-        constant is pinned by an assertion that goes red on a rename instead of
-        a skip that goes quiet on one.
+        This plants a synthetic fleet with the same shape as the live one —
+        four declared residents, plus a retired project and a dot-prefixed one
+        that the existing exclusion tests above already prove are refused —
+        and resolves it the way ``test_a_declared_resident_is_discovered``
+        already does, just with more than one project at once.
         """
         assert reg.RESIDENT_PROJECTS_DIR == "projects", (
             "the resident tree was renamed — re-aim this pin rather than letting it skip"
         )
-        projects_tree = reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR
-        live = reg.get_resident_branches()
+        self._project(tmp_path, "baud", "baud")
+        self._project(tmp_path, "earmark", "earmark")
+        self._project(tmp_path, "finch", "finch")
+        self._project(tmp_path, "aipass_site", "aipass_site")
+        self._project(tmp_path, "marketstand", "marketstand", status="retired")
+        self._project(tmp_path, ".speakeasy", "speakeasy")
 
-        if projects_tree.is_dir():
-            assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
-            joined = " ".join(live.values()).lower()
-            assert "marketstand" not in joined and "speakeasy" not in joined
-        else:
-            assert live == {}, "no projects/ tree on this machine — nothing may resolve"
+        live = reg.get_resident_branches(tmp_path)
+
+        assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
+        joined = " ".join(live.values()).lower()
+        assert "marketstand" not in joined and "speakeasy" not in joined
 
 
 class TestBroadcastScope:

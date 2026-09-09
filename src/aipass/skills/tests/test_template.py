@@ -164,13 +164,19 @@ class TestCopyTemplate:
         src = get_template("with_handler")
         target = tmp_path / "placeholder-test"
         copy_template(src["path"], target, "placeholder-test")
-        files = sorted(p for p in target.rglob("*") if p.is_file())
+        files = [p for p in target.rglob("*") if p.is_file()]
         # The floor. The old shape put the assert under `if f.is_file()` with
         # no else, so a target that laid down nothing passed. The
         # except UnicodeDecodeError below it was dead too: the with_handler
         # template is two utf-8 files and no binary (measured), so it only
         # stood ready to swallow a real failure.
-        assert [f.name for f in files] == ["SKILL.md", "handler.py"]
+        #
+        # Compared as a set, not a sorted list: sorting Paths compares
+        # case-insensitively on Windows and byte-wise on POSIX, so
+        # ["handler.py", "SKILL.md"] and ["SKILL.md", "handler.py"] are both
+        # "sorted" depending on the platform. Which two files exist is the
+        # claim; their filesystem listing order never is.
+        assert {f.name for f in files} == {"SKILL.md", "handler.py"}
         for f in files:
             content = f.read_text(encoding="utf-8")
             assert "{{SKILL_NAME}}" not in content, f"Unreplaced in {f.name}"

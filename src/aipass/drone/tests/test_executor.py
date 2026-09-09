@@ -201,8 +201,13 @@ class TestFileNotFoundWrapping:
         cause = exc_info.value.__cause__
         assert isinstance(cause, FileNotFoundError)
         # Which file was not found is the whole claim; the type is shared with
-        # every missing cwd and every missing script.
-        assert cause.filename == "this_executable_does_not_exist_xyz"
+        # every missing cwd and every missing script. `.filename` is the
+        # platform's own attribute on the raised error, and subprocess on
+        # Windows raises FileNotFoundError for a missing executable with
+        # filename=None ([WinError 2]) — POSIX fills it, Windows does not.
+        # The name is the wrapper's to guarantee on every platform, so assert
+        # it in the wrapper's own message instead.
+        assert "this_executable_does_not_exist_xyz" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

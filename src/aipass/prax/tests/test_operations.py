@@ -1622,6 +1622,12 @@ class TestHandleRefresh:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
+        # _handle_refresh walks UP from cwd looking for a DASHBOARD.local.json
+        # or .aipass marker. Without one directly in tmp_path, the walk keeps
+        # going past the sandbox and can match an ancestor the test never
+        # built (a home directory's own .aipass, say) — planting the marker
+        # here is what makes tmp_path itself the first, and only, match.
+        (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
@@ -1640,6 +1646,9 @@ class TestHandleRefresh:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
+        # See test_refresh_cwd_success: the marker keeps the ancestor walk
+        # inside the sandbox this test built.
+        (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
