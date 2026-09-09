@@ -277,6 +277,44 @@ name is perfectly correct code whenever the module does not walk.
 rather than a stdlib classmethod one level below it. If the walk itself is the
 claim, root the sandbox first.
 
+## The class this rule's own template was, for one day
+
+**A proof of a divergence must MANUFACTURE both halves. Asking the host for one
+of them is the species, not the demonstration of it.**
+
+The teaching template shipped with this rule, `templates/platform_oracle_test.py`,
+went red on the Windows leg of run 34290037771 - the first completed matrix run
+carrying the rule. Three failures and two errors, all of one shape: the proofs of
+the WRONG shapes ran the wrong shape against the real machine and asserted the
+POSIX half of the answer.
+
+| what it did | what Windows did |
+| --- | --- |
+| wrote to `/dev/null/impossible/log.jsonl` and expected ENOTDIR | created it - an ordinary path under the current drive - so the write succeeded, nothing was reported, and the proof's `== 1` read zero |
+| ran the sealed-cwd walk against the real ancestors of `tmp_path` | `tmp_path` lives under the user profile there; an ancestor carried the marker and answered first |
+| symlinked `RUNNER~1` to a long directory to make two spellings of one path | `FileExistsError [WinError 183]` - the 8.3 generator had already minted `RUNNER~1` for that same directory one line earlier, and symlinks need privilege besides |
+
+The third is worth reading twice: the platform collided with the fixture by
+proving the fixture's own thesis.
+
+The cures are the ones this rule teaches, applied to itself: two injected writers
+instead of one real filesystem; a `WALK_CEILING` that declares where the built
+world ends, so the walk cannot reach the host; and a dot-dot spelling, which is
+two strings for one directory on every platform and needs no filesystem feature.
+Verified on Linux against a Windows-SHAPED world - a marked ancestor above the
+sandbox makes the unbounded walk answer `runneradmin` and the bounded one answer
+`sandbox` - and then re-run on the matrix.
+
+**The gap this exposes, stated plainly.** This pack's corpus is `tests/`. The
+templates live under `apps/`, so no rule in this pack has ever audited them, and
+a copy of the six templates into a `tests/` tree scores 100 on six rules and 80
+on `no_oracle` (8 rows, all the delegation limit that rule publishes). Even
+audited, no arm here would have caught it: the defect lived in helper functions
+and a fixture, and this rule does not follow calls. What caught it was the
+Windows leg RUNNING the template through the suite pin that runs every template.
+That is the honest order of proof for this whole subject - a static rule narrows
+the search, and only the other runner returns a verdict.
+
 ## How to fix a flag
 
 `templates/platform_oracle_test.py` runs all five cures against both halves of the

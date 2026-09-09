@@ -64,7 +64,7 @@ this file is really claiming.
 import errno
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Callable, Iterator, List
+from typing import Any, Callable, Iterator, List, Optional
 from unittest.mock import patch
 
 import pytest
@@ -77,10 +77,21 @@ import pytest
 #: the entire ingredient list for the LISTING_ORDER divergence.
 SKILL_FILES: tuple = ("SKILL.md", "handler.py")
 
+#: The path segment that makes a destination a DEVICE rather than a directory.
+#: POSIX answers ENOTDIR for anything under it; Windows has no such rule, which
+#: is the whole of the MODE_INJECTOR divergence in one word.
+DEVICE_SEGMENT: str = "null"
+
 #: The marker a branch root carries. The fleet's own code manufactures one of
 #: these under the real home in five separate places, which is why an upward
 #: walk out of a sandbox is not a theoretical concern.
 BRANCH_MARKER: str = ".aipass"
+
+#: Where the world a test BUILT stops and the host begins. None means unbounded,
+#: which is what production does and what makes the wrong shape below dangerous.
+#: A test that needs the "no marked ancestor" half of the matrix sets this to the
+#: top of its own tmp_path tree - see the proof of the fifth wrong shape.
+WALK_CEILING: Optional[Path] = None
 
 
 def lay_down_skill(target: Path) -> List[Path]:
@@ -153,11 +164,19 @@ def branch_root() -> Path:
     with - because what stops the walk is whichever ancestor happens to carry
     the marker, and the ancestors of a temp directory are not the same set on
     every host.
+
+    `WALK_CEILING` is the THIRD cure and the reason this file can prove its own
+    claim on any runner: a walk that may leave the tree the test built has the
+    host in it, so the test declares where the built world ends. Left at None -
+    the default, and the shape production ships with - the walk runs to the
+    filesystem root, which is the hazard the wrong shape below rides on.
     """
     walking = current_dir()
     while walking != walking.parent:
         if (walking / BRANCH_MARKER).exists():
             return walking
+        if WALK_CEILING is not None and walking == WALK_CEILING:
+            break
         walking = walking.parent
     return current_dir()
 
@@ -173,7 +192,19 @@ def describe_branch() -> str:
 
 
 def posix_writer(destination: Path, record: str) -> None:
-    """A strict filesystem: an impossible destination raises."""
+    """A STRICT filesystem, manufactured here rather than asked of the host.
+
+    CURED 2026-09-08, AND THE CURE IS THIS FILE EATING ITS OWN RULE. The first
+    version really wrote to `/dev/null/impossible/log.jsonl` and relied on POSIX
+    answering ENOTDIR. On the Windows runner that path is an ordinary creatable
+    location under the current drive: the write SUCCEEDED, nothing was reported,
+    and the proof of the wrong shape failed - inside the file that teaches
+    MODE_INJECTOR, which is the species for exactly that mistake. Both halves of
+    the matrix are stand-ins now, so the divergence is DEMONSTRATED rather than
+    requested, and this file makes the same claim on every host.
+    """
+    if DEVICE_SEGMENT in destination.parts:
+        raise OSError(errno.ENOTDIR, "Not a directory", str(destination))
     destination.write_text(record, encoding="utf-8")
 
 
@@ -183,7 +214,9 @@ def forgiving_writer(_destination: Path, _record: str) -> None:
     Windows ignores POSIX mode bits for the owner and has no `/dev/null`
     directory semantics. A write the author expected to fail simply succeeds,
     so no exception is raised, nothing is reported, and every assertion built
-    on the failure reads zero. It is a no-op here for exactly that reason.
+    on the failure reads zero. It is a no-op here for exactly that reason - and
+    it is not a hypothesis: the Windows leg of run 34290037771 did precisely
+    this to the first version of this file.
     """
     return None
 
@@ -355,8 +388,10 @@ def wrong_d_compares_an_unresolved_temp_path(short_name: Path, long_name: Path) 
     # THE DEFECT. The Windows runner hands `tmp_path` out as an 8.3 short name -
     # `C:\\Users\\RUNNER~1\\...` - until something resolves it, and the code
     # under test resolves what it returns. Both sides name the same directory.
-    # Neither side is the same string. Here the two spellings are a symlink and
-    # its target, which is the same property reachable from Linux.
+    # Neither side is the same string. Here the two spellings are a directory and
+    # a dot-dot route back into it, which is the same property, portable, and
+    # needs no filesystem feature - see the fixture for what Windows did to the
+    # symlink this used to use.
     assert made == short_name / "workspace"
     assert long_name.is_dir()
 
@@ -442,18 +477,23 @@ def right_e2_roots_the_sandbox_before_letting_the_walk_run(sandbox: Path) -> Non
 
 @pytest.fixture
 def two_spellings(tmp_path: Path) -> Iterator[tuple]:
-    """One directory reachable under two different strings.
+    """One directory reachable under two different strings, spelled portably.
 
-    A SYMLINK IS THE HONEST STAND-IN FOR AN 8.3 SHORT NAME. Windows gives a
-    runner's temp directory two names - `RUNNER~1` and the long profile name -
-    that denote one directory and compare unequal as text. A symlink has exactly
-    that property and is reachable from Linux, so the divergence below is run
-    rather than described.
+    TWO STRINGS, ONE DIRECTORY - that is the whole property an 8.3 short name
+    has, and a dot-dot spelling has it on every platform, with no privilege and
+    no filesystem feature behind it.
+
+    IT WAS A SYMLINK NAMED RUNNER~1 UNTIL 2026-09-08, and Windows refused it in
+    the most on-topic way available: `FileExistsError [WinError 183]`, because
+    the 8.3 generator had ALREADY minted `RUNNER~1` for the long directory
+    created one line above. The platform collided with the fixture by proving
+    the fixture's own thesis. Symlinks also need Developer Mode or privilege
+    there (catalog row 14), so the shape was twice unavailable. Nothing about
+    the lesson needed either.
     """
     long_name = tmp_path / "runneradmin_long_profile_name"
     long_name.mkdir()
-    short_name = tmp_path / "RUNNER~1"
-    short_name.symlink_to(long_name, target_is_directory=True)
+    short_name = long_name / ".." / long_name.name
     yield short_name, long_name
 
 
@@ -520,7 +560,11 @@ def test_lay_down_skill_really_writes_both_names(tmp_path: Path) -> None:
 
 def test_wrong_b_is_green_on_a_strict_filesystem_and_red_on_a_forgiving_one() -> None:
     """Proof: the device-path injector passes against a raising writer and fails when the write succeeds."""
-    # GREEN HERE. /dev/null/impossible/... really is ENOTDIR on this host.
+    # GREEN AGAINST A STRICT FILESYSTEM, which is manufactured rather than
+    # borrowed from this machine: `posix_writer` refuses a device path by its
+    # SPELLING, so the green half means the same thing on a runner where that
+    # path is ordinary and creatable. It was the real filesystem until the
+    # Windows leg of run 34290037771 wrote the file and left the count at zero.
     wrong_b_injects_the_failure_through_the_filesystem(posix_writer)
 
     # RED THERE. Nothing raised, nothing was reported, and the count is zero -
@@ -572,13 +616,21 @@ def test_wrong_e_is_green_in_an_unmarked_sandbox_and_red_under_a_marked_ancestor
     sandbox_below_a_marked_ancestor: Path,
 ) -> None:
     """Proof: the sealed-cwd pin passes with no marked ancestor and fails when an ancestor answers first."""
-    # GREEN ON A /tmp-SHAPED HOST. No ancestor carries the marker, the walk runs
-    # to the filesystem root, the fallback returns the cwd, and the sandbox's own
-    # name is rendered. The test looks like it proved something about the walk.
-    wrong_e_seals_cwd_and_trusts_the_ancestors(tmp_path)
+    # GREEN IN A WORLD WITH NO MARKED ANCESTOR, and the ceiling is how that world
+    # is BUILT rather than hoped for. Until 2026-09-08 this line ran the walk
+    # against the real ancestors of tmp_path and asserted the answer a
+    # /tmp-shaped host gives; on the Windows runner tmp_path lives under the user
+    # profile, an ancestor answered, and the proof went red - the file that
+    # teaches SHALLOW_SANDBOX asking the host what the answer should be. With the
+    # ceiling at tmp_path the walk cannot leave the tree this test made, so the
+    # claim is about the walk on every runner.
+    with patch(f"{__name__}.WALK_CEILING", tmp_path):
+        wrong_e_seals_cwd_and_trusts_the_ancestors(tmp_path)
 
-    # RED ON A HOST WHERE TEMP LIVES UNDER THE USER PROFILE. Same patch, same
-    # production code, and the walk stops at `runneradmin` instead.
+    # RED WHERE TEMP LIVES UNDER THE USER PROFILE. Same patch, same production
+    # code, and the walk stops at `runneradmin` instead. No ceiling here: the
+    # marked ancestor is inside the built tree and answers first, so this half
+    # never reaches the host either.
     with pytest.raises(AssertionError):
         wrong_e_seals_cwd_and_trusts_the_ancestors(sandbox_below_a_marked_ancestor)
 
@@ -618,3 +670,6 @@ def test_the_wrong_shapes_are_the_ones_this_pack_would_flag() -> None:
     wrong_a_compares_a_listing_against_an_ordered_literal(PurePosixPath)
     wrong_b_injects_the_failure_through_the_filesystem(posix_writer)
     wrong_c_asserts_on_an_os_filled_attribute(posix_launcher)
+    # Each of the three runs against a POSIX-shaped STAND-IN, not against this
+    # machine. That is the difference between showing a divergence and being
+    # subject to one, and it is the line this file crossed once.
