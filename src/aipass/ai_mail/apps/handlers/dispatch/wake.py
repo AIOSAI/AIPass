@@ -528,7 +528,7 @@ def _check_pid_alive(pid: int) -> bool:
 def _is_zombie_linux(pid: int) -> bool:
     """Return True if PID is a zombie (Linux /proc/status check)."""
     try:
-        with open(f"/proc/{pid}/status", "r") as f:
+        with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("State:"):
                     return "Z" in line

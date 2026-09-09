@@ -120,7 +120,7 @@ def load_index() -> Dict[str, Any]:
     """
     if INDEX_PATH.exists():
         try:
-            with open(INDEX_PATH) as f:
+            with open(INDEX_PATH, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.warning(f"[indexer] Failed to load index file: {e}")
@@ -152,7 +152,7 @@ def save_index(index: Dict[str, Any]) -> Dict[str, Any]:
         index["metadata"]["last_updated"] = datetime.now().isoformat()
         index["metadata"]["total_files"] = len(index["files"])
 
-        with open(INDEX_PATH, "w") as f:
+        with open(INDEX_PATH, "w", encoding="utf-8") as f:
             json.dump(index, f, indent=2)
 
         return {"success": True}

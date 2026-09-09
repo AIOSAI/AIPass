@@ -88,7 +88,7 @@ class TestSubscribePersists:
 
             import json
 
-            data = json.loads(sub_file.read_text())
+            data = json.loads(sub_file.read_text(encoding="utf-8"))
             assert data == {"chat_id": 42, "mode": "default"}
 
     def test_subscribe_roundtrip_reload(self, tmp_path, _patch_base_bot_deps):
@@ -97,7 +97,7 @@ class TestSubscribePersists:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}))
+        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}), encoding="utf-8")
 
         result = bot._load_monitor_subscription()
 
@@ -175,7 +175,7 @@ class TestBootMonitor:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}))
+        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}), encoding="utf-8")
 
         with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.LogStreamer") as MockStreamer:
             mock_instance = MagicMock()
@@ -204,7 +204,7 @@ class TestBootMonitor:
     def test_boot_noop_when_empty_subscription(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         sub_file: Path = _patch_base_bot_deps
-        sub_file.write_text("{}")
+        sub_file.write_text("{}", encoding="utf-8")
 
         with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.LogStreamer") as MockStreamer:
             bot._boot_monitor()
@@ -215,7 +215,7 @@ class TestBootMonitor:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 99, "mode": "all"}))
+        sub_file.write_text(json.dumps({"chat_id": 99, "mode": "all"}), encoding="utf-8")
 
         with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.LogStreamer") as MockStreamer:
             MockStreamer.return_value = MagicMock()
@@ -464,7 +464,7 @@ class TestMonitorOff:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}))
+        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}), encoding="utf-8")
 
         with patch.object(bot, "send_message"):
             bot._monitor_unsubscribe(42)
@@ -558,7 +558,7 @@ class TestMonitorStatus:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}))
+        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}), encoding="utf-8")
         mock_streamer = MagicMock()
         mock_streamer._running = True
         bot._monitor_streamer = mock_streamer
@@ -574,7 +574,7 @@ class TestMonitorStatus:
         sub_file: Path = _patch_base_bot_deps
         import json
 
-        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}))
+        sub_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}), encoding="utf-8")
         bot._monitor_streamer = MagicMock(_running=True)
 
         with patch.object(bot, "send_message") as mock_send:

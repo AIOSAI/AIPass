@@ -23,7 +23,7 @@ from unittest.mock import patch, MagicMock
 def _make_old_file(path: Path, age_days: int) -> None:
     """Create a file and backdate its mtime."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("stale log content\n")
+    path.write_text("stale log content\n", encoding="utf-8")
     old_time = time.time() - (age_days * 86400)
     os.utime(path, (old_time, old_time))
 

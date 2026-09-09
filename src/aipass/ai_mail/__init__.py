@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # Import-free type visibility; never executed at runtime.
     from pathlib import Path
 
-__all__ = ["FEED_PATH", "feed_path", "outstanding_dispatches", "register_path"]
+__all__ = ["FEED_PATH", "feed_path", "outstanding_dispatches", "register_path"]  # noqa: F822 - FEED_PATH resolves via __getattr__ (PEP 562), not a module-level binding
 
 
 def feed_path() -> "Path":

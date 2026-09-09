@@ -42,7 +42,7 @@ def _write_registry(
         "metadata": metadata or {"version": "1.0.0"},
         "branches": branches,
     }
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path
 
 

@@ -65,7 +65,7 @@ def tmp_local_json_with_progress(tmp_local_json: Path) -> Path:
             "stages": {"1": {}, "2": {}, "3": {}},
         }
     }
-    tmp_local_json.write_text(json.dumps(data))
+    tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
     return tmp_local_json
 
 
@@ -137,7 +137,7 @@ class TestSaveStage:
     def test_preserves_existing_stages(self, tmp_local_json_with_progress: Path) -> None:
         """Earlier stage data is not overwritten when saving a later stage."""
         _save_stage(4, {"new": "data"})
-        stored = json.loads(tmp_local_json_with_progress.read_text())
+        stored = json.loads(tmp_local_json_with_progress.read_text(encoding="utf-8"))
         assert "1" in stored["setup_progress"]["stages"]
         assert "4" in stored["setup_progress"]["stages"]
 

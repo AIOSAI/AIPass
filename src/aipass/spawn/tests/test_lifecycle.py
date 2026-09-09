@@ -135,7 +135,7 @@ class TestDeleteBranch:
         assert (archive_path / ".trinity" / "passport.json").exists()
 
         # Registry should no longer contain TEST_API
-        reg = json.loads(mock_registry.read_text())
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "TEST_API" not in names
 

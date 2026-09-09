@@ -95,7 +95,7 @@ class TestCheckTelethonSetup:
             session_path,
         )
         session_file = Path(str(session_path) + ".session")
-        session_file.write_text("session data")
+        session_file.write_text("session data", encoding="utf-8")
 
         ready, reason = check_telethon_setup()
         assert ready is True

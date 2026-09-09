@@ -243,7 +243,7 @@ class TestDiscoverSkillsInPath:
 
 class TestParseFrontmatter:
     def test_valid_file(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        with tempfile.NamedTemporaryFile(encoding="utf-8", mode="w", suffix=".md", delete=False) as f:
             f.write("---\nname: test\ndescription: Hello\n---\n\n# Body\n")
             f.flush()
             result = parse_frontmatter(f.name)

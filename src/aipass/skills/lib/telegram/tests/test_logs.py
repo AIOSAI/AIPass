@@ -85,7 +85,7 @@ class TestLogsOn:
             MockStreamer.return_value = MagicMock()
             bot._logs_start(42, "all")
 
-            data = json.loads(pref_file.read_text())
+            data = json.loads(pref_file.read_text(encoding="utf-8"))
             assert data == {"chat_id": 42, "mode": "all"}
 
     def test_on_starts_streamer(self, tmp_path, _patch_base_bot_deps):
@@ -185,7 +185,7 @@ class TestLogsErrors:
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.LogStreamer", return_value=MagicMock()),
         ):
             bot._logs_start(42, "default")
-            data = json.loads(pref_file.read_text())
+            data = json.loads(pref_file.read_text(encoding="utf-8"))
             assert data["mode"] == "default"
 
 
@@ -215,7 +215,7 @@ class TestLogsOff:
         with patch.object(bot, "send_message"):
             bot._logs_stop(42)
 
-        data = json.loads(pref_file.read_text())
+        data = json.loads(pref_file.read_text(encoding="utf-8"))
         assert data["mode"] == "off"
 
     def test_off_sends_confirmation(self, tmp_path, _patch_base_bot_deps):
@@ -254,7 +254,7 @@ class TestLogsStatus:
     def test_status_when_disabled(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "off"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "off"}), encoding="utf-8")
 
         with patch.object(bot, "send_message") as mock_send:
             bot._logs_status(42)
@@ -264,7 +264,7 @@ class TestLogsStatus:
     def test_status_when_active(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}), encoding="utf-8")
         bot._log_streamer = MagicMock(_running=True)
 
         with patch.object(bot, "send_message") as mock_send:
@@ -276,7 +276,7 @@ class TestLogsStatus:
     def test_status_shows_errors_mode(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}), encoding="utf-8")
         bot._log_streamer = MagicMock(_running=True)
 
         with patch.object(bot, "send_message") as mock_send:
@@ -287,7 +287,7 @@ class TestLogsStatus:
     def test_status_shows_branch_name(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "all"}), encoding="utf-8")
         bot._log_streamer = MagicMock(_running=True)
 
         with patch.object(bot, "send_message") as mock_send:
@@ -396,14 +396,14 @@ class TestLogsPersistence:
     def test_load_returns_none_on_corrupt_json(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text("not json{{{")
+        pref_file.write_text("not json{{{", encoding="utf-8")
 
         assert bot._load_logs_preference() is None
 
     def test_load_returns_none_on_non_dict(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text('"just a string"')
+        pref_file.write_text('"just a string"', encoding="utf-8")
 
         assert bot._load_logs_preference() is None
 
@@ -435,7 +435,7 @@ class TestAutoStartPreference:
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         bot._active_chat_id = None
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "default"}), encoding="utf-8")
 
         with (
             patch.object(bot, "_write_mirror_mapping"),
@@ -452,7 +452,7 @@ class TestAutoStartPreference:
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         bot._active_chat_id = None
         pref_file: Path = _patch_base_bot_deps
-        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "off"}))
+        pref_file.write_text(json.dumps({"chat_id": 42, "mode": "off"}), encoding="utf-8")
 
         with (
             patch.object(bot, "_write_mirror_mapping"),

@@ -171,7 +171,7 @@ def _safe_write_dashboard(
         return True
     try:
         content = data if isinstance(data, str) else json.dumps(data, indent=2) + "\n"
-        dashboard_path.write_text(content)
+        dashboard_path.write_text(content, encoding="utf-8")
         return True
     except OSError as e:
         logger.error("Failed to write dashboard for %s: %s", branch_name, e)
@@ -187,7 +187,7 @@ def _update_spawn_template(
     if not spawn_path.exists():
         return
     try:
-        spawn_data = json.loads(spawn_path.read_text())
+        spawn_data = json.loads(spawn_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to read spawn template: %s", e)
         result["errors"].append(f"SPAWN_TEMPLATE: {e}")
