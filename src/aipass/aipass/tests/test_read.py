@@ -40,7 +40,7 @@ class TestHandleCommandRouting:
     def test_help_flag(self) -> None:
         """--help prints usage and returns True."""
         with patch(f"{_MOD}.console") as mock_con:
-            with patch(f"{_MOD}.json_handler"):
+            with patch(f"{_MOD}.json_handler", autospec=True):
                 assert handle_command("read", ["--help"]) is True
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
         assert "aipass read" in printed
@@ -48,7 +48,7 @@ class TestHandleCommandRouting:
     def test_info_flag(self) -> None:
         """--info prints introspection and returns True."""
         with patch(f"{_MOD}.console") as mock_con:
-            with patch(f"{_MOD}.json_handler"):
+            with patch(f"{_MOD}.json_handler", autospec=True):
                 assert handle_command("read", ["--info"]) is True
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
         assert "read" in printed
@@ -66,7 +66,7 @@ class TestBranchList:
         """All branches from list_branches appear in output."""
         with patch(f"{_MOD}.list_branches", return_value=["drone", "hooks"]):
             with patch(f"{_MOD}.console") as mock_con:
-                with patch(f"{_MOD}.json_handler"):
+                with patch(f"{_MOD}.json_handler", autospec=True):
                     assert handle_command("read", []) is True
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
         assert "drone" in printed
@@ -76,7 +76,7 @@ class TestBranchList:
         """No-args gate reports module identity, per the introspection standard."""
         with patch(f"{_MOD}.list_branches", return_value=["drone"]):
             with patch(f"{_MOD}.console") as mock_con:
-                with patch(f"{_MOD}.json_handler"):
+                with patch(f"{_MOD}.json_handler", autospec=True):
                     assert handle_command("read", []) is True
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
         assert "Module:" in printed
@@ -86,7 +86,7 @@ class TestBranchList:
         """The roster comes from list_branches on every call, never a frozen list."""
         with patch(f"{_MOD}.list_branches", return_value=["zeta_brand_new"]):
             with patch(f"{_MOD}.console") as mock_con:
-                with patch(f"{_MOD}.json_handler"):
+                with patch(f"{_MOD}.json_handler", autospec=True):
                     handle_command("read", [])
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
         assert "zeta_brand_new" in printed
@@ -106,7 +106,7 @@ class TestRenderReadme:
         readme.write_text("# Drone\nRoutes commands.\n", encoding="utf-8")
         with patch(f"{_MOD}.get_readme_path", return_value=readme):
             with patch(f"{_MOD}.console") as mock_con:
-                with patch(f"{_MOD}.json_handler"):
+                with patch(f"{_MOD}.json_handler", autospec=True):
                     assert handle_command("read", ["drone"]) is True
         # Path header printed + a Markdown object rendered
         printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
@@ -120,7 +120,7 @@ class TestRenderReadme:
         readme.write_text("# Drone\n", encoding="utf-8")
         with patch(f"{_MOD}.get_readme_path", return_value=readme) as mock_get:
             with patch(f"{_MOD}.console"):
-                with patch(f"{_MOD}.json_handler"):
+                with patch(f"{_MOD}.json_handler", autospec=True):
                     handle_command("read", ["@drone"])
         mock_get.assert_called_once_with("drone")
 
@@ -130,7 +130,7 @@ class TestRenderReadme:
             with patch(f"{_MOD}.list_branches", return_value=["drone", "prax"]):
                 with patch(f"{_MOD}.console") as mock_con:
                     with patch(f"{_MOD}.error") as mock_err:
-                        with patch(f"{_MOD}.json_handler"):
+                        with patch(f"{_MOD}.json_handler", autospec=True):
                             assert handle_command("read", ["nope"]) is True
         err_text = " ".join(str(a) for call in mock_err.call_args_list for a in call[0])
         assert "nope" in err_text
@@ -144,7 +144,7 @@ class TestRenderReadme:
         with patch(f"{_MOD}.get_readme_path", return_value=readme):
             with patch(f"{_MOD}.read_readme_at", return_value="# Handler\n") as mock_read:
                 with patch(f"{_MOD}.console"):
-                    with patch(f"{_MOD}.json_handler"):
+                    with patch(f"{_MOD}.json_handler", autospec=True):
                         assert handle_command("read", ["drone"]) is True
         mock_read.assert_called_once_with(readme)
 
@@ -154,6 +154,6 @@ class TestRenderReadme:
         with patch(f"{_MOD}.get_readme_path", return_value=missing):
             with patch(f"{_MOD}.console"):
                 with patch(f"{_MOD}.error") as mock_err:
-                    with patch(f"{_MOD}.json_handler"):
+                    with patch(f"{_MOD}.json_handler", autospec=True):
                         assert handle_command("read", ["drone"]) is True
         assert mock_err.called

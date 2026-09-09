@@ -29,6 +29,37 @@ PERSISTENT_ARTIFACTS = ARTIFACT_DIRS - TRANSIENT_DIRS
 TEMPLATE_CLASSES = sorted(get_available_classes())
 
 
+def test_the_class_registry_declares_two_classes_and_the_collector_finds_both():
+    """The floor under every ``TEMPLATE_CLASSES`` parametrize in this file, derived twice.
+
+    ``TEMPLATE_CLASSES`` is computed at collection time by
+    ``get_available_classes()``. A collector that came back empty would turn the
+    four parametrized canaries below into SKIPPED, and the summary would read
+    green — so the count is pinned here from the RAW SOURCE of
+    ``class_registry``, read as an AST rather than by calling the collector that
+    is under judgement. A collector blinded to one class fails this, not the
+    canaries it silently emptied.
+    """
+    import ast
+
+    from aipass.spawn.apps.handlers import class_registry
+
+    source = Path(class_registry.__file__).read_text(encoding="utf-8")
+    declared = next(
+        node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "CITIZEN_CLASSES" for t in node.targets)
+    )
+    from_source = sorted(key.value for key in declared.keys)
+
+    assert len(from_source) == 2, f"class_registry.py declares {from_source}, not the two documented classes"
+    assert from_source == ["manager", "specialist"], from_source
+    assert len(TEMPLATE_CLASSES) == 2, f"get_available_classes() returned {TEMPLATE_CLASSES}"
+    assert TEMPLATE_CLASSES == from_source, (
+        f"the collector and the source disagree: {TEMPLATE_CLASSES} vs {from_source}"
+    )
+
+
 def _template_registry(class_name: str) -> Path:
     return get_template_dir(class_name) / ".spawn" / ".template_registry.json"
 
@@ -64,7 +95,12 @@ def test_no_build_artifacts_tracked_in_registry(class_name):
 
 
 def test_copy_engine_skips_artifact_dirs():
-    """The skip set is the enforcement point — keep it honest about every cache dir."""
+    """``SKIP_NAMES`` contains every name in ``ARTIFACT_DIRS``, so no cache dir is ever copied.
+
+    The copy engine decides what a newborn is born with by name, and this is
+    the one place that decision is written down. A cache dir missing from
+    ``SKIP_NAMES`` is copied into every citizen minted after it.
+    """
     from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 
     assert ARTIFACT_DIRS <= set(SKIP_NAMES)

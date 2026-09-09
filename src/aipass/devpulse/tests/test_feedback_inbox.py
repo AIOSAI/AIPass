@@ -81,14 +81,15 @@ class TestListMessages:
             }
         )
         inbox.list_messages()
-        # list_messages prints to stderr via Rich Console
-        # We just verify it doesn't raise
+        assert "no feedback messages" in capsys.readouterr().err.lower()
 
-    def test_lists_all_messages(self, populated_inbox):
-        """Should not raise when listing populated inbox."""
-        # list_messages outputs to stderr via Rich Console; no assertion on output
-        # Just verify it runs without error
+    def test_lists_all_messages(self, populated_inbox, capsys):
+        """Every stored message id is on the listing, none invented."""
         inbox.list_messages()
+        err = capsys.readouterr().err
+        for msg in populated_inbox["messages"]:
+            assert msg["id"] in err
+        assert "no feedback messages" not in err.lower()
 
 
 class TestViewMessage:
@@ -116,14 +117,21 @@ class TestViewMessage:
         data = storage.load_inbox()
         assert data["unread_count"] == 2  # Unchanged
 
-    def test_view_nonexistent_message(self, populated_inbox):
-        """Should handle nonexistent message ID gracefully."""
-        # Should not raise
+    def test_view_nonexistent_message(self, populated_inbox, capsys):
+        """An unknown id says so by name and changes nothing in the inbox."""
         inbox.view_message("zzz99999")
+        assert "message zzz99999 not found" in capsys.readouterr().err.lower()
+        assert storage.load_inbox()["unread_count"] == populated_inbox["unread_count"]
 
-    def test_view_message_with_thread(self, populated_inbox):
-        """Should display thread replies without error."""
+    def test_view_message_with_thread(self, populated_inbox, capsys):
+        """A message with replies prints the thread header and every reply body."""
         inbox.view_message("bbb22222")
+        err = capsys.readouterr().err
+        msg = next(m for m in populated_inbox["messages"] if m["id"] == "bbb22222")
+        assert msg["thread"], "fixture must carry a thread for this pin to mean anything"
+        assert f"Thread ({len(msg['thread'])} replies):" in err
+        for reply in msg["thread"]:
+            assert reply["body"] in err
 
 
 class TestClearMessage:
@@ -199,8 +207,8 @@ class TestClearAllRead:
         data = storage.load_inbox()
         assert data["total_messages"] == 1
 
-    def test_empty_inbox_clear_all(self, mock_feedback_dir):
-        """Should handle empty inbox gracefully."""
+    def test_empty_inbox_clear_all(self, mock_feedback_dir, capsys):
+        """An empty inbox says there is nothing to clear and stays empty."""
         storage.save_inbox(
             {
                 "mailbox": "feedback",
@@ -210,6 +218,8 @@ class TestClearAllRead:
             }
         )
         inbox.clear_all_read()
+        assert "no read messages to clear" in capsys.readouterr().err.lower()
+        assert storage.load_inbox()["total_messages"] == 0
 
 
 class TestGetSummary:

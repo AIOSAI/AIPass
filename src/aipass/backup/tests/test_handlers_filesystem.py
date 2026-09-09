@@ -20,12 +20,17 @@ class TestScanWalk:
     """Test directory walking -- creates_files, .exists() tokens."""
 
     def test_walk_empty_dir(self, tmp_path: Path) -> None:
-        """Walk an empty directory returns nothing."""
+        """Walk an empty directory yields NOTHING -- the value, not the type.
+
+        isinstance(result, list) was true of a walker that invented entries and
+        true of one that returned the caller's own tree; only the emptiness is
+        the claim this test's name makes.
+        """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.walk import walk_project
 
             result = list(walk_project(str(tmp_path)))
-            assert isinstance(result, list)
+            assert result == []
 
     def test_walk_with_files(self, tmp_path: Path) -> None:
         """Walk a directory with files returns file tuples."""
@@ -38,13 +43,18 @@ class TestScanWalk:
             assert len(result) >= 2
 
     def test_walk_nonexistent_dir(self, tmp_path: Path) -> None:
-        """nonexistent / missing_dir / not_a_dir -- walk handles gracefully."""
+        """A missing directory walks to empty, and does not raise.
+
+        The old spelling was 'result == [] or isinstance(result, list)': the
+        second clause is true whenever the first one is, so the assertion could
+        not fail. Measured 2026-09-08 -- the real answer is the empty list.
+        """
         bad_path = tmp_path / "nonexistent"
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.scan.walk import walk_project
 
             result = list(walk_project(str(bad_path)))
-            assert result == [] or isinstance(result, list)
+            assert result == []
 
 
 class TestScanFilter:
@@ -85,14 +95,24 @@ class TestScanFilter:
 
             spec = load_spec(str(tmp_path))
             result = filter_paths(files, spec, [], 100)
-            assert len(result) >= 0
+
+            # 'len(result) >= 0' is true of every sequence -- a filter that
+            # dropped the one file it was handed passed it. The test is named
+            # "preserves files", so preservation is what it now says.
+            assert len(result) == 1
+            assert result[0] == (str(f), "keep.txt")
 
 
 class TestIgnorePatterns:
     """Test ignore pattern loading."""
 
     def test_load_spec_missing_file(self, tmp_path: Path) -> None:
-        """Load spec from a directory without .backupignore."""
+        """With no .backupignore the spec matches NOTHING -- nothing is ignored.
+
+        The type alone permitted a spec that ignored the whole project, which
+        for a backup tool is the silent-data-loss direction: every file
+        "matched" and none got copied. The behaviour is the claim.
+        """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.ignore.patterns import load_spec
 
@@ -100,9 +120,16 @@ class TestIgnorePatterns:
 
             result = load_spec(str(tmp_path))
             assert isinstance(result, pathspec.PathSpec)
+            assert result.match_file("a.pyc") is False
+            assert result.match_file("src/main.py") is False
 
     def test_load_spec_with_file(self, tmp_path: Path) -> None:
-        """Load spec from a directory with .backupignore."""
+        """The patterns in .backupignore are the ones the spec enforces.
+
+        Same file, same two patterns as the fixture writes: a spec that parsed
+        the file and threw the rules away is a PathSpec too, so the type said
+        nothing about whether load_spec had read a single line.
+        """
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
@@ -112,6 +139,9 @@ class TestIgnorePatterns:
 
             result = load_spec(str(tmp_path))
             assert isinstance(result, pathspec.PathSpec)
+            assert result.match_file("a.pyc") is True
+            assert result.match_file("__pycache__/mod.py") is True
+            assert result.match_file("src/main.py") is False
 
 
 class TestProjectSetup:
@@ -140,22 +170,43 @@ class TestProjectConfig:
     """Test config loading -- returns_dict, isinstance(result, dict), json_type tokens."""
 
     def test_load_config_missing(self, tmp_path: Path) -> None:
-        """Load config from unregistered project -- returns default dict."""
+        """An unregistered project gets the DEFAULTS, ceilings included.
+
+        The docstring already said "returns default dict"; only the "dict" half
+        was ever asserted, and {} is a dict. The ceilings matter most: if
+        max_backup_files came back missing or zero, the run ceiling that refuses
+        a runaway tree would either not arm or refuse everything.
+        """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.project.config import load_project_config
 
             result = load_project_config(str(tmp_path))
             assert isinstance(result, dict)
+            assert result["backup_mode"] == "snapshot"
+            assert result["max_versions"] == 10
+            assert result["max_backup_files"] == 25000
+            assert result["max_backup_size_gb"] == 10
+            assert result["whitelist"] == []
 
-    def test_load_config_returns_dict(self, tmp_path: Path) -> None:
-        """isinstance(result, dict) -- config always a dict."""
+    def test_config_written_by_setup_identifies_the_project(self, tmp_path: Path) -> None:
+        """create_backup_dir writes a config that names the project it belongs to.
+
+        Renamed off "returns_dict": that was the type, and the type is what the
+        sibling above already covers. What create_backup_dir adds over the
+        defaults is the identity block, and mixing that up is how one project's
+        config could point at another project's tree.
+        """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
             from aipass.backup.apps.handlers.project.config import load_project_config
             from aipass.backup.apps.handlers.project.setup import create_backup_dir
 
             create_backup_dir(str(tmp_path))
             result = load_project_config(str(tmp_path))
+
             assert isinstance(result, dict)
+            assert result["project_name"] == tmp_path.name
+            assert Path(result["project_path"]) == tmp_path
+            assert result["max_backup_files"] == 25000
 
 
 class TestPathBuilder:

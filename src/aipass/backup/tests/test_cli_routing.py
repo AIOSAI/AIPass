@@ -166,15 +166,31 @@ class TestPrintHelp:
     """Test print_help and print_introspection existence."""
 
     def test_entry_point_has_print_help(self) -> None:
-        """print_help function exists in backup.py entry point.
+        """print_help is callable on the real entry module and prints the verbs.
 
-        Backup.py has print_help but imports heavy dependencies
-        (rich.progress, all handler subpackages). We verify the
-        token coverage here; the actual function is tested via
-        the CLI routing integration in drone.
+        This unit used to be a bare 'assert True' under a docstring saying the
+        function was "verified by reading backup.py source" -- it was true of
+        every program, including one with no print_help at all. The heavy
+        imports the old comment worried about are already paid for elsewhere in
+        this file (TestHelpNeverExecutes imports the same module), so the
+        function can simply be called and read.
         """
-        # print_help verified by reading backup.py source
-        assert True
+        from aipass.backup.apps import backup as entry
+
+        assert callable(entry.print_help)
+
+        with patch.object(entry, "console") as console:
+            entry.print_help()
+
+        printed = "\n".join(str(call) for call in console.print.call_args_list)
+
+        # The COMMANDS block marks each verb with [green]; the EXAMPLES block
+        # below it spells the same words in [dim]. A bare "versioned" in printed
+        # was satisfied by the examples alone -- measured: renaming the COMMANDS
+        # row left that weaker pin green. The marker is what makes it a claim
+        # about the command reference rather than about the whole page.
+        for verb in ("snapshot", "versioned", "all", "register", "status", "settings"):
+            assert f"[green]{verb}[/green]" in printed, f"COMMANDS block lost {verb}"
 
     @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
     def test_print_introspection_exists(self, mod_path: str) -> None:
@@ -348,19 +364,40 @@ class TestStubFailsHonestly:
     Regression: 'backup settings <project>' logged to file, printed nothing and
     returned success, while print_help and the README advertised it as a
     working command.
+
+    Second regression (refusal sweep 2026-09-07): saying so was not enough.
+    The stub printed its warning and returned True, so main() exited 0 --
+    measured from the shell, 'backup settings <project>' exited 0 before this
+    cure and exits 1 after it. The stub now raises NotImplementedError, which
+    route_command catches and main reports as a named failure.
     """
 
-    def test_settings_stub_announces_itself(self) -> None:
-        """Invoking the settings stub with a project prints an honest notice."""
-        mod, console = _load_module_fresh("aipass.backup.apps.modules.settings")
+    def test_settings_stub_refuses_and_names_the_reason(self) -> None:
+        """The stub raises rather than returning a success the caller believes."""
+        mod, _console = _load_module_fresh("aipass.backup.apps.modules.settings")
 
-        result = mod.handle_command("settings", ["/some/project"])
+        with pytest.raises(NotImplementedError) as caught:
+            mod.handle_command("settings", ["/some/project"])
 
-        assert result is True
-        console.print.assert_called()
-        mod.warning.assert_called_once()
-        announced = str(mod.warning.call_args).lower()
-        assert "not implemented" in announced or "deferred" in announced
+        # The exact sentence the operator gets, not an either/or over two words.
+        assert str(caught.value) == (
+            "settings is not implemented \u2014 the settings UI is deferred (Phase 3). "
+            "Edit .backup/config.json in the project directly for now."
+        )
+
+    def test_settings_stub_leaves_the_run_marked_failed(self) -> None:
+        """main() turns the raise into exit 1, naming module and reason.
+
+        The whole point of the sweep row: a refusal that exits 0 is a refusal
+        nobody downstream can see. This drives the REAL entry point, so the
+        route_command handler and main's failure branch are both on the path.
+        """
+        from aipass.backup.apps import backup as entry
+
+        with patch.object(sys, "argv", ["backup", "settings", "/some/project"]):
+            code = entry.main()
+
+        assert code == 1
 
 
 class TestUnknownCommandNotSwallowed:
@@ -411,6 +448,29 @@ class TestHelpNeverExecutes:
         ["drive_clear", str(Path(tempfile.gettempdir()) / "probe_project"), "--force", "--help"],
         ["restore", str(Path(tempfile.gettempdir()) / "probe_project"), "file", "a.py", "b.py", "--help"],
     ]
+
+    def test_the_help_sweep_still_covers_every_shape_it_was_built_for(self) -> None:
+        """Count guard for HELP_ARGV -- the sweep cannot quietly shrink.
+
+        The table is a literal in this class body, so it cannot vanish at
+        collection time, but nothing pinned its SIZE: a row deleted in a rebase
+        removed a verb from the sweep and the file still printed all-green with
+        one case fewer. Five shapes are deliberate -- long flag, short flag, a
+        flag behind another flag (--force), and a flag behind positional args
+        (restore's two operands) -- because each is a different position for
+        main()'s 'any arg is a help flag' scan to miss.
+        """
+        assert len(self.HELP_ARGV) == 5
+        assert [row[0] for row in self.HELP_ARGV] == [
+            "snapshot",
+            "versioned",
+            "all",
+            "drive_clear",
+            "restore",
+        ]
+        # Every row must actually carry a help flag, or it sweeps nothing.
+        assert all(row[-1] in ("--help", "-h") for row in self.HELP_ARGV)
+        assert sum(1 for row in self.HELP_ARGV if "-h" in row) == 1
 
     @pytest.mark.parametrize("argv", HELP_ARGV)
     def test_help_after_project_never_runs_the_verb(self, argv: list[str]) -> None:

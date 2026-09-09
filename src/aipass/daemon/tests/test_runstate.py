@@ -408,8 +408,28 @@ class TestWindowClosedUnrun:
 
 
 class TestCatchUpDueness:
-    def test_off_by_default_a_closed_window_does_not_fire(self):
+    def test_on_by_default_a_closed_window_fires_late(self):
+        """DPLAN-0332 flipped this, and the flip is the whole point of the plan.
+
+        Was test_off_by_default_a_closed_window_does_not_fire, pinning ruling 6
+        of 2026-09-07 (catch-up opt-in). Patrick superseded it on 09-08 after
+        the 23h gap: every enabled job in the fleet had left catch_up unset, so
+        opt-in meant nothing recovered. A job that states nothing now catches up.
+
+        The pin READS THE FLAG rather than hard-coding one world. The lane is
+        gated by RECOVERY_LANE_LIVE while @devpulse and Patrick run the
+        controlled live proof, and a pin that asserted the flipped world would
+        go red on a tree that is behaving exactly as ruled. What must always
+        hold is that the flag and the default agree.
+        """
         job = windowed_job()
+        assert job["schedule"].get("catch_up") is None, "this job must state nothing about catch_up"
+        due = is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0))
+        assert due is runstate_mod.RECOVERY_LANE_LIVE
+
+    def test_explicit_false_opts_out(self):
+        """The escape hatch: a job whose late run is worthless says so."""
+        job = windowed_job(catch_up=False)
         assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is False
 
     def test_opted_in_a_closed_window_fires_late(self):

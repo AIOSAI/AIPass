@@ -93,12 +93,18 @@ class TestGetDetector:
     """Tests for get_detector() singleton."""
 
     def test_returns_branch_detector_instance(self):
-        """get_detector() should return a BranchDetector instance."""
+        """get_detector() builds a detector with empty caches and parks it on the module."""
         mod = _import_branch_detector()
         setattr(mod, "_detector_instance", None)
-        with patch.object(mod.BranchDetector, "__init__", return_value=None):
+        with patch.object(mod.BranchDetector, "_load_registry", autospec=True):
             detector = mod.get_detector()
-            assert isinstance(detector, mod.BranchDetector)
+
+        assert isinstance(detector, mod.BranchDetector)
+        assert detector.branch_map == {}
+        assert detector.log_map == {}
+        assert detector.module_map == {}
+        assert detector.known_branches == set()
+        assert mod._detector_instance is detector, "the singleton slot must hold what was handed back"
 
     def test_returns_same_instance_on_second_call(self):
         """get_detector() should return the same singleton on repeated calls."""
@@ -584,42 +590,61 @@ class TestFileEventCallback:
         mod.global_queue.enqueue.assert_called_once()
 
     def test_maps_event_types_correctly(self):
-        """Should map event types to lowercase actions."""
+        """A known event type gets its mapped action and the priority that goes with it."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
         mod.file_event_callback("CLI", "CREATED", "/file.py")
 
-        call_kwargs = mod.MonitoringEvent.call_args
-        # Check the action kwarg
-        assert call_kwargs[1]["action"] == "created" or call_kwargs.kwargs.get("action") == "created"
+        kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert kwargs["action"] == "created"
+        assert kwargs["priority"] == 2, "created is one of the three that outrank a modify"
+        assert kwargs["event_type"] == "file"
+        assert kwargs["branch"] == "CLI"
+        assert kwargs["message"] == "/file.py"
+        assert kwargs["level"] == "info"
 
     def test_handles_unknown_event_type(self):
-        """Should lowercase unknown event types."""
+        """An event type outside the map is lowercased and falls to the default priority."""
         mod, _, mock_eq, _ = _import_file_watcher_integration()
 
         mod.file_event_callback("FLOW", "RENAMED", "/file.py")
 
-        call_kwargs = mod.MonitoringEvent.call_args
-        assert call_kwargs[1]["action"] == "renamed" or call_kwargs.kwargs.get("action") == "renamed"
+        kwargs = mod.MonitoringEvent.call_args.kwargs
+        assert kwargs["action"] == "renamed"
+        assert kwargs["priority"] == 3, "an unmapped action takes the priority_map default"
+        assert kwargs["branch"] == "FLOW"
 
     def test_handles_exception(self):
-        """Should catch and log exceptions."""
-        mod, _, _, _ = _import_file_watcher_integration()
+        """A failing event build is swallowed: nothing is enqueued and the error is logged."""
+        mod, _, mock_eq, _ = _import_file_watcher_integration()
         mod.MonitoringEvent.side_effect = Exception("boom")
 
-        # Should not raise
-        mod.file_event_callback("PRAX", "MODIFIED", "/file.py")
+        assert mod.file_event_callback("PRAX", "MODIFIED", "/file.py") is None
+
+        mock_eq.global_queue.enqueue.assert_not_called()
+        mod.logger.error.assert_called_once()
+        message = mod.logger.error.call_args.args[0]
+        assert "unexpected Exception (PRAX MODIFIED /file.py)" in message
+        assert "file watching continues" in message
 
 
 class TestGetFileWatcher:
     """Tests for get_file_watcher() singleton."""
 
     def test_returns_file_watcher_manager(self):
-        """get_file_watcher() should return a FileWatcherManager."""
-        mod, _, _, _ = _import_file_watcher_integration()
+        """get_file_watcher() builds an idle manager on the global queue and caches it."""
+        mod, _, mock_eq, _ = _import_file_watcher_integration()
         setattr(mod, "_file_watcher", None)
+
         watcher = mod.get_file_watcher()
+
         assert isinstance(watcher, mod.FileWatcherManager)
+        assert watcher.queue is mock_eq.global_queue, "no queue argument means the global one"
+        assert watcher.running is False
+        assert watcher.observer is None
+        assert watcher.branch_paths == []
+        assert watcher.branch_filter is None
+        assert mod._file_watcher is watcher, "the singleton slot must hold what was handed back"
 
     def test_returns_same_instance(self):
         """get_file_watcher() should return singleton."""
@@ -807,10 +832,17 @@ class TestGetHelpText:
     """Tests for get_help_text()."""
 
     def test_returns_string(self):
-        """get_help_text() should return a string."""
+        """get_help_text() returns the exact three-command menu the loop prints."""
         mod = _import_interactive_filter()
         result = mod.get_help_text()
         assert isinstance(result, str)
+        assert result == (
+            "\n"
+            "Available Commands:\n"
+            "  status          - Show monitoring state\n"
+            "  help            - Show this help\n"
+            "  quit/exit       - Stop monitoring\n"
+        )
 
     def test_contains_key_commands(self):
         """Help text should mention available commands."""

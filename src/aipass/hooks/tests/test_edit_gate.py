@@ -552,10 +552,21 @@ class TestDiagnosticsStateModule:
             assert ds.load() == {}
 
     def test_clear_is_safe_when_the_file_is_already_gone(self, tmp_path: Path):
+        """Clearing an absent state file leaves it absent and reads back empty.
+
+        Had no oracle: it called clear() and asserted nothing, so a clear() that
+        CREATED the file, or left a partial one behind, was green. The gate
+        reads this state to decide whether an edit is fenced, so "absent" and
+        "empty" are the two answers that matter.
+        """
         from aipass.hooks.apps.modules import diagnostics_state as ds
 
-        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
+        absent = tmp_path / "absent.json"
+        with patch.object(ds, "STATE_FILE", absent):
             ds.clear()
+
+            assert not absent.exists()
+            assert ds.load() == {}
 
 
 class TestEditGateExternalProject:

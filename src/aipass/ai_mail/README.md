@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1410 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1447 cases**, 1447 passed / 0 skipped, measured 2026-09-07 from both rootdirs (branch and repo root)
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1422 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1463 cases**, 1463 passed / 0 skipped, measured 2026-09-08 from both rootdirs (branch and repo root)
 
 > Two numbers because they answer different questions: `def test_` counts what
 > was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
@@ -21,6 +21,17 @@
 > "48 modules plus `conftest.py`" and simply forgot `__init__.py`; the total was
 > right and the breakdown was not, which is the harder half to catch because
 > the number a reader checks still adds up.
+>
+> **HOW THE FIRST NUMBER IS COUNTED, because the spelling changes it.** A
+> `def test_` search anchored to the start of a line, allowing indentation and
+> `async`, is the method — an unanchored search over-counts (it matches
+> `def test_` inside a docstring) and an unindented-only search returns roughly
+> half, because most of this suite's units are methods on `Test...` classes.
+> The number above is what that anchored method returns AND what seedgo's
+> pytest_quality corpus reader counts by parsing the AST: two independent
+> methods, one answer, re-measured every time this line moves. It is written
+> down because an earlier edition carried 1410 while the corpus read 1412 on
+> the same day, and nobody could tell which grep had produced it.
 >
 > **UNVERIFIED — fresh-checkout skips.** A previous edition claimed 4
 > live-hygiene tests skip on a fresh checkout (2 in `test_live_mailbox_hygiene.py`,
@@ -655,24 +666,12 @@ for months; the interactive manager lane had not. It does now, unconditionally:
 every route into that spawn comes from `@daemon`, so *attachable* was never the same
 thing as *attended*.
 
-**2 — Fable is managers-only.** *"managers are fable thats it, only manager run
-fable."* `resolve_wake_model(citizen_class, requested)` is the one site that decides:
-
-| Target | Requested model | Runs on |
-|---|---|---|
-| `citizen_class: manager` | anything, or nothing | **`fable`** — overridden, and the override is logged |
-| anyone else | `fable` / `claude-fable-5` / `FABLE` | `DEFAULT_MODEL`, with a warning — the wake still happens |
-| anyone else | anything else, or nothing | unchanged: the `wake.model` field, else `DEFAULT_MODEL` |
-
-- **One read, one source.** `citizen_class` comes from the passport the manager gate
-  already opens. An unreadable passport arrives as `""` — not a manager — the same
-  direction `is_manager()` refuses to fail in; inventing a manager would silently
-  move an ordinary branch onto Fable.
-- **Substring, not equality.** The CLI takes both `fable` and `claude-fable-5`, so a
-  check comparing to the bare alias would let the full id walk straight past the
-  non-manager half of the rule.
-- **The lane names its model.** @vera reached Fable by *CLI default* — the right
-  answer with no decision behind it. Both spawn lanes now state the model they mean.
+**2 — Fable is managers-only.** ***SUPERSEDED 2026-09-08 — see "Fable is granted by
+name" below.*** The 08-30 wording was *"managers are fable thats it, only manager run
+fable"*, and it is recorded here rather than deleted because the rule that replaced it
+was written by watching this one fail: @vera is manager-class, so on 2026-09-08 at
+11:31 she woke on Fable through the daemon's scheduled lane, and nobody had asked her
+to. A rule keyed on a *class* cannot say "this one manager and no other".
 
 **3 — Daemon sessions are marked.** Patrick killed @vera's live session mid-run: it
 was not in the dispatch register (the manager-interactive lane bypasses it) and
@@ -697,6 +696,52 @@ dispatch are two questions; only one of them has a monitor to close it. The
 **headless** lane registers and is closed by `dispatch_monitor`, which is why
 routing scheduled manager wakes through it (`scheduled=True`) answers marking and
 supervision together.
+
+### Fable is granted by name (Patrick, 2026-09-08)
+
+*"only devpulse runs on fable (I carry the admin baggage)."* Every other agent —
+every class, every project, Vera-Studio included — runs `DEFAULT_MODEL` when
+dispatched or scheduled, and lighter models on request. **Patrick alone decides who
+may run Fable**, @devpulse included. This supersedes the 2026-08-30 ruling above
+(compass #323 → #350).
+
+`resolve_wake_model(target_email, requested)` is the one site that decides, and it
+returns a `ModelDecision(model, refusal)`:
+
+| Target | Requested model | Runs on |
+|---|---|---|
+| in the grant | `fable` / `claude-fable-5` / `FABLE` | that model — the grant is permission to **ask** |
+| in the grant | nothing | `DEFAULT_MODEL` — a grant is not a standing assignment |
+| not in the grant | any spelling of Fable | `DEFAULT_MODEL`, **and the refusal is returned** |
+| anyone | anything else, or nothing | unchanged: the `wake.model` field, else `DEFAULT_MODEL` |
+
+- **Granted by name, not by class.** `citizen_class` is no longer an input. It still
+  decides the manager *gate* — who is woken at all versus mailed — and that is a
+  different question the same constant used to answer twice.
+- **The grant lives where the repo cannot ship it.** `CONFIG_FILE` →
+  `.ai_mail.local/safety_config.json` (gitignored), key `fable_allowed`, a list of
+  addresses. Absent, unparseable, or not-a-list falls back to `FABLE_GRANT_DEFAULT`
+  = `{"@devpulse"}` — **never to empty**, because a grant that collapsed on a typo
+  would demote @devpulse silently and the only symptom would be devpulse spawning on
+  opus. An **explicit** `[]` is honoured: that is how you revoke Fable fleet-wide,
+  and it is distinguishable from the key being absent. *(That file pointed at the
+  branch root — tracked territory — until this ruling; nothing existed at either
+  path, so `_load_config` had always returned its own defaults.)*
+- **Refused, never silent, never stalling.** The refusal names the target, the model
+  requested and the ruling date, and it is rendered as a `warn` step on the `model`
+  label so it reaches the dispatch output the caller actually reads — the superseded
+  version only logged it. The wake proceeds on `DEFAULT_MODEL`: the caller asked for
+  a model, not for a veto.
+- **Substring, not equality.** The CLI takes both `fable` and `claude-fable-5`, so a
+  check comparing to the bare alias would let the full id walk past the grant.
+- **Addresses normalised** exactly as `is_wake_blocked` normalises them (one leading
+  `@`, lowercased), on both sides — a policy keyed on an address is worthless if
+  typing it differently promotes *or* demotes a seat.
+- **One resolver, measured.** Three sites in `apps/` name a model:
+  `wake.py:884` (interactive tmux) and `wake.py:1133` (headless `base_args`) both
+  take the value `wake_branch` already resolved, and `daemon.py:423` hardcodes
+  `DEFAULT_MODEL` in a module its own comment documents as dormant. No second path
+  can reach Fable.
 
 ### Admin Lane (`admin=True`)
 
@@ -1179,7 +1224,7 @@ ai_mail/
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
 └── tests/                      # 48 test modules + conftest.py; 1399 def test_,
-                                # 1433 collected cases (selection below)
+                                # 1463 collected cases (selection below)
     ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -1196,7 +1241,6 @@ ai_mail/
     ├── test_upsert.py          # upsert_key repeat-signal collapsing (40 tests)
     ├── test_central_writer.py  # Central stats aggregation
     ├── test_cli_routing.py     # CLI routing + help/version
-    ├── test_json_handler.py    # Shim WIRING only — behaviour is seedgo's contract
     ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)

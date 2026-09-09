@@ -422,7 +422,11 @@ def _cmd_revoke_token(args: List[str]) -> None:
         success(f"Token {token_id} revoked")
         console.print("[dim]Effective on the next request — no restart needed.[/dim]")
     else:
-        warning(f"No active token with id: {token_id}")
+        # A refusal, not a note: nothing was revoked, so an operator scripting
+        # `revoke-token <id> && <next>` must not proceed believing the device
+        # is off. error() names the id and carries the failure to the exit
+        # seam, the same channel its sibling refusal above already uses.
+        error(f"No active token with id: {token_id}")
     console.print()
 
 

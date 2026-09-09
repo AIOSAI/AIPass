@@ -123,6 +123,7 @@ class TestProviderHooksSnapshot:
 
     def test_same_hook_count_per_event(self, baseline, current):
         """Verify the same number of hooks per event in baseline and current."""
+        assert len(baseline) == 8, f"provider baseline should snapshot 8 events, got {sorted(baseline)}"
         for event in baseline:
             expected = len(baseline[event])
             actual = len(current.get(event, []))
@@ -215,27 +216,29 @@ class TestDoubleFire:
         overlap = provider_scripts & project_scripts
 
         # If same script appears in both, the command strings MUST be identical (dedup)
-        # or it will double-fire
-        for script in overlap:
-            p_cmds = [c for c in provider_cmds if script_name(c) == script]
-            j_cmds = [c for c in project_cmds if script_name(c) == script]
-            for pc in p_cmds:
-                for jc in j_cmds:
-                    assert pc == jc, (
-                        f"Double-fire risk: {script} has different command strings at "
-                        f"provider ({pc!r}) vs project ({jc!r}). "
-                        f"Claude Code deduplicates by exact string — different strings = fires twice."
-                    )
+        # or it will double-fire. Collected rather than looped over so the assertion
+        # runs even when the overlap is empty — an empty overlap is the healthy case,
+        # but a loop over it would report green without checking anything.
+        double_fire = [
+            (script, pc, jc)
+            for script in sorted(overlap)
+            for pc in sorted(c for c in provider_cmds if script_name(c) == script)
+            for jc in sorted(c for c in project_cmds if script_name(c) == script)
+            if pc != jc
+        ]
+        assert not double_fire, (
+            f"Double-fire risk: {double_fire} — same script with different command strings at "
+            f"provider vs project. "
+            f"Claude Code deduplicates by exact string — different strings = fires twice."
+        )
 
     def test_branch_hooks_dont_duplicate_provider(self):
         """Branch-level hooks should NOT include hooks that only work from provider level."""
         branch_baseline = _load_fixture("branch_hooks_snapshot.json")
         provider_only_events = {"PreToolUse", "PostToolUse"}
 
-        for event in provider_only_events:
-            assert event not in branch_baseline, (
-                f"Branch baseline has {event} hooks — these only fire from provider settings"
-            )
+        leaked = provider_only_events & set(branch_baseline)
+        assert not leaked, f"Branch baseline has {sorted(leaked)} hooks — these only fire from provider settings"
 
 
 # -- Branch hooks snapshot -----------------------------------------------------
@@ -251,13 +254,17 @@ class TestBranchHooksSnapshot:
 
     def test_branch_settings_match_baseline(self, baseline):
         """Spot-check a few branches have the correct hooks."""
+        expected_cmds = _extract_hook_commands(baseline)
+        assert expected_cmds == {}, (
+            f"Branch baseline is the no-hooks pattern — a branch settings.json declaring hooks "
+            f"would double-fire against the provider level. Baseline declares: {expected_cmds}"
+        )
         branches_to_check = ["seedgo", "devpulse", "aipass"]
         for branch in branches_to_check:
             settings_path = _REPO_ROOT / "src" / "aipass" / branch / ".claude" / "settings.json"
             if not settings_path.exists():
                 continue
             current = _load_settings_hooks(settings_path)
-            expected_cmds = _extract_hook_commands(baseline)
             actual_cmds = _extract_hook_commands(current)
             assert expected_cmds == actual_cmds, (
                 f"Branch {branch} hooks don't match baseline.\nExpected: {expected_cmds}\nActual: {actual_cmds}"

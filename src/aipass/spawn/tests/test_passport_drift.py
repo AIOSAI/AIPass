@@ -101,6 +101,32 @@ class TestDriftDetectorHermetic:
         contract = {"branch_info": {"email"}, "identity": {"traits"}}
         assert _passport_drift({}, contract) == {"branch_info": ["email"], "identity": ["traits"]}
 
+    def test_the_class_table_under_the_contract_canary_holds_both_classes(self):
+        """The floor under the parametrized canary below, derived from the raw source.
+
+        ``sorted(get_available_classes())`` is computed at collection time. A
+        collector that came back empty would make the contract canary SKIPPED
+        and the summary green, so the count is pinned from the AST of
+        ``class_registry.py`` — the declaration, not the function under
+        judgement.
+        """
+        import ast
+
+        from aipass.spawn.apps.handlers import class_registry
+
+        source = Path(class_registry.__file__).read_text(encoding="utf-8")
+        declared = next(
+            node.value
+            for node in ast.parse(source).body
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "CITIZEN_CLASSES" for t in node.targets)
+        )
+        from_source = sorted(key.value for key in declared.keys)
+
+        assert len(from_source) == 2, f"class_registry.py declares {from_source}"
+        assert sorted(get_available_classes()) == from_source, (
+            f"the collector and the source disagree: {sorted(get_available_classes())} vs {from_source}"
+        )
+
     @pytest.mark.parametrize("citizen_class", sorted(get_available_classes()))
     def test_template_contract_includes_email_and_traits(self, citizen_class):
         """Lock what the template currently guarantees — the live scan inherits this."""

@@ -407,6 +407,11 @@ class TestAllowDenyUnchanged:
     ]
 
     def test_decisions_are_identical_to_the_pre_record_gate(self):
+        # The floor. This matrix absorbed three rows that have no other
+        # end-to-end pin (-fr, the sudo prefix, two targets) when they were
+        # folded in on 09-07, so a matrix that shrank would take those claims
+        # with it and the loop would still report the gate unchanged.
+        assert len(self.MATRIX) == 17
         for command, expected in self.MATRIX:
             result = handle(
                 {

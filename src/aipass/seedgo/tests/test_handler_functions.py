@@ -86,8 +86,13 @@ def _mock_infrastructure(monkeypatch):
 
 
 def test_print_branch_summary_basic():
-    """print_branch_summary runs without error on minimal audit result."""
-    from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary
+    """print_branch_summary renders the branch line, the score grid and the overall.
+
+    Was a bare call that asserted nothing (no_oracle). The lines below are the
+    strings the function actually hands to console.print, measured 2026-09-07;
+    `console` here is the fixture's mock, which is what the module binds.
+    """
+    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
 
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
@@ -96,13 +101,24 @@ def test_print_branch_summary_basic():
         "files_checked": 10,
         "results": {},
     }
-    # Should not raise
     print_branch_summary(audit_result)
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    branch_line = (
+        "[bold cyan]seedgo[/bold cyan] [dim](10 production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+    )
+    assert branch_line in lines
+    assert "  Meta            100% ✅    Naming           90% ✅" in lines
+    assert "  [bold]Overall:          95% ✅[/bold]" in lines
 
 
 def test_print_branch_summary_with_violations():
-    """print_branch_summary handles violation lists."""
-    from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary
+    """print_branch_summary renders the violation block: count, file, score, issue.
+
+    Was a bare call that asserted nothing (no_oracle) — it could not tell a
+    rendered violation from a silently dropped one.
+    """
+    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
 
     audit_result: Dict = {
         "branch": {"name": "testbranch"},
@@ -114,13 +130,30 @@ def test_print_branch_summary_with_violations():
         },
         "meta_violations": [{"path": "file.py", "score": 50, "issues": ["Missing META block"]}],
     }
-    # Should not raise
     print_branch_summary(audit_result)
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    branch_line = (
+        "[bold cyan]testbranch[/bold cyan] "
+        "[dim](5 production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+    )
+    assert branch_line in lines
+    assert "  [bold red]META VIOLATIONS (1 files):[/bold red]" in lines
+    assert "    [red]✗[/red] [magenta]file.py[/magenta] [dim](score: 50%)[/dim]" in lines
+    assert "      [dim]• Missing META block[/dim]" in lines
 
 
 def test_print_branch_summary_with_system_averages():
-    """print_branch_summary handles optional system averages."""
-    from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary
+    """The optional system-average arguments are accepted and never rendered.
+
+    Was a bare call that asserted nothing (no_oracle). Measured 2026-09-07:
+    print_branch_summary takes `system_averages` and `overall_system_avg` but
+    reads neither — the only mentions of them in audit_display.py are the
+    signature and the introspection blurb. The 90 passed in below reaches no
+    line of output, so that is what this pins. If the comparison is ever wired
+    up, this test goes red and should be rewritten to pin the new line.
+    """
+    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
 
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
@@ -130,8 +163,12 @@ def test_print_branch_summary_with_system_averages():
         "results": {},
     }
     system_averages: Dict[str, int] = {"meta": 90}
-    # Should not raise
     print_branch_summary(audit_result, system_averages, 90)
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    assert "  Meta            100% ✅" in lines
+    assert "  [bold]Overall:         100% ✅[/bold]" in lines
+    assert not [line for line in lines if "90" in line]
 
 
 # ===========================================================================
@@ -471,7 +508,14 @@ def test_update_readme_auto_sections_no_readme(tmp_path):
 
 
 def test_update_readme_auto_sections_missing_markers(tmp_path):
-    """update_readme_auto_sections reports missing markers."""
+    """update_readme_auto_sections reports exactly the two sections it generated.
+
+    Was `assert len(missing_markers) > 0 or len(updated) == 0` — an OR that
+    passes on either half, so it pinned neither. Measured 2026-09-07: for a
+    branch dir holding nothing but a README, only `tree` and `last_updated`
+    generate content; the other three sections are skipped empty BEFORE the
+    marker check, so they are neither updated nor reported missing.
+    """
     branch_dir = tmp_path / "mybranch"
     branch_dir.mkdir()
     readme = branch_dir / "README.md"
@@ -482,5 +526,6 @@ def test_update_readme_auto_sections_missing_markers(tmp_path):
     )
 
     result = update_readme_auto_sections(str(branch_dir))
-    # Some sections should report missing markers
-    assert len(result["missing_markers"]) > 0 or len(result["updated"]) == 0
+    assert result["missing_markers"] == ["tree", "last_updated"]
+    assert result["updated"] == []
+    assert result["errors"] == []

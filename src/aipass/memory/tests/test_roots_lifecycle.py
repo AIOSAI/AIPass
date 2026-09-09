@@ -407,9 +407,13 @@ class TestTheOperatorLane:
         assert "roots Module" in capsys.readouterr().out
 
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
+        """REWRITTEN 2026-09-08: named AND non-zero, not named and exit 0."""
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
         from aipass.memory.apps.modules import roots
 
+        reset_command_state()
         assert roots.handle_command("roots", ["nonsense"]) is True
+        assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
         captured = capsys.readouterr()
         assert "nonsense" in captured.out + captured.err
 
@@ -418,7 +422,11 @@ class TestTheOperatorLane:
         """Never operate on a default. A missing path is a question, not a zero."""
         from aipass.memory.apps.modules import roots
 
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        reset_command_state()
         assert roots.handle_command("roots", [verb]) is True
+        assert resolve_exit(True) == 2, f"roots {verb} refused but would exit 0"
         captured = capsys.readouterr()
         assert "needs a path" in captured.out + captured.err
 

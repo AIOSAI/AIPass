@@ -198,7 +198,11 @@ class TestLintRefusesWhatItCannotMeasure:
         assert len(hits) == 1
         assert hits[0]["length"] == 400
         assert hits[0]["over_by"] == 100
-        assert "reason" not in hits[0] or hits[0]["reason"] != "unmeasurable"
+        # A MEASURABLE note carries no `reason` at all -- that key is how the
+        # unmeasurable species is told apart, so its absence is the pin. The
+        # `or` this replaced passed whenever the key was missing OR held any
+        # other word, which is every hit this handler can emit.
+        assert "reason" not in hits[0], hits[0]
 
     def test_a_string_note_within_cap_is_clean(self, tmp_path):
         path = self._branch(tmp_path, "short")
@@ -501,6 +505,7 @@ class TestKeepNKeepsN:
             "section",
             lambda name: {"per_branch": {}, "defaults": {"local": {"sessions": {"count": 5}}}},
         )
+        compared = 0
         for count in range(1, 10):
             mem_file = tmp_path / str(count) / ".trinity" / "local.json"
             mem_file.parent.mkdir(parents=True)
@@ -511,6 +516,9 @@ class TestKeepNKeepsN:
             fires = detector.check_single_file(mem_file)["should_rollover"]
             drains = bool(ext._extract_tail_excess(self._entries(count), 5, 999, "sessions", "memory"))
             assert fires == drains, f"count={count}: detector={fires} extractor={drains}"
+            compared += 1
+
+        assert compared == 9, "the sweep must cross the cap of 5 from both sides, not sample one point"
 
 
 # =============================================================================
@@ -748,14 +756,21 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["field"] == "note"
 
     def test_the_six_published_keys_are_still_ints(self):
-        """@hooks' edit_gate formats length/cap/over_by with %d — a str would raise."""
+        """@hooks' edit_gate formats length/cap/over_by with %d — a str would raise.
+
+        CURED 2026-09-08. The entry named its text field `observation`, which is
+        not the schema's name, so this unit was measuring a MISSING-FIELD hit —
+        length 0, cap 300, over_by 0 — and never the over-cap hit it says it
+        publishes. Six isinstance calls were true of that hit too, which is
+        exactly how a wrong fixture reads green for months. It now builds the
+        over-cap hit and pins the numbers.
+        """
         before = {"observations": []}
-        after = {"observations": [{"number": 1, "observation": "x" * 500}]}
+        after = {"observations": [{"number": 1, "note": "x" * 500}]}
         hit = el.changed_entries(before, after, _limits())[0]
-        for key in ("length", "cap", "over_by"):
-            assert isinstance(hit[key], int)
-        for key in ("entry_type", "container", "key"):
-            assert isinstance(hit[key], str)
+        assert (hit["length"], hit["cap"], hit["over_by"]) == (500, 300, 200), hit
+        assert (hit["entry_type"], hit["container"], hit["key"]) == ("observations", "observations", "0"), hit
+        assert "%d/%d (+%d)" % (hit["length"], hit["cap"], hit["over_by"]) == "500/300 (+200)"
 
     def test_untouched_renamed_field_drift_is_carried_not_refused(self):
         """A renamed field deadlocks rollover exactly like an over-cap one.

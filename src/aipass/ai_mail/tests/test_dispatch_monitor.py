@@ -973,8 +973,22 @@ def test_cleanup_own_lock_leaves_unreadable(tmp_path):
 
 
 def test_cleanup_own_lock_missing_noop(tmp_path):
-    """Missing lock file is a no-op."""
-    _cleanup_own_lock(str(tmp_path / ".dispatch.lock"))  # must not raise
+    """A missing lock is a no-op — it is not created on the way past.
+
+    Had no oracle: the trailing comment said "must not raise" and nothing
+    checked anything. A cleanup that touched the path, or wrote an empty lock
+    before deciding it was absent, would have passed — and would then hold a
+    lock nobody owns.
+    """
+    lock = tmp_path / ".dispatch.lock"
+
+    _cleanup_own_lock(str(lock))
+
+    assert not lock.exists()
+    # Narrower than "tmp_path is empty" on purpose: this branch's conftest
+    # plants its own seam directories in tmp_path, so an empty-directory
+    # assertion would be pinning the fixture, not the cleanup.
+    assert list(tmp_path.glob("*.lock")) == []
 
 
 # --- Forensics + incomplete-detection main() tests ------------------------
@@ -1804,7 +1818,13 @@ class TestBrokenSandboxFailsLoud:
 
         mock_bounce.assert_called_once()
         reason = mock_bounce.call_args[0][1]
-        assert "sandbox" in reason.lower() or "-4" in reason
+        # MEASURED 2026-09-08: the reason a sender actually receives reads
+        # "Attempt 1 (resume): exit code -4" and never says "sandbox". The
+        # ``or`` that stood here was not tolerance — its first clause had never
+        # once held, and the dead half was the half naming this test. The bounce
+        # text not naming the sandbox is reported to @devpulse as a product
+        # question; this pin says what the code does today.
+        assert "exit code -4" in reason, reason
 
     def test_never_falls_back_to_unsandboxed(self, monkeypatch, main_argv):
         argv, lock_file, stderr_log = main_argv
@@ -3402,7 +3422,13 @@ def test_reconcile_survives_a_failing_pointer_write(tmp_path, pointer_home, monk
     stdout_log = tmp_path / "stdout.log"
     stdout_log.write_text(json.dumps({"session_id": "actual-id"}), encoding="utf-8")
 
-    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)  # no raise
+    # Had no oracle: the trailing comment said "no raise" and nothing checked
+    # it. pytest.raises cannot spell "must not raise", so the oracle is what
+    # SURVIVED the refused write — no pointer was invented on disk to paper over
+    # it, which is the failure mode a swallowed exception would hide.
+    _reconcile_pointer(branch, str(stdout_log), _AIMED_CMD)
+
+    assert mod.session_pointer.read_pointer(branch) is None
 
 
 def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_argv, pointer_home):
@@ -3520,4 +3546,9 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
         main()
 
     pointer = mod.session_pointer.read_pointer(branch_path)
-    assert pointer is None or pointer["session_id"] != "bad-session"
+    # MEASURED 2026-09-08: a pointer IS written — the retry mints a fresh
+    # session and stamps it monitor-retry-fresh — so ``pointer is None`` never
+    # held on this path and the assertion could not fail where it was aimed.
+    assert pointer is not None
+    assert pointer["session_id"] != "bad-session", pointer
+    assert pointer["set_by"] == "monitor-retry-fresh", pointer

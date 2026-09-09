@@ -69,7 +69,7 @@ class TestChunkPlanText:
         assert len(result) == 2
         assert result[0]["section"] == "Introduction"
         assert result[1]["section"] == "Details"
-        assert "Introduction" in result[0]["text"] or "introduction" in result[0]["text"]
+        assert result[0]["text"].startswith("## Introduction\n"), result[0]["text"][:40]
 
     def test_flushes_last_section(self, monkeypatch):
         mod = _import_plans_processor(monkeypatch)
@@ -148,10 +148,13 @@ class TestChunkPlanText:
 
         result = mod._chunk_plan_text(text, "plan.md")
 
-        # The single chunk was > MAX_CHUNK_CHARS * 2, so it gets split
-        assert len(result) >= 2
-        for chunk in result:
-            assert "_part" in chunk["section"] or chunk["section"] == "Big Section"
+        # The single chunk was > MAX_CHUNK_CHARS * 2, so it gets split into
+        # exactly one part per MAX_CHUNK_CHARS, each part numbered from zero.
+        assert [chunk["section"] for chunk in result] == [
+            "Big Section_part0",
+            "Big Section_part1",
+            "Big Section_part2",
+        ]
 
     def test_empty_text(self, monkeypatch):
         mod = _import_plans_processor(monkeypatch)

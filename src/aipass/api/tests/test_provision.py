@@ -288,12 +288,22 @@ def test_get_default_caller_data_structure():
 
 
 def test_get_default_caller_data_timestamp_is_iso():
-    """Timestamp should be a valid ISO-format string."""
+    """
+    The stamp parses AND is the moment it was made.
+
+    "Should not raise" is not an oracle: fromisoformat's return value was
+    thrown away, so the test proved the string was parseable and nothing
+    about whether it was a real timestamp. A hardcoded 1970 stamp passed it.
+    """
     from datetime import datetime
 
+    before = datetime.now()
     data = get_default_caller_data()
-    # Should not raise
-    datetime.fromisoformat(data["timestamp"])
+    after = datetime.now()
+
+    stamped = datetime.fromisoformat(data["timestamp"])
+
+    assert before <= stamped <= after, f"the stamp is not the moment it was made: {stamped}"
 
 
 # =============================================
@@ -312,9 +322,19 @@ def test_get_default_caller_log_structure():
 
 
 def test_get_default_caller_log_timestamp_is_iso():
-    """Timestamp should be a valid ISO-format string."""
+    """
+    The log's stamp parses AND is the moment it was made.
+
+    Same shape as the caller-data stamp above and the same hole: the parsed
+    value was discarded, so nothing here could tell a live stamp from a
+    constant.
+    """
     from datetime import datetime
 
+    before = datetime.now()
     log = get_default_caller_log()
-    # Should not raise
-    datetime.fromisoformat(log["timestamp"])
+    after = datetime.now()
+
+    stamped = datetime.fromisoformat(log["timestamp"])
+
+    assert before <= stamped <= after, f"the stamp is not the moment it was made: {stamped}"

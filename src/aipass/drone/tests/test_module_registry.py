@@ -140,7 +140,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["alpha"]),
             patch(f"{_MOD}.get_module_info", return_value=info),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -158,7 +158,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["broken"]),
             patch(f"{_MOD}.get_module_info", return_value=None),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -181,7 +181,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["aaa", "bbb"]),
             patch(f"{_MOD}.get_module_info", side_effect=side_effect),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -195,7 +195,7 @@ class TestHandleCommandList:
         with (
             patch(f"{_MOD}.list_modules", return_value=[]),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -217,7 +217,7 @@ class TestHandleCommandInfo:
         """'info' with no args logs a warning and returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -231,7 +231,7 @@ class TestHandleCommandInfo:
         with (
             patch(f"{_MOD}.get_module_info", return_value=None),
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -251,7 +251,7 @@ class TestHandleCommandInfo:
         with (
             patch(f"{_MOD}.get_module_info", return_value=info),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -276,7 +276,7 @@ class TestHandleCommandCheck:
         """'check' with no args logs a warning and returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -290,7 +290,7 @@ class TestHandleCommandCheck:
         with (
             patch(f"{_MOD}.is_module", return_value=True),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -306,7 +306,7 @@ class TestHandleCommandCheck:
         with (
             patch(f"{_MOD}.is_module", return_value=False),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -330,7 +330,7 @@ class TestHandleCommandUnknown:
         """An unrecognized command returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler"),
+            patch(f"{_MOD}.json_handler", autospec=True),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -372,7 +372,7 @@ class TestTheAuditLine:
             patch(f"{_MOD}.is_module", return_value=False),
             patch(f"{_MOD}.logger"),
             patch(f"{_MOD}.console"),
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler", autospec=True) as mock_jh,
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -410,7 +410,7 @@ class TestRouteModuleCommand:
                         "exit_code": 0,
                     },
                 ) as mock_cap,
-                patch(f"{_HANDLER}.json_handler"),
+                patch(f"{_HANDLER}.json_handler", autospec=True),
             ):
                 result = mrh.route_module_command("testext", "run", ["--flag"])
             assert result["stdout"] == "ok"
@@ -433,11 +433,20 @@ class TestRouteModuleCommand:
                 "exit_code": 0,
             }
             with (
+                # THE JSON PATCH GOES FIRST AND THAT IS LOAD-BEARING. `patch`
+                # resolves a dotted target through `pkgutil.resolve_name`, which
+                # calls `importlib.import_module` — so once the importlib patch
+                # below is live, the next patch in the same block resolves
+                # `_HANDLER` to `mock_mod` and lands its mock on THAT instead of
+                # on the real handler module. Measured in the other order: the
+                # module's `json_handler` was still the real module inside the
+                # block, so this patch replaced nothing and the test wrote a real
+                # log record. Entered first, it patches the module it names.
+                patch(f"{_HANDLER}.json_handler", autospec=True),
                 patch(
                     f"{_HANDLER}.importlib.import_module",
                     return_value=mock_mod,
                 ),
-                patch(f"{_HANDLER}.json_handler"),
             ):
                 result = mrh.route_module_command("fakeint", "status")
             assert result["stdout"] == "done"
@@ -455,11 +464,13 @@ class TestRouteModuleCommand:
             mock_mod = MagicMock()
             mock_mod.handle_command.return_value = True
             with (
+                # json_handler FIRST — see test_routes_internal_module_via_import:
+                # a live importlib patch makes the next patch resolve to mock_mod.
+                patch(f"{_HANDLER}.json_handler", autospec=True),
                 patch(
                     f"{_HANDLER}.importlib.import_module",
                     return_value=mock_mod,
                 ),
-                patch(f"{_HANDLER}.json_handler"),
             ):
                 result = mrh.route_module_command("boolmod", "check")
             assert result["exit_code"] == 0
@@ -476,11 +487,13 @@ class TestRouteModuleCommand:
             mock_mod = MagicMock()
             mock_mod.handle_command.return_value = False
             with (
+                # json_handler FIRST — see test_routes_internal_module_via_import:
+                # a live importlib patch makes the next patch resolve to mock_mod.
+                patch(f"{_HANDLER}.json_handler", autospec=True),
                 patch(
                     f"{_HANDLER}.importlib.import_module",
                     return_value=mock_mod,
                 ),
-                patch(f"{_HANDLER}.json_handler"),
             ):
                 result = mrh.route_module_command("failmod", "broken")
             assert result["exit_code"] == 1
@@ -506,7 +519,7 @@ class TestRouteModuleCommand:
                         "exit_code": 0,
                     },
                 ),
-                patch(f"{_HANDLER}.json_handler") as mock_jh,
+                patch(f"{_HANDLER}.json_handler", autospec=True) as mock_jh,
             ):
                 mrh.route_module_command("logext", "ping")
             mock_jh.log_operation.assert_called_once_with(

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from aipass.trigger.apps.config import trail_logger
@@ -382,20 +382,37 @@ class TestHandleErrorDetectedHappyPath:
             "dispatch_sent", {"recipient": "@flow"}
         )
 
-    def test_handles_send_exception_gracefully(self) -> None:
-        """Does not raise when _send_email throws."""
+    def test_a_throwing_send_is_reported_and_stops_the_pipeline(self) -> None:
+        """_send_email raising is caught, named in the log, and records nothing.
+
+        The unit was the call and nothing else, so it passed on `except: pass`
+        — which is the worst outcome available here. This handler is the last
+        thing standing between an error and an operator: if a throwing send
+        went unlogged, dispatch would be dead and the only symptom would be
+        silence. And the exception must not be mistaken for a delivery, so
+        nothing downstream of the send may run.
+        """
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.side_effect = RuntimeError("SMTP down")
+        from aipass.trigger.apps.handlers.json import json_handler
 
-        mod.handle_error_detected(
-            branch="flow",
-            module="cfg",
-            message="err",
-            error_hash="h1",
-            count=2,
-            fingerprint="fpX",
-        )
+        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+
+        with patch.object(mod, "logger") as mock_logger:
+            mod.handle_error_detected(
+                branch="flow",
+                module="cfg",
+                message="err",
+                error_hash="h1",
+                count=2,
+                fingerprint="fpX",
+            )
+
+        reported = str(mock_logger.warning.call_args_list)
+        assert "SMTP down" in reported, f"the cause must reach the log, got: {reported}"
+        json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
+        mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
 
     def test_does_not_record_dispatch_when_send_fails(self) -> None:
         """When _send_email returns False, dispatch is not recorded."""
@@ -450,20 +467,37 @@ class TestFallbackStubs:
         mod = _import_module()
         assert mod.registry_is_suppressed("any-fingerprint") is False
 
-    def test_registry_record_dispatch_does_not_raise(self) -> None:
-        """Fallback record_dispatch is a no-op."""
+    def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self) -> None:
+        """The fallback takes the same one argument and answers None like the real one.
+
+        A stub stands in for a function the caller cannot see is missing, so
+        the two things worth pinning are the shape of the call and the shape of
+        the answer. "It did not raise" covers neither: a stub that took no
+        argument, or returned a truthy sentinel a caller then branched on,
+        would pass it. record_dispatch returns nothing, so the stub must too.
+        """
         mod = _import_module()
-        mod.registry_record_dispatch("any-fingerprint")
+
+        assert mod.registry_record_dispatch("any-fingerprint") is None
+        assert mod._REGISTRY_DISPATCH_AVAILABLE is False
 
     def test_circuit_breaker_allows_returns_true(self) -> None:
         """Fallback circuit breaker always allows."""
         mod = _import_module()
         assert mod.circuit_breaker_allows() is True
 
-    def test_circuit_breaker_record_error_does_not_raise(self) -> None:
-        """Fallback circuit_breaker_record_error is a no-op."""
+    def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self) -> None:
+        """The fallback breaker records nothing and says nothing.
+
+        Same reasoning as the record_dispatch stub, with one addition that
+        matters here: without a registry there is no breaker state, so this
+        must not fabricate one. It counts nothing and returns None, and a
+        caller cannot tell it apart from the real call by the answer.
+        """
         mod = _import_module()
-        mod.circuit_breaker_record_error()
+
+        assert mod.circuit_breaker_record_error() is None
+        assert mod.circuit_breaker_allows() is True
 
     def test_registry_dispatch_available_is_false(self) -> None:
         """Module reports registry dispatch as unavailable."""

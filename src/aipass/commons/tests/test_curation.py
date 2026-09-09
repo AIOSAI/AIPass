@@ -26,7 +26,9 @@ Covers:
 import sqlite3
 from unittest.mock import patch
 
+import pytest
 
+import aipass.commons.apps.modules.reaction as reaction
 from aipass.commons.apps.handlers.curation.reaction_queries import (
     add_reaction,
     remove_reaction,
@@ -42,6 +44,8 @@ from aipass.commons.apps.handlers.curation.pin_queries import (
     is_pinned,
 )
 from aipass.commons.apps.handlers.curation.trending_queries import get_trending_posts
+
+_REACTION_MOD = "aipass.commons.apps.modules.reaction"
 
 
 # =============================================================================
@@ -82,7 +86,7 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int) -> int:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_add_reaction_new_returns_true(mock_json: object, initialized_db: object) -> None:
     """Adding a new reaction to a post should return True."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -92,7 +96,7 @@ def test_add_reaction_new_returns_true(mock_json: object, initialized_db: object
     assert result is True
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_add_reaction_duplicate_returns_false(mock_json: object, initialized_db: object) -> None:
     """Adding the same reaction a second time should return False."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -103,7 +107,7 @@ def test_add_reaction_duplicate_returns_false(mock_json: object, initialized_db:
     assert result is False
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_add_reaction_invalid_type_returns_false(mock_json: object, initialized_db: object) -> None:
     """An invalid reaction name should be rejected immediately."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -113,7 +117,7 @@ def test_add_reaction_invalid_type_returns_false(mock_json: object, initialized_
     assert result is False
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_add_reaction_comment_target(mock_json: object, initialized_db: object) -> None:
     """Reactions can target a comment instead of a post."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -128,7 +132,7 @@ def test_add_reaction_comment_target(mock_json: object, initialized_db: object) 
     assert counts.get("agree") == 1
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_db: object) -> None:
     """Providing both post_id and comment_id should be rejected."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -143,7 +147,7 @@ def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_remove_reaction_existing_returns_true(mock_json: object, initialized_db: object) -> None:
     """Removing an existing reaction should return True."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -168,7 +172,7 @@ def test_remove_reaction_nonexistent_returns_false(initialized_db: object) -> No
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db: object) -> None:
     """get_reactions should return accurate per-type counts."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -191,7 +195,7 @@ def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db:
     assert "agree" not in counts
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_get_reactions_detailed_returns_agent_names(mock_json: object, initialized_db: object) -> None:
     """get_reactions_detailed should map reaction types to agent name lists."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -211,7 +215,7 @@ def test_get_reactions_detailed_returns_agent_names(mock_json: object, initializ
     assert set(detailed["agree"]) == {"TEST_BRANCH", "AGENT_B"}
 
 
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_get_reaction_summary_formatted_string(mock_json: object, initialized_db: object) -> None:
     """get_reaction_summary should return an emoji-count formatted string."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -241,7 +245,7 @@ def test_get_reaction_summary_empty_returns_empty_string(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 def test_pin_post_success(mock_json: object, initialized_db: object) -> None:
     """Pinning an existing post should return True and set pinned=1."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -252,7 +256,7 @@ def test_pin_post_success(mock_json: object, initialized_db: object) -> None:
     assert is_pinned(conn, post_id) is True
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 def test_unpin_post_success(mock_json: object, initialized_db: object) -> None:
     """Unpinning a pinned post should return True and set pinned=0."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -264,7 +268,7 @@ def test_unpin_post_success(mock_json: object, initialized_db: object) -> None:
     assert is_pinned(conn, post_id) is False
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db: object) -> None:
     """get_pinned_posts should return only posts with pinned=1."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -281,7 +285,7 @@ def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db:
     assert pinned[0]["title"] == "Test Post"
 
 
-@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: object) -> None:
     """get_pinned_posts with room_name should filter to that room only."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -327,7 +331,7 @@ def test_is_pinned_false_for_nonexistent_post(initialized_db: object) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler", autospec=True)
 def test_get_trending_posts_empty(mock_json: object, initialized_db: object) -> None:
     """get_trending_posts with no engagement data should return an empty list."""
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
@@ -337,8 +341,8 @@ def test_get_trending_posts_empty(mock_json: object, initialized_db: object) -> 
     assert trending == []
 
 
-@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler")
-@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler")
+@patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_get_trending_posts_with_engagement(
     mock_reaction_json: object,
     mock_trending_json: object,
@@ -366,3 +370,65 @@ def test_get_trending_posts_with_engagement(
     assert trending[0]["id"] == post_id
     assert trending[0]["reaction_count"] == 3
     assert trending[0]["engagement_count"] == 3
+
+
+# =============================================================================
+# MODULE ROUTING — every verb reaction.py declares reaches its own handler
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "verb,handler",
+    [
+        ("react", "_handle_react"),
+        ("unreact", "_handle_unreact"),
+        ("pin", "_handle_pin"),
+        ("unpin", "_handle_unpin"),
+    ],
+)
+def test_reaction_handle_command_routes_verb_to_its_own_handler(verb: str, handler: str) -> None:
+    """Each arg-taking verb in HANDLED_COMMANDS reaches the handler named for it.
+
+    A misroute is silent: rename the verb or swap two arms of the if-chain and
+    every reaction test still passes, because they all call the handlers
+    directly. This enters by the CLI door instead, and names the verb as a
+    literal so the entry point is measurably exercised.
+    """
+    with (
+        patch(f"{_REACTION_MOD}.{handler}", return_value=True) as mock_handler,
+        patch(f"{_REACTION_MOD}.json_handler", autospec=True),
+    ):
+        assert reaction.handle_command(verb, ["arg"]) is True
+
+    mock_handler.assert_called_once_with(["arg"])
+
+
+def test_reaction_handle_command_declines_a_verb_it_does_not_own() -> None:
+    """A verb outside HANDLED_COMMANDS returns False so routing can continue.
+
+    Both arg shapes, because only one of them reaches the membership guard. With
+    args, an unowned verb falls off the end of the if-chain and returns False on
+    its own. With NO args it does not get that far: the introspection arm fires
+    first, so without the guard commons would print reaction's module map for
+    somebody else's verb and report it handled - and route_command would stop
+    there, never offering the command to the module that owns it.
+    """
+    assert reaction.handle_command("nosuchverb", ["arg"]) is False
+    assert reaction.handle_command("nosuchverb", []) is False
+
+
+def test_reaction_declares_the_seven_verbs_the_router_dispatches() -> None:
+    """HANDLED_COMMANDS is the declaration entry_point_diff measures against.
+
+    Adding a verb here without an arm in handle_command makes it unroutable and
+    silently so - the command falls through to the unknown-command refusal.
+    """
+    assert reaction.HANDLED_COMMANDS == [
+        "react",
+        "unreact",
+        "reactions",
+        "pin",
+        "unpin",
+        "pinned",
+        "trending",
+    ]

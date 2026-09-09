@@ -61,7 +61,7 @@ def test_handle_command_help_flag(capsys):
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "Usage" in combined or "usage" in combined.lower()
+    assert "usage:" in combined.lower()
 
 
 def test_handle_command_unknown_subcommand(capsys):
@@ -70,7 +70,7 @@ def test_handle_command_unknown_subcommand(capsys):
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "bogus" in combined.lower() or "unknown" in combined.lower()
+    assert "unknown watchdog subcommand: bogus" in combined.lower()
 
 
 # --------------------------------------------------------------------------
@@ -252,7 +252,7 @@ def test_cancel_requires_handle(capsys):
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "usage" in combined.lower() or "cancel" in combined.lower()
+    assert "usage: watchdog cancel <handle>" in combined.lower()
 
 
 def test_cancel_handle_routes_to_registry(capsys):
@@ -339,7 +339,7 @@ def test_status_prints_active_watches(capsys):
     assert "agent-abc123" in out
     assert "schedule-def456" in out
     assert "@drone" in out
-    assert "2 active" in out or "2 active watch" in out
+    assert "2 active watch(es):" in out
 
 
 def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys):
@@ -448,7 +448,8 @@ def test_list_routes_to_status(capsys):
         result = wd_mod.handle_command("watchdog", ["list"])
     assert result is True
     out = capsys.readouterr().out.lower()
-    assert "watchdog status" in out or "no active watches" in out
+    assert "watchdog status" in out
+    assert "no active watches." in out
 
 
 def test_agent_subcommand_requires_id(capsys):
@@ -457,7 +458,7 @@ def test_agent_subcommand_requires_id(capsys):
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "usage" in combined.lower() or "watchdog agent" in combined.lower()
+    assert "usage: watchdog agent <branch>" in combined.lower()
 
 
 def test_agent_subcommand_invokes_handler(capsys):
@@ -515,7 +516,7 @@ def test_agent_subcommand_invalid_timeout(capsys):
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "invalid" in combined.lower() or "--timeout" in combined.lower()
+    assert "invalid --timeout value: notanumber" in combined.lower()
 
 
 def test_agent_subcommand_default_timeout_is_600():
@@ -644,7 +645,7 @@ def test_baseline_rejects_unknown_flag(capsys):
     imported.assert_not_called()
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "--forever" in combined or "unknown" in combined.lower()
+    assert "unknown baseline flag: --forever" in combined.lower()
 
 
 def test_baseline_daemon_flag_is_refused_by_name(capsys):

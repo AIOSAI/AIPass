@@ -170,7 +170,9 @@ def test_the_one_template_is_what_every_class_mints_from():
     seed checks would be silently testing only one of them."""
     from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 
-    for citizen_class in get_available_classes():
+    classes = get_available_classes()
+    assert len(classes) == 2, f"the class registry offers {classes} - the sweep below is not sweeping the fleet"
+    for citizen_class in classes:
         assert get_template_dir(citizen_class) / ".trinity" == CITIZEN_TRINITY
 
 

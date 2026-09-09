@@ -197,6 +197,25 @@ drone @spawn --help                                            # Full help text
 drone @spawn --version                                         # Version string
 ```
 
+### Exit codes — a refusal never exits 0
+
+`main()` calls `reset_command_state()` on entry (the failure flag is process-level and
+drone routes in-process, so a stale mark from an earlier command would otherwise convict
+this one), and every routed command's code passes through `_resolved()`: a non-zero code is
+its own answer and is returned untouched, a 0 is re-asked of `resolve_exit`, which answers
+**2** when the command called `error()` and **0** when it did not.
+
+| Code | Meaning |
+|------|---------|
+| `0` | The command did what it said |
+| `1` | The command refused, or the verb is unknown |
+| `2` | The command returned 0 after calling `error()` — the seam caught it |
+
+`migrate-passports` against a root with no discoverable passports is the worked example: it
+prints "No passports found … nothing was scanned" and **exits 1**. It exited 0 until
+2026-09-08, which made "I searched the wrong root" indistinguishable from "your fleet is
+already 2.0" to anything reading the exit code (fleet refusal sweep, FPLAN-0518).
+
 ### Class registry — the gateway other branches import through
 
 `apps/handlers/` is internal to this branch; its `__init__` refuses cross-branch
@@ -283,7 +302,7 @@ spawn/
 ├── templates/
 │   ├── citizen/                         # The one citizen template (49 files, 24 dirs)
 │   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 28 test files, 801 test functions (956 cases)
+├── tests/                               # 28 test files, 809 test functions (960 cases)
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # birth_certificate_repair.py (gitignored — machine-local)
 ├── artifacts/                           # Birth certificate
@@ -388,10 +407,16 @@ except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
 
 ## Tests
 
-**957 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-07 from the
-repo root in the CI shape (`-c pyproject.toml --rootdir=.`), 8m58s. The branch-directory
-tally is **not re-run since 2026-09-05**, when both rootdirs agreed. Counted the way
-seedgo's readme rule counts: **811 `def test_` functions; pytest expands them to 957 cases.**
+**960 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-08 from the
+repo root in the CI shape (`-p no:cacheprovider`, 1m56s) AND from the branch directory
+(2m19s) — both rootdirs agree.
+
+**809 test functions expand to 960 cases.** The counting method is written down because it
+decides the number: 809 is an AST count of `FunctionDef` nodes named `test_*` under
+`tests/`, which is what seedgo's corpus measures. A `grep` for `def test_` answers 812 at
+any indentation and 814 anywhere on a line — both count lines inside docstrings and
+comments. This README carried 801 in one place and 811 in another for exactly that reason;
+one number, one method, stated once.
 
 There is no longer a skip. `test_scaffold.py` moved to `tests/.archive/` during the
 DPLAN-0325 sweep — it still ships in the template (a newborn gets it), but spawn's own
@@ -429,8 +454,8 @@ suite no longer carries it, so the file is out of the table below.
 | `test_conftest_fixtures.py` | Pins that spawn's own mocking fixtures reach the code they claim to mock |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 93 total, 86 tested (92%) — seedgo's own count, `drone @seedgo audit
-aipass @spawn`, 2026-09-05. The seven untested are listed by `drone @seedgo test_map @spawn`.
+**Public functions:** 94 total, 87 tested (93%) — seedgo's own count, `drone @seedgo audit
+aipass @spawn`, 2026-09-08. The seven untested are listed by `drone @seedgo test_map @spawn`.
 
 ---
 
@@ -516,8 +541,8 @@ ANOTHER project's tree is outside that glob and gets no contract coverage from i
   0 violations, 0 failed checks, 0 type errors. 16 live bypass rules.
   The old "98% without bypasses" figure is **unverified** — not re-measured since 2026-08-25 and
   it would need all 16 lifted to re-measure honestly.
-- **Tests:** 957 passed, 0 skipped, 0 failed (2026-09-07, repo root, CI shape) — 811 test functions
-- **Public functions:** 94, of which 87 are tested (seedgo's test-opportunity count, 2026-09-07)
+- **Tests:** 960 passed, 0 skipped, 0 failed (2026-09-08, both rootdirs) — 809 test functions (AST count; see Tests)
+- **Public functions:** 94, of which 87 are tested (seedgo's test-opportunity count, 2026-09-08)
 - **Production files:** 29 in `apps/` (seedgo's corpus); 19 handlers, 9 modules, entry point
 - **Template registry:** 49 files, 24 dirs (citizen — the one template both classes mint from),
   manifest verified against disk 2026-09-05: every declared file present, nothing untracked but

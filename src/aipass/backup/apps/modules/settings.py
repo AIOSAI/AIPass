@@ -56,13 +56,17 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Say it out loud. Logging to file and exiting 0 reads as success to the
-    # caller, which is the one thing a deferred command must never do.
+    # Say it out loud, and REFUSE. Returning True here printed a warning and
+    # exited 0 -- indistinguishable from a settings UI that opened and closed,
+    # which is the one thing a deferred command must never look like
+    # (refusal sweep 2026-09-07). Raising reaches route_command's handler in
+    # apps/backup.py, which names the module and the reason and exits 1.
     logger.warning(f"[backup] {MODULE_NAME} stub invoked with args={args} — awaiting Phase 3")
     trail.log_operation(f"{MODULE_NAME}_stub_invoked", {"args": args})
-    warning(f"{PRIMARY_COMMAND} is not implemented — the settings UI is deferred (Phase 3)")
-    console.print("[dim]Edit .backup/config.json in the project directly for now.[/dim]")
-    return True
+    raise NotImplementedError(
+        f"{PRIMARY_COMMAND} is not implemented — the settings UI is deferred (Phase 3). "
+        "Edit .backup/config.json in the project directly for now."
+    )
 
 
 # =============================================
@@ -71,5 +75,10 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
-    result = handle_command(sys.argv[1], sys.argv[2:])
+    try:
+        result = handle_command(sys.argv[1], sys.argv[2:])
+    except NotImplementedError as exc:
+        # Standalone entry has no router to catch it -- report, do not traceback.
+        warning(str(exc))
+        sys.exit(1)
     sys.exit(0 if result else 1)

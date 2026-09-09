@@ -103,7 +103,19 @@ TEST_DIRS: tuple = corpus.TEST_DIRS
 CONFESSION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     (r"\bfor\s+coverage\b", "says the test exists for coverage"),
     (r"\bcoverage\s+slot\b", "names itself a coverage slot"),
-    (r"\bto\s+satisf(?:y|ies)\b", "says the test exists to satisfy something"),
+    # THE TEST MUST BE THE SUBJECT. A bare "to satisfy" is a verb phrase, not a
+    # purposive claim, and it convicted five units fleet-wide on 2026-09-07 of
+    # which NONE was a confession: "a test that fired real events to satisfy the
+    # standard would pollute the bus" (a hypothetical about another test), "the
+    # only way to satisfy the old form" (a rejected design), "started editing
+    # the measurement to satisfy itself" (a guard that was not written),
+    # "Cheap to satisfy" (@api), "editing text to satisfy a cap would be
+    # authoring memories" (@memory). Requiring a self-referential verb acquits
+    # all five and still reads every confession form the rule doc names.
+    (
+        r"\b(?:exists?|added|written|kept|included)\s+(?:only\s+)?to\s+satisf(?:y|ies)\b",
+        "says the test exists to satisfy something",
+    ),
     (r"\bsatisfies\s+the\s+(?:checker|standard|audit|linter)\b", "says it satisfies a checker"),
     (r"\bthe\s+standard\s+requires\b", "cites a standard as the reason it exists"),
     (r"\bseedgo\s+requires\b", "cites the auditor as the reason it exists"),
@@ -116,6 +128,10 @@ CONFESSION_PATTERNS: Tuple[Tuple[str, str], ...] = (
 #: What starts a comment line. Named so the reader's one contract - the `#` must
 #: begin the line's own content - is spelled once.
 COMMENT_MARKER: str = "#"
+
+#: Every character that opens or closes a quotation in prose, straight and
+#: typographic. A phrase between two of these is being NAMED, not said.
+QUOTE_MARKS: str = "\"'\u201c\u201d\u2018\u2019"
 
 #: How many flagged units to name in the result. The full list lives in the
 #: report artifact; a check message that prints hundreds of lines is unreadable.
@@ -131,18 +147,62 @@ _COMPILED: Tuple[Tuple[re.Pattern, str], ...] = tuple(
 # =============================================================================
 
 
+def _is_quoted(text: str, start: int, end: int) -> bool:
+    """True when the span [start, end) sits inside quotation marks on its line.
+
+    THE SAME EXCLUSION THE RULE ALREADY MAKES FOR DATA, one layer up. A test
+    whose *data* contains "for coverage" is testing a string, and the rule has
+    never flagged it. A docstring that writes the phrase IN QUOTES is doing the
+    same thing in prose: it is naming the phrase, not confessing.
+
+    Measured across the fleet on 2026-09-07 before this existed: 11 units
+    matched a pattern, and exactly 5 of them had the match inside quotes - all
+    five in seedgo's own `TestCoverageSlotDetection`, the tests OF this
+    detector, whose docstrings necessarily quote the phrases it hunts. No other
+    branch moved by a single unit. That is the whole population this narrowing
+    touches, which is why it is a scope fix rather than the intent-guessing the
+    rule doc refuses.
+
+    The cost, stated rather than hidden: a genuine confession written inside
+    quotation marks for emphasis is now missed. That is the same direction the
+    data exclusion already errs in, and it is the safer one - a rule whose own
+    test suite reads as a room full of confessions is a rule nobody trusts.
+
+    Read on the match's OWN LINE only: an unbalanced quote earlier in a
+    paragraph must not silence every phrase after it.
+
+    Args:
+        text: The prose the match was found in.
+        start: Match start offset.
+        end: Match end offset.
+
+    Returns:
+        True when a quotation opens before the span on its line and closes after it.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line_end = len(text) if line_end == -1 else line_end
+    opens = sum(text[line_start:start].count(mark) for mark in QUOTE_MARKS)
+    closes = sum(text[end:line_end].count(mark) for mark in QUOTE_MARKS)
+    return opens % 2 == 1 and closes >= 1
+
+
 def confession_in(text: str) -> str:
     """The reason this text is a confession, or "" when it is not one.
+
+    EVERY match is considered, not just the first: a phrase quoted early in a
+    docstring must not acquit an unquoted confession later in the same one.
 
     Args:
         text: Any prose - a docstring, a comment.
 
     Returns:
-        The reason, first pattern wins, or "".
+        The reason for the first UNQUOTED match, or "".
     """
     for pattern, reason in _COMPILED:
-        if pattern.search(text):
-            return reason
+        for match in pattern.finditer(text):
+            if not _is_quoted(text, match.start(), match.end()):
+                return reason
     return ""
 
 

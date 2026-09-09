@@ -43,7 +43,7 @@ def _get_aipass_src(branch_path: Path) -> Path:
 def _read_lock(lock_path: Path) -> Dict:
     """Read dispatch lock file, return parsed data or empty dict."""
     try:
-        data = json.loads(lock_path.read_text())
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
         return {
             "subject": data.get("subject", ""),
             "started": data.get("started", ""),

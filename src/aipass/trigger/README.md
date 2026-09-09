@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through a 7-gate pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-09-07
+**Last Updated:** 2026-09-08
 
 ## Quick Start
 
@@ -73,7 +73,7 @@ drone @trigger branch_log_events stop       # Stop the branch log watcher
 drone @trigger branch_log_events reset      # Clear error deduplication hashes
 drone @trigger branch_log_events --help     # Branch watcher help
 drone @trigger log_events status            # System log watcher state
-drone @trigger log_events start             # Declines by design — see system_logs ownership
+drone @trigger log_events start             # Declines by design, exits 2 — see system_logs ownership
 drone @trigger log_events stop              # Stop the system log watcher
 drone @trigger log_events --help            # System watcher help
 ```
@@ -282,7 +282,16 @@ Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an
 because it is still the reader the startup catch-up scan uses. The ruling ends the
 duplicate, not the watching — the branch watcher globs `system_logs/*.log` alongside the
 per-branch logs and carries the branch mapping, the parsing and the staleness handling.
-`drone @trigger log_events start` says so rather than reporting a failure.
+`drone @trigger log_events start` says so rather than reporting a failure — and since
+2026-09-08 it also **exits 2** rather than 0. Both halves are the contract: the wording
+must not send a reader hunting a broken watcher, and the exit code must not tell a
+caller's `&&` that a watcher is running. Exiting 0 for eighteen months meant
+`log_events start && <next>` ran `<next>` with nothing watching. The refusal now travels
+through cli's `error()`, `main()` returns `resolve_exit(True)` instead of a literal `0`,
+and `reset_command_state()` at the top of `main()` stops one refusal colouring the next
+command in the same process. A clean routed command is still 0; an unknown command is
+still 1; a routed refusal is 2. Ruled by @devpulse over this branch's own 2026-08-14
+reading, following @daemon's identical call at `schedule.py:50-52`.
 
 **One line is counted once, even though prax writes it twice.** Every prax call
 lands in *two* files: `src/aipass/<branch>/logs/<module>.log` and
@@ -440,7 +449,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1015 test functions in 28 files (pytest expands to 1049)
+├── tests/                          # 1017 test functions in 28 files (pytest expands to 1051)
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -536,9 +545,12 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-**1015 test functions across 28 test files; pytest expands them to 1049 cases**, all
-passing (`1049 passed`, 0 failed, 0 skipped, 16.5s — measured 2026-09-07 evening from
-the repo root). It read 1006 / 28 / 1039 earlier the same day; FPLAN-0492 wave 5 added
+**1017 test functions across 28 test files; pytest expands them to 1051 cases**, all
+passing (`1051 passed`, 0 failed, 0 skipped, 17.8s from the repo root and 25.1s from this
+directory — measured 2026-09-08). It read 1015 / 28 / 1049 the evening before; FPLAN-0508
+wave 9 took every v5 pytest_quality rule to 100 by rewriting eighteen units in place, and
+added exactly two functions — both in `test_trigger_entry.py`, pinning the new exit seam.
+It read 1006 / 28 / 1039 earlier on 2026-09-07; FPLAN-0492 wave 5 added
 the occurrence-counting, alias and module-identity pins and merged 6 of the 7 DPLAN-0323
 duplicate rows. It read 1016 / 29 / 1057 for the two days before that: on 2026-09-07
 01:30 `test_json_handler.py` was archived and four test functions were removed from
@@ -620,7 +632,7 @@ landed upstream.
 
 ---
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-08*
 
 ---
 [← Back to AIPass](../../../README.md)

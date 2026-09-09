@@ -632,26 +632,41 @@ class TestTheFilterHasOneImplementationForFourWalks:
         assert "endswith" not in source.split('"""')[-1], "a second implementation is a second answer"
 
     @pytest.mark.parametrize(
-        "module_name",
+        ("module_name", "sites"),
         [
-            "aipass.memory.apps.handlers.monitor.detector",
-            "aipass.memory.apps.handlers.monitor.memory_watcher",
-            "aipass.memory.apps.handlers.monitor.registry_scope",
+            ("aipass.memory.apps.handlers.monitor.detector", 1),
+            ("aipass.memory.apps.handlers.monitor.memory_watcher", 1),
+            ("aipass.memory.apps.handlers.monitor.registry_scope", 2),
         ],
     )
-    def test_no_registry_glob_in_this_tree_is_left_unfiltered(self, module_name):
+    def test_no_registry_glob_in_this_tree_is_left_unfiltered(self, module_name, sites):
         """The structural pin: catch it where it is WRITTEN, not only where it runs.
 
         Last night's lesson cost a second CI red — a cure that landed on one of
         N identical sites while the rest kept the disease. This reads the source
         rather than the behaviour, so a fifth walk added tomorrow is red on the
         line it is typed on.
+
+        TWO THINGS THIS UNIT LEARNED ON 2026-09-08. The matcher required the
+        literal ``"_REGISTRY.json"`` ON the glob line, so ``registry_scope``'s
+        two sites — which glob through the ``*_REGISTRY_GLOB`` constants — were
+        invisible, and that row asserted NOTHING while reading green. And the
+        loop could find no site at all and still pass, which is how the blind
+        row hid: the count below is measured per module and floors the loop, so
+        a site that moves out of reach of the matcher is red, not silent.
         """
         source = inspect.getsource(importlib.import_module(module_name))
 
-        for number, line in enumerate(source.splitlines(), start=1):
-            if "glob(" not in line or "_REGISTRY.json" not in line:
-                continue
+        globbed = [
+            (number, line)
+            for number, line in enumerate(source.splitlines(), start=1)
+            if "glob(" in line and ("_REGISTRY.json" in line or "REGISTRY_GLOB" in line)
+        ]
+        assert len(globbed) == sites, (
+            f"{module_name}: expected {sites} registry-glob site(s), read {len(globbed)} — "
+            "a site moved, was added, or slipped past the matcher"
+        )
+        for number, line in globbed:
             assert "exactly_named(" in line, f"{module_name}:{number} globs registries with no exact-case filter"
 
 
@@ -1212,6 +1227,10 @@ class TestTheTwoWorldsMustNotBeStacked:
         bare world IS the posix world here. It can only be caught by asserting
         that a world was chosen at all.
         """
+        assert set(self._EXPECTED_PLATFORMS) == set(self._EMULATIONS), (
+            "the emulation table and the row list disagree — a platform with no world, "
+            "or a world no row runs under, makes the loop below prove nothing"
+        )
         for platform in self._EXPECTED_PLATFORMS:
             world = self._world_for(platform)
             assert world, f"the {platform} rows run bare, so on a {platform}-foreign host they measure the runner"
@@ -1226,6 +1245,7 @@ class TestTheTwoWorldsMustNotBeStacked:
         host and re-running what used to be the bare posix rows — DIES, exactly
         what CI reported under a label that said posix.
         """
+        assert set(self._EMULATIONS) == {"posix", "nt"}, self._EMULATIONS
         for platform, emulation in self._EMULATIONS.items():
             under_the_other_host = self._EMULATIONS["nt" if platform == "posix" else "posix"]
             verdict = self._verdict(under_the_other_host + emulation + DEAD_CWD_WORLD)

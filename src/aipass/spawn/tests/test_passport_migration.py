@@ -184,6 +184,15 @@ def _legacy_passport(
     return document
 
 
+#: The floor every loop over ``discover_passports(synthetic_fleet)`` asserts before
+#: it iterates. The fixture writes TEN passports and two of them are decoys that must
+#: never be discovered — a ``.backup/`` snapshot and the template — so a discovery that
+#: started following either would read 9 or 10 here, and a discovery that found nothing
+#: would turn every one of those loops into a silent pass. Measured 2026-09-08:
+#: 6 core + 2 resident.
+SYNTHETIC_FLEET_SIZE = 8
+
+
 @pytest.fixture
 def synthetic_fleet(tmp_path):
     """A tmp repo root reproducing every live shape this migration must fix."""
@@ -403,7 +412,9 @@ class TestBlockAndKeyOrder:
 
     def test_every_migrated_passport_uses_the_2_0_block_order(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             document = _read(target.path)
             assert tuple(document.keys()) == CONTRACT_BLOCK_ORDER, f"{target.branch_dir.name} block order"
 
@@ -411,7 +422,9 @@ class TestBlockAndKeyOrder:
     def test_key_order_inside_every_block_follows_the_contract(self, synthetic_fleet, section):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
         contract = CONTRACT_KEY_ORDER[section]
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             keys = tuple(_read(target.path)[section].keys())
             expected = tuple(key for key in contract if key in keys)
             assert keys == expected, f"{target.branch_dir.name}.{section} key order"
@@ -488,7 +501,9 @@ class TestValueLanes:
 
     def test_version_and_schema_version_both_become_2_0_0(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             meta = _read(target.path)["document_metadata"]
             assert (meta["version"], meta["schema_version"]) == ("2.0.0", "2.0.0")
 
@@ -502,12 +517,17 @@ class TestValueLanes:
 
     def test_residency_is_core_under_src_aipass_and_resident_under_projects(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        assert {t.residency for t in targets} == {"core", "resident"}, "both residencies must be in the sweep"
+        for target in targets:
             assert _read(target.path)["citizenship"]["residency"] == target.residency
 
     def test_git_branch_becomes_dev_everywhere(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             assert _read(target.path)["branch_info"]["git_branch"] == "dev"
 
     def test_registry_path_backfilled_when_missing(self, synthetic_fleet):
@@ -615,7 +635,9 @@ class TestIdentityContentPreserved:
     def test_synthetic_identity_content_survives_byte_identical(self, synthetic_fleet):
         before = {t.branch_dir.name: _read(t.path) for t in discover_passports(synthetic_fleet)}
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             old = before[target.branch_dir.name]
             new = _read(target.path)
             for key in ("role", "purpose", "what_i_do", "what_i_dont_do"):
@@ -743,7 +765,9 @@ class TestNoHardcodedHomePaths:
 
     def test_synthetic_fleet_keeps_no_absolute_path_at_all(self, synthetic_fleet):
         migrate_fleet(synthetic_fleet, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(synthetic_fleet):
+        targets = discover_passports(synthetic_fleet)
+        assert len(targets) == SYNTHETIC_FLEET_SIZE, f"discovery found {len(targets)} passports, not the fleet"
+        for target in targets:
             text = target.path.read_text(encoding="utf-8")
             assert "/home/" not in text, target.path
             assert ABSOLUTE_FOSSIL_PREFIX not in text, target.path
@@ -752,7 +776,9 @@ class TestNoHardcodedHomePaths:
 
     def test_live_fleet_copy_has_no_home_substring_left(self, live_fleet_copy):
         migrate_fleet(live_fleet_copy, confirm=True, run_date=RUN_DATE)
-        for target in discover_passports(live_fleet_copy):
+        targets = discover_passports(live_fleet_copy)
+        assert targets, "the live copy fixture planted no passports - the sweep below would prove nothing"
+        for target in targets:
             assert "/home/" not in target.path.read_text(encoding="utf-8"), target.path
 
 
@@ -947,11 +973,15 @@ class TestEmptyScanIsNotAnAllClear:
         empty_root = tmp_path / "some_other_repo"
         (empty_root / "src").mkdir(parents=True)
 
-        assert handle_migrate_passports(["--root", str(empty_root)]) == 0
+        # A REFUSAL EXITS NON-ZERO. This pinned the 0 until 2026-09-08, which made the
+        # command say "I searched the wrong root" in words and "all clear" in the one
+        # channel a caller can branch on. Rewritten in place rather than added beside:
+        # the old expectation was the defect, so leaving it would pin both answers.
+        assert handle_migrate_passports(["--root", str(empty_root)]) == 1
 
         captured = capsys.readouterr()
-        # The zero-scan line is a warning() — stderr by seedgo's routing rule —
-        # while the layout hint stays on stdout, so read both streams.
+        # The zero-scan line is an error() — stderr by seedgo's routing rule — while
+        # the layout hint stays on stdout, so read both streams.
         both = _unwrapped(captured.out + captured.err)
         assert _unwrapped("already 2.0") not in both, "an empty scan must not report the fleet as migrated"
         assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
@@ -962,9 +992,10 @@ class TestEmptyScanIsNotAnAllClear:
         empty_root = tmp_path / "some_other_repo"
         empty_root.mkdir()
 
-        handle_migrate_passports(["--root", str(empty_root)])
+        code = handle_migrate_passports(["--root", str(empty_root)])
 
         captured = capsys.readouterr()
+        assert code == 1, "a root that yielded nothing is a refusal, not a clean run"
         assert _unwrapped(str(empty_root)) in _unwrapped(captured.out + captured.err)
 
     def test_a_populated_root_still_reports_the_all_clear(self, synthetic_fleet, capsys):
@@ -974,9 +1005,10 @@ class TestEmptyScanIsNotAnAllClear:
         handle_migrate_passports(["--root", str(synthetic_fleet), "--confirm"])
         capsys.readouterr()
 
-        handle_migrate_passports(["--root", str(synthetic_fleet)])
+        code = handle_migrate_passports(["--root", str(synthetic_fleet)])
 
         captured = capsys.readouterr()
+        assert code == 0, "a real all-clear is not a refusal — the exit seam must not convict it"
         assert _unwrapped("already 2.0") in _unwrapped(captured.out)
         assert _unwrapped("No passports found") not in _unwrapped(captured.out + captured.err)
 
@@ -1139,8 +1171,21 @@ class TestLiveBaselineGuardsOnTheWorld:
         assert reason is None, "a two-tier world IS measurable — the guard must not skip it"
 
     def test_the_live_machine_is_measured_or_says_why(self):
-        """Whatever this machine is, the verdict must be self-describing."""
-        shape, reason = _fleet_baseline_verdict(repo_root())
+        """Whatever this machine is, the verdict must be self-describing.
 
-        assert len(shape) == 3
-        assert reason is None or isinstance(reason, str)
+        The old pin read ``reason is None or isinstance(reason, str)`` — true of
+        every value the function can return, on either arm, so it could not fail
+        on any machine. The claim worth making is the RULE the verdict follows:
+        it measures exactly when a resident tier is present, and otherwise it
+        says which world it saw. Measured on this box 2026-09-08:
+        shape (22, 18, 4), reason None.
+        """
+        shape, reason = _fleet_baseline_verdict(repo_root())
+        total, core, resident = shape
+
+        assert total == core + resident, f"a discovered passport landed in neither tier: {shape}"
+        assert (reason is None) is (resident > 0), (
+            f"the verdict must measure exactly when a resident is present: shape={shape} reason={reason!r}"
+        )
+        if total and resident == 0:
+            assert f"{core} core, 0 resident" in reason, reason

@@ -28,10 +28,10 @@ def _suppress_log_operation(monkeypatch):
 # --- get_footer tests ------------------------------------------------
 
 
-def test_get_footer_returns_string():
-    """get_footer returns a string."""
-    result = mod.get_footer()
-    assert isinstance(result, str)
+# ``test_get_footer_returns_string`` lived here until 2026-09-08 (FPLAN-0514).
+# Its whole oracle was ``isinstance(result, str)``, and the two units below
+# already fail on anything that is not the constant string, so it pinned nothing
+# a sibling did not. Retired to tests/.archive/, not deleted.
 
 
 def test_get_footer_matches_constant():

@@ -698,6 +698,11 @@ class TestNoPrivateCwdFallback:
 
     def test_the_allowlist_names_only_files_that_exist(self):
         """An allowlist entry for a deleted file is a hole nobody can see."""
+        assert len(CWD_ALLOWLIST) == 1, (
+            f"the allowlist holds {len(CWD_ALLOWLIST)} entries, not the 1 this pin was written "
+            "against — an emptied allowlist sends the loop below through zero iterations and "
+            f"reports green having checked nothing: {sorted(CWD_ALLOWLIST)}"
+        )
         for entry in CWD_ALLOWLIST:
             assert (APPS_DIR.parent / entry).exists(), entry
 

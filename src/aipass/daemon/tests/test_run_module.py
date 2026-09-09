@@ -10,6 +10,7 @@
 
 from unittest.mock import patch
 
+from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 from aipass.daemon.apps.modules.run import (
     run_tick,
     handle_command,
@@ -38,8 +39,15 @@ class TestHandleCommand:
 
     def test_help_flag(self, capsys):
         result = handle_command("run", ["--help"])
+        out = capsys.readouterr().out
         assert result is True
         assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
+        # The capture was requested and never read: a True receipt says the call
+        # returned, not that anything was printed. run's help is its own — the
+        # heading names this verb, so a router that answered with some other
+        # module's help would fail here instead of passing on the receipt.
+        assert "run — Decentralized Scheduler Tick" in out, f"run --help printed: {out[:200]!r}"
+        assert "USAGE:" in out, "run --help must print a USAGE: block"
 
 
 class TestRunTick:
@@ -167,12 +175,34 @@ class TestPrunePersistence:
         mock_save = self._quiet_tick(runstate)
         # The bug: pruning mutated memory every tick but only ever saved inside
         # the fire loop, so a quiet tick threw the prune away.
-        mock_save.assert_called_once()
-        assert "@ghost/retired" not in mock_save.call_args[0][0]["jobs"]
+        #
+        # Was assert_called_once. Since DPLAN-0332 every tick also stamps
+        # last_tick, so a quiet tick writes twice and the count no longer
+        # identifies the prune. The claim never was "exactly one write" — it is
+        # "the prune reaches disk", so that is what this now asserts.
+        assert mock_save.called, "a quiet tick must still persist its prune"
+        assert all("@ghost/retired" not in call[0][0]["jobs"] for call in mock_save.call_args_list)
+        assert "@ghost/retired" not in runstate["jobs"]
 
-    def test_clean_runstate_is_not_rewritten(self):
-        mock_save = self._quiet_tick({"jobs": {"@commons/live": {}}})
-        mock_save.assert_not_called()
+    def test_a_clean_quiet_tick_writes_only_its_tick_stamp(self):
+        """DPLAN-0332 superseded the old claim, and this is the honest remainder.
+
+        Was test_clean_runstate_is_not_rewritten / assert_not_called: a tick
+        with nothing to prune and nothing to fire wrote nothing at all. It now
+        writes exactly once, because recording last_tick IS the tick's product —
+        gap detection reads it, and a tick that saved nothing would be
+        indistinguishable from a tick that never happened.
+
+        What the original pin was really protecting — no gratuitous rewrite for
+        work that was not done — survives as the count: one write, and its only
+        content is the stamp.
+        """
+        runstate = {"jobs": {"@commons/live": {}}}
+        mock_save = self._quiet_tick(runstate)
+        mock_save.assert_called_once()
+        saved = mock_save.call_args[0][0]
+        assert saved["last_tick"], "the one write must be the tick stamp"
+        assert saved["jobs"] == {"@commons/live": {}}, "nothing else may change on a clean quiet tick"
 
     def test_dry_run_never_writes(self):
         runstate = {"jobs": {"@ghost/retired": {}, "@commons/live": {}}}
@@ -180,6 +210,13 @@ class TestPrunePersistence:
         mock_save.assert_not_called()
 
     def test_discovery_failure_does_not_wipe_runstate(self):
+        """Discovery returning nothing must never be read as "the fleet is empty".
+
+        The tick stamp is still written — the scheduler DID tick, and swallowing
+        that would make the next tick report a gap that never happened and queue
+        catch-ups for windows nobody missed. What must survive is the jobs dict:
+        an empty discovery is a discovery failure, not a fleet that retired.
+        """
         runstate = {"jobs": {"@commons/live": {}}}
         with (
             patch(f"{RUN}.discover_jobs", return_value=[]),
@@ -187,8 +224,9 @@ class TestPrunePersistence:
             patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
         ):
             run_tick()
-        mock_save.assert_not_called()
         assert runstate["jobs"] == {"@commons/live": {}}
+        for call in mock_save.call_args_list:
+            assert call[0][0]["jobs"] == {"@commons/live": {}}, "a save must never carry a wiped roster"
 
 
 # ── rotation delegation (DPLAN-0287 piece 1) ─────────
@@ -211,7 +249,7 @@ class TestRotationDelegation:
             outcome, detail = _fire_job(job, runstate)
         assert outcome == OUTCOME_FIRED
         assert detail == "woke @backup"
-        mock_rotation.assert_called_once_with(job, runstate)
+        mock_rotation.assert_called_once_with(job, runstate, header="")
 
     def test_ordinary_job_never_touches_the_rotation(self):
         with (
@@ -283,14 +321,40 @@ class TestMissedWindowLine:
         assert (first["missed"], second["missed"]) == (1, 0)
 
     def test_the_marker_is_persisted(self):
+        # Was assert_called_once; since DPLAN-0332 the tick also stamps
+        # last_tick, so the count no longer identifies this write. The claim is
+        # that the marker reaches disk, and that is asserted directly.
         runstate = {"jobs": {}}
         _results, mock_save = self._tick(runstate)
-        mock_save.assert_called_once()
+        assert mock_save.called
         assert runstate["jobs"]["@commons/live"]["missed_logged_for"]
+        assert any(
+            call[0][0]["jobs"].get("@commons/live", {}).get("missed_logged_for") for call in mock_save.call_args_list
+        ), "the MISSED marker never reached a save"
 
-    def test_a_job_without_catch_up_is_told_it_is_not_firing(self, capsys):
-        self._tick({"jobs": {}})
+    def test_a_job_that_opts_out_is_told_it_is_not_firing(self, capsys):
+        # SUPERSEDED SHAPE, SAME DEFECT. This pin used to pass no catch_up field
+        # at all, because under ruling 6 (2026-09-07) absent meant off. DPLAN-0332
+        # reversed the default on 2026-09-08, so absent now means ON and only an
+        # explicit false opts out — the opt-out is what has to be stated here.
+        #
+        # The defect is unchanged and is the reason the pin survives the reversal:
+        # on 2026-09-08 at 11:37:52 this line read "catch_up is off — not firing"
+        # and the same tick fired the job three seconds later, because the line
+        # read the raw field while is_job_due() read catch_up_on(). One predicate
+        # now answers both.
+        self._tick({"jobs": {}}, catch_up=False)
         assert "catch_up is off — not firing" in flat(capsys.readouterr().out)
+
+    def test_an_unset_catch_up_is_told_it_is_firing_late(self, capsys):
+        # The flip itself: a job that states nothing is caught up, and the line
+        # says so. Every enabled job in the fleet left this field unset, which is
+        # exactly why nothing recovered from the 23-hour gap on 2026-09-08.
+        self._tick({"jobs": {}})
+        # Reads the flag: the lane is gated while @devpulse and Patrick run the
+        # controlled live proof, and the line must tell the truth in BOTH worlds.
+        expected = "on — firing late this tick" if runstate_mod.RECOVERY_LANE_LIVE else "off — not firing"
+        assert f"catch_up is {expected}" in flat(capsys.readouterr().out)
 
     def test_a_job_with_catch_up_is_told_it_is_firing_late(self, capsys):
         self._tick({"jobs": {}}, catch_up=True)

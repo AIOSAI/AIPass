@@ -20,7 +20,6 @@ reply is always deliverable to the mail it answers.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
@@ -632,19 +631,34 @@ class TestResidentDiscovery:
         (stray / "passport.json").write_text(json.dumps({"citizenship": {"residency": "resident"}}), encoding="utf-8")
         assert reg.get_resident_branches(tmp_path) == {}
 
-    def test_the_live_fleet_still_resolves_its_four_residents(self):
-        """Behavioural, against THIS machine: the semantics change, not the answer.
+    def test_a_built_fleet_of_four_residents_all_resolve(self, tmp_path):
+        """Behavioural, against a tree this test builds — not against THIS machine.
 
         projects/* is gitignored — each project is its own repo — so a fresh
-        checkout and CI have no fleet to measure. This pin guards the live
-        machine, not any installed fleet, so it skips loudly rather than
-        reporting a red for a tree that was never cloned.
+        checkout and CI have no fleet to read (fresh_clone, 2026-09-08). The
+        previous version of this test read the real projects/ tree and, when
+        that tree was absent, fell back to asserting the empty dict — two
+        oracles for one test, and the one a fresh clone or CI actually hits was
+        never proven against a real multi-project shape.
+
+        This plants a synthetic fleet with the same shape as the live one —
+        four declared residents, plus a retired project and a dot-prefixed one
+        that the existing exclusion tests above already prove are refused —
+        and resolves it the way ``test_a_declared_resident_is_discovered``
+        already does, just with more than one project at once.
         """
-        if os.environ.get("GITHUB_ACTIONS"):
-            pytest.skip("live-fleet pin: projects/* is gitignored, CI has no fleet to measure")
-        if not (reg.find_repo_root() / reg.RESIDENT_PROJECTS_DIR).is_dir():
-            pytest.skip("live-fleet pin: no projects/ tree on this machine")
-        live = reg.get_resident_branches()
+        assert reg.RESIDENT_PROJECTS_DIR == "projects", (
+            "the resident tree was renamed — re-aim this pin rather than letting it skip"
+        )
+        self._project(tmp_path, "baud", "baud")
+        self._project(tmp_path, "earmark", "earmark")
+        self._project(tmp_path, "finch", "finch")
+        self._project(tmp_path, "aipass_site", "aipass_site")
+        self._project(tmp_path, "marketstand", "marketstand", status="retired")
+        self._project(tmp_path, ".speakeasy", "speakeasy")
+
+        live = reg.get_resident_branches(tmp_path)
+
         assert set(live) == {"@baud", "@earmark", "@finch", "@aipass_site"}, sorted(live)
         joined = " ".join(live.values()).lower()
         assert "marketstand" not in joined and "speakeasy" not in joined

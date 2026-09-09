@@ -6,9 +6,16 @@ Covers: slugify_subject, create_plan_impl, create_plan_file,
 """
 
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+#: The platform's temp directory, never a POSIX literal. These paths are only
+#: ever handed to MagicMocks - nothing here touches the disk - but a hardcoded
+#: /tmp still reads as a POSIX-only test to anyone porting the suite, and
+#: seedgo's windows_compat rule says so out loud.
+_TMP = Path(tempfile.gettempdir())
 
 
 # ---------------------------------------------------------------------------
@@ -454,10 +461,19 @@ class TestGetClosedPlans:
         assert subjects == {"done A", "done B"}
 
     def test_result_tuples_contain_plan_num_and_info(self, mock_registry):
+        """Every returned row is a (plan_num, plan_info) pair, and there IS a row.
+
+        FLOOR BEFORE THE LOOP (FPLAN-0508, VACUOUS-LOOP). The loop below carried
+        every assertion in this unit, so a get_closed_plans() that returned an
+        empty list passed it having checked nothing at all - the exact defect the
+        unit exists to catch. mock_registry holds three plans of which exactly
+        one is closed, so the floor is a measured 1, not a truthiness check.
+        """
         _, registry = mock_registry
         with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
+        assert len(result) == 1
         for plan_num, plan_info in result:
             assert isinstance(plan_num, str)
             assert isinstance(plan_info, dict)
@@ -502,7 +518,7 @@ class TestCreatePlanImpl:
             "save_registry": MagicMock(return_value=True),
             "auto_close_orphaned_plans": MagicMock(return_value=(registry, 0)),
             "resolve_plan_location": MagicMock(
-                return_value=(True, Path("/tmp/plans"), ""),
+                return_value=(True, _TMP / "plans", ""),
             ),
             "calculate_relative_location": MagicMock(return_value="plans"),
             "get_template": MagicMock(return_value="# Plan content"),
@@ -516,12 +532,12 @@ class TestCreatePlanImpl:
         deps.update(overrides)
         return deps
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_successful_creation(self, mock_log, mock_jh):
         deps = self._make_deps()
         success, plan_num, loc, tmpl, err, msgs = create_plan_impl(
-            location="/tmp/plans",
+            location=str(_TMP / "plans"),
             subject="Widget feature",
             template_type="default",
             **deps,
@@ -534,7 +550,7 @@ class TestCreatePlanImpl:
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_missing_dependency_returns_failure(self, mock_log, mock_jh):
         deps = self._make_deps()
@@ -546,12 +562,12 @@ class TestCreatePlanImpl:
         assert "Missing required dependency" in err
         assert "get_template" in err
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_location_resolution_failure(self, mock_log, mock_jh):
         deps = self._make_deps(
             resolve_plan_location=MagicMock(
-                return_value=(False, Path("/tmp"), "Dir not found"),
+                return_value=(False, _TMP, "Dir not found"),
             ),
         )
 
@@ -560,7 +576,7 @@ class TestCreatePlanImpl:
         assert success is False
         assert err == "Dir not found"
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_file_creation_failure(self, mock_log, mock_jh):
         deps = self._make_deps(
@@ -572,7 +588,7 @@ class TestCreatePlanImpl:
         assert success is False
         assert err == "File exists"
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_auto_cleanup_runs_and_saves(self, mock_log, mock_jh):
         registry = {"next_number": 5, "plans": {}}
@@ -594,7 +610,7 @@ class TestCreatePlanImpl:
         assert len(dim_msgs) == 1
         assert "2" in dim_msgs[0]["text"]
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_plan_type_config_used(self, mock_log, mock_jh):
         """Plan type config controls prefix, digits, slug length."""
@@ -617,7 +633,7 @@ class TestCreatePlanImpl:
         plan_file_path: Path = call_args[0][0]
         assert plan_file_path.name.startswith("DPLAN-001")
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_template_exception_returns_failure(self, mock_log, mock_jh):
         deps = self._make_deps(
@@ -629,7 +645,7 @@ class TestCreatePlanImpl:
         assert success is False
         assert "Failed to load template" in err
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_dashboard_failure_does_not_block_success(self, mock_log, mock_jh):
         deps = self._make_deps(
@@ -643,7 +659,7 @@ class TestCreatePlanImpl:
         assert success is True
         assert err == ""
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_empty_subject_produces_filename_without_slug(self, mock_log, mock_jh):
         deps = self._make_deps()
@@ -659,7 +675,7 @@ class TestCreatePlanImpl:
         # Should not have double underscores from empty slug
         assert "__" not in name
 
-    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler")
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
     def test_registry_save_failure_warns_but_returns_success(self, mock_log, mock_jh):
         """Plan is created even if registry save fails (file already on disk)."""

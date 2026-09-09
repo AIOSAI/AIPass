@@ -157,29 +157,42 @@ def test_handle_command_check_subcommand():
 
 
 def test_print_introspection_runs():
-    """print_introspection produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.readme_update import print_introspection
+    """print_introspection names the module and both handlers it is wired to.
 
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_introspection()
-    assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
+    Was `assert console.print.called or header.called` — an OR that passes on
+    either half, so a version that printed nothing but touched the header
+    still passed. These are the lines the function actually emits, measured
+    2026-09-07; `console`/`header` are the fixture mocks the module binds.
+    """
+    from aipass.seedgo.apps.modules.readme_update import console, header, print_introspection
+
+    assert print_introspection() is None
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    assert "[bold cyan]readme_update Module[/bold cyan]" in lines
+    assert "  [cyan]handlers/readme/[/cyan]" in lines
+    assert "  [cyan]handlers/json/[/cyan]" in lines
+    assert "  [dim]- aipass.cli (console, header)[/dim]" in lines
+    assert header.call_args_list == []
 
 
 def test_print_help_runs():
-    """print_help produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.readme_update import print_help
+    """print_help prints the command list under the 'README Auto-Update' header.
 
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_help()
-    assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
+    Was `assert console.print.called or header.called` — an OR that passes on
+    either half. Both halves are real here, so both are pinned separately,
+    against the strings measured 2026-09-07.
+    """
+    from aipass.seedgo.apps.modules.readme_update import console, header, print_help
+
+    assert print_help() is None
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    header.assert_called_once_with("README Auto-Update")
+    assert "[yellow]COMMANDS:[/yellow]" in lines
+    assert "[yellow]AUTO-GENERATED SECTIONS:[/yellow]" in lines
+    assert "  LAST_UPDATED  Timestamp" in lines
+    assert "[dim]Commands: readme, --help[/dim]" in lines
 
 
 # ---------------------------------------------------------------------------
@@ -188,21 +201,49 @@ def test_print_help_runs():
 
 
 def test_print_target_error_not_found():
-    """_print_target_error handles 'not_found:xyz' code without raising."""
-    from aipass.seedgo.apps.modules.readme_update import _print_target_error
+    """_print_target_error names the unresolved branch, on the error channel.
+
+    Was a bare call that asserted nothing (no_oracle): it could not tell the
+    branch name being reported from it being swallowed. Measured 2026-09-07 —
+    this arm routes to cli's error(), and prints nothing on console.
+    """
+    from aipass.seedgo.apps.modules.readme_update import _print_target_error, console, display_error
 
     _print_target_error("not_found:some_branch")
 
+    reported = [call.args[0] for call in display_error.call_args_list if call.args]
+    assert reported == ["Branch 'some_branch' not found in registry"]
+    assert console.print.call_args_list == []
+
 
 def test_print_result_empty():
-    """_print_result handles empty result dict without raising."""
-    from aipass.seedgo.apps.modules.readme_update import _print_result
+    """Nothing updated, nothing missing, no errors: _print_result says nothing.
+
+    Silence is the design here, and this pins it. Was a bare call that
+    asserted nothing (no_oracle). Measured 2026-09-07: outside check mode
+    every section falls to the else arm, which prints only when is_check is
+    True — so an empty result really does emit zero lines on either channel.
+    """
+    from aipass.seedgo.apps.modules.readme_update import _print_result, console, display_error
 
     _print_result({"updated": [], "missing_markers": [], "errors": []})
 
+    assert console.print.call_args_list == []
+    assert display_error.call_args_list == []
+
 
 def test_print_result_with_errors():
-    """_print_result displays errors without raising."""
-    from aipass.seedgo.apps.modules.readme_update import _print_result
+    """_print_result reports the error and stops: it does not also list sections.
 
-    _print_result({"updated": [], "missing_markers": [], "errors": ["Something went wrong"]})
+    Was a bare call that asserted nothing (no_oracle). "TREE" is in `updated`
+    on purpose: without the early return after the errors, console would carry
+    "  [green]Updated[/green] Directory Tree" (measured 2026-09-07), so the
+    console-silence assertion is what pins the return.
+    """
+    from aipass.seedgo.apps.modules.readme_update import _print_result, console, display_error
+
+    _print_result({"updated": ["TREE"], "missing_markers": [], "errors": ["Something went wrong"]})
+
+    reported = [call.args[0] for call in display_error.call_args_list if call.args]
+    assert reported == ["Something went wrong"]
+    assert console.print.call_args_list == []

@@ -25,6 +25,7 @@ Covers 9 tests:
 """
 
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -109,9 +110,13 @@ def test_output_capture(capsys: pytest.CaptureFixture[str]) -> None:
         _daemon_mod.main()
     captured = capsys.readouterr()
     assert len(captured.out) > 0, "Help output must be capturable on stdout"
-    assert "USAGE" in captured.out or "daemon" in captured.out.lower(), (
-        "Captured help output must contain usage information"
-    )
+    # Was `"USAGE" in out or "daemon" in out.lower()`. Both clauses hold on the
+    # real banner, so the `or` bought nothing: either half alone kept the unit
+    # green. Measured by running main() under --help — the banner prints the
+    # heading, then the literal `USAGE:` line, then the command forms. Pinned
+    # to what the code actually emits.
+    assert "USAGE:" in captured.out, f"help must print the USAGE: block, got: {captured.out[:200]!r}"
+    assert "DAEMON - Branch Management System" in captured.out, "help must print the DAEMON banner heading"
 
 
 def test_version_flag() -> None:
@@ -166,6 +171,18 @@ def test_help_after_junk_arg_does_not_fire_scheduler() -> None:
 # router and that is where these tests intercept it.
 ROUTER = "aipass.daemon.apps.daemon"
 
+# The effectful seam is patched at every site below that feeds a verb to the real
+# router. GATED_VERBS holds install-timer and uninstall-timer, and with the gate
+# removed — a red-first run, a mutation run — main() reaches _install()/
+# _uninstall() and the real systemctl. conftest's autouse _seal_timer_host_state
+# already makes that unreachable, but a guard living one file away is invisible
+# both to a reader of these tests and to seedgo's host_state rule, which acquits
+# a site only when the seam is patched IN the unit.
+#
+# Written out in full at each site rather than held in a constant: the rule reads
+# the patch target as a literal, and a Name resolves to nothing it can follow.
+# The repetition is the point — a unit copied out of this file takes its guard.
+
 # Every verb daemon.py routes, with the flags it actually defines. branch-health
 # is absent on purpose: it takes a POSITIONAL and gates it in its own module
 # (wave 1), pinned in test_activity_report.py.
@@ -215,15 +232,19 @@ class TestUnknownArgumentIsRefused:
 
     @pytest.mark.parametrize("verb", GATED_VERBS)
     def test_a_stray_positional_is_refused(self, verb) -> None:
-        with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
-            with pytest.raises(SystemExit) as exc:
-                _daemon_mod.main()
+        with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
+            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+                with pytest.raises(SystemExit) as exc:
+                    _daemon_mod.main()
         assert exc.value.code == 1, f"{verb} accepted a stray positional"
 
     @pytest.mark.parametrize("verb", GATED_VERBS)
     def test_the_refusal_names_the_token(self, verb) -> None:
         """A refusal that does not name the token leaves a long command line a guess."""
-        with patch(f"{ROUTER}.error") as mock_err:
+        with (
+            patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True),
+            patch(f"{ROUTER}.error") as mock_err,
+        ):
             with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 with pytest.raises(SystemExit):
                     _daemon_mod.main()
@@ -256,8 +277,56 @@ class TestUnknownArgumentIsRefused:
         with patch.object(sys, "argv", ["daemon", "activity", "--hours", "48"]):
             assert _daemon_mod.main() == 0
 
+    @pytest.mark.parametrize("verb", ["install-timer", "uninstall-timer"])
+    def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(self, verb, _seal_timer_host_state) -> None:
+        """The two rows that took the scheduler down on 2026-09-07, run in the world that did it.
+
+        The gate is patched to a no-op here — the exact mutation world, and the
+        exact state of this file during a red-first run — so _install() and
+        _uninstall() really execute. What must hold is that they execute
+        against the sealed seams and not the user's systemd.
+
+        This asserts in BOTH directions on purpose. Live host state unchanged is
+        half the claim; the other half is that the verb actually RAN, because a
+        world where nothing fires would satisfy the first half while proving
+        nothing at all. The sealed systemctl having been called is what
+        distinguishes "it could not touch the host" from "it never got there".
+        """
+        live_dir = Path.home() / ".config" / "systemd" / "user"
+        units = ("daemon-tick.service", "daemon-tick.timer")
+        before = sorted(name for name in units if (live_dir / name).exists())
+
+        with patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None):
+            with patch.object(sys, "argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
+                result = _daemon_mod.main()
+
+        assert result == 0, f"{verb} with the gate removed should run the verb, not refuse"
+        assert _seal_timer_host_state.called, (
+            f"{verb} never reached _run_systemctl — this test proves nothing about the seal"
+        )
+
+        # Where the file operations actually landed. install-timer copies both
+        # units in, uninstall-timer unlinks whatever is there — against the
+        # SEALED directory. The seam is a module constant, so the same code
+        # would perform the same operations on whatever it points at; this is
+        # what makes the live-dir assertion below a consequence of the seal
+        # rather than a coincidence.
+        sealed_dir = _daemon_mod.timer_install._UNIT_DIR
+        assert sealed_dir != live_dir, "the seal is not in place — _UNIT_DIR is the live directory"
+        if verb == "install-timer":
+            assert sorted(p.name for p in sealed_dir.iterdir()) == sorted(units), (
+                f"install-timer did not write the units into the sealed dir: {list(sealed_dir.iterdir())}"
+            )
+
+        after = sorted(name for name in units if (live_dir / name).exists())
+        assert after == before, f"{verb} changed the live unit files: {before} -> {after}"
+
     def test_help_outranks_the_gate(self) -> None:
         """A help request is never an unknown argument, and never exits non-zero."""
+        # The floor. An empty GATED_VERBS would make the loop below a silent
+        # pass: twelve is what wave 2b landed, counted from the list above.
+        assert len(GATED_VERBS) == 12, f"the gate covers twelve verbs, this list names {len(GATED_VERBS)}"
         for verb in GATED_VERBS:
-            with patch.object(sys, "argv", ["daemon", verb, "--help"]):
-                assert _daemon_mod.main() == 0, f"{verb} --help must exit 0"
+            with patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True):
+                with patch.object(sys, "argv", ["daemon", verb, "--help"]):
+                    assert _daemon_mod.main() == 0, f"{verb} --help must exit 0"

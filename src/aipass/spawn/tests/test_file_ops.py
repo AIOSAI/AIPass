@@ -294,6 +294,7 @@ class TestShouldSkip:
 
     def test_should_skip_all_skip_names(self) -> None:
         """Every entry in SKIP_NAMES triggers a skip."""
+        assert len(SKIP_NAMES) == 6, f"SKIP_NAMES holds {sorted(SKIP_NAMES)} - the sweep below is not the whole set"
         for name in SKIP_NAMES:
             assert _should_skip(Path(name)), f"{name} should be skipped"
 

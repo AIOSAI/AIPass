@@ -8,6 +8,7 @@
 
 """Tests for the nightly steward rotation (DPLAN-0287)."""
 
+import inspect
 from pathlib import Path
 from unittest.mock import patch
 
@@ -358,7 +359,19 @@ class TestManagerLane:
         assert "boom" in detail
 
     def test_lane_probe_reads_the_live_signature(self):
-        assert rotation_module._scheduled_lane_available() in (True, False)
+        """The probe answers True because ai_mail's wake_branch really takes `scheduled`.
+
+        Was `in (True, False)` — true of every bool, so it survived any
+        implementation that returns one. The probe exists to notice the day
+        ai_mail's lane appears or disappears, so it pins the live answer and the
+        parameter that produces it. If wake_branch loses `scheduled`, rotation
+        starts skipping every manager steward by name (rotation.py line 203) and
+        both halves of this go red together.
+        """
+        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+
+        assert "scheduled" in inspect.signature(wake_branch).parameters
+        assert rotation_module._scheduled_lane_available() is True
 
 
 # ── CLI surface ───────────────────────────────────────

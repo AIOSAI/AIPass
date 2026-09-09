@@ -214,6 +214,11 @@ class TestGetAllUsersPaths:
         registry_path, _ = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             users = get_all_users()
+            # The floor. Every assertion in this unit sits inside the loop, so an
+            # empty result made it a silent pass — a get_all_users() that
+            # returned nothing at all reported green. Three is the fixture's own
+            # number, pinned by test_all_paths_are_absolute above.
+            assert len(users) == 3, f"the registry fixture plants 3 users, got {len(users)}"
             for email, info in users.items():
                 assert info["mailbox_path"].endswith(".ai_mail.local"), (
                     f"mailbox_path for {email} should end with .ai_mail.local, got: {info['mailbox_path']}"
@@ -224,6 +229,8 @@ class TestGetAllUsersPaths:
         registry_path, _ = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             users = get_all_users()
+            # The floor — see test_all_paths_end_with_ai_mail_local above.
+            assert len(users) == 3, f"the registry fixture plants 3 users, got {len(users)}"
             for email, info in users.items():
                 # Normalize to forward slashes for consistent counting on all platforms
                 path = info["mailbox_path"].replace("\\", "/")
@@ -235,6 +242,8 @@ class TestGetAllUsersPaths:
         registry_path, repo_root = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             users = get_all_users()
+            # The floor — see test_all_paths_end_with_ai_mail_local above.
+            assert len(users) == 3, f"the registry fixture plants 3 users, got {len(users)}"
             for email, info in users.items():
                 assert info["mailbox_path"].startswith(str(repo_root)), (
                     f"Path for {email} should start with repo root {repo_root}, got: {info['mailbox_path']}"

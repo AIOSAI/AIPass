@@ -58,10 +58,23 @@ def _out(capsys) -> str:
 class TestRetiredVerbsAnswer:
     """A retired verb routes, refuses, and names its replacement."""
 
-    def test_both_retired_verbs_are_still_routed(self):
+    def test_both_retired_verbs_route_and_exit_non_zero(self):
+        """Routed is not the same as succeeded.
+
+        REWRITTEN 2026-09-08 (the fleet refusal sweep): this asserted only that
+        the verb was CLAIMED, and a claimed refusal that printed through
+        `warning()` left the failure flag clear, so `drone @memory templates
+        push-templates` exited 0 and every script reading that code was told the
+        retired verb had worked. The refusal now goes through `error()`, and the
+        pin is the exit code the entry point would return, not the routing bool.
+        """
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
         for verb in ("push-templates", "diff-templates"):
-            assert templates.handle_command(verb, []) is True
-            assert templates.handle_command("templates", [verb]) is True
+            for argv in ([verb, []], ["templates", [verb]]):
+                reset_command_state()
+                assert templates.handle_command(argv[0], argv[1]) is True
+                assert resolve_exit(True) == 2, f"{argv} refused but would exit 0"
 
     def test_push_templates_names_both_live_lanes(self, capsys):
         templates.handle_command("templates", ["push-templates"])
@@ -89,6 +102,14 @@ class TestRetiredVerbsAnswer:
         with patch.object(templates, "push_to_spawn_templates") as pushed:
             templates.handle_command("templates", ["push-templates", "--dry-run"])
         pushed.assert_not_called()
+
+        # "Loudly" is half the claim, and it was the half this unit captured and
+        # never looked at: capsys was requested, readouterr() was never called,
+        # so a verb that went back to silent no-op passed here. The refusal has
+        # to reach the caller even when --dry-run is on the line.
+        printed = _out(capsys)
+        assert "retired" in printed.lower(), printed
+        assert "dead_template_lane_20260827" in printed, printed
 
 
 # =============================================================================

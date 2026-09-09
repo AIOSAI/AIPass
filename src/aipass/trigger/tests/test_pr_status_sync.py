@@ -65,10 +65,29 @@ class TestHandlePrCreated:
         mock_popen.return_value.wait.assert_not_called()
 
     @patch("subprocess.Popen", side_effect=FileNotFoundError("drone not found"))
-    def test_handles_missing_drone(self, mock_popen: MagicMock, tmp_path: Path) -> None:
-        """Doesn't crash if drone binary not found."""
+    def test_a_missing_drone_is_named_and_the_event_is_still_logged(self, mock_popen: MagicMock) -> None:
+        """No drone on PATH costs the sync, not the event record.
+
+        The sync is fire-and-forget, so its failure has to be survivable — but
+        two things have to survive it. The cause reaches the log (a status sync
+        that silently never runs is the failure nobody notices for weeks), and
+        the handler carries on to record the PR event, which does not depend on
+        the sync at all. Not raising was neither of those.
+        """
         mod = _import_module()
-        mod.handle_pr_created(branch="flow")  # Should not raise
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+
+        with patch.object(mod, "logger") as mock_logger:
+            mod.handle_pr_created(branch="flow")
+
+        reported = str(mock_logger.info.call_args_list)
+        assert "drone not found" in reported, f"the cause must reach the log: {reported}"
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "pr_created_event",
+            {"branch": "flow", "pr_url": ""},
+        )
 
     @patch("subprocess.Popen")
     def test_logs_operation(self, mock_popen: MagicMock) -> None:
@@ -107,10 +126,29 @@ class TestHandlePrMerged:
         assert args == ["drone", "@prax", "status", "sync"]
 
     @patch("subprocess.Popen", side_effect=OSError("exec failed"))
-    def test_handles_exec_failure(self, mock_popen: MagicMock) -> None:
-        """Doesn't crash on subprocess failure."""
+    def test_an_exec_failure_is_named_and_the_merge_is_still_logged(self, mock_popen: MagicMock) -> None:
+        """A refused exec costs the sync, not the merge record.
+
+        Same contract as the pr_created side, and it is pinned separately
+        because the two handlers each build their own payload: a merge that
+        reached the log with a blank pr_number would be indistinguishable from
+        no merge at all. OSError rather than FileNotFoundError so the catch is
+        exercised on a second exception class, not just the obvious one.
+        """
         mod = _import_module()
-        mod.handle_pr_merged(pr_number="99")  # Should not raise
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+
+        with patch.object(mod, "logger") as mock_logger:
+            mod.handle_pr_merged(pr_number="99")
+
+        reported = str(mock_logger.info.call_args_list)
+        assert "exec failed" in reported, f"the cause must reach the log: {reported}"
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "pr_merged_event",
+            {"pr_number": "99", "title": ""},
+        )
 
     @patch("subprocess.Popen")
     def test_logs_operation(self, mock_popen: MagicMock) -> None:

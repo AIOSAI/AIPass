@@ -49,7 +49,13 @@ def test_mood_styles_contains_expected_moods():
 
 
 def test_mood_styles_values_are_color_icon_tuples():
-    """Each MOOD_STYLES entry should be a (color_str, icon_str) tuple."""
+    """Each MOOD_STYLES entry should be a (color_str, icon_str) tuple.
+
+    The count assert is the loop's floor: an empty MOOD_STYLES would enter no
+    iteration and pass this test with nothing checked.
+    """
+    assert len(MOOD_STYLES) == 6, f"Expected 6 moods, found {sorted(MOOD_STYLES)}"
+
     for mood, value in MOOD_STYLES.items():
         assert isinstance(value, tuple), f"Expected tuple for mood '{mood}'"
         assert len(value) == 2, f"Expected 2-element tuple for mood '{mood}'"
@@ -92,7 +98,7 @@ def test_mood_icon_unknown_mood_returns_dash():
 @patch("aipass.commons.apps.handlers.rooms.room_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.rooms.room_ops.get_db")
 @patch("aipass.commons.apps.handlers.rooms.room_ops.close_db")
-@patch("aipass.commons.apps.handlers.rooms.room_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.room_ops.json_handler", autospec=True)
 def test_create_room_success(
     mock_json: object,
     mock_close: object,
@@ -185,7 +191,7 @@ def test_room_create_help_prints_usage_without_creating(mock_create_room: object
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
 def test_set_and_get_room_state(mock_json: object, initialized_db: object) -> None:
     """set_room_state should persist a key/value, and get_room_state should retrieve it."""
     import sqlite3
@@ -198,7 +204,7 @@ def test_set_and_get_room_state(mock_json: object, initialized_db: object) -> No
     assert value == "A glowing desk lamp"
 
 
-@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
 def test_get_all_room_state_with_multiple_keys(mock_json: object, initialized_db: object) -> None:
     """get_all_room_state should return all key/value pairs for a room."""
     import sqlite3

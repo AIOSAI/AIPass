@@ -310,11 +310,26 @@ class TestRelease:
         mod.release()
         assert mod._held_lock is None
 
-    def test_release_without_acquire_is_safe(self):
-        """release() is a no-op when no lock is held."""
+    def test_release_without_acquire_is_safe(self, tmp_path):
+        """release() is a no-op when no lock is held.
+
+        "No-op" is observable: no file is unlinked and nothing claims a release
+        that never happened, so a viewer that never took the relay lock cannot
+        delete the lock file the holder is standing on.
+        """
         mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        lock_path.write_text("held by someone else", encoding="utf-8")
+        setattr(mod, "_lock_path_override", lock_path)
         setattr(mod, "_held_lock", None)
-        mod.release()
+
+        with patch.object(mod, "logger") as log:
+            assert mod.release() is None
+
+        log.info.assert_not_called()
+        log.warning.assert_not_called()
+        assert lock_path.exists()
+        assert mod._held_lock is None
 
     def test_release_handles_already_deleted_file(self, tmp_path):
         """release() handles the case where the lock file was already deleted."""

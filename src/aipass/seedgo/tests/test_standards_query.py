@@ -122,25 +122,55 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs():
-    """print_introspection executes without raising."""
-    from aipass.seedgo.apps.modules.standards_query import print_introspection
+    """print_introspection lists the discovered packs and how to open each one.
+
+    Was a bare call that asserted nothing (no_oracle): a print_introspection
+    that discovered nothing passed just as happily. Lines measured 2026-09-07;
+    `console` is the fixture mock the module binds.
+    """
+    from aipass.seedgo.apps.modules.standards_query import console, print_introspection
 
     print_introspection()
 
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    assert "[bold cyan]standards_query Module[/bold cyan]" in lines
+    assert "[yellow]Discovered Packs:[/yellow]" in lines
+    assert "  [cyan]handlers/pytest_quality_standards/[/cyan]" in lines
+    assert "  [green]drone @seedgo standards_query aipass_standards[/green]" in lines
+
 
 def test_print_help_runs():
-    """print_help executes without raising."""
-    from aipass.seedgo.apps.modules.standards_query import print_help
+    """print_help documents all three call forms and names its own commands.
+
+    Was a bare call that asserted nothing (no_oracle). Lines measured
+    2026-09-07.
+    """
+    from aipass.seedgo.apps.modules.standards_query import console, print_help
 
     print_help()
 
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    assert "[bold cyan]Standards Query Module[/bold cyan]" in lines
+    assert "[yellow]COMMANDS:[/yellow]" in lines
+    assert "  [green]drone @seedgo standards_query aipass_standards architecture[/green]" in lines
+    assert "[dim]Commands: standards_query, standard, --help[/dim]" in lines
+
 
 def test_discover_packs_returns_dict():
-    """_discover_packs returns a dict."""
+    """_discover_packs finds seedgo's three packs, each mapped to its own directory.
+
+    The isinstance check alone pinned the return TYPE and nothing about the
+    value (assertion_shape), so a discovery that found no pack at all scored a
+    pass. The three names below are the *_standards directories under
+    apps/handlers/ that hold a *_check.py, measured 2026-09-07; the last
+    assertion pins that the value is the pack directory itself, not its parent.
+    """
     from aipass.seedgo.apps.modules.standards_query import _discover_packs
 
     packs = _discover_packs()
     assert isinstance(packs, dict)
+    assert set(packs) == {"aipass_standards", "pytest_quality_standards", "tests_pytest_standards"}
+    assert (packs["pytest_quality_standards"] / "no_oracle_check.py").is_file()
 
 
 def test_discover_standards_empty_dir(tmp_path):
@@ -209,10 +239,20 @@ def test_alias_help_flag():
 
 
 def test_print_alias_help_runs():
-    """print_alias_help executes without raising."""
-    from aipass.seedgo.apps.modules.standards_query import print_alias_help
+    """print_alias_help explains the short form and points back at the long one.
+
+    Was a bare call that asserted nothing (no_oracle) — it could not tell the
+    alias help from the query help. Lines measured 2026-09-07.
+    """
+    from aipass.seedgo.apps.modules.standards_query import console, print_alias_help
 
     print_alias_help()
+
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    assert "[bold cyan]Standard (short alias)[/bold cyan]" in lines
+    assert "  [green]drone @seedgo standard json_structure[/green]" in lines
+    assert "  Short form of [green]standards_query <pack> <standard>[/green]." in lines
+    assert "[dim]Commands: standard, --help[/dim]" in lines
 
 
 def test_resolve_standard_finds_single_owner():

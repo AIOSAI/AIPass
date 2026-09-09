@@ -30,6 +30,19 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 from aipass.aipass.shared import scaffold_content as sc
 
 
+def _expected_aipass_home() -> str:
+    """The AIPASS_HOME the detector must find, derived independently of it.
+
+    project_home._detect_aipass_home walks up from the installed ``aipass``
+    package to the repo root. This reads the same fact off the package itself
+    rather than calling the detector, so the pin is a second derivation and not
+    a restatement of the code under test.
+    """
+    import aipass
+
+    return str(Path(aipass.__file__).resolve().parent.parent.parent)
+
+
 # ---------------------------------------------------------------------------
 # _sanitize_name tests
 # ---------------------------------------------------------------------------
@@ -129,8 +142,15 @@ def test_init_project_creates_all_expected_files(tmp_path):
 
     # Every expected file must appear in created_files (extras like .venv are env-dependent)
     created_basenames = [Path(f).name for f in result["created_files"]]
+    # THE `or f.exists()` ESCAPE IS GONE (v5 assertion_shape, 2026-09-08). Both
+    # clauses were about the result, so either alone carried the whole
+    # assertion: a file minted but left out of created_files passed on the
+    # second clause, and the report is the thing under test here. Measured the
+    # same day: every expected file is named in created_files AND on disk, so
+    # both claims are now made separately and each can fail on its own.
     for f in expected_files:
-        assert f.name in created_basenames or f.exists(), f"Expected {f.name} in created_files"
+        assert f.name in created_basenames, f"Expected {f.name} in created_files"
+        assert f.exists(), f"Expected {f.name} on disk"
     assert len(result["created_files"]) >= 10
 
 
@@ -402,7 +422,11 @@ def test_init_project_returns_dict(tmp_path):
 
     result = init_project(target, project_name="rtype")
 
+    # Value pins added 2026-09-08 (v5 assertion_shape): a dict was true of the
+    # empty dict an init that created nothing would also return.
     assert isinstance(result, dict)
+    assert result["created_files"], "init_project reported no created files"
+    assert set(result) >= {"created_files", "aipass_home"}
 
 
 def test_init_project_agents_md_no_trinity(tmp_path):
@@ -582,7 +606,14 @@ def test_init_project_returns_aipass_home(tmp_path):
     result = init_project(target, project_name="home")
 
     assert "aipass_home" in result
-    assert result["aipass_home"] is None or isinstance(result["aipass_home"], str)
+    # THE `is None or isinstance(..., str)` ESCAPE IS GONE (v5
+    # assertion_shape, 2026-09-08). Both clauses were about the result and
+    # between them they admitted every possible value. The None arm is not
+    # even reachable under this suite: detection returns None only when
+    # find_spec("aipass") fails, and the suite has already imported the
+    # package. The expected value is derived here from the installed package
+    # location - the same fact the detector reads, spelled independently.
+    assert result["aipass_home"] == _expected_aipass_home()
 
 
 def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypatch):
@@ -615,7 +646,7 @@ def test_update_project_returns_aipass_home(tmp_path):
     result = update_project(target)
 
     assert "aipass_home" in result
-    assert result["aipass_home"] is None or isinstance(result["aipass_home"], str)
+    assert result["aipass_home"] == _expected_aipass_home()
 
 
 def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
@@ -633,10 +664,14 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
 
     result = update_project(target)
 
-    if result["aipass_home"] is not None:
-        new_data = json.loads(local_settings_path.read_text(encoding="utf-8"))
-        assert new_data.get("env", {}).get("AIPASS_HOME") == result["aipass_home"]
-        assert str(local_settings_path) in result["updated_files"]
+    # THE GUARD IS NOW A FLOOR (v5 unentered_assert, 2026-09-08). `if
+    # result["aipass_home"] is not None:` had no else, so a detector that
+    # started returning None turned this whole test into a silent pass -
+    # which is the exact regression it exists to catch.
+    assert result["aipass_home"] == _expected_aipass_home()
+    new_data = json.loads(local_settings_path.read_text(encoding="utf-8"))
+    assert new_data.get("env", {}).get("AIPASS_HOME") == result["aipass_home"]
+    assert str(local_settings_path) in result["updated_files"]
 
 
 # ---------------------------------------------------------------------------
@@ -824,10 +859,15 @@ def test_init_project_no_hook_scripts_shipped(tmp_path):
 
     init_project(target, project_name="noscripts")
 
+    # THE GUARD BECAME AN EXPRESSION (v5 unentered_assert, 2026-09-08). The
+    # `if hooks_dir.exists():` arm had no else, so the case this test is named
+    # for - no hooks directory at all - passed having checked nothing, and so
+    # did the case where the directory was never created because init crashed
+    # earlier. An absent directory ships no scripts, which is the same verdict
+    # said out loud.
     hooks_dir = target / ".claude" / "hooks"
-    if hooks_dir.exists():
-        shipped = [f.name for f in hooks_dir.iterdir()]
-        assert len(shipped) == 0, f"No hook scripts should be shipped: {shipped}"
+    shipped = sorted(f.name for f in hooks_dir.iterdir()) if hooks_dir.exists() else []
+    assert shipped == [], f"No hook scripts should be shipped: {shipped}"
 
 
 def test_init_project_settings_has_no_hook_events(tmp_path):
@@ -1163,9 +1203,16 @@ def test_prep_md_contains_session_wrap_up():
 
 
 def test_prep_md_contains_memory_instructions():
-    """prep_md() includes instructions for updating .trinity/ files."""
+    """prep_md() names the memory directory AND the file inside it.
+
+    The `or` is gone (v5 assertion_shape, 2026-09-08): both clauses were about
+    the same string, so either alone carried the assertion. Measured the same
+    day by calling prep_md() from the shell - both substrings are present, so
+    both are now pinned and each can fail on its own.
+    """
     result = sc.prep_md()
-    assert ".trinity/" in result or "local.json" in result
+    assert ".trinity/" in result
+    assert "local.json" in result
 
 
 # ---------------------------------------------------------------------------
@@ -1174,10 +1221,16 @@ def test_prep_md_contains_memory_instructions():
 
 
 def test_inbox_json_returns_valid_json():
-    """inbox_json() returns valid JSON."""
+    """inbox_json() parses, and its key set is exactly the mailbox contract.
+
+    The key SET is this unit's claim; the sibling below pins the values. A dict
+    on its own (v5 assertion_shape) was true of every possible document,
+    including an empty one.
+    """
     result = sc.inbox_json()
     parsed = json.loads(result)
     assert isinstance(parsed, dict)
+    assert sorted(parsed) == ["mailbox", "messages", "total_messages", "unread_count"]
 
 
 def test_inbox_json_has_mailbox_structure():
@@ -1393,13 +1446,19 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     target.mkdir()
     bootstrap.init_project(target, project_name="pathcheck")
 
-    for path in target.rglob("*"):
-        if not path.is_file():
-            continue
+    # THE FLOOR (v5 unentered_assert, 2026-09-08). The scan is built first and
+    # its size asserted before anything is read: an init_project that minted
+    # nothing, or a filter that excluded every file, made this regression guard
+    # a silent pass and the run said so nowhere.
+    tracked = [
+        path
+        for path in target.rglob("*")
+        if path.is_file()
+        and not any(part in _GITIGNORED_PARTS for part in path.relative_to(target).parts)
+        and ".local." not in path.name
+    ]
+    assert len(tracked) >= 9, f"only {len(tracked)} tracked files minted - the scan below proves nothing"
+    for path in tracked:
         rel = path.relative_to(target)
-        if any(part in _GITIGNORED_PARTS for part in rel.parts):
-            continue
-        if ".local." in rel.name:
-            continue
         content = path.read_text(encoding="utf-8")
         assert fake_home not in content, f"{rel} leaks machine-local AIPASS_HOME"

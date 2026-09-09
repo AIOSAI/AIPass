@@ -256,6 +256,11 @@ class TestProbeIsolation:
 
 class TestBuildSkeleton:
     def test_copies_the_memory_files(self, tmp_path):
+        # The floor, and the point of the test: the skeleton exists so no run
+        # touches real memory, so an emptied _SKELETON_MEMORY_FILES would mean
+        # NOTHING is copied - and the old loop would have called that a pass.
+        assert set(hook_test._SKELETON_MEMORY_FILES) == {"local.json", "observations.json", "passport.json"}
+
         real = tmp_path / "hooks"
         (real / ".trinity").mkdir(parents=True)
         for name in hook_test._SKELETON_MEMORY_FILES:

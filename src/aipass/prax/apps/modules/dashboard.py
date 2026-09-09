@@ -237,7 +237,9 @@ def _handle_refresh(args: List[str]) -> None:
         if result["status"] == "success":
             console.print(f"[green]Refreshed {result['branches_updated']} branches[/green]")
         elif result["status"] == "partial":
-            warning(f"Refreshed {result['branches_updated']} branches, {result['branches_failed']} failed")
+            # error(), not warning(): a partial refresh left branches stale, and
+            # only error() marks the command failed for the exit seam in main().
+            error(f"Refreshed {result['branches_updated']} branches, {result['branches_failed']} failed")
             for err in result.get("errors", []):
                 error(str(err))
         else:

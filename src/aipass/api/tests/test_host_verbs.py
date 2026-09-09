@@ -247,7 +247,22 @@ class TestAdminIsUnreachableNotJustUnset:
         host_verbs.wake_branch("memory", PROJECT, message="--admin")
 
         argv = _argv(routed)
-        assert argv.count("--admin") == 0 or argv.index("--admin") > 3
+
+        # The old shape was `count == 0 or index > 3`, which cannot fail in the
+        # way that matters: if the string never reaches argv at all the first
+        # arm is true and nothing about POSITION is ever checked, and if it does
+        # reach argv the disjunction still passes on a technicality. What the
+        # verb actually promises is narrower and checkable — the text travels as
+        # the message VALUE, never as a bare flag in a position drone would read.
+        assert "--admin" in argv, "the message text never reached the argv at all"
+
+        # Measured 2026-09-07, the argv really is
+        # ['@ai_mail', 'dispatch', 'wake', '@memory', '--admin'] — the message
+        # travels as the trailing POSITIONAL, not behind a --message flag. So
+        # the promise is about where it lands: past the verb and past the
+        # branch, in the slot drone reads as text rather than as an option.
+        assert argv.index("--admin") == len(argv) - 1, f"the message text is not the trailing positional: {argv}"
+        assert argv.index("--admin") > 3, f"the message value landed where drone reads options: {argv}"
 
     def test_this_module_never_imports_wake_branch_directly(self) -> None:
         """

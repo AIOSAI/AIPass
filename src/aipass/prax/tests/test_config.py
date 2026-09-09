@@ -90,6 +90,8 @@ class TestGetSystemLogsDir:
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
         assert isinstance(result, Path)
+        # Which Path: the repo root's system_logs/, by that name.
+        assert result.name == "system_logs"
 
     def test_returns_system_logs_subdir(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
@@ -129,8 +131,14 @@ class TestGetModuleLogsDir:
 
     def test_returns_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_module_logs_dir("flow")
         assert isinstance(result, Path)
+        # Which Path: no flow/ exists under either root here, so the
+        # unknown-module fallback answers system_logs/external/<module>.
+        # (Without the _find_repo_root patch above this resolved against the
+        # real checkout and created system_logs/external/flow in it.)
+        assert result == tmp_path / "system_logs" / "external" / "flow"
 
     def test_existing_module_under_ecosystem(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
@@ -241,6 +249,8 @@ class TestLinesToBytes:
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
         result = load_mod.lines_to_bytes(100)
         assert isinstance(result, int)
+        # Which int: the line budget times the 200-byte default line.
+        assert result == 20_000
 
     def test_default_avg_line_length(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
@@ -275,6 +285,9 @@ class TestGetDebugPrintsEnabled:
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
         result = load_mod.get_debug_prints_enabled()
         assert isinstance(result, bool)
+        # Which bool: tmp_path carries no prax_logger_config.json, and the
+        # unconfigured answer is off.
+        assert result is False
 
     def test_false_when_config_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
@@ -329,6 +342,8 @@ class TestLoadLogConfig:
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
         result = load_mod.load_log_config()
         assert isinstance(result, dict)
+        # Which dict: exactly the four sections callers index, no more.
+        assert set(result) == {"system_logs", "local_logs", "log_format", "date_format"}
 
     def test_default_keys_present(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
@@ -494,6 +509,9 @@ class TestLoadIgnorePatternsFromConfig:
         ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
         result = ip_mod.load_ignore_patterns_from_config()
         assert isinstance(result, set)
+        # Which set: the defaults, and "archive.local" is one of them --
+        # the branch-local archive directory prax must never walk into.
+        assert "archive.local" in result
 
     def test_defaults_when_no_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)

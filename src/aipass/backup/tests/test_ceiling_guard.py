@@ -229,8 +229,16 @@ class TestRunRefusal:
         assert result.success is False
         assert result.files_copied == 0
         assert "refused" in result.errors[0].lower()
+
+        # Measured 2026-09-08 on a fresh tree: the refusal DOES leave the
+        # snapshot directory behind (setup scaffolds .backup/snapshots before
+        # the ceiling is read) and leaves it completely empty. The old
+        # "does not exist OR holds no blob" spelling could not fail -- the
+        # first clause was false on every run, so only the second was ever
+        # asked, and neither said which world was the real one.
         dest = build_snapshot_path(str(root))
-        assert not dest.exists() or not any(dest.rglob("*.blob"))
+        assert dest.exists() is True
+        assert list(dest.rglob("*")) == []
 
     def test_versioned_refuses_and_writes_no_store(self, tmp_path: Path) -> None:
         """run_versioned refuses over-ceiling and creates no versioned content."""
@@ -242,8 +250,11 @@ class TestRunRefusal:
 
         assert result.success is False
         assert result.files_copied == 0
+
+        # Measured: versioned refuses BEFORE it scaffolds, so unlike snapshot
+        # the store directory is never created at all.
         store = build_versioned_store(str(root))
-        assert not store.exists() or not any(store.rglob("*.blob"))
+        assert store.exists() is False
 
     def test_versioned_refuses_a_pre_scanned_set(self, tmp_path: Path) -> None:
         """The 'all' path hands versioned a pre-scanned list — still measured.
@@ -259,8 +270,10 @@ class TestRunRefusal:
         result = run_versioned(str(root), show_panels=False, pre_scanned=pre)
 
         assert result.success is False
+
+        # Same world as the un-scanned call: nothing scaffolded, nothing written.
         store = build_versioned_store(str(root))
-        assert not store.exists() or not any(store.rglob("*.blob"))
+        assert store.exists() is False
 
     def test_all_refuses_before_either_store_is_written(self, tmp_path: Path) -> None:
         """'all' writes nothing on breach — belt and braces with the sub-guards."""
@@ -270,10 +283,14 @@ class TestRunRefusal:
         root = self._project(tmp_path)
         assert handle_command("all", [str(root), "--quiet"]) is True
 
+        # Measured on a fresh tree, both worlds named rather than or-ed:
+        # 'all' refuses on its own shared scan, so versioned is never even
+        # scaffolded, while the snapshot directory exists and is empty.
         store = build_versioned_store(str(root))
         dest = build_snapshot_path(str(root))
-        assert not store.exists() or not any(store.rglob("*.blob"))
-        assert not dest.exists() or not any(dest.rglob("*.blob"))
+        assert store.exists() is False
+        assert dest.exists() is True
+        assert list(dest.rglob("*")) == []
 
     def test_all_refuses_without_re_walking_the_tree(self, tmp_path: Path) -> None:
         """'all' must refuse on its own shared scan, not delegate to the sub-guards.

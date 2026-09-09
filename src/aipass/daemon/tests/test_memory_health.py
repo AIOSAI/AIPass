@@ -614,14 +614,32 @@ class TestRealTrinityFiles:
         assert result["valid"] is True, f"real observations.json flagged: {result['issues']}"
         assert result["containers"]["observations"] is True
 
-    def test_real_branch_reports_no_structure_issues(self) -> None:
-        """Full health status on the real branch surfaces no structure issues.
+    def test_a_fully_populated_branch_reports_no_structure_issues(self, tmp_path: Path) -> None:
+        """Full health status on a built branch surfaces no structure issues.
+
+        Used to run against @daemon's OWN live .trinity files, but that
+        directory is gitignored (fresh_clone, 2026-09-08) — a fresh clone or
+        CI checkout has none, so the checker found nothing to cover and this
+        went red for a reason unrelated to the code. The branch this test
+        reads is now built here with the same two files and the same valid
+        shapes ``_setup_full_branch`` gives every other test in this module,
+        so the claim is proven against a tree the repo actually ships.
 
         Freshness and optional-file status are free to vary; a structure issue
-        on a healthy, actively-updated branch is the noise this replaced.
+        on a healthy, fully-populated branch is the noise this replaced.
         """
-        with patch.object(mh.json_handler, "log_operation"):
-            result = mh.get_memory_health_status(str(self.BRANCH_ROOT), "DAEMON")
+        branch = _setup_full_branch(tmp_path)
 
+        with patch.object(mh.json_handler, "log_operation"):
+            result = mh.get_memory_health_status(str(branch), "DAEMON")
+
+        # The floor, and it pins names rather than a count. An empty
+        # structure_checks would make the loop a silent pass, and a health
+        # status that quietly stopped checking one of the two files would shrink
+        # the dict while every remaining entry still read valid.
+        assert sorted(result["structure_checks"]) == [
+            ".trinity/local.json",
+            ".trinity/observations.json",
+        ], f"structure_checks covered {sorted(result['structure_checks'])}"
         for check in result["structure_checks"].values():
             assert check["valid"] is True, f"real branch structure issue: {check['issues']}"

@@ -43,10 +43,27 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
 
     # ---- cli ----
+    # The exit seam is REAL here, not mocked. main() now returns
+    # resolve_exit(True) instead of a literal 0, and a MagicMock seam would
+    # make every exit-code assertion below compare against a mock that equals
+    # nothing — green or red for reasons unrelated to the exit code. These
+    # three are pure functions over one process-level flag, so wiring the real
+    # ones costs nothing and is the only way an exit code means anything.
+    from aipass.cli.apps.modules import mark_command_failed, reset_command_state, resolve_exit
+
     mock_cli = MagicMock()
     mock_cli.console = _mock_console
     mock_cli.header = _mock_header
+    # error() marks the command failed in the real cli; a bare mock would not,
+    # and the refusal arm of the seam would be untestable from here.
+    _mock_error.side_effect = lambda *a, **k: mark_command_failed()
     mock_cli.error = _mock_error
+    mock_cli.reset_command_state = reset_command_state
+    mock_cli.resolve_exit = resolve_exit
+    # Real too, and it matters: a test that reaches for this through the mocked
+    # module and got an auto-MagicMock would set no flag at all, and the reset
+    # it means to exercise would pass with the reset deleted (measured).
+    mock_cli.mark_command_failed = mark_command_failed
     monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", mock_cli)
@@ -375,6 +392,53 @@ class TestMain:
         result = trigger.main()
         assert result == 0
         mock_mod.handle_command.assert_called_once_with("fire", ["startup"])
+
+    def test_a_module_that_refuses_through_error_exits_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Handled is not succeeded — a routed refusal must reach the shell.
+
+        Every module of mine that declined through error() still exited 0,
+        because main() returned the literal 0 on any truthy route and nothing
+        ever read cli's failure flag (canary's fleet sweep, 2026-09-07). A
+        caller's `drone @trigger log_events start && <next>` therefore ran
+        <next> with no watcher. The route is still handled, so the unknown
+        command gate cannot catch this; resolve_exit is what separates the two.
+        """
+        trigger = _import_trigger()
+        monkeypatch.setattr(sys, "argv", ["trigger", "start"])
+
+        def _refuse(command, args):
+            from aipass.cli.apps.modules import error
+
+            error("Not started — withdrawn by ruling, not failed")
+            return True
+
+        mock_mod = MagicMock()
+        mock_mod.handle_command.side_effect = _refuse
+        monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
+
+        result = trigger.main()
+
+        assert result == 2, "a handled command that refused must not report success"
+        _mock_error.assert_called_once()
+
+    def test_a_previous_refusal_does_not_colour_the_next_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The failure flag is process-level, so main() resets it at the door.
+
+        cli keeps the flag in module state that outlives a single main(). In a
+        long-lived process — anything importing and calling main() twice — one
+        refusal would otherwise make every later command exit 2 forever.
+        """
+        from aipass.cli.apps.modules import mark_command_failed
+
+        trigger = _import_trigger()
+        monkeypatch.setattr(sys, "argv", ["trigger", "fire", "startup"])
+        mock_mod = MagicMock()
+        mock_mod.handle_command.return_value = True
+        monkeypatch.setattr(trigger, "discover_modules", lambda: [mock_mod])
+
+        mark_command_failed()
+
+        assert trigger.main() == 0
 
     def test_valid_command_no_extra_args(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Command with no trailing args passes empty list."""

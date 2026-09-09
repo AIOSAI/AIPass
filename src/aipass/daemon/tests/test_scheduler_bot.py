@@ -201,6 +201,10 @@ class TestQueueJsonSchema:
             "prompt_preview",
             "wake",
         ]
+        # The floor. The loop's iterable is a literal one assignment above, but
+        # nothing in the unit says how many names it must hold — eleven is the
+        # frozen schema this test is named for, counted from the list.
+        assert len(required_fields) == 11, f"the frozen schema is eleven fields, this list names {len(required_fields)}"
         for field in required_fields:
             assert field in job_out, f"Missing field: {field}"
 

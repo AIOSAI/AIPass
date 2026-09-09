@@ -280,11 +280,22 @@ def test_status_counts_handlers(trigger_cls):
     assert len(result) == 2
 
 
-def test_status_returns_dict(trigger_cls):
-    """status() return type is a plain dict."""
+def test_status_returns_a_snapshot_not_the_live_registry(trigger_cls):
+    """status() hands back counts in a fresh dict — writing to it cannot reach the bus.
+
+    This asserted isinstance(result, dict) and nothing else, which a bare
+    `return cls._handlers` satisfies just as well: right type, and the caller
+    left holding the bus's own mutable state. The comprehension in status() is
+    what makes the answer a snapshot, and that is the part worth pinning.
+    """
     trigger_cls.on("x", MagicMock())
+
     result = trigger_cls.status()
-    assert isinstance(result, dict)
+
+    assert result == {"x": 1}
+    result["x"] = 99
+    result["smuggled"] = 7
+    assert trigger_cls.status() == {"x": 1}
 
 
 # ---------------------------------------------------------------------------

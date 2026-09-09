@@ -62,6 +62,9 @@ class TestGetTemplate:
 
     def test_error_lists_valid_types(self):
         result = get_template("wrong")
+        # The floor: an emptied VALID_TYPES would make the loop below pass
+        # having read nothing out of the error string.
+        assert VALID_TYPES == ("markdown_only", "with_handler", "full")
         for vt in VALID_TYPES:
             assert vt in result["error"]
 
@@ -83,6 +86,7 @@ class TestGetTemplate:
         assert TEMPLATES_DIR.is_dir()
 
     def test_all_valid_types_have_directories(self):
+        assert VALID_TYPES == ("markdown_only", "with_handler", "full")
         for vt in VALID_TYPES:
             assert (TEMPLATES_DIR / vt).exists(), f"Missing template dir: {vt}"
 
@@ -160,13 +164,22 @@ class TestCopyTemplate:
         src = get_template("with_handler")
         target = tmp_path / "placeholder-test"
         copy_template(src["path"], target, "placeholder-test")
-        for f in target.rglob("*"):
-            if f.is_file():
-                try:
-                    content = f.read_text(encoding="utf-8")
-                    assert "{{SKILL_NAME}}" not in content, f"Unreplaced in {f.name}"
-                except UnicodeDecodeError:
-                    pass  # skip binary
+        files = [p for p in target.rglob("*") if p.is_file()]
+        # The floor. The old shape put the assert under `if f.is_file()` with
+        # no else, so a target that laid down nothing passed. The
+        # except UnicodeDecodeError below it was dead too: the with_handler
+        # template is two utf-8 files and no binary (measured), so it only
+        # stood ready to swallow a real failure.
+        #
+        # Compared as a set, not a sorted list: sorting Paths compares
+        # case-insensitively on Windows and byte-wise on POSIX, so
+        # ["handler.py", "SKILL.md"] and ["SKILL.md", "handler.py"] are both
+        # "sorted" depending on the platform. Which two files exist is the
+        # claim; their filesystem listing order never is.
+        assert {f.name for f in files} == {"SKILL.md", "handler.py"}
+        for f in files:
+            content = f.read_text(encoding="utf-8")
+            assert "{{SKILL_NAME}}" not in content, f"Unreplaced in {f.name}"
 
     def test_target_already_exists_fails(self, tmp_path):
         target = tmp_path / "exists"

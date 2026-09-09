@@ -47,6 +47,15 @@ def _make_module(
     return mod
 
 
+def _printed(mock_console) -> str:
+    """Everything a patched console was asked to print, joined into one string.
+
+    Shared by the print_* units below so each one's oracle is the claim in its
+    own docstring rather than a re-derivation of how Rich is called.
+    """
+    return " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+
+
 def _make_handling_module(name: str, doc: str | None = "Handles things") -> ModuleType:
     """Create a module whose handle_command returns True (claims the command)."""
     mod = _make_module(name, doc=doc)
@@ -462,20 +471,35 @@ class TestPrintIntrospection:
         from aipass.flow.apps.flow import print_introspection
 
         mod = _make_module("create_plan", doc="Create a new plan")
-        print_introspection([mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_introspection([mod])
+
+        printed = _printed(mock_console)
+        assert "create_plan" in printed
+        assert "Create a new plan" in printed
 
     def test_with_empty_modules(self) -> None:
         """Displays fallback text when no modules discovered."""
         from aipass.flow.apps.flow import print_introspection
 
-        print_introspection([])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_introspection([])
+
+        printed = _printed(mock_console)
+        assert "No modules discovered" in printed
+        assert "Discovered Modules:" in printed
 
     def test_module_without_docstring(self) -> None:
         """Uses 'No description' when module has no docstring."""
         from aipass.flow.apps.flow import print_introspection
 
         mod = _make_module("bare_mod", doc=None)
-        print_introspection([mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_introspection([mod])
+
+        printed = _printed(mock_console)
+        assert "bare_mod" in printed
+        assert "No description" in printed
 
     @pytest.mark.parametrize("names", [("alpha",), ("alpha", "beta")])
     def test_every_discovered_module_is_named(self, names) -> None:
@@ -488,15 +512,35 @@ class TestPrintIntrospection:
         merging: dropping the second module changed no branch, so the count is
         a parameter, not a test. The oracle is new: both rows now READ the
         output, so deleting the loop body reds them.
+
+        FLOOR BEFORE THE LOOP (FPLAN-0508, VACUOUS-LOOP). Every assertion here
+        sat inside `for name in names`, so a parametrise row that arrived empty
+        would pass the unit without reading one character of the listing. The
+        floor is the row's own width, and the printed text must be non-empty
+        before it is searched - a console that printed nothing at all would
+        otherwise satisfy an empty loop in silence.
+
+        THE DESCRIPTION MUST NOT ECHO THE NAME, and it used to. The doc was
+        ``f"{name} module"``, so `name in printed` was satisfied by the
+        DESCRIPTION column whether or not the name column printed anything at
+        all. Measured, not suspected: blanking `module_name` in the f-string at
+        flow.py:210 left all five rows of this class green. The descriptions
+        are name-free now and asserted beside the names, so each column has to
+        carry its own value.
         """
         from aipass.flow.apps.flow import print_introspection
 
+        assert len(names) >= 1
+        docs = {name: f"purpose text {index}" for index, name in enumerate(names)}
+
         with patch(f"{_FLOW}.console") as mock_console:
-            print_introspection([_make_module(name, doc=f"{name} module") for name in names])
+            print_introspection([_make_module(name, doc=docs[name]) for name in names])
 
         printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        assert printed
         for name in names:
             assert name in printed
+            assert docs[name] in printed
 
 
 # ===========================================================================
@@ -512,13 +556,25 @@ class TestPrintHelp:
         from aipass.flow.apps.flow import print_help
 
         mod = _make_module("create_plan", doc="Create a new plan")
-        print_help([mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_help([mod])
+
+        printed = _printed(mock_console)
+        assert "USAGE:" in printed
+        assert "AVAILABLE COMMANDS:" in printed
+        assert "create_plan" in printed
+        assert "Create a new plan" in printed
 
     def test_with_empty_modules(self) -> None:
         """Shows help even when no modules are discovered."""
         from aipass.flow.apps.flow import print_help
 
-        print_help([])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_help([])
+
+        printed = _printed(mock_console)
+        assert "USAGE:" in printed
+        assert "No modules discovered" in printed
 
     @pytest.mark.parametrize(
         ("module_name", "expected_short"),
@@ -553,7 +609,12 @@ class TestPrintHelp:
         from aipass.flow.apps.flow import print_help
 
         mod = _make_module("mystery", doc=None)
-        print_help([mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_help([mod])
+
+        printed = _printed(mock_console)
+        assert "mystery" in printed
+        assert "No description" in printed
 
 
 # ===========================================================================
@@ -569,21 +630,39 @@ class TestPrintModuleHelp:
         from aipass.flow.apps.flow import print_module_help
 
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
-        print_module_help("create_plan", [mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_module_help("create_plan", [mod])
+
+        printed = _printed(mock_console)
+        assert "Create plans" in printed
+        assert "Unknown command" not in printed
 
     def test_no_match(self) -> None:
-        """Shows error for unknown command."""
+        """Shows error for unknown command.
+
+        The diagnostic leaves through cli's error(), not through console, so
+        BOTH are patched and both are read - asserting only on console would
+        have missed the whole message.
+        """
         from aipass.flow.apps.flow import print_module_help
 
         mod = _make_module("create_plan")
-        print_module_help("nonexistent", [mod])
+        with patch(f"{_FLOW}.console") as mock_console, patch(f"{_FLOW}.error") as mock_error:
+            print_module_help("nonexistent", [mod])
+
+        mock_error.assert_called_once()
+        assert "Unknown command: nonexistent" in str(mock_error.call_args.args[0])
+        assert "Run" in _printed(mock_console)
 
     def test_module_without_docstring(self) -> None:
         """Shows 'No documentation available' for undocumented module."""
         from aipass.flow.apps.flow import print_module_help
 
         mod = _make_module("bare_mod", doc=None)
-        print_module_help("bare_mod", [mod])
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_module_help("bare_mod", [mod])
+
+        assert "No documentation available" in _printed(mock_console)
 
     def test_a_multiline_docstring_is_shown_whole_and_stripped(self) -> None:
         """Every line reaches the reader, without the leading/trailing blanks.

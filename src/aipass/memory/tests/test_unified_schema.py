@@ -687,11 +687,19 @@ class TestExtractWithMetadataEntryIdentity:
         result = self._run(ext, tmp_path, sessions)
 
         assert result["count"] == 2
-        for entry in result["entries"]:
-            meta = entry["_metadata"]
-            assert "entry_number" not in meta or isinstance(meta["entry_number"], int)
-            assert "entry_date" not in meta or isinstance(meta["entry_date"], str)
-            assert None not in meta.values()
+        # sessions[-2] lost its number and sessions[-1] its date, and those two
+        # are exactly the entries that archive -- so each metadata dict is short
+        # of ONE identity key and carries no None in its place. The `or` this
+        # replaced passed whenever the key was absent, which was every run.
+        metas = [entry["_metadata"] for entry in result["entries"]]
+        assert [sorted(k for k in meta if k.startswith("entry_")) for meta in metas] == [
+            ["entry_date"],
+            ["entry_number"],
+        ]
+        assert isinstance(metas[0]["entry_date"], str)
+        assert isinstance(metas[1]["entry_number"], int)
+        for meta in metas:
+            assert None not in meta.values(), meta
 
 
 # ===========================================================================
@@ -803,10 +811,16 @@ class TestEntryLimitsCasingAndCaps:
         mod = _get_entry_limits()
         default_rollover = mod.config_loader.DEFAULT_CONFIG["rollover"]["defaults"]
 
+        checked = []
         for file_type, sections in default_rollover.items():
             if file_type.startswith("_"):
                 continue
             for section_name, section_val in sections.items():
+                checked.append(f"{file_type}.{section_name}")
                 assert "max_chars" not in section_val, (
                     f"rollover.defaults.{file_type}.{section_name} still has max_chars"
                 )
+
+        # Named, not counted: a section that disappears takes its own pin with
+        # it, and an empty defaults block would make the loop above prove nothing.
+        assert checked == ["local.sessions", "local.key_learnings", "observations.observations"], checked

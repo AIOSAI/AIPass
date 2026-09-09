@@ -216,10 +216,14 @@ class TestDisplayPushResults:
 
         templates._display_push_results(result, dry_run=False)
 
-        # Should hit the 'All branches are up to date' and 'No updates needed' paths
+        # BOTH paths, not either: the docstring above claims the no-change run
+        # says its counts AND its verdict, and an `or` passed on whichever one
+        # happened to survive. The zero counts are the reason the verdict fires.
         call_args_list = [str(c) for c in mocks["console"].print.call_args_list]
         joined = " ".join(call_args_list)
-        assert "up to date" in joined or "No updates needed" in joined
+        assert "up to date" in joined, joined
+        assert "Branches updated:  0" in joined, joined
+        assert "Files modified:    0" in joined, joined
 
     def test_push_results_dry_run_with_changes(self, monkeypatch) -> None:
         """dry_run=True with changes -- shows DRY RUN label and 'would be updated'."""

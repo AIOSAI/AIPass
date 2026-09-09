@@ -823,6 +823,34 @@ class TestScanTemplate:
 class TestCheckTemplateBaselineFull:
     """Full template baseline tests with mocked spawn template dirs."""
 
+    def test_a_template_entry_is_spelled_in_posix_on_every_platform(self):
+        """The CI red of 2026-09-08, cured at the producer instead of at the pin.
+
+        `_scan_template` rendered each entry with `str()`, which follows the
+        host, so the Windows leg produced "apps\\something.py" where Linux
+        produced "apps/something.py". Two things broke there and only one of them
+        was visible: the check NAME a branch reads, and the bypass match, which
+        is done against this same text while bypass rules are written with
+        forward slashes - so a deliberate exception silently stopped being
+        honoured on one platform. `_transform_path` already returned posix on its
+        rename branch, so the module disagreed with itself.
+
+        Asserted through `PureWindowsPath`, which behaves the same on every host,
+        because a pin for a platform defect must not itself ask the platform.
+        Mutation caught: `item.relative_to(root).as_posix()` becoming
+        `str(item.relative_to(root))`, which answers "apps\\something.py" here.
+        """
+        from pathlib import PureWindowsPath
+
+        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+
+        spelled = architecture_check._relative_spelling(
+            PureWindowsPath(r"C:\templates\citizen\apps\something.py"),
+            PureWindowsPath(r"C:\templates\citizen"),
+        )
+
+        assert spelled == "apps/something.py"
+
     def test_spawn_templates_dir_missing(self, tmp_path, monkeypatch):
         """When SPAWN_TEMPLATES_DIR does not exist, returns failure."""
         import sys
@@ -983,12 +1011,15 @@ class TestCheckTemplateBaselineFull:
 
         bypass = [{"standard": "architecture", "file": "something.py"}]
         result = architecture_check.check_template_baseline(str(entry), bypass_rules=bypass)
-        # The missing file should be bypassed
+        # The missing file should be bypassed. Selected rather than guarded inside
+        # a loop: if the check ever stops being emitted, the count fails here
+        # instead of the test passing with nothing looked at.
         file_checks = [c for c in result if c["name"].startswith("File:")]
-        for c in file_checks:
-            if "something.py" in c["name"]:
-                assert c["passed"] is True
-                assert "bypassed" in c["message"]
+        bypassed = [c for c in file_checks if "something.py" in c["name"]]
+        assert len(bypassed) == 1, f"expected one check for something.py, got {[c['name'] for c in result]}"
+        assert bypassed[0]["name"] == "File: apps/something.py"
+        assert bypassed[0]["passed"] is True
+        assert bypassed[0]["message"] == "Template file missing (bypassed)"
 
     def test_template_baseline_missing_dir_bypassed(self, tmp_path, monkeypatch):
         """Bypassed missing template directory is marked as passed."""
@@ -1021,8 +1052,10 @@ class TestCheckTemplateBaselineFull:
         bypass = [{"standard": "architecture", "file": "apps/handlers"}]
         result = architecture_check.check_template_baseline(str(entry), bypass_rules=bypass)
         dir_checks = [c for c in result if c["name"].startswith("Dir:") and "handlers" in c["name"]]
-        for c in dir_checks:
-            assert c["passed"] is True
+        assert len(dir_checks) == 1, f"expected one handlers dir check, got {[c['name'] for c in result]}"
+        assert dir_checks[0]["name"] == "Dir: apps/handlers/"
+        assert dir_checks[0]["passed"] is True
+        assert dir_checks[0]["message"] == "Template directory missing (bypassed)"
 
 
 # ===========================================================================

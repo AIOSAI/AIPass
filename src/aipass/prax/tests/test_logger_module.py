@@ -226,12 +226,29 @@ class TestGetSystemStatus:
     """Tests for get_system_status() — returns a dict with system info."""
 
     def test_returns_dict(self, monkeypatch):
-        """get_system_status returns a dictionary."""
-        mod, _mocks = _inject_and_import(monkeypatch)
+        """The status dict carries exactly the seven documented keys.
+
+        The siblings below each pin one entry; this unit pins the SHAPE — a key
+        quietly dropped or renamed is invisible to a per-key test that no longer
+        exists, so the whole set is asserted here, plus the one value no sibling
+        reads.
+        """
+        mod, mocks = _inject_and_import(monkeypatch)
 
         result = mod.get_system_status()
 
         assert isinstance(result, dict)
+        assert sorted(result) == [
+            "file_watcher_active",
+            "individual_loggers",
+            "logger_override_active",
+            "module_logs_dir",
+            "registry_file",
+            "system_logs_dir",
+            "total_modules",
+        ]
+        json_dir = mocks["aipass.prax.apps.handlers.config.load"].PRAX_JSON_DIR
+        assert result["registry_file"] == str(json_dir / "prax_logger_data.json")
 
     def test_contains_total_modules_key(self, monkeypatch):
         """Result includes total_modules count from registry."""
@@ -562,10 +579,18 @@ class TestModuleConstants:
         assert mod.MODULE_NAME == "prax_logger"
 
     def test_data_file_is_path(self, monkeypatch):
-        """DATA_FILE is a pathlib.Path."""
-        mod, _mocks = _inject_and_import(monkeypatch)
+        """DATA_FILE is a Path, and it is PRAX_JSON_DIR/prax_logger_data.json.
 
+        The sibling below only asks that the module name appears somewhere in
+        the filename; the whole path is what a reader needs, because the
+        directory half comes from config and nothing else pins it.
+        """
+        mod, mocks = _inject_and_import(monkeypatch)
+
+        json_dir = mocks["aipass.prax.apps.handlers.config.load"].PRAX_JSON_DIR
         assert isinstance(mod.DATA_FILE, Path)
+        assert mod.DATA_FILE.name == "prax_logger_data.json"
+        assert mod.DATA_FILE == json_dir / "prax_logger_data.json"
 
     def test_data_file_contains_module_name(self, monkeypatch):
         """DATA_FILE filename includes the module name."""
@@ -704,14 +729,26 @@ class TestNullLoggerFallback:
         for level in levels:
             assert callable(getattr(fallback, level, None)), f"NullLogger is missing {level}()"
 
-    def test_levels_do_not_raise(self):
-        """Every fallback level is safe to call — it must never crash a caller."""
+    def test_levels_swallow_the_call_and_delegate(self):
+        """Swallowing is the whole contract, so the consequence is asserted.
+
+        "It did not raise" is not an oracle. Each level must return None — a
+        caller gets nothing back and cannot trip over it — and must hand the
+        message, unaltered, to the stdlib logger underneath. The inner logger is
+        replaced so the delegation is visible rather than merely believed.
+        """
         fallback = _load_fallback_logger()
 
-        fallback.debug("debug via fallback")
-        fallback.info("info via fallback")
-        fallback.warning("warning via fallback")
-        fallback.error("error via fallback")
+        with patch.object(fallback, "_logger") as inner:
+            assert fallback.debug("debug via fallback") is None
+            assert fallback.info("info via fallback") is None
+            assert fallback.warning("warning via fallback") is None
+            assert fallback.error("error via fallback") is None
+
+        inner.debug.assert_called_once_with("debug via fallback")
+        inner.info.assert_called_once_with("info via fallback")
+        inner.warning.assert_called_once_with("warning via fallback")
+        inner.error.assert_called_once_with("error via fallback")
 
     def test_append_jsonl_degrades_to_none(self):
         """The other eager fallback: a broken logger chain leaves append_jsonl

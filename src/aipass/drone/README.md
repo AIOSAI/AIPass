@@ -606,22 +606,22 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 **What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1264 passed in 349s on 2026-09-07.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1264 passed in 119s on 2026-09-08.
 
 ---
 
 ## Status
 
-Measured 2026-09-06, all numbers from this tree tonight:
+Measured 2026-09-08, all numbers from this tree tonight:
 
 | What | Measured | How |
 |---|---|---|
-| Tests | 1272 pass, 0 skip, 32 files (1185 `def test_` functions) | `python -m pytest tests/ -q`, both rootdirs |
-| Seedgo audit | 100 on every CI-scored category | `drone @seedgo audit aipass @drone` |
+| Tests | 1264 pass, 0 skip, 31 files (1182 `def test_` functions) | `python -m pytest tests/ -q`, both rootdirs |
+| Seedgo audit | 100 on every CI-scored category; 100 on all eleven v5 pytest_quality rules | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
 | Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
 | Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
 | json handler | the fleet shim, sha256 `3456b766…`, 1724 bytes — bound to prax's service, byte-identical fleet-wide | `sha256sum` |
-| Deletion store | 920 records, 33 of them attributed to the project name rather than a citizen; 211 forged by another branch's suite (see Known Issues) | `.ai_central/deletions.jsonl` |
+| Deletion store | 949 records, 37 of them attributed to the project name rather than a citizen; 211 forged by another branch's suite plus the one annotation row that documents them (see Known Issues) | `.ai_central/deletions.jsonl` |
 
 ## Known Issues
 
@@ -636,7 +636,7 @@ Measured 2026-09-06, all numbers from this tree tonight:
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1272 pass, 0 skip | **Last Updated:** 2026-09-06
+**Seedgo:** 100% | **Tests:** 1264 pass, 0 skip | **Last Updated:** 2026-09-08
 
 ---
 [← Back to AIPass](../../../README.md)

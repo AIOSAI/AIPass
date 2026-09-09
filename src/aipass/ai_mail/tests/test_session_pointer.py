@@ -14,7 +14,6 @@ the real ``~/.claude`` or inside a live branch.
 """
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -470,7 +469,13 @@ def test_pointer_file_is_valid_json_on_disk(branch):
     raw = pointer_path(branch).read_text(encoding="utf-8")
     parsed = json.loads(raw)
     assert set(parsed) == {"session_id", "set_at", "set_by", "cwd"}
-    assert os.linesep in raw or "\n" in raw  # indented, not a single blob
+    # MEASURED 2026-09-08: five newlines — one after the opening brace and one
+    # after each of the four keys. The ``or`` that stood here could not fail:
+    # read_text uses universal newlines, so "\n" is in the text on every
+    # platform whatever os.linesep says, and a single-blob dump would have
+    # passed it too. The claim in the old comment — indented, not a blob — is
+    # now the assertion.
+    assert raw.count("\n") == 5, raw
 
 
 # --- Windows path rendering ------------------------------------------

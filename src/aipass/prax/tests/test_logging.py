@@ -226,15 +226,15 @@ class TestDetectExternalProject:
         module_file = isolated / "orphan.py"
         module_file.touch()
 
-        # tmp_path's parents may have .git, so this test may find one
-        # The key assertion is: it doesn't return an AIPass-internal result
-        result = detect_external_project(str(module_file))
-        if result is not None:
-            _, root = result
-            # Should NOT be the AIPass repo root
-            from aipass.prax.apps.handlers.logging.introspection import _REPO_ROOT
+        # The walk-up only stops at a .git or a pyproject.toml. Assert that no
+        # ancestor carries one BEFORE asking for the answer: an `if result is
+        # not None` guard here used to swallow the whole oracle, so a host whose
+        # tmpdir sat inside a checkout reported green having checked nothing.
+        ancestors = [module_file, *module_file.parents]
+        marked = [p for p in ancestors if (p / ".git").exists() or (p / "pyproject.toml").exists()]
+        assert marked == [], f"tmp_path sits inside a project root ({marked}) — the None below is not testable here"
 
-            assert root != _REPO_ROOT
+        assert detect_external_project(str(module_file)) is None
 
 
 # =============================================
@@ -302,12 +302,23 @@ class TestGetCallerInfo:
         assert isinstance(result, tuple)
         assert len(result) == 3
 
-    def test_module_name_is_string(self, mock_prax_infrastructure):
-        """First element (module_name) is always a string."""
+    def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
+        """The caller is this file, so the name is this file's stem — not merely a str.
+
+        The two env overrides are cleared first: with AIPASS_LOG_NAME set, every
+        answer here would be that variable and the stack walk would prove
+        nothing.
+        """
         from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 
-        module_name, _path, _branch = get_caller_info()
+        monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
+        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
+
+        module_name, path, branch = get_caller_info()
         assert isinstance(module_name, str)
+        assert module_name == "test_logging"
+        assert path == __file__
+        assert branch == "prax"
 
     def test_called_from_test_file(self, mock_prax_infrastructure):
         """When called from a test file, path should reference this file."""

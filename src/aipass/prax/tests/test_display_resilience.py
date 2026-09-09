@@ -206,9 +206,21 @@ class TestDisplayWorkerSurvivesBadEvent:
         assert render.call_count == 2
 
     def test_worker_returns_normally_when_every_event_fails(self):
-        """A permanently broken renderer must not propagate out of the thread."""
+        """A permanently broken renderer must not propagate out of the thread.
+
+        "Returned normally" is only visible in what the worker did on the way
+        out: it attempted ALL THREE events (so the guard caught each one and the
+        loop went round again), recorded each failure, and left through its own
+        stop flag rather than through the exception.
+        """
         mod = _import_monitor()
-        self._run_worker(mod, [_event(), _event(), _event()], ValueError("boom"))
+
+        with patch.object(mod, "logger") as log:
+            render = self._run_worker(mod, [_event(), _event(), _event()], ValueError("boom"))
+
+        assert render.call_count == 3
+        assert log.debug.call_count == 3
+        assert mod._stop_event.is_set() is True
 
     def test_render_failure_is_reported_to_the_operator(self):
         """The failure is logged in plain language, naming the subsystem and impact."""

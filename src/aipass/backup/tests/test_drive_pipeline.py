@@ -527,10 +527,21 @@ class TestDriveTracker:
         assert result is True
 
     def test_load_tracker(self, tmp_path: Path) -> None:
-        """Load tracker returns dict from json_handler."""
+        """An unseeded project loads the EMPTY tracker, and reads the right file.
+
+        isinstance(result, dict) alone was satisfied by a tracker that had
+        invented entries, which for this handler is the dangerous direction:
+        a phantom entry tells drive_sync a file is already uploaded and it
+        skips it. So the value is pinned, and the path handed to the reader
+        is pinned beside it.
+        """
         mod = _fresh_import("aipass.backup.apps.handlers.drive.tracker")
         result = mod.load_tracker(str(tmp_path))
-        assert isinstance(result, dict)
+
+        assert result == {}
+        mod.json_handler.read_json.assert_called_once()
+        read_path = Path(str(mod.json_handler.read_json.call_args[0][0]))
+        assert read_path.parent == tmp_path / ".backup"
 
     def test_save_tracker(self, tmp_path: Path) -> None:
         """Save tracker calls json_handler.write_json and checks the bool."""

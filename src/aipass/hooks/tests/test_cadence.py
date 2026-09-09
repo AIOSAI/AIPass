@@ -513,7 +513,16 @@ class TestModuleInterface:
 
         assert handle_command("other", []) is False
 
-    def test_print_introspection_runs(self, tmp_path):
+    def test_print_introspection_runs(self, tmp_path, capsys):
+        """Introspection names the module and reports the cadence it read.
+
+        Had no oracle at all: it called print_introspection and asserted
+        nothing, so an introspection that printed an empty string, or the wrong
+        module's banner, was a pass. The config here is absent on purpose - the
+        defaults are what a reader gets when a branch has no cadence.json, and
+        that is the state most likely to be wrong and least likely to be looked
+        at.
+        """
         from aipass.hooks.apps.modules.cadence import print_introspection
 
         with (
@@ -522,6 +531,12 @@ class TestModuleInterface:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             print_introspection()
+
+        # stderr: this module prints through the cli's err_console.
+        err = capsys.readouterr().err
+        assert err.startswith("cadence Module")
+        assert "Enabled: True" in err
+        assert "Loader 'tier0'" in err
 
 
 class TestCompactIntegration:
@@ -889,7 +904,11 @@ class TestPerLoaderPeriod:
             )
         )
 
-        for turn_val in range(1, 8):
+        # The turns spelled out, not range(1, 8): "every turn" is the whole
+        # claim, so the seven turns are the test data and an iterable that
+        # produced none of them would have passed silently.
+        fired = {}
+        for turn_val in (1, 2, 3, 4, 5, 6, 7):
             _reset_module_globals()
             _write_state(tmp_path, turn=turn_val - 1)
 
@@ -898,7 +917,9 @@ class TestPerLoaderPeriod:
                 patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
                 patch(f"{MODULE}._CONFIG_PATH", config),
             ):
-                assert should_fire("tier0") is True, f"tier0 should fire on turn {turn_val}"
+                fired[turn_val] = should_fire("tier0")
+
+        assert fired == {1: True, 2: True, 3: True, 4: True, 5: True, 6: True, 7: True}
 
     def test_navmap_period_5_skips_non_fire_turns(self, tmp_path):
         from aipass.hooks.apps.modules.cadence import should_fire

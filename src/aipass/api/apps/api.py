@@ -33,7 +33,7 @@ from typing import Any, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services for formatted output
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 from rich.panel import Panel
 from rich.table import Table
 from rich.columns import Columns
@@ -273,6 +273,12 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 def main():
     """Main entry point - routes commands to modules"""
     try:
+        # The failure flag cli's error() sets is process-level, so a previous
+        # command in the same process (or an imported branch that printed an
+        # error while this one was still succeeding) would otherwise be read
+        # as OUR failure. Cleared before anything can set it.
+        reset_command_state()
+
         # Parse arguments directly from sys.argv
         args = sys.argv[1:]
 
@@ -321,13 +327,21 @@ def main():
         # Log api command attempt
         json_handler.log_operation("api_command_attempted", {"command": command, "modules_discovered": len(modules)})
 
-        # Route command to modules
-        if route_command(command, remaining_args, modules):
-            return 0
-        else:
+        # Route command to modules.
+        #
+        # A module returning True means "I recognised this command", NOT "it
+        # worked" — every refusal below (no key, missing argument, bind
+        # refused) is still a handled command, and returning 0 on all of them
+        # is what let `drone @api validate && <next>` proceed on a failure.
+        # resolve_exit reads the flag error() raises: 1 unrecognised,
+        # 2 recognised-and-refused, 0 only when nothing printed an error.
+        handled = route_command(command, remaining_args, modules)
+
+        if not handled:
             logger.warning(f"Unknown command: {command}")
             error(f"Unknown command: {command}", suggestion="Run 'drone @api --help' for available commands")
-            return 1
+
+        return resolve_exit(handled)
 
     except Exception as exc:
         logger.error("[api] Unhandled error in main: %s", exc)

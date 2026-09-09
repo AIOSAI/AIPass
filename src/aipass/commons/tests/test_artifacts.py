@@ -117,7 +117,7 @@ def test_craft_artifact_no_args() -> None:
 @patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.close_db")
-@patch("aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler")
+@patch("aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler", autospec=True)
 def test_craft_artifact_success(
     mock_json: MagicMock,
     mock_close: MagicMock,
@@ -281,7 +281,7 @@ def test_seal_capsule_no_args() -> None:
 @patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.close_db")
-@patch("aipass.commons.apps.handlers.artifacts.capsule_ops.json_handler")
+@patch("aipass.commons.apps.handlers.artifacts.capsule_ops.json_handler", autospec=True)
 def test_seal_capsule_success(
     mock_json: MagicMock,
     mock_close: MagicMock,
@@ -351,7 +351,7 @@ def test_open_capsule_no_args() -> None:
 
 
 @patch("aipass.commons.apps.modules.artifact.craft_artifact")
-@patch("aipass.commons.apps.modules.artifact.json_handler")
+@patch("aipass.commons.apps.modules.artifact.json_handler", autospec=True)
 def test_artifact_handle_command_routes_craft(
     mock_json: MagicMock,
     mock_craft: MagicMock,
@@ -376,7 +376,7 @@ def test_artifact_handle_command_routes_craft(
 
 
 @patch("aipass.commons.apps.modules.trade.gift_artifact")
-@patch("aipass.commons.apps.modules.trade.json_handler")
+@patch("aipass.commons.apps.modules.trade.json_handler", autospec=True)
 def test_trade_handle_command_routes_gift(
     mock_json: MagicMock,
     mock_gift: MagicMock,
@@ -402,7 +402,7 @@ def test_trade_handle_command_routes_gift(
 
 
 @patch("aipass.commons.apps.modules.capsule.seal_capsule")
-@patch("aipass.commons.apps.modules.capsule.json_handler")
+@patch("aipass.commons.apps.modules.capsule.json_handler", autospec=True)
 def test_capsule_handle_command_routes_capsule(
     mock_json: MagicMock,
     mock_seal: MagicMock,

@@ -353,7 +353,12 @@ class TestMalformedJson:
 
         mock_logger.error.assert_called()
         error_msg = mock_logger.error.call_args[0][0]
-        assert "malformed" in error_msg.lower() or "json" in error_msg.lower()
+        # The whole sentence: the tag that routes it, the verdict, the offending
+        # path and the parser's own reason. An `or` over two words passed on any
+        # message carrying either, including one that named no file at all.
+        assert error_msg.startswith("[config_loader] Malformed JSON in ")
+        assert str(bad_config) in error_msg
+        assert error_msg.endswith("Expecting property name enclosed in double quotes: line 1 column 2 (char 1)")
 
     def test_missing_entry_limits_section_returns_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

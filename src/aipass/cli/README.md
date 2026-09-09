@@ -6,8 +6,8 @@
 **Module:** `aipass.cli`
 **Version:** 2.1.0
 **Seedgo:** 100%
-**Tests:** 166 test functions across 10 files; pytest expands to 186 cases — 186 passing, 0 skipped (measured 2026-09-06)
-**Last Updated:** 2026-09-06
+**Tests:** 164 test functions across 9 files; pytest expands to 176 cases — 176 passing, 0 skipped (measured 2026-09-08)
+**Last Updated:** 2026-09-08
 
 ## Quick Start
 
@@ -89,6 +89,51 @@ from aipass.cli.apps.modules import header, fatal, operation_start        # Full
 from aipass.cli.apps.modules.display import header                        # Direct module
 ```
 
+## The exit seam — the idiom to copy
+
+`mark_command_failed`, `command_failed`, `reset_command_state` and `resolve_exit`
+live here, so this is the reference spelling for the whole fleet. **Three lines,
+in this order**, in your branch's `main()`:
+
+```python
+def main() -> int:
+    reset_command_state()                     # 1. clear the flag on entry
+    ...
+    handled = route_command(command, args, modules)
+    if not handled:
+        error(f"Unknown command: {command}")  # 2. refuse through error()
+    return resolve_exit(handled)              # 3. let the seam pick the code
+```
+
+| code | meaning |
+|------|---------|
+| `0`  | routed, and nothing called `error()` |
+| `2`  | routed, but a refusal went through `error()` |
+| `1`  | not routed at all |
+
+Why each line is load-bearing:
+
+- **`reset_command_state()` first.** The flag is process-level state. Without
+  the reset, one refused command makes every later command in the same process
+  exit 2 — and under a test suite, one red test colours the next.
+- **The refusal goes through `error()`, not `warning()`.** Only `error()` calls
+  `mark_command_failed()`. `warning()` deliberately does not: it is for things
+  that proceed. Swapping the colour without the flag changes nothing an exit
+  code can see.
+- **`return resolve_exit(handled)`, never a bare `0`.** A `main()` that returns
+  0 on any truthy route discards the only thing the flag was recorded for. This
+  is what made refusals exit 0 across the fleet (@canary's sweep, 2026-09-07):
+  the machinery existed, three branches consulted it, and everywhere else
+  `error()` printed red and the shell read success.
+- **A caller's own `1` is never overwritten.** `resolve_exit()` checks
+  `handled` *before* it looks at the flag, so a command that was never routed is
+  a 1 whether or not `error()` also tripped the flag.
+
+Cancellation is **130** (128 + SIGINT), not 0 — an interrupted run is not a
+successful one. In this branch that lives in `run_cli()`, which exists as a
+function rather than as bare code in the `__main__` block precisely so both it
+and the crash path (`1`) can be pinned by test.
+
 ## Commands
 
 ```bash
@@ -107,7 +152,7 @@ drone @cli templates demo      # Run templates function showcase
 cli/
 ├── __init__.py                 # Top-level exports (6 symbols) + cli_entry()
 ├── apps/
-│   ├── cli.py                  # Entry point (main, discover_modules, route_command)
+│   ├── cli.py                  # Entry point (main, run_cli, discover_modules, route_command)
 │   ├── modules/                # PUBLIC — import from here
 │   │   ├── __init__.py         # Re-exports all 14 display + template symbols
 │   │   ├── display.py          # header, success, error, warning, fatal, section, exit-code API
@@ -120,19 +165,20 @@ cli/
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 166 test functions, 10 files — pytest expands to 186 cases, 0 skip
+├── tests/                      # 164 test functions, 9 files — pytest expands to 176 cases, 0 skip
 │   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
-│   ├── test_display.py         # 60 defs — display functions + routing + exit codes + help flags
+│   ├── test_display.py         # 59 defs — display functions + routing + exit codes + help flags
 │   ├── test_templates.py       # 31 defs — operation templates + routing + help flags
 │   ├── test_handler_guard.py   # 19 defs — cross-branch import guard contract
-│   ├── test_cli_routing.py     # 12 defs (15 cases) — entry point routing, help, version, refusals
-│   ├── test_json_handler.py    # 6 defs (14 cases) — shim WIRING only; behaviour is @seedgo's fleet contract
-│   ├── test_help_flags.py      # 11 defs (20 cases) — whole-sequence help detection
+│   ├── test_cli_routing.py     # 18 defs (21 cases) — entry point routing, help, version, refusals, the exit seam
+│   ├── test_help_flags.py      # 10 defs (19 cases) — whole-sequence help detection
+│   ├── test_import_dead_cwd.py # 9 defs — imports survive a deleted cwd + AST ban on inspect.stack()
 │   ├── test_output_capture.py  # 8 defs — capture is environment-proof (ANSI strip, 4 shells)
 │   ├── test_integration.py     # 6 defs — main() flow, entry points
 │   ├── test_parked_is_not_collected.py # 4 defs — collection barrier over tests/parked/ holds
-│   ├── test_import_dead_cwd.py # 9 defs — imports survive a deleted cwd + AST ban on inspect.stack()
-│   ├── .archive/               # NOT collected — the pre-service handler suites (DPLAN-0325)
+│   ├── .archive/               # NOT collected — the pre-service handler suites (DPLAN-0325), the
+│   │                           #   shim wiring suite (2026-09-07), and two TYPE-ONLY units whose
+│   │                           #   claims siblings already pinned by identity (2026-09-08)
 │   └── parked/                 # TRACKED, not run — collect_ignore_glob barrier (archive doctrine, 2026-08-18)
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
@@ -216,20 +262,29 @@ The two bypasses that read "json_handler cannot import prax (circular)" were ret
 | Entry | Command | How |
 |-------|---------|-----|
 | drone | `drone @cli [command]` | Routes to `apps/cli.py:main()` |
-| Import | `from aipass.cli import ...` | The real entry point — 352 import statements in 247 files across 18 branches (measured 2026-09-06; 29 in test files). 42 of those statements are cli's own tests; 310 in 230 files come from the other 17 branches |
+| Import | `from aipass.cli import ...` | The real entry point — 368 import statements in 255 files across 18 branches (measured 2026-09-08 over live `.py` files only; `.archive/` and `tests/parked/` excluded). 42 of those statements are cli's own, in 16 files; 326 in 239 files come from the other 17 branches |
+
+`run_cli()` in `apps/cli.py` is the process wrapper the `__main__` block calls: it runs
+`main()` and maps a `KeyboardInterrupt` to 130 and an escaped exception to 1. It is a
+function rather than bare code in the block so both codes can be pinned by test.
 
 `python -m aipass.cli` is **not** an entry point — `__main__.py` was archived 2026-05-02 (no branch in the fleet ships one). `cli_entry()` still exists in `__init__.py` but is no longer wired: `pyproject.toml` maps the `aipass` script to `aipass.aipass.apps.aipass:main`. See APLAN-0002 for the keep-or-retire decision.
 
 ## Status / Known issues
 
-**Status:** green. 186 cases pass, 0 skipped; seedgo audit 100% on every scored category
-(all measured 2026-09-06). No open defects in this branch's code.
+**Status:** green. 176 cases pass, 0 skipped, from the repo root and from this directory;
+`drone @seedgo audit aipass @cli` 100% on every scored category and
+`drone @seedgo audit pytest_quality @cli` 100% on all ten v5 rules (all measured 2026-09-08).
+No open defects in this branch's code.
 
 **Known issues**
 
 - `cli_entry()` in `__init__.py` is dead wiring. It is a valid console_scripts target, but
   `pyproject.toml` points the `aipass` script at `aipass.aipass.apps.aipass:main`, so nothing
   calls it. Keep-or-retire is still open under APLAN-0002.
+- Nothing in the fleet currently exits **2**. The code is reachable — a routed command that
+  calls `error()` and returns True gets it, measured from the shell 2026-09-08 — but no verb
+  cli ships does that today, so the 2 is pinned by test rather than by a live command.
 - Importer counts depend on the scope you measure. @hooks reports 21 cli imports in 21 of its
   files; this README counts 22 in 22, and both are right — the extra is @hooks' own dead-cwd
   test pin (`tests/test_import_dead_cwd.py:65`), a plain `import aipass.cli.apps.modules`.
@@ -237,14 +292,16 @@ The two bypasses that read "json_handler cannot import prax (circular)" were ret
 
 **Unverified in this pass**
 
-- `tests/parked/` is described as TRACKED (not gitignored). Tonight's pass was docs-only and ran
-  no git commands, so that word carries from 2026-08-19. The collection barrier beside it *was*
-  re-verified: `tests/parked/conftest.py` sets `collect_ignore_glob = ["*"]` and
+- `tests/parked/` is described as TRACKED (not gitignored). This pass ran no git commands, so
+  that word still carries from 2026-08-19. The collection barrier beside it *was* re-verified:
+  `tests/parked/conftest.py` sets `collect_ignore_glob = ["*"]` and
   `test_parked_is_not_collected.py` pins it with real pytest collection.
+- The @hooks importer figure quoted above (21 in 21 of its files) is carried from 2026-09-06.
+  Only cli's own totals were re-measured tonight.
 
 ---
 
-*Last Updated: 2026-09-06*
+*Last Updated: 2026-09-08*
 
 ---
 [← Back to AIPass](../../../README.md)

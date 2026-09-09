@@ -9,10 +9,16 @@ on:
   pull_request:
     branches: [main, dev]
 
-# A new push to the same ref cancels the stale in-flight run.
+# One run per ref at a time, and a RUNNING run is never cancelled: a new push
+# queues behind it (GitHub keeps at most one pending run per group). Until
+# 2026-09-08 this was cancel-in-progress: true, and eight landings pushed
+# within hours on 2026-09-07/08 erased every in-flight verdict; the first
+# completed matrix showed 13 reds with no wave to attribute them to
+# (RPLAN-0004 in seedgo, finding 2.5). A verdict that finishes is worth the
+# runner minutes it costs on a public repo.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

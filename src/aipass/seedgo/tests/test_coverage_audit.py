@@ -693,6 +693,36 @@ class TestRenderDeprecatedPatterns:
         assert mock_con.print.call_count == 0
 
 
+def _rendered(render, *args, **kwargs) -> str:
+    """Everything the shared console printed while *render* ran, as one string.
+
+    THE ORACLE THE RENDER TESTS IN THIS FILE WERE MISSING (no_oracle, measured
+    2026-09-07: 17 units here). Calling a renderer and asserting nothing pins
+    one thing only - that it did not raise - so a renderer that printed
+    NOTHING AT ALL passed every one of them, which is the failure a display
+    module actually has. The console is the MagicMock the autouse fixture
+    installs, and reading its calls back is the only place a render is
+    observable from here.
+
+    Reset first, so each assertion reads its own render and not the tail of the
+    previous test's.
+
+    Args:
+        render: The display function under test.
+        *args: Passed straight through.
+        **kwargs: Passed straight through.
+
+    Returns:
+        Every printed argument joined, ready for a substring assertion.
+    """
+    import sys
+
+    console = sys.modules["aipass.cli"].console
+    console.reset_mock()
+    render(*args, **kwargs)
+    return " ".join(str(call) for call in console.print.call_args_list)
+
+
 class TestPrintIntrospection:
     """Tests for print_introspection."""
 
@@ -763,7 +793,10 @@ class TestPrintBranchSummary:
             ({"architecture": 50, "naming": 60}, 55),  # < 75
             ({"naming": 100, "meta": 90}, 95),  # a 100 skips its violation render
         ):
-            print_branch_summary(self._make_audit_result(scores=scores, average=average))
+            rendered = _rendered(print_branch_summary, self._make_audit_result(scores=scores, average=average))
+
+            assert "test_branch" in rendered, f"the branch was not named at {average}"
+            assert str(average) in rendered, f"the overall {average} was not rendered"
 
     def test_the_header_states_what_it_measured_not_only_how_much(self, monkeypatch):
         """The count is scoped out loud, because the corpus is not the branch.
@@ -859,7 +892,11 @@ class TestPrintBranchSummary:
             },
             average=80,
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        # The third standard is the one a two-per-row renderer drops.
+        assert "Meta" in rendered, "the odd standard was not rendered at all"
 
     def test_empty_scores(self):
         """Empty scores dict still renders overall."""
@@ -868,7 +905,10 @@ class TestPrintBranchSummary:
         )
 
         result = self._make_audit_result(scores={}, average=0)
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "Overall" in rendered, "a branch with no scores still owes an Overall line"
 
     def test_architecture_violations_displayed(self):
         """Architecture score < 100 triggers arch violation render."""
@@ -890,7 +930,13 @@ class TestPrintBranchSummary:
                 }
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        # The renderer strips the "Dir: " prefix and groups the failure under a
+        # heading, so the check's own name is not what reaches the screen.
+        assert "Missing directories" in rendered, "the failed check got no heading"
+        assert "apps" in rendered, "the directory that failed was not named"
 
     def test_standard_violations_displayed(self):
         """Standard with violations list gets rendered."""
@@ -911,7 +957,10 @@ class TestPrintBranchSummary:
                 ],
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "Bad name" in rendered, "the violation's own issue text was not rendered"
 
     def test_branch_level_failed_checks(self):
         """Failed checks but no violations list renders messages."""
@@ -934,7 +983,11 @@ class TestPrintBranchSummary:
                 }
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "Unused function foo()" in rendered, "a failed check with no violations list went unrendered"
+        assert "OK" not in rendered, "a PASSING check must not be rendered as a finding"
 
     def test_violations_not_in_scores_rendered(self):
         """Violation lists not in scores are caught defensively."""
@@ -953,7 +1006,10 @@ class TestPrintBranchSummary:
                 "issues": ["Orphan violation"],
             },
         ]
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "Orphan violation" in rendered, "a violation list with no matching score was silently dropped"
 
     def test_type_errors_rendered(self):
         """Type errors section is rendered."""
@@ -975,7 +1031,10 @@ class TestPrintBranchSummary:
                 ],
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "bad.py" in rendered, "the file carrying the type errors was not named"
 
     def test_test_map_rendered(self):
         """Test map section is rendered."""
@@ -992,7 +1051,10 @@ class TestPrintBranchSummary:
                 },
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "3" in rendered and "5" in rendered, "the test-map counts were not rendered"
 
     def test_deprecated_patterns_rendered(self):
         """Deprecated patterns section is rendered."""
@@ -1010,7 +1072,10 @@ class TestPrintBranchSummary:
                 ],
             },
         )
-        print_branch_summary(result)
+
+        rendered = _rendered(print_branch_summary, result)
+
+        assert "Rename to docs/" in rendered, "the deprecated-pattern message was not rendered"
 
     def test_system_averages_and_overall(self):
         """system_averages and overall_system_avg args accepted."""
@@ -1019,11 +1084,15 @@ class TestPrintBranchSummary:
         )
 
         result = self._make_audit_result()
-        print_branch_summary(
+
+        rendered = _rendered(
+            print_branch_summary,
             result,
             system_averages={"naming": 85},
             overall_system_avg=87,
         )
+
+        assert "test_branch" in rendered, "the branch summary rendered nothing at all"
 
     def test_no_bypass_label_travels_with_the_branch_score(self):
         """A --no-bypass summary says so — the score alone reads as a regression."""
@@ -1066,13 +1135,31 @@ class TestPrintSystemSummary:
             "type_errors": type_errors,
         }
 
-    def test_empty_results(self):
-        """Empty audit_results list handled gracefully."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
+    @staticmethod
+    def _rendered_lines(results: list, **kwargs) -> list:
+        """Every string print_system_summary hands to console.print, in order.
 
-        print_system_summary([])
+        The autouse fixture mocks `aipass.cli`, so `audit_display.console` is a
+        MagicMock and stdout stays empty — `capsys` would see nothing. The call
+        args are the strings the module actually chose, and they arrive before
+        Rich renders them, so a pinned fragment can never be split by a wrap.
+        """
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        recorder = MagicMock()
+        with patch.object(audit_display, "console", recorder):
+            audit_display.print_system_summary(results, **kwargs)
+        return [str(call.args[0]) if call.args else "" for call in recorder.print.call_args_list]
+
+    def test_empty_results(self):
+        """An empty fleet divides by no branches: zeros throughout, no improvement areas."""
+        lines = self._rendered_lines([])
+
+        assert "  Total branches:        0" in lines
+        assert "  Average compliance:    0%" in lines
+        assert "  Type errors:           0" in lines
+        assert "[bold]STANDARD AVERAGES:[/bold]" in lines
+        assert "[bold]TOP IMPROVEMENT AREAS:[/bold]" not in lines
 
     def test_mixed_tiers(self):
         """A fleet spanning all three tiers renders, and so does an all-excellent one.
@@ -1084,46 +1171,63 @@ class TestPrintSystemSummary:
         input moves here so the all-one-tier shape is still executed rather
         than assumed to be covered.
 
-        Mutation-checked at the merge: a summary that raises on either list
-        reds this test.
+        FPLAN-0509: it asserted nothing, so "renders" was the whole claim. Both
+        lists now pin the tier counts they were chosen to exercise. Re-mutated:
+        widening `excellent` to `average >= 96` reds it.
         """
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
+        cases = [
+            (
+                [
+                    self._make_result("excellent", 95),
+                    self._make_result("good", 82),
+                    self._make_result("bad", 60),
+                ],
+                [
+                    "  Total branches:        3",
+                    "  Average compliance:    79%",
+                    "  Branches ≥90%:         1",
+                    "  Branches 75-89%:       1",
+                    "  Branches <75%:         1",
+                ],
+            ),
+            (
+                [
+                    self._make_result("a", 95),
+                    self._make_result("b", 92),
+                ],
+                [
+                    "  Total branches:        2",
+                    "  Average compliance:    93%",
+                    "  Branches ≥90%:         2",
+                    "  Branches 75-89%:       0",
+                    "  Branches <75%:         0",
+                ],
+            ),
+        ]
+        assert len(cases) == 2, "both the spread fleet and the merged all-excellent one must run"
 
-        for results in (
-            [
-                self._make_result("excellent", 95),
-                self._make_result("good", 82),
-                self._make_result("bad", 60),
-            ],
-            [
-                self._make_result("a", 95),
-                self._make_result("b", 92),
-            ],
-        ):
-            print_system_summary(results)
+        for results, expected in cases:
+            lines = self._rendered_lines(results)
+            for line in expected:
+                assert line in lines, f"{line!r} missing from {lines!r}"
 
     def test_type_errors_in_summary(self):
-        """Type errors total rendered."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
+        """The type-error total is the fleet sum, counted alongside the branches carrying it."""
+        lines = self._rendered_lines(
+            [
+                self._make_result("a", 85, type_errors=5),
+                self._make_result("b", 90, type_errors=0),
+            ]
         )
 
-        results = [
-            self._make_result("a", 85, type_errors=5),
-            self._make_result("b", 90, type_errors=0),
-        ]
-        print_system_summary(results)
+        assert "  Type errors:           5 (1 branches)" in lines
 
     def test_no_type_errors_green(self):
-        """Zero type errors shows green message."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
+        """A clean fleet prints the bare zero, without the branch-count parenthetical."""
+        lines = self._rendered_lines([self._make_result("a", 90)])
 
-        results = [self._make_result("a", 90)]
-        print_system_summary(results)
+        assert "  Type errors:           0" in lines
+        assert not [line for line in lines if line.startswith("  Type errors:") and "branches)" in line]
 
     def test_odd_standard_count(self):
         """An odd standard count renders the last one alone, at any tier of averages.
@@ -1134,30 +1238,46 @@ class TestPrintSystemSummary:
         string choices that cannot crash and were never asserted. Its scores
         move here, so the three-tier spread is still rendered.
 
-        Mutation-checked at the merge: a renderer that raises on either score
-        set reds this test.
+        FPLAN-0509: the icons the merge note called "never asserted" are asserted
+        here now, alongside the odd-one-out row. Re-mutated: stepping the pairing
+        loop by 3 reds it, and so does moving the ✅ threshold to `>= 91`.
         """
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
-        )
+        cases = [
+            (
+                {"arch": 80, "naming": 85, "meta": 90},
+                [
+                    "  Arch             80% ⚠️    Meta             90% ✅",
+                    "  Naming           85% ⚠️",
+                ],
+            ),
+            (
+                {"high": 95, "mid": 80, "low": 50},
+                [
+                    "  High             95% ✅    Low              50% ❌",
+                    "  Mid              80% ⚠️",
+                ],
+            ),
+        ]
+        assert len(cases) == 2, "both the plain spread and the merged three-tier icon set must run"
 
-        for scores in (
-            {"arch": 80, "naming": 85, "meta": 90},
-            {"high": 95, "mid": 80, "low": 50},
-        ):
-            print_system_summary([self._make_result("a", 80, scores=scores)])
+        for scores, expected in cases:
+            lines = self._rendered_lines([self._make_result("a", 80, scores=scores)])
+            paired, alone = expected
+            assert paired in lines, f"{paired!r} missing from {lines!r}"
+            assert alone in lines, f"the odd third standard did not render alone: {lines!r}"
 
     def test_top_improvement_areas(self):
-        """Top improvement areas listed with failing branch count."""
-        from aipass.seedgo.apps.handlers.audit.audit_display import (
-            print_system_summary,
+        """The three worst standards are ranked, each with its own <75% branch count."""
+        lines = self._rendered_lines(
+            [
+                self._make_result("a", 60, scores={"arch": 50, "naming": 70}),
+                self._make_result("b", 80, scores={"arch": 90, "naming": 70}),
+            ]
         )
 
-        results = [
-            self._make_result("a", 60, scores={"arch": 50, "naming": 70}),
-            self._make_result("b", 80, scores={"arch": 90, "naming": 70}),
-        ]
-        print_system_summary(results)
+        assert "[bold]TOP IMPROVEMENT AREAS:[/bold]" in lines
+        assert "  1. Arch            (avg: 70%, 1 branches <75%)" in lines
+        assert "  2. Naming          (avg: 70%, 2 branches <75%)" in lines
 
     def test_no_bypass_label_travels_with_the_fleet_average(self):
         """The summary block is what gets copied out — it carries the label itself."""

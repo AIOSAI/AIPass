@@ -315,7 +315,7 @@ def _fake_timer_module(**overrides):
     return fake
 
 
-def test_router_timer_wake_in(_bypass_caller_guard, capsys):
+def test_router_timer_wake_in(_bypass_caller_guard):
     fake = _fake_timer_module()
     with patch("importlib.import_module", return_value=fake):
         result = wd_mod.handle_command("watchdog", ["timer", "1s"])

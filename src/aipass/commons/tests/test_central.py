@@ -80,7 +80,7 @@ def test_get_registered_branches_missing_file() -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.central.central_writer.json_handler")
+@patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.central.central_writer.logger")
 @patch("aipass.commons.apps.handlers.central.central_writer._read_last_checked", return_value="1970-01-01T00:00:00Z")
 @patch("aipass.commons.apps.handlers.central.central_writer.get_registered_branches")
@@ -136,7 +136,7 @@ def test_aggregate_branch_stats_with_data(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.central.central_writer.json_handler")
+@patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.central.central_writer.close_db", side_effect=lambda conn: None)
 @patch("aipass.commons.apps.handlers.central.central_writer.get_db")
 def test_query_top_threads_returns_sorted(
@@ -180,7 +180,7 @@ def test_query_top_threads_returns_sorted(
     assert threads[1]["title"] == "Old Thread"
 
 
-@patch("aipass.commons.apps.handlers.central.central_writer.json_handler")
+@patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.central.central_writer.close_db", side_effect=lambda conn: None)
 @patch("aipass.commons.apps.handlers.central.central_writer.get_db")
 def test_query_top_threads_empty_db(
@@ -257,7 +257,7 @@ def test_write_central_file_atomic_write(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.central.central_writer.json_handler")
+@patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.central.central_writer.logger")
 @patch("aipass.commons.apps.handlers.central.central_writer.write_central_file")
 @patch("aipass.commons.apps.handlers.central.central_writer.build_central_data")
@@ -292,7 +292,7 @@ def test_update_central_orchestrates_full_pipeline(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler")
+@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.logger")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
@@ -336,7 +336,7 @@ def test_write_commons_activity_branch_not_found(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler")
+@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.logger")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
 @patch(
@@ -388,7 +388,7 @@ def test_update_commons_dashboard_queries_db(
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.logger")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
@@ -413,7 +413,7 @@ def test_update_dashboards_for_event_calls_pipeline(
     mock_update_central.assert_called_once()
 
 
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.logger")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")

@@ -467,9 +467,17 @@ class TestAnUnreadableFileIsNeverBlank:
         sys.platform == "win32",
         reason="chmod 0o000 cannot construct an unreadable file here - no POSIX mode bits",
     )
+    # sys.platform FIRST — the machine probe seedgo's self_skip rule asks for —
+    # and the getattr second, which is not defensiveness for its own sake:
+    # test_windows_import.py simulates Windows by HIDING os.geteuid while
+    # os.name stays "posix", so a bare os.geteuid() here raises AttributeError
+    # at COLLECTION time and takes this whole file's tests with it. That guard
+    # caught exactly this change on 2026-09-07 and its docstring already named
+    # the shape. The getattr is what survives the simulation; the sys.platform
+    # is what stops the condition being decided purely by symbol lookup.
     @pytest.mark.skipif(
-        getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="root reads everything; the mode says nothing to it",
+        sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="a file mode only means something to a non-root POSIX process",
     )
     def test_a_file_we_may_not_read_is_a_fault_not_a_blank(self, tmp_path) -> None:
         """The one that would have cost real settings: unreadable, not empty."""

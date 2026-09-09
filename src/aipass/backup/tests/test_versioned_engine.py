@@ -195,7 +195,17 @@ class TestDiffGenerator:
             new.write_text("line1\nline3\n", encoding="utf-8")
 
             diff = generate_diff_content(old, new)
-            assert "---" in diff or "+++" in diff or "line" in diff
+
+            # Three clauses joined by 'or', all three about the result: the
+            # last one ("line" in diff) is true of literally any output that
+            # echoes either file, so the assertion could not fail. Measured
+            # 2026-09-08 -- all three headers are present, and so are the two
+            # changed lines with their unified-diff signs.
+            assert "--- a/old.py" in diff
+            assert "+++ b/new.py" in diff
+            assert "@@ -1,2 +1,2 @@" in diff
+            assert "-line2" in diff
+            assert "+line3" in diff
 
     def test_binary_marker(self, tmp_path: Path):
         """Binary files get marker instead of diff."""

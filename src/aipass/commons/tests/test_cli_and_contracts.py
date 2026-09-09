@@ -28,6 +28,7 @@ Covers seedgo test_quality categories that are missing from other test files:
 """
 
 import importlib
+import sqlite3
 import sys
 from io import StringIO
 from pathlib import Path
@@ -226,11 +227,18 @@ def test_route_command_returns_false_for_unhandled():
 
 
 def test_route_command_returns_bool():
-    """route_command should always return a bool."""
+    """route_command answers its own True, never the module's truthy value.
+
+    handle_command may return anything truthy - a dict of results, a status
+    string. route_command's contract is bool, and main() feeds that straight to
+    resolve_exit(). An isinstance check cannot catch a regression here because a
+    passed-through dict would fail it too loudly to reach production; what this
+    pins is that the value is the literal True and not the payload.
+    """
     mock_module = MagicMock()
-    mock_module.handle_command.return_value = False
+    mock_module.handle_command.return_value = {"handled": True, "rows": 3}
     result = route_command("test", [], [mock_module])
-    assert isinstance(result, bool)
+    assert result is True
 
 
 # ===========================================================================
@@ -316,12 +324,19 @@ def test_unknown_command_names_the_whole_invocation():
         assert "nosuchverb nosucharg" in mock_error.call_args[0][0]
 
 
-def test_ensure_database_returns_bool():
-    """ensure_database should return a bool indicating success."""
-    with patch("aipass.commons.apps.commons.init_db") if hasattr(commons_main, "init_db") else patch.dict(sys.modules):
-        # ensure_database returns bool
-        result = ensure_database()
-        assert isinstance(result, bool)
+def test_ensure_database_answers_false_when_init_db_raises():
+    """A failed init must answer False, not propagate - main() refuses on it.
+
+    ensure_database catches broadly and returns a verdict; if that except ever
+    stops answering False, main() reads a None as falsey by luck rather than by
+    contract, and a re-raise would crash the CLI instead of printing the
+    refusal. Both halves are pinned here: the failure verdict and the success
+    verdict on the same real function.
+    """
+    with patch("aipass.commons.apps.modules.database.init_db", side_effect=sqlite3.OperationalError("no such table")):
+        assert ensure_database() is False
+
+    assert ensure_database() is True
 
 
 # ===========================================================================

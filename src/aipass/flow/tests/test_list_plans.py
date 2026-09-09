@@ -127,7 +127,7 @@ class TestHandleCommandRouting:
 
     def test_json_handler_called_on_filter_commands(self):
         """json_handler.log_operation should be called for filter commands."""
-        with patch(f"{_MOD}.list_plans"), patch(f"{_MOD}.json_handler") as mock_jh:
+        with patch(f"{_MOD}.list_plans", autospec=True), patch(f"{_MOD}.json_handler", spec=True) as mock_jh:
             from aipass.flow.apps.modules.list_plans import handle_command
 
             result = handle_command("list", ["open"])
@@ -240,7 +240,7 @@ class TestListPlansOrchestrator:
 
         with (
             patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl,
-            patch(f"{_MOD}.load_registry") as mock_lr,
+            patch(f"{_MOD}.load_registry", autospec=True) as mock_lr,
             patch(f"{_MOD}.get_registry_statistics") as mock_gs,
             patch(f"{_MOD}.format_plans_list") as mock_fpl,
             patch(f"{_MOD}.format_statistics_summary") as mock_fss,

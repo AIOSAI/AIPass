@@ -17,6 +17,7 @@ import pytest
 
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
+    REPO_URL,
     TOTAL_STEPS,
     _acquire_install_lock,
     _ask_permission_mode,
@@ -621,8 +622,14 @@ class TestPrintNextSteps:
     """The installed banner shown before the welcome chat."""
 
     def test_runs_without_error(self, tmp_path: Path) -> None:
-        """Renders without raising for a real path."""
-        _print_next_steps(tmp_path)
+        """The banner names the install home and the three commands to try next."""
+        with patch(f"{_MOD}.console") as mock_console, patch(f"{_MOD}.success") as mock_success:
+            _print_next_steps(tmp_path)
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert mock_success.call_args[0][0] == f"AIPass is installed at {tmp_path}"
+        assert "drone systems" in printed
+        assert "aipass doctor" in printed
+        assert "aipass init run" in printed
 
 
 class TestRunChatOnly:
@@ -666,12 +673,22 @@ class TestSmoke:
     """Help/introspection render and constants hold."""
 
     def test_print_help_runs(self) -> None:
-        """print_help renders without error."""
-        print_help()
+        """print_help names the command, the step order and the init hand-off."""
+        with patch(f"{_MOD}.console") as mock_console:
+            print_help()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert "aipass install[/bold cyan] \u2014 one-command bootstrap of AIPass" in printed
+        assert "resolve home -> fetch -> setup.sh -> verify -> welcome chat" in printed
+        assert "aipass init run" in printed
 
     def test_print_introspection_runs(self) -> None:
-        """print_introspection renders without error."""
-        print_introspection()
+        """print_introspection names the module, the default home and the source."""
+        with patch(f"{_MOD}.console") as mock_console:
+            print_introspection()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert "install Module" in printed
+        assert str(DEFAULT_HOME) in printed
+        assert REPO_URL in printed
 
     def test_total_steps_constant(self) -> None:
         """The install flow advertises four steps."""

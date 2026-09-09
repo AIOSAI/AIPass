@@ -49,8 +49,16 @@ class TestReadAllCentrals:
 
     def test_returns_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         reader = _fresh_import_reader(monkeypatch, tmp_path)
+        central_dir = tmp_path / ".ai_central"
+        central_dir.mkdir()
+        payload = {"status": "active"}
+        (central_dir / "AI_MAIL.central.json").write_text(json.dumps(payload), encoding="utf-8")
+
         result = reader.read_all_centrals()
         assert isinstance(result, dict)
+        # Which dict: the whole mapping, not just a key spot-check -- one
+        # entry in, one entry out, keyed by the lowered service name.
+        assert result == {"ai_mail": payload}
 
     def test_empty_dict_when_dir_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """No .ai_central directory should return empty dict."""

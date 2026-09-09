@@ -229,9 +229,20 @@ class TestStartStopMonitoring:
         observer_inst.join.assert_called_once()
 
     def test_stop_monitoring_handles_none(self):
+        """No observer means no teardown: nothing is stopped, nothing is joined."""
         mod, _inst, _cls = self._import_watcher_monitor()
-        # Should not raise
-        mod.stop_monitoring(None)
+
+        assert mod.stop_monitoring(None) is None
+
+        # An observer that reports itself absent takes the same path, and the
+        # only way to see that path was taken is that it was left untouched.
+        absent = MagicMock()
+        absent.__bool__.return_value = False
+
+        mod.stop_monitoring(absent)
+
+        absent.stop.assert_not_called()
+        absent.join.assert_not_called()
 
 
 # ============================================================================
@@ -325,10 +336,29 @@ class TestDiscoveryWatcher:
         assert getattr(mod, "_observer") is None
 
     def test_stop_file_watcher_noop_when_not_running(self):
+        """Nothing is running, so no teardown is attempted.
+
+        Two ways to be "not running", both no-ops: no observer at all, and an
+        observer whose thread has already died. Neither may be stopped or
+        joined, and the dead one is NOT cleared — is_file_watcher_active()
+        already reads it as inactive, and stop() on a dead watchdog observer
+        raises.
+        """
         mod, _inst, _cls = self._import_discovery_watcher()
+
         setattr(mod, "_observer", None)
-        # Should not raise
+        assert mod.stop_file_watcher() is None
+        assert getattr(mod, "_observer") is None
+
+        dead = MagicMock()
+        dead.is_alive.return_value = False
+        setattr(mod, "_observer", dead)
+
         mod.stop_file_watcher()
+
+        dead.stop.assert_not_called()
+        dead.join.assert_not_called()
+        assert getattr(mod, "_observer") is dead
 
     def test_is_file_watcher_active_true_when_alive(self):
         mod, _inst, _cls = self._import_discovery_watcher()
@@ -481,13 +511,27 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "load_module_registry", _explode)
         monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
 
+        saved = []
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.append(modules))
+
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+
         handler = mod.PythonFileWatcher()
         event = MagicMock()
         event.event_type = "created"  # dispatch() routes on this
         event.is_directory = False
         event.src_path = str(tmp_path / "anything.py")
 
-        handler.dispatch(event)  # must not raise — the dispatcher calls it exactly like this
+        # Must not raise — the dispatcher calls it exactly like this.
+        assert handler.dispatch(event) is None
+
+        # Contained, and named: an exception the guard has never heard of is
+        # still swallowed and still reported by its own type.
+        assert errors, "a _Boom escaped or vanished silently"
+        assert "_Boom" in errors[0], "the report must name the error type it did not expect"
+        assert "anything.py" in errors[0], "the report must name the file that failed"
+        assert saved == [], "the event must be dropped, not half-registered"
 
     def test_a_swallowed_failure_is_still_reported(self, tmp_path, monkeypatch):
         """Swallowing must not mean hiding — 15 silent hours is what made it costly."""

@@ -8,6 +8,7 @@
 
 """Tests for cli, memory_template_updated, and warning_logged event handlers."""
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,10 +93,22 @@ class TestHandleCliHeaderDisplayed:
             "cli_event", {"success": True}
         )
 
-    def test_accepts_arbitrary_kwargs(self) -> None:
-        """Does not crash when extra kwargs are passed."""
+    def test_arbitrary_kwargs_are_absorbed_and_never_reach_the_log(self) -> None:
+        """Extra event data is swallowed by **kwargs — the payload is unchanged.
+
+        Not crashing was all this checked, and not crashing is what a handler
+        that quietly forwarded its kwargs into the log payload also does. The
+        bus hands every handler whatever the firer passed; the contract is that
+        this one logs its own fixed payload regardless.
+        """
         mod = _import_cli()
+        from aipass.trigger.apps.handlers.json import json_handler
+
         mod.handle_cli_header_displayed(foo="bar", baz=42)
+
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "cli_event", {"success": True}
+        )
 
     def test_returns_none(self) -> None:
         """Handler returns None (handlers must not return values)."""
@@ -125,10 +138,23 @@ class TestHandleMemoryTemplateUpdated:
             "memory_template_event", {"success": True}
         )
 
-    def test_accepts_kwargs(self) -> None:
-        """Does not crash when event data kwargs are passed."""
+    def test_documented_event_data_is_absorbed_and_never_reaches_the_log(self) -> None:
+        """template_name and updated_by are documented, accepted, and discarded.
+
+        The module docstring names both as expected event data, so "does not
+        crash" was the weakest possible reading of that contract: it passes
+        equally if the handler folds either name into the logged payload. The
+        payload is fixed; the event data is context for a push this handler
+        does not perform.
+        """
         mod = _import_memory_template_updated()
+        from aipass.trigger.apps.handlers.json import json_handler
+
         mod.handle_memory_template_updated(template_name="local", updated_by="drone")
+
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "memory_template_event", {"success": True}
+        )
 
     def test_returns_none(self) -> None:
         """Handler returns None."""
@@ -158,22 +184,53 @@ class TestHandleWarningLogged:
             "warning_logged_event", {"success": True}
         )
 
-    def test_accepts_all_named_params(self) -> None:
-        """Accepts all documented event parameters without error."""
+    def test_the_three_discarded_params_are_really_discarded(self, lane) -> None:
+        """error_hash, timestamp and level are accepted and then dropped.
+
+        The handler assigns them to `_` on purpose: the lane computes its own
+        signature and its own level, so a caller's `level="critical"` must not
+        be able to relabel a warning. "Accepts them without error" passed just
+        as well if any of the three travelled into the row, which is the only
+        way this could go wrong.
+        """
         mod = _import_warning_logged()
+
         mod.handle_warning_logged(
             branch="flow",
             message="disk almost full",
-            error_hash="w1",
+            error_hash="w1-should-not-travel",
             timestamp="2026-04-25T12:00:00",
             log_file="flow.log",
             module_name="watcher",
-            level="warning",
+            level="critical",
         )
 
-    def test_does_not_crash_with_none_params(self) -> None:
-        """Handles None for every named parameter gracefully."""
+        rows = lane.mod.get_signatures()
+        assert len(rows) == 1
+        assert rows[0]["level"] == "WARNING", "the caller's level must not relabel the row"
+        serialised = json.dumps(rows[0])
+        assert "w1-should-not-travel" not in serialised
+        assert "2026-04-25T12:00:00" not in serialised
+
+    def test_all_none_records_nothing_and_still_logs(self, lane) -> None:
+        """No branch and no message is not a warning — nothing recorded, still logged.
+
+        A malformed event must not mint a signature keyed on nothing, which
+        would then repeat and eventually mail the operator. Surviving the call
+        proved neither half: the lane has to stay empty AND the handler still
+        has to log that it ran.
+
+        Measured 2026-09-08, and worth knowing before rewriting this: deleting
+        the handler's own `if branch and message` guard does NOT turn this red.
+        escalation._record carries the identical guard (`not branch or not
+        module or not message` -> None), so the handler's copy is belt and
+        braces at a module boundary, not the thing keeping the lane empty. What
+        this unit actually pins is the pair — nothing recorded, and the log
+        call still made outside the guard.
+        """
         mod = _import_warning_logged()
+        from aipass.trigger.apps.handlers.json import json_handler
+
         mod.handle_warning_logged(
             branch=None,
             message=None,
@@ -184,10 +241,35 @@ class TestHandleWarningLogged:
             level=None,
         )
 
-    def test_accepts_extra_kwargs(self) -> None:
-        """Accepts unexpected kwargs via **kwargs."""
+        assert lane.mod.get_signatures() == []
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "warning_logged_event", {"success": True}
+        )
+
+    def test_an_undocumented_kwarg_reaches_neither_the_lane_nor_the_log(self, lane) -> None:
+        """**kwargs absorbs what the contract does not name, and it stops there.
+
+        Firers add event data faster than handlers learn about it, so the
+        handler has to take an unknown key without failing — and without
+        letting it leak into a signature, where it would split one repeating
+        warning into many and defeat the digest.
+        """
         mod = _import_warning_logged()
-        mod.handle_warning_logged(extra_field="unexpected")
+        from aipass.trigger.apps.handlers.json import json_handler
+
+        mod.handle_warning_logged(
+            branch="flow",
+            message="disk almost full",
+            module_name="watcher",
+            extra_field="unexpected-and-unnamed",
+        )
+
+        rows = lane.mod.get_signatures()
+        assert len(rows) == 1
+        assert "unexpected-and-unnamed" not in json.dumps(rows[0])
+        json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
+            "warning_logged_event", {"success": True}
+        )
 
     def test_returns_none(self) -> None:
         """Handler returns None."""

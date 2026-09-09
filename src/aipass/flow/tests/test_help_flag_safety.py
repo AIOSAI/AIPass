@@ -241,7 +241,7 @@ class TestTemplateManagerHelpSafety:
     def test_templates_help_anywhere(self):
         from aipass.flow.apps.modules import template_manager as mod
 
-        with patch(f"{_TPL}.load_registry") as target, patch(f"{_TPL}.print_help") as help_fn:
+        with patch(f"{_TPL}.load_registry", autospec=True) as target, patch(f"{_TPL}.print_help") as help_fn:
             handled = mod.handle_command("templates", ["verbose", "--help"])
 
         assert handled is True

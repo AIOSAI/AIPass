@@ -205,6 +205,12 @@ class TestTheCorpusItself:
 
     def test_every_case_declares_a_verdict_for_this_runtime(self) -> None:
         """A case that forgot to say whether python must satisfy it would skip silently."""
+        # An empty corpus makes every loop in this class vacuous, so the floor
+        # is asserted once, here, where the first of them runs (seedgo
+        # unentered_assert, 2026-09-07). A corpus that failed to load and a
+        # corpus where every case is correct look identical without it.
+        assert CASES, "the shared corpus is empty — nothing was checked against the doors"
+
         for entry in CASES:
             assert RUNTIME in entry["runtimes"], entry["id"]
 
@@ -243,6 +249,10 @@ class TestTheCorpusItself:
         not survive. Without this, the fix for one case would leave the next
         one to be found by CI on a platform nobody runs locally.
         """
+        assert CASES, "the shared corpus is empty — no mode-carrying case could be found"
+
+        mode_carrying = 0
+
         for entry in CASES:
             carries_mode = "mode" in entry["expect"] or any(
                 "mode" in override for override in entry.get("expect_by_runtime", {}).values()
@@ -250,11 +260,17 @@ class TestTheCorpusItself:
             if not carries_mode:
                 continue
 
+            mode_carrying += 1
             without = _platform_block(entry).get("expect_without", {})
             assert POSIX_MODE_BITS in without, (
                 f"{entry['id']} expects a file mode but never says what a platform "
                 f"without POSIX mode bits should expect"
             )
+
+        # `mode` is the expectation this guard exists for. A corpus that stopped
+        # carrying it anywhere would leave the loop above entering nothing and
+        # this test green — an absence wearing a pass's clothes.
+        assert mode_carrying, "no case expects a file mode, so this guard measured nothing"
 
     def test_a_case_that_cannot_be_built_here_is_skipped_and_never_passed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -287,6 +303,15 @@ class TestTheCorpusItself:
         assert needy[0]["id"] in str(skipped.value)
         assert "cannot host the case" in str(skipped.value)
 
+    # A MARKER, not two skips in the body: os.name leads the condition (the
+    # machine probe seedgo's self_skip rule asks for) and short-circuits before
+    # the uid is read. The getattr is not belt-and-braces — test_windows_import
+    # simulates Windows by hiding os.geteuid while os.name stays "posix", and a
+    # bare call here is evaluated at COLLECTION time and takes the file with it.
+    @pytest.mark.skipif(
+        os.name != "posix" or getattr(os, "geteuid", lambda: 0)() == 0,
+        reason="this guard is about a non-root POSIX machine, where all three capabilities exist",
+    )
     def test_a_posix_machine_measures_every_capability(self) -> None:
         """
         The counterpart to verify-then-skip, and the reason it is not a hole.
@@ -297,11 +322,6 @@ class TestTheCorpusItself:
         is excluded because root really does read a mode-000 file, which is the
         capability being absent for a true reason rather than a broken probe.
         """
-        if os.name != "posix":
-            pytest.skip("this guard is about the platform that has all three")
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            pytest.skip("root reads everything; unreadable_files is legitimately absent")
-
         assert platform_capabilities() == frozenset(CAPABILITY_MEANINGS)
 
     def test_every_capability_a_case_names_is_one_this_runner_measures(self) -> None:
@@ -311,6 +331,8 @@ class TestTheCorpusItself:
         Both directions are checked: what a case REQUIRES and what it declares
         an expectation for.
         """
+        assert CASES, "the shared corpus is empty — no capability name was checked"
+
         for entry in CASES:
             platform = _platform_block(entry)
             named = set(platform.get("requires", [])) | set(platform.get("expect_without", {}))
@@ -453,19 +475,48 @@ def test_the_settings_doors_satisfy_the_shared_corpus(entry: Dict[str, Any], tmp
         else:
             answer = _run(tmp_path, entry)
 
+            # Every assertion below sits behind an `if`, so a case whose
+            # expectation block names NONE of the four would run the door, check
+            # nothing, and report green — seedgo's unentered_assert rule saw
+            # exactly that on 2026-09-07. The four are counted and the count is
+            # the floor: a case that expects nothing is a corpus defect, and it
+            # fails here rather than padding the pass count.
+            checked = 0
+
             if "view" in expected:
+                checked += 1
                 assert answer == expected["view"], entry["id"]
             if "document" in expected:
+                checked += 1
                 assert answer == expected["document"], entry["id"]
             if "file" in expected:
+                checked += 1
                 assert json.loads(target.read_text(encoding="utf-8")) == expected["file"], entry["id"]
             if "mode" in expected:
+                checked += 1
                 assert stat.S_IMODE(target.stat().st_mode) == int(expected["mode"], 8), entry["id"]
+
+            # Unconditional, and measured before it was written: every one of
+            # the corpus's success cases declares at least one of the four
+            # today. An `or file_unchanged` escape hatch here would be a second
+            # assertion that cannot fail, which is the same defect one layer up.
+            assert checked, (
+                f"{entry['id']} succeeded but declares no expectation — the door was run and nothing was checked"
+            )
 
         if expected.get("file_unchanged"):
             # A refusal that already wrote something is not a refusal. This is
             # the read-then-error-then-write doctrine, asserted in bytes.
             assert _snapshot(target) == before, entry["id"]
+        else:
+            # The other case, checked rather than left silent (the pattern
+            # unentered_assert.md itself prescribes). A case that MEANT to claim
+            # the doctrine and misspelled the key would otherwise disable it
+            # with no sign — `.get` reads a typo as False exactly like a real
+            # absence, so the key is checked by name here.
+            assert "file_unchanged" not in expected, (
+                f"{entry['id']} carries a falsy file_unchanged — say true or leave it out"
+            )
     finally:
         if entry["given"]["state"] == "unreadable" and target.exists():
             target.chmod(0o600)

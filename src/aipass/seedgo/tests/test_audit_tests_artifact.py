@@ -137,7 +137,11 @@ class TestArtifactNaming:
         assert name_a != name_b
 
     def test_the_same_path_always_hashes_the_same(self, tmp_path):
-        assert target.resolve(str(tmp_path)).artifact_name() == target.resolve(str(tmp_path)).artifact_name()
+        """Two independent resolutions of one path agree - the hash is of the path, nothing else."""
+        first = target.resolve(str(tmp_path)).artifact_name()
+        second = target.resolve(str(tmp_path)).artifact_name()
+
+        assert first == second
 
     def test_the_namespace_is_disjoint_from_the_audit(self, tmp_path):
         """Never last_audit_* - a different schema needs a different name."""
@@ -242,6 +246,8 @@ class TestRefusedArtifact:
 
     def test_every_group_in_a_refused_run_is_not_applicable_never_zero(self, tmp_path):
         document = artifact.refused_artifact(_branch_target(tmp_path), refusal.refusal_for_canary())
+
+        assert len(document["groups"]) == 4
 
         for group in document["groups"].values():
             assert group["status"] == "not_applicable"
@@ -412,6 +418,27 @@ class TestIsolationProof:
 
 
 class TestAdapterContract:
+    def test_the_contract_declares_the_names_it_declares(self):
+        """The tables the three parametrised tests below iterate, counted by hand.
+
+        VANISHING-TABLE (empty_parametrize, 2026-09-07). Those three build their
+        cases from `adapters.REQUIRED_FUNCTIONS`, `REQUIRED_CONSTANTS` and
+        `FORBIDDEN_FUNCTIONS` at COLLECTION time. Empty any of those tuples and
+        pytest reports the test as SKIPPED, the suite summary stays green, and
+        the adapter contract silently stops being checked at all - which is the
+        one failure a contract test cannot afford, because the thing it guards
+        is what a new ecosystem adapter must provide.
+
+        Counted here against literals, not against the tuples themselves: a test
+        that asserts `len(REQUIRED_FUNCTIONS) == len(REQUIRED_FUNCTIONS)` agrees
+        with itself however the contract is emptied.
+        """
+        assert len(adapters.REQUIRED_FUNCTIONS) == 8
+        assert len(adapters.REQUIRED_CONSTANTS) == 2
+        assert len(adapters.FORBIDDEN_FUNCTIONS) == 2
+        assert adapters.REQUIRED_CONSTANTS == ("ADAPTER_API", "ECOSYSTEM")
+        assert adapters.FORBIDDEN_FUNCTIONS == ("check_module", "check_branch")
+
     def test_a_complete_adapter_has_no_problems(self):
         assert adapters.contract_problems(_adapter_module()) == []
 

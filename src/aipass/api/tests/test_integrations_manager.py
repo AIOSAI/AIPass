@@ -58,7 +58,7 @@ class TestHandleCommand:
         result = handle_command("integrations", ["--help"])
         assert result is True
 
-    @patch(f"{_IM}.json_handler")
+    @patch(f"{_IM}.json_handler", autospec=True)
     @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
@@ -94,7 +94,7 @@ class TestHandleCommand:
     @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
-    @patch(f"{_IM}.registry")
+    @patch(f"{_IM}.registry", autospec=True)
     @patch(f"{_IM}.list_contracts", return_value=[])
     @patch(f"{_IM}.get_contracts", return_value={"contracts": [], "count": 0, "success": True})
     def test_list_subcommand_exits(
@@ -260,7 +260,7 @@ class TestRunCall:
 class TestPrintFunctions:
     """Tests for print_introspection and print_help."""
 
-    @patch(f"{_IM}.json_handler")
+    @patch(f"{_IM}.json_handler", autospec=True)
     @patch(f"{_IM}.console", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
     def test_print_introspection(

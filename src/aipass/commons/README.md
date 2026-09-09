@@ -364,15 +364,19 @@ drone @commons --version                        # Version
 
 ## Status / Known Issues
 
-Everything in this section was measured on 2026-09-07 (FPLAN-0492 wave 7). Numbers are counts taken that night, not carried forward.
+Everything in this section was measured on 2026-09-07 (FPLAN-0492 wave 7, then re-measured after FPLAN-0508 wave 1). Numbers are counts taken that night, not carried
+forward.
 
-**Test suite:** 477 `def test_` across 21 `tests/test_*.py` files; pytest expands them to **491 cases, 491 passed / 0 skipped**, 26s, run from the repo root as
-`.venv/bin/python -m pytest src/aipass/commons -c pyproject.toml --rootdir=. -q -p no:cacheprovider`. The gap between 477 and 491 is parametrization. Three of the 21 files
-are class-based (`test_commons.py` uses `unittest.TestCase`, `test_lifecycle.py` and `test_comments_posts.py` use pytest classes), so 356 of the 477 are top-level
-functions and 121 are methods. Four of the 477 are this wave's exit-code pins, added to the existing `test_cli_and_contracts.py`; the suite has no new files.
+**Test suite:** 480 `def test_` across 21 `tests/test_*.py` files; pytest expands them to **497 cases, 497 passed / 0 skipped**, 29s, run from the repo root as
+`.venv/bin/python -m pytest src/aipass/commons/tests -q -p no:cacheprovider`. The gap between 480 and 497 is parametrization. Three of the 21 files
+are class-based (`test_commons.py` uses `unittest.TestCase`, `test_lifecycle.py` and `test_comments_posts.py` use pytest classes), so 359 of the 480 are top-level
+functions and 121 are methods. Three of the 480 are the FPLAN-0508 routing contracts in `test_curation.py`, one of them parametrized over four verbs; the suite has no
+new files.
 
 **Standards:** `drone @seedgo audit aipass @commons --full` -- 100% on every scored category, no type errors. The audit consults 46 categories: v4 `test_quality` was
-archived on 2026-09-07 and is no longer a live standard, so a README that cites a per-category test score is citing a rule that no longer runs. The branch-local bypass
+archived on 2026-09-07 and is no longer a live standard, so a README that cites a per-category test score is citing a rule that no longer runs. The separate v5
+`pytest_quality` pack (`drone @seedgo audit pytest_quality @commons`) gates nothing and reads **100% on all 11 scored rules** as of 2026-09-07; its corpus is the
+`tests/` tree, which the aipass audit's 56-file production corpus excludes. The branch-local bypass
 registry (`.seedgo/bypass.json`) holds **74 rows**; the row naming `increment_counter` / `update_data_metrics` was removed when those functions retired with the old json
 handler (75 -> 74), and no row names them tonight.
 

@@ -563,11 +563,39 @@ class TestGetValidationRulesAuthKeys:
         assert rules["min_length"] == 10
         assert "prefix" not in rules
 
-    def test_return_type_is_dict(self):
-        """All providers should return a dict."""
-        for provider in ["openrouter", "openai", "anthropic", "generic", "nonexistent"]:
-            rules = api_key.get_validation_rules(provider)
-            assert isinstance(rules, dict)
+    def test_each_provider_gets_its_own_prefix_rule(self):
+        """
+        The rules are the prefixes, and this asserted only isinstance(dict).
+
+        A dict is what every one of these returns whatever is in it, so the
+        old shape survived every provider collapsing onto the same rule —
+        which would mean an OpenAI key passing OpenRouter validation. Measured
+        2026-09-07, these are the real values.
+        """
+        expected = {
+            "openrouter": {"prefix": "sk-or-v1-", "min_length": 40},
+            "openai": {"prefix": "sk-", "min_length": 40},
+            "anthropic": {"prefix": "sk-ant-", "min_length": 40},
+        }
+
+        assert len(expected) == 3, "the provider table shrank — one of them is no longer checked"
+
+        for provider, rule in expected.items():
+            assert api_key.get_validation_rules(provider) == rule
+
+    def test_an_unknown_provider_falls_back_to_the_generic_rule(self):
+        """
+        The fallback carries NO prefix, and that is the part worth pinning.
+
+        An unknown provider inheriting some other provider's prefix would
+        reject every key it was ever given, and a dict-shaped assertion could
+        not tell the two apart.
+        """
+        generic = api_key.get_validation_rules("generic")
+
+        assert api_key.get_validation_rules("nonexistent") == generic
+        assert "prefix" not in generic
+        assert generic["min_length"] == 10
 
 
 class TestGoogleValidateFallsThrough:
@@ -591,7 +619,7 @@ class TestGoogleValidateFallsThrough:
         with (
             patch(PATCH_CONSOLE),
             patch("aipass.api.apps.modules.api_key.validate_key") as mock_validate,
-            patch("aipass.api.apps.modules.api_key.json_handler"),
+            patch("aipass.api.apps.modules.api_key.json_handler", autospec=True),
         ):
             assert api_key.handle_command("validate", ["openrouter"]) is True
 
@@ -638,8 +666,8 @@ class TestTrailingHelpDoesNotExecute:
         """
         fake_key = "sk-or-v1-SYNTHETICTESTKEYNOTREAL00000000000000ZZZZ"
         with (
-            patch("aipass.api.apps.modules.api_key.keys") as mock_keys,
-            patch("aipass.api.apps.modules.api_key.json_handler"),
+            patch("aipass.api.apps.modules.api_key.keys", autospec=True) as mock_keys,
+            patch("aipass.api.apps.modules.api_key.json_handler", autospec=True),
         ):
             mock_keys.get_api_key.return_value = fake_key
             api_key.handle_command("get-key", ["openrouter", "--help"])

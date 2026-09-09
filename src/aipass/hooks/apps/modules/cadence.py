@@ -164,7 +164,7 @@ def _load_and_increment(hook_data: dict) -> int:
     fd = None
 
     try:
-        fd = open(path, "a+")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -441,7 +441,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
     fd = None
     try:
-        fd = open(path, "a+")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -523,7 +523,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
     fd = None
     try:
-        fd = open(path, "a+")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
         _lock(fd)
         fd.seek(0)
         content = fd.read()

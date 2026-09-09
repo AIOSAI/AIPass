@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-08
 
 ---
 
@@ -54,7 +54,7 @@ daemon/
 │   ├── .archive/              # scheduler_cron (archived — superseded by run.py)
 │   ├── modules/
 │   │   ├── update.py          # Status digest module — summarizes DAEMON activity
-│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones
+│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones (585 lines)
 │   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
@@ -76,10 +76,13 @@ daemon/
 │   │   │   ├── red_flag_detector.py   # Detects anomalies / red flags
 │   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
+│   │   │   ├── catch_up_lane.py       # Tick-side glue: detect+queue the gap, drain one
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
+│   │   │   ├── recovery.py            # Gap detection, missed windows, queue, wake headers
 │   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
+│   │   │   ├── tick_lock.py           # Single-instance advisory lock for the tick
 │   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor,
 │   │   │                              # telegram_notifier (superseded copy)
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
@@ -100,7 +103,7 @@ daemon/
 ├── dropbox/                    # Incoming file drops
 ├── logs/                       # Prax log output
 ├── tools/                      # Branch verification utilities
-└── tests/                      # Test suite — 531 test functions in 19 files (pytest expands to 594)
+└── tests/                      # Test suite — 534 test functions in 19 files (pytest expands to 598)
 ```
 
 ---
@@ -262,13 +265,16 @@ The trust model behind the fleet definition remains asymmetric on purpose: a pas
 
 ### Optional schedule fields (2026-09-07, FPLAN-0492 ruling 6)
 
-Both live inside the job's `schedule` block, next to `type` and `time`. Both are
-opt-in: absent means today's behaviour, which is what every existing job gets.
+These live inside the job's `schedule` block, next to `type` and `time`. `slot` is
+opt-in. `catch_up` **was** opt-in under ruling 6 and is now on by default — Patrick
+reversed it on 2026-09-08 after every enabled job in the fleet left it unset and the
+fleet therefore recovered from nothing.
 
 | Field | Applies to | Effect |
 |-------|-----------|--------|
 | `slot` | `interval` | An ISO instant naming **one occurrence** of the rhythm you want (`"2026-09-06T03:00:00"`). A job that has never run is seeded from it, so its first fire lands on the next slot instead of the next tick. |
-| `catch_up` | `daily`, `rotation` | When the window closed with no run, the first tick after it fires the job once and stamps `caught_up` on the runstate row. |
+| `catch_up` | `daily`, `rotation`, `hourly` | When the window closed with no run, the first tick after it fires the job once and stamps `caught_up` on the runstate row. **ON by default since 2026-09-08** — see *Recovery after a gap*. |
+| `catch_up_max_age_hours` | `daily`, `rotation`, `hourly` | Drop missed windows older than N hours. Absent = unlimited, which is the default Patrick asked for: ten days away still earns one wake. |
 
 **Why `slot` exists.** An interval job with no `last_run` is due on the very next
 tick, and that tick's minute becomes its rhythm forever. @seedgo enabled a weekly
@@ -283,6 +289,11 @@ and no `last_run`, so a row-keyed test would refuse to seed exactly the job that
 needs it. A past slot keeps its *phase* — it is rolled forward by whole intervals, not
 used verbatim, so a stale anchor never makes a job instantly overdue. A job with no
 slot keeps today's behaviour and says so in `run.log` at WARNING.
+
+**`hourly` gained a catch-up arm on 2026-09-08.** Before that `is_job_due` routed
+hourly to `_is_hourly_due` alone, so an hourly job had no catch-up at all whatever
+its `catch_up` field said. Its window is refused rather than guessed when it crosses
+the hour (a `time` past minute 44), the same shape as daily's midnight refusal.
 
 **`catch_up` is bounded by `_already_ran_today`**, so a caught-up run can never
 double-fire the day it lands in, and it never widens the window backwards — a job is
@@ -346,6 +357,135 @@ meet that fence, and it ships disabled. Every other target is unaffected.
 Interval jobs have `slot` (above) — declare the hour you want and the first fire lands on it. For the other types, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
 
 ---
+
+## run.py's split (2026-09-08, PR #759 row 13)
+
+`run.py` reached 690 lines against seedgo's 650 cap and held one direct file
+operation — `LOCK_FILE.parent.mkdir` — which a module may not do. Both were the last
+red row on PR #759. Two coherent pieces came out; the tick lane itself did not move.
+
+| Module | Owns | Why it is not in run.py |
+|--------|------|-------------------------|
+| `handlers/schedule/catch_up_lane.py` | detect-and-queue, drain-one, and the `OUTCOME_*` vocabulary | The DPLAN-0332 glue is a whole subject, and it was the largest block a reader had to skip past to follow an ordinary tick |
+| `handlers/schedule/tick_lock.py` | the lock directory, the lock file, `fcntl` | It is the only thing in the tick lane that touches the filesystem, and a handler may do that where a module may not |
+
+**`catch_up_lane` fires nothing itself.** `fire` and `log` arrive as callables from
+`run.py`. A handler may not import a module — that is seedgo's encapsulation rule and
+the circular import it exists to prevent — so injection is what keeps the dependency
+arrow pointing one way. It also means the lane is testable without a tick.
+
+**`tick_lock` takes the lock path as an argument** rather than holding its own copy of
+the constant. `run.py` still owns `LOCK_FILE`, so a test that seams the path on that
+module still seams the file that actually gets opened; a second copy of the constant
+would have quietly re-pointed the suite at the live lock.
+
+`OUTCOME_FIRED` / `OUTCOME_FAILED` / `OUTCOME_BLOCKED` are re-exported from `run.py`,
+not redefined there: the drain branches on the same three words the fire returns, and
+one definition means they cannot drift.
+
+Result: **run.py 690 → 585 lines**, zero direct file operations, `Modules` 100,
+`drone @seedgo audit aipass @daemon` **100%**. No behaviour changed and
+`RECOVERY_LANE_LIVE` stayed `False` throughout.
+
+## Recovery after a gap (2026-09-08, DPLAN-0332)
+
+On 2026-09-07 the scheduler timer went away at 11:46 and nothing ticked for 23 hours.
+@vera/release-watch and @daemon/inbox-sweep both missed their windows. The fleet came
+back and **nothing noticed** — no gap was detected, no catch-up was owed, and the
+agents that eventually woke were told nothing about the time they had lost. Patrick's
+ruling that morning: the scheduler must recover on its own, and the agent must be
+told the truth about time.
+
+The principle the header follows: **the system informs, the agent reasons.** The
+header states facts about time and stops. It never tells the agent what to conclude
+and it never replays history at it.
+
+**The path a gap takes through a tick**
+
+| Step | Where | What it does |
+|------|-------|--------------|
+| stamp | `recovery.record_tick` | `last_tick` written in a `finally`, so the stamp survives every early return |
+| detect | `recovery.detect_gap` | gap wider than 30 min (~15 missed ticks); cause read from the host |
+| enumerate | `recovery.enumerate_missed` | every `daily`/`rotation`/`hourly` window that both **opened and closed** inside the gap |
+| queue | `recovery.queue_catch_up` | **one** entry per `@owner/job_id` carrying every missed instant, merged idempotently on re-detection |
+| supersede | `recovery.drop_from_queue` | a job whose regular window arrives first drops its entry — the on-time wake still carries the missed list |
+| drain | `recovery.drain_ready` | at most **one** catch-up in flight fleet-wide; the next goes when the previous completed, 60 min is the ceiling not the rhythm |
+| inform | `recovery.scheduled_header` / `catch_up_header` | prepended to the prompt, filed to the target's `.daemon/last_wake_prompt.txt` **and** `daemon_json/last_wake_prompt.txt`, and logged to `run.log` |
+
+**Cause is read from the host, or refused by name.** `psutil` first (the fleet has a
+Windows job), `/proc/stat btime` second, then `BootTimeUnavailable` — never a guess,
+because a guessed boot time becomes a confident false sentence in a citizen's wake
+header.
+
+| Boot time | Cause | What the sentence says |
+|-----------|-------|------------------------|
+| before the gap opened | `scheduler_stopped` | ticking stopped at X while the machine was up — 09-07's shape |
+| inside the gap | `scheduler_stopped_then_rebooted` | ticking stopped at X, **and** the host booted at Y, inside the gap, after it had already opened |
+| not readable | `unknown` | the cause could not be read from this host — the gap is still reported |
+
+Three values, not the DPLAN's original two. @devpulse ruled on 2026-09-08 after
+measuring 09-07: the incident was **both** — the timer was removed at 11:46 while the
+machine was up, and the machine then rebooted at 16:14 inside the same gap. A
+two-valued cause reports only the reboot and hides the defect that actually mattered.
+There is no `machine_off` value, because boot-inside-the-gap cannot be told apart
+from "shut down for the night" without positive evidence the host was up during the
+gap, and no cross-platform source provides it — so the cause names what is **known**
+and the sentence states both instants rather than picking a story.
+
+**One catch-up, never a replay.** Ten days off is one wake carrying ten dates, not
+ten wakes — "imagine 10 missed events all firing at once" (Patrick). The header ends
+with *do not replay each one*, because an agent handed ten dates may otherwise
+reasonably try to do ten days of work. A refused fire retries after the cooldown;
+three attempts and it is **parked at the tail of the queue, not dropped** — "we could
+not reach this branch" and "this branch owed nothing" are not the same sentence.
+
+**The queue is visible.** `drone @daemon queue` prints a Catch-up Queue under the job
+table (owner, windows missed, oldest, cause, state, attempts) whenever anything is
+owed, and `--json` gained an additive `catch_up_queue` key. The eleven job fields and
+the three original top-level keys are untouched, so @skills' scheduler bot sees
+exactly what it saw before.
+
+**Where the wake transcript is filed.** Both places, per @devpulse's ruling of
+2026-09-08: the target branch's `.daemon/last_wake_prompt.txt` **and** daemon's own
+`daemon_json/last_wake_prompt.txt`. `.daemon/` is the scheduler's surface in every
+branch — the owner writes `schedule.json` into it, the scheduler writes its outputs
+beside it — so this is the daemon's own artifact in the daemon's own directory, not a
+cross-branch edit of somebody's code. Written atomically (tmp then replace) so a
+branch waking mid-write never reads half a header, and fail-soft **per destination**
+so a read-only external tree costs neither the local copy nor the wake. The owner is
+resolved by **email** through discovery's roster, never by directory name: two
+citizens can share a directory name across federated roots, and filing a wake under
+the wrong one hands a citizen somebody else's instructions. ai_mail's write at
+`wake.py:802` stays for the tmux manager lane; the headless scheduled lane it never
+covered now has this second writer.
+
+**`RECOVERY_LANE_LIVE` (`runstate.py`) is `False`, and everything above is built but
+NOT IN SERVICE.** The systemd tick runs this **working tree** every two minutes, not a
+commit — an edit here is production the moment it is saved. That bit the fleet twice
+in one morning: at 11:31:42 the half-flipped default fired @vera/release-watch out of
+window with no header, and at 12:04:39, minutes after the flag went `True`, the very
+next timer tick fired her a *second* time that day under a `Scheduled` header whose
+"Last run 2026-09-07 09:46" was false — she had run at 11:31:42.
+
+@devpulse's ruling, 2026-09-08: *"the tree is production while the timer is installed,
+so nothing under the flag may be True at any moment you are not personally watching a
+tick."* The flag stays `False` until the controlled live proof runs from @devpulse's
+seat with Patrick. `False` is exactly the pre-DPLAN-0332 behaviour: `catch_up` is
+opt-in again, no gap detection, no queue, no drain.
+
+**Two refusals detect_gap owes the fleet**, both found by @devpulse reading run.log
+against the journal after my own probes wrote false sentences into it:
+
+- **No `last_tick` is not a gap.** A runstate full of older instants (`last_run`,
+  `last_success_at`, `next_run`) is the temptation; reaching for one invents an
+  absence the fleet never had and queues catch-ups for windows nobody missed.
+- **A boot that precedes the last tick did not cause the gap**, and the sentence has
+  to *say* so rather than merely mention the instant — a boot named next to a gap
+  reads as cause to anyone skimming it.
+
+**Probes run against copies.** The live runstate is host state under the rule that
+landed at `0d14e8c1`: never run the `run` verb from a seat against it. Every
+experiment takes a `tmp_path` copy of the runstate and the schedule file.
 
 ## Fleet Inbox Sweep
 
@@ -504,15 +644,87 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ---
 
+## The suite may not move host state (2026-09-08, FPLAN-0524)
+
+**Patrick's ruling, his words:** *"tests can't disable processes, they should restore to exact
+same state before the test. The test is fine and good that it can enter something."*
+
+**What went wrong.** `tests/test_cli_routing.py` runs the real router over every verb in
+`GATED_VERBS`, and two of those verbs are `install-timer` and `uninstall-timer`. With the argument
+gate in place the refusal comes first and the verb never runs — so the committed suite was safe.
+Without it (a red-first run, or any mutation run that disables the gate) `_install()` and
+`_uninstall()` executed against the user's real systemd. `journalctl --user` recorded seven
+Started/Stopped pairs across four such runs on 2026-09-07, ending on a **Stop at 11:46:40**.
+Nothing ticked for twenty-three hours: `@vera/release-watch` and `@daemon/inbox-sweep` both missed
+their windows, and no MISSED line could be written, because writing one takes a tick. The suite
+reported `594 passed` every time.
+
+**The seal.** `tests/conftest.py` holds `_seal_timer_host_state` — **autouse, unconditional**,
+patching the three seams by which `timer_install` can change host state:
+
+| seam | what it covers |
+|---|---|
+| `_run_systemctl` | every stop / disable / enable / start / daemon-reload |
+| `_UNIT_DIR` | where unit files are copied to and unlinked from |
+| `_STATE_DIR` | the `~/.aipass` mkdir |
+
+Session-wide rather than on the two rows that bit, because the defect is not *"two rows reach
+systemd"* — it is *"a test can reach systemd at all"*, and the next verb added to `GATED_VERBS`
+would inherit the hole silently. `TestRunSystemctl` is unaffected: it binds `_run_systemctl` by
+direct import at module load, so it still exercises the real function against a patched
+`subprocess.run`.
+
+**The sentinel.** `_host_state_sentinel` (session-scoped, autouse) snapshots the live timer at
+session start and asserts it unchanged at session end. It is the backstop for a route nobody has
+thought of yet — a test that shells `drone @daemon uninstall-timer`, a helper calling `systemctl`
+directly. It does **not** restore: a sentinel that quietly put the timer back would hide the
+defect it exists to report. Proven by mutation — with the end-of-session reading doctored to
+`active: inactive`, the run reports `14 passed, 1 error`. A suite can no longer pass and take the
+scheduler down in the same run.
+
+**If a test must reach the real timer**, it takes the `timer_host_state` fixture and only that: it
+records `is-enabled` / `is-active` / the unit-file list, restores exactly what it recorded in a
+`finally`, and then asserts the restore matched. Idempotent by construction — it restores *to a
+recorded state* rather than toggling. No test needs it today; it is the contract for the next one.
+
+### Making a mutation run safe
+
+A mutation run is the dangerous case, because the whole point of one is to disable a guard and see
+what still passes — and the guard being disabled is often the one holding the verb back.
+
+- **A harness that shells out to `pytest` is safe with nothing to remember.** The seal is autouse
+  and session-scoped, so every subprocess run inherits it. This is the shape used for FPLAN-0524's
+  own four mutations.
+- **A harness that imports `timer_install` and calls a verb directly is not.** It bypasses the
+  conftest entirely and must take `timer_host_state`, or patch the three seams itself.
+- **Say plainly what changed:** the FPLAN-0492 wave 2b harness (2026-09-07) had neither. It
+  replaced the gate call and ran the pins in-process, which is exactly how the scheduler ended up
+  uninstalled. The rule above is the line that changes.
+
+Every mutation in FPLAN-0524 was chosen so the assertion is exercised without the destructive path
+ever running: the gate patch removed (proves the verb executes), `shutil.copy2` disabled (proves
+the sealed-dir assertion is live), the test's `live_dir` redirected (proves the live comparison
+bites), and the sentinel's end reading doctored (proves the session fails). The unsealed world was
+**not** re-run to prove it dangerous — 2026-09-07's journal already measured that, and repeating
+the damage to re-derive a known fact is not evidence, it is a second outage.
+
+---
+
 ## Test Suite
 
-All numbers below re-measured 2026-09-07 (FPLAN-0492 wave 2b), not carried.
+All numbers below re-measured 2026-09-08 (FPLAN-0527), not carried.
 
-- **531 test functions** across 19 test files; parametrization expands these to **594 cases**
+- **534 test functions** across 19 test files; parametrization expands these to **598 cases**
   (`.venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q` →
-  `594 passed in 42.88s`, 0 failed, 0 skipped)
+  `598 passed in 25.51s`, 0 failed, 0 skipped; **598 passed in 25.63s** from the branch directory)
+- **DPLAN-0332's own 59 pins are NOT in that count.** They are written, green and
+  mutation-proved (17/17 red) but parked at `docs.local/pending/test_recovery.py.pending`:
+  the test-write gate (Patrick, 2026-09-01, DPLAN-0323) refuses new test files and daemon
+  cannot flip it. They were not appended into an existing test file instead — the gate names
+  that as its deliberate residual, and using it would be routing around a human ruling.
+  The ask is with @devpulse.
 - Re-run with `activity_collector.get_branch_paths` forced to `[]` — the CI condition, where a
-  checkout has no registry — also **594 passed**. Any test that exercises a name gate pins the
+  checkout has no registry — also **596 passed**. Any test that exercises a name gate pins the
   roster it resolves against; the dev machine's registry is not a fixture (learned from CI red
   on b681c085, cured in 5c132a5e)
 - 10/10 modules covered — every module under `apps/modules/` is imported by at least one live test file
@@ -526,7 +738,7 @@ All numbers below re-measured 2026-09-07 (FPLAN-0492 wave 2b), not carried.
 - *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
   emptying the list is a seedgo-side change, out of scope for a docs pass.
 
-*Last Updated: 2026-09-07*
+*Last Updated: 2026-09-08*
 
 ---
 [← Back to AIPass](../../../README.md)

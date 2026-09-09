@@ -15,7 +15,7 @@ For entry points, also verifies entire branch structure against template baselin
 """
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, List, Optional
 
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_template_ignore_patterns
@@ -436,6 +436,21 @@ def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
         return None, f'Unresolved citizen_class "{citizen_class}" — {exc}'
 
 
+def _relative_spelling(item: PurePath, root: PurePath) -> str:
+    """One template entry's path relative to the template root, spelled in posix.
+
+    ALWAYS FORWARD SLASHES, ON EVERY PLATFORM, and it is not cosmetic. This
+    string becomes the check name a branch reads ("File: apps/something.py") and
+    the text a bypass rule is matched against, and bypass rules are written with
+    forward slashes. Rendered with `str()` it followed the host: the Windows CI
+    leg produced "apps\\something.py", which failed the name and silently failed
+    the bypass match with it, so a deliberate exception stopped being honoured on
+    one platform only. `_transform_path` already returned posix on its rename
+    branch, so the two spellings disagreed inside one module.
+    """
+    return item.relative_to(root).as_posix()
+
+
 def _scan_template(template_path: Path) -> Dict:
     """Scan spawn template directory and return expected structure.
 
@@ -449,7 +464,7 @@ def _scan_template(template_path: Path) -> Dict:
         if _should_ignore(item, ignore_config):
             continue
 
-        relative = str(item.relative_to(template_path))
+        relative = _relative_spelling(item, template_path)
 
         if item.is_dir():
             structure["directories"].append(relative)
@@ -644,7 +659,9 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
         {
             "name": f"Template baseline ({citizen_class})",
             "passed": missing_count == 0,
-            "message": f"{total_count} items checked from spawn/templates/{template_dir_name}/, {missing_count} missing",
+            "message": (
+                f"{total_count} items checked from spawn/templates/{template_dir_name}/, {missing_count} missing"
+            ),
         },
     )
 

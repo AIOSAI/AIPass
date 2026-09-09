@@ -22,6 +22,7 @@ from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
+from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
     get_job_state,
@@ -50,6 +51,10 @@ def print_help():
     console.print("  drone @daemon queue           Show job queue (Rich table)")
     console.print("  drone @daemon queue --json     Machine-readable JSON (frozen schema)")
     console.print("  drone @daemon queue --help     Show this help message")
+    console.print("\n[yellow]CATCH-UP QUEUE:[/yellow]")
+    console.print("  Shown under the job table when the fleet owes catch-up wakes")
+    console.print("  after a gap: who, how many windows, the oldest, the cause,")
+    console.print("  and whether it is waiting, in flight, or parked after 3 tries.")
     console.print()
 
 
@@ -157,12 +162,64 @@ def _print_rich_table(entries: list) -> None:
     console.print()
 
 
-def _build_json_output(entries: list) -> dict:
-    """Build frozen-schema JSON output for @skills consumption."""
+def _catch_up_rows(runstate: dict) -> list:
+    """The catch-up queue as rows: who owes what, how old, and when it can go.
+
+    DPLAN-0332. Without this the queue is invisible — a fleet could be sitting on
+    ten days of owed wakes and the only surface that claims to show "the queue"
+    would report business as usual.
+    """
+    flying = recovery.in_flight(runstate)
+    rows = []
+    for entry in recovery.queue_order(runstate):
+        gap = entry.get("gap", {})
+        is_flying = bool(flying and flying.get("owner") == entry["owner"] and flying.get("job_id") == entry["job_id"])
+        rows.append(
+            {
+                "owner": entry["owner"],
+                "id": entry["job_id"],
+                "missed": entry.get("count", len(entry.get("missed", []))),
+                "oldest": entry.get("oldest"),
+                "cause": gap.get("cause", "unknown"),
+                "attempts": entry.get("attempts", 0),
+                "parked": bool(entry.get("parked_at")),
+                "state": "in-flight" if is_flying else ("parked" if entry.get("parked_at") else "waiting"),
+            }
+        )
+    return rows
+
+
+def _print_catch_up_queue(runstate: dict) -> None:
+    """Print the catch-up queue under the job table. Silent when there is nothing owed."""
+    rows = _catch_up_rows(runstate)
+    if not rows:
+        return
+
+    console.print("[bold cyan]Catch-up Queue[/bold cyan] [dim](one fires at a time)[/dim]")
+    console.print()
+    console.print(f"  {'OWNER':<14} {'ID':<20} {'MISSED':<7} {'OLDEST':<18} {'CAUSE':<28} {'STATE':<10} {'TRY':<3}")
+    console.print("  " + "-" * 103)
+    for r in rows:
+        oldest = (r["oldest"] or "-")[:16].replace("T", " ")
+        console.print(
+            f"  {r['owner']:<14} {r['id']:<20} {r['missed']:<7} {oldest:<18} "
+            f"{r['cause']:<28} {r['state']:<10} {r['attempts']:<3}"
+        )
+    console.print()
+
+
+def _build_json_output(entries: list, runstate: Optional[dict] = None) -> dict:
+    """Build frozen-schema JSON output for @skills consumption.
+
+    ``catch_up_queue`` was ADDED, never a rename: the eleven job fields and the
+    three top-level keys are the frozen schema @skills reads, and a consumer
+    that ignores the new key sees exactly what it saw before.
+    """
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "count": len(entries),
         "jobs": entries,
+        "catch_up_queue": _catch_up_rows(runstate or {}),
     }
 
 
@@ -177,6 +234,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         runstate = load_runstate()
         entries = _build_queue(jobs, runstate)
         _print_rich_table(entries)
+        _print_catch_up_queue(runstate)
         logger.info("[queue] Queue displayed (%d jobs)", len(entries))
         return True
 
@@ -193,13 +251,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     entries = _build_queue(jobs, runstate)
 
     if "--json" in args:
-        output = _build_json_output(entries)
+        output = _build_json_output(entries, runstate)
         # soft_wrap=True + markup=False — default console.print forces width-80
         # wrapping on non-TTY and parses [] markup, injecting newlines mid-string
         # that corrupt machine output. These flags emit clean, parseable JSON.
         console.print(json.dumps(output, indent=2), soft_wrap=True, markup=False)
     else:
         _print_rich_table(entries)
+        _print_catch_up_queue(runstate)
 
     logger.info("[queue] Queue displayed (%d jobs)", len(entries))
     return True

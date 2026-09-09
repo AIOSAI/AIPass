@@ -55,7 +55,7 @@ from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.templates.spawn_pusher import push_to_spawn_templates
@@ -148,7 +148,7 @@ def _announce_retired(verb: str) -> None:
     """Refuse a retired verb and name the lane that replaced it."""
     reason, replacement = RETIRED_VERBS[verb]
     console.print()
-    warning(f"'{verb}' was retired on 2026-08-27 — {reason}.")
+    error(f"'{verb}' was retired on 2026-08-27 — {reason}.")
     console.print()
     console.print("[bold]Run instead:[/bold]")
     console.print(f"  {replacement}")

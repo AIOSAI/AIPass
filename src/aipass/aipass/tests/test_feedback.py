@@ -109,10 +109,21 @@ class TestHandleCommand:
 
 
 class TestSmoke:
-    """Help/introspection render without error."""
+    """Help/introspection print the lines they advertise."""
 
     def test_print_help_runs(self) -> None:
-        print_help()
+        """print_help names the command and every one of its three forms."""
+        with patch(f"{_MOD}.console") as mock_console:
+            print_help()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert "aipass feedback[/bold cyan] \u2014 toggle the feedback reminder" in printed
+        assert "aipass feedback on[/green]" in printed
+        assert "aipass feedback off[/green]" in printed
 
     def test_print_introspection_runs(self) -> None:
-        print_introspection()
+        """print_introspection names the module and the command it delegates to."""
+        with patch(f"{_MOD}.console") as mock_console:
+            print_introspection()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert "feedback Module" in printed
+        assert "drone @hooks feedback on/off" in printed

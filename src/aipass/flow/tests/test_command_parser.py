@@ -398,11 +398,19 @@ class TestParseCloseCommandArgs:
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
         plan_num, _, all_plans, _, _excl, error = parse_close_command_args(["--all", "--exclude", "APLAN"])
-        assert error is not None
-        assert "--exclude" in error
+        # PINNED TO THE STRING THE PARSER RETURNS, measured by calling it:
+        # ("Unrecognised argument: --exclude"). `error is not None` was true of
+        # any refusal at all, including one naming the wrong flag.
+        assert error == "Unrecognised argument: --exclude"
         # REFUSES the run: nothing survives the parse to be acted on.
         assert plan_num is None
-        assert all_plans is False or error  # the caller must not proceed on an error
+        # `all_plans is False or error` could never fail - the right clause was
+        # the error string this test had just required to be non-empty, so the
+        # `or` short-circuited to truthy whatever all_plans held. Measured, the
+        # parser leaves all_plans TRUE on a refusal; it does not unset the flag,
+        # and the error is the whole of what stops the caller. Pinned as it IS,
+        # so a future parser that starts clearing the flag has to say so here.
+        assert all_plans is True
 
     def test_typo_in_the_flag_name_refuses(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args

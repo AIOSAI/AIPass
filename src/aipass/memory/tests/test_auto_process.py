@@ -21,7 +21,6 @@ enabled=false respected, rollover-trigger path.
 All tests use mocks/tmp_path — no live filesystem or infrastructure access.
 """
 
-import importlib
 import importlib.util
 import json
 import sys

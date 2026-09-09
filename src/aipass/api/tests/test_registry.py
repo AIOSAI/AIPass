@@ -8,6 +8,7 @@
 
 """Tests for registry.py — driver auto-discovery for integrations."""
 
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -96,20 +97,47 @@ class TestImportDriver:
     """Tests for _import_driver() — single driver import and registration."""
 
     def test_import_valid_driver(self, tmp_path):
-        """Valid driver.py with register() is imported successfully."""
+        """
+        A driver with register() is loaded AND its hook is called.
+
+        The call stood alone before 2026-09-07 — no assertion at all, so an
+        _import_driver that silently skipped the register() hook passed. The
+        hook is the entire point of a driver: without it the module is loaded
+        and registers nothing, which looks identical from the outside.
+        """
         project = tmp_path / "proj"
         project.mkdir()
         driver = project / "driver.py"
-        driver.write_text("LOADED = True\ndef register(): pass\n")
+        driver.write_text(
+            "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n"
+        )
+
         _import_driver(driver, "proj")
 
+        # The namespaced key is the contract: two projects named driver.py
+        # must not overwrite each other in sys.modules.
+        loaded = sys.modules["_aipass_integration_proj"]
+        assert loaded.LOADED is True, "the driver module was never executed"
+        assert loaded.REGISTERED is True, "the driver was loaded but its register() hook never ran"
+
     def test_driver_without_register_hook(self, tmp_path):
-        """Driver without register() is still loaded without error."""
+        """
+        No register() is not an error — the module still loads.
+
+        Also a bare call. What is worth pinning is that the absence of the
+        hook does not abort the import partway: a driver may register at
+        module level instead, so its top-level code has to have run.
+        """
         project = tmp_path / "proj2"
         project.mkdir()
         driver = project / "driver.py"
         driver.write_text("LOADED = True\n")
+
         _import_driver(driver, "proj2")
+
+        assert sys.modules["_aipass_integration_proj2"].LOADED is True, (
+            "a driver with no register() hook was not executed"
+        )
 
     def test_invalid_spec_raises(self, tmp_path):
         """Nonexistent driver path raises ImportError or FileNotFoundError."""
@@ -151,8 +179,20 @@ class TestPrintIntrospection:
 
     @patch("aipass.api.apps.modules.registry.console")
     @patch("aipass.api.apps.modules.registry.header")
-    def test_runs_without_error(self, _mock_header, _mock_console):
-        """Introspection renders without raising."""
+    def test_introspection_reports_where_it_looks_for_drivers(self, _mock_header, mock_console):
+        """
+        The self-map names the directory it scans and whether it has loaded.
+
+        A bare call with no assertion until 2026-09-07. This module's whole
+        job is auto-discovery, so the two facts an operator opens the self-map
+        for are WHERE it looks and WHETHER it has run — an introspection that
+        stopped printing either still "rendered without raising".
+        """
         from aipass.api.apps.modules.registry import print_introspection
 
         print_introspection()
+
+        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+
+        assert "integrations" in printed, "the self-map no longer says where it scans for drivers"
+        assert "Loaded:" in printed, "the self-map no longer says whether discovery has run"

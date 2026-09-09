@@ -195,8 +195,16 @@ def test_on_email_delivered_with_central_callback():
 
 
 def test_on_email_delivered_with_none_callbacks():
-    """No error when callback is None."""
-    on_email_delivered(None)
+    """A None callback is SKIPPED, silently — not called and not warned about.
+
+    Had no oracle: the call was the entire test. The function's only failure
+    path logs a warning, so an untouched logger is what says the None limb was
+    taken rather than the try block entered and its exception swallowed.
+    """
+    with patch("aipass.ai_mail.apps.handlers.email.error_dispatch.logger") as mock_logger:
+        on_email_delivered(None)
+
+    mock_logger.warning.assert_not_called()
 
 
 def test_on_email_delivered_central_failure_does_not_raise():

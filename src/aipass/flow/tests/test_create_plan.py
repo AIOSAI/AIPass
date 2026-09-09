@@ -187,7 +187,7 @@ class TestOperationLogging:
     @patch(f"{_MOD}.create_plan", return_value=(True, 1, ".", "default", ""))
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "flow_plans"))
-    @patch(f"{_MOD}.json_handler")
+    @patch(f"{_MOD}.json_handler", spec=True)
     def test_logs_operation(self, mock_jh, mock_parse, mock_get_type, mock_create, mock_display):
         handle_command = _import_handle_command()
         result = handle_command("create", [".", "My Plan"])

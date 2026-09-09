@@ -50,13 +50,18 @@ class TestDetectAipassRoot:
         with patch.dict(os.environ, {}, clear=True):
             with patch(f"{_MOD}.os.environ", new={}):
                 result = _detect_aipass_root()
-        # Result should be a Path (exact value depends on environment)
+        # The exact value depends on the environment; what it must NAME does
+        # not. Value pin added 2026-09-08 (v5 assertion_shape): isinstance
+        # alone was equally true of Path.cwd(), which is exactly the wrong
+        # answer this walk exists to avoid.
         assert isinstance(result, Path)
+        assert (result / "src" / "aipass").is_dir(), f"{result} does not hold src/aipass/"
 
     def test_returns_path_type(self) -> None:
-        """Always returns a Path object."""
+        """Returns a Path, and the Path it returns is an AIPass tree root."""
         result = _detect_aipass_root()
         assert isinstance(result, Path)
+        assert (result / "src" / "aipass").is_dir(), f"{result} does not hold src/aipass/"
 
 
 # =============================================================================

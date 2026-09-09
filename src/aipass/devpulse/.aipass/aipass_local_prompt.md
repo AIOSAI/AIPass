@@ -97,7 +97,7 @@ Gives the user an interactive session, distinct from autonomous dispatch. Find t
 
 ```
 tmux new-session -d -s "name" -c "/path/to/branch"
-tmux send-keys -t "name" "claude" Enter
+tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only (Patrick 2026-09-08)
 ```
 
 # Compass — decisions, not memory

@@ -841,18 +841,23 @@ class TestJsonIsOneDocumentOnStdout:
     """
 
     @pytest.mark.parametrize(
-        "args",
+        ("args", "verb"),
         [
-            ("get", "--json"),
-            ("get", "@memory", "--json"),
-            ("set", "@memory", "sessions", "25", "--json"),
-            ("set-default", "sessions", "25", "--json"),
-            ("set", "@wizard", "sessions", "25", "--json"),
-            ("reset", "--json"),
+            (("get", "--json"), "config get"),
+            (("get", "@memory", "--json"), "config get"),
+            (("set", "@memory", "sessions", "25", "--json"), "config set"),
+            (("set-default", "sessions", "25", "--json"), "config set-default"),
+            (("set", "@wizard", "sessions", "25", "--json"), "config set"),
+            # `reset` is the one verb whose document does not name itself -- it
+            # reports the bare "config". Pinned as MEASURED, not as wished: the
+            # wire string is @api's to renegotiate, not a test's to assume.
+            (("reset", "--json"), "config"),
         ],
     )
-    def test_whole_stdout_parses(self, verbs, capsys, args) -> None:
-        assert isinstance(_payload(verbs, capsys, *args), dict)
+    def test_whole_stdout_parses(self, verbs, capsys, args, verb) -> None:
+        payload = _payload(verbs, capsys, *args)
+        assert set(payload) >= {"ok", "verb"}, payload
+        assert payload["verb"] == verb, payload["verb"]
 
     @pytest.mark.parametrize(
         "args",
@@ -875,7 +880,9 @@ class TestJsonIsOneDocumentOnStdout:
         assert capsys.readouterr().err == ""
 
     def test_push_stdout_parses(self, verbs, capsys) -> None:
-        assert isinstance(_payload_rollover(verbs, capsys, "push", "--json"), dict)
+        payload = _payload_rollover(verbs, capsys, "push", "--json")
+        assert set(payload) >= {"ok", "verb"}, payload
+        assert payload["verb"] == "rollover push", payload["verb"]
 
     def test_human_path_emits_no_json(self, verbs, capsys) -> None:
         """Without the flag the surface is unchanged -- rendered, not parseable."""
@@ -1178,8 +1185,10 @@ class TestJsonSurvivesRich:
     def test_no_newline_hides_inside_any_string_value(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
         payload = _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
-        for value in payload.values():
-            assert not isinstance(value, str) or "\n" not in value
+        strings = {key: value for key, value in payload.items() if isinstance(value, str)}
+        assert set(strings) == {"verb", "error"}, strings
+        for key, value in strings.items():
+            assert "\n" not in value, key
 
     def test_emitter_round_trips_a_long_payload(self, verbs, capsys) -> None:
         document = {"ok": False, "verb": "config set", "error": "x" * 400, "suggestion": None}

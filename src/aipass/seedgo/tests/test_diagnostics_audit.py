@@ -9,7 +9,33 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _console_lines(function_name: str, *args):
+    """Call a diagnostics_audit render function and read back what it printed.
+
+    The module binds ``console`` at import time and the autouse fixture hands it
+    a MagicMock, so stdout stays empty and ``capsys`` sees nothing. The strings
+    the module actually chose are the ones handed to ``console.print`` — those
+    are the oracle, and they arrive unrendered, so no Rich line-wrap can split a
+    fragment a test pins.
+
+    Returns:
+        (return value of the render function, list of printed strings).
+    """
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    recorder = MagicMock()
+    with patch.object(diagnostics_audit, "console", recorder):
+        result = getattr(diagnostics_audit, function_name)(*args)
+    printed = [str(call.args[0]) if call.args else "" for call in recorder.print.call_args_list]
+    return result, printed
 
 
 # ---------------------------------------------------------------------------
@@ -149,29 +175,33 @@ def test_handle_command_unknown_arg():
 
 
 def test_print_introspection_runs():
-    """print_introspection produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_introspection
+    """Introspection names the module, its handler package, and where the work runs.
 
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_introspection()
+    The `or mock_cli.header.called` this replaced pinned nothing: introspection
+    never calls `header`, so the second clause was dead and the first passed on
+    any single print at all.
+    """
+    result, lines = _console_lines("print_introspection")
+
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
+    assert "[bold cyan]Diagnostics Audit Module[/bold cyan]" in lines
+    assert "[yellow]Connected Handlers:[/yellow]" in lines
+    assert "  [cyan]handlers/diagnostics/[/cyan]" in lines
+    assert "  Diagnostics checking runs through the audit pipeline:" in lines
 
 
 def test_print_help_runs():
-    """print_help produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_help
+    """Help carries all three of its sections, and names pyright as the checker.
 
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    mock_cli.header.reset_mock()
-    result = print_help()
+    Same escape as introspection above: `header` is never called here either.
+    """
+    result, lines = _console_lines("print_help")
+
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
+    assert "[yellow]COMMANDS:[/yellow]" in lines
+    assert "[yellow]EXAMPLES:[/yellow]" in lines
+    assert "[yellow]WHAT IT CHECKS:[/yellow]" in lines
+    assert "  - Type errors (Pylance/pyright)" in lines
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +210,7 @@ def test_print_help_runs():
 
 
 def test_print_branch_diagnostics_clean():
-    """print_branch_diagnostics handles clean branch result."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_branch_diagnostics
-
+    """Zero errors renders the green tick and the file tally, and no top-files block."""
     result = {
         "branch": "TEST",
         "total_errors": 0,
@@ -191,14 +219,17 @@ def test_print_branch_diagnostics_clean():
         "files_with_errors": 0,
         "results": [],
     }
-    # Should not raise
-    print_branch_diagnostics(result)
+
+    _, lines = _console_lines("print_branch_diagnostics", result)
+
+    assert "[green]✓[/green] [bold]TEST[/bold]" in lines
+    assert "  Files: 5 analyzed, 0 with errors" in lines
+    assert "  [green]Errors: 0[/green]  Warnings: 0" in lines
+    assert "  [dim]Top files with errors:[/dim]" not in lines
 
 
 def test_print_branch_diagnostics_with_errors():
-    """print_branch_diagnostics handles branch with errors."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_branch_diagnostics
-
+    """15 errors renders the red cross, and the offending file with its first lines."""
     result = {
         "branch": "TEST",
         "total_errors": 15,
@@ -216,26 +247,47 @@ def test_print_branch_diagnostics_with_errors():
             }
         ],
     }
-    # Should not raise
-    print_branch_diagnostics(result)
+
+    _, lines = _console_lines("print_branch_diagnostics", result)
+
+    assert "[red]✗[/red] [bold]TEST[/bold]" in lines
+    assert "  Files: 10 analyzed, 2 with errors" in lines
+    assert "  [red]Errors: 15[/red]  Warnings: 3" in lines
+    assert "  [dim]Top files with errors:[/dim]" in lines
+    assert "    • /some/path/test.py [dim](5 errors)[/dim]" in lines
+    assert "      [dim]L10:[/dim] Type mismatch" in lines
+    assert "      [dim]L20:[/dim] Undefined variable 'x'" in lines
 
 
 def test_print_system_summary_empty():
-    """print_system_summary handles empty results list."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_system_summary
+    """An empty fleet totals to zero everywhere, and lists no branches by error count."""
+    _, lines = _console_lines("print_system_summary", [])
 
-    print_system_summary([])
+    assert "[bold]SYSTEM DIAGNOSTICS SUMMARY:[/bold]" in lines
+    assert "  Total branches:        0" in lines
+    assert "  Clean branches:        0" in lines
+    assert "  Total errors:          0" in lines
+    assert "[bold]BRANCHES BY ERROR COUNT:[/bold]" not in lines
 
 
 def test_print_system_summary_with_data():
-    """print_system_summary handles real-ish data."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import print_system_summary
-
+    """Two branches: the totals add up, and only the one with errors gets listed."""
     results = [
         {"branch": "FLOW", "total_errors": 0, "total_warnings": 1, "total_files": 5, "files_with_errors": 0},
         {"branch": "CLI", "total_errors": 3, "total_warnings": 0, "total_files": 8, "files_with_errors": 2},
     ]
-    print_system_summary(results)
+
+    _, lines = _console_lines("print_system_summary", results)
+
+    assert "  Total branches:        2" in lines
+    assert "  Clean branches:        1" in lines
+    assert "  Branches with errors:  1" in lines
+    assert "  Files analyzed:        13" in lines
+    assert "  Total errors:          3" in lines
+    assert "  Total warnings:        1" in lines
+    assert "[bold]BRANCHES BY ERROR COUNT:[/bold]" in lines
+    assert "  CLI                3 errors" in lines
+    assert not [line for line in lines if line.startswith("  FLOW")], "clean branches are not listed by error count"
 
 
 # ---------------------------------------------------------------------------

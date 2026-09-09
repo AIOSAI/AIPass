@@ -64,7 +64,7 @@ class TestShouldSurfaceRejections:
         ready_state["surfaces_count"] = 5
         ok, reason, st = should_surface("item1", 0.8, ready_state, {"max_surfaces_per_session": 5}, current_time=1000.0)
         assert ok is False
-        assert "budget" in reason.lower() or "exhausted" in reason.lower()
+        assert reason == "Session budget exhausted (5/5)"
         assert st is ready_state
 
     def test_spacing_not_met(self, ready_state):
@@ -250,3 +250,40 @@ class TestConfigMerging:
         assert DEFAULT_CONFIG["max_surfaces_per_session"] == 5
         assert DEFAULT_CONFIG["min_messages_between"] == 10
         assert DEFAULT_CONFIG["cooldown_seconds"] == 300
+
+
+# ===========================================================================
+# The exit seam — a refusal that exits 0 is half a refusal
+# ===========================================================================
+
+
+class TestTheUnknownSubcommandRefusalReachesTheExitCode:
+    """The fleet refusal sweep, 2026-09-07: `governance <bogus>` exited 0.
+
+    Printed through `warning()`, which marks nothing, so the entry point's
+    `resolve_exit(True)` read a clean command and returned 0 — a caller asking
+    whether the verb existed was told yes. Same sentence, through `error()`.
+    """
+
+    def test_an_unknown_subcommand_exits_two(self, capsys):
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+        from aipass.memory.apps.modules import governance as governance_module
+
+        reset_command_state()
+        assert governance_module.handle_command("governance", ["nonsense"]) is True
+        assert resolve_exit(True) == 2, "governance refused an unknown subcommand but would exit 0"
+        captured = capsys.readouterr()
+        assert "nonsense" in captured.out + captured.err
+
+    def test_the_bare_verb_still_exits_zero(self, capsys):
+        """The other half: introspection is not a refusal and must stay 0."""
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+        from aipass.memory.apps.modules import governance as governance_module
+
+        reset_command_state()
+        assert governance_module.handle_command("governance", []) is True
+        assert resolve_exit(True) == 0, "bare governance is introspection, not a failure"
+        # Read the capture: exit 0 alone cannot tell introspection from silence.
+        captured = capsys.readouterr()
+        assert "governance Module" in captured.out
+        assert "should_surface" in captured.out

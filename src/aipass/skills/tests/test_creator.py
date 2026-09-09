@@ -117,7 +117,12 @@ class TestCreateSkillModule:
             result = create_skill("no-trigger", template_type="markdown_only", target_dir=tmp_path)
         assert result["success"] is True
 
-    @patch("aipass.skills.apps.modules.creator.json_handler")
+    # json_handler is a MODULE (this branch's bound shim for the fleet json
+    # service), so a bare patch hands back a MagicMock that answers every
+    # attribute - log_operation could be deleted from production and these two
+    # would stay green. autospec makes the mock refuse what the real module
+    # does not have.
+    @patch("aipass.skills.apps.modules.creator.json_handler", autospec=True)
     def test_json_log_on_success(self, mock_jh, tmp_path):
         create_skill("jlog-test", template_type="markdown_only", target_dir=tmp_path)
         mock_jh.log_operation.assert_called_once()
@@ -125,7 +130,7 @@ class TestCreateSkillModule:
         assert call_args[0][0] == "skill_created"
         assert call_args[0][1]["success"] is True
 
-    @patch("aipass.skills.apps.modules.creator.json_handler")
+    @patch("aipass.skills.apps.modules.creator.json_handler", autospec=True)
     def test_json_log_on_failure(self, mock_jh):
         create_skill("", template_type="markdown_only")
         mock_jh.log_operation.assert_called_once()

@@ -18,11 +18,14 @@ Provides standard fixtures:
   - mock_infrastructure: autouse fixture that patches logger + json_handler
   - mock_logger: standalone mock logger fixture
   - mock_json_handler: standalone mock json_handler fixture
+  - host_state_snapshot: opt-in snapshot/restore guard for a test that must
+    touch real host state (pack rule: host_state)
 
 These fixtures establish a consistent test environment across all branches.
 """
 
 import importlib
+import json
 import logging
 import sys
 import types
@@ -203,7 +206,53 @@ def mock_json_handler() -> MagicMock:
     handler.save_json = MagicMock(return_value=True)
     handler.ensure_json_exists = MagicMock(return_value=True)
     handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
+    handler.get_json_path = MagicMock(return_value=Path("mock.json"))
     handler.validate_json_structure = MagicMock(return_value=True)
     handler.log_operation = MagicMock(return_value=True)
     return handler
+
+
+@pytest.fixture()
+def host_state_snapshot(tmp_path):
+    """Opt-in guard for a test that must touch REAL host state and put it back.
+
+    Patrick's ruling, 2026-09-08: a test may touch the real thing, it must
+    restore the exact prior state. Reach for this only when patching the seam
+    will not do - monkeypatch.setenv, delenv, chdir and setattr are restored for
+    you and are the cheaper cure. The pack rule is host_state; the full worked
+    pattern is pytest_quality_standards/templates/host_state_test.py.
+
+    THE LIMIT, AND IT IS WHY THE SNAPSHOT IS A DOCUMENT: a teardown does not run
+    when the process is killed. A SIGKILL - an OOM kill, a kill -9 on a hung
+    run, a CI runner reclaiming its box - skips this fixture entirely. So the
+    snapshot lands under tmp_path BEFORE anything changes, and the restore is
+    written idempotent (it names the state it wants, never the change it makes),
+    so a later run can finish an interrupted one.
+
+    Example:
+        def test_the_timer_reports_stopped(host_state_snapshot):
+            host_state_snapshot("timer", read_timer_state, set_timer_state)
+            set_timer_state("stopped")
+            assert read_timer_state() == "stopped"
+
+    Restores in reverse order of registration, applies each restore twice to
+    prove it is idempotent, and ASSERTS the state came back - an unverified
+    restore is the failure this rule exists for.
+    """
+    guarded = []
+
+    def guard(name: str, read, restore):
+        """Snapshot one piece of host state to tmp_path and register its restore."""
+        before = read()
+        document = tmp_path / f"host_state_{name}.json"
+        document.write_text(json.dumps(before), encoding="utf-8")
+        guarded.append((name, document, read, restore))
+        return before
+
+    yield guard
+
+    for name, document, read, restore in reversed(guarded):
+        before = json.loads(document.read_text(encoding="utf-8"))
+        restore(before)
+        restore(before)
+        assert read() == before, f"host state '{name}' was not restored by this test"

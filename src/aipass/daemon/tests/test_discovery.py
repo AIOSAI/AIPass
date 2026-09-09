@@ -93,6 +93,10 @@ class TestValidateJob:
         assert _validate_job(job, Path("test.json")) is False
 
     def test_all_valid_schedule_types(self):
+        # The floor. An empty VALID_SCHEDULE_TYPES would make the loop below a
+        # silent pass — and _validate_job reads that same set, so emptying it
+        # rejects every job while this unit stayed green. Five, counted live.
+        assert len(VALID_SCHEDULE_TYPES) == 5, f"expected five schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
         for stype in VALID_SCHEDULE_TYPES:
             job = {"id": "test", "schedule": {"type": stype}, "prompt": "do stuff"}
             assert _validate_job(job, Path("test.json")) is True

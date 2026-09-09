@@ -65,7 +65,7 @@ def tmp_local_json_with_progress(tmp_local_json: Path) -> Path:
             "stages": {"1": {}, "2": {}, "3": {}},
         }
     }
-    tmp_local_json.write_text(json.dumps(data))
+    tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
     return tmp_local_json
 
 
@@ -137,7 +137,7 @@ class TestSaveStage:
     def test_preserves_existing_stages(self, tmp_local_json_with_progress: Path) -> None:
         """Earlier stage data is not overwritten when saving a later stage."""
         _save_stage(4, {"new": "data"})
-        stored = json.loads(tmp_local_json_with_progress.read_text())
+        stored = json.loads(tmp_local_json_with_progress.read_text(encoding="utf-8"))
         assert "1" in stored["setup_progress"]["stages"]
         assert "4" in stored["setup_progress"]["stages"]
 
@@ -226,21 +226,32 @@ class TestSaveStage:
 
 class TestPrintIntrospection:
     def test_not_started(self, tmp_local_json) -> None:
-        """No error when setup not started."""
-        with patch("aipass.aipass.apps.modules.init_flow.console"):
+        """Stage 0 prints the not-started line and the command that starts it."""
+        with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
             print_introspection()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert "Setup not started. Run: aipass init run" in printed
 
     def test_in_progress(self, tmp_local_json_with_progress) -> None:
-        """No error when setup is in progress."""
-        with patch("aipass.aipass.apps.modules.init_flow.console"):
+        """A part-done setup prints the stage reached and where it resumes."""
+        with patch("aipass.aipass.apps.modules.init_flow.console") as mock_console:
             print_introspection()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert f"stage 3/{TOTAL_STAGES} completed." in printed
+        assert "resume from stage 4" in printed
 
     def test_complete(self, tmp_local_json) -> None:
-        """No error when setup is complete."""
+        """A finished setup reports completion through success(), not a stage line."""
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
         tmp_local_json.write_text(json.dumps(data))
-        with patch("aipass.aipass.apps.modules.init_flow.console"):
+        with (
+            patch("aipass.aipass.apps.modules.init_flow.console") as mock_console,
+            patch("aipass.aipass.apps.modules.init_flow.success") as mock_success,
+        ):
             print_introspection()
+        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+        assert mock_success.call_args[0][0] == "Setup complete."
+        assert "In progress:" not in printed
 
 
 # =============================================================================
@@ -372,7 +383,7 @@ class TestRunInit:
         for p in patches:
             mocks.append(ctx.enter_context(p))
         with ctx:
-            with patch("aipass.aipass.apps.modules.init_flow.json_handler"):
+            with patch("aipass.aipass.apps.modules.init_flow.json_handler", autospec=True):
                 with patch("aipass.aipass.apps.modules.init_flow.console"):
                     result = run_init(non_interactive=True, template=TEMPLATE_AIPASS)
         assert result == 0
@@ -760,7 +771,7 @@ class TestInitUpdateRegistrySync:
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=check_proc) as mock_run,
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
@@ -789,7 +800,7 @@ class TestInitUpdateRegistrySync:
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.warning"),
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
@@ -817,7 +828,7 @@ class TestInitUpdateRegistrySync:
             ),
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.warning"),
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
@@ -834,7 +845,7 @@ class TestInitUpdateRegistrySync:
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=FileNotFoundError("drone not found")),
             patch(f"{_MOD_UPDATE}.console"),
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
@@ -853,7 +864,7 @@ class TestInitUpdateRegistrySync:
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=_sp.TimeoutExpired(cmd="drone", timeout=30)),
             patch(f"{_MOD_UPDATE}.console"),
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
@@ -898,7 +909,7 @@ class TestInitUpdateGitAuth:
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
 
@@ -920,7 +931,7 @@ class TestInitUpdateGitAuth:
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
 
@@ -942,7 +953,7 @@ class TestInitUpdateGitAuth:
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success"),
             patch(f"{_MOD_UPDATE}.cli_error") as mock_error,
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path)])
 
@@ -960,7 +971,7 @@ class TestInitUpdateGitAuth:
             patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
-            patch(f"{_MOD_UPDATE}.json_handler"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _handle_init_update([str(tmp_path), "--dry-run"])
 
@@ -1070,6 +1081,10 @@ class TestTemplateSelector:
             with patch(f"{_MOD}.warning") as mock_warn:
                 with patch(f"{_MOD}.shutil.which", return_value=None):
                     stage_8_smoke_test()
+        # THE FLOOR (v5 unentered_assert, 2026-09-08). A stage 8 that stopped
+        # warning at all - or one that never reached the hint - made this a
+        # silent pass, which is precisely the regression it guards.
+        assert mock_warn.call_args_list, "stage 8 emitted no warning - the loop below proves nothing"
         for call in mock_warn.call_args_list:
             msg = call[0][0].lower()
             assert "setup.sh" in msg

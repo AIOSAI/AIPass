@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.8.3"
+version = "2.8.4"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -144,6 +144,11 @@ extend-exclude = ["*.md", "src/aipass/spawn/templates"]
 # families is a deliberate cleanup, not a version-bump side effect.
 select = ["E4", "E7", "E9", "F"]
 ignore = ["E402"]
+
+# adopted 2026-09-08 under RPLAN-0004 decision D1 (seedgo), the cp1252 class:
+# before 39 sites, after 0.
+preview = true
+extend-select = ["PLW1514"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]

@@ -97,12 +97,23 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
         """Claimed and reported, never a silent no-op that looks like success.
 
-        Read from BOTH streams on purpose: the warning routes to stderr under
+        Read from BOTH streams on purpose: the refusal routes to stderr under
         @seedgo's output-routing standard, and asserting stdout alone made this
         red on the first run for a reason that had nothing to do with the
         behaviour being pinned.
+
+        REWRITTEN 2026-09-08 (the fleet refusal sweep). The docstring promised
+        "never a silent no-op that looks like success" and the test never
+        measured the success half: the refusal printed through `warning()`, the
+        failure flag stayed clear and the process exited 0, which is precisely
+        what looks like success to a caller. It goes through `error()` now and
+        the exit code is pinned.
         """
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        reset_command_state()
         assert fleet.handle_command("fleet", ["nonsense"]) is True
+        assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
         captured = capsys.readouterr()
         assert "nonsense" in captured.out + captured.err
 

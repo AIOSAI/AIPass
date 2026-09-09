@@ -10,6 +10,7 @@
 
 import json
 import time
+from dataclasses import fields
 
 import pytest
 from unittest.mock import MagicMock
@@ -978,8 +979,15 @@ def test_compute_fingerprint_empty_strings() -> None:
     assert fp == fp2
 
 
-def test_report_return_type_is_dict(tmp_path: Path) -> None:
-    """report() always returns a dict."""
+def test_report_returns_the_whole_entry_not_a_summary_of_it(tmp_path: Path) -> None:
+    """report() returns every ErrorEvent field plus is_new — callers read them.
+
+    This asserted isinstance(result, dict), which the six-key fallback dict in
+    report()'s except branch satisfies too. The difference is the whole point:
+    a caller reaching for result["fingerprint"] or result["id"] gets a KeyError
+    off that degraded path, so "it is a dict" is exactly the claim that cannot
+    tell the good return from the broken one. The field set is the contract.
+    """
     _seed_registry(tmp_path)
     er = _import_registry()
 
@@ -988,7 +996,9 @@ def test_report_return_type_is_dict(tmp_path: Path) -> None:
         message="test message",
         component="API",
     )
-    assert isinstance(result, dict)
+
+    assert set(result) == {f.name for f in fields(er.ErrorEvent)} | {"is_new"}
+    assert result["fingerprint"] == er.compute_fingerprint("ValueError", er.normalize_message("test message"), "API")
 
 
 # ---------------------------------------------------------------------------

@@ -130,7 +130,11 @@ def test_the_refusal_states_the_policy_and_the_way_through(repo_root, hosted_bau
 
     lowered = error.lower()
     assert "repl" in lowered, "replies are the sanctioned channel — say so"
-    assert "admin" in lowered or "devpulse" in lowered, "name who may initiate"
+    # MEASURED 2026-09-08, not assumed: the refusal names BOTH, so the ``or``
+    # that stood here could not fail — either word could rot out of the message
+    # and the other kept the unit green.
+    assert "devpulse" in lowered, "name who may initiate"
+    assert "admin" in lowered, "and say it is the verified-admin LANE, not the citizen"
 
 
 def test_explaining_the_wall_does_not_open_it(repo_root, hosted_baud, noop_inbox_lock):

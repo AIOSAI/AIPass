@@ -360,9 +360,22 @@ class TestSessionHelpers:
 
 
 class TestIntrospection:
-    def test_print_introspection_no_sessions(self, tmp_path):
+    def test_print_introspection_no_sessions(self, tmp_path, capsys):
+        """With no session files, introspection still names itself and the dir.
+
+        Had no oracle: an introspection that printed nothing passed, which is
+        exactly the failure this unit is positioned to catch - the empty-dir
+        path is the one where a reader has nothing else to check against.
+        """
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             cc_sessions.print_introspection()
+
+        # stderr, not stdout: this module prints through the cli's err_console,
+        # which is the seam that lets drone pipe a command's real output while
+        # narration still reaches the terminal.
+        err = capsys.readouterr().err
+        assert err.startswith("sessions — CC session listing & reclaim")
+        assert "No CC session files found" in err
 
     def test_handle_command_sessions(self, tmp_path):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
@@ -401,11 +414,25 @@ class TestOccupantSelectionIsKindAware:
     def _s(pid, kind, started_ms):
         return {"pid": pid, "kind": kind, "startedAt": started_ms, "cwd": "/tmp/branch"}
 
+    @staticmethod
+    def _occupant_pid(cwd, **kwargs):
+        """The occupant's pid, having first proved there IS an occupant.
+
+        Every row below used to index find_occupant's result inline. It returns
+        dict | None - None is a real answer, pinned by test_free_branch_is_none
+        - so pyright read eight subscripts of None, and a regression that
+        answered None would have surfaced as a TypeError inside the assert
+        rather than as the ranking claim that actually broke.
+        """
+        occupant = cc_sessions.find_occupant(cwd, **kwargs)
+        assert occupant is not None
+        return occupant["pid"]
+
     def test_a_seat_behind_a_job_is_not_shadowed(self):
         job = self._s(1, "bg", 1_000_000_000_000)
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(job, seat):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+            assert self._occupant_pid("/tmp/branch") == 2
 
     def test_order_on_disk_does_not_decide(self):
         """Session files are read in directory order — the answer must not be."""
@@ -413,18 +440,18 @@ class TestOccupantSelectionIsKindAware:
         seat = self._s(2, "interactive", 1_000_000_500_000)
         for ordering in ((job, seat), (seat, job)):
             with self._live(*ordering):
-                assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+                assert self._occupant_pid("/tmp/branch") == 2
 
     def test_a_job_is_still_returned_when_it_is_the_only_occupant(self):
         """Ranking, not filtering — a bg-only branch stays answerable."""
         with self._live(self._s(1, "bg", 1_000_000_000_000)):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 1
+            assert self._occupant_pid("/tmp/branch") == 1
 
     def test_background_spelling_ranks_as_a_job_too(self):
         job = self._s(1, "background", 1_000_000_000_000)
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(job, seat):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+            assert self._occupant_pid("/tmp/branch") == 2
 
     def test_the_oldest_seat_is_the_incumbent(self):
         """Callers rank themselves against 'the occupant' — that must be the
@@ -432,25 +459,25 @@ class TestOccupantSelectionIsKindAware:
         older = self._s(1, "interactive", 1_000_000_000_000)
         newer = self._s(2, "interactive", 1_000_000_900_000)
         with self._live(newer, older):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 1
+            assert self._occupant_pid("/tmp/branch") == 1
 
     def test_three_sessions_job_first_still_names_the_oldest_seat(self):
         job = self._s(1, "bg", 999_000_000_000)
         newer_seat = self._s(2, "interactive", 1_000_000_900_000)
         older_seat = self._s(3, "interactive", 1_000_000_000_000)
         with self._live(job, newer_seat, older_seat):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 3
+            assert self._occupant_pid("/tmp/branch") == 3
 
     def test_unknown_start_never_displaces_a_seat_whose_age_is_known(self):
         undated = {"pid": 1, "kind": "interactive", "cwd": "/tmp/branch"}
         dated = self._s(2, "interactive", 1_000_000_900_000)
         with self._live(undated, dated):
-            assert cc_sessions.find_occupant("/tmp/branch")["pid"] == 2
+            assert self._occupant_pid("/tmp/branch") == 2
 
     def test_our_own_pid_is_still_excluded(self):
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(self._s(1, "bg", 1_000_000_000_000), seat):
-            assert cc_sessions.find_occupant("/tmp/branch", exclude_pid=2)["pid"] == 1
+            assert self._occupant_pid("/tmp/branch", exclude_pid=2) == 1
 
     def test_free_branch_is_none(self):
         with self._live():

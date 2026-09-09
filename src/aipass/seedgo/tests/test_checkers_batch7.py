@@ -1736,7 +1736,9 @@ class TestJsonStructureExemptsDeclarationOnlyModules:
         """A skip nobody can read is indistinguishable from a check that ran."""
         result = self._score(self.DECLARATIONS_ONLY, tmp_path)
         text = " ".join(c["message"] for c in result["checks"]).lower()
-        assert "declar" in text or "no operations" in text, result["checks"]
+        # The message names the fact the exemption is keyed on AND why it follows.
+        assert "declarations only" in text, result["checks"]
+        assert "performs no operations to log" in text, result["checks"]
 
     def test_ONE_method_puts_the_module_back_in_scope(self, tmp_path):
         source = '"""Doc."""\n\n\nclass Thing:\n    def do(self):\n        return 1\n'

@@ -55,7 +55,14 @@ class TestLoadSkill:
     def test_body_is_markdown_content(self):
         result = load_skill("github")
         body = result["body"]
-        assert "# GitHub" in body or "## " in body
+        # The old `or` was two facts about the same body, so either half
+        # carried it. The real contract is the split: the body is what sits
+        # BELOW the frontmatter, so the H1 opens it and no frontmatter key
+        # survives into it.
+        assert body.startswith("# GitHub Skill")
+        assert "## When to Use" in body
+        assert "name: github" not in body
+        assert result["metadata"]["description"] not in body
 
     def test_handler_contract(self):
         """Verify handler follows the run(action, args, config) contract."""

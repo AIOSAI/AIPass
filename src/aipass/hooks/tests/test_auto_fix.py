@@ -193,7 +193,7 @@ class TestAutoFixStateFile:
     def test_state_file_cleared_on_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo):
         from aipass.hooks.apps.handlers.lifecycle.auto_fix import handle
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tf:
+        with tempfile.NamedTemporaryFile(encoding="utf-8", suffix=".json", delete=False, mode="w") as tf:
             state_path = Path(tf.name)
             tf.write('{"file": "/tmp/old.py", "errors": [{"line": 1, "message": "old"}]}')
 

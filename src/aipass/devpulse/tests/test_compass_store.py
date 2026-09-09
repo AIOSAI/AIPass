@@ -326,13 +326,15 @@ class TestSupersedes:
     def test_migration_idempotent_repeated_connects(self, db):
         """Re-opening the DB re-runs migration harmlessly; column stays present."""
         compass.add_decision("ctx one", "dec one", "good", db_path=db)
+        column_present_per_connect = []
         for _ in range(3):
             conn = store._connect(db)
             try:
                 cols = {r["name"] for r in conn.execute("PRAGMA table_info(decisions)")}
             finally:
                 conn.close()
-            assert "supersedes" in cols
+            column_present_per_connect.append("supersedes" in cols)
+        assert column_present_per_connect == [True, True, True]
 
     def test_migration_adds_column_to_legacy_db(self, db):
         """A pre-supersedes DB gets the column added in via _connect migration."""
@@ -389,11 +391,38 @@ class TestFindConflicts:
         compass.add_decision("special ctx", "a normal decision", "good", db_path=db)
         weird = 'broken " ( ) * : query -term AND OR NOT'
         result = compass.find_conflicts(weird, "more * (text) ^caret", db_path=db)
-        assert isinstance(result, list)  # no exception raised
+        assert result == []  # no token overlaps, and no FTS5 syntax error either
+        # The same syntax characters around a real token still find the row:
+        # sanitising quotes the words, it does not drop them.
+        hits = compass.find_conflicts('special " ( ) * :', "-normal AND OR NOT", db_path=db)
+        assert [hit["decision"] for hit in hits] == ["a normal decision"]
 
     def test_empty_text_returns_empty(self, db):
         """Text with no usable tokens yields no conflicts (and no crash)."""
         assert compass.find_conflicts("   ", "   ", db_path=db) == []
+
+    def test_query_survives_fts_syntax(self, db):
+        """`compass query "opt-in"` must search, not die in FTS5's parser.
+
+        Measured 2026-09-08: query_decisions handed the raw text to MATCH, so
+        a hyphen became column-filter syntax (sqlite3.OperationalError: no such
+        column: in) and the router reported "Unknown command: compass". The
+        query is defused the way find_conflicts already was.
+        """
+        compass.add_decision("catch_up opt-in default", "flip it to opt-out", "good", db_path=db)
+        hits = compass.query_decisions("catch_up opt-in", db_path=db)
+        assert [hit["decision"] for hit in hits] == ["flip it to opt-out"]
+        # Every FTS5 operator, none of it reaching the parser: a clean miss.
+        assert compass.query_decisions('broken " ( ) * : -term AND OR NOT ^caret', db_path=db) == []
+        # The same syntax around real tokens still finds the row.
+        hits = compass.query_decisions('"(opt-in)" *default*', db_path=db)
+        assert [hit["decision"] for hit in hits] == ["flip it to opt-out"]
+        # Every word must match (implicit AND), the contract the CLI tests pin:
+        # a stray word turns a hit into an honest miss, not a fuzzy OR.
+        assert compass.query_decisions("opt-in elsewhere", db_path=db) == []
+        # No word token at all is refused by name, not searched as nothing.
+        with pytest.raises(ValueError, match="no searchable words"):
+            compass.query_decisions("--- *** ()", db_path=db)
 
 
 class TestSetNote:

@@ -126,11 +126,6 @@ class TestHandleCommandRouting:
         result = display.handle_command("display", ["unknown_sub"])
         assert result is False
 
-    def test_handle_command_returns_bool(self):
-        """handle_command always returns a bool — return type contract."""
-        result = display.handle_command("nonexistent", [])
-        assert isinstance(result, bool)
-
 
 # =============================================================================
 # header() output tests

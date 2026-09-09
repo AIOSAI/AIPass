@@ -23,7 +23,7 @@ from unittest.mock import patch, MagicMock
 def _make_old_file(path: Path, age_days: int) -> None:
     """Create a file and backdate its mtime."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("stale log content\n")
+    path.write_text("stale log content\n", encoding="utf-8")
     old_time = time.time() - (age_days * 86400)
     os.utime(path, (old_time, old_time))
 
@@ -168,9 +168,17 @@ class TestSweepIntegration:
 class TestSweepCommand:
     """Test the 'sweep' subcommand routing in handle_command."""
 
-    def test_sweep_subcommand_routes(self, monkeypatch, capsys):
-        """Verify 'drone @prax log-audit sweep' routes to _run_sweep."""
-        _ensure_watchdog_mock(monkeypatch)
+    def test_sweep_subcommand_routes(self, monkeypatch, mock_prax_infrastructure):
+        """Verify 'drone @prax log-audit sweep' routes to _run_sweep.
+
+        capsys is gone from the signature because it can never see anything here:
+        conftest's autouse fixture replaces ``aipass.cli.apps.modules`` in
+        sys.modules, so the ``console`` and ``warning`` log_audit prints through
+        are mocks and stdout stays empty (measured: ``CaptureResult(out='',
+        err='')``). The mock's calls ARE the output, and they are what this pins —
+        the exact strings _run_sweep emits for the summary the watchdog returns.
+        """
+        watchdog = _ensure_watchdog_mock(monkeypatch)
 
         mod_name = "aipass.prax.apps.modules.log_audit"
         sys.modules.pop(mod_name, None)
@@ -179,3 +187,10 @@ class TestSweepCommand:
         result = handle_command("log-audit", ["sweep"])
 
         assert result is True
+        watchdog.sweep_stale_logs.assert_called_once_with()
+        printed = [call.args[0] for call in mock_prax_infrastructure.console.print.call_args_list]
+        assert printed == [
+            "\n[bold cyan]Sweeping stale logs (>30 days)...[/bold cyan]",
+            "\n  Removed 1 file(s), reclaimed 12.5 KB\n",
+        ]
+        mock_prax_infrastructure.cli.warning.assert_called_once_with("DELETED old.log: 45.2 days old, 12.5 KB")

@@ -1608,12 +1608,25 @@ class TestHandleEvent:
                 mock_parse.assert_called_once()
 
     def test_exception_caught(self):
-        """Should catch exceptions and log error."""
-        mod, _, _, mock_filters, queue = _import_filesystem_handler()
+        """A failure inside the handler costs the event, never the watcher.
+
+        The observable consequence of the guard: the event is DROPPED (no
+        MonitoringEvent is built, nothing reaches the queue) and the operator is
+        told which file and which error type in plain language.
+        """
+        mod, mock_eq, _, mock_filters, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.side_effect = Exception("boom")
-        # Should not raise
-        handler._handle_event("modified", "/some/file.py")
+
+        with patch.object(mod, "logger") as log:
+            assert handler._handle_event("modified", "/some/file.py") is None
+
+        mock_eq.MonitoringEvent.assert_not_called()
+        queue.enqueue.assert_not_called()
+        message = log.error.call_args.args[0]
+        assert "/some/file.py" in message, "the report must name the file that failed"
+        assert "Exception on modified" in message, "the report must name the error type and the action"
+        assert "file watching continues" in message
 
     def test_priority_levels_mapped(self):
         """Should map priority levels correctly."""

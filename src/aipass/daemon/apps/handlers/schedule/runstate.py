@@ -188,12 +188,40 @@ def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> boo
 # CLOSED WINDOWS — catch-up and the MISSED record
 # =============================================
 
-# Per-job opt-in, read from the job's ``schedule`` block alongside ``type`` and
-# ``time``. Absent means off, which is every job that exists today.
+# Per-job, read from the job's ``schedule`` block alongside ``type`` and
+# ``time``. ABSENT NOW MEANS ON (DPLAN-0332, Patrick 2026-09-08), superseding
+# ruling 6 of 09-07 which made it opt-in: every enabled job in the fleet left it
+# unset, so when the timer vanished for 23h on 09-07 nothing recovered. A job
+# whose late run is worthless sets it to false.
 CATCH_UP_FIELD = "catch_up"
+
+# DPLAN-0332 build gate. The systemd tick runs this WORKING TREE every two
+# minutes, so a half-built recovery lane is production: on 2026-09-08 at
+# 11:31:42 the flipped default fired @vera/release-watch out of window, with no
+# header, mid-build. @devpulse's rule for the rest of the build — "keep the new
+# lane inert until the piece is whole (a flag you flip in the last edit)".
+#
+# False  = pre-DPLAN-0332 behaviour exactly: catch_up is opt-IN, no gap
+#          detection, no queue, no drain.
+# True   = the DPLAN-0332 lane.
+#
+# FALSE, and it stays False until Patrick and @devpulse run the controlled live
+# proof from their seat. @devpulse's ruling 2026-09-08 12:15, after I flipped it
+# and the very next timer tick (12:04:30-12:04:39) fired @vera a second time that
+# day with a header whose "Last run 2026-09-07 09:46" was FALSE — she had run at
+# 11:31:42 — and labelled Scheduled rather than catch-up:
+#
+#   "the tree is production while the timer is installed, so nothing under the
+#    flag may be True at any moment you are not personally watching a tick."
+RECOVERY_LANE_LIVE = False
 
 # Schedule types that fire inside a daily window and can therefore MISS one.
 _DAILY_TYPES = frozenset({"daily", "rotation"})
+
+# Every type that fires inside a window. ``hourly`` joined at DPLAN-0332: before
+# it, is_job_due mapped hourly to _is_hourly_due alone, so an hourly job had no
+# catch-up path at ALL — not an opt-in it declined, an arm that did not exist.
+_WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly"})
 
 # Runstate key: the calendar date whose miss has already been reported, so the
 # MISSED line is written once per job per day rather than on every tick for the
@@ -233,10 +261,46 @@ def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) 
     return not _already_ran_today(last_run, now)
 
 
-def _is_catch_up_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """True when an opted-in daily job should fire late, after its closed window."""
-    if not schedule.get(CATCH_UP_FIELD):
+def catch_up_on(schedule: dict) -> bool:
+    """Is catch-up enabled for this schedule? Default ON since DPLAN-0332.
+
+    ``is False`` rather than falsiness: a job that has never heard of the field
+    must be ON, and only an explicit false opts out.
+    """
+    if not RECOVERY_LANE_LIVE:
+        return schedule.get(CATCH_UP_FIELD) is True
+    return schedule.get(CATCH_UP_FIELD) is not False
+
+
+def _hourly_window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
+    """True when THIS HOUR's window has closed with nothing run inside it.
+
+    The hourly twin of window_closed_unrun, and it refuses the same edge for the
+    same reason: a window whose tail crosses the hour boundary (minute > 44)
+    never closes inside its own hour, so there is no instant at which the miss
+    is certain.
+    """
+    raw = schedule.get("time", "0")
+    try:
+        target_m = int(raw)
+    except (ValueError, TypeError) as e:
+        logger.info("[runstate] Hourly time parse failed for %r: %s", raw, e)
         return False
+
+    close_minute = target_m + WINDOW_MINUTES
+    if close_minute >= 60:
+        return False
+    if now.minute <= close_minute:
+        return False
+    return not _already_ran_this_hour(last_run, now)
+
+
+def _is_catch_up_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
+    """True when a windowed job should fire late, after its window closed unrun."""
+    if not catch_up_on(schedule):
+        return False
+    if schedule.get("type") == "hourly":
+        return _hourly_window_closed_unrun(schedule, last_run, now)
     return window_closed_unrun(schedule, last_run, now)
 
 
@@ -249,7 +313,7 @@ def is_catch_up_fire(job: dict, runstate: dict, now: Optional[datetime] = None) 
     two say very different things about the health of the host.
     """
     schedule = job.get("schedule", {})
-    if schedule.get("type") not in _DAILY_TYPES:
+    if schedule.get("type") not in _WINDOWED_TYPES:
         return False
     if now is None:
         now = datetime.now()
@@ -265,11 +329,14 @@ def missed_window(job: dict, runstate: dict, now: Optional[datetime] = None) -> 
     :func:`note_missed_window` owns the once-per-day bookkeeping.
     """
     schedule = job.get("schedule", {})
-    if schedule.get("type") not in _DAILY_TYPES:
+    sched_type = schedule.get("type")
+    if sched_type not in _WINDOWED_TYPES:
         return False
     if now is None:
         now = datetime.now()
     state = get_job_state(runstate, job["owner"], job["id"])
+    if sched_type == "hourly":
+        return _hourly_window_closed_unrun(schedule, _due_from(state), now)
     return window_closed_unrun(schedule, _due_from(state), now)
 
 
@@ -519,7 +586,13 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
         "rotation": lambda: (
             _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
         ),
-        "hourly": lambda: _is_hourly_due(schedule, since_success, now),
+        # Hourly gained its catch-up arm at DPLAN-0332. It had none before —
+        # not an opt-in it declined, an arm that did not exist — so an hourly
+        # job that missed its window waited a full hour however long the
+        # scheduler had been away.
+        "hourly": lambda: (
+            _is_hourly_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
+        ),
         "interval": lambda: _is_interval_due(schedule, last_run, now),
         "once": lambda: _is_once_due(schedule, completed, now),
     }

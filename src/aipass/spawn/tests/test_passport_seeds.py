@@ -146,6 +146,8 @@ class TestBuildSeed:
         passport["citizenship"][STAMP_KEY] = {"version": "2.0.0", "sha256": "deadbeef"}
 
         citizenship = build_seed(passport)["citizenship"]
+        assert len(MACHINE_LOCAL_CITIZENSHIP) == 4, MACHINE_LOCAL_CITIZENSHIP
+        assert STAMP_KEY in MACHINE_LOCAL_CITIZENSHIP, "the stamp is the field this test exists for"
         for field in MACHINE_LOCAL_CITIZENSHIP:
             assert field not in citizenship, f"{field} survived the strip"
 
@@ -186,6 +188,32 @@ class TestBuildSeed:
 
 class TestSeedValidation:
     """A seed is a passport minus machine-local. Both lanes, one schema."""
+
+    def test_the_leak_guard_table_carries_all_four_machine_local_fields(self):
+        """The floor under the parametrized leak guard below, read from the raw source.
+
+        ``MACHINE_LOCAL_CITIZENSHIP`` is imported, so an edit that emptied or
+        shortened it would silently shrink the table the leak guard runs over —
+        an empty one is reported SKIPPED and the summary reads green. The count
+        is derived here from the AST of ``seed_ops.py`` rather than from the
+        imported tuple, so a tuple that lost a field fails HERE instead of
+        quietly dropping a case.
+        """
+        import ast
+
+        source = Path(seed_ops.__file__).read_text(encoding="utf-8")
+        declared = next(
+            node.value
+            for node in ast.parse(source).body
+            if isinstance(node, ast.Assign)
+            and any(getattr(t, "id", "") == "MACHINE_LOCAL_CITIZENSHIP" for t in node.targets)
+        )
+
+        assert len(declared.elts) == 4, f"seed_ops declares {len(declared.elts)} machine-local fields, not 4"
+        assert len(MACHINE_LOCAL_CITIZENSHIP) == 4, MACHINE_LOCAL_CITIZENSHIP
+        assert set(MACHINE_LOCAL_CITIZENSHIP) == {"registered", "registry_id", "citizen_id", STAMP_KEY}, (
+            f"the machine-local set moved: {MACHINE_LOCAL_CITIZENSHIP}"
+        )
 
     def test_a_built_seed_validates(self):
         assert validate_seed(build_seed(make_passport())) == []

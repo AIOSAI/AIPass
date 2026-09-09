@@ -23,7 +23,7 @@ from __future__ import annotations
 import sys
 import types
 from collections.abc import Callable
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -37,10 +37,24 @@ from aipass.drone.apps.handlers.generic_adapter import capture_main
 
 @pytest.fixture(autouse=True)
 def _mock_log_operation():
-    """Prevent json_handler.log_operation from touching disk."""
-    with patch("aipass.drone.apps.handlers.generic_adapter.json_handler") as mock_jh:
-        mock_jh.log_operation = MagicMock()
-        yield
+    """Prevent json_handler.log_operation from touching disk, and hand back the mock.
+
+    ``autospec=True`` so the stand-in carries the real module's attribute set:
+    a bare ``patch`` answers every name, so a test asserting on a function
+    production no longer has stays green. Measured with ``log_operation``
+    renamed in the handler shim: this file's module-patching unit passed on the
+    invented attribute; with the spec it raises AttributeError.
+
+    Yields the mock rather than nothing so a test that needs the handle asks for
+    this fixture instead of patching the same attribute a second time — the
+    double patch is what made ``autospec=True`` impossible here
+    (``InvalidSpecError: ... has already been mocked out``).
+    """
+    with patch(
+        "aipass.drone.apps.handlers.generic_adapter.json_handler",
+        autospec=True,
+    ) as mock_jh:
+        yield mock_jh
 
 
 @pytest.fixture()
@@ -297,14 +311,13 @@ class TestRestoration:
 class TestLogOperation:
     """Verify json_handler.log_operation is invoked with correct args."""
 
-    def test_log_operation_called(self, _fake_module_factory):
+    def test_log_operation_called(self, _fake_module_factory, _mock_log_operation):
         _fake_module_factory("log_mod", lambda: 0)
-        with patch("aipass.drone.apps.handlers.generic_adapter.json_handler") as mock_jh:
-            capture_main("log_mod", "myprog", command="status")
-            mock_jh.log_operation.assert_called_once()
-            call_args = mock_jh.log_operation.call_args
-            assert call_args[0][0] == "generic_adapter.capture_main"
-            payload = call_args[0][1]
-            assert payload["entry_point"] == "log_mod"
-            assert payload["name"] == "myprog"
-            assert payload["command"] == "status"
+        capture_main("log_mod", "myprog", command="status")
+        _mock_log_operation.log_operation.assert_called_once()
+        call_args = _mock_log_operation.log_operation.call_args
+        assert call_args[0][0] == "generic_adapter.capture_main"
+        payload = call_args[0][1]
+        assert payload["entry_point"] == "log_mod"
+        assert payload["name"] == "myprog"
+        assert payload["command"] == "status"

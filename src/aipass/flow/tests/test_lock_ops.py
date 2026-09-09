@@ -193,10 +193,19 @@ class TestReleaseLock:
         assert not lock.exists()
 
     def test_no_error_when_lock_missing(self, tmp_path):
-        """Should handle missing lock file gracefully (missing_ok=True)."""
+        """Should handle missing lock file gracefully (missing_ok=True).
+
+        The graceful part is now READ: release_lock returns None and the file
+        is still absent afterwards. A bare call asserted nothing - a
+        release_lock that created the file, or returned an error object, passed
+        this test unchanged.
+        """
         mod = _import_lock_ops()
         lock = tmp_path / ".nonexistent.lock"
-        mod.release_lock(lock)
+        assert not lock.exists()
+
+        assert mod.release_lock(lock) is None
+        assert not lock.exists()
 
     def test_logs_warning_on_os_error(self, tmp_path, mock_logger):
         """Should log warning when lock removal fails."""
@@ -204,4 +213,15 @@ class TestReleaseLock:
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
         with patch.object(Path, "unlink", side_effect=OSError("disk error")):
-            mod.release_lock(lock)
+            assert mod.release_lock(lock) is None
+
+        # THE WARNING IS THE SUBJECT, and it was never read. This unit takes
+        # mock_logger, states "should log warning" in its docstring and then
+        # checked neither - a release_lock that swallowed the OSError silently
+        # passed it. The message is asserted through the real formatting the
+        # handler uses: lazy %s args, not an f-string.
+        mock_logger.warning.assert_called_once()
+        args = mock_logger.warning.call_args.args
+        assert "Failed to release lock file" in args[0]
+        assert lock in args
+        assert any("disk error" in str(arg) for arg in args)

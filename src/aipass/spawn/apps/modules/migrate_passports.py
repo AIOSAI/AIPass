@@ -140,7 +140,12 @@ def handle_migrate_passports(args: list[str]) -> int:
     )
 
     _print_receipt(receipt)
-    return 1 if receipt["errors"] else 0
+    # A REFUSAL EXITS NON-ZERO (Patrick's standing ruling, fleet refusal sweep
+    # 2026-09-07). Zero scanned is the same refusal the receipt already prints in
+    # words: discovery matched nothing, so nothing was judged. It used to exit 0,
+    # which made "I searched the wrong root" indistinguishable from "your fleet is
+    # already 2.0" to anything reading the exit code.
+    return 1 if receipt["errors"] or not receipt["scanned"] else 0
 
 
 # =============================================================================
@@ -216,7 +221,10 @@ def _print_receipt(receipt: dict) -> None:
         # targets, and the green line below would call that success. Measured
         # against a real sibling repo (@wren, schema 1.0, untouched): the
         # command reported "every scanned passport is already 2.0".
-        warning(f"No passports found under {receipt['root']} — nothing was scanned.")
+        error(
+            f"No passports found under {receipt['root']} — nothing was scanned.",
+            suggestion="Point --root at an AIPass checkout, or drop --root to scan this repository.",
+        )
         console.print(
             "  [dim]Discovery matches this repository's layout "
             "(src/aipass/<branch>/ and projects/<project>/src/<pkg>/<branch>/).[/dim]"

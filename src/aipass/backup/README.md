@@ -349,13 +349,18 @@ from where the caller's shell happened to be standing.
 
 ## Tests
 
-**302 test functions across 14 files in `tests/`; pytest expands them to 383
-cases.** Both numbers measured 2026-09-05 — the first by counting `def test_`
+**298 test functions across 13 files in `tests/`; pytest expands them to 371
+cases.** Both numbers re-measured 2026-09-08 — the first by counting `def test_`
 lines the way the seedgo readme rule counts them, the second from a full run:
 
 ```
-python -m pytest src/aipass/backup/tests -q     # 383 passed
+python -m pytest src/aipass/backup/tests -q     # 371 passed
 ```
+
+The drop from the 2026-09-05 figures (302 defs / 14 files / 383 cases) is one
+file, not attrition: `tests/test_json_handler.py` (6 defs, 14 cases) was
+archived on 2026-09-07 to `tests/.archive/`. 302 − 6 + 2 = 298 and
+383 − 14 + 2 = 371, the +2 being this wave's two added units.
 
 The gap is parametrisation, concentrated in `test_drive_pipeline.py` (71 defs)
 and `test_dead_cwd_imports.py` (37 defs). Run it from the **repo root** — from

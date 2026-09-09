@@ -149,7 +149,7 @@ def _write_presence(data: dict) -> None:
 def _read_proc_comm(pid: int) -> str:
     """Read /proc/<pid>/comm. Returns empty string on failure."""
     try:
-        return Path(f"/proc/{pid}/comm").read_text().strip()
+        return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip()
     except OSError as exc:
         logger.info("[PRESENCE] Cannot read /proc/%d/comm: %s", pid, exc)
         return ""
@@ -158,7 +158,7 @@ def _read_proc_comm(pid: int) -> str:
 def _read_proc_ppid(pid: int) -> int | None:
     """Read PPid from /proc/<pid>/status. Returns None on failure."""
     try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
             if line.startswith("PPid:"):
                 return int(line.split()[1])
     except OSError as exc:

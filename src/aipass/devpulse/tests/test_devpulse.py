@@ -8,7 +8,7 @@
 
 """Tests for devpulse.py — entry point CLI routing and module discovery."""
 
-import importlib
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 
@@ -68,6 +68,26 @@ class TestCLIRouting:
         assert result is False
         assert "Did you mean: watchdog?" in capsys.readouterr().err
 
+    def test_a_module_that_raises_is_reported_by_name_not_as_unknown(self, capsys):
+        """A module exception names the module and the exception, never "Unknown command".
+
+        Measured 2026-09-08: `compass query "opt-in"` raised
+        sqlite3.OperationalError inside the module; route_command logged it
+        and fell through to "Unknown command: compass / Did you mean: compass?"
+        — handled=False, the real message in a log nobody reads.
+        """
+
+        def _raise(command, args):
+            raise RuntimeError("no such column: in")
+
+        broken = SimpleNamespace(__name__="aipass.devpulse.apps.modules.compass", handle_command=_raise)
+        result = devpulse_module.route_command("compass", ["query", "opt-in"], [broken])
+        assert result is True
+        err = capsys.readouterr().err
+        assert "compass failed on 'compass': RuntimeError: no such column: in" in err
+        assert "Unknown command" not in err
+        assert "Did you mean" not in err
+
     @patch.object(devpulse_module, "print_help")
     def test_print_help_called_on_help_flag(self, mock_print_help):
         """--help invokes print_help."""
@@ -94,35 +114,35 @@ class TestModuleDiscovery:
     """discover_modules() finds modules with handle_command."""
 
     def test_discover_modules_returns_list(self):
-        """Returns a list of discovered modules."""
+        """Returns the four command modules that live in apps/modules/."""
         result = devpulse_module.discover_modules()
-        assert isinstance(result, list)
+        names = {mod.__name__.rsplit(".", 1)[-1] for mod in result}
+        assert {"watchdog", "compass", "feedback", "admin_grant"} <= names
 
     def test_discovered_modules_have_handle_command(self):
         """Each discovered module exposes handle_command."""
         modules = devpulse_module.discover_modules()
-        for mod in modules:
-            assert hasattr(mod, "handle_command")
-
-    def test_reimport_after_mock(self):
-        """Verify module reimport picks up mocked state."""
-        devpulse_module.discover_modules()
-        with patch.object(devpulse_module, "MODULES_DIR", devpulse_module.Path("/nonexistent")):
-            importlib.reload(devpulse_module)
-            reloaded = devpulse_module.discover_modules()
-        importlib.reload(devpulse_module)
-        assert isinstance(reloaded, list)
+        assert modules, "discovery found nothing - the loop below would check nothing"
+        assert all(callable(getattr(mod, "handle_command", None)) for mod in modules)
 
 
 class TestErrorResilience:
     """Graceful handling of edge cases."""
 
-    def test_route_command_catches_module_errors(self):
-        """Module exceptions are caught, returns False."""
+    def test_route_command_catches_module_errors(self, capsys):
+        """Module exceptions are caught, reported by name, and count as handled.
+
+        Rewritten 2026-09-08: this pinned ``False`` - the fall-through that
+        rendered a module crash as "Unknown command". The crash is now the
+        module's failure (True, exit 2 through resolve_exit), named on stderr.
+        """
         bad_module = MagicMock(__name__="bad_module")
         bad_module.handle_command.side_effect = Exception("boom")
         result = devpulse_module.route_command("test", [], [bad_module])
-        assert result is False
+        assert result is True
+        err = capsys.readouterr().err
+        assert "bad_module failed on 'test': Exception: boom" in err
+        assert "Unknown command" not in err
 
     def test_empty_file_modules_dir(self, tmp_path):
         """discover_modules handles empty_file in modules directory."""
@@ -130,7 +150,7 @@ class TestErrorResilience:
         empty.write_text("")
         with patch.object(devpulse_module, "MODULES_DIR", tmp_path):
             result = devpulse_module.discover_modules()
-        assert isinstance(result, list)
+        assert result == []
 
     def test_handle_command_with_empty_args(self):
         """--help with empty args list succeeds."""

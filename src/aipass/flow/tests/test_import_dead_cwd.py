@@ -321,7 +321,12 @@ class TestTheModuleCountIsDerivedFromTwoMechanisms:
         # will always convict the most careful author. Parsing gets the executable
         # body; comments are dropped by the tokenizer on the way.
         tree = ast.parse(inspect.getsource(_flow_modules_by_import_machinery).strip())
-        body = tree.body[0].body
+        function = tree.body[0]
+        assert isinstance(function, ast.FunctionDef), (
+            "the second derivation is no longer a plain function definition, so the source "
+            f"read below is not its body: {type(function).__name__}"
+        )
+        body = function.body
         if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
             body = body[1:]
         finder_source = "\n".join(ast.unparse(node) for node in body)
@@ -340,7 +345,17 @@ class TestTheModuleCountIsDerivedFromTwoMechanisms:
         """And that the fixture actually uses both, rather than one twice."""
         import inspect
 
-        fixture_source = inspect.getsource(flow_modules.__wrapped__)
+        # getattr rather than attribute access: pytest's public type for a
+        # fixture does not declare __wrapped__, so the checker cannot see the
+        # undecorated function even though it is there. Asserted first, so a
+        # pytest that stops wrapping fixtures fails HERE with a sentence rather
+        # than as an AttributeError three lines down.
+        undecorated = getattr(flow_modules, "__wrapped__", None)
+        assert undecorated is not None, (
+            "the flow_modules fixture no longer carries __wrapped__, so the source read "
+            "below would be the decorator's rather than the fixture's own"
+        )
+        fixture_source = inspect.getsource(undecorated)
 
         assert "_flow_modules()" in fixture_source and "_flow_modules_by_import_machinery()" in fixture_source, (
             "the fixture no longer derives its expectation from the second mechanism: " + fixture_source
@@ -1315,6 +1330,37 @@ print("FILE_ABS_TO_POSIX", posixpath.isabs(str(pathlib.__file__)))
             f"still pass — @seedgo's SHORT-TABLE species: {sorted(dialects)}"
         )
 
+        # A COUNT, FROM THE CLASS BODY RATHER THAN FROM THE TABLE. Everything
+        # above reads HOSTS and only HOSTS, so all three assertions are blind in
+        # one direction: a dialect world defined in this class and never
+        # REGISTERED is not a shrunken table, it is a table that never grew, and
+        # nothing here noticed. Add a third host constant, forget the HOSTS
+        # line, and every parametrisation over sorted(HOSTS) quietly keeps
+        # running two rows — the SHORT-TABLE species arriving from the other
+        # side. So the hosts are recounted independently: a class constant is an
+        # emulated host when it is NAMED one and BUILDS one, both read from the
+        # source rather than from the table. NO_HOST is named like a host and
+        # imports no dialect, which is exactly right — it installs no world, and
+        # it is correctly absent from HOSTS. The runner fakes import dialects too
+        # and are not hosts; the name is what separates them.
+        defined = {
+            name: value
+            for name, value in vars(type(self)).items()
+            if name.endswith("_HOST")
+            and isinstance(value, str)
+            and any(f"import {module}" in value for module in ("posixpath", "ntpath"))
+        }
+        assert len(self.HOSTS) == len(defined), (
+            "a dialect host is defined in this class body and never registered in HOSTS, so "
+            "every parametrisation over sorted(HOSTS) runs a row short and stays green: "
+            f"defined {sorted(defined)} vs registered {sorted(self.HOSTS)}"
+        )
+        assert set(self.HOSTS.values()) == set(defined.values()), (
+            "HOSTS registers a world that is not one of this class's dialect host constants, "
+            f"so a parametrised row is emulating something unnamed: {sorted(self.HOSTS)} vs "
+            f"{sorted(defined)}"
+        )
+
     def test_the_two_hosts_are_genuinely_different_worlds(self):
         """Control for the litmus: two identical hosts would pass it for free.
 
@@ -1584,7 +1630,11 @@ except OSError:
         runner to find it.
         """
         line = next(entry for entry in self.HOSTS[host].splitlines() if entry.startswith("ABSOLUTE = "))
-        node = ast.parse(line).body[0].value
+        statement = ast.parse(line).body[0]
+        assert isinstance(statement, ast.Assign), (
+            f"the {host} host's ABSOLUTE line is no longer a plain assignment: {line!r}"
+        )
+        node = statement.value
 
         assert isinstance(node, ast.Constant) and isinstance(node.value, str), (
             f"the {host} host COMPUTES its probe path rather than publishing one: "
@@ -1736,7 +1786,7 @@ class TestTheCallerIsNoneBranchSurvivesADeniedRealpath:
     @spawn measured the correction (relayed by @devpulse 2026-08-31): the branch
     is unreachable from IMPORT-shaped pins — ``apps/__init__.py`` always supplies
     a real-file frame, the nine-branch reproduction stands — but it IS reachable
-    by calling ``_guard_branch_access()`` DIRECTLY from a ``python -c`` child.
+    by calling ``_guard_branch_access()`` DIRECTLY from a ``-c`` interpreter child.
     Every frame there is a string pseudo-file or importlib, both skipped, so
     ``_find_real_caller`` returns None and the branch RUNS. Under a realpath
     denial a regrown walk dies in it; the cured plain ``return`` survives.
@@ -1752,7 +1802,7 @@ class TestTheCallerIsNoneBranchSurvivesADeniedRealpath:
     exercising the same-branch allow instead, and the test would pass while
     watching nothing.
 
-    Runs as ``python -c``, never a script and never a heredoc (@commons,
+    Runs as a ``-c`` interpreter child, never a script and never a heredoc (@commons,
     @hooks): a script frame is a real on-disk file, ``getsourcefile``
     early-returns, and the denial is silently inert.
     """
@@ -1802,7 +1852,7 @@ class TestNoModuleLevelLocationCallSurvives:
     CORRECTED 2026-08-31 (@spawn, relayed by @devpulse): this docstring used to
     end "a parse of the tree is the only instrument that sees it". That was TOO
     STRONG. The branch is unreachable from IMPORT-shaped pins, which is not the
-    same as unreachable — calling the guard DIRECTLY from a ``python -c`` child
+    same as unreachable — calling the guard DIRECTLY from a ``-c`` interpreter child
     reaches it, and ``TestTheCallerIsNoneBranchSurvivesADeniedRealpath`` above is
     that pin. Both are kept: regrowing the walk kills both, and this one needs no
     subprocess and names the offending line anywhere in the tree.

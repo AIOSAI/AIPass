@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
@@ -30,12 +29,16 @@ clothes.
 """
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import autostart as host_autostart
+from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
+from aipass.api.apps.modules import host_serve as host_serve_module
+from aipass.api.apps.modules.host_api import handle_command
 
 
 @pytest.fixture
@@ -69,6 +72,25 @@ def has_systemd(quiet: None, monkeypatch: pytest.MonkeyPatch) -> None:
     below, which patch the gate in the other direction.
     """
     monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+
+
+@pytest.fixture
+def quiet_serve(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """
+    Silence the CLI module and hand back what it tried to say.
+
+    The verb tests below assert on the operator-facing output, so the console
+    and the error reporter are captured rather than merely muted — a fixture
+    that only silenced them would leave those tests with nothing to read.
+    """
+    console = MagicMock()
+    reporter = MagicMock()
+    monkeypatch.setattr(host_serve_module, "console", console)
+    monkeypatch.setattr(host_serve_module, "header", MagicMock())
+    monkeypatch.setattr(host_serve_module, "error", reporter)
+    monkeypatch.setattr(host_serve_module, "logger", MagicMock())
+    monkeypatch.setattr(host_serve_module, "json_handler", MagicMock())
+    return {"console": console, "error": reporter}
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> MagicMock:
@@ -344,3 +366,117 @@ class TestTheInstallStepsAreOrderedAndOutsideTheTree:
         provides — the exact failure this build exists to end.
         """
         assert any("enable-linger" in step for step in host_autostart.install_commands(Path("/u")))
+
+
+class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
+    """
+    The verb itself, routed the way a person reaches it.
+
+    Everything above tests the handler. Nothing tested the CLI: seedgo's
+    entry_point_diff named `autostart` as a declared entry point no test
+    reaches, and it matched this branch's own APLAN-0013 N1a item, which had
+    measured 29 lines in cmd_autostart with 1 of them executed. So the four
+    outcomes an operator can actually produce are pinned here, through
+    handle_command, and the handler underneath is mocked — the wiring is what
+    was never run.
+
+    The exit-code arm matters most. An operator scripting `autostart &&
+    systemctl --user enable ...` must not reach the enable step when no unit
+    was written, and that is a promise the CLI makes, not the handler.
+    """
+
+    def _report(self, linger: Any = True, conflict: Any = None) -> dict:
+        """The handler's real report shape — unit, steps, linger, conflict."""
+        return {
+            "unit": Path("/branch/logs/aipass-host-api.service"),
+            "steps": ["cp /branch/logs/u.service ~/.config/systemd/user/", "systemctl --user enable --now x"],
+            "linger": linger,
+            "conflict": conflict,
+        }
+
+    def test_the_verb_routes_and_prints_the_installation_steps(self, quiet_serve: dict) -> None:
+        """The ordinary success path: every step reaches the operator's screen."""
+        report = self._report()
+
+        with patch.object(host_serve_module.host_lifetime, "autostart_report", return_value=report) as reporter:
+            assert handle_command("host-api", ["autostart"]) is True
+
+        reporter.assert_called_once_with(None, None)
+        printed = " ".join(str(call) for call in quiet_serve["console"].print.call_args_list)
+        for step in report["steps"]:
+            assert step in printed, f"the operator was not shown the step they have to run: {step}"
+
+    def test_lingering_being_off_is_a_warning_not_a_dim_note(self, quiet_serve: dict) -> None:
+        """
+        The one report field whose absence is the original 08-27 failure.
+
+        Without lingering the unit waits for a login that a headless reboot
+        never provides — the server stays down and the unit looks installed.
+        That has to reach `warning`, not the same dim line that says everything
+        is fine, because the two are read at a glance and never re-read.
+        """
+        with patch.object(host_serve_module, "warning") as warned:
+            with patch.object(
+                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(linger=False)
+            ):
+                assert handle_command("host-api", ["autostart"]) is True
+
+        warned.assert_called_once()
+        assert "linger" in str(warned.call_args).lower()
+
+    def test_lingering_that_could_not_be_read_is_not_reported_as_off(self, quiet_serve: dict) -> None:
+        """
+        None is a third answer, and collapsing it into False cries wolf.
+
+        The handler returns None when the question could not be asked at all.
+        An operator warned that lingering is OFF when nobody could tell is an
+        operator who stops believing the next warning.
+        """
+        with patch.object(host_serve_module, "warning") as warned:
+            with patch.object(
+                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(linger=None)
+            ):
+                assert handle_command("host-api", ["autostart"]) is True
+
+        warned.assert_not_called()
+
+    def test_a_non_numeric_port_is_refused_before_the_handler_runs(self, quiet_serve: dict) -> None:
+        """
+        A typo'd --port must not reach the unit renderer.
+
+        The handler would take the string and bake it into a file that runs at
+        every boot, so the refusal has to happen at the layer that parsed it.
+        """
+        with patch.object(host_serve_module.host_lifetime, "autostart_report") as reporter:
+            assert handle_command("host-api", ["autostart", "--port", "eighty-seven"]) is True
+
+        reporter.assert_not_called()
+        quiet_serve["error"].assert_called_once()
+        assert "eighty-seven" in str(quiet_serve["error"].call_args)
+
+    def test_an_unsupported_platform_is_reported_and_writes_nothing(self, quiet_serve: dict) -> None:
+        """No systemd is a refusal with a reason, never a traceback."""
+        refusal = host_autostart.AutostartUnsupported("systemd is not available on this platform")
+
+        with patch.object(host_serve_module.host_lifetime, "autostart_report", side_effect=refusal):
+            assert handle_command("host-api", ["autostart"]) is True
+
+        quiet_serve["error"].assert_called_once()
+        assert "systemd is not available" in str(quiet_serve["error"].call_args)
+
+    def test_a_refused_bind_exits_non_zero_so_a_chained_enable_never_runs(self, quiet_serve: dict) -> None:
+        """
+        D1 reaches the unit too, and the exit code is the whole point.
+
+        An address refused at the CLI must not be baked into something that
+        retries it at every boot forever, and an operator chaining the enable
+        step behind `&&` has only the exit code to tell them it did not.
+        """
+        refusal = host_config.BindRefused("wildcards are refused")
+
+        with patch.object(host_serve_module.host_lifetime, "autostart_report", side_effect=refusal):
+            with pytest.raises(SystemExit) as exit_info:
+                handle_command("host-api", ["autostart"])
+
+        assert exit_info.value.code == 1
+        quiet_serve["error"].assert_called_once()

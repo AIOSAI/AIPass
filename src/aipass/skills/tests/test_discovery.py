@@ -210,6 +210,9 @@ class TestDiscoverSkillsInPath:
     def test_skill_dict_structure(self):
         catalog_path = Path(__file__).resolve().parent.parent / "lib"
         skills = discover_skills_in_path(catalog_path, "builtin")
+        # The floor: without it an empty lib/ makes the loop below a silent
+        # pass. Seven built-in skills ship in lib/ (measured).
+        assert len(skills) == 7, f"lib/ discovery returned {len(skills)} skills, expected 7"
         for skill in skills:
             assert "name" in skill
             assert "description" in skill
@@ -240,7 +243,7 @@ class TestDiscoverSkillsInPath:
 
 class TestParseFrontmatter:
     def test_valid_file(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+        with tempfile.NamedTemporaryFile(encoding="utf-8", mode="w", suffix=".md", delete=False) as f:
             f.write("---\nname: test\ndescription: Hello\n---\n\n# Body\n")
             f.flush()
             result = parse_frontmatter(f.name)

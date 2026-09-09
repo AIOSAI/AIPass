@@ -725,8 +725,17 @@ class TestSubcommands:
         templates, _ = _import_templates(monkeypatch)
         assert "template-status" in templates._SUBCOMMANDS
 
-    def test_subcommands_values_are_strings(self, monkeypatch) -> None:
+    def test_subcommands_are_the_three_lane_verbs_with_one_line_help(self, monkeypatch) -> None:
+        """The map IS the help surface, so its verbs and its text both count.
+
+        Was an isinstance sweep over the map: true of an empty map and of a map
+        whose every description was the empty string, so it could not fail. The
+        three verbs the siblings above name one at a time are named together
+        here, and each description must be a non-empty single line because
+        `--help` printed one row per entry.
+        """
         templates, _ = _import_templates(monkeypatch)
+        assert set(templates._SUBCOMMANDS) == {"push-templates", "diff-templates", "template-status"}
         for key, value in templates._SUBCOMMANDS.items():
-            assert isinstance(key, str), f"Key {key!r} is not a string"
-            assert isinstance(value, str), f"Value for {key!r} is not a string"
+            assert value.strip(), f"{key} has no description -- --help would print a bare verb"
+            assert "\n" not in value, f"{key}'s description spans lines and would break the help table"

@@ -193,7 +193,7 @@ def test_query_karma_with_data(initialized_db: sqlite3.Connection) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.social.leaderboard_ops.json_handler")
+@patch("aipass.commons.apps.handlers.social.leaderboard_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.social.leaderboard_ops.close_db")
 @patch("aipass.commons.apps.handlers.social.leaderboard_ops.get_db")
 def test_show_leaderboard_returns_all_categories(
@@ -212,7 +212,7 @@ def test_show_leaderboard_returns_all_categories(
     assert set(result["boards"].keys()) == {"artifacts", "trades", "posts", "rooms", "karma"}
 
 
-@patch("aipass.commons.apps.handlers.social.leaderboard_ops.json_handler")
+@patch("aipass.commons.apps.handlers.social.leaderboard_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.social.leaderboard_ops.close_db")
 @patch("aipass.commons.apps.handlers.social.leaderboard_ops.get_db")
 def test_show_leaderboard_single_category(
@@ -244,10 +244,10 @@ def test_show_leaderboard_invalid_category() -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
-@patch("aipass.commons.apps.modules.explore.json_handler")
+@patch("aipass.commons.apps.modules.explore.json_handler", autospec=True)
 @patch(
     "aipass.commons.apps.modules.commons_identity.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},
@@ -270,10 +270,10 @@ def test_explore_handle_command_routes_explore(
     assert result is True
 
 
-@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler")
+@patch("aipass.commons.apps.handlers.rooms.explore_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.close_db")
 @patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db")
-@patch("aipass.commons.apps.modules.explore.json_handler")
+@patch("aipass.commons.apps.modules.explore.json_handler", autospec=True)
 @patch(
     "aipass.commons.apps.modules.commons_identity.get_caller_branch",
     return_value={"name": "TEST_BRANCH"},

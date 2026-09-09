@@ -30,7 +30,19 @@ class TestMockLoggerReachesItsConsumer:
         assert file_ops.logger is mock_logger
 
     def test_the_replacement_is_actually_a_mock(self, mock_logger):
+        """A RECORDING double, not merely an object of the right class.
+
+        isinstance alone passed for any Mock at all, including one nothing ever
+        reaches. What the fixture is FOR is that a call made through the
+        consumer's binding lands on the object the test holds, so the call is
+        made and read back.
+        """
         assert isinstance(file_ops.logger, Mock)
+
+        file_ops.logger.warning("template registry missing: %s", "citizen")
+
+        mock_logger.warning.assert_called_once_with("template registry missing: %s", "citizen")
+        assert mock_logger.error.call_count == 0
 
     def test_patching_the_prax_package_would_reach_nothing(self):
         """The retired spelling, pinned as the failure it was.

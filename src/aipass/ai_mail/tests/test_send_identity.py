@@ -585,14 +585,15 @@ class TestDispatchEnvIsolation:
 
         Without this, all env var isolation is useless — the subprocess
         would inherit os.environ instead of the cleaned spawn_env.
-        Accepts either the direct kwarg form (env=spawn_env) or the
-        popen_kwargs dict form ("env": spawn_env) introduced with the
-        sandbox broker-fd wiring (FPLAN-0250 Phase 6b).
+
+        MEASURED 2026-09-08: the source carries the popen_kwargs dict form and
+        ONLY that form — the direct kwarg spelling (env=spawn_env) is not in the
+        file since the sandbox broker-fd wiring landed (FPLAN-0250 Phase 6b).
+        This accepted either, so one live spelling and one dead one kept it
+        green; the dict form could have been dropped without a red.
         """
         active_source = self._load_active_source()
-        assert "env=spawn_env" in active_source or '"env": spawn_env' in active_source, (
-            "dispatch_monitor.py must pass spawn_env as the subprocess env"
-        )
+        assert '"env": spawn_env' in active_source, "dispatch_monitor.py must pass spawn_env as the subprocess env"
 
     def test_detect_refuses_when_cwd_is_outside_any_branch(self, clean_env, tmp_path, list_format_registry):
         """A CALLER_BRANCH claim no longer survives a CALLER_CWD outside any branch.

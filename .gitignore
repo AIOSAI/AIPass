@@ -200,3 +200,8 @@ sandbox_test/
 
 # mutmut working copy (advisory mutation runs, DPLAN-0323, 2026-09-07)
 mutants/
+
+# The last wake prompt a citizen received, filed into ITS .daemon/ by the daemon
+# (DPLAN-0332 catch-up lane) and by ai_mail's interactive lane. A runtime record
+# per machine, never a tracked file — it names live PIDs and fire instants.
+**/.daemon/last_wake_prompt.txt

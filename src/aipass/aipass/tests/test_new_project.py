@@ -555,12 +555,20 @@ def test_guard_init_blocks_nested_by_default(tmp_path):
 
 
 def test_guard_init_allows_nested_with_flag(tmp_path):
+    """The flag is the ONLY difference between the refusal and the pass.
+
+    Both halves stand in one unit on purpose (v5 no_oracle, 2026-09-08): the
+    old body called the allowed form and asserted nothing, so a _guard_init
+    that had stopped refusing anything at all would have kept it green.
+    """
     from aipass.aipass.apps.handlers.init.bootstrap import _guard_init
 
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}")
     target = tmp_path / "projects" / "nested"
     target.mkdir(parents=True)
-    _guard_init(target, allow_projects_child=True)
+    with pytest.raises(RuntimeError, match="inside AIPass project"):
+        _guard_init(target)
+    assert _guard_init(target, allow_projects_child=True) is None
 
 
 def test_guard_init_still_blocks_non_projects_nested(tmp_path):
@@ -754,15 +762,26 @@ def test_no_agent_skips_auto_launch(host_env, monkeypatch):
 
 
 def test_aipass_print_introspection():
-    from aipass.aipass.apps.aipass import print_introspection
+    """Bare invocation names the branch and points at --help."""
+    from aipass.aipass.apps import aipass as entry
 
-    print_introspection([])
+    with patch.object(entry, "console") as mock_console:
+        entry.print_introspection([])
+    printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+    assert "AIPASS \u2014 Concierge & Setup" in printed
+    assert "--help" in printed
 
 
 def test_aipass_print_help():
-    from aipass.aipass.apps.aipass import print_help
+    """Full help prints the usage block and the doctor command line."""
+    from aipass.aipass.apps import aipass as entry
 
-    print_help([])
+    with patch.object(entry, "console") as mock_console:
+        entry.print_help([])
+    printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+    assert "Usage:" in printed
+    assert "aipass[/green] [dim]<command>[/dim]" in printed
+    assert "System health \u2014 structure, registry, hooks, tests" in printed
 
 
 # ---------------------------------------------------------------------------

@@ -305,14 +305,25 @@ def test_kill_switch_inactive_when_no_file(tmp_path):
     assert result is False
 
 
-def test_kill_switch_uses_default_path_when_key_missing():
-    """Falls back to default path when kill_switch_path is absent from config."""
-    # With no kill_switch_path key, it uses the default (which shouldn't exist in test)
-    result = is_kill_switch_active({})
+def test_kill_switch_uses_default_path_when_key_missing(tmp_path, monkeypatch):
+    """With no kill_switch_path key it consults <repo root>/.aipass/autonomous_pause.
 
-    # The default path uses _REPO_ROOT / ".aipass" / "autonomous_pause"
-    # which should not exist in a test environment
-    assert isinstance(result, bool)
+    The assertion here was ``isinstance(result, bool)`` — true of every possible
+    implementation, including one that ignored the default path entirely and
+    returned False forever. It was also a fact about the AUTHOR'S MACHINE: the
+    real repo root was consulted, so the answer depended on whether a pause file
+    happened to exist. The default is aimed at tmp_path now, which makes both
+    answers observable and the result the same on any machine.
+    """
+    monkeypatch.setattr(daemon_mod, "_REPO_ROOT", tmp_path)
+    default_path = tmp_path / ".aipass" / "autonomous_pause"
+
+    assert is_kill_switch_active({}) is False
+
+    default_path.parent.mkdir(parents=True)
+    default_path.touch()
+
+    assert is_kill_switch_active({}) is True
 
 
 # ---- get_registered_branches tests -----------------------------

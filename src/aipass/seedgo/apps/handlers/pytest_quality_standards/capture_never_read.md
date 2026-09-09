@@ -82,9 +82,23 @@ be switched off within a day, and would deserve to be.
 
 ## What this rule does not claim
 
-- **It does not follow calls.** A unit that hands `capsys` to a helper which
-  reads it is flagged, and that flag is wrong. Following the call means resolving
-  a helper across modules — an interpreter, not a reader.
+- **It does not follow calls across modules.** Resolving a helper through an
+  import means executing the import graph — an interpreter, not a reader. A
+  helper reached by an import, an attribute, a class method or a variable
+  holding the function stays invisible, and its caller stays flagged.
+- **It does follow the module-level defs of one file, to a fixed point**
+  (2026-09-07). A unit that hands `capsys` to a same-file helper which reads
+  `readouterr()` off the parameter it arrived in *has* read its capture, and so
+  has one whose helper forwards that parameter to a second same-file helper
+  which reads it. Both spellings are live: @devpulse's suite is the one-hop form
+  (`_output(capsys)`), @memory's is the two-hop form (`_payload` → `_raw_stdout`).
+  Position is carried through the forward, so a helper that reads its *first*
+  argument does not excuse a caller that passed the fixture second.
+  Reported by @devpulse and confirmed by measurement over 22 branches: **132
+  rows before, 9 after** — devpulse 25 → 1, memory 98 → 1, seedgo 2 → 0, and six
+  branches keep the single row they had. The closure terminates by construction:
+  the candidate set is this file's defs, fixed before the loop, and each pass can
+  only add to a bounded set, so mutual recursion adds nothing on the second pass.
 - **It does not cover `caplog`,** despite what the rule's name suggests. `capsys`
   has a read *method*: a call site a reader can find. `caplog` is read by
   touching `.records` or `.text`, which is ordinary attribute access and looks

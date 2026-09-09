@@ -429,3 +429,42 @@ class TestRealTrinityFiles:
 
         assert isinstance(result["entry_size"]["violations"], list)
         assert isinstance(result["entry_size"]["total_violations"], int)
+
+
+# ===========================================================================
+# The exit seam — a refusal that exits 0 is half a refusal
+# ===========================================================================
+
+
+class TestTheUnknownSubcommandRefusalReachesTheExitCode:
+    """The fleet refusal sweep, 2026-09-07: `health <bogus>` exited 0.
+
+    It printed the right sentence through `warning()`, which colours the line
+    and marks nothing, so `resolve_exit(True)` in the entry point read a clean
+    command and returned 0. A script asking whether the verb existed was told
+    yes. The sentence is unchanged; it goes through `error()` now, which sets
+    the process failure flag the entry point reads.
+    """
+
+    def test_an_unknown_subcommand_exits_two(self, capsys):
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        health = _get_health()
+        reset_command_state()
+        assert health.handle_command("health", ["nonsense"]) is True
+        assert resolve_exit(True) == 2, "health refused an unknown subcommand but would exit 0"
+        captured = capsys.readouterr()
+        assert "nonsense" in captured.out + captured.err
+
+    def test_the_bare_verb_still_exits_zero(self, capsys):
+        """The other half: introspection is not a refusal and must stay 0."""
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        health = _get_health()
+        reset_command_state()
+        assert health.handle_command("health", []) is True
+        assert resolve_exit(True) == 0, "bare health is introspection, not a failure"
+        # Read the capture: exit 0 alone cannot tell introspection from silence.
+        captured = capsys.readouterr()
+        assert "health Module" in captured.out
+        assert "get_branch_health" in captured.out

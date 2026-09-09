@@ -73,8 +73,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import warning
+    from aipass.cli.apps.modules import error
 
-    warning(f"governance: unknown subcommand '{args[0]}'")
+    error(f"governance: unknown subcommand '{args[0]}'")
     print_introspection()
     return True

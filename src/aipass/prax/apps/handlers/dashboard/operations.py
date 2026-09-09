@@ -222,7 +222,7 @@ def _load_or_create_dashboard(dashboard_path: Path, branch_path: Path) -> Dict:
     """Load existing dashboard JSON or create from template."""
     if not dashboard_path.exists():
         return create_fresh_dashboard(branch_path)
-    content = dashboard_path.read_text().strip()
+    content = dashboard_path.read_text(encoding="utf-8").strip()
     if not content:
         return create_fresh_dashboard(branch_path)
     try:

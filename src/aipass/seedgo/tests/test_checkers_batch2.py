@@ -114,7 +114,9 @@ def do_work():
         assert result["score"] < 100
         violations = [c for c in result["checks"] if not c["passed"]]
         assert len(violations) > 0
-        assert "silent failure" in violations[0]["message"].lower() or "except" in violations[0]["message"].lower()
+        assert violations[0]["message"] == (
+            "Silent failure detected (except: pass) in bad_errors.py at line 4 - errors should log/return"
+        )
 
     def test_error_handling_bypass_respected(self, tmp_path: Path) -> None:
         code = """\
@@ -261,7 +263,7 @@ def call_api():
         assert result["score"] < 100
         violations = [c for c in result["checks"] if not c["passed"]]
         assert len(violations) > 0
-        assert "hardcoded" in violations[0]["message"].lower() or "key" in violations[0]["message"].lower()
+        assert violations[0]["message"] == "Found 1 hardcoded key(s) on lines 1"
 
     def test_hardcoded_key_bypass_respected(self, tmp_path: Path) -> None:
         # NOTE: same FAKE/synthetic sk-or-v1-... fixture key below — not a real credential.

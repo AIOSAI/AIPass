@@ -57,7 +57,7 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> N
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_and_retrieve(
     mock_logger: object,
@@ -75,7 +75,7 @@ def test_set_preference_and_retrieve(
     assert level == "watch"
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_update_existing(
     mock_logger: object,
@@ -93,7 +93,7 @@ def test_set_preference_update_existing(
     assert get_preference(conn, "TEST_BRANCH", "room", "dev") == "mute"
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_invalid_level(
     mock_logger: object,
@@ -108,7 +108,7 @@ def test_set_preference_invalid_level(
     assert result is False
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_invalid_target_type(
     mock_logger: object,
@@ -142,7 +142,7 @@ def test_get_preference_nonexistent(initialized_db: object) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_get_all_preferences_returns_all(
     mock_logger: object,
@@ -180,7 +180,7 @@ def test_get_all_preferences_empty_for_new_agent(initialized_db: object) -> None
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_mute_returns_false(
     mock_logger: object,
@@ -198,7 +198,7 @@ def test_should_notify_mute_returns_false(
     assert should_notify(conn, "TEST_BRANCH", "room", "general", "new_post") is False
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_watch_returns_true_for_any_event(
     mock_logger: object,
@@ -217,7 +217,7 @@ def test_should_notify_watch_returns_true_for_any_event(
     assert should_notify(conn, "TEST_BRANCH", "room", "general", "reaction") is True
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_track_only_mention_and_reply(
     mock_logger: object,
@@ -252,7 +252,7 @@ def test_should_notify_default_no_preference(initialized_db: object) -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler")
+@patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_get_watchers_returns_watching_agents(
     mock_logger: object,

@@ -39,7 +39,7 @@ from aipass.aipass.apps.modules.doctor import _check_sandbox
 @pytest.fixture(autouse=True)
 def _stub_json_handler():
     """Suppress json_handler.log_operation side effects in all tests."""
-    with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.json_handler") as mock:
+    with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.json_handler", autospec=True) as mock:
         mock.log_operation = MagicMock()
         yield mock
 
@@ -461,7 +461,7 @@ class TestIsLinux:
 @pytest.fixture
 def _stub_doctor_json():
     """Stub json_handler inside doctor.py too."""
-    with patch("aipass.aipass.apps.modules.doctor.json_handler") as mock:
+    with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True) as mock:
         mock.log_operation = MagicMock()
         yield mock
 
@@ -503,6 +503,10 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
         results = _check_sandbox()
+        # THE FLOOR (v5 unentered_assert, 2026-09-08). Six rows measured from
+        # the shell the same day with every prereq stubbed absent; an empty
+        # result made "no FAIL anywhere" true by vacuity.
+        assert len(results) >= 6, f"only {len(results)} rows - the loop below proves nothing"
         for r in results:
             assert r.glyph != GLYPH_FAIL, f"Flag OFF should not produce FAIL, got FAIL for {r.label}"
 
@@ -565,6 +569,11 @@ class TestCheckSandboxDoctor:
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: Path("/tmp/fake"))
 
         results = _check_sandbox()
+        # THE FLOOR (v5 unentered_assert, 2026-09-08). Seven rows measured from
+        # the shell the same day with every prereq stubbed present - one more
+        # than the flag-off shape, because bwrap functional is only probed when
+        # bwrap is there. An empty result made "all PASS" true by vacuity.
+        assert len(results) >= 7, f"only {len(results)} rows - the loop below proves nothing"
         for r in results:
             assert r.glyph == GLYPH_PASS, f"All present should be PASS, got {r.glyph} for {r.label}"
 
@@ -686,7 +695,13 @@ class TestCheckSandboxDoctor:
 
         results = _check_sandbox()
         missing_results = [r for r in results if r.glyph == GLYPH_WARN]
+        # THE FLOOR AND THE ESCAPE, BOTH (v5 unentered_assert + assertion_shape,
+        # 2026-09-08). Measured from the shell the same day: five WARN rows -
+        # bwrap, node, srt, rg, broker daemon - and NOT the sandbox flag row,
+        # which reads PASS when the flag is off. So the `or r.label ==
+        # "sandbox flag"` arm never once fired, and it acquitted every row it
+        # would have reached. Empty results made the loop vacuous on top.
+        assert len(missing_results) >= 5, f"only {len(missing_results)} WARN rows - the loop proves nothing"
+        assert "sandbox flag" not in [r.label for r in missing_results]
         for r in missing_results:
-            assert "inert" in r.detail or r.label == "sandbox flag", (
-                f"Missing prereq {r.label} should show inert suffix"
-            )
+            assert "inert" in r.detail, f"Missing prereq {r.label} should show inert suffix"

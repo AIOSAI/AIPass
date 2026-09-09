@@ -27,6 +27,7 @@ from aipass.cli.apps.modules import console, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, discover_jobs
+from aipass.daemon.apps.handlers.schedule.recovery import compose_prompt
 from aipass.daemon.apps.handlers.schedule.runstate import load_runstate, job_key
 from aipass.daemon.apps.handlers.schedule.rotation import (
     DEFAULT_INCLUDE_MANAGERS,
@@ -175,9 +176,13 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
     return ok, status.summary, False
 
 
-def fire_rotation(job: dict, runstate: dict) -> tuple:
+def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
     """
     Fire one rotation turn: pick the next citizen, wake it, advance the pointer.
+
+    ``header`` is the DPLAN-0332 wake header. It arrives composed rather than
+    built here, because why a wake is happening is the scheduler's knowledge —
+    the rotation only knows whose night it is.
 
     Returns (ok: bool, detail: str) for the scheduler tick. `ok` reports whether
     the rotation completed a turn — a target that was busy is a recorded miss,
@@ -211,6 +216,8 @@ def fire_rotation(job: dict, runstate: dict) -> tuple:
     model = wake.get("model") or DEFAULT_WAKE_MODEL
     fresh = wake.get("fresh", True)
     prompt = render_prompt(job.get("prompt", ""), email)
+    if header:
+        prompt = compose_prompt(header, prompt)
 
     _log(f"STEWARD: {email} — wake_branch(fresh={fresh}, model={model}, manager={is_manager})")
 

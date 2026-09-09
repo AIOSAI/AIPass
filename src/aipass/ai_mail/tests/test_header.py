@@ -186,6 +186,11 @@ def test_header_docstring_opens_the_module_body():
     assert isinstance(first, ast.Expr), f"module opens with {type(first).__name__}"
     assert isinstance(first.value, ast.Constant)
     assert isinstance(first.value.value, str)
+    # The three shape checks above are satisfied by ANY opening string literal,
+    # including one sitting above a docstring assigned some other way — which is
+    # the very shape the pin above this one cannot tell apart. Tying the literal
+    # to __doc__ is what makes mechanism and outcome the same string.
+    assert first.value.value == mod.__doc__, "the opening literal IS the docstring, not a string beside it"
 
 
 def _discarded_module_strings(source: str) -> list:

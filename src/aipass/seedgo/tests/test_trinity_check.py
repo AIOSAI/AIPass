@@ -1792,6 +1792,10 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
+        # Floor, measured: nine groups are always reported, even for a branch
+        # whose local.json will not parse. Without it an empty checks list would
+        # walk this row green having read no key at all.
+        assert len(result["checks"]) == 9
         for check in result["checks"]:
             assert set(check) == {"name", "passed", "message", "score"}
             assert isinstance(check["score"], int)
@@ -1848,14 +1852,52 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
-        for check in result["checks"]:
-            if not check["passed"]:
-                assert check["score"] < 100
+        # The failing groups are selected first and counted, because the guard
+        # this replaces asserted nothing at all if every group happened to pass.
+        # Measured on this fixture: 7 of the 9 groups fail on an unparseable
+        # local.json; File set and Receipt are the two that survive it.
+        failing = [check for check in result["checks"] if not check["passed"]]
+        assert len(failing) == 7, f"expected 7 failing groups, got {[c['name'] for c in failing]}"
+        for check in failing:
+            assert check["score"] < 100
 
 
 # ===========================================================================
 # F. Meta composition -- the two implementations must never drift apart
 # ===========================================================================
+
+
+def _both_composers(checker):
+    """The two inputs the cross-implementation guard needs, or a red naming what is gone.
+
+    THESE THREE ARMS USED TO SKIP (SELF-SKIP, cured 2026-09-07). Measured over
+    the whole class before the change: 28 of 28 parametrisations ran and none
+    skipped, so no arm protected anything. What they COULD do is silently retire
+    the guard - the one thing standing between @memory's composer and this
+    checker drifting apart - the moment a file moved. A guard that cannot run is
+    a guard that is not there, and the fleet would have learned that from a
+    green suite.
+
+    Args:
+        checker: The trinity checker under test.
+
+    Returns:
+        `(compose_meta, config, prose)`, all three non-None. The composer is
+        handed back rather than read from module scope at the call site, so the
+        caller gets a callable a type checker can see is not None - which is the
+        same fact the assertion below establishes, stated once.
+    """
+    compose = _compose_meta
+    assert compose is not None, (
+        f"@memory's tab_renderer is the OTHER side of this guard and it is unreachable "
+        f"({_COMPOSE_META_IMPORT_ERROR}) - the byte-identity check cannot run, which is a "
+        f"finding about the fleet and not a reason to pass"
+    )
+    config = checker.load_memory_config()
+    prose = checker.load_template_prose()
+    assert config is not None, "live memory.config.json is unreadable - the meta line has no source"
+    assert prose is not None, "the gold templates are unreadable - the meta line has no prose"
+    return compose, config, prose
 
 
 class TestMetaComposition:
@@ -1947,32 +1989,22 @@ class TestMetaComposition:
         decides whether what it finds is right. If the two ever disagree the
         fleet fails a group forever with nobody able to fix it.
         """
-        if _compose_meta is None:
-            pytest.skip(f"@memory tab_renderer unavailable: {_COMPOSE_META_IMPORT_ERROR}")
-        config = checker.load_memory_config()
-        prose = checker.load_template_prose()
-        if config is None or prose is None:
-            pytest.skip("live memory.config.json or gold templates unavailable")
+        compose, config, prose = _both_composers(checker)
 
         mine = checker.expected_meta_line(section, branch_name, config, prose[section])
-        theirs = _compose_meta(section, config.get("rollover", {}), config.get("entry_limits", {}), branch_name)
+        theirs = compose(section, config.get("rollover", {}), config.get("entry_limits", {}), branch_name)
 
         assert mine == theirs
 
     def test_per_branch_char_cap_override_survives_the_renderer(self, checker):
-        if _compose_meta is None:
-            pytest.skip(f"@memory tab_renderer unavailable: {_COMPOSE_META_IMPORT_ERROR}")
-        config = checker.load_memory_config()
-        prose = checker.load_template_prose()
-        if config is None or prose is None:
-            pytest.skip("live memory.config.json or gold templates unavailable")
+        compose, config, prose = _both_composers(checker)
         overridden = copy.deepcopy(config)
         overridden.setdefault("entry_limits", {}).setdefault("per_branch", {})["seedgo"] = {
             "observations": {"max_chars": 120}
         }
 
         mine = checker.expected_meta_line("observations", "seedgo", overridden, prose["observations"])
-        theirs = _compose_meta(
+        theirs = compose(
             "observations",
             overridden.get("rollover", {}),
             overridden.get("entry_limits", {}),

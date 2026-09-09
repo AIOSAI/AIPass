@@ -11,6 +11,7 @@
 from unittest.mock import MagicMock, patch
 
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
+from aipass.cli.apps.modules import display
 
 PATCH_CONSOLE = "aipass.api.apps.api.console"
 PATCH_HEADER = "aipass.api.apps.api.header"
@@ -350,7 +351,7 @@ class TestRouterNormalisesHelpFlag:
 
         with (
             patch("aipass.api.apps.api.discover_modules", return_value=[module]),
-            patch("aipass.api.apps.api.json_handler"),
+            patch("aipass.api.apps.api.json_handler", autospec=True),
             patch("sys.argv", ["api.py"] + argv),
         ):
             main()
@@ -371,3 +372,81 @@ class TestRouterNormalisesHelpFlag:
     def test_normal_args_pass_through_untouched(self):
         """Commands without a help flag are handed their real args."""
         assert self._run(["get-key", "openrouter"]) == [("get-key", ["openrouter"])]
+
+
+class TestTheExitSeamCarriesARefusal:
+    """A command that RAN and REFUSED must not report success.
+
+    Until 2026-09-08 main() returned 0 on any truthy route, and a module
+    returning True means only "I recognised this command" — never "it worked".
+    Six commands were measured exiting 0 on a failure on 2026-08-28
+    (APLAN-0013 item 1: caller-usage, track, get-key, validate, get-secret,
+    models), so `drone @api validate && <next>` proceeded on a missing key.
+    The code now comes from cli's process-level failure flag, which error()
+    raises: 1 unrecognised, 2 recognised-and-refused, 0 otherwise.
+
+    These pins go through the REAL error(), not a mock, because the thing
+    under test is the wiring between the two — a mocked error() sets no flag
+    and would pass against the old code.
+    """
+
+    def _run(self, argv, module_body):
+        """Run main() with one discovered module whose handle_command is module_body."""
+        module = _make_fake_module("fake")
+        module.handle_command.side_effect = module_body
+
+        with (
+            patch(PATCH_DISCOVER, return_value=[module]),
+            patch(PATCH_JSON_HANDLER, autospec=True),
+            patch(PATCH_CONSOLE),
+            patch(PATCH_LOGGER),
+            patch("aipass.cli.apps.modules.display.err_console"),
+            patch("sys.argv", ["api.py"] + argv),
+        ):
+            return main()
+
+    def test_a_handled_refusal_exits_2(self):
+        """The exact APLAN-0013 shape: a real command, a real failure, exit 0."""
+
+        def refuse(command, args):
+            display.error("No API key found for openrouter")
+            return True
+
+        assert self._run(["validate"], refuse) == 2
+
+    def test_a_handled_success_still_exits_0(self):
+        """The seam must not turn every command into a failure."""
+
+        def succeed(command, args):
+            return True
+
+        assert self._run(["list-providers"], succeed) == 0
+
+    def test_an_unrecognised_command_is_1_not_2(self):
+        """Unhandled outranks failed — 'no such command' is not 'the command failed'.
+
+        main() prints its own error() on this path, so the flag IS set by the
+        time resolve_exit runs; the distinction has to survive that.
+        """
+
+        def decline(command, args):
+            return False
+
+        assert self._run(["definitelynotacommand"], decline) == 1
+
+    def test_a_stale_failure_flag_from_an_earlier_command_is_not_ours(self):
+        """The flag is process-level, so main() clears it before anything can set it.
+
+        Without the reset at the top of main(), one refusal anywhere earlier in
+        the process — a previous command, or an imported branch printing its
+        own error while ours was still succeeding — makes every later success
+        exit 2. In-process callers and the test suite itself share that flag.
+        """
+
+        def succeed(command, args):
+            return True
+
+        display.mark_command_failed()
+        assert display.command_failed() is True, "the precondition this test needs was not set up"
+
+        assert self._run(["list-providers"], succeed) == 0

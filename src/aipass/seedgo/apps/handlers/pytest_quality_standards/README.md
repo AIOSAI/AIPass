@@ -34,7 +34,7 @@ The design was the defect. This pack is the correction.
 |---|---|
 | substring match over raw text | AST, every time |
 | comments and docstrings score | only code counts |
-| 51 pattern items, all mandatory | eleven independent rules |
+| 51 pattern items, all mandatory | fourteen independent rules |
 | one number, no evidence | every flag carries its nodeid, line and calls |
 | gated the board at 100 | **advisory** — reports, never fails |
 | AIPass-specific | generic: stdlib-only, lifts onto any Python project |
@@ -50,10 +50,13 @@ The design was the defect. This pack is the correction.
 | `empty_parametrize` | does this table have cases, or does the test never run? |
 | `mock_drift` | does the patched target still exist in production? |
 | `self_skip` | does this test skip itself into permanent silence? |
+| `fresh_clone` | would this test pass on a machine that has only what the repo ships? |
+| `platform_oracle` | is this test's pass or fail a fact about the code, or about the host? |
 | `posix_literal` | does this test hardcode one platform's path shape? |
 | `entry_point_diff` | does production declare a verb no test names? |
 | `coverage_slot` | does this test confess, in prose, to existing for coverage? |
 | `docstring_pin` | does the docstring name a symbol the test actually calls? |
+| `host_state` | does this test leave the machine the way it found it? |
 
 ## Two design commitments
 

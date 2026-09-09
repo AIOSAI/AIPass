@@ -223,7 +223,10 @@ class TestResetCommand:
 
         handle_command(command="reset")
         printed = mocks["console"].print.call_args[0][0]
-        assert "reset" in printed.lower() or "default" in printed.lower()
+        # The one string the module prints, measured by running it. The two
+        # `or` clauses this replaces both held, so neither was load-bearing:
+        # any confirmation mentioning either word passed.
+        assert printed == "Registry path reset to default"
 
 
 # ===========================================================================
@@ -245,5 +248,8 @@ class TestUnknownCommand:
 
         handle_command(command="destroy")
         mocks["logger"].warning.assert_called()
-        warning_msg = mocks["logger"].warning.call_args[0][0]
-        assert "unknown" in warning_msg.lower() or "destroy" in str(mocks["logger"].warning.call_args)
+        # The format string and the lazy argument, separately. Both clauses of
+        # the `or` this replaces held — the second one read the repr of the whole
+        # call, so it passed on the format string alone.
+        assert mocks["logger"].warning.call_args[0][0] == "config: unknown command '%s'"
+        assert mocks["logger"].warning.call_args[0][1] == "destroy"

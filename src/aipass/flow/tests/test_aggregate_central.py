@@ -183,7 +183,7 @@ class TestAggregateCentralOrchestrator:
 
 class TestOperationLogging:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
-    @patch(f"{_MOD}.json_handler")
+    @patch(f"{_MOD}.json_handler", spec=True)
     def test_logs_operation(self, mock_jh, mock_aggregate):
         handle_command = _import_handle_command()
         result = handle_command("aggregate", ["--heal"])
@@ -194,7 +194,7 @@ class TestOperationLogging:
         )
 
     @patch(f"{_MOD}.print_introspection")
-    @patch(f"{_MOD}.json_handler")
+    @patch(f"{_MOD}.json_handler", spec=True)
     def test_no_logging_on_introspection(self, mock_jh, mock_intro):
         """Introspection (no args) should not log an operation."""
         handle_command = _import_handle_command()
@@ -203,7 +203,7 @@ class TestOperationLogging:
         mock_jh.log_operation.assert_not_called()
 
     @patch(f"{_MOD}.print_help")
-    @patch(f"{_MOD}.json_handler")
+    @patch(f"{_MOD}.json_handler", spec=True)
     def test_no_logging_on_help(self, mock_jh, mock_help):
         """Help should not log an operation."""
         handle_command = _import_handle_command()

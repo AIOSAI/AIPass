@@ -627,7 +627,14 @@ def test_default_model_is_opus():
 
 
 def test_known_model_aliases_are_bare_names():
-    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix)."""
+    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix).
+
+    The floor below is the whole point: the only assertion here is inside the
+    loop, so emptying KNOWN_MODEL_ALIASES — which would break every wake — made
+    this unit pass having checked nothing. Four is measured 2026-09-08: sonnet,
+    opus, haiku, fable.
+    """
+    assert len(KNOWN_MODEL_ALIASES) == 4, sorted(KNOWN_MODEL_ALIASES)
     for alias in KNOWN_MODEL_ALIASES:
         assert not alias.startswith("claude-"), f"{alias} should be a bare alias"
 
@@ -1900,59 +1907,193 @@ class TestIsManager:
         assert "wake skipped, mail delivered" not in src
 
 
-# --- wake-lane rulings, Patrick 2026-08-30 ------------------------------
+# --- wake-lane rulings, Patrick 2026-09-08 ------------------------------
+#
+# THESE PINS WERE WRITTEN TO THE 2026-08-30 RULING AND ARE REWRITTEN IN PLACE.
+# That rule was "managers are fable thats it, only manager run fable", and this
+# class pinned it from both sides. It is superseded (compass #323 → #350): only
+# @devpulse runs Fable, granted by NAME, and citizen_class decides nothing about
+# the model any more. Every assertion below changed direction — a class-based
+# pin cannot express "this one manager and no other", which is the whole reason
+# the ruling moved after @vera, a manager-class project owner, woke on Fable
+# through the scheduled lane on 2026-09-08.
+
+
+@pytest.fixture
+def granted(monkeypatch, tmp_path):
+    """Point the grant at a written config, and hand back a writer for it.
+
+    The real CONFIG_FILE is untracked and may hold anything on the machine
+    running this suite, so a test that read it would be measuring Patrick's
+    laptop. Every test here writes the grant it means to test.
+    """
+
+    def _write(entries):
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"fable_allowed": entries}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+        return config
+
+    return _write
 
 
 class TestWakeModelPolicy:
-    """resolve_wake_model() — "managers are fable thats it, only manager run fable".
+    """resolve_wake_model() — Fable is granted by name, to @devpulse alone.
 
     Two halves tested separately because they fail in opposite directions: the
-    manager half over-applies Fable if it is wrong, the non-manager half lets it
-    leak. A test suite that only pinned the first would pass a policy that gave
-    Fable to everybody.
+    grant half strands @devpulse on opus if it is wrong, the refusal half lets
+    Fable leak to everyone. A suite that only pinned the first would pass a
+    policy that gave Fable to everybody, which is the policy that was just
+    superseded.
     """
 
-    def test_manager_with_no_requested_model_gets_fable(self):
-        assert wake_mod.resolve_wake_model("manager", None) == "fable"
+    def test_a_granted_seat_may_ask_for_fable(self, granted):
+        granted(["@devpulse"])
 
-    def test_manager_request_is_overridden_not_honoured(self):
-        """A schedule naming a model is a preference; the ruling is a policy."""
-        assert wake_mod.resolve_wake_model("manager", "sonnet") == "fable"
+        assert wake_mod.resolve_wake_model("@devpulse", "fable").model == "fable"
 
-    def test_manager_already_asking_for_fable_still_gets_fable(self):
-        assert wake_mod.resolve_wake_model("manager", "claude-fable-5") == "fable"
+    def test_a_seat_without_the_grant_is_refused_and_told_why(self, granted):
+        """The refusal is RETURNED, not only logged. The superseded version only
+        logged it, and a log line is not read by whoever typed the command."""
+        granted(["@devpulse"])
 
-    def test_non_manager_with_no_request_keeps_todays_default(self):
-        """The ruling changed who gets Fable, not what everyone else defaults to."""
-        assert wake_mod.resolve_wake_model("aipass_framework", None) == DEFAULT_MODEL
+        decision = wake_mod.resolve_wake_model("@vera", "fable")
 
-    def test_non_manager_request_is_honoured_as_today(self):
-        assert wake_mod.resolve_wake_model("aipass_framework", "sonnet") == "sonnet"
+        assert decision.model == DEFAULT_MODEL
+        assert "@vera" in decision.refusal, decision.refusal
+        assert "fable" in decision.refusal.lower(), decision.refusal
+        assert "2026-09-08" in decision.refusal, decision.refusal
 
-    def test_non_manager_asking_for_fable_falls_back_never_refuses(self):
-        """Refusing the wake would punish the target for its schedule's model
+    def test_a_refused_request_never_stalls_the_wake(self, granted):
+        """Refusing the WAKE would punish the target for its schedule's model
         field. The wake happens; the model does not."""
-        assert wake_mod.resolve_wake_model("aipass_framework", "fable") == DEFAULT_MODEL
+        granted(["@devpulse"])
 
-    def test_non_manager_full_fable_id_is_refused_too(self):
+        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
+
+    def test_manager_class_no_longer_buys_fable(self, granted):
+        """The superseded rule, pinned as superseded. This is the exact call the
+        08-30 version answered with "fable" for any manager; @vera is
+        manager-class and holds no grant, so it is opus now."""
+        granted(["@devpulse"])
+
+        assert wake_mod.resolve_wake_model("@vera", None).model == DEFAULT_MODEL
+        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
+
+    def test_nothing_requested_is_the_default_even_for_a_granted_seat(self, granted):
+        """The grant is permission to ASK for Fable, not a standing assignment
+        to it. Patrick: everyone runs opus by default when dispatched."""
+        granted(["@devpulse"])
+
+        assert wake_mod.resolve_wake_model("@devpulse", None).model == DEFAULT_MODEL
+
+    def test_a_lighter_request_is_honoured_unchanged(self, granted):
+        """The ruling names who may run Fable. It does not touch anything else,
+        and the 08-30 version overrode a manager's sonnet request outright."""
+        granted(["@devpulse"])
+
+        assert wake_mod.resolve_wake_model("@devpulse", "sonnet").model == "sonnet"
+        assert wake_mod.resolve_wake_model("@ai_mail", "haiku").model == "haiku"
+
+    def test_the_full_fable_id_is_caught_too(self, granted):
         """The spelling that walks past an equality check. `--model` takes both
         `fable` and `claude-fable-5`, so a policy comparing to the bare alias
-        would hand a non-manager the exact model the ruling forbids."""
-        assert wake_mod.resolve_wake_model("aipass_framework", "claude-fable-5") == DEFAULT_MODEL
+        would hand an ungranted seat the exact model the ruling forbids."""
+        granted(["@devpulse"])
 
-    def test_non_manager_fable_is_refused_whatever_the_casing(self):
-        assert wake_mod.resolve_wake_model("specialist", "FABLE") == DEFAULT_MODEL
+        assert wake_mod.resolve_wake_model("@vera", "claude-fable-5").model == DEFAULT_MODEL
 
-    def test_unclassified_citizen_is_treated_as_non_manager(self):
-        """An unreadable passport reaches this function as "". Failing toward
-        manager would silently move an ordinary branch onto Fable — the same
-        direction is_manager() already refuses to fail in."""
-        assert wake_mod.resolve_wake_model("", None) == DEFAULT_MODEL
-        assert wake_mod.resolve_wake_model("", "fable") == DEFAULT_MODEL
+    def test_fable_is_refused_whatever_the_casing(self, granted):
+        granted(["@devpulse"])
+
+        assert wake_mod.resolve_wake_model("@vera", "FABLE").model == DEFAULT_MODEL
+
+    def test_the_address_spelling_cannot_escape_the_grant(self, granted):
+        """Both directions of the same normalisation. A grant keyed on an
+        address is worthless if typing it differently changes the answer —
+        dropping the @ or shouting it must not promote OR demote a seat."""
+        granted(["devpulse"])
+
+        assert wake_mod.resolve_wake_model("@DevPulse", "fable").model == "fable"
+        assert wake_mod.resolve_wake_model("devpulse", "fable").model == "fable"
+        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
 
     def test_fable_is_a_known_alias(self):
         """The lane names a model the CLI actually resolves."""
         assert "fable" in KNOWN_MODEL_ALIASES
+
+
+class TestTheGrantIsReadFromTheUntrackedConfig:
+    """fable_allowed() — Patrick edits the grant, the repo does not ship it.
+
+    The direction of every fallback here is the point: a grant that collapsed to
+    EMPTY on a bad file would demote @devpulse silently, and the only symptom
+    would be devpulse spawning on opus. Failing toward the written ruling is the
+    recoverable direction; failing toward nobody is not.
+    """
+
+    def test_a_missing_config_falls_back_to_the_written_default(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", tmp_path / "nothing_here.json")
+
+        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+        assert "@devpulse" in wake_mod.fable_allowed()
+
+    def test_an_unparseable_config_falls_back_to_the_default(self, monkeypatch, tmp_path):
+        config = tmp_path / "safety_config.json"
+        config.write_text("{not json{{{", encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+
+    def test_a_config_without_the_key_falls_back_to_the_default(self, monkeypatch, tmp_path):
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"max_turns_per_wake": 100}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+
+    def test_a_grant_that_is_not_a_list_falls_back_to_the_default(self, monkeypatch, tmp_path):
+        """The typo shape: a bare string instead of a list. Iterating it would
+        grant '@', '@d', '@e' — a frozenset of letters that matches nobody, i.e.
+        a silent revocation dressed as a config."""
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"fable_allowed": "@devpulse"}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+
+    def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
+        """Patrick moving the seat means the default no longer applies — this is
+        a replacement, not an addition, or a revoked seat could never be revoked."""
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"fable_allowed": ["@someone_else"]}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == frozenset({"@someone_else"})
+        assert "@devpulse" not in wake_mod.fable_allowed()
+
+    def test_an_explicit_empty_list_revokes_the_grant_from_everyone(self, monkeypatch, tmp_path):
+        """A decision, not an accident, and distinguishable from the key being
+        absent. It is the spelling for turning Fable off fleet-wide."""
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"fable_allowed": []}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == frozenset()
+        assert wake_mod.resolve_wake_model("@devpulse", "fable").model == DEFAULT_MODEL
+
+    def test_written_entries_are_normalised_like_every_other_address(self, monkeypatch, tmp_path):
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps({"fable_allowed": ["DevPulse", "@Vera"]}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == frozenset({"@devpulse", "@vera"})
+
+    def test_the_grant_lives_where_the_repo_does_not_ship_it(self):
+        """The config path is inside .ai_mail.local/, which is gitignored. It
+        pointed at the branch root until 2026-09-08 — tracked territory, i.e.
+        the repo would have shipped an answer to who may run Fable."""
+        assert wake_mod.CONFIG_FILE.parent.name == ".ai_mail.local"
 
 
 def _tmux_line(calls, verb):
@@ -1984,7 +2125,14 @@ class TestUnattendedWakesBypassPermissions:
 
     def test_interactive_manager_lane_names_its_model_never_a_bare_claude(self, tmp_path, monkeypatch):
         """Naming nothing is how @vera reached Fable by accident — right answer,
-        no decision behind it. The lane states the model it means."""
+        no decision behind it. The lane states the model it means.
+
+        The claim is that a model is NAMED, not which one: this pinned the
+        literal "--model fable" until 2026-09-08, so it was really re-asserting
+        the manager rule and it went red the moment that rule was superseded.
+        A manager with no request now resolves to the default, and the point of
+        this unit — no bare `claude` on this lane, ever — is unchanged.
+        """
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -1992,7 +2140,7 @@ class TestUnattendedWakesBypassPermissions:
         status, ok = wake_branch("@testbranch", sender="@daemon")
 
         assert ok is True
-        assert "--model fable" in _tmux_line(calls, "send-keys")
+        assert f"--model {DEFAULT_MODEL}" in _tmux_line(calls, "send-keys")
 
     def test_headless_lane_still_bypasses(self, tmp_path, monkeypatch):
         """Regression guard: the lane that already complied must keep complying."""
@@ -2128,32 +2276,55 @@ class TestDaemonSessionMarking:
 class TestModelPolicyReachesBothSpawnLanes:
     """The policy is decided once, above the fork. These pin that BOTH lanes
     read that one decision — a rule enforced in only one lane is the shape the
-    fleet keeps paying for."""
+    fleet keeps paying for.
 
-    def test_manager_schedule_asking_for_sonnet_still_spawns_fable(self, tmp_path, monkeypatch):
+    REWRITTEN 2026-09-08 for the grant. These pinned manager-class reaching
+    Fable down both lanes; the lanes are unchanged and the rule they carry is
+    not, so what each one asserts flipped while the structure stayed.
+    """
+
+    def test_a_granted_seat_reaches_fable_down_the_tmux_lane(self, tmp_path, monkeypatch, granted):
+        granted(["@testbranch"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
 
-        status, ok = wake_branch("@testbranch", sender="@daemon", model="sonnet")
+        status, ok = wake_branch("@testbranch", sender="@daemon", model="fable")
 
         assert ok is True
         assert "--model fable" in _tmux_line(calls, "send-keys")
 
-    def test_headless_manager_wake_is_fable_too(self, tmp_path, monkeypatch):
-        """A manager on the scheduled lane never touches tmux, and the ruling
-        does not stop at the tmux door."""
+    def test_a_granted_seat_reaches_fable_down_the_headless_lane_too(self, tmp_path, monkeypatch, granted):
+        """The scheduled lane never touches tmux, and the grant does not stop at
+        the tmux door — this is the lane @vera actually woke on."""
+        granted(["@testbranch"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
 
-        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True, model="opus")
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True, model="fable")
 
         assert ok is True
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == "fable"
 
-    def test_non_manager_asking_for_fable_spawns_on_the_default(self, tmp_path, monkeypatch):
+    def test_an_ungranted_manager_spawns_on_the_default_down_the_tmux_lane(self, tmp_path, monkeypatch, granted):
+        """@vera's exact shape: manager-class, project owner, scheduled through
+        @daemon, asking for Fable. Under the 08-30 rule this line spawned Fable
+        without anyone requesting it."""
+        granted(["@devpulse"])
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", model="fable")
+
+        assert ok is True
+        assert f"--model {DEFAULT_MODEL}" in _tmux_line(calls, "send-keys")
+        assert "fable" not in _tmux_line(calls, "send-keys")
+
+    def test_an_ungranted_seat_asking_for_fable_spawns_on_the_default(self, tmp_path, monkeypatch, granted):
+        granted(["@devpulse"])
         _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="specialist")
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -2164,28 +2335,63 @@ class TestModelPolicyReachesBothSpawnLanes:
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
 
-    def test_the_model_decision_is_a_named_step(self, tmp_path, monkeypatch):
-        """Which model ran, and on what classification, readable from the status
-        without grepping a log."""
+    def test_the_model_decision_is_a_named_step(self, tmp_path, monkeypatch, granted):
+        """Which model ran, readable from the status without grepping a log.
+
+        The class is deliberately NOT in this step any more: printing it beside
+        the model implied it decided the model, which is the superseded rule.
+        """
+        granted(["@testbranch"])
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
 
-        status, ok = wake_branch("@testbranch", sender="@daemon", model="sonnet")
+        status, ok = wake_branch("@testbranch", sender="@daemon", model="fable")
 
         step = status.find_step("model")
         assert step is not None
-        assert "fable" in step[2] and "manager" in step[2]
+        assert step[0] == "ok"
+        assert step[2] == "fable"
 
-    def test_a_branch_with_no_passport_never_lands_on_fable(self, tmp_path, monkeypatch):
-        """The hoisted default, end to end. citizen_class is bound before the
-        passport read, and it is bound to "" — an unreadable passport must not
-        be able to promote a branch onto the managers-only model."""
+    def test_a_refusal_is_a_warn_step_naming_target_model_and_ruling(self, tmp_path, monkeypatch, granted):
+        """Item 2 of the ruling: never silent. The caller sees this in the
+        dispatch output, not only in a log nobody has open."""
+        granted(["@devpulse"])
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="specialist")
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", model="fable")
+
+        step = status.find_step("model")
+        assert step is not None
+        assert step[0] == "warn", step
+        assert "@testbranch" in step[2], step[2]
+        assert "fable" in step[2].lower(), step[2]
+        assert "2026-09-08" in step[2], step[2]
+        assert DEFAULT_MODEL in step[2], step[2]
+
+    def test_the_refusal_step_appears_in_the_formatted_output(self, tmp_path, monkeypatch, granted):
+        """find_step reads the record; this reads what a human is shown."""
+        granted(["@devpulse"])
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="specialist")
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", model="fable")
+
+        assert "may not run Fable" in status.format()
+
+    def test_a_branch_with_no_passport_never_lands_on_fable(self, tmp_path, monkeypatch, granted):
+        """End to end with nothing to read. A missing passport used to be the
+        thing that kept a branch off Fable; now the grant is, and this pins that
+        an unreadable identity still cannot promote anyone."""
+        granted(["@devpulse"])
         _make_wake_fixtures(tmp_path, monkeypatch)  # no .trinity/passport.json
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
 
-        status, ok = wake_branch("@testbranch")
+        status, ok = wake_branch("@testbranch", model="fable")
 
         assert ok is True
         cmd = calls["popen"][0]["cmd"]

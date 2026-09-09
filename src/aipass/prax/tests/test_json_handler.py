@@ -86,20 +86,25 @@ class TestForModule:
 
         assert resolved.branch_root == tmp_path / "notabranch"
 
+    @pytest.mark.skipif(os.name == "nt", reason="creating a directory symlink needs privileges on Windows")
     def test_a_symlinked_path_is_not_followed(self, tmp_path):
         """resolve() would walk the link to its target and name the WRONG branch.
-        The absence of resolve() is a behaviour, not just an omission."""
+        The absence of resolve() is a behaviour, not just an omission.
+
+        The skip asks the MACHINE (``os.name``) and nothing else. It used to make
+        the link inside a ``try`` and call ``pytest.skip`` from the ``except``,
+        which reads as an unconditional skip: any OSError at all — a full disk, a
+        typo in the path — turned a failure into a silent pass on every platform.
+        """
         real = tmp_path / "real_branch" / "apps" / "handlers" / "json"
         real.mkdir(parents=True)
         (real / "json_handler.py").write_text("", encoding="utf-8")
         link = tmp_path / "linked_branch"
-        try:
-            link.symlink_to(tmp_path / "real_branch", target_is_directory=True)
-        except (OSError, NotImplementedError):
-            pytest.skip("symlinks unavailable on this platform")
+        link.symlink_to(tmp_path / "real_branch", target_is_directory=True)
 
         resolved = json_service.for_module(link / "apps" / "handlers" / "json" / "json_handler.py")
 
+        assert resolved.branch_root == link
         assert resolved.branch_root.name == "linked_branch"
 
 
@@ -120,12 +125,18 @@ class TestTheJsonDirectoryIsResolvedPerCall:
         assert resolved.json_dir.parent.name == "prax"
 
     def test_an_empty_env_var_is_absence_not_the_filesystem_root(self, monkeypatch):
-        """AIPASS_TEST_LOG_DIR='' must not resolve to /prax/prax_json."""
+        """AIPASS_TEST_LOG_DIR='' must not resolve to /prax/prax_json.
+
+        One value, not a choice of two. ``if test_dir:`` treats "" as absence, so
+        the answer is the real tree. A mutation to ``is not None`` builds
+        ``Path("") / "prax" / "prax_json"`` — the RELATIVE ``prax/prax_json`` — and
+        ``Path("/")`` would build the filesystem root; this equality refuses both.
+        """
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
         resolved = json_service.for_module(json_handler.__file__)
 
-        assert resolved.json_dir.parts[0] != os.sep or resolved.json_dir.parent.name == "prax"
-        assert resolved.json_dir.name == "prax_json"
+        assert resolved.json_dir == resolved.branch_root / "prax_json"
+        assert resolved.json_dir.is_absolute()
 
     def test_a_later_change_of_the_variable_wins(self, monkeypatch, tmp_path):
         """Nothing is captured. The load-bearing pin: a value read once at
@@ -429,7 +440,13 @@ class TestEnsureJsonExists:
         assert written["config"]["max_log_entries"] == json_service.DEFAULT_MAX_LOG_ENTRIES
 
     def test_the_default_passes_its_own_validator(self, handle):
-        """A default the handler would itself reject is a self-healing loop."""
+        """A default the handler would itself reject is a self-healing loop.
+
+        The floor is the declared type list itself: an empty (or shortened)
+        JSON_TYPES would make the loop below assert nothing and still pass.
+        """
+        assert json_service.JSON_TYPES == ("config", "data", "log")
+
         for json_type in json_service.JSON_TYPES:
             document = json_service._default_document(json_type, "any")
 
@@ -632,11 +649,19 @@ class TestTheShimBindsAndNeverWraps:
 
     @pytest.mark.parametrize("name", BOUND_NAMES)
     def test_every_public_name_is_a_bound_method_of_a_jsonhandle(self, name):
+        """The type is half the claim; the other half is WHICH function it binds.
+
+        ``isinstance(..., JsonHandle)`` alone passes for any wrapper that happens
+        to hold a handle. The identity below is the value: the shim's name IS the
+        service's own callable, not a copy of it and not a forwarder around it.
+        """
         bound = getattr(json_handler, name)
 
         assert isinstance(getattr(bound, "__self__", None), json_service.JsonHandle), (
             f"{name} is not a bound method — a wrapper adds a frame and breaks caller attribution"
         )
+        assert bound.__func__ is getattr(json_service.JsonHandle, name)
+        assert bound.__name__ == name
 
     def test_the_shim_is_bound_to_prax(self):
         assert json_handler.get_json_path.__self__.branch_root.name == "prax"

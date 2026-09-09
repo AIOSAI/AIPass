@@ -209,7 +209,15 @@ def test_handle_command_help_word():
 
 
 def test_print_introspection_runs():
-    """print_introspection produces console output."""
+    """print_introspection names the module and both pack lanes.
+
+    "console.print OR header was called" is true of a function that prints one
+    blank line, so it measured nothing. The three strings here were read off a
+    real run (2026-09-07). The third is the one that matters most: this module
+    scores STANDARDS packs and must say out loud which discovered packs it is
+    NOT scoring, or a reader takes the absence of `tests_pytest` for a missing
+    pack rather than another lane.
+    """
     import sys
     from aipass.seedgo.apps.modules.standards_audit import print_introspection
 
@@ -217,12 +225,21 @@ def test_print_introspection_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
+    assert "standards_audit Module" in printed, f"introspection never named the module: {printed!r}"
+    assert "Discovered Packs:" in printed, f"introspection never listed the packs: {printed!r}"
+    assert "Not scored here (other lanes):" in printed, f"introspection hid the non-scoring packs: {printed!r}"
 
 
 def test_print_help_runs():
-    """print_help produces console output."""
+    """print_help prints its banner and the honest-score flag.
+
+    Same reason as the introspection test above. `--no-bypass` is pinned rather
+    than a decorative line: it is the flag that produces the second number every
+    APLAN publishes, and help that stops documenting it is the reason a branch
+    reports only its bypassed score.
+    """
     import sys
     from aipass.seedgo.apps.modules.standards_audit import print_help
 
@@ -230,8 +247,10 @@ def test_print_help_runs():
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
+    printed = "\n".join(str(call.args[0]) for call in mock_cli.console.print.call_args_list if call.args)
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
+    assert "Standards Audit Module" in printed, f"help never named the module: {printed!r}"
+    assert "audit aipass --no-bypass" in printed, f"help never documented --no-bypass: {printed!r}"
 
 
 def test_handle_command_unknown_pack():

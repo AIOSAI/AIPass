@@ -530,3 +530,34 @@ class TestLintHelpFlag:
         with patch.object(lint, "_execute_lint") as scanned:
             assert lint.handle_command("lint", ["run"]) is True
         scanned.assert_called_once()
+
+
+# ===========================================================================
+# The exit seam — a refusal that exits 0 is half a refusal
+# ===========================================================================
+
+
+class TestTheEmptyRegistryRefusalReachesTheExitCode:
+    """The fleet refusal sweep, 2026-09-07: an empty registry exited 0.
+
+    "No branches found in registry" is a refusal — nothing was linted and the
+    caller must not read that as a clean bill of health. It printed through
+    `warning()`, which marks nothing, so the entry point returned 0. Through
+    `error()` the process failure flag is set and `resolve_exit` returns 2.
+    """
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def test_an_empty_registry_exits_two(self, capsys):
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        lint = self._lint_module()
+        reset_command_state()
+        # The name the module actually binds: _read_registry is imported from
+        # the monitor detector into lint's own namespace, so patch it there.
+        with patch.object(lint, "_read_registry", return_value=[]):
+            assert lint.handle_command("lint", ["run"]) is True
+        assert resolve_exit(True) == 2, "lint found no branches but would exit 0"
+        captured = capsys.readouterr()
+        assert "No branches found" in captured.out + captured.err
