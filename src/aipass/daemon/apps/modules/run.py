@@ -15,7 +15,6 @@ Part of the DPLAN-0204 decentralized scheduler redesign.
 
 import sys
 import time
-from datetime import datetime
 from typing import List
 
 from aipass.prax import logger
@@ -25,7 +24,6 @@ from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
-    RECOVERY_LANE_LIVE,
     catch_up_on,
     get_job_state,
     load_runstate,
@@ -43,14 +41,10 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     prune_orphans,
     window_label,
 )
+from aipass.daemon.apps.handlers.schedule import catch_up_lane
 from aipass.daemon.apps.handlers.schedule import recovery
+from aipass.daemon.apps.handlers.schedule import tick_lock
 from aipass.daemon.apps.handlers.module_root import module_file
-
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[run] fcntl unavailable (Windows)")
 
 _DAEMON_ROOT = module_file(__file__).parents[2]  # src/aipass/daemon/
 LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
@@ -60,9 +54,12 @@ HANDLED_COMMANDS = {"run"}
 # What a single fire attempt ended as. Three states, not two: a wake that was
 # REFUSED before anything started is neither a run nor a failure, and collapsing
 # it into either one is the defect this vocabulary exists to prevent.
-OUTCOME_FIRED = "fired"
-OUTCOME_FAILED = "failed"
-OUTCOME_BLOCKED = "blocked"
+# Re-exported, not redefined: catch_up_lane's drain branches on the same three
+# words this module returns, and one definition means they cannot drift. Callers
+# and tests that import these from run keep working.
+OUTCOME_FIRED = catch_up_lane.OUTCOME_FIRED
+OUTCOME_FAILED = catch_up_lane.OUTCOME_FAILED
+OUTCOME_BLOCKED = catch_up_lane.OUTCOME_BLOCKED
 
 # wake_branch gates that refuse BEFORE a process exists. Read by step LABEL from
 # the DispatchStatus rather than by matching the prose in `summary`, which is a
@@ -379,106 +376,6 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
     return missed_count
 
 
-def _detect_and_queue(enabled: List[dict], runstate: dict, dry_run: bool) -> tuple:
-    """Find the gap, enumerate what closed inside it, queue one entry per job.
-
-    Returns (gap or None, jobs_queued). Runs BEFORE the due check, because a job
-    whose regular window is open right now must be able to supersede its own
-    queued entry on this same tick.
-    """
-    if not RECOVERY_LANE_LIVE:
-        return None, 0
-
-    gap = recovery.detect_gap(runstate)
-    if not gap:
-        return None, 0
-
-    _log(f"GAP {gap['duration']} ({gap['sentence']})")
-    logger.warning("[run] GAP %s — %s", gap["duration"], gap["sentence"])
-
-    try:
-        gap_start = datetime.fromisoformat(gap["gap_start"])
-        gap_end = datetime.fromisoformat(gap["gap_end"])
-    except (ValueError, TypeError) as e:
-        logger.error("[run] gap instants unreadable (%s) — nothing queued", e)
-        return gap, 0
-
-    queued = 0
-    for job in enabled:
-        instants = recovery.enumerate_missed(job, gap_start, gap_end)
-        if not instants:
-            continue
-        if dry_run:
-            _log(f"DRY RUN — would queue {job['owner']}/{job['id']} ({len(instants)} window(s))")
-            continue
-        entry = recovery.queue_catch_up(runstate, job, instants, gap)
-        if entry is None:
-            _log(f"SKIP QUEUE: {job['owner']}/{job['id']} — catch_up off or every window too old")
-            continue
-        queued += 1
-        _log(f"QUEUED: {job['owner']}/{job['id']} ({entry['count']} window(s), oldest {entry['oldest']})")
-
-    if queued and not dry_run:
-        save_runstate(runstate)
-    return gap, queued
-
-
-def _drain_one(runstate: dict, enabled: List[dict], dry_run: bool) -> int:
-    """Fire at most ONE queued catch-up. Returns 1 if one fired, else 0.
-
-    Patrick's rule, and the reason this function can only ever return 0 or 1:
-    "imagine 10 missed events all firing at once."
-    """
-    if not RECOVERY_LANE_LIVE:
-        return 0
-
-    entry = recovery.drain_ready(runstate)
-    if entry is None:
-        return 0
-
-    by_key = {job_key(j["owner"], j["id"]): j for j in enabled}
-    job = by_key.get(job_key(entry["owner"], entry["job_id"]))
-    if job is None:
-        # The job left the fleet while it was queued. Drop it rather than
-        # retrying forever against a schedule nobody publishes any more.
-        recovery.drop_from_queue(runstate, entry["owner"], entry["job_id"])
-        _log(f"CATCH-UP DROPPED: {entry['owner']}/{entry['job_id']} — job no longer discovered")
-        if not dry_run:
-            save_runstate(runstate)
-        return 0
-
-    if dry_run:
-        _log(f"DRY RUN — would fire CATCH-UP {entry['owner']}/{entry['job_id']} ({entry['count']} window(s))")
-        return 0
-
-    state = get_job_state(runstate, entry["owner"], entry["job_id"])
-    header = recovery.catch_up_header(entry, job, state)
-    outcome, detail = _fire_job(job, runstate, header=header)
-
-    if outcome == OUTCOME_FIRED:
-        recovery.drop_from_queue(runstate, entry["owner"], entry["job_id"])
-        recovery.mark_in_flight(runstate, entry)
-        update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=True)
-        _log(f"CATCH-UP FIRED: {entry['owner']}/{entry['job_id']} ({entry['count']} window(s))")
-        logger.info("[run] CATCH-UP FIRED %s/%s (%s windows)", entry["owner"], entry["job_id"], entry["count"])
-        save_runstate(runstate)
-        return 1
-
-    parked = recovery.record_attempt(entry)
-    if parked:
-        _log(f"CATCH-UP FAILED: {entry['owner']}/{entry['job_id']} — {recovery.MAX_ATTEMPTS} attempts, moved to tail")
-        logger.warning(
-            "[run] CATCH-UP FAILED %s/%s after %s attempts — moved to the tail",
-            entry["owner"],
-            entry["job_id"],
-            recovery.MAX_ATTEMPTS,
-        )
-    else:
-        _log(f"CATCH-UP DEFERRED: {entry['owner']}/{entry['job_id']} — {detail}")
-    save_runstate(runstate)
-    return 0
-
-
 def run_tick(dry_run: bool = False) -> dict:
     """Execute one discover -> due-check -> fire pass, and stamp the tick.
 
@@ -554,7 +451,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
     # DPLAN-0332. Before the due check on purpose: a job whose regular window is
     # open right now must be able to supersede its own queued entry on this very
     # tick, and it can only do that if the entry already exists.
-    gap, results["queued"] = _detect_and_queue(enabled, runstate, dry_run)
+    gap, results["queued"] = catch_up_lane.detect_and_queue(enabled, runstate, dry_run, _log)
 
     results["missed"] = _report_missed_windows(enabled, runstate, dry_run)
 
@@ -568,7 +465,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
             _log(f"  {j['owner']}/{j['id']} — not due")
         # A quiet tick is exactly when the queue should move: nothing is
         # competing for the fleet and the branches are most likely free.
-        results["drained"] = _drain_one(runstate, enabled, dry_run)
+        results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
         return results
 
     _log(f"{len(due_jobs)} job(s) due:")
@@ -624,7 +521,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
     # One catch-up per tick at most, and never in front of a live window: the
     # on-time fires above have already had their turn.
-    results["drained"] = _drain_one(runstate, enabled, dry_run)
+    results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
 
     _log(
         f"Tick complete: {results['fired']} fired, {results['failed']} failed, "
@@ -636,29 +533,28 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
 
 def _run_with_lock(dry_run: bool = False) -> int:
-    """Run tick with fcntl lock to prevent concurrent execution."""
-    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    """Run one tick under the single-instance lock. Returns the process exit code.
 
-    if fcntl is None:
+    LOCK_FILE stays owned HERE and is passed in, so a test that seams the path on
+    this module still seams the file that actually gets opened.
+    """
+    tick_lock.prepare(LOCK_FILE)
+
+    if not tick_lock.available():
         _log("fcntl not available (non-Unix), running without lock.")
         results = run_tick(dry_run)
         return 1 if results["failed"] > 0 else 0
 
-    lock_fd = open(LOCK_FILE, "w", encoding="utf-8")  # noqa: SIM115
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError as e:
-        logger.info("[run] Lock acquisition failed (another instance running): %s", e)
+    handle = tick_lock.acquire(LOCK_FILE)
+    if handle is None:
         _log("Another scheduler instance is running, skipping.")
-        lock_fd.close()
         return 0
 
     try:
         results = run_tick(dry_run)
         return 1 if results["failed"] > 0 else 0
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
+        tick_lock.release(handle)
 
 
 def handle_command(command: str, args: List[str]) -> bool:

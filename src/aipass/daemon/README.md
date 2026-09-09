@@ -54,7 +54,7 @@ daemon/
 │   ├── .archive/              # scheduler_cron (archived — superseded by run.py)
 │   ├── modules/
 │   │   ├── update.py          # Status digest module — summarizes DAEMON activity
-│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones
+│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones (585 lines)
 │   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
@@ -76,10 +76,13 @@ daemon/
 │   │   │   ├── red_flag_detector.py   # Detects anomalies / red flags
 │   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
+│   │   │   ├── catch_up_lane.py       # Tick-side glue: detect+queue the gap, drain one
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
+│   │   │   ├── recovery.py            # Gap detection, missed windows, queue, wake headers
 │   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
+│   │   │   ├── tick_lock.py           # Single-instance advisory lock for the tick
 │   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor,
 │   │   │                              # telegram_notifier (superseded copy)
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
@@ -354,6 +357,35 @@ meet that fence, and it ships disabled. Every other target is unaffected.
 Interval jobs have `slot` (above) — declare the hour you want and the first fire lands on it. For the other types, seed different `last_run` values in `daemon_json/daemon_runstate.json`. Within a single tick, jobs that fire together are already separated by a fixed 1s sleep (`run.py`) — that is not configurable and is not a substitute for offsetting the schedules themselves.
 
 ---
+
+## run.py's split (2026-09-08, PR #759 row 13)
+
+`run.py` reached 690 lines against seedgo's 650 cap and held one direct file
+operation — `LOCK_FILE.parent.mkdir` — which a module may not do. Both were the last
+red row on PR #759. Two coherent pieces came out; the tick lane itself did not move.
+
+| Module | Owns | Why it is not in run.py |
+|--------|------|-------------------------|
+| `handlers/schedule/catch_up_lane.py` | detect-and-queue, drain-one, and the `OUTCOME_*` vocabulary | The DPLAN-0332 glue is a whole subject, and it was the largest block a reader had to skip past to follow an ordinary tick |
+| `handlers/schedule/tick_lock.py` | the lock directory, the lock file, `fcntl` | It is the only thing in the tick lane that touches the filesystem, and a handler may do that where a module may not |
+
+**`catch_up_lane` fires nothing itself.** `fire` and `log` arrive as callables from
+`run.py`. A handler may not import a module — that is seedgo's encapsulation rule and
+the circular import it exists to prevent — so injection is what keeps the dependency
+arrow pointing one way. It also means the lane is testable without a tick.
+
+**`tick_lock` takes the lock path as an argument** rather than holding its own copy of
+the constant. `run.py` still owns `LOCK_FILE`, so a test that seams the path on that
+module still seams the file that actually gets opened; a second copy of the constant
+would have quietly re-pointed the suite at the live lock.
+
+`OUTCOME_FIRED` / `OUTCOME_FAILED` / `OUTCOME_BLOCKED` are re-exported from `run.py`,
+not redefined there: the drain branches on the same three words the fire returns, and
+one definition means they cannot drift.
+
+Result: **run.py 690 → 585 lines**, zero direct file operations, `Modules` 100,
+`drone @seedgo audit aipass @daemon` **100%**. No behaviour changed and
+`RECOVERY_LANE_LIVE` stayed `False` throughout.
 
 ## Recovery after a gap (2026-09-08, DPLAN-0332)
 
