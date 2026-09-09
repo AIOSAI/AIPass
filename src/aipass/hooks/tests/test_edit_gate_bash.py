@@ -177,9 +177,16 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
         assert seen["cwd"] == sibling_projects["admin_seat"]
 
-    def test_the_stamp_does_not_outlive_the_check(self, sibling_projects: dict, grant_granted):
-        """A hook process is short-lived, but it is not the only thing in it."""
-        os.environ.pop("AIPASS_CALLER_CWD", None)
+    def test_the_stamp_does_not_outlive_the_check(self, sibling_projects: dict, grant_granted, monkeypatch):
+        """A hook process is short-lived, but it is not the only thing in it.
+
+        The arrangement uses monkeypatch.delenv, not os.environ.pop: the
+        interpreter environment is process-wide, so a raw pop outlives this test
+        and every later test in the session sees it — and it is NOT restored on
+        the failing path, which is exactly the run where you least want the
+        environment silently rearranged (host_state, @seedgo 2026-09-08).
+        """
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert "AIPASS_CALLER_CWD" not in os.environ
 

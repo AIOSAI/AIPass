@@ -153,7 +153,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1756 test functions across 51 files; pytest expands to 1838 cases (1836 pass, 2 skipped — 1 env, 1 win32-only)
+└── tests/                       # 1762 test functions across 51 files; pytest expands to 1844 cases (1842 pass, 2 skipped — 1 env, 1 win32-only)
     └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 
