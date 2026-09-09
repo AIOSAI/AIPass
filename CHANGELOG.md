@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased] — no stragglers: every v5 pytest_quality row to 100 fleet-wide before the canary trial (FPLAN-0508, DPLAN-0323 phase 7.5)
+## [2026-09-08] — no stragglers: every v5 pytest_quality row to 100 fleet-wide, then red-to-rule: the first fully green three-OS matrix (FPLAN-0508 / FPLAN-0529, DPLAN-0323 phase 7.5, merged as PR #759, v2.8.4)
 
 Fleet re-audit 2026-09-08 03:52, uncached, one branch at a time: 17 branches read 100 on every score-bearing v5 rule; api reads 99 on one `unentered_assert` row ruled a judged false positive and forwarded to seedgo. Ten owner waves, every landing verified from devpulse's seat and committed path-scoped; nothing deleted, removals archived with reason headers; six pack notes to seedgo. The canary trial (DPLAN-0323 phase 8) is unblocked and waits on Patrick's go.
 
