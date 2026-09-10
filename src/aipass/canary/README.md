@@ -3,7 +3,7 @@
 **Purpose:** Permanent test citizen. Exists to be spawned, dispatched, resumed, broken and re-scaffolded so the working fleet never is. All mail, logs and memories here are TEST DATA by definition — never production work. Sibling of @finch (projects tier) and @wren (external tier): three homes covering three different fence contexts.
 **Module:** `aipass.canary`
 **Created:** 2026-08-20
-**Last Updated:** 2026-09-06
+**Last Updated:** 2026-09-09
 
 ---
 
@@ -51,25 +51,15 @@ Canary is covered by that fleet-wide run, not by a canary-specific job.
 **Unverified:** canary's behaviour inside that composed run has not been
 reproduced locally — the full-fleet invocation was not run here tonight.
 
-**Known red — the repo-root config form.** This README previously documented
-`pytest src/aipass/canary/tests -c pyproject.toml --rootdir=.` as a shape that
-must pass. Measured 2026-09-06, it does not:
-
-```
-61 errors in 0.66s
-RuntimeError: aipass.canary.apps.handlers.json.json_handler binds the fleet
-json service but AIPASS_TEST_LOG_DIR is not set — every branch conftest sets
-it at import
-```
-
-`-c pyproject.toml` puts the rootdir at the repo root, which loads the
-repo-root `conftest.py` guard; canary's `tests/conftest.py` sets
-`AIPASS_TEST_LOG_DIR` only inside a fixture, too late for that guard. Either
-form below passes (61 passed, both measured 2026-09-06):
+**Repo-root config form — now green.** This README previously documented
+`pytest src/aipass/canary/tests -c pyproject.toml --rootdir=.` as red (61
+errors, `AIPASS_TEST_LOG_DIR` unset at import — every branch conftest sets it
+at import, and canary's set it only inside a fixture, too late for the
+repo-root `conftest.py` guard). `tests/conftest.py` now sets the seam at
+import time. Verified 2026-09-09, same invocation:
 
 ```bash
-pytest src/aipass/canary/tests --rootdir=. -v
-AIPASS_TEST_LOG_DIR=$(mktemp -d) pytest src/aipass/canary/tests -c pyproject.toml --rootdir=. -v
+pytest src/aipass/canary/tests -c pyproject.toml --rootdir=. -v   # 47 passed
 ```
 
 See **Status / Known issues**.
@@ -171,15 +161,11 @@ observe here.
 
 Measured 2026-09-06 unless marked otherwise.
 
-- **Suite:** 61 passed from the repo root (`pytest src/aipass/canary/tests`).
-- **`-c pyproject.toml --rootdir=.` is red — canary's own defect, not the
-  invocation's.** Canary's `tests/conftest.py` sets `AIPASS_TEST_LOG_DIR` only
-  inside a fixture; 16 of the 18 branch conftests set it at module import, as
-  the repo-root guard's message requires. Controls run tonight with the same
-  flags: @cli 186 passed, @daemon 495 passed, @aipass 1081 errors with the
-  identical `RuntimeError`. Canary and @aipass are exactly the two branches
-  without the import-time set. Reported, not fixed — the round that found it
-  was docs-only.
+- **Suite:** 47 passed from the repo root (`pytest src/aipass/canary/tests`).
+- **`-c pyproject.toml --rootdir=.` is green.** Canary's `tests/conftest.py`
+  now sets `AIPASS_TEST_LOG_DIR` at module import, matching the other 16
+  branches and satisfying the repo-root guard. Verified 2026-09-09: 47 passed,
+  no errors.
 - **Composed fleet run: unverified here.** Whether canary stays green inside
   CI's single-process `-n auto` fleet run was not reproduced locally tonight.
   In that shape a sibling conftest sets the env var first, so canary's missing
