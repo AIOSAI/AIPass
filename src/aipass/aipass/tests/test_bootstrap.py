@@ -464,13 +464,27 @@ def test_update_project_return_dict_structure(tmp_path):
     result = update_project(target)
 
     assert set(result.keys()) == {
+        # Plan shape (DPLAN-0335). Exact-set, not superset: a key added here
+        # without a decision is a key @hooks and doctor may start reading.
         "project_name",
         "target",
+        "aipass_home",
+        "aipass_version",
+        "stamped_version",
+        "stamp_pending",
+        "applied",
+        "pending",
+        "files",
+        "handlers",
+        "trust_reenrol",
+        "backup_dir",
+        # Legacy shape — the CLI and older pins read these.
         "updated_files",
         "already_current",
+        "kept_files",
+        "ignored_files",
         "skipped_files",
         "removed_files",
-        "aipass_home",
         "trust_enrolled",
     }
     assert result["project_name"] == "UPD"
@@ -514,26 +528,63 @@ def test_update_project_idempotent(tmp_path, monkeypatch):
     assert result1["already_current"] == result2["already_current"]
 
 
-def test_update_project_updates_modified_managed_file(tmp_path):
-    """A managed file with altered content is re-written on update."""
+def test_update_project_keeps_a_managed_file_the_project_edited(tmp_path):
+    """The conffile rule: an edited managed file is KEPT, template lands beside it.
+
+    This is the Vera case (DPLAN-0334/0335) in miniature — the update must not
+    be able to undo a manager's own work. prep.md is the subject because it is
+    generated locally, so the pin holds with or without a detectable AIPASS_HOME.
+    """
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="mod")
 
-    # Corrupt a managed file
-    claude_md = target / "CLAUDE.md"
-    claude_md.write_text("# Corrupted\n", encoding="utf-8")
+    prep = target / ".claude" / "commands" / "prep.md"
+    prep.write_text("# My own prep\n", encoding="utf-8")
 
     result = update_project(target)
 
-    # CLAUDE.md must appear in updated, not already_current
-    assert str(claude_md.resolve()) in result["updated_files"]
-    assert str(claude_md.resolve()) not in result["already_current"]
+    assert str(prep.resolve()) in result["kept_files"]
+    assert str(prep.resolve()) not in result["updated_files"]
+    # The edit survives verbatim, and the template is readable beside it.
+    assert prep.read_text(encoding="utf-8") == "# My own prep\n"
+    sidecar = prep.with_name("prep.md.aipass-new")
+    assert sidecar.is_file()
+    assert sidecar.read_text(encoding="utf-8") == sc.prep_md()
 
-    # Content is restored from project template
-    restored = claude_md.read_text(encoding="utf-8")
-    assert "# MOD" in restored
-    assert "Startup protocol" in restored
+    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+    assert entry["action"] == "kept-local"
+
+
+def test_update_project_rewrites_a_managed_file_nobody_touched(tmp_path):
+    """The other arm: hash still matches the manifest, so the template wins.
+
+    Simulated by recording the on-disk hash — the state a project is in when
+    AIPass wrote the file and the template has since moved on.
+    """
+    import hashlib
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="mod")
+
+    prep = target / ".claude" / "commands" / "prep.md"
+    prep.write_text("# superseded template\n", encoding="utf-8")
+    manifest_path = target / ".aipass" / "scaffold_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][".claude/commands/prep.md"] = hashlib.sha256(prep.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = update_project(target)
+
+    assert str(prep.resolve()) in result["updated_files"]
+    assert prep.read_text(encoding="utf-8") == sc.prep_md()
+    assert not prep.with_name("prep.md.aipass-new").exists()
+
+    # And the old content is recoverable, never just gone.
+    backups = list((target / ".aipass" / ".backup").glob("scaffold_*/.claude/commands/prep.md"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "# superseded template\n"
 
 
 def test_update_project_never_touches_user_owned_files(tmp_path):
@@ -1135,8 +1186,73 @@ def test_update_project_tier_files_already_current(tmp_path):
     assert any("tier1_navmap.md" in f for f in result["already_current"])
 
 
-def test_update_project_refreshes_stale_tier_files(tmp_path):
-    """update overwrites tier files when they differ from canonical source."""
+def test_update_project_skips_files_the_owner_protected(tmp_path):
+    """.updateignore outranks every other rule — no write, no backup, no sidecar.
+
+    Patrick, 2026-09-09: "project owners decide what update skips." The pin
+    covers all three of the file's documented spellings at once: a full
+    relative path, a bare filename matched at any depth, and a directory.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="owned")
+
+    (target / ".updateignore").write_text(
+        "# mine now\n\n.claude/commands/prep.md\ntier0_kernel.md\n.claude/\n",
+        encoding="utf-8",
+    )
+    prep = target / ".claude" / "commands" / "prep.md"
+    prep.write_text("# my own prep\n", encoding="utf-8")
+
+    result = update_project(target)
+
+    assert str(prep.resolve()) in result["ignored_files"]
+    assert str(prep.resolve()) not in result["kept_files"]
+    assert prep.read_text(encoding="utf-8") == "# my own prep\n"
+    assert not prep.with_name("prep.md.aipass-new").exists()
+    assert not (target / ".aipass" / ".backup").exists()
+
+    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+    assert entry["action"] == "skipped"
+    assert entry["reason"] == ".updateignore"
+
+    # A bare filename reaches a nested path, and a directory pattern covers
+    # everything under it.
+    protected = {e["path"] for e in result["files"] if e["action"] == "skipped"}
+    assert ".aipass/tier0_kernel.md" in protected
+    assert ".claude/settings.json" in protected
+
+
+def test_update_project_leaves_a_protected_file_out_of_the_manifest(tmp_path):
+    """No recorded hash for an ignored file, so un-ignoring it behaves like backfill.
+
+    Recording the on-disk hash would make the next update read the file as
+    "unmodified since AIPass wrote it" and overwrite the very thing the owner
+    protected — the failure the conffile rule exists to prevent, re-entered
+    through the back door.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="unignore")
+
+    prep = target / ".claude" / "commands" / "prep.md"
+    (target / ".updateignore").write_text(".claude/commands/prep.md\n", encoding="utf-8")
+    prep.write_text("# my own prep\n", encoding="utf-8")
+    update_project(target)
+
+    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
+    assert ".claude/commands/prep.md" not in manifest["files"]
+
+    # Un-ignore: the file is now unknown provenance, so it is kept, not clobbered.
+    (target / ".updateignore").unlink()
+    result = update_project(target)
+
+    assert str(prep.resolve()) in result["kept_files"]
+    assert prep.read_text(encoding="utf-8") == "# my own prep\n"
+
+
+def test_update_project_keeps_an_edited_tier_file(tmp_path):
+    """A tier file the project rewrote is kept — this is literally the Vera navmap."""
     target = tmp_path / "proj"
     target.mkdir()
     result = init_project(target, project_name="stale")
@@ -1144,13 +1260,14 @@ def test_update_project_refreshes_stale_tier_files(tmp_path):
     if result["aipass_home"] is None:
         pytest.skip("AIPASS_HOME not detectable in this environment")
 
-    (target / ".aipass" / "tier0_kernel.md").write_text("# stale\n", encoding="utf-8")
+    navmap = target / ".aipass" / "tier1_navmap.md"
+    navmap.write_text("# The studio's own map\n", encoding="utf-8")
 
     result = update_project(target)
 
-    assert any("tier0_kernel.md" in f for f in result["updated_files"])
-    content = (target / ".aipass" / "tier0_kernel.md").read_text(encoding="utf-8")
-    assert "AIPass" in content
+    assert str(navmap.resolve()) in result["kept_files"]
+    assert navmap.read_text(encoding="utf-8") == "# The studio's own map\n"
+    assert navmap.with_name("tier1_navmap.md.aipass-new").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -1280,21 +1397,29 @@ def test_with_source_header_is_first_line():
 # ---------------------------------------------------------------------------
 
 
-def test_update_project_syncs_agents_md(tmp_path):
-    """update restores AGENTS.md when its content has been altered."""
+def test_update_project_never_rewrites_a_seed(tmp_path):
+    """Seeds exist to be filled in, so update leaves AGENTS.md and CLAUDE.md alone.
+
+    No sidecar either — a seed is not a file AIPass has an opinion about once
+    it exists, so offering a template to diff against would be noise.
+    """
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="sync")
 
-    agents_md = target / "AGENTS.md"
-    agents_md.write_text("# Corrupted\n", encoding="utf-8")
+    for seed_name in ("AGENTS.md", "CLAUDE.md"):
+        (target / seed_name).write_text(f"# My own {seed_name}\n", encoding="utf-8")
 
     result = update_project(target)
 
-    assert str(agents_md.resolve()) in result["updated_files"]
-    restored = agents_md.read_text(encoding="utf-8")
-    assert "# SYNC" in restored
-    assert "Startup protocol" in restored
+    for seed_name in ("AGENTS.md", "CLAUDE.md"):
+        seed = target / seed_name
+        assert seed.read_text(encoding="utf-8") == f"# My own {seed_name}\n"
+        assert str(seed.resolve()) in result["already_current"]
+        assert str(seed.resolve()) not in result["updated_files"]
+        assert not seed.with_name(f"{seed_name}.aipass-new").exists()
+        entry = next(e for e in result["files"] if e["path"] == seed_name)
+        assert entry["reason"] == "seed — never rewritten"
 
 
 def test_update_project_creates_missing_agents_md(tmp_path):

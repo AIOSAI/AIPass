@@ -49,10 +49,12 @@ src/aipass/devpulse/
 │   │   ├── admin_grant.py       # Birth-cert admin privilege ceremony command routing
 │   │   ├── compass.py           # Rated decision engine (SQLite/FTS5) command routing
 │   │   ├── feedback.py          # Feedback mailbox command routing
+│   │   ├── release_notify.py    # Release mail fan-out to project managers
 │   │   └── watchdog.py          # Always-on dispatch reporting + directed wakes
 │   ├── handlers/
 │   │   ├── compass/             # Decision store (SQLite/FTS5), rating, query, review
 │   │   ├── feedback/            # Inbox, compose, storage
+│   │   ├── release_notify/      # Manager discovery, mail body, delivery + per-version stamp
 │   │   ├── json/                # json_handler.py — the fleet's ONE json shim (binds @prax's service; sha256 3456b766…, 1724 bytes; DPLAN-0325)
 │   │   ├── owner/               # Owner gate + admin grant (keygen, mint, 5-leg verify)
 │   │   └── watchdog/            # Agent, timer, schedule, registry, wire, presenter
@@ -221,6 +223,25 @@ implementation; @ai_mail mirrors it on the dispatch lane. The user runs the cere
 | `admin_grant keygen` | Generate the signing key (owner-only, refuses overwrite) |
 | `admin_grant keygen --force` | Regenerate the key (invalidates the existing signature) |
 | `admin_grant mint` | Add + sign the admin privilege block (owner-only) |
+
+### Release notify — the merge train's last step (DPLAN-0335 leg 1)
+
+When a release tag goes out, every project manager on this machine should hear about it
+on their next wake. `release-notify` enumerates them (passports with `citizen_class: manager`
+under an active root in `AIPASS_ROOTS.json`, plus every project under `projects/`; the AIPass
+source repo is skipped — it has no scaffold of its own to update), mails each one the version,
+the release URL, the top of the CHANGELOG and the preview-first ritual (doctor → `init update
+--dry-run` → ask Patrick or devpulse → apply → doctor), and posts one `general` thread. One
+send per version: the stamp is `.devpulse/release_notify.json`.
+
+| Command | What it does |
+|---|---|
+| `release-notify v<version>` | Mail every manager + post one commons thread, then stamp the version |
+| `release-notify v<version> --dry-run` | Print recipients, what was skipped and why, and the whole body — sends nothing, writes nothing |
+| `release-notify v<version> --force` | Send again for a version already stamped |
+
+A failed send is named and the fan-out continues; the exit code is non-zero if any recipient
+or the commons post failed.
 
 ## Git Operations
 

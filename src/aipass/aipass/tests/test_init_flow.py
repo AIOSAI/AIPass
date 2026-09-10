@@ -960,14 +960,22 @@ class TestInitUpdateGitAuth:
         assert rc == 1
         assert any('"owner": true' in str(c) for c in mock_error.call_args_list)
 
-    def test_dry_run_skips_the_scaffold_refresh_and_writes_nothing(self, tmp_path: Path) -> None:
-        """--dry-run touches nothing: no scaffold refresh, no sync-registry, no writes."""
+    def test_dry_run_plans_the_scaffold_and_writes_nothing(self, tmp_path: Path) -> None:
+        """--dry-run touches nothing: the plan is computed with apply=False, no sync-registry.
+
+        DPLAN-0335 turned --dry-run from "skip the scaffold entirely" into a
+        real preview, so the pin is now that update_project is CALLED and told
+        not to write — not that it is skipped.
+        """
         self._project(tmp_path)
         passport_path = tmp_path / "src" / "demo" / "vera" / ".trinity" / "passport.json"
         before = passport_path.read_text(encoding="utf-8")
 
         with (
-            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project") as mock_update,
+            patch(
+                "aipass.aipass.apps.handlers.init.bootstrap.update_project",
+                return_value={"updated_files": [], "already_current": [], "pending": False},
+            ) as mock_update,
             patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
@@ -976,10 +984,56 @@ class TestInitUpdateGitAuth:
             rc = _handle_init_update([str(tmp_path), "--dry-run"])
 
         assert rc == 0
-        mock_update.assert_not_called()
+        mock_update.assert_called_once()
+        assert mock_update.call_args.kwargs["apply"] is False
         mock_run.assert_not_called()
         assert passport_path.read_text(encoding="utf-8") == before
         assert any("would repair" in str(c) for c in mock_success.call_args_list)
+
+    def test_dry_run_exits_2_when_the_scaffold_is_behind(self, tmp_path: Path) -> None:
+        """Exit 2 is the "there is a plan to read" signal; 0 means nothing to do.
+
+        A manager (or a script) has to tell those apart without parsing output,
+        so the code is the contract, not the text.
+        """
+        self._project(tmp_path)
+        plan = {"updated_files": [], "already_current": [], "pending": True}
+
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project", return_value=plan),
+            patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
+            patch(f"{_MOD_UPDATE}.console"),
+            patch(f"{_MOD_UPDATE}.success"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
+        ):
+            rc = _handle_init_update([str(tmp_path), "--dry-run"])
+
+        assert rc == 2
+        mock_run.assert_not_called()
+
+    def test_json_flag_emits_the_plan_as_parseable_json(self, tmp_path: Path) -> None:
+        """--json prints the plan document itself, not a rendered table."""
+        self._project(tmp_path)
+        plan = {
+            "project_name": "DEMO",
+            "pending": True,
+            "files": [{"path": ".aipass/tier0_kernel.md", "action": "update", "reason": "unmodified"}],
+            "handlers": [{"name": "testwrite_gate", "action": "add"}],
+        }
+
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project", return_value=plan),
+            patch(f"{_MOD_UPDATE}.subprocess.run"),
+            patch(f"{_MOD_UPDATE}.console") as mock_console,
+            patch(f"{_MOD_UPDATE}.success"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
+        ):
+            rc = _handle_init_update([str(tmp_path), "--dry-run", "--json"])
+
+        assert rc == 2
+        emitted = json.loads(mock_console.print_json.call_args[0][0])
+        assert emitted["files"][0]["action"] == "update"
+        assert emitted["handlers"][0]["name"] == "testwrite_gate"
 
 
 # =============================================================================

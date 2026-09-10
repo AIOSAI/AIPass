@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 1.1.0
-# Description: Mid-turn grounding backstop after compaction (PostToolUse, DPLAN-0276)
+# Version: 1.2.0
+# Description: Mid-turn grounding backstop + manager release notice after compaction (PostToolUse, DPLAN-0276/0335)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-08-07
+# Modified: 2026-09-09
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -57,6 +57,19 @@ def handle(hook_data: dict) -> dict:
 
         if not sections:
             return {"stdout": "", "exit_code": 0}
+
+        # The manager-only release notice rides the same regroup (DPLAN-0335
+        # leg 2). Built only once there is grounding to carry it — a bare notice
+        # under a re-ground header would read as a regroup that reground nothing,
+        # and the two file reads would be spent on a block nobody sees.
+        try:
+            release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
+            notice = release_notice.build_notice(hook_data)
+        except Exception as exc:
+            logger.info("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
+            notice = ""
+        if notice:
+            sections.append(notice)
 
         header = (
             "[POST-COMPACT RE-GROUND — mid-turn backstop, DPLAN-0276]\n"

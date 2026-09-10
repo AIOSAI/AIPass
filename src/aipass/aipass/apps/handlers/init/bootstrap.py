@@ -35,9 +35,10 @@ import logging
 import re
 import shutil
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
+from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
     _claude_local_settings,
@@ -55,6 +56,20 @@ logger = logging.getLogger(__name__)
 _STALE_MANAGED_FILES: list[Path] = [
     Path(".aipass") / "aipass_global_prompt.md",
 ]
+
+#: Scaffold files the manifest records a hash for. These are the files AIPass
+#: writes into a project; everything else in the tree belongs to the project.
+#: Order is display order in the plan.
+_MANIFEST_TRACKED: tuple = (
+    ".aipass/tier0_kernel.md",
+    ".aipass/tier1_navmap.md",
+    ".aipass/hooks.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/commands/prep.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+)
 
 
 def _sanitize_name(raw: str) -> str:
@@ -416,6 +431,12 @@ def init_project(
             venv_link.symlink_to(aipass_venv)
             created.append(f".venv (symlink to AIPass runtime: {aipass_venv})")
 
+    # 12. .aipass/scaffold_manifest.json — records which AIPass version wrote
+    # which file, so a later `init update` can tell "the template moved on"
+    # from "the project edited this file" (DPLAN-0335, the conffile rule).
+    manifest_file = sm.write_manifest(target, _managed_manifest_entries(target))
+    created.append(str(manifest_file))
+
     return {
         "registry_id": registry_id,
         "registry_file": registry_filename,
@@ -426,22 +447,68 @@ def init_project(
     }
 
 
-def update_project(target: Path) -> dict:
-    """Update managed scaffold files in an existing AIPass project.
+def _seed_content(md_name: str, name: str, aipass_home: str | None) -> str | None:
+    """Content a seed file is created with, or None when no source is available.
 
-    Overwrites managed prompt and config files with the latest templates while
-    leaving all user-owned files (registry, README, .gitignore,
-    src/) untouched.
+    Shared by init and update so a project that lost its ``CLAUDE.md`` gets the
+    same file back that init would have minted.
+    """
+    template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
+    if template and template.is_file():
+        return template.read_text(encoding="utf-8").replace("{name}", name)
+    if md_name == "AGENTS.md":
+        return sc.agents_md(name)
+    source = Path(aipass_home) / md_name if aipass_home else None
+    if source and source.is_file():
+        return source.read_text(encoding="utf-8")
+    return None
+
+
+def _read_text(path: Path) -> str | None:
+    """Read a text file, or None when it is absent or not decodable as UTF-8."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.info("unreadable, treating as absent: %s (%s)", path, exc)
+        return None
+
+
+def _managed_manifest_entries(target: Path) -> dict:
+    """Hashes of every tracked scaffold file that exists in *target*.
+
+    Used by ``init_project`` to stamp the manifest for a project AIPass just
+    wrote in full, where every file on disk is by definition ours.
+    """
+    entries: dict = {}
+    for rel in _MANIFEST_TRACKED:
+        digest = sm.hash_file(target / rel)
+        if digest is not None:
+            entries[rel] = digest
+    return entries
+
+
+def update_project(target: Path, *, apply: bool = True) -> dict:
+    """Plan -- and optionally apply -- a scaffold update for an AIPass project.
+
+    Plan mode (``apply=False``) performs ZERO filesystem writes: no mkdir, no
+    manifest stamp, no trust enrolment. Every decision is a read. This is what
+    ``aipass init update --dry-run`` runs, and what makes the preview
+    trustworthy enough to paste to Patrick for a go.
 
     Args:
         target: Directory containing the AIPass project to update.
+        apply: When False, compute the plan and write nothing.
 
     Returns:
-        dict with project_name, target, updated_files, skipped_files.
+        The plan dict. ``files`` carries one entry per managed file
+        (``create`` / ``update`` / ``current`` / ``kept-local`` / ``retire``),
+        ``handlers`` one per hook handler added or retired, plus the version
+        stamp and the legacy ``updated_files`` / ``already_current`` /
+        ``skipped_files`` / ``removed_files`` lists.
 
     Raises:
-        ValueError: If no ``*_REGISTRY.json`` is found in target (not an AIPass
-            project or init has not been run yet).
+        ValueError: If target is the AIPass source repo, or has no
+            ``*_REGISTRY.json`` (not a project, or init has not been run).
     """
     target = target.resolve()
 
@@ -461,171 +528,320 @@ def update_project(target: Path) -> dict:
     registry_path = registry_files[0]
     name = registry_path.stem.replace("_REGISTRY", "")
 
-    updated: list[str] = []
-    already_current: list[str] = []
-    skipped: list[str] = []
-    removed: list[str] = []
-    aipass_home: str | None = None
-    trust_enrolled = False
+    aipass_home = _detect_aipass_home()
+    recorded = sm.manifest_hashes(target)
+    installed = sm.installed_version()
+    stamped = sm.stamped_version(target)
+    ignored = sm.read_ignore(target)
 
-    # Managed directories — create if missing (graceful recovery).
     aipass_dir = target / ".aipass"
-    aipass_dir.mkdir(exist_ok=True)
-
     claude_dir = target / ".claude"
-    claude_dir.mkdir(exist_ok=True)
 
-    # --- Managed files: write only when content has changed ---
+    files: list[dict] = []
+    handlers: list[dict] = []
+    writes: list[tuple] = []  # (destination, content) — performed only when apply
+    retires: list[Path] = []
+    symlinks: list[tuple] = []  # (link, destination)
+    manifest_next: dict = {}
+    trust_reenrol = False
 
-    aipass_home = aipass_home or _detect_aipass_home()
+    def record(rel: str, dest: Path, action: str, reason: str, content: str | None = None) -> None:
+        """Add one file to the plan and queue whatever write it implies.
 
-    # tier0_kernel.md + tier1_navmap.md — tiered prompt injection
+        ``.updateignore`` outranks everything, including the seed rule and the
+        hash rule (Patrick, 2026-09-09): if the owner has claimed a file, the
+        update has no opinion about it at all -- no write, no backup, no
+        sidecar, and no drift reported against it.
+        """
+        nonlocal manifest_next
+        if sm.is_ignored(rel, ignored):
+            files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME})
+            # No manifest entry on purpose. Recording the on-disk hash would
+            # make a later un-ignore read as "unmodified since AIPass wrote it"
+            # and overwrite the very file the owner protected; leaving it out
+            # is what actually gives un-ignore the backfill behaviour asked for.
+            return
+        files.append({"path": rel, "action": action, "reason": reason})
+        if action in (sm.ACTION_CREATE, sm.ACTION_UPDATE):
+            writes.append((dest, content))
+            manifest_next[rel] = sm.sha256_text(content or "")
+        elif action == sm.ACTION_CURRENT:
+            digest = sm.hash_file(dest)
+            if digest is not None:
+                manifest_next[rel] = digest
+        elif action == sm.ACTION_KEPT_LOCAL:
+            writes.append((sm.sidecar_path(dest), content))
+            # The manifest records what AIPASS wrote, not what is on disk.
+            # Adopting the edited hash here would make the NEXT update read
+            # "unmodified since AIPass wrote it" and overwrite the manager's
+            # work on the second run — the exact loss this rule prevents.
+            if rel in recorded:
+                manifest_next[rel] = recorded[rel]
+
+    # --- Managed files copied verbatim from a template (the conffile rule) ---
+
+    managed: list[tuple] = []
     for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-        tier_dest = aipass_dir / tier_file
-        tier_src = Path(aipass_home) / ".aipass" / tier_file if aipass_home else None
-        if tier_src and tier_src.is_file():
-            canonical = tier_src.read_text(encoding="utf-8")
-            if not tier_dest.exists() or tier_dest.read_text(encoding="utf-8") != canonical:
-                tier_dest.write_text(canonical, encoding="utf-8")
-                updated.append(str(tier_dest))
-            else:
-                already_current.append(str(tier_dest))
-        elif tier_dest.exists():
-            already_current.append(str(tier_dest))
+        src = Path(aipass_home) / ".aipass" / tier_file if aipass_home else None
+        text = _read_text(src) if src and src.is_file() else None
+        managed.append((f".aipass/{tier_file}", aipass_dir / tier_file, text))
+    managed.append((".claude/commands/prep.md", claude_dir / "commands" / "prep.md", sc.prep_md()))
 
-    # settings.json — smart merge: preserve user hooks, update AIPass permissions.
-    # AIPASS_HOME never lives here — machine-local paths go in settings.local.json.
+    for rel, dest, template_text in managed:
+        current_hash = sm.hash_file(dest)
+        template_hash = sm.sha256_text(template_text) if template_text is not None else None
+        action, reason = sm.decide(rel, current_hash, template_hash, recorded.get(rel))
+        record(rel, dest, action, reason, template_text)
+
+    # --- Seeds: created once, never rewritten. They exist to be filled in. ---
+
+    for md_name in sm.SEED_FILES:
+        dest = target / md_name
+        if dest.exists():
+            record(md_name, dest, sm.ACTION_CURRENT, "seed — never rewritten")
+            continue
+        content = _seed_content(md_name, name, aipass_home)
+        if content is None:
+            logger.warning("Source %s not found at AIPASS_HOME, skipping", md_name)
+            continue
+        record(md_name, dest, sm.ACTION_CREATE, "seed absent", content)
+
+    # --- Merge files: user values are preserved by the merge itself, so the ---
+    # --- conffile rule does not apply. They are never "kept (local edits)". ---
+
     settings_path = claude_dir / "settings.json"
-    if not settings_path.exists():
-        settings_path.write_text(_claude_settings(), encoding="utf-8")
-        updated.append(str(settings_path))
+    generated_settings = _claude_settings()
+    existing_settings_text = _read_text(settings_path)
+    if existing_settings_text is None:
+        record(".claude/settings.json", settings_path, sm.ACTION_CREATE, "absent", generated_settings)
     else:
-        existing_content = settings_path.read_text(encoding="utf-8")
         try:
-            existing = json.loads(existing_content)
+            existing = json.loads(existing_settings_text)
         except json.JSONDecodeError as exc:
             logger.info("settings.json parse failed, rebuilding: %s", exc)
             existing = {}
-        generated = json.loads(_claude_settings())
-        merged = _merge_settings(existing, generated)
+        merged = _merge_settings(existing, json.loads(generated_settings))
         merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
         if existing != merged:
-            settings_path.write_text(merged_content, encoding="utf-8")
-            updated.append(str(settings_path))
+            record(
+                ".claude/settings.json",
+                settings_path,
+                sm.ACTION_UPDATE,
+                "merge adds AIPass permissions",
+                merged_content,
+            )
         else:
-            already_current.append(str(settings_path))
+            record(".claude/settings.json", settings_path, sm.ACTION_CURRENT, "merge is a no-op")
 
     # settings.local.json (gitignored) — machine-local AIPASS_HOME + claudeMdExcludes
     # fence. Retrofit-safe: merges into existing content, never clobbers.
     if aipass_home and not is_throwaway_path(aipass_home):
-        local_settings_path = claude_dir / "settings.local.json"
+        local_path = claude_dir / "settings.local.json"
         generated = json.loads(_claude_local_settings(aipass_home, nested=is_projects_child(target)))
-        if not local_settings_path.exists():
-            local_settings_path.write_text(json.dumps(generated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            updated.append(str(local_settings_path))
+        existing_local_text = _read_text(local_path)
+        if existing_local_text is None:
+            content = json.dumps(generated, indent=2, ensure_ascii=False) + "\n"
+            record(".claude/settings.local.json", local_path, sm.ACTION_CREATE, "absent", content)
         else:
-            existing_content = local_settings_path.read_text(encoding="utf-8")
             try:
-                existing = json.loads(existing_content)
+                existing = json.loads(existing_local_text)
             except json.JSONDecodeError as exc:
                 logger.info("settings.local.json parse failed, rebuilding: %s", exc)
                 existing = {}
             merged = _merge_local_settings(existing, generated)
+            merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
             if existing != merged:
-                local_settings_path.write_text(
-                    json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+                record(
+                    ".claude/settings.local.json",
+                    local_path,
+                    sm.ACTION_UPDATE,
+                    "merge adds AIPASS_HOME",
+                    merged_content,
                 )
-                updated.append(str(local_settings_path))
             else:
-                already_current.append(str(local_settings_path))
+                record(".claude/settings.local.json", local_path, sm.ACTION_CURRENT, "merge is a no-op")
 
-    # hooks.json — union-merge: preserve user enabled, add new hooks from template
-    hooks_json_path = aipass_dir / "hooks.json"
-    hook_home = aipass_home or _detect_aipass_home()
-    template_path = Path(hook_home) / ".aipass" / "project_hooks.json" if hook_home else None
+    # hooks.json — union-merge (preserve user enabled, add new handlers), then
+    # prune retired handlers. The union alone can only ever grow a project.
+    hooks_path = aipass_dir / "hooks.json"
+    template_path = Path(aipass_home) / ".aipass" / "project_hooks.json" if aipass_home else None
     if template_path and template_path.is_file():
         template_data = json.loads(template_path.read_text(encoding="utf-8"))
-        if hooks_json_path.exists():
+        existing_hooks_text = _read_text(hooks_path)
+        if existing_hooks_text is None:
+            existing_hooks: dict = {}
+        else:
             try:
-                existing_hooks = json.loads(hooks_json_path.read_text(encoding="utf-8"))
+                existing_hooks = json.loads(existing_hooks_text)
             except json.JSONDecodeError as exc:
                 logger.info("hooks.json parse failed, rebuilding: %s", exc)
                 existing_hooks = {}
-            merged_hooks = _merge_hooks_json(existing_hooks, template_data)
-            merged_hooks_content = json.dumps(merged_hooks, indent=2, ensure_ascii=False) + "\n"
-            if existing_hooks != merged_hooks:
-                hooks_json_path.write_text(merged_hooks_content, encoding="utf-8")
-                updated.append(str(hooks_json_path))
-                trust_enrolled = _enroll_project(target)
-            else:
-                already_current.append(str(hooks_json_path))
+        merged_hooks = sm.prune_retired(_merge_hooks_json(existing_hooks, template_data))
+        merged_hooks_content = json.dumps(merged_hooks, indent=2, ensure_ascii=False) + "\n"
+
+        before = _handler_names(existing_hooks)
+        for handler in sorted(_handler_names(merged_hooks) - before):
+            handlers.append({"name": handler, "action": "add"})
+        for handler in sm.retired_handlers_in(existing_hooks):
+            handlers.append({"name": handler, "action": "retire"})
+
+        if existing_hooks_text is None:
+            record(".aipass/hooks.json", hooks_path, sm.ACTION_CREATE, "absent", merged_hooks_content)
+            trust_reenrol = True
+        elif existing_hooks != merged_hooks:
+            reason = _handler_reason(handlers)
+            record(".aipass/hooks.json", hooks_path, sm.ACTION_UPDATE, reason, merged_hooks_content)
+            trust_reenrol = True
         else:
-            hooks_json_path.write_text(
-                json.dumps(template_data, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
+            record(".aipass/hooks.json", hooks_path, sm.ACTION_CURRENT, "merge is a no-op")
+    elif hooks_path.exists():
+        record(".aipass/hooks.json", hooks_path, sm.ACTION_CURRENT, "no template available — nothing to compare")
+
+    # --- Retired managed files: renamed, never unlinked (Patrick, DPLAN-0264) ---
+
+    for rel in _STALE_MANAGED_FILES:
+        stale_path = target / rel
+        if sm.is_ignored(rel.as_posix(), ignored):
+            files.append({"path": rel.as_posix(), "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME})
+        elif stale_path.is_file():
+            files.append(
+                {
+                    "path": rel.as_posix(),
+                    "action": sm.ACTION_RETIRE,
+                    "reason": f"renamed to {sm.disabled_path(stale_path).name}",
+                }
             )
-            updated.append(str(hooks_json_path))
-            trust_enrolled = _enroll_project(target)
-    elif hooks_json_path.exists():
-        already_current.append(str(hooks_json_path))
+            retires.append(stale_path)
 
-    # CLAUDE.md, AGENTS.md — sync from project templates or AIPass source
-    for md_name in ("CLAUDE.md", "AGENTS.md"):
-        dest = target / md_name
-        template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
-        if template and template.is_file():
-            new_content = template.read_text(encoding="utf-8").replace("{name}", name)
-            if not dest.exists() or dest.read_text(encoding="utf-8") != new_content:
-                dest.write_text(new_content, encoding="utf-8")
-                updated.append(str(dest))
-            else:
-                already_current.append(str(dest))
-        else:
-            already_current.append(str(dest))
+    # --- .venv symlink → AIPass shared runtime (create if missing) ---
 
-    # .claude/commands/prep.md — managed slash command, refresh to latest
-    # Only prep.md — memo.md belongs at provider level (~/.claude/commands/)
-    commands_dir = claude_dir / "commands"
-    commands_dir.mkdir(exist_ok=True)
-    prep_path = commands_dir / "prep.md"
-    generated = sc.prep_md()
-    if not prep_path.exists() or prep_path.read_text(encoding="utf-8") != generated:
-        prep_path.write_text(generated, encoding="utf-8")
-        updated.append(str(prep_path))
-    else:
-        already_current.append(str(prep_path))
-
-    # --- User-owned files: always skip ---
-    for skip_name in (
-        str(registry_path),
-        str(target / "README.md"),
-        str(target / ".gitignore"),
-    ):
-        skipped.append(skip_name)
-
-    # .venv symlink → AIPass shared runtime (create if missing)
     venv_link = target / ".venv"
     if not venv_link.exists() and aipass_home:
         aipass_venv = Path(aipass_home) / ".venv"
         if aipass_venv.is_dir():
-            venv_link.symlink_to(aipass_venv)
-            updated.append(f".venv (symlink to AIPass runtime: {aipass_venv})")
+            files.append(
+                {"path": ".venv", "action": sm.ACTION_CREATE, "reason": f"symlink to AIPass runtime: {aipass_venv}"}
+            )
+            symlinks.append((venv_link, aipass_venv))
 
-    # --- Cruft cleanup: remove known-stale AIPass-managed artifacts ---
-    for rel in _STALE_MANAGED_FILES:
-        stale_path = target / rel
-        if stale_path.is_file():
-            stale_path.unlink()
-            removed.append(str(stale_path))
-            logger.info("Removed stale managed file: %s", stale_path)
+    # Tracked files with no plan entry (a merge file this host skips) keep their
+    # recorded hash so a stamp never silently drops provenance.
+    for rel in _MANIFEST_TRACKED:
+        if sm.is_ignored(rel, ignored):
+            continue
+        if rel not in manifest_next and rel in recorded and (target / rel).exists():
+            manifest_next[rel] = recorded[rel]
+
+    stamp_pending = stamped != installed
+    pending = bool(writes or retires or symlinks or handlers or stamp_pending)
+
+    # --- Apply: every write in this run happens below this line ---
+
+    backup_dir: Path | None = None
+    if apply:
+        aipass_dir.mkdir(exist_ok=True)
+        claude_dir.mkdir(exist_ok=True)
+        (claude_dir / "commands").mkdir(exist_ok=True)
+        backup_dir = _apply_writes(target, writes, retires, symlinks)
+        sm.write_manifest(target, manifest_next, installed)
+        if trust_reenrol:
+            trust_reenrol = _enroll_project(target)
+
+    updated = [str(dest) for dest, _ in writes if not dest.name.endswith(sm.NEW_SUFFIX)]
+    updated += [f".venv (symlink to AIPass runtime: {dest})" for _, dest in symlinks]
 
     return {
         "project_name": name,
         "target": str(target),
-        "updated_files": updated,
-        "already_current": already_current,
-        "skipped_files": skipped,
-        "removed_files": removed,
         "aipass_home": aipass_home,
-        "trust_enrolled": trust_enrolled,
+        "aipass_version": installed,
+        "stamped_version": stamped,
+        "stamp_pending": stamp_pending,
+        "applied": apply,
+        "pending": pending,
+        "files": files,
+        "handlers": handlers,
+        "trust_reenrol": trust_reenrol,
+        "backup_dir": str(backup_dir) if backup_dir else None,
+        # Legacy shape — the CLI and existing pins read these.
+        "updated_files": updated,
+        "already_current": [str(target / entry["path"]) for entry in files if entry["action"] == sm.ACTION_CURRENT],
+        "kept_files": [str(target / entry["path"]) for entry in files if entry["action"] == sm.ACTION_KEPT_LOCAL],
+        "ignored_files": [str(target / entry["path"]) for entry in files if entry["action"] == sm.ACTION_SKIPPED],
+        "skipped_files": [
+            str(registry_path),
+            str(target / "README.md"),
+            str(target / ".gitignore"),
+        ],
+        "removed_files": [str(path) for path in retires],
+        "trust_enrolled": trust_reenrol,
     }
+
+
+def _handler_names(hooks: dict) -> set:
+    """Every handler name in a hooks document, across all events."""
+    names: set = set()
+    for event, entries in hooks.items():
+        if isinstance(entries, dict) and event not in ("_comment", "hooks_enabled"):
+            names.update(entries)
+    return names
+
+
+def _handler_reason(handlers: list) -> str:
+    """One-line summary of the handler changes driving a hooks.json update.
+
+    Counts, not names: the names are printed in full directly below in the
+    plan, and a nine-handler list here wraps the reason column into noise on
+    any normal terminal.
+    """
+    added = sum(1 for h in handlers if h["action"] == "add")
+    retired = sum(1 for h in handlers if h["action"] == "retire")
+    parts = []
+    if added:
+        parts.append(f"{added} handler(s) added")
+    if retired:
+        parts.append(f"{retired} retired")
+    return ", ".join(parts) if parts else "merge changes hook config"
+
+
+def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> Path | None:
+    """Perform the planned writes, backing up anything overwritten first.
+
+    Returns the backup directory, or None when nothing needed backing up.
+    Backups land in ``.aipass/.backup/scaffold_<stamp>/`` mirroring the project
+    tree, so a manager can diff or restore by path.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = target / sm.BACKUP_REL / f"scaffold_{stamp}"
+    used = False
+
+    def backup(path: Path) -> None:
+        """Copy an existing file into the backup tree before it is replaced."""
+        nonlocal used
+        if not path.is_file():
+            return
+        dest = backup_root / path.relative_to(target)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(path), str(dest))
+        used = True
+
+    for dest, content in writes:
+        # A .aipass-new sidecar is ours and disposable — backing it up would
+        # fill the backup tree with copies of copies on every apply.
+        if not dest.name.endswith(sm.NEW_SUFFIX):
+            backup(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+
+    for stale_path in retires:
+        backup(stale_path)
+        disabled = sm.disabled_path(stale_path)
+        if disabled.exists():
+            disabled.unlink()
+        stale_path.rename(disabled)
+        logger.info("Retired managed file: %s -> %s", stale_path, disabled)
+
+    for link, dest in symlinks:
+        link.symlink_to(dest)
+
+    return backup_root if used else None
