@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-09-10] — release awareness for project managers: a release mail and a manager-only session-start notice, a safe `aipass init update` (manifest, plan-then-apply, keep local edits, backup, retire, doctor scaffold check), `.updateignore` at project and branch roots, the identity injector rendering every passport facet, and the first Windows-only red cured with a Linux oracle (DPLAN-0335 / FPLAN-0530–0532, RPLAN-0005 row 1, merged as PR #761, v2.8.5)
 
 ### Added
 
