@@ -17,3 +17,5 @@ my-project
 # Compass decision store — private decision data, never commit (DPLAN-0212)
 devpulse_json/compass/
 
+# Release-notify per-version stamp — local runtime state (DPLAN-0335 leg 1)
+.devpulse/

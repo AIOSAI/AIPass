@@ -137,6 +137,70 @@ def _find_passport(cwd: str) -> Path | None:
     return None
 
 
+#: Ceiling for the whole rendered identity block, in characters. Not a hard
+#: platform limit — a budget. This block is injected on EVERY turn, so a
+#: passport that grows without bound quietly taxes every prompt in the session.
+IDENTITY_CHAR_BUDGET = 4000
+
+#: What a facet may spend before it is cut at a sentence boundary. Sized so the
+#: richest passport in the fleet (Vera's six facets) fits under the budget with
+#: the rest of the block intact.
+FACET_CHAR_BUDGET = 320
+
+
+def _truncate_at_sentence(text: str, limit: int) -> str:
+    """Cut *text* to <= *limit* chars, preferring the last sentence boundary.
+
+    Dropping a whole facet would lose a claim the passport makes about the
+    citizen; cutting one mid-word makes it read as corrupted. Cutting at the
+    last full sentence keeps every facet present and every kept word true.
+
+    Args:
+        text: The facet body.
+        limit: Maximum characters to keep.
+
+    Returns:
+        The text unchanged when it already fits, else the longest prefix ending
+        at a sentence boundary, else a hard cut with an ellipsis.
+    """
+    if len(text) <= limit:
+        return text
+
+    window = text[:limit]
+    cut = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
+    if cut > 0:
+        return window[: cut + 1]
+    # No sentence boundary in the window — hard cut. The ellipsis has to come
+    # out of the budget, not be added on top of it, or a facet with no full stop
+    # in range renders one char OVER the limit it was cut to.
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _personality_lines(personality: object) -> list[str]:
+    """One 'Facet: text' line per personality facet, in the passport's order.
+
+    Only a dict renders. A string, a list or None yields nothing, so a passport
+    that does not carry the key — every AIPass passport today — renders exactly
+    as it did before this function existed.
+
+    Args:
+        personality: The raw identity.personality value, whatever shape it has.
+
+    Returns:
+        Rendered lines, empty when there is nothing to render.
+    """
+    if not isinstance(personality, dict) or not personality:
+        return []
+
+    lines: list[str] = []
+    for facet, text in personality.items():
+        if not text:
+            continue
+        label = str(facet).replace("_", " ").capitalize()
+        lines.append(f"{label}: {_truncate_at_sentence(str(text), FACET_CHAR_BUDGET)}")
+    return lines
+
+
 def _format_identity(data: dict) -> str:
     lines: list[str] = []
 
@@ -160,6 +224,13 @@ def _format_identity(data: dict) -> str:
     if identity.get("purpose"):
         lines.append(f"Purpose: {identity['purpose']}")
 
+    # Personality reads AFTER purpose and BEFORE the Do/Don't pair, so the
+    # facets sit with who-I-am rather than with what-I-handle. Insertion order
+    # is the passport author's order and is kept: the facets are written as a
+    # progression (core, then voice, then how I decide, then how I hold up),
+    # and sorting them would silently rewrite that argument.
+    lines.extend(_personality_lines(identity.get("personality")))
+
     what_i_do = identity.get("what_i_do", [])
     if what_i_do:
         lines.append("Do: " + " | ".join(what_i_do[:4]))
@@ -167,6 +238,15 @@ def _format_identity(data: dict) -> str:
     what_i_dont_do = identity.get("what_i_dont_do", [])
     if what_i_dont_do:
         lines.append("Don't: " + " | ".join(what_i_dont_do[:3]))
+
+    # Anti-traits follow the Don't line because they are the same kind of
+    # statement one level up: Don't names tasks that belong to someone else,
+    # Never names ways of BEING that the citizen rejects. Old Vera's own
+    # recorded insight was that the anti-traits, not the traits, were what
+    # kept her out of generic-assistant drift — so they are worth the line.
+    anti_traits = identity.get("anti_traits")
+    if isinstance(anti_traits, list) and anti_traits:
+        lines.append("Never: " + " | ".join(str(a) for a in anti_traits))
 
     # Passport 1.0 keeps principles at the top level, 2.0 moves them inside
     # identity (DPLAN-0319). Read the new home first, fall back to the old one —

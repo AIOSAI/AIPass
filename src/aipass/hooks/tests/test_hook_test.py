@@ -287,8 +287,16 @@ class TestBuildSkeleton:
 
 class TestRestoreEnv:
     def test_unset_stays_unset(self, monkeypatch):
+        """_restore_env(name, None) removes a var that had no prior value.
+
+        The 'leaked' value is arranged with monkeypatch.setenv rather than a raw
+        os.environ assignment. In the passing run _restore_env deletes it either
+        way, but the environment is process-wide: if this assertion ever fails,
+        a raw write leaves AIPASS_PROBE_SENTINEL set for every later test in the
+        session. monkeypatch undoes it on every path (host_state, @seedgo).
+        """
         monkeypatch.delenv("AIPASS_PROBE_SENTINEL", raising=False)
-        os.environ["AIPASS_PROBE_SENTINEL"] = "leaked"
+        monkeypatch.setenv("AIPASS_PROBE_SENTINEL", "leaked")
         hook_test._restore_env("AIPASS_PROBE_SENTINEL", None)
         assert "AIPASS_PROBE_SENTINEL" not in os.environ
 

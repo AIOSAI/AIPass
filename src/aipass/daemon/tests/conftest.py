@@ -34,6 +34,7 @@ from unittest.mock import MagicMock, patch
 
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import timer_install
+from aipass.daemon.apps.handlers.schedule import recovery as recovery_mod
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 
 # The two units the scheduler runs on. Named here because both the seal and the
@@ -171,6 +172,94 @@ def _live_job_keys(path):
         return set(json.loads(path.read_text(encoding="utf-8")).get("jobs", {}))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+WAKE_PROMPT_FILE = "last_wake_prompt.txt"
+
+
+@pytest.fixture(autouse=True)
+def _seal_branch_wake_prompt(tmp_path):
+    """Keep the suite out of every OTHER citizen's .daemon/ directory.
+
+    MEASURED 2026-09-08 20:45:18, found by @devpulse: Vera-Studio's live
+    .daemon/last_wake_prompt.txt held exactly the 16 bytes 'tend your branch' —
+    test_run_blocked_contract.py's _job() default prompt. The path is
+    _fire_job -> recovery.record_wake_prompt -> _branch_daemon_dir, which
+    resolves @vera through discovery.active_citizens() to the REAL Vera-Studio
+    tree, and writes. The FakeStatus seam stops the wake reaching a live tmux;
+    nothing stopped the transcript reaching a live branch.
+
+    SEALED SESSION-WIDE ON THE SEAM, not on the row that bit. The blast radius
+    is every fixture owner that happens to be a real citizen — @commons, @backup,
+    @vera, @devpulse, @daemon, @seedgo, @baud, @flow and @api all appear in this
+    suite — so scoping the guard to one test module would leave it open for the
+    tenth. That is learning 130, paid for on the timer in FPLAN-0524.
+
+    Returns a tmp directory rather than None so a test can still assert the
+    branch-side write HAPPENED; only its destination changes.
+    """
+    sealed = tmp_path / "_sealed_branch_daemon"
+    with patch.object(recovery_mod, "_branch_daemon_dir", return_value=sealed):
+        yield sealed
+
+
+def _live_wake_prompts() -> dict:
+    """Every citizen's live wake transcript, keyed by path. Missing files are None."""
+    prompts = {}
+    try:
+        from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
+
+        citizens = active_citizens()
+    except (ImportError, OSError):
+        return prompts
+
+    for citizen in citizens:
+        f = Path(citizen["path"]) / ".daemon" / WAKE_PROMPT_FILE
+        try:
+            prompts[str(f)] = f.read_text(encoding="utf-8") if f.exists() else None
+        except OSError:
+            prompts[str(f)] = None
+    return prompts
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _branch_wake_prompt_sentinel():
+    """Fail the session that rewrote a live citizen's wake transcript.
+
+    The seal above closes the known route; this is the backstop for the one
+    nobody has thought of. Read-only and non-restoring — the damage is reported,
+    not quietly papered over.
+
+    IT TELLS A TEST FROM A REAL FIRE, and it can, precisely. The live scheduler
+    runs while the suite runs (~2 min timer, ~30 s suite), and a real fire during
+    that window legitimately rewrites a branch's transcript — @vera's did at
+    07:45:19 today. But record_wake_prompt always writes BOTH destinations with
+    the SAME text, and the suite's daemon_json copy is sealed to tmp by
+    _seal_runstate_file. So: branch file changed AND daemon_json now matches it
+    means a real tick out of a separate process; branch file changed and
+    daemon_json does not means this suite wrote it. That discriminator is why
+    this sentinel can be strict without crying wolf (learning 135).
+    """
+    before = _live_wake_prompts()
+    yield
+    after = _live_wake_prompts()
+
+    live_copy = runstate_mod.RUNSTATE_FILE.parent / WAKE_PROMPT_FILE
+    try:
+        daemons_own = live_copy.read_text(encoding="utf-8") if live_copy.exists() else None
+    except OSError:
+        daemons_own = None
+
+    escaped = [path for path, text in after.items() if before.get(path) != text and text != daemons_own]
+    assert not escaped, (
+        "THE SUITE WROTE INTO A LIVE CITIZEN'S .daemon/ DIRECTORY.\n"
+        f"  files: {sorted(escaped)}\n"
+        "A test reached recovery.record_wake_prompt with a REAL owner email and "
+        "the transcript landed in that citizen's tree. Seal its seam — see "
+        "_seal_branch_wake_prompt in this file.\n"
+        "(If a real timer tick fired one of these mid-run, daemon_json's own copy "
+        "would match it and this assert would not have fired. It did not match.)"
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

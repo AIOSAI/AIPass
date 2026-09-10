@@ -1154,6 +1154,127 @@ def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
     return 0
 
 
+def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
+    """Compare a project's tier0 kernel against AIPASS_HOME, with provenance.
+
+    Split out of ``_check_scaffold`` to keep both readable: the interesting part
+    is not the comparison but WHICH of four states the file is in, and that
+    deserves to be legible on its own.
+    """
+    from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
+
+    canonical = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
+    if not (canonical and canonical.is_file()):
+        return []
+
+    project_hash = sm.hash_file(root / ".aipass" / "tier0_kernel.md")
+    if project_hash is None:
+        return [CheckResult("tier0_kernel.md", GLYPH_WARN, "not found", preview)]
+    if project_hash == sm.hash_file(canonical):
+        return [CheckResult("tier0_kernel.md", GLYPH_PASS, "matches AIPASS_HOME", "")]
+
+    recorded_hash = sm.manifest_hashes(root).get(".aipass/tier0_kernel.md")
+    if recorded_hash == project_hash:
+        # AIPass wrote this and the template has since moved on — an update
+        # will refresh it, so the preview command is the whole answer.
+        return [CheckResult("tier0_kernel.md", GLYPH_WARN, "template moved on", preview)]
+
+    # A file the project edited, or one AIPass cannot prove it wrote. A bare
+    # "differs" reads as a fault the manager cannot clear, when in fact the
+    # update will KEEP it and there are exactly two ways to settle it — so name
+    # both instead of warning about neither.
+    provenance = "kept (local edits)" if recorded_hash else "kept (unknown provenance)"
+    return [
+        CheckResult(
+            "tier0_kernel.md",
+            GLYPH_WARN,
+            provenance,
+            f"Update keeps your copy. Delete it to take the template, or add it to {sm.IGNORE_NAME} to keep it for good",
+        )
+    ]
+
+
+def _check_scaffold() -> List[CheckResult]:
+    """Run Scaffold group checks — is this project's AIPass scaffold current?
+
+    Read-only by design, including under ``--fix``. Applying a scaffold update
+    is a decision (it can replace files a manager wrote), not a repair, and
+    DPLAN-0335 puts that decision with Patrick or devpulse. Doctor's whole job
+    here is to report the drift and name the command that previews it.
+    """
+    from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
+    from aipass.aipass.apps.handlers.init.bootstrap import _MANIFEST_TRACKED, _handler_names
+
+    reg_path = _find_registry()
+    if reg_path is None:
+        return [CheckResult("scaffold", GLYPH_WARN, "no project registry", "Run 'aipass init' to create one")]
+
+    root = reg_path.parent
+    if (root / "src" / "aipass").is_dir() and (root / "pyproject.toml").exists():
+        # The source repo's scaffold IS the templates — nothing to compare to.
+        return [CheckResult("scaffold", GLYPH_PASS, "AIPass source repo — hand-maintained", "")]
+
+    preview = f"Run 'aipass init update {root} --dry-run' to see the plan"
+    results: List[CheckResult] = []
+    ignored = sm.read_ignore(root)
+
+    installed = sm.installed_version()
+    manifest = sm.read_manifest(root)
+    stamped = sm.stamped_version(root)
+
+    if not manifest:
+        results.append(CheckResult("scaffold manifest", GLYPH_WARN, "not stamped", preview))
+    else:
+        recorded = len(sm.manifest_hashes(root))
+        stamped_at = str(manifest.get("stamped_at", ""))[:10]
+        results.append(CheckResult("scaffold manifest", GLYPH_PASS, f"{recorded} files, {stamped_at}", ""))
+
+    if stamped == installed:
+        results.append(CheckResult("scaffold version", GLYPH_PASS, installed, ""))
+    else:
+        results.append(CheckResult("scaffold version", GLYPH_WARN, f"{stamped or 'unstamped'} → {installed}", preview))
+
+    aipass_home = _detect_aipass_home()
+
+    # tier0 is the prompt injected every turn — the one file whose drift a
+    # manager feels immediately, so it gets its own line rather than a count.
+    if not sm.is_ignored(".aipass/tier0_kernel.md", ignored):
+        results.extend(_check_tier0(root, aipass_home, preview))
+
+    # hooks.json — handler keys, not mere existence. Presence-only is how a
+    # project passed doctor carrying a hooks file two months stale.
+    hooks_path = root / ".aipass" / "hooks.json"
+    template_path = Path(aipass_home) / ".aipass" / "project_hooks.json" if aipass_home else None
+    if not hooks_path.exists():
+        results.append(CheckResult("hooks handlers", GLYPH_WARN, "hooks.json not found", preview))
+    elif template_path and template_path.is_file():
+        try:
+            project_hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+            template_hooks = json.loads(template_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("[doctor] hooks compare failed: %s", exc)
+            results.append(CheckResult("hooks handlers", GLYPH_WARN, "unreadable", preview))
+        else:
+            missing = sorted(_handler_names(template_hooks) - _handler_names(project_hooks))
+            if missing:
+                shown = ", ".join(missing[:3]) + ("…" if len(missing) > 3 else "")
+                results.append(CheckResult("hooks handlers", GLYPH_WARN, f"{len(missing)} missing: {shown}", preview))
+            else:
+                results.append(CheckResult("hooks handlers", GLYPH_PASS, "match template", ""))
+
+            retired = sm.retired_handlers_in(project_hooks)
+            if retired:
+                results.append(CheckResult("retired handlers", GLYPH_WARN, ", ".join(retired), preview))
+
+    if ignored:
+        # Owner-protected files are not drift and never carry a remediation —
+        # the whole point of .updateignore is that this project decided already.
+        protected = sum(1 for rel in _MANIFEST_TRACKED if sm.is_ignored(rel, ignored))
+        results.append(CheckResult(".updateignore", GLYPH_PASS, f"{protected} file(s) owner-protected", ""))
+
+    return results
+
+
 # --- Main doctor run ---
 
 
@@ -1167,6 +1288,7 @@ def _compute_doctor_groups(
         ("Services", lambda: _check_services(verbose=verbose)),
         ("Community", _check_community),
         ("Structure", _check_structure),
+        ("Scaffold", _check_scaffold),
         ("Sandbox", _check_sandbox),
     ]
     groups: Dict[str, List[CheckResult]] = {}
@@ -1279,7 +1401,7 @@ def print_introspection() -> None:
     console.print("[bold cyan]doctor Module[/bold cyan]")
     console.print("System health aggregation — flutter-doctor-style output")
     console.print()
-    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Sandbox")
+    console.print("[yellow]Groups:[/yellow] System, Identity, Services, Community, Structure, Scaffold, Sandbox")
     console.print("[yellow]Next:[/yellow]  [green]aipass doctor[/green] / [green]aipass doctor --fix[/green]")
     console.print()
 

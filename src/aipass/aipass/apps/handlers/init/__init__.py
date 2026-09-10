@@ -19,6 +19,14 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     is_projects_child,
     update_project,
 )
+from aipass.aipass.apps.handlers.init.scaffold_manifest import (
+    MANIFEST_REL,
+    RETIRED_HOOK_HANDLERS,
+    manifest_hashes,
+    read_manifest,
+    stamped_version,
+    write_manifest,
+)
 from aipass.aipass.shared.scaffold_content import (
     global_prompt_md,
     inbox_json,
@@ -27,12 +35,18 @@ from aipass.aipass.shared.scaffold_content import (
 )
 
 __all__ = [
+    "MANIFEST_REL",
+    "RETIRED_HOOK_HANDLERS",
     "_sanitize_name",
     "global_prompt_md",
     "inbox_json",
     "init_project",
     "is_projects_child",
+    "manifest_hashes",
     "prep_md",
+    "read_manifest",
+    "stamped_version",
     "update_project",
     "with_source",
+    "write_manifest",
 ]

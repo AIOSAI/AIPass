@@ -13,6 +13,7 @@ from unittest.mock import patch, MagicMock
 
 
 from aipass.devpulse.apps import devpulse as devpulse_module
+from aipass.devpulse.apps.modules import release_notify as release_notify_module
 
 
 class TestCLIRouting:
@@ -172,3 +173,63 @@ class TestHandleCommandGuard:
         result = devpulse_module.handle_command("bogus_invalid_command", [])
         assert result is False
         assert "bogus_invalid_command" in capsys.readouterr().err
+
+
+class TestReleaseNotifyRouting:
+    """release-notify routing — a question never becomes a send (DPLAN-0335 leg 1).
+
+    The command mails every project manager on the machine. Every pin here is
+    about the paths that must NOT reach the sender: help, a refused flag, a
+    token that is not a version, and --dry-run.
+    """
+
+    def test_both_spellings_route_to_the_same_work(self):
+        """The module file is release_notify.py; Patrick types release-notify."""
+        with patch.object(release_notify_module, "_notify", return_value=True) as work:
+            for spelling in ("release-notify", "release_notify"):
+                assert release_notify_module.handle_command(spelling, ["v2.8.4"]) is True
+        assert work.call_count == 2
+        assert work.call_args.args == ("2.8.4", False, False)
+
+    def test_help_anywhere_explains_and_never_sends(self, capsys):
+        """A help flag in ANY position explains — it does not enumerate or send."""
+        with patch.object(release_notify_module, "_notify") as work:
+            assert release_notify_module.handle_command("release-notify", ["v2.8.4", "--help"]) is True
+        work.assert_not_called()
+        assert "release-notify" in capsys.readouterr().out
+
+    def test_unknown_flag_is_refused_by_name(self, capsys):
+        """An unrecognised flag names itself and nothing is sent."""
+        with patch.object(release_notify_module, "_notify") as work:
+            assert release_notify_module.handle_command("release-notify", ["v2.8.4", "--bogus"]) is True
+        work.assert_not_called()
+        assert "Unknown flag: --bogus" in capsys.readouterr().err
+
+    def test_a_token_that_is_not_a_version_is_refused_by_name(self, capsys):
+        """release-notify banana is refused, not sent as v-banana."""
+        with patch.object(release_notify_module, "_notify") as work:
+            assert release_notify_module.handle_command("release-notify", ["banana"]) is True
+        work.assert_not_called()
+        assert "Not a version: banana" in capsys.readouterr().err
+
+    def test_dry_run_sends_nothing_reads_no_stamp_and_prints_the_body(self, capsys):
+        """--dry-run is a preview: no mail, no commons post, no state file touched."""
+        discovery = {
+            "roots": ["/somewhere/Vera-Studio"],
+            "managers": [{"address": "@vera", "name": "VERA", "passport": "/somewhere/passport.json", "root": "/x"}],
+            "skipped": [{"path": "/somewhere/else/passport.json", "reason": "citizen_class is builder, not manager"}],
+        }
+        with (
+            patch.object(release_notify_module, "discover_managers", return_value=discovery),
+            patch.object(release_notify_module, "changelog_headline", return_value=["what shipped"]),
+            patch.object(release_notify_module, "send_email", side_effect=AssertionError("dry run sent mail")),
+            patch.object(release_notify_module, "post_commons", side_effect=AssertionError("dry run posted")),
+            patch.object(release_notify_module, "load_state", side_effect=AssertionError("dry run read state")),
+            patch.object(release_notify_module, "record_notified", side_effect=AssertionError("dry run wrote state")),
+        ):
+            assert release_notify_module.handle_command("release-notify", ["v2.8.4", "--dry-run"]) is True
+        out = capsys.readouterr().out
+        assert "@vera" in out
+        assert "citizen_class is builder, not manager" in out
+        assert "https://github.com/AIOSAI/AIPass/releases/tag/v2.8.4" in out
+        assert "`" not in out

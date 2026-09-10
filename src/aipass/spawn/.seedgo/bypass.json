@@ -26,6 +26,11 @@
       "reason": "Pure string transformation \u2014 placeholder replacement engine, no file I/O"
     },
     {
+      "file": "apps/handlers/update_ignore.py",
+      "standard": "json_structure",
+      "reason": "Pure reader \u2014 parses the owner's .updateignore and answers is_ignored(). Performs no operation: it never writes, and spawn never creates or modifies the file. The operation it informs is the update itself, which update_ops logs at the site that performs it (log_operation('update_executed'))."
+    },
+    {
       "file": "apps/modules/core.py",
       "standard": "deep_nesting",
       "reason": "handle_command() depth 7 \u2014 complex argument parsing for spawn create with --role/--traits/--purpose/--template/--registry flags. Nested while loop through args array; extraction would obscure control flow."

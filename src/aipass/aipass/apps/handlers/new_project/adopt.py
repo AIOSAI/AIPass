@@ -39,6 +39,8 @@ from aipass.aipass.apps.handlers.new_project import (
     _spawn_project_agent,
     _write_registry,
 )
+from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
+from aipass.aipass.apps.handlers.init.bootstrap import _managed_manifest_entries
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
     _claude_local_settings,
@@ -61,10 +63,10 @@ def _gitignore_safety(target: Path, *, dry_run: bool) -> str:
             return "already-safe"
         if not dry_run:
             separator = "" if existing.endswith("\n") else "\n"
-            gitignore_path.write_text(existing + separator + "\n" + sc.gitignore(), encoding="utf-8")
+            sm.write_text_lf(gitignore_path, existing + separator + "\n" + sc.gitignore())
         return "appended"
     if not dry_run:
-        gitignore_path.write_text(sc.gitignore(), encoding="utf-8")
+        sm.write_text_lf(gitignore_path, sc.gitignore())
     return "created"
 
 
@@ -74,7 +76,7 @@ def _write_if_missing(path: Path, content: str, *, dry_run: bool, planned: list[
         return
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        sm.write_text_lf(path, content)
     planned.append(str(path))
 
 
@@ -193,6 +195,16 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
             if not dry_run:
                 venv_link.symlink_to(venv)
             files.append(str(venv_link))
+
+    # .aipass/scaffold_manifest.json — records which AIPass version wrote which
+    # file, so a later `init update` can tell the template moving on from the
+    # project editing the file (DPLAN-0335). Adopt stamps only what it wrote:
+    # an adopted tree's pre-existing files are the project's, not ours.
+    if not dry_run:
+        manifest_file = sm.write_manifest(target, _managed_manifest_entries(target))
+        files.append(str(manifest_file))
+    else:
+        files.append(str(sm.manifest_path(target)))
 
     # Resident agent — registry MUST exist first (dry_run never spawns)
     spawn_result = None

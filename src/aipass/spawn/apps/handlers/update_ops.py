@@ -33,6 +33,7 @@ from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import find_registry, load_registry, branches_as_list
+from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
 from aipass.spawn.apps.handlers.json import json_handler
 
 # .ai_mail.local/ is a branch's live mailbox (@ai_mail's data contract, not spawn's) —
@@ -131,9 +132,10 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST.
     """
     errors: list[str] = []
-    counts = {"additions": 0, "renames": 0, "updates": 0, "pruned": 0, "skipped_py": 0}
+    counts = {"additions": 0, "renames": 0, "updates": 0, "pruned": 0, "skipped_py": 0, "owner_protected": 0}
     additions_detail: list[dict] = []
     updates_detail: list[dict] = []
+    ignored_detail: list[dict] = []
 
     branch_dir = _resolve_branch_path(branch_name)
     if branch_dir is None:
@@ -155,6 +157,15 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
 
     replacements = build_replacements_dict(branch_dir, branch_name)
 
+    # THE OWNER'S DECISION, READ FIRST. .updateignore is checked before every other
+    # rule in both walks below — before the create-only set, before the passport
+    # heal, before add/merge — because an owner-protected file is a decision already
+    # made and nothing downstream is entitled to reconsider it. Absent file, empty
+    # list, nothing protected.
+    ignore_patterns = read_ignore(branch_dir)
+    if ignore_patterns and trace:
+        logger.info("[update] %s declares %d owner-protected pattern(s)", IGNORE_NAME, len(ignore_patterns))
+
     # Walk template directories — create missing ones in branch
     for template_subdir in sorted(template_dir.rglob("*")):
         if not template_subdir.is_dir():
@@ -163,6 +174,10 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
             continue
         rel_dir = template_subdir.relative_to(template_dir).as_posix()
         resolved_dir = replace_placeholders(rel_dir, replacements)
+        if is_ignored(resolved_dir, ignore_patterns):
+            if trace:
+                logger.info("[update] SKIP (%s): %s/", IGNORE_NAME, resolved_dir)
+            continue
         if _is_never_update(resolved_dir + "/"):
             continue
         if resolved_dir in _SKIP_TRACKING:
@@ -189,6 +204,16 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
             continue
 
         resolved_path = replace_placeholders(rel_path, replacements)
+
+        if is_ignored(resolved_path, ignore_patterns):
+            # Never written, never merged, never backed up — and reported as a skip
+            # rather than a warning. @vera's passport is the case this exists for: it
+            # reaches here before the heal below can propose a merge into it.
+            ignored_detail.append({"branch_path": resolved_path})
+            counts["owner_protected"] += 1
+            if trace:
+                logger.info("[update] SKIP (%s): %s", IGNORE_NAME, resolved_path)
+            continue
 
         if resolved_path == _PASSPORT_HEAL_PATH:
             dest = branch_dir / resolved_path
@@ -272,6 +297,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
         _updates_detail=updates_detail,
         _renames_detail=[],
         _pruned_detail=[],
+        _ignored_detail=ignored_detail,
     )
 
 
@@ -569,6 +595,7 @@ def _result(
         "updates": counts.get("updates", 0),
         "pruned": counts.get("pruned", 0),
         "skipped_py": counts.get("skipped_py", 0),
+        "owner_protected": counts.get("owner_protected", 0),
         "errors": errors,
         "dry_run": dry_run,
     }

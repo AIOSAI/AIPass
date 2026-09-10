@@ -12,6 +12,7 @@ All file operations use tmp_path to stay fully isolated from the live
 filesystem. Tests mock subprocess calls to avoid real git/drone invocations.
 """
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -205,6 +206,16 @@ def test_create_project_empty_template(host_env, monkeypatch):
     assert (target / "README.md").exists()
     assert (target / ".gitignore").exists()
     assert not (target / "pyproject.toml").exists()
+
+    # `aipass new` is the fourth project-minting door and was the only one not
+    # stamping a manifest, so a project born here met its first `init update`
+    # as unknown provenance and collected sidecars for files nobody edited.
+    manifest = target / ".aipass" / "scaffold_manifest.json"
+    assert manifest.is_file()
+    stamped = json.loads(manifest.read_text(encoding="utf-8"))
+    assert stamped["files"], "manifest stamped with no files"
+    for rel, digest in stamped["files"].items():
+        assert hashlib.sha256((target / rel).read_bytes()).hexdigest() == digest, rel
 
 
 def test_create_project_python_template(host_env, monkeypatch):

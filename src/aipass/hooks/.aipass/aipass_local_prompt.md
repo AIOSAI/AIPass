@@ -86,7 +86,7 @@ apps/
       diagnostics.py       #   JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 51 files, 1838 cases (1836 pass, 2 skips: 1 env, 1 win32-only)
+tests/                     # 51 files, 1844 cases (1842 pass, 2 skips: 1 env, 1 win32-only)
   .archive/                # removed suites, never deleted -- header says what each pinned
 ```
 

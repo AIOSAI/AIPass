@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-09-06
+# Modified: 2026-09-09
 # =============================================
 
 """
@@ -43,7 +43,7 @@ console = err_console
 # The one version string. --version printed a hardcoded "1.0.0" while the header
 # above said 1.0.1 (FPLAN-0490, found 2026-09-06); keep this constant and the
 # header in step - there is no other version source in the branch.
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -126,6 +126,7 @@ def print_help():
     console.print('  drone @devpulse compass query "registry"     Search rated decisions')
     console.print("  drone @devpulse watchdog agent @flow         Watch a dispatched agent")
     console.print("  drone @devpulse feedback inbox               Check cross-project feedback")
+    console.print("  drone @devpulse release-notify v2.8.4        Mail every project manager a release")
 
 
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:

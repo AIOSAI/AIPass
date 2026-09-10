@@ -148,6 +148,7 @@ Steps:
 - [ ] Confirm the CHANGELOG top section is the release notes you want
 - [ ] **Push the tag — `drone @git tag v<version>` (devpulse, no user input needed).** The verb (owner tier) does it all safely: `git fetch origin`, **VERSION GUARD** (refuses unless the tag's `X.Y.Z` matches BOTH `origin/main:pyproject.toml` version and `origin/main:src/aipass/__init__.py` `__version__` — so you can't tag the wrong version), **EXISTS GUARD** (refuses if the tag already exists local or remote), then tags `origin/main` (the remote ref, never stale local main) and pushes → fires `publish.yml`. It reports the pushed sha. `drone @git tag --list` shows existing tags. This replaced the old manual `git tag`/`push` step (S274).
 - [ ] Verify PyPI shows the new version + the GitHub Release appeared (`curl -s https://pypi.org/pypi/aipass/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])"`)
+- [ ] **Notify project managers (DPLAN-0335):** `drone @devpulse release-notify v<version>` — mails every manager-class citizen outside the source repo (declared roots + `projects/*`) with the release link and the update ritual, and posts one commons thread. Idempotent per version; `--dry-run` first if in doubt. Managers preview with `aipass init update <root> --dry-run` and apply only on Patrick's or devpulse's go.
 - [ ] Record the tag → Run Summary
 
 ## 8. Wrap

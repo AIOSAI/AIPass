@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-04-16",
-    "description": "Bypass config for @aipass citizen. Pruned 2026-08-13 (S112, DPLAN-0291 round): 85 rules -> 27. Removed 8 rules whose target file no longer exists and 50 proven inert by CONTROL RUN in BOTH lanes (audit lane: audit_branch with bypass_rules=[]; checklist lane: drone @seedgo checklist per-directory with bypass emptied). 9 further rules the audit lane called dead were LIVE in the checklist lane and were kept - measuring one lane only would have deleted them. Remaining rules cover: binary-invocation introspection (bare aipass <cmd> runs, --info for introspection), thin entry-point router, pure-python bootstrap that runs before AIPass services exist, shared/ helpers checked by the checklist lane, and CLI flag NAME references (permission_flags). Editing this file is @aipass's own call per Patrick's S46 ruling, reaffirmed by @devpulse 2026-08-13. Pruned 2026-09-04 (FPLAN-0489, DPLAN-0325): 25 rules -> 24. The one shared/json_handler.py rule (trigger) went with its file to shared/.archive/ — the fleet is on prax's service behind the one shim, so the pre-infra json leaf no longer exists to bypass."
+    "description": "Bypass config for @aipass citizen. Pruned 2026-08-13 (S112, DPLAN-0291 round): 85 rules -> 27. Removed 8 rules whose target file no longer exists and 50 proven inert by CONTROL RUN in BOTH lanes (audit lane: audit_branch with bypass_rules=[]; checklist lane: drone @seedgo checklist per-directory with bypass emptied). 9 further rules the audit lane called dead were LIVE in the checklist lane and were kept - measuring one lane only would have deleted them. Remaining rules cover: binary-invocation introspection (bare aipass <cmd> runs, --info for introspection), thin entry-point router, pure-python bootstrap that runs before AIPass services exist, shared/ helpers checked by the checklist lane, and CLI flag NAME references (permission_flags). Editing this file is @aipass's own call per Patrick's S46 ruling, reaffirmed by @devpulse 2026-08-13. Pruned 2026-09-04 (FPLAN-0489, DPLAN-0325): 25 rules -> 24. The one shared/json_handler.py rule (trigger) went with its file to shared/.archive/ — the fleet is on prax's service behind the one shim, so the pre-infra json leaf no longer exists to bypass. Extended 2026-09-09 (FPLAN-0530, DPLAN-0335 leg 3): 24 rules -> 26. The two new rows carry scaffold_manifest.py, which bootstrap.py imports and which therefore inherits bootstrap's own pure-Python rows verbatim — same file, same reason, one level down."
   },
   "bypass": [
     {
@@ -39,6 +39,16 @@
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "log_visibility",
       "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
+    },
+    {
+      "file": "apps/handlers/init/scaffold_manifest.py",
+      "standard": "json_structure",
+      "reason": "Imported BY bootstrap.py, so it inherits bootstrap's Pure Python only contract — importing json_handler here would pull prax into the first-install path bootstrap exists to survive. It reads and writes one JSON document (the scaffold manifest) with stdlib json; every caller that logs is a module above it."
+    },
+    {
+      "file": "apps/handlers/init/scaffold_manifest.py",
+      "standard": "log_visibility",
+      "reason": "Same inheritance as bootstrap.py: prax system_logger requires AIPass to be installed, and this module is on the path that runs before that is true. stdlib getLogger is correct here."
     },
     {
       "file": "apps/modules/doctor.py",

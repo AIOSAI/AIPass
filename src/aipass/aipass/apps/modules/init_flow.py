@@ -1011,8 +1011,13 @@ def print_help() -> None:
     console.print("  [green]aipass init run --template <name>[/green]    [dim]# select template[/dim]")
     console.print("  [green]aipass init run --dry-run[/green]            [dim]# walk all stages, no writes[/dim]")
     console.print("  [green]aipass init --list[/green]                   [dim]# list available templates[/dim]")
-    console.print("  [green]aipass init update \\[target][/green]          [dim]# refresh scaffold + git auth[/dim]")
-    console.print("  [green]aipass init update --dry-run[/green]         [dim]# preview git-auth repairs only[/dim]")
+    console.print(
+        "  [green]aipass init update \\[target][/green]          [dim]# apply the scaffold plan + git auth[/dim]"
+    )
+    console.print(
+        "  [green]aipass init update --dry-run[/green]         [dim]# print the plan, write nothing (exit 2 = pending)[/dim]"
+    )
+    console.print("  [green]aipass init update --json[/green]            [dim]# the same plan, machine-readable[/dim]")
     console.print()
     console.print("[yellow]STAGES:[/yellow] 10 stages, each saved — resume on ctrl-C")
     console.print()
@@ -1102,32 +1107,138 @@ def _run_git_auth_provisioning(target: Path, dry_run: bool = False) -> int:
     return 0 if dry_run or result["verified"] else 1
 
 
-def _handle_init_update(args: list[str]) -> int:
-    """Handle `aipass init update [target] [--dry-run]` — refresh scaffold + git auth."""
-    from aipass.aipass.apps.handlers.init.bootstrap import update_project
+#: Plan glyphs, one per action. The column is fixed-width so a manager can
+#: scan the left edge for "what would change" without reading the reasons.
+_PLAN_GLYPHS: dict = {
+    "create": ("+", "green"),
+    "update": ("~", "yellow"),
+    "current": ("=", "dim"),
+    "kept-local": ("!", "cyan"),
+    "retire": ("-", "magenta"),
+    "skipped": ("·", "blue"),
+}
 
-    dry_run = "--dry-run" in args
-    positional = [a for a in args if not a.startswith("--")]
-    target = Path(positional[0]) if positional else Path.cwd()
 
-    if dry_run:
-        # Scaffold refresh has no preview mode, so say so rather than implying
-        # this previewed the whole command.
-        console.print("[dim]Preview mode — scaffold refresh skipped; git-auth provisioning is planned only.[/dim]")
-        return _run_git_auth_provisioning(target, dry_run=True)
+def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
+    """Print the scaffold plan — the same block whether previewing or applying.
 
-    try:
-        result = update_project(target)
+    Apply prints the plan too, on purpose: what a manager pasted for a go and
+    what actually ran must be readable as the same thing.
+    """
+    files = result.get("files") or []
+    handlers = result.get("handlers") or []
+    if not files and not handlers:
+        # A caller (or a test) handed us the legacy shape — fall back to counts.
         updated = result.get("updated_files", [])
-        current = result.get("already_current", [])
         if updated:
             success(f"Updated {len(updated)} file(s):")
             for f in updated:
                 console.print(f"  + {f}")
         else:
             success("All files already current.")
+        current = result.get("already_current", [])
         if current:
             console.print(f"  ({len(current)} already up to date)")
+        return
+
+    verb = "would change" if dry_run else "changed"
+    console.print(
+        f"\n[bold]Scaffold plan[/bold] — {result.get('project_name', '?')}  [dim]{result.get('target', '')}[/dim]"
+    )
+    stamped = result.get("stamped_version") or "unstamped"
+    console.print(f"[dim]AIPass {result.get('aipass_version', '?')} · project stamped {stamped}[/dim]\n")
+
+    width = max((len(entry["path"]) for entry in files), default=0)
+    for entry in files:
+        glyph, colour = _PLAN_GLYPHS.get(entry["action"], ("?", "white"))
+        label = entry["action"].ljust(11)
+        console.print(
+            f"  [{colour}]{glyph} {label}[/{colour}] {entry['path'].ljust(width)}  [dim]{entry['reason']}[/dim]"
+        )
+
+    if handlers:
+        added = [h["name"] for h in handlers if h["action"] == "add"]
+        retired = [h["name"] for h in handlers if h["action"] == "retire"]
+        console.print("")
+        if added:
+            console.print(f"  [green]hooks[/green]   add     {', '.join(sorted(added))}")
+        if retired:
+            console.print(f"  [magenta]hooks[/magenta]   retire  {', '.join(sorted(retired))}")
+
+    console.print("")
+    if result.get("stamp_pending"):
+        console.print(f"  [yellow]stamp[/yellow]   {stamped} → {result.get('aipass_version', '?')} pending")
+    if result.get("trust_reenrol"):
+        console.print(
+            "  [green]trust[/green]   re-enrolled" if not dry_run else "  [green]trust[/green]   re-enrol on apply"
+        )
+    if result.get("backup_dir"):
+        console.print(f"  [dim]backup  {result['backup_dir']}[/dim]")
+
+    protected = [e for e in files if e["action"] == "skipped"]
+    if protected:
+        console.print(f"  [blue]owner[/blue]   {len(protected)} file(s) protected by .updateignore")
+
+    # Count what would be WRITTEN, not what carries a non-current label: a kept
+    # file whose sidecar is already there changes nothing, and a summary that
+    # said otherwise while the exit code said 0 would just teach people to
+    # stop reading one of them.
+    changed = [e for e in files if e.get("writes")]
+    console.print(
+        f"\n  {len(changed)} of {len(files)} file(s) {verb}, {len(files) - len(changed) - len(protected)} unchanged."
+    )
+
+    kept = [e for e in files if e["action"] == "kept-local"]
+    if kept:
+        # A kept file stays kept on every future run until someone resolves it,
+        # so the plan has to say how — otherwise the warning becomes furniture.
+        console.print(
+            f"  [dim]{len(kept)} file(s) kept: your copy stands. Diff it against the .aipass-new"
+            " beside it; delete yours to take the template.[/dim]"
+        )
+
+
+def _handle_init_update(args: list[str]) -> int:
+    """Handle `aipass init update [target] [--dry-run] [--json]`.
+
+    Exit codes are the contract the ritual leans on (DPLAN-0335):
+    ``--dry-run`` exits 0 when the scaffold is current and 2 when anything is
+    pending, so a manager — or a script — can tell "nothing to do" from
+    "there is a plan to read" without parsing the output.
+    """
+    from aipass.aipass.apps.handlers.init.bootstrap import update_project
+
+    dry_run = "--dry-run" in args
+    as_json = "--json" in args
+    positional = [a for a in args if not a.startswith("--")]
+    target = Path(positional[0]) if positional else Path.cwd()
+
+    try:
+        result = update_project(target, apply=not dry_run)
+    except Exception as exc:
+        logger.warning("[init_flow] update failed: %s", exc)
+        cli_error(f"Update failed: {exc}")
+        return 1
+
+    if as_json:
+        # print_json, not print(): rich emits valid JSON with no markup
+        # interpretation and no line wrapping, so a pipe gets a parseable
+        # document while a terminal still gets it highlighted.
+        console.print_json(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        _print_scaffold_plan(result, dry_run=dry_run)
+
+    if dry_run:
+        # Nothing above this line wrote a byte. git-auth is planned only too,
+        # so the whole command stays a read.
+        if not as_json:
+            console.print("[dim]Preview only — nothing written. Apply needs Patrick's or devpulse's go.[/dim]")
+        auth_rc = _run_git_auth_provisioning(target, dry_run=True)
+        if auth_rc != 0:
+            return auth_rc
+        return 2 if result.get("pending") else 0
+
+    try:
         if result.get("trust_enrolled"):
             success("Enrolled in trust registry — hooks active.")
         # Owner/identity check + heal via the frozen sync-registry contract

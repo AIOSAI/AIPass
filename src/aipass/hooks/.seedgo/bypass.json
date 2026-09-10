@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-05-18",
-    "updated": "2026-09-01",
+    "updated": "2026-09-09",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — seedgo's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1310,6 +1310,21 @@
       "file": "apps/modules/testgate_policy.py",
       "standard": "json_structure",
       "reason": "Reads the operator-owned .aipass/test_write_policy.json with stdlib json — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "json_structure",
+      "reason": "Reads .trinity/passport.json and .aipass/scaffold_manifest.json with stdlib json.loads and writes nothing (DPLAN-0335 leg 2) — no JSON file ops needing json_handler, identical profile to grounding_content.py and identity.py, which read the same passport the same way."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "modules",
+      "reason": "Shared notice-loading service consumed by two handlers — lifecycle/release_notice.py (SessionStart) and lifecycle/post_compact_regrounding.py (the post-compact regroup). The module IS the loader, same pattern as grounding_content.py and cadence.py, so it carries no drone subcommand and needs no handle_command; build_notice is orchestration over the private helpers beside it, and reads long only because the silence rules are documented in its docstring."
+    },
+    {
+      "file": "apps/handlers/lifecycle/release_notice.py",
+      "standard": "json_structure",
+      "reason": "Thin SessionStart wiring — imports the module at call time and returns its string. No JSON operations at all, same profile as prompt/identity.py."
     }
   ],
   "notes": {

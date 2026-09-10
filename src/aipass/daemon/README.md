@@ -644,6 +644,37 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ---
 
+## The suite may not write into another citizen's tree (2026-09-09)
+
+Found by @devpulse, not by me: Vera-Studio's live
+`.daemon/last_wake_prompt.txt` held exactly the 16 bytes `tend your branch` —
+`test_run_blocked_contract.py`'s `_job()` default prompt, mtime 2026-09-08
+20:45:18, the minute the daemon suite ran during the PR #759 landing. The path is
+`_fire_job` → `recovery.record_wake_prompt` → `_branch_daemon_dir`, which resolves
+`@vera` through `discovery.active_citizens()` to the **real** Vera-Studio tree and
+writes. The `FakeStatus` seam stops a wake reaching a live tmux; nothing stopped the
+transcript reaching a live branch.
+
+**Sealed on the seam, session-wide** (`_seal_branch_wake_prompt`), not on the row that
+bit. Nine real citizen emails appear as fixture owners in this suite — `@commons`,
+`@backup`, `@vera`, `@devpulse`, `@daemon`, `@seedgo`, `@baud`, `@flow`, `@api` — so a
+guard scoped to one test module would have left it open for the tenth. The fixture
+returns a tmp directory rather than `None`, so a test can still assert the
+branch-side write *happened*; only its destination changes.
+
+**The sentinel tells a test from a real fire, precisely.** The live scheduler runs
+while the suite runs — a ~2 minute timer against a ~30 second suite — and a genuine
+fire legitimately rewrites a branch's transcript (@vera's did at 07:45:19 on 09-09).
+But `record_wake_prompt` always writes **both** destinations with the same text, and
+the suite's `daemon_json` copy is sealed to tmp. So a branch file that changed *and*
+now matches `daemon_json` is a real tick from another process; one that changed and
+does not match is this suite. That discriminator is what lets the sentinel be strict
+without crying wolf.
+
+Removing the seal reproduces the exact evidence — `tend your branch` back in Vera's
+file — and the sentinel names it, plus a **second** escaped citizen the original
+report had not found: `@commons`.
+
 ## The suite may not move host state (2026-09-08, FPLAN-0524)
 
 **Patrick's ruling, his words:** *"tests can't disable processes, they should restore to exact

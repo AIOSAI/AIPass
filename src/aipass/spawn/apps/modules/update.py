@@ -99,6 +99,9 @@ def handle_update(args: list[str]) -> int:
         console.print("  [green]--apply[/green]           Execute changes (default is preview-only)")
         console.print("  [green]--dry-run[/green]         Preview changes without modifying files [dim](default)[/dim]")
         console.print("  [green]--trace[/green]           Enable verbose logging")
+        console.print()
+        console.print("  [dim]A branch may protect its own files from update with a .updateignore at its[/dim]")
+        console.print("  [dim]root — one pattern per line, e.g. .trinity/passport.json or docs.local/[/dim]")
         return 0
 
     if not args:
@@ -198,6 +201,9 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
     console.print(f"  Updates:    {result.get('updates', 0)}")
     console.print(f"  Pruned:     {result.get('pruned', 0)}")
     console.print(f"  Skipped py: {result.get('skipped_py', 0)}")
+    owner_protected = result.get("owner_protected", 0)
+    if owner_protected:
+        console.print(f"  Owner-protected: {owner_protected} [dim](.updateignore)[/dim]")
 
     errs = result.get("errors", [])
     if errs:
@@ -214,6 +220,16 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
             for a in additions_detail:
                 if isinstance(a, dict):
                     console.print(f"    + {a.get('template_path', '')}")
+
+        ignored_detail = result.get("_ignored_detail", [])
+        if isinstance(ignored_detail, list) and ignored_detail:
+            # Its own line and NOT a warning: an owner-protected file is a decision
+            # already made, so the preview reports it the way it reports any other
+            # skip. Nothing here was written, merged or backed up.
+            console.print("  [cyan]Owner-protected (.updateignore):[/cyan]")
+            for g in ignored_detail:
+                if isinstance(g, dict):
+                    console.print(f"    = {g.get('branch_path', '')} [dim](skipped - .updateignore)[/dim]")
 
         updates_detail = result.get("_updates_detail", [])
         if isinstance(updates_detail, list) and updates_detail:
@@ -259,6 +275,7 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
     total_upd = sum(r.get("updates", 0) for r in results)
     total_prn = sum(r.get("pruned", 0) for r in results)
     total_skip = sum(r.get("skipped_py", 0) for r in results)
+    total_prot = sum(r.get("owner_protected", 0) for r in results)
     total_err = sum(len(r.get("errors", [])) for r in results)
 
     for r in results:
@@ -271,7 +288,7 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
     console.print(
         f"  Totals: +{total_add} added, ~{total_upd} updated, "
         f">{total_ren} renamed, -{total_prn} pruned, "
-        f"!{total_skip} py-skipped"
+        f"!{total_skip} py-skipped, ={total_prot} owner-protected"
     )
 
     if total_err:

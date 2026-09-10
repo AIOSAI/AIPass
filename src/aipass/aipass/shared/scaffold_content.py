@@ -271,6 +271,10 @@ def gitignore() -> str:
         "# Disabled files\n"
         "*(disabled)*\n"
         "\n"
+        "# Scaffold update artefacts (aipass init update)\n"
+        ".aipass/.backup/\n"
+        "*.aipass-new\n"
+        "\n"
         "# Registry lock\n"
         ".*_REGISTRY.lock\n"
     )
