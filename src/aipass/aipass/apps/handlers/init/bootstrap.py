@@ -301,10 +301,7 @@ def init_project(
             },
             "branches": [],
         }
-        registry_path.write_text(
-            json.dumps(registry_data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        sm.write_text_lf(registry_path, json.dumps(registry_data, indent=2, ensure_ascii=False) + "\n")
         created.append(str(registry_path))
 
     # 2. .aipass/
@@ -317,7 +314,10 @@ def init_project(
         if not tier_dest.exists() and aipass_home:
             tier_src = Path(aipass_home) / ".aipass" / tier_file
             if tier_src.is_file():
-                shutil.copy2(str(tier_src), str(tier_dest))
+                # Read-then-write, not copy2: copy2 would carry a CRLF checkout
+                # of AIPASS_HOME straight into the project, and the manifest
+                # would then hold a hash no template comparison could match.
+                sm.write_text_lf(tier_dest, tier_src.read_text(encoding="utf-8"))
                 created.append(str(tier_dest))
 
     # 2b. .aipass/hooks.json — project hook config from template
@@ -325,7 +325,7 @@ def init_project(
     if not hooks_json_path.exists() and aipass_home:
         template = Path(aipass_home) / ".aipass" / "project_hooks.json"
         if template.is_file():
-            shutil.copy2(str(template), str(hooks_json_path))
+            sm.write_text_lf(hooks_json_path, template.read_text(encoding="utf-8"))
             created.append(str(hooks_json_path))
             _enroll_project(target)
         else:
@@ -339,15 +339,15 @@ def init_project(
         template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
         if template and template.is_file():
             content = template.read_text(encoding="utf-8").replace("{name}", name)
-            dest.write_text(content, encoding="utf-8")
+            sm.write_text_lf(dest, content)
             created.append(str(dest))
         elif md_name == "AGENTS.md":
-            dest.write_text(sc.agents_md(name), encoding="utf-8")
+            sm.write_text_lf(dest, sc.agents_md(name))
             created.append(str(dest))
         else:
             source = Path(aipass_home) / md_name if aipass_home else None
             if source and source.is_file():
-                shutil.copy2(str(source), str(dest))
+                sm.write_text_lf(dest, source.read_text(encoding="utf-8"))
                 created.append(str(dest))
             else:
                 logging.getLogger(__name__).warning("Source %s not found at AIPASS_HOME, skipping", md_name)
@@ -356,13 +356,13 @@ def init_project(
     readme_md_path = target / "README.md"
     if not readme_md_path.exists():
         readme_content = sc.readme_md(name).replace("{date}", today)
-        readme_md_path.write_text(readme_content, encoding="utf-8")
+        sm.write_text_lf(readme_md_path, readme_content)
         created.append(str(readme_md_path))
 
     # 7. .gitignore
     gitignore_path = target / ".gitignore"
     if not gitignore_path.exists():
-        gitignore_path.write_text(sc.gitignore(), encoding="utf-8")
+        sm.write_text_lf(gitignore_path, sc.gitignore())
         created.append(str(gitignore_path))
 
     # 9. .claude/settings.json — tracked, permissions only (no machine-local paths)
@@ -371,16 +371,14 @@ def init_project(
 
     settings_path = claude_dir / "settings.json"
     if not settings_path.exists():
-        settings_path.write_text(_claude_settings(), encoding="utf-8")
+        sm.write_text_lf(settings_path, _claude_settings())
         created.append(str(settings_path))
 
     # 9b. .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
     if aipass_home and not is_throwaway_path(aipass_home):
         local_settings_path = claude_dir / "settings.local.json"
         if not local_settings_path.exists():
-            local_settings_path.write_text(
-                _claude_local_settings(aipass_home, nested=is_projects_child(target)), encoding="utf-8"
-            )
+            sm.write_text_lf(local_settings_path, _claude_local_settings(aipass_home, nested=is_projects_child(target)))
             created.append(str(local_settings_path))
 
     # 9c. .claude/commands/prep.md — /prep session wrap-up slash command
@@ -389,7 +387,7 @@ def init_project(
     commands_dir.mkdir(exist_ok=True)
     prep_path = commands_dir / "prep.md"
     if not prep_path.exists():
-        prep_path.write_text(sc.prep_md(), encoding="utf-8")
+        sm.write_text_lf(prep_path, sc.prep_md())
         created.append(str(prep_path))
 
     # 10. src/<project>/ package structure (pip-installable from day one)
@@ -402,16 +400,16 @@ def init_project(
         created.append(str(package_dir))
     init_py = package_dir / "__init__.py"
     if not init_py.exists():
-        init_py.write_text(f'"""{raw_name} — created with aipass init."""\n', encoding="utf-8")
+        sm.write_text_lf(init_py, f'"""{raw_name} — created with aipass init."""\n')
         created.append(str(init_py))
 
     # 10b. pyproject.toml — pytest config + package metadata
     pyproject_path = target / "pyproject.toml"
     if not pyproject_path.exists():
-        pyproject_path.write_text(
+        sm.write_text_lf(
+            pyproject_path,
             f'[project]\nname = "{package_name}"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n\n'
             f'[tool.pytest.ini_options]\ntestpaths = ["src"]\npythonpath = ["src"]\n',
-            encoding="utf-8",
         )
         created.append(str(pyproject_path))
 
@@ -420,7 +418,7 @@ def init_project(
     if not tests_dir.exists():
         tests_dir.mkdir(parents=True)
         conftest = tests_dir / "conftest.py"
-        conftest.write_text('"""Pytest fixtures for ' + raw_name + '."""\n', encoding="utf-8")
+        sm.write_text_lf(conftest, '"""Pytest fixtures for ' + raw_name + '."""\n')
         created.append(str(tests_dir))
 
     # 11. .venv symlink → AIPass shared runtime
@@ -555,13 +553,13 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         """
         nonlocal manifest_next
         if sm.is_ignored(rel, ignored):
-            files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME})
+            files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME, "writes": False})
             # No manifest entry on purpose. Recording the on-disk hash would
             # make a later un-ignore read as "unmodified since AIPass wrote it"
             # and overwrite the very file the owner protected; leaving it out
             # is what actually gives un-ignore the backfill behaviour asked for.
             return
-        files.append({"path": rel, "action": action, "reason": reason})
+        writes_before = len(writes)
         if action in (sm.ACTION_CREATE, sm.ACTION_UPDATE):
             writes.append((dest, content))
             manifest_next[rel] = sm.sha256_text(content or "")
@@ -570,13 +568,27 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             if digest is not None:
                 manifest_next[rel] = digest
         elif action == sm.ACTION_KEPT_LOCAL:
-            writes.append((sm.sidecar_path(dest), content))
+            # A kept file whose sidecar already matches the template needs no
+            # write at all, and saying otherwise made Vera-Studio preview
+            # "would change / exit 2" forever after the first apply. The file
+            # is still KEPT — the owner still has an unresolved edit — but the
+            # plan must not claim a write it would not perform.
+            sidecar = sm.sidecar_path(dest)
+            if sm.hash_file(sidecar) == sm.sha256_text(content or ""):
+                reason = f"{reason} (template already beside it)"
+            else:
+                writes.append((sidecar, content))
             # The manifest records what AIPASS wrote, not what is on disk.
             # Adopting the edited hash here would make the NEXT update read
             # "unmodified since AIPass wrote it" and overwrite the manager's
             # work on the second run — the exact loss this rule prevents.
             if rel in recorded:
                 manifest_next[rel] = recorded[rel]
+        # "writes" is the honest answer to "would this run touch the file?",
+        # which the verdict alone cannot give: a kept file with a current
+        # sidecar is KEPT and writes nothing. The plan's counts and its exit
+        # code both read this, so they can never disagree.
+        files.append({"path": rel, "action": action, "reason": reason, "writes": len(writes) > writes_before})
 
     # --- Managed files copied verbatim from a template (the conffile rule) ---
 
@@ -702,13 +714,16 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     for rel in _STALE_MANAGED_FILES:
         stale_path = target / rel
         if sm.is_ignored(rel.as_posix(), ignored):
-            files.append({"path": rel.as_posix(), "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME})
+            files.append(
+                {"path": rel.as_posix(), "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME, "writes": False}
+            )
         elif stale_path.is_file():
             files.append(
                 {
                     "path": rel.as_posix(),
                     "action": sm.ACTION_RETIRE,
                     "reason": f"renamed to {sm.disabled_path(stale_path).name}",
+                    "writes": True,
                 }
             )
             retires.append(stale_path)
@@ -720,7 +735,12 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         aipass_venv = Path(aipass_home) / ".venv"
         if aipass_venv.is_dir():
             files.append(
-                {"path": ".venv", "action": sm.ACTION_CREATE, "reason": f"symlink to AIPass runtime: {aipass_venv}"}
+                {
+                    "path": ".venv",
+                    "action": sm.ACTION_CREATE,
+                    "reason": f"symlink to AIPass runtime: {aipass_venv}",
+                    "writes": True,
+                }
             )
             symlinks.append((venv_link, aipass_venv))
 
@@ -831,7 +851,7 @@ def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> 
         if not dest.name.endswith(sm.NEW_SUFFIX):
             backup(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        sm.write_text_lf(dest, content)
 
     for stale_path in retires:
         backup(stale_path)

@@ -63,10 +63,10 @@ def _gitignore_safety(target: Path, *, dry_run: bool) -> str:
             return "already-safe"
         if not dry_run:
             separator = "" if existing.endswith("\n") else "\n"
-            gitignore_path.write_text(existing + separator + "\n" + sc.gitignore(), encoding="utf-8")
+            sm.write_text_lf(gitignore_path, existing + separator + "\n" + sc.gitignore())
         return "appended"
     if not dry_run:
-        gitignore_path.write_text(sc.gitignore(), encoding="utf-8")
+        sm.write_text_lf(gitignore_path, sc.gitignore())
     return "created"
 
 
@@ -76,7 +76,7 @@ def _write_if_missing(path: Path, content: str, *, dry_run: bool, planned: list[
         return
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        sm.write_text_lf(path, content)
     planned.append(str(path))
 
 

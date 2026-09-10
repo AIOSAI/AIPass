@@ -29,6 +29,8 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
+from aipass.aipass.apps.handlers.init.bootstrap import _managed_manifest_entries
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.prax import logger
 from aipass.spawn import spawn_agent
@@ -98,10 +100,7 @@ def _write_registry(target: Path, name: str) -> tuple[str, str]:
         },
         "branches": [],
     }
-    (target / filename).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    sm.write_text_lf(target / filename, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return registry_id, filename
 
 
@@ -112,18 +111,16 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
     """Write template-specific files. Returns relative paths created."""
     created: list[str] = []
 
-    (target / "README.md").write_text(
-        f"# {name}\n\nCreated with `aipass new`. Template: {template}.\n",
-        encoding="utf-8",
-    )
+    sm.write_text_lf(target / "README.md", f"# {name}\n\nCreated with `aipass new`. Template: {template}.\n")
     created.append("README.md")
 
-    (target / ".gitignore").write_text(sc.gitignore(), encoding="utf-8")
+    sm.write_text_lf(target / ".gitignore", sc.gitignore())
     created.append(".gitignore")
 
     if template == "python":
         pkg = name.replace("-", "_").lower()
-        (target / "pyproject.toml").write_text(
+        sm.write_text_lf(
+            target / "pyproject.toml",
             "[build-system]\n"
             'requires = ["setuptools>=61.0"]\n'
             'build-backend = "setuptools.build_meta"\n\n'
@@ -137,15 +134,11 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
             "[tool.pytest.ini_options]\n"
             'testpaths = ["src"]\n'
             'pythonpath = ["src"]\n',
-            encoding="utf-8",
         )
         created.append("pyproject.toml")
         src = target / "src" / pkg
         src.mkdir(parents=True)
-        (src / "__init__.py").write_text(
-            f'"""{name} — born deployable."""\n\n__version__ = "0.1.0"\n',
-            encoding="utf-8",
-        )
+        sm.write_text_lf(src / "__init__.py", f'"""{name} — born deployable."""\n\n__version__ = "0.1.0"\n')
         created.append(f"src/{pkg}/__init__.py")
 
     return created
@@ -179,14 +172,17 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             dest = aipass_dir / tier_file
             src_path = Path(aipass_home) / ".aipass" / tier_file
             if src_path.is_file():
-                shutil.copy2(str(src_path), str(dest))
+                # Read-then-write, never copy2: a CRLF checkout of AIPASS_HOME
+                # would otherwise hand the project bytes no template comparison
+                # can match (PR #761, windows-setup).
+                sm.write_text_lf(dest, src_path.read_text(encoding="utf-8"))
                 created.append(f".aipass/{tier_file}")
 
     # hooks.json + trust enrollment
     if aipass_home:
         template = Path(aipass_home) / ".aipass" / "project_hooks.json"
         if template.is_file():
-            shutil.copy2(str(template), str(aipass_dir / "hooks.json"))
+            sm.write_text_lf(aipass_dir / "hooks.json", template.read_text(encoding="utf-8"))
             created.append(".aipass/hooks.json")
             _enroll_project(target)
 
@@ -199,36 +195,40 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             tmpl = Path(aipass_home) / ".aipass" / f"project_{md_name}"
             if tmpl.is_file():
                 content = tmpl.read_text(encoding="utf-8").replace("{name}", reg)
-                dest.write_text(content, encoding="utf-8")
+                sm.write_text_lf(dest, content)
                 created.append(md_name)
                 continue
         if md_name == "AGENTS.md":
-            dest.write_text(sc.agents_md(reg), encoding="utf-8")
+            sm.write_text_lf(dest, sc.agents_md(reg))
             created.append(md_name)
 
     # .claude/settings.json — tracked, permissions only (no machine-local paths)
     claude_dir = target / ".claude"
     claude_dir.mkdir(exist_ok=True)
-    (claude_dir / "settings.json").write_text(
-        _claude_settings(),
-        encoding="utf-8",
-    )
+    sm.write_text_lf(claude_dir / "settings.json", _claude_settings())
     created.append(".claude/settings.json")
 
     # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes
     # fence (gitignored). `aipass new` always creates under <host>/projects/<name>.
     if aipass_home and not is_throwaway_path(aipass_home):
-        (claude_dir / "settings.local.json").write_text(
+        sm.write_text_lf(
+            claude_dir / "settings.local.json",
             _claude_local_settings(aipass_home, nested=is_projects_child(target)),
-            encoding="utf-8",
         )
         created.append(".claude/settings.local.json")
 
     # .claude/commands/prep.md
     commands_dir = claude_dir / "commands"
     commands_dir.mkdir(exist_ok=True)
-    (commands_dir / "prep.md").write_text(sc.prep_md(), encoding="utf-8")
+    sm.write_text_lf(commands_dir / "prep.md", sc.prep_md())
     created.append(".claude/commands/prep.md")
+
+    # .aipass/scaffold_manifest.json — `aipass new` mints a whole tree, so
+    # every file in it is ours and the stamp is honest. Without it, a project
+    # born here would meet its first `init update` as unknown provenance and
+    # collect a sidecar for files nobody had touched (DPLAN-0335).
+    sm.write_manifest(target, _managed_manifest_entries(target))
+    created.append(str(sm.MANIFEST_REL.as_posix()))
 
     # .venv symlink
     if aipass_home:

@@ -1154,6 +1154,46 @@ def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
     return 0
 
 
+def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
+    """Compare a project's tier0 kernel against AIPASS_HOME, with provenance.
+
+    Split out of ``_check_scaffold`` to keep both readable: the interesting part
+    is not the comparison but WHICH of four states the file is in, and that
+    deserves to be legible on its own.
+    """
+    from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
+
+    canonical = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
+    if not (canonical and canonical.is_file()):
+        return []
+
+    project_hash = sm.hash_file(root / ".aipass" / "tier0_kernel.md")
+    if project_hash is None:
+        return [CheckResult("tier0_kernel.md", GLYPH_WARN, "not found", preview)]
+    if project_hash == sm.hash_file(canonical):
+        return [CheckResult("tier0_kernel.md", GLYPH_PASS, "matches AIPASS_HOME", "")]
+
+    recorded_hash = sm.manifest_hashes(root).get(".aipass/tier0_kernel.md")
+    if recorded_hash == project_hash:
+        # AIPass wrote this and the template has since moved on — an update
+        # will refresh it, so the preview command is the whole answer.
+        return [CheckResult("tier0_kernel.md", GLYPH_WARN, "template moved on", preview)]
+
+    # A file the project edited, or one AIPass cannot prove it wrote. A bare
+    # "differs" reads as a fault the manager cannot clear, when in fact the
+    # update will KEEP it and there are exactly two ways to settle it — so name
+    # both instead of warning about neither.
+    provenance = "kept (local edits)" if recorded_hash else "kept (unknown provenance)"
+    return [
+        CheckResult(
+            "tier0_kernel.md",
+            GLYPH_WARN,
+            provenance,
+            f"Update keeps your copy. Delete it to take the template, or add it to {sm.IGNORE_NAME} to keep it for good",
+        )
+    ]
+
+
 def _check_scaffold() -> List[CheckResult]:
     """Run Scaffold group checks — is this project's AIPass scaffold current?
 
@@ -1198,18 +1238,8 @@ def _check_scaffold() -> List[CheckResult]:
 
     # tier0 is the prompt injected every turn — the one file whose drift a
     # manager feels immediately, so it gets its own line rather than a count.
-    tier0 = root / ".aipass" / "tier0_kernel.md"
-    canonical = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
-    if sm.is_ignored(".aipass/tier0_kernel.md", ignored):
-        pass  # Owner-protected — reported in the .updateignore line, not as drift.
-    elif canonical and canonical.is_file():
-        project_hash = sm.hash_file(tier0)
-        if project_hash is None:
-            results.append(CheckResult("tier0_kernel.md", GLYPH_WARN, "not found", preview))
-        elif project_hash == sm.hash_file(canonical):
-            results.append(CheckResult("tier0_kernel.md", GLYPH_PASS, "matches AIPASS_HOME", ""))
-        else:
-            results.append(CheckResult("tier0_kernel.md", GLYPH_WARN, "differs from AIPASS_HOME", preview))
+    if not sm.is_ignored(".aipass/tier0_kernel.md", ignored):
+        results.extend(_check_tier0(root, aipass_home, preview))
 
     # hooks.json — handler keys, not mere existence. Presence-only is how a
     # project passed doctor carrying a hooks file two months stale.

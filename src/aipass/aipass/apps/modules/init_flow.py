@@ -1179,10 +1179,13 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
     if protected:
         console.print(f"  [blue]owner[/blue]   {len(protected)} file(s) protected by .updateignore")
 
-    changed = [e for e in files if e["action"] not in ("current", "skipped")]
+    # Count what would be WRITTEN, not what carries a non-current label: a kept
+    # file whose sidecar is already there changes nothing, and a summary that
+    # said otherwise while the exit code said 0 would just teach people to
+    # stop reading one of them.
+    changed = [e for e in files if e.get("writes")]
     console.print(
-        f"\n  {len(changed)} of {len(files)} file(s) {verb}, "
-        f"{len(files) - len(changed) - len(protected)} already current."
+        f"\n  {len(changed)} of {len(files)} file(s) {verb}, {len(files) - len(changed) - len(protected)} unchanged."
     )
 
     kept = [e for e in files if e["action"] == "kept-local"]

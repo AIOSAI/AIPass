@@ -75,10 +75,10 @@ ACTION_KEPT_LOCAL: str = "kept-local"
 ACTION_RETIRE: str = "retire"
 ACTION_SKIPPED: str = "skipped"
 
-#: Verdicts that mean "something would be written". ``current`` and ``skipped``
-#: are the two that are not pending; ``kept-local`` IS pending, because the
-#: apply writes a ``.aipass-new`` sidecar the manager has to look at.
-PENDING_ACTIONS: frozenset = frozenset({ACTION_CREATE, ACTION_UPDATE, ACTION_KEPT_LOCAL, ACTION_RETIRE})
+# NOTE: there is deliberately no PENDING_ACTIONS set here. "Would this write
+# something?" cannot be answered from the verdict alone -- a kept-local file
+# whose sidecar already matches the template writes nothing -- so the plan
+# derives pending from the writes it actually queued, never from the label.
 
 
 # =============================================================================
@@ -94,6 +94,27 @@ def sha256_text(text: str) -> str:
     only spelling that matches what lands on disk.
     """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def write_text_lf(path: Path, content: str) -> None:
+    """Write a scaffold file with LF endings on every platform.
+
+    THE ONE WRITER FOR EVERY MANAGED FILE, and the reason is the manifest.
+    ``Path.write_text`` defaults to ``newline=None``, which on Windows
+    translates every ``\n`` to ``\r\n`` on the way to disk. The manifest then
+    holds a hash of the LF string while the plan compares a hash of the CRLF
+    bytes — two hashes of "the same file" that can never agree, so a freshly
+    initialised project reported ``prep.md`` as needing an update forever
+    (PR #761, windows-setup, 2026-09-09).
+
+    Pinning the newline makes bytes on disk equal ``content.encode("utf-8")``
+    everywhere, which is what lets one hash answer for all three OSes — and it
+    makes the ``.aipass-new`` sidecar and the backup copy byte-comparable
+    across a team that is not all on the same platform. Same shape as the
+    cp1252 class RPLAN-0004 gated with PLW1514: the platform default silently
+    changes bytes, and str-vs-bytes reasoning diverges from there.
+    """
+    path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def hash_file(path: Path) -> str | None:
@@ -189,7 +210,7 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
         "stamped_at": datetime.now(timezone.utc).isoformat(),
         "files": {key: files[key] for key in sorted(files)},
     }
-    path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_text_lf(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")
     return path
 
 

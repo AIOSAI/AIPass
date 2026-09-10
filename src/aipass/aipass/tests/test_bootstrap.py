@@ -27,6 +27,8 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     init_project,
     update_project,
 )
+from aipass.aipass.apps.handlers.init import bootstrap
+from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
 
 
@@ -492,6 +494,80 @@ def test_update_project_return_dict_structure(tmp_path):
     assert isinstance(result["updated_files"], list)
     assert isinstance(result["already_current"], list)
     assert isinstance(result["skipped_files"], list)
+
+
+def _windows_newline_world(monkeypatch):
+    """Make this Linux process translate newlines the way Windows does.
+
+    THE PLATFORM ORACLE (FPLAN-0529 shape). CPython's ``write_text`` with the
+    default ``newline=None`` translates every ``\n`` to ``os.linesep`` on the
+    way to disk — a no-op here, ``\r\n`` on Windows. That single difference
+    made PR #761's windows-setup job red while all three Linux legs were green,
+    so pinning it needs the Windows-shaped world manufactured, not a runner.
+
+    The fake is faithful in the one way that matters: it translates ONLY when
+    the caller left ``newline`` unset, which is exactly the condition the cure
+    removes. A writer that pins ``newline="\n"`` passes straight through.
+    """
+    real_write_text = Path.write_text
+
+    def windows_write_text(self, data, encoding=None, errors=None, newline=None):
+        if newline is None:
+            # newline="" then stops the real writer translating a second time.
+            return real_write_text(self, data.replace("\n", "\r\n"), encoding=encoding, errors=errors, newline="")
+        return real_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
+
+    monkeypatch.setattr(Path, "write_text", windows_write_text)
+
+
+def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monkeypatch):
+    """Every file init writes holds LF bytes, on a platform that would give CRLF.
+
+    The manifest hashes bytes on disk while the plan hashes the template string,
+    so the two can only ever agree if what lands on disk IS the string. This
+    pins that invariant at the source rather than at one symptom.
+    """
+    _windows_newline_world(monkeypatch)
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="crlf")
+
+    for rel in bootstrap._MANIFEST_TRACKED:
+        path = target / rel
+        if path.is_file():
+            assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
+
+    # And the recorded hash is the hash of the template string, not of some
+    # platform-translated variant of it.
+    prep = target / ".claude" / "commands" / "prep.md"
+    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["files"][".claude/commands/prep.md"] == sc_sha256(sc.prep_md())
+    assert prep.read_bytes() == sc.prep_md().encode("utf-8")
+
+
+def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monkeypatch):
+    """PR #761 windows-setup, reproduced on Linux: a fresh project must be current.
+
+    Before the cure this reported `.claude/commands/prep.md` as an update on the
+    first run and a kept-local (with a spurious `.aipass-new` beside it) on the
+    second — a file nobody had touched, on a project AIPass had just written.
+    """
+    _windows_newline_world(monkeypatch)
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
+        lambda _: False,
+    )
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="crlfupd")
+
+    first = update_project(target)
+    second = update_project(target)
+
+    assert first["updated_files"] == []
+    assert first["kept_files"] == []
+    assert second["updated_files"] == []
+    assert not (target / ".claude" / "commands" / "prep.md.aipass-new").exists()
 
 
 def test_update_project_already_current_after_init(tmp_path, monkeypatch):
