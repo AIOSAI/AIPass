@@ -581,6 +581,240 @@ class TestNeverUpdateGuard:
         assert result["pruned"] == 0
 
 
+class TestUpdateIgnoreIsTheOwnersDecision:
+    """`.updateignore` at a branch root — the owner decides what update skips.
+
+    Patrick's ruling 2026-09-09: "project owners decide what update skips."
+    @vera's todo 25 is the case: a preview proposed merging template boilerplate
+    into her passport and she did not apply, because the tool could not tell her
+    passport from a template.
+
+    The contract is identical to `aipass init update`'s at project roots, so an
+    owner learns it once. These pins are on THIS door.
+    """
+
+    def _ignore(self, branch_dir, text):
+        (branch_dir / ".updateignore").write_text(text, encoding="utf-8")
+
+    def _update(self, template_dir, mock_registry, dry_run=True):
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            return update_branch("test_branch", dry_run=dry_run)
+
+    def test_absent_file_protects_nothing(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """No `.updateignore` is the world every branch is in today — nothing protected."""
+        assert not (branch_dir / ".updateignore").exists()
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["owner_protected"] == 0
+        assert result["_ignored_detail"] == []
+
+    def test_a_named_file_moves_from_written_to_owner_protected(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """The whole point, measured as a MOVE: the same file, both worlds.
+
+        Asserting only the protected world would pass against a template that
+        never offered the file in the first place, so the unprotected run is the
+        control and the two are compared.
+        """
+        (branch_dir / "README.md").unlink()
+        before = self._update(template_dir, mock_registry)
+        offered = [a["template_path"] for a in before["_additions_detail"]]
+        assert "README.md" in offered, "control: the template must be offering this file"
+        assert before["owner_protected"] == 0
+
+        self._ignore(branch_dir, "README.md\n")
+        after = self._update(template_dir, mock_registry)
+
+        assert after["owner_protected"] == 1
+        assert [g["branch_path"] for g in after["_ignored_detail"]] == ["README.md"]
+        assert "README.md" not in [a["template_path"] for a in after["_additions_detail"]]
+
+    def test_a_protected_file_is_never_written(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """--apply must not create it either. Byte-for-byte, the file stays absent."""
+        (branch_dir / "README.md").unlink()
+        self._ignore(branch_dir, "README.md\n")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert result["success"] is True
+        assert result["owner_protected"] == 1
+        assert not (branch_dir / "README.md").exists(), "an owner-protected file was written by --apply"
+
+    def test_a_protected_json_is_never_merged_and_never_backed_up(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """Never written, never merged, never backed up — the third clause has its own pin.
+
+        A merge that was skipped but still left a `.recovery` copy would mean the
+        tool touched a file the owner put out of reach.
+        """
+        dashboard = branch_dir / "DASHBOARD.local.json"
+        before = dashboard.read_text(encoding="utf-8")
+        self._ignore(branch_dir, "DASHBOARD.local.json\n")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert result["owner_protected"] == 1
+        assert dashboard.read_text(encoding="utf-8") == before
+        recovery = branch_dir / ".spawn" / ".recovery"
+        copies = list(recovery.rglob("*DASHBOARD*")) if recovery.exists() else []
+        assert copies == [], f"an owner-protected file was backed up: {copies}"
+
+    def test_the_passport_is_protected_before_the_heal_can_reach_it(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """@vera's case. The heal runs BEFORE the create-only guard, so ignore must run before both."""
+        template_passport = template_dir / ".trinity"
+        template_passport.mkdir()
+        (template_passport / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "{{branchname}}", "email": "@{{branchname}}", "git_branch": "dev"},
+                    "identity": {"citizen_class": "specialist", "role": "template", "traits": ["generic"]},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        passport = branch_dir / ".trinity" / "passport.json"
+        document = json.loads(passport.read_text(encoding="utf-8"))
+        del document["branch_info"]["email"]
+        passport.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        before = passport.read_text(encoding="utf-8")
+
+        control = self._update(template_dir, mock_registry)
+        assert ".trinity/passport.json" in [u["branch_path"] for u in control["_updates_detail"]], (
+            "control: the heal must be proposing a merge, or this pin proves nothing"
+        )
+
+        self._ignore(branch_dir, ".trinity/passport.json\n")
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert result["owner_protected"] == 1
+        assert [g["branch_path"] for g in result["_ignored_detail"]] == [".trinity/passport.json"]
+        assert passport.read_text(encoding="utf-8") == before, "the heal reached an owner-protected passport"
+
+    def test_a_directory_pattern_takes_everything_under_it(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """A trailing slash means the directory and everything below it, at any depth."""
+        nested = template_dir / "docs" / "sub"
+        nested.mkdir(parents=True)
+        (template_dir / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
+        (nested / "deep.md").write_text("# deep\n", encoding="utf-8")
+
+        self._ignore(branch_dir, "docs/\n")
+        result = self._update(template_dir, mock_registry)
+
+        protected = sorted(g["branch_path"] for g in result["_ignored_detail"])
+        assert protected == ["docs/guide.md", "docs/sub/deep.md"]
+        assert not any(a["template_path"].startswith("docs/") for a in result["_additions_detail"])
+
+    def test_comments_and_blank_lines_are_not_patterns(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """The parsed PATTERN LIST, not just its downstream effect.
+
+        Asserting only that a commented-out name is still written is a test that
+        passes for the wrong reason, and a mutation proved it: a `#` is a literal
+        to fnmatch, so a comment kept as a pattern can never match a filename and
+        the defect is invisible one layer down. The clause under test is "# comments,
+        blank lines ignored", so the pin reads what the parser returned.
+        """
+        from aipass.spawn.apps.handlers.update_ignore import read_ignore
+
+        self._ignore(
+            branch_dir,
+            "# README.md is the owner's, or would be\n\n   \n  DASHBOARD.local.json  \n\t\n# trailing note\n",
+        )
+
+        assert read_ignore(branch_dir) == ["DASHBOARD.local.json"]
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["owner_protected"] == 1
+        assert [g["branch_path"] for g in result["_ignored_detail"]] == ["DASHBOARD.local.json"]
+
+    def test_a_bare_name_matches_at_any_depth(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """A pattern with no slash claims that filename wherever it sits.
+
+        This is what an owner writing `passport.json` means; requiring the full
+        `.trinity/` prefix for the common case would make the file a trap. A
+        mutation removing this arm left every other pin in the class green, so it
+        gets one of its own: the target is at DEPTH and the pattern is a bare name.
+        """
+        nested = template_dir / "docs" / "deep"
+        nested.mkdir(parents=True)
+        (nested / "notes.md").write_text("# nested\n", encoding="utf-8")
+        (template_dir / "notes.md").write_text("# root\n", encoding="utf-8")
+
+        self._ignore(branch_dir, "notes.md\n")
+        result = self._update(template_dir, mock_registry)
+
+        protected = sorted(g["branch_path"] for g in result["_ignored_detail"])
+        assert protected == ["docs/deep/notes.md", "notes.md"], (
+            "a bare name must claim the nested copy as well as the root one"
+        )
+        assert not any(a["template_path"].endswith("notes.md") for a in result["_additions_detail"])
+
+    def test_a_pattern_with_a_slash_claims_only_that_path(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """The other half of the depth rule: naming a path must not widen to a basename.
+
+        Without the "no slash" guard, an owner writing `.trinity/passport.json`
+        would silently also protect any `passport.json` elsewhere in the branch.
+        Over-protection is the safe direction and still not what they asked for.
+        """
+        nested = template_dir / "docs" / "deep"
+        nested.mkdir(parents=True)
+        (nested / "notes.md").write_text("# nested\n", encoding="utf-8")
+        (template_dir / "notes.md").write_text("# root\n", encoding="utf-8")
+
+        self._ignore(branch_dir, "docs/deep/notes.md\n")
+        result = self._update(template_dir, mock_registry)
+
+        assert [g["branch_path"] for g in result["_ignored_detail"]] == ["docs/deep/notes.md"]
+        assert "notes.md" in [a["template_path"] for a in result["_additions_detail"]], (
+            "the root copy shares a basename and was never named — it must still be written"
+        )
+
+    def test_a_commented_out_name_is_still_written(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """The owner's escape hatch: comment the line out and the file comes back."""
+        (branch_dir / "README.md").unlink()
+        self._ignore(branch_dir, "# README.md\n")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["owner_protected"] == 0
+        assert "README.md" in [a["template_path"] for a in result["_additions_detail"]]
+
+    def test_spawn_never_creates_or_modifies_the_ignore_file(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """It is the owner's file. An update must leave it exactly as it found it."""
+        self._ignore(branch_dir, "README.md\n")
+        path = branch_dir / ".updateignore"
+        before = path.read_text(encoding="utf-8")
+
+        self._update(template_dir, mock_registry, dry_run=False)
+
+        assert path.read_text(encoding="utf-8") == before
+
+    def test_an_unreadable_ignore_file_protects_nothing_and_does_not_raise(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """Bad bytes must not take the whole update down with them."""
+        (branch_dir / "README.md").unlink()
+        (branch_dir / ".updateignore").write_bytes(b"\xff\xfe README.md")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["success"] is True
+        assert result["owner_protected"] == 0
+        assert "README.md" in [a["template_path"] for a in result["_additions_detail"]]
+
+
 class TestUpdateAll:
     """Tests for update_all()."""
 

@@ -95,6 +95,28 @@ drone @spawn update specialist --all --apply                   # All specialist-
 drone @spawn update @branch_name --dry-run                     # Explicit preview (same as default)
 ```
 
+#### `.updateignore` — the owner decides what update skips
+
+A branch protects its own files with a `.updateignore` at its root, beside `.trinity/`.
+Same fashion as `.gitignore` and `.backupignore`: one pattern per line, `#` comments,
+blank lines ignored, a trailing `/` for a directory and everything under it, a pattern
+with no slash also matching that filename at any depth. No negation in v1.
+
+```
+.trinity/passport.json
+docs.local/
+```
+
+A matched file is **never written, never merged, never backed up**, and the preview
+reports it as `skipped (.updateignore)` on its own line rather than as a warning — an
+owner-protected file is a decision already made. Spawn never creates or modifies the
+file; its absence protects nothing.
+
+One name, two doors: `aipass init update` honours the same contract at *project* roots
+(`tier1_navmap.md`, `.aipass/prompts/`), so an owner learns the syntax once. The case it
+was built for is a preview that proposed merging template boilerplate into a citizen's
+passport — with the passport named here, it is hers, and the rest of the update proceeds.
+
 ### Delete
 
 ```bash
