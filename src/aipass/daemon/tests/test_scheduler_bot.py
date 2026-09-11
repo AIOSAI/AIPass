@@ -208,6 +208,14 @@ class TestQueueJsonSchema:
         for field in required_fields:
             assert field in job_out, f"Missing field: {field}"
 
+    def test_a_command_job_previews_its_command_in_the_same_schema(self, interval_job):
+        """DPLAN-0338: a command job has no prompt, so the preview names what it runs. Keys unchanged."""
+        command = {key: value for key, value in interval_job.items() if key != "prompt"}
+        command.update(id="sweep", command="drone rm --stale 10d ../..", branch_path="unused", wake={})
+        wake_entry, command_entry = _build_queue([interval_job, command], {"jobs": {}})
+        assert command_entry["prompt_preview"] == "command: drone rm --stale 10d ../.."
+        assert set(command_entry) == set(wake_entry), "a command job may not change the frozen schema's keys"
+
     def test_type_values(self, once_job, interval_job):
         """Type field matches schedule type."""
         runstate = {"jobs": {}}

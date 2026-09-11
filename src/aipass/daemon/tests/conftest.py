@@ -18,6 +18,7 @@
 
 import json
 import os
+import sys
 import tempfile
 
 # Redirect prax logs to temp directory during tests
@@ -34,6 +35,7 @@ from unittest.mock import MagicMock, patch
 
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import timer_install
+from aipass.daemon.apps.handlers.schedule import command_job as command_job_mod
 from aipass.daemon.apps.handlers.schedule import recovery as recovery_mod
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 
@@ -201,6 +203,28 @@ def _seal_branch_wake_prompt(tmp_path):
     sealed = tmp_path / "_sealed_branch_daemon"
     with patch.object(recovery_mod, "_branch_daemon_dir", return_value=sealed):
         yield sealed
+
+
+# Stands in for drone in every test: exits 1 naming the seal, so a test that
+# forgot its own fake sees a FAILED fire rather than a live command or a live mail.
+SEALED_LAUNCHER = (sys.executable, "-c", "import sys; sys.exit('sealed: a test reached the real drone launcher')")
+
+
+@pytest.fixture(autouse=True)
+def _seal_command_launcher():
+    """No test may run the real drone through a command job (DPLAN-0338).
+
+    ``command_job.LAUNCHER`` replaces the job's own ``drone`` token AND prefixes
+    the notify mail's ``drone @ai_mail email`` call, so this one seam covers every
+    subprocess the command lane can start: a real scheduled command against the
+    real tree, and a real mail into a real citizen's inbox. Session-wide on the
+    seam for the reason the three seals above are (learning 130): the next test
+    to fire a command job has no reason to know this file exists.
+
+    Tests that need a behaviour patch LAUNCHER over this with their own fake.
+    """
+    with patch.object(command_job_mod, "LAUNCHER", SEALED_LAUNCHER):
+        yield SEALED_LAUNCHER
 
 
 def _live_wake_prompts() -> dict:

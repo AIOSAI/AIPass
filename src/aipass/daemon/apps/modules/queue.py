@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -109,7 +109,8 @@ def _build_queue(jobs: list, runstate: dict) -> list:
         elif "@" in owner:
             owner = f"@{owner.split('@')[0]}"
 
-        prompt = job.get("prompt", "")
+        # A command job has no prompt; its command is what it does (DPLAN-0338).
+        prompt = f"command: {job['command']}" if "command" in job else job.get("prompt", "")
         flat = " ".join(prompt.split())  # collapse newlines/whitespace → single-line preview
         preview = flat[:80] + "..." if len(flat) > 80 else flat
 

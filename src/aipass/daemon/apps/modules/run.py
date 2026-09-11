@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-15
-# Modified: 2026-09-10
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -42,6 +42,8 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     window_label,
 )
 from aipass.daemon.apps.handlers.schedule import catch_up_lane
+from aipass.daemon.apps.handlers.schedule import command_job
+from aipass.daemon.apps.handlers.schedule.job_reference import job_reference_lines
 from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule import tick_lock
 from aipass.daemon.apps.handlers.module_root import module_file
@@ -85,6 +87,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Fires via:[/yellow]")
     console.print("  [cyan]*[/cyan] wake_branch() [dim](ai_mail dispatch — direct import)[/dim]")
+    console.print("  [cyan]*[/cyan] a drone subprocess [dim](command jobs — no wake, DPLAN-0338)[/dim]")
     console.print()
 
 
@@ -98,79 +101,8 @@ def print_help():
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  Sweeps src/aipass/*/.daemon/*.json for scheduled jobs,")
     console.print("  evaluates due-ness, and wakes each due branch via wake_branch().")
-    console.print("\n[bold cyan]SCHEDULING — How to author a job:[/bold cyan]")
-    console.print("  [bold]File:[/bold] src/aipass/<branch>/.daemon/schedule.json")
-    console.print()
-    console.print("  [bold]Schema:[/bold]")
-    console.print("    {")
-    console.print('      "version": 1,')
-    console.print('      "branch": "@<branch>",')
-    console.print('      "jobs": [')
-    console.print("        {")
-    console.print('          "id": "my-job",')
-    console.print('          "enabled": true,')
-    console.print('          "schedule": { "type": "interval", "interval_minutes": 30 },')
-    console.print('          "wake": { "fresh": true, "model": "haiku" },')
-    console.print('          "prompt": "Do something, then STOP."')
-    console.print("        }")
-    console.print("      ]")
-    console.print("    }")
-    console.print()
-    console.print("  [bold]Schedule types:[/bold]")
-    console.print("    [cyan]interval[/cyan]  interval_minutes: N")
-    console.print("              [dim]Fires when elapsed >= N since last_run.[/dim]")
-    console.print("              [dim]Never run and no slot -> fires IMMEDIATELY (warned in run.log).[/dim]")
-    console.print("    [cyan]daily[/cyan]     time: HH:MM")
-    console.print("              [dim]+/-15 min window, once per day.[/dim]")
-    console.print("    [cyan]hourly[/cyan]    time: M  [dim](minute of hour)[/dim]")
-    console.print("              [dim]+/-15 min window, once per hour.[/dim]")
-    console.print("    [cyan]once[/cyan]      due_date: YYYY-MM-DD")
-    console.print("              [dim]Fires when date <= today, then marks completed.[/dim]")
-    console.print("    [cyan]rotation[/cyan]  time: HH:MM")
-    console.print("              [dim]Daily window, but wakes the NEXT citizen on the fleet[/dim]")
-    console.print("              [dim]roster instead of the owner. See drone @daemon rotation.[/dim]")
-    console.print()
-    console.print("  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models)")
-    console.print()
-    console.print("  [bold]Optional schedule fields:[/bold]")
-    console.print('    [cyan]slot[/cyan]      "2026-09-06T03:00:00"   [dim](interval jobs)[/dim]')
-    console.print("              [dim]An ISO instant naming ONE occurrence of the rhythm you want.[/dim]")
-    console.print("              [dim]A job that has never run is seeded from it, so the first fire[/dim]")
-    console.print("              [dim]lands on the next slot instead of the next tick. Without it,[/dim]")
-    console.print("              [dim]enabling a weekly job at 01:34 locks it to 01:34 forever.[/dim]")
-    console.print("              [dim]A past slot keeps its phase — it is rolled forward, not used raw.[/dim]")
-    console.print("    [cyan]catch_up[/cyan]  false                   [dim](daily, rotation and hourly jobs)[/dim]")
-    console.print("              [dim]ON UNLESS YOU SET false (DPLAN-0332, 2026-09-08). When a[/dim]")
-    console.print("              [dim]window closed with no run, the job fires once afterwards and[/dim]")
-    console.print("              [dim]stamps caught_up on the runstate row. Set false when a late[/dim]")
-    console.print("              [dim]run is worthless.[/dim]")
-    console.print("    [cyan]catch_up_max_age_hours[/cyan]  24         [dim](optional)[/dim]")
-    console.print("              [dim]A missed window older than this is logged MISSED and not[/dim]")
-    console.print("              [dim]queued. Unlimited by default: ten days away should still be[/dim]")
-    console.print("              [dim]exactly one wake.[/dim]")
-    console.print()
-    console.print("  [bold]Staggering:[/bold] Prefer `slot` on interval jobs. Seeding last_run values")
-    console.print("  in daemon_json/daemon_runstate.json by hand still works for the other types.")
-    console.print()
-    console.print("[bold cyan]RECOVERY AFTER A GAP (DPLAN-0332):[/bold cyan]")
-    console.print("  Every tick stamps last_tick. If the next tick is more than 30 min later,")
-    console.print("  the scheduler was away: it names the cause from the host boot time (machine")
-    console.print("  off, scheduler stopped while up, or both), enumerates every window that")
-    console.print("  closed inside the gap, and queues ONE catch-up per job carrying them all.")
-    console.print("  Ten days off is one wake with ten dates, never ten wakes.")
-    console.print()
-    console.print("  The queue drains one at a time fleet-wide: the next fires when the previous")
-    console.print("  completes, or 60 min later if it never reports. Three refusals park an entry")
-    console.print("  at the tail so it cannot block the queue — it is never dropped.")
-    console.print()
-    console.print("  Every wake carries a header saying why it is awake: SCHEDULED with the last")
-    console.print("  run, or CATCH-UP with the gap, the cause and the missed windows. The agent")
-    console.print("  is told the truth about time and decides what matters — nothing is replayed.")
-    console.print()
-    console.print("  [bold]run.log:[/bold] GAP once per gap, then QUEUED / CATCH-UP FIRED /")
-    console.print("  CATCH-UP FAILED / SUPERSEDED. The MISSED line still names every windowed job")
-    console.print("  whose window closed unrun, once per job per day.")
-    console.print()
+    for line in job_reference_lines():
+        console.print(line)
 
 
 def _log(message: str) -> None:
@@ -200,6 +132,50 @@ def _blocked_reason(status) -> str:
     return ""
 
 
+def _mail_notice(to: str, subject: str, body: str) -> None:
+    """Send a command job's notify.email mail. A mail that fails is logged; it never changes the fire."""
+    failure = command_job.send_mail(to, subject, body, _DAEMON_ROOT)  # signed @daemon: cwd is identity
+    if failure:
+        _log(f"WARNING: notify mail to {to} not sent — {failure}")
+        logger.warning("[run] notify mail to %s not sent: %s", to, failure)
+
+
+def _fire_command_job(job: dict) -> tuple:
+    """Run a command job's drone command as a subprocess (DPLAN-0338). No wake, no seat, no tokens.
+
+    Never BLOCKED: nothing uses a seat, so no gate can refuse it and no active-agent
+    lock is taken. Exit 0 is FIRED; a non-zero exit, a timeout or a command that
+    never started is FAILED with the output tail as its detail. FIRE and DONE go
+    to the console (the tick log) AND the logger (logs/run.log), pass or fail.
+    """
+    from aipass.daemon.apps.handlers.schedule.telegram_notifier import notify_complete, notify_error, notify_triggered
+
+    owner, job_id, command = job["owner"], job["id"], job["command"]
+    notify, mail_to = _should_notify(job), command_job.notify_email(job)
+
+    _log(f"FIRE: {owner}/{job_id} -> command: {command}")
+    logger.info("[run] FIRE %s/%s command: %s", owner, job_id, command)
+    if notify:
+        notify_triggered(owner, job_id)
+    if mail_to:
+        _mail_notice(mail_to, *command_job.start_mail(job))
+
+    result = command_job.run_command(command, job.get("branch_path"), command_job.timeout_for(job))
+    done = command_job.done_text(result)
+    _log(f"DONE: {owner}/{job_id} — {done}")
+    (logger.info if result.ok else logger.warning)("[run] DONE %s/%s %s", owner, job_id, done)
+    if mail_to:
+        _mail_notice(mail_to, *command_job.finish_mail(job, result))
+
+    if result.ok:
+        if notify:
+            notify_complete(owner, job_id, done)
+        return OUTCOME_FIRED, done
+    if notify:
+        notify_error(owner, job_id, done)
+    return OUTCOME_FAILED, done
+
+
 def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     """Fire a single job via direct wake_branch import (DPLAN-0204 path A).
 
@@ -215,7 +191,13 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     steward is already a recorded MISS there — the pointer advanced and a
     different citizen gets the night — so that night is genuinely spent, and
     calling it blocked would re-fire a rotation whose turn was already taken.
+
+    A command job (DPLAN-0338) is asked about FIRST, ahead of rotation: a job that
+    carries a command never wakes anyone, whatever else its schedule says.
     """
+    if "command" in job:
+        return _fire_command_job(job)
+
     if job.get("schedule", {}).get("type") == ROTATION_TYPE:
         ok, detail = fire_rotation(job, runstate, header=header)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
@@ -506,9 +488,8 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
             results["fired"] += 1
             if caught_up:
                 results["caught_up"] += 1
-                _log(
-                    f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window_label(job['schedule'])} window closed"
-                )
+                window = window_label(job["schedule"])
+                _log(f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window} window closed")
             update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=caught_up)
         elif outcome == OUTCOME_BLOCKED:
             # Never stamps last_run — the job stays due and the next tick tries

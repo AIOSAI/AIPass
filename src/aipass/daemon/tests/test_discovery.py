@@ -102,7 +102,93 @@ class TestValidateJob:
             assert _validate_job(job, Path("test.json")) is True
 
     def test_required_keys_constant(self):
-        assert REQUIRED_JOB_KEYS == {"id", "schedule", "prompt"}
+        # prompt left the required set at DPLAN-0338: a job now says exactly one
+        # of prompt or command, which JOB_ACTION_KEYS checks rather than requires.
+        assert REQUIRED_JOB_KEYS == {"id", "schedule"}
+        assert discovery.JOB_ACTION_KEYS == ("prompt", "command")
+
+
+# ── command jobs (DPLAN-0338) ─────────────────────────
+
+
+def command_job(**extra) -> dict:
+    """A command job as its owner writes it into .daemon/schedule.json."""
+    job = {
+        "id": "sweep",
+        "schedule": {"type": "interval", "interval_minutes": 10080},
+        "command": "drone rm --stale 10d ../..",
+    }
+    job.update(extra)
+    return job
+
+
+class TestCommandJobValidation:
+    def test_a_command_job_is_valid(self):
+        assert _validate_job(command_job(), Path("test.json")) is True
+
+    def test_prompt_and_command_together_is_refused_and_named(self, caplog):
+        with caplog.at_level("WARNING"):
+            assert _validate_job(command_job(prompt="tend"), Path("test.json")) is False
+        assert "exactly one of prompt or command, found prompt and command" in caplog.text
+
+    def test_neither_is_refused_and_named(self, caplog):
+        job = {"id": "empty", "schedule": {"type": "daily", "time": "04:00"}}
+        with caplog.at_level("WARNING"):
+            assert _validate_job(job, Path("test.json")) is False
+        assert "exactly one of prompt or command, found neither" in caplog.text
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -rf ../..",
+            "bash -c 'drone @daemon run'",
+            "/usr/local/bin/drone @daemon",
+            "env drone @daemon run",
+            "",
+            'drone @daemon "unterminated',
+            42,
+        ],
+    )
+    def test_a_command_that_is_not_a_drone_verb_is_refused(self, command, caplog):
+        with caplog.at_level("WARNING"):
+            assert _validate_job(command_job(command=command), Path("test.json")) is False
+        assert "Command job 'sweep' refused" in caplog.text
+
+    def test_a_rotation_command_job_is_refused(self, caplog):
+        job = command_job(schedule={"type": "rotation", "time": "05:00"})
+        with caplog.at_level("WARNING"):
+            assert _validate_job(job, Path("test.json")) is False
+        assert "rotation" in caplog.text
+
+    @pytest.mark.parametrize("timeout", [0, -5, "600", True, 1.5, None])
+    def test_a_bad_timeout_is_refused(self, timeout, caplog):
+        with caplog.at_level("WARNING"):
+            assert _validate_job(command_job(timeout_seconds=timeout), Path("test.json")) is False
+        assert "timeout_seconds must be a positive whole number" in caplog.text
+
+    def test_a_whole_number_timeout_is_accepted(self):
+        assert _validate_job(command_job(timeout_seconds=30), Path("test.json")) is True
+
+    @pytest.mark.parametrize("notify", [{"email": "devpulse"}, {"email": "@"}, {"email": 5}, "yes", 1])
+    def test_a_bad_notify_is_refused(self, notify, caplog):
+        with caplog.at_level("WARNING"):
+            assert _validate_job(command_job(notify=notify), Path("test.json")) is False
+        assert "notify" in caplog.text
+
+    @pytest.mark.parametrize("notify", [True, False, {"email": "@devpulse"}])
+    def test_a_good_notify_is_accepted(self, notify):
+        assert _validate_job(command_job(notify=notify), Path("test.json")) is True
+
+    def test_a_wake_block_is_ignored_with_a_warning(self, caplog):
+        with caplog.at_level("WARNING"):
+            assert _validate_job(command_job(wake={"fresh": True, "model": "opus"}), Path("test.json")) is True
+        assert "wake block ignored" in caplog.text
+
+    def test_notify_email_on_a_prompt_job_is_named_not_silently_dropped(self, caplog):
+        job = {"id": "tend", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "x", "notify": {"email": "@a"}}
+        with caplog.at_level("WARNING"):
+            assert _validate_job(job, Path("test.json")) is True
+        assert "notify.email works on command jobs only" in caplog.text
 
 
 # ── _load_schedule_file ──────────────────────────────
@@ -317,6 +403,43 @@ class TestDiscoverJobs:
         assert len(jobs) == 1
         assert jobs[0]["schedule"]["type"] == "rotation"
         assert jobs[0]["config"] == {"include_managers": True}
+
+    def test_command_jobs_carry_their_command_and_branch(self, temp_src_aipass, sample_registry):
+        root, src = temp_src_aipass
+        branch_dir = src / "testbranch"
+        daemon_dir = branch_dir / ".daemon"
+        daemon_dir.mkdir(parents=True)
+        data = {
+            "version": 1,
+            "jobs": [
+                command_job(timeout_seconds=120, notify={"email": "@devpulse"}, wake={"model": "opus"}),
+                {"id": "tend", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "Tend."},
+            ],
+        }
+        (daemon_dir / "schedule.json").write_text(json.dumps(data))
+
+        reg_file = root / "AIPASS_REGISTRY.json"
+        reg_file.write_text(json.dumps(sample_registry))
+
+        with (
+            patch(f"{DISCOVERY}._REPO_ROOT", root),
+            patch(f"{DISCOVERY}._SRC_AIPASS", src),
+            patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
+        ):
+            jobs = discover_jobs()
+
+        by_id = {job["id"]: job for job in jobs}
+        assert set(by_id) == {"sweep", "tend"}
+        sweep = by_id["sweep"]
+        assert sweep["command"] == "drone rm --stale 10d ../.."
+        # The directory whose .daemon/ published the job: drone reads cwd as identity.
+        assert Path(sweep["branch_path"]).resolve() == branch_dir.resolve()
+        assert sweep["timeout_seconds"] == 120
+        assert sweep["notify"] == {"email": "@devpulse"}
+        assert sweep["wake"] == {}, "a command job's wake block is dropped, not carried"
+        assert "prompt" not in sweep
+        # A wake job's shape is untouched: nothing of the command lane leaks onto it.
+        assert set(by_id["tend"]) == {"owner", "id", "schedule", "wake", "prompt", "enabled", "config"}
 
     def test_disabled_jobs_still_discovered(self, temp_src_aipass, sample_registry):
         root, src = temp_src_aipass

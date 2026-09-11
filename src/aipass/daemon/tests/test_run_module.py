@@ -1,16 +1,27 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-06-25
+# Modified: 2026-09-11
 # =============================================
 
 """Tests for the drone @daemon run module (decentralized scheduler tick)."""
 
+import json
+import os
+import signal
+import sys
+import time
+from datetime import datetime
+from typing import Optional
 from unittest.mock import patch
 
+import pytest
+
+from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
+from aipass.daemon.apps.modules import run as run_mod
 from aipass.daemon.apps.modules.run import (
     run_tick,
     handle_command,
@@ -274,7 +285,7 @@ def flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def interval_job_with_slot(slot="2026-09-06T03:00:00", minutes=10080):
+def interval_job_with_slot(slot: Optional[str] = "2026-09-06T03:00:00", minutes=10080):
     """@seedgo's weekly cycle, in the shape that caused the lesson."""
     schedule = {"type": "interval", "interval_minutes": minutes}
     if slot is not None:
@@ -463,3 +474,515 @@ class TestCaughtUpTick:
             results = run_tick()
         assert results["caught_up"] == 0
         assert mock_update.call_args.kwargs["caught_up"] is False
+
+
+# ── command jobs (DPLAN-0338) ────────────────────────
+
+
+def fake_drone(tmp_path, program: str = "", mail_exit: int = 0) -> tuple:
+    """A stand-in for drone: the interpreter running a one-liner, so the tokens after "drone" arrive as sys.argv[1:].
+
+    Every launch first appends its argv and cwd to a journal, so a test reads back
+    exactly what ran and where. A launch whose first argument is @ai_mail is the
+    notify mail and answers ``mail_exit``; anything else runs ``program``.
+    """
+    journal = tmp_path / "launches.jsonl"
+    prelude = (
+        "import json, os, subprocess, sys, time\n"
+        f"with open({str(journal)!r}, 'a', encoding='utf-8') as f:\n"
+        "    f.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+        f"if sys.argv[1:2] == ['@ai_mail']:\n    sys.exit({mail_exit})\n"
+    )
+    return (sys.executable, "-c", prelude + program), journal
+
+
+def launches(journal) -> list:
+    """Every launch the fake recorded, in order."""
+    if not journal.exists():
+        return []
+    return [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+
+
+def same_dir(a, b) -> bool:
+    return os.path.realpath(str(a)) == os.path.realpath(str(b))
+
+
+def command_job_dict(branch_dir, command="drone @daemon --help", **extra) -> dict:
+    """A discovered command job, in the shape discovery hands the tick."""
+    job = {
+        "owner": "@commons",
+        "id": "sweep",
+        "enabled": True,
+        "schedule": {"type": "once", "due_date": "2020-01-01"},
+        "wake": {},
+        "config": {},
+        "command": command,
+        "branch_path": str(branch_dir),
+    }
+    job.update(extra)
+    return job
+
+
+def pid_gone(pid: int, within: float = 5.0) -> bool:
+    """True once *pid* is dead. A zombie waiting for its new parent to reap it counts as dead.
+
+    POSIX only, and its one caller is skipped elsewhere: signal 0 probes a process
+    on POSIX, but on Windows os.kill TERMINATES it, so the probe is guarded.
+    """
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        if os.name == "posix":
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+        stat = f"/proc/{pid}/stat"
+        if os.path.exists(stat):
+            with open(stat, encoding="utf-8") as f:
+                if f.read().rsplit(")", 1)[-1].split()[0] == "Z":
+                    return True
+        time.sleep(0.1)
+    return False
+
+
+def kill_quietly(pid: int) -> None:
+    """Teardown for a test that started a background process. Already gone is fine, and said."""
+    try:
+        os.kill(pid, signal.SIGTERM)  # TerminateProcess on Windows, SIGTERM on POSIX
+    except OSError as e:
+        print(f"background pid {pid} already gone at teardown: {e}")
+
+
+@pytest.fixture
+def telegram():
+    """The three telegram seams, mocked, so no test here pings a real chat."""
+    base = "aipass.daemon.apps.handlers.schedule.telegram_notifier"
+    with (
+        patch(f"{base}.notify_triggered") as triggered,
+        patch(f"{base}.notify_complete") as complete,
+        patch(f"{base}.notify_error") as error,
+    ):
+        yield {"triggered": triggered, "complete": complete, "error": error}
+
+
+@pytest.fixture
+def no_wake():
+    """wake_branch, wired to fail loudly if a command job ever reaches it."""
+    wake = "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch"
+    with patch(wake, side_effect=AssertionError("a command job woke someone")) as mock_wake:
+        yield mock_wake
+
+
+class TestCommandArgv:
+    def test_splits_quoted_arguments_without_a_shell(self):
+        argv = command_job.command_argv('drone @ai_mail email @x "two words"')
+        assert argv == ["drone", "@ai_mail", "email", "@x", "two words"]
+
+    def test_shell_syntax_arrives_as_plain_arguments(self):
+        # No shell: a glob, a pipe and a ; are characters in argv, never operators.
+        argv = command_job.command_argv("drone rm *.tmp | tee x ; echo y")
+        assert argv == ["drone", "rm", "*.tmp", "|", "tee", "x", ";", "echo", "y"]
+
+    @pytest.mark.parametrize(
+        "command",
+        ["rm -rf ../..", "bash -c 'drone @daemon run'", "/usr/local/bin/drone @daemon", "env drone @daemon run"],
+    )
+    def test_anything_but_drone_first_is_refused(self, command):
+        with pytest.raises(ValueError, match="first token must be 'drone'"):
+            command_job.command_argv(command)
+
+    @pytest.mark.parametrize("command", ["", "   ", None, 42, ["drone", "@daemon"]])
+    def test_an_empty_or_non_string_command_is_refused(self, command):
+        with pytest.raises(ValueError, match="non-empty string"):
+            command_job.command_argv(command)
+
+    def test_an_unbalanced_quote_is_refused_not_guessed(self):
+        with pytest.raises(ValueError, match="does not parse"):
+            command_job.command_argv('drone @daemon "unterminated')
+
+
+class TestOutputTail:
+    def test_keeps_the_last_lines_and_drops_blank_ones(self):
+        assert command_job.output_tail("a\n\nb\nc\n  \nd\ne\nf\n") == "b\nc\nd\ne\nf"
+
+    def test_caps_from_the_front_so_the_ending_survives(self):
+        tail = command_job.output_tail("x" * 1000 + "\nTHE END", lines=5, max_chars=50)
+        assert len(tail) == 50
+        assert tail.startswith("...")
+        assert tail.endswith("THE END")
+
+
+class TestRunCommand:
+    def test_exit_zero_is_ok_with_the_output_tail(self, tmp_path, monkeypatch):
+        launcher, journal = fake_drone(tmp_path, "for i in range(8): print(f'line {i}')\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path, 30)
+        assert result.ok
+        assert (result.exit_code, result.timed_out, result.error) == (0, False, "")
+        assert result.tail.splitlines() == ["line 3", "line 4", "line 5", "line 6", "line 7"]
+        assert [entry["argv"] for entry in launches(journal)] == [["@daemon", "--help"]]
+
+    def test_a_non_zero_exit_fails_and_keeps_stderr_in_order(self, tmp_path, monkeypatch):
+        program = "print('scanned 4', flush=True)\nsys.stderr.write('refused: fence\\n')\nsys.exit(3)\n"
+        launcher, _ = fake_drone(tmp_path, program)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone rm --stale 10d .", tmp_path, 30)
+        assert not result.ok
+        assert result.exit_code == 3
+        assert result.tail.splitlines() == ["scanned 4", "refused: fence"]
+
+    def test_an_overrun_is_stopped_and_named(self, tmp_path, monkeypatch):
+        launcher, _ = fake_drone(tmp_path, "print('started', flush=True)\ntime.sleep(30)\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path, 1)
+        assert not result.ok
+        assert result.timed_out is True
+        assert result.exit_code is None
+        assert result.duration < 10, f"a 1s timeout took {result.duration:.1f}s to come back"
+        assert result.tail == "started", "output written before the overrun must survive into the tail"
+
+    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
+    def test_an_overrun_stops_the_grandchild_too(self, tmp_path, monkeypatch):
+        # Drone runs every @branch verb in a child of its own, so killing drone
+        # alone would orphan exactly the work that overran.
+        pidfile = tmp_path / "grandchild.pid"
+        program = (
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            f"open({str(pidfile)!r}, 'w').write(str(child.pid))\n"
+            "print('spawned', flush=True)\ntime.sleep(30)\n"
+        )
+        launcher, _ = fake_drone(tmp_path, program)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path, 1)
+        grandchild = int(pidfile.read_text())
+        try:
+            assert result.timed_out is True
+            assert pid_gone(grandchild), f"grandchild {grandchild} outlived the timeout"
+        finally:
+            kill_quietly(grandchild)
+
+    def test_a_background_child_holding_the_output_is_not_a_timeout(self, tmp_path, monkeypatch):
+        # Through a pipe, the read waits for EVERY holder of the write end, so a
+        # command that exited 0 at once would be reported as an overrun.
+        pidfile = tmp_path / "background.pid"
+        program = (
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'])\n"
+            f"open({str(pidfile)!r}, 'w').write(str(child.pid))\n"
+            "print('done', flush=True)\n"
+        )
+        launcher, _ = fake_drone(tmp_path, program)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path, 10)
+        background = int(pidfile.read_text())
+        try:
+            assert result.ok, f"exit 0 reported as {result}"
+            assert result.duration < 5, f"returned after {result.duration:.1f}s — it waited on the background child"
+        finally:
+            kill_quietly(background)
+
+    def test_the_command_runs_in_the_owner_branch(self, tmp_path, monkeypatch):
+        branch = tmp_path / "owner_branch"
+        branch.mkdir()
+        launcher, journal = fake_drone(tmp_path, "print(os.getcwd())\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", branch, 30)
+        assert same_dir(result.tail, branch)
+        assert same_dir(launches(journal)[0]["cwd"], branch)
+
+    def test_no_shell_reads_the_command(self, tmp_path, monkeypatch):
+        (tmp_path / "a.tmp").write_text("x", encoding="utf-8")
+        launcher, _ = fake_drone(tmp_path, "print(json.dumps(sys.argv[1:]))\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone rm *.tmp ; echo pwned", tmp_path, 30)
+        assert json.loads(result.tail) == ["rm", "*.tmp", ";", "echo", "pwned"]
+
+    def test_no_branch_directory_is_refused_never_run_from_here(self, tmp_path, monkeypatch):
+        launcher, journal = fake_drone(tmp_path, "")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", None)
+        assert not result.ok
+        assert "no branch directory" in result.error
+        assert launches(journal) == [], "nothing may start from the tick's own cwd"
+
+    def test_a_missing_branch_directory_fails_to_start(self, tmp_path, monkeypatch):
+        launcher, journal = fake_drone(tmp_path, "")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("drone @daemon --help", tmp_path / "gone", 30)
+        assert not result.ok
+        assert result.error.startswith("could not start")
+        assert launches(journal) == []
+
+    def test_a_non_drone_command_never_starts(self, tmp_path, monkeypatch):
+        launcher, journal = fake_drone(tmp_path, "")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        result = command_job.run_command("rm -rf ../..", tmp_path, 30)
+        assert result.error.startswith("refused: the first token must be 'drone'")
+        assert launches(journal) == []
+
+    def test_the_suite_seal_answers_any_test_that_forgot_its_fake(self, tmp_path):
+        # conftest's _seal_command_launcher: no test reaches the real drone.
+        result = command_job.run_command("drone @daemon --help", tmp_path, 30)
+        assert result.exit_code == 1
+        assert "sealed: a test reached the real drone launcher" in result.tail
+
+
+class TestCommandJobFire:
+    def _fire(self, tmp_path, monkeypatch, program, mail_exit=0, **extra):
+        launcher, journal = fake_drone(tmp_path, program, mail_exit=mail_exit)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        branch = tmp_path / "branch"
+        branch.mkdir()
+        job = command_job_dict(branch, **extra)
+        outcome, detail = _fire_job(job, {"jobs": {}}, header="Scheduled wake: sweep")
+        return outcome, detail, launches(journal), branch
+
+    def test_exit_zero_is_fired_and_nobody_is_woken(
+        self, tmp_path, monkeypatch, telegram, no_wake, capsys, caplog, _seal_branch_wake_prompt
+    ):
+        with caplog.at_level("INFO"):
+            outcome, detail, runs, _ = self._fire(tmp_path, monkeypatch, "print('4 files deleted')\n")
+        assert outcome == OUTCOME_FIRED
+        assert detail.startswith("exit 0, ")
+        assert detail.endswith("— 4 files deleted")
+        no_wake.assert_not_called()
+        assert [entry["argv"] for entry in runs] == [["@daemon", "--help"]]
+        assert not (_seal_branch_wake_prompt / "last_wake_prompt.txt").exists(), "a command job files no wake prompt"
+
+        out = flat(capsys.readouterr().out)
+        assert "FIRE: @commons/sweep -> command: drone @daemon --help" in out
+        assert "DONE: @commons/sweep — exit 0, " in out
+        # logs/run.log is the logger, not the console: both lines land there too.
+        assert "[run] FIRE @commons/sweep command: drone @daemon --help" in caplog.text
+        assert "[run] DONE @commons/sweep exit 0, " in caplog.text
+        assert "4 files deleted" in caplog.text
+
+    def test_a_non_zero_exit_is_failed_with_the_tail(self, tmp_path, monkeypatch, telegram, no_wake, caplog):
+        with caplog.at_level("WARNING"):
+            outcome, detail, _, _ = self._fire(
+                tmp_path, monkeypatch, "print('refused: fence', flush=True)\nsys.exit(2)\n"
+            )
+        assert outcome == OUTCOME_FAILED
+        assert detail.startswith("exit 2, ")
+        assert detail.endswith("— refused: fence")
+        assert "[run] DONE @commons/sweep exit 2, " in caplog.text
+        no_wake.assert_not_called()
+
+    def test_an_overrun_is_failed_and_named(self, tmp_path, monkeypatch, telegram, no_wake):
+        outcome, detail, _, _ = self._fire(tmp_path, monkeypatch, "time.sleep(30)\n", timeout_seconds=1)
+        assert outcome == OUTCOME_FAILED
+        assert detail.startswith("timed out after 1s, process tree stopped")
+        no_wake.assert_not_called()
+
+    def test_a_wake_block_is_ignored_at_fire(self, tmp_path, monkeypatch, telegram, no_wake):
+        outcome, _, runs, _ = self._fire(tmp_path, monkeypatch, "", wake={"fresh": True, "model": "opus"})
+        assert outcome == OUTCOME_FIRED
+        assert len(runs) == 1
+        no_wake.assert_not_called()
+
+    def test_telegram_pings_on_start_and_on_finish(self, tmp_path, monkeypatch, telegram, no_wake):
+        _, detail, _, _ = self._fire(tmp_path, monkeypatch, "print('ok')\n")
+        telegram["triggered"].assert_called_once_with("@commons", "sweep")
+        telegram["complete"].assert_called_once_with("@commons", "sweep", detail)
+        telegram["error"].assert_not_called()
+
+    def test_telegram_names_a_failure(self, tmp_path, monkeypatch, telegram, no_wake):
+        _, detail, _, _ = self._fire(tmp_path, monkeypatch, "sys.exit(4)\n")
+        telegram["triggered"].assert_called_once_with("@commons", "sweep")
+        telegram["error"].assert_called_once_with("@commons", "sweep", detail)
+        telegram["complete"].assert_not_called()
+
+    def test_notify_false_keeps_telegram_quiet(self, tmp_path, monkeypatch, telegram, no_wake):
+        self._fire(tmp_path, monkeypatch, "print('ok')\n", notify=False)
+        for seam in telegram.values():
+            seam.assert_not_called()
+
+    def test_notify_email_mails_start_and_finish_signed_daemon(self, tmp_path, monkeypatch, telegram, no_wake):
+        notify = {"email": "@devpulse"}
+        outcome, _, runs, branch = self._fire(tmp_path, monkeypatch, "print('4 deleted')\n", notify=notify)
+        assert outcome == OUTCOME_FIRED
+        assert [entry["argv"][:3] for entry in runs] == [
+            ["@ai_mail", "email", "@devpulse"],
+            ["@daemon", "--help"],
+            ["@ai_mail", "email", "@devpulse"],
+        ], "start mail, then the command, then the finish mail"
+
+        start_subject, start_body = runs[0]["argv"][3:]
+        assert start_subject == "Command job started: @commons/sweep"
+        assert "Command: drone @daemon --help" in start_body
+        assert "Timeout: 600s" in start_body
+
+        finish_subject, finish_body = runs[2]["argv"][3:]
+        assert finish_subject.startswith("Command job passed: @commons/sweep (exit 0, ")
+        assert "Exit code: 0" in finish_body
+        assert "Duration: " in finish_body
+        assert finish_body.endswith("Output tail:\n4 deleted")
+
+        # cwd is identity: the mails are signed @daemon, the command runs as its owner.
+        assert same_dir(runs[0]["cwd"], run_mod._DAEMON_ROOT)
+        assert same_dir(runs[2]["cwd"], run_mod._DAEMON_ROOT)
+        assert same_dir(runs[1]["cwd"], branch)
+        # A notify BLOCK is not a no: telegram keeps pinging under the same rule.
+        telegram["triggered"].assert_called_once()
+
+    def test_the_finish_mail_says_failed(self, tmp_path, monkeypatch, telegram, no_wake):
+        _, _, runs, _ = self._fire(tmp_path, monkeypatch, "sys.exit(2)\n", notify={"email": "@devpulse"})
+        finish_subject, finish_body = runs[-1]["argv"][3:]
+        assert finish_subject.startswith("Command job FAILED: @commons/sweep (exit 2, ")
+        assert "Exit code: 2" in finish_body
+
+    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, telegram, no_wake, caplog):
+        with caplog.at_level("WARNING"):
+            outcome, _, runs, _ = self._fire(
+                tmp_path, monkeypatch, "print('ok')\n", mail_exit=1, notify={"email": "@devpulse"}
+            )
+        assert outcome == OUTCOME_FIRED
+        assert len(runs) == 3, "both mails were attempted"
+        assert caplog.text.count("[run] notify mail to @devpulse not sent") == 2
+
+
+class TestCommandJobTick:
+    """The runstate row a command job leaves is the row a wake job leaves."""
+
+    def _tick(self, tmp_path, monkeypatch, program, job):
+        launcher, journal = fake_drone(tmp_path, program)
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        runstate = {"jobs": {}}
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            results = run_tick()
+        return results, runstate, journal
+
+    def test_a_pass_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, telegram, no_wake):
+        job = command_job_dict(tmp_path)
+        results, runstate, _ = self._tick(tmp_path, monkeypatch, "print('ok')\n", job)
+        assert (results["fired"], results["failed"], results["blocked"]) == (1, 0, 0)
+        row = runstate["jobs"]["@commons/sweep"]
+        assert row["last_status"] == "success"
+        assert row["last_success_at"] == row["last_run"]
+        assert row["last_error"] is None
+        assert row["completed"] == row["last_run"], "a once job completes exactly as a wake job does"
+
+        wake_row = {"jobs": {}}
+        runstate_mod.update_job_runstate(wake_row, "@commons", "sweep", job["schedule"])
+        assert set(row) == set(wake_row["jobs"]["@commons/sweep"]), "no new fields: the row is a wake job's row"
+
+    def test_a_failure_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, telegram, no_wake):
+        job = command_job_dict(tmp_path)
+        results, runstate, _ = self._tick(tmp_path, monkeypatch, "print('refused', flush=True)\nsys.exit(2)\n", job)
+        assert (results["fired"], results["failed"], results["blocked"]) == (0, 1, 0)
+        row = runstate["jobs"]["@commons/sweep"]
+        assert row["last_status"] == "failed"
+        assert row["last_failure_at"] == row["last_run"]
+        assert row["last_error"].startswith("exit 2, ")
+        assert row["last_error"].endswith("— refused")
+        assert "completed" not in row, "a failed once job is not done; it retries after the backoff"
+
+    def test_a_completed_once_job_does_not_run_again(self, tmp_path, monkeypatch, telegram, no_wake):
+        job = command_job_dict(tmp_path)
+        launcher, journal = fake_drone(tmp_path, "print('ok')\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        runstate = {"jobs": {}}
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            first, second = run_tick(), run_tick()
+        assert (first["fired"], second["fired"]) == (1, 0)
+        assert len(launches(journal)) == 1
+
+    def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, telegram, no_wake):
+        # catch_up is opt-in while RECOVERY_LANE_LIVE is False; opted in, the
+        # window closed unrun two days ago, so the real predicates say "late".
+        job = command_job_dict(tmp_path, schedule={"type": "daily", "time": "00:01", "catch_up": True})
+        launcher, _ = fake_drone(tmp_path, "print('ok')\n")
+        monkeypatch.setattr(command_job, "LAUNCHER", launcher)
+        runstate = {
+            "jobs": {"@commons/sweep": {"last_run": "2020-01-01T00:01:00", "last_success_at": "2020-01-01T00:01:00"}}
+        }
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            results = run_tick()
+        assert (results["fired"], results["caught_up"]) == (1, 1)
+        assert runstate["jobs"]["@commons/sweep"]["caught_up"] == runstate["jobs"]["@commons/sweep"]["last_run"]
+
+
+# (schedule, runstate row, now, due) — due-ness never reads what a job DOES, so a
+# command job inherits every rule a wake job has: windows, catch-up, backoff, once.
+_DUE_CASES = [
+    ({"type": "daily", "time": "04:00"}, {}, "2026-09-11T04:05:00", True),
+    ({"type": "daily", "time": "04:00"}, {"last_success_at": "2026-09-11T04:01:00"}, "2026-09-11T04:10:00", False),
+    (
+        {"type": "daily", "time": "04:00", "catch_up": True},
+        {"last_run": "2026-09-09T04:01:00"},
+        "2026-09-11T09:00:00",
+        True,
+    ),
+    (
+        {"type": "daily", "time": "04:00", "catch_up": False},
+        {"last_run": "2026-09-09T04:01:00"},
+        "2026-09-11T09:00:00",
+        False,
+    ),
+    ({"type": "interval", "interval_minutes": 10080}, {"last_run": "2026-09-01T04:00:00"}, "2026-09-11T09:00:00", True),
+    (
+        {"type": "interval", "interval_minutes": 10080},
+        {"last_run": "2026-09-10T04:00:00"},
+        "2026-09-11T09:00:00",
+        False,
+    ),
+    ({"type": "hourly", "time": "30"}, {}, "2026-09-11T09:31:00", True),
+    ({"type": "once", "due_date": "2026-09-11"}, {}, "2026-09-11T09:00:00", True),
+    ({"type": "once", "due_date": "2026-09-11"}, {"completed": "2026-09-11T08:00:00"}, "2026-09-11T09:00:00", False),
+    (
+        {"type": "daily", "time": "09:00"},
+        {"last_run": "2026-09-11T08:58:00", "last_status": "failed", "last_failure_at": "2026-09-11T08:58:00"},
+        "2026-09-11T09:00:00",
+        False,
+    ),
+]
+
+
+class TestCatchUpUntouched:
+    @pytest.mark.parametrize("schedule,row,now,due", _DUE_CASES)
+    def test_a_command_job_is_due_exactly_when_a_wake_job_is(self, schedule, row, now, due):
+        at = datetime.fromisoformat(now)
+        runstate = {"jobs": {"@commons/live": dict(row)}}
+        wake_job = {**live_job(), "schedule": schedule}
+        cmd_job = command_job_dict("/unused", id="live", schedule=schedule)
+        assert runstate_mod.is_job_due(wake_job, runstate, at) is due
+        assert runstate_mod.is_job_due(cmd_job, runstate, at) is due
+        assert runstate_mod.is_catch_up_fire(cmd_job, runstate, at) == runstate_mod.is_catch_up_fire(
+            wake_job, runstate, at
+        )
+        assert runstate_mod.missed_window(cmd_job, runstate, at) == runstate_mod.missed_window(wake_job, runstate, at)
+
+    def test_the_cases_are_not_vacuous(self):
+        verdicts = [case[3] for case in _DUE_CASES]
+        assert verdicts.count(True) >= 4 and verdicts.count(False) >= 4, verdicts
+
+    def test_an_interval_command_job_is_slot_seeded_like_any_other(self):
+        schedule = {"type": "interval", "interval_minutes": 10080, "slot": "2026-09-14T04:00:00"}
+        cmd_job = command_job_dict("/unused", schedule=schedule)
+        runstate = {"jobs": {}}
+        assert runstate_mod.needs_slot_seed(cmd_job, runstate) is True
+        assert runstate_mod.seed_interval_slot(runstate, cmd_job, datetime(2026, 9, 11, 13, 0)) is not None
+        assert runstate["jobs"]["@commons/sweep"]["next_run"].startswith("2026-09-14T04:00")
+
+
+class TestHelpNamesCommandJobs:
+    def test_run_help_shows_the_command_job_shape(self, capsys):
+        handle_command("run", ["--help"])
+        out = flat(capsys.readouterr().out)
+        assert '"command": "drone rm --stale 10d ../.."' in out
+        assert "drone must be the first token" in out
+        assert '"notify": { "email": "@devpulse" }' in out
