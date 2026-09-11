@@ -246,6 +246,74 @@ drone @prax log-audit --help             # Audit usage
 `audit` reports problems but always exits 0 — it flags unbounded and critical
 files in its output, so a health gate must read the text, not `$?`.
 
+### Scheduled job — the weekly tmp sweep (DPLAN-0338, 2026-09-11)
+
+prax owns one daemon job, in `.daemon/schedule.json`: **`tmp-sweep-weekly`**.
+It is a *command* job, so the daemon tick runs it as a subprocess from this
+directory. No agent is woken and no tokens are spent.
+
+```
+drone rm --stale 10d ..        # '..' from src/aipass/prax is src/aipass
+```
+
+- **What it sweeps.** Regular `*.tmp` files sitting directly inside any `*_json`
+  folder under `src/aipass`, with an mtime more than 10 days old. Nothing else.
+  The one call covers every branch's json folder: drone crosses its
+  sibling-branch fence in stale mode only, by design, because a stale staging
+  temp is nobody's work. A staged write is temp + fsync + rename, and a process
+  killed between the two leaves the temp behind. The real document is intact
+  whatever happens to it.
+- **When.** Weekly, Sunday 04:00 local. That is the quiet hour, clear of
+  @seedgo's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot is
+  `2026-09-13T04:00:00`. The tick seeded the runstate row from it at 13:31 on
+  09-11 (`last_run` 09-06 04:00, first fire 09-13 04:00), so the job never fires
+  at whatever minute a tick first discovers it. A Sunday missed while the
+  machine was off fires on the first tick after it is back.
+- **Where it shows.** The `FIRE` and `DONE` lines (exit code, duration, output
+  tail) in daemon's `logs/run.log` and in `~/.aipass/daemon-tick.log`. The
+  runstate row `@prax/tmp-sweep-weekly` in `daemon/daemon_json/daemon_runstate.json`.
+  One row per deleted file in `.ai_central/deletions.jsonl` (`mode: stale`,
+  `age: 10d`). A mail to @devpulse when the sweep starts and another when it
+  finishes. `drone @daemon queue` lists it; `--json` carries
+  `command: drone rm --stale 10d ..` as the preview.
+- **Changing it.** To change the age, edit the command string (`10d` → `5d`;
+  `m`/`h`/`d` are accepted, zero is refused). To turn it off, set
+  `enabled: false`. `timeout_seconds` is 120 because a command job holds the
+  tick lock for its whole run.
+
+**The first sweep, run by hand 2026-09-11 13:32.** The dry run printed
+`folders scanned 1539, files matched 706 (35602375 bytes)`. The real run deleted
+all 706, freed 35.6 MB, refused 0 and added 706 ledger rows. `*.tmp` under
+`src/aipass/*/*_json` went from 1170 to 466. Every file deleted was an old-era
+`tmpXXXX.tmp` from the retired handler. The 466 left are younger than 10 days
+and age in week by week. The run took **39 s wall**; a dry run with nothing to
+delete takes 1.2 s. So the cost is about 54 ms per deleted file, because each one
+writes a ledger row and a log line. At that rate 120 s covers about 2,100 files a
+week. A timeout marks the row FAILED but keeps whatever it already deleted.
+
+**Where the orphans come from (measured 2026-09-11, not yet acted on).** Each
+new-era `.<pid>_<n>.tmp` still holds the document it was staging, so its content
+names the writer. Of the 442 in `prax_json/` (09-04 to 09-11), **384 (87%)**
+were staging one record: `discovery_watcher_event` with `action: started`. That
+is the last line of `start_file_watcher()` (`handlers/discovery/watcher.py:234`).
+Since 2026-09-04 it runs on `prax-watcher-start`, the daemon thread nobody joins
+(see "The watcher start does not block the first log line"). A short-lived
+process such as a hook logs once and exits while that thread is still walking or
+writing, and interpreter exit kills a daemon thread wherever it stands, between
+temp and rename included. That dates the rise DPLAN-0338 calls "cause unknown"
+to this move: about 5 a day in the old era, 18 to 73 a day since 09-04. The
+files come from 439 distinct pids, so it is one death per process, not one bad
+process. The rest: 28 empty or partial,
+`jsonl_append` 16, `introspection_resolved` 9, `direct_log_created` 3,
+`config_loaded` 2. On 09-11 the count jumped
+to 174 in 13 hours. 57 of those 174 are the FPLAN-0542 data-leg bump staging the
+same `started` record. That bump added a second staged write to every
+`log_operation`, so each dying process now has two windows instead of one. The
+strip DPLAN-0338 leaves open (the creation-time records) is aimed at
+`introspection_resolved`, and by this count that is one of the smallest
+writers. The cause is reported to @devpulse; the cure is unruled and is not in
+this change.
+
 ### Asking for help never does the thing
 
 Every module screens the **whole argument sequence** for help, not just the
@@ -810,6 +878,7 @@ prax/
 │       ├── registry/                  # Module registry load/save
 │       ├── status/                    # STATUS.md sync handler (trigger unwired, but `status sync` still reaches it)
 │       └── watcher/                   # Background system watchers
+├── .daemon/schedule.json              # Daemon command job: tmp-sweep-weekly (DPLAN-0338)
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
 └── tests/                             # 1414 test functions, 36 files (1502 cases)

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "branch": "@prax",
+  "jobs": [
+    {
+      "id": "tmp-sweep-weekly",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 10080,
+        "slot": "2026-09-13T04:00:00"
+      },
+      "command": "drone rm --stale 10d ..",
+      "timeout_seconds": 120,
+      "notify": {
+        "email": "@devpulse"
+      },
+      "_note": "WHAT: the fleet's weekly sweep of stale staging temps (DPLAN-0338 wave 2a, FPLAN-0546). A command job: the daemon tick runs it as a subprocess from src/aipass/prax/, so no agent is woken and no tokens are spent. drone rm --stale deletes only regular *.tmp files directly inside *_json folders whose mtime is older than the age, walking recursively under the target; '..' from this directory is src/aipass, so one call covers every branch's json folder (the sibling-branch fence is crossed in stale mode only, by design). These temps are what a staged write (temp + fsync + rename) leaves when its process is killed between the two; the real document is intact whatever happens to them. WHEN: Sunday 04:00 local, weekly - Patrick 2026-09-11 'once a week, I really don't care'; the quiet hour, clear of @seedgo's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot names one Sunday: devpulse's dispatch wrote 2026-09-14, which is a Monday, so the Sunday of that week is used here. A never-run job is seeded from the slot by the tick, so the first fire lands on the slot, never on the tick that discovers the file; a missed Sunday (machine off) fires on the first tick after. WHY 10d: Patrick 2026-09-11 11:18, matching systemd-tmpfiles' /tmp default; the temps hold no work, so the age is tidiness only. CHANGING THE AGE is editing the command string: '10d' -> '5d' (m/h/d accepted, zero refused). Turning it off is enabled:false. WHERE IT SHOWS: daemon logs/run.log and ~/.aipass/daemon-tick.log (FIRE and DONE lines with exit code, duration, output tail), the runstate row prax:tmp-sweep-weekly in daemon_json/daemon_runstate.json, one row per deleted file in .ai_central/deletions.jsonl, and a start and a finish mail to @devpulse. timeout 120s because a command job holds the tick lock for its whole run. Measured 2026-09-11, first sweep by hand: 706 files in 39 s wall, the scan alone 1.2 s, so about 54 ms per deleted file (each writes a ledger row and a log line); 120 s covers roughly 2,100 files a week, about 300 orphans a day. A timeout is FAILED on the runstate row but keeps what it already deleted, and the next week finishes the rest; if the DONE lines start showing runs near 120 s, raise timeout_seconds here."
+    }
+  ]
+}
