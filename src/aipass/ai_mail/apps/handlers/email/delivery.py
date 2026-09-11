@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.3.0
+# Version: 3.4.0
 # Created: 2025-12-02
-# Modified: 2026-08-12
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -356,8 +356,47 @@ def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str, sender_root
     return False
 
 
+def _refuse_unverified_external(recipient_path: Path, to_branch: str, caller_cwd: str) -> Tuple[bool, str]:
+    """Fail closed for an external-tier recipient when the sender cannot be placed.
+
+    No reply exemption on this path: a reply's proof only counts inside the
+    sender's own project, so with no project a stamped ``reply_path`` could name
+    any mailbox on disk. The verified-admin grant stays the bridge and runs last.
+
+    Args:
+        recipient_path: The resolved branch path of the external citizen.
+        to_branch: The address as sent.
+        caller_cwd: AIPASS_CALLER_CWD as delivery saw it, possibly "".
+
+    Returns:
+        (True, reason) to refuse, (False, "") for a verified admin.
+    """
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    if verified_caller.is_verified_admin_caller():
+        logger.info("[delivery] external tier exempted for verified admin with no sender project: %s", to_branch)
+        return False, ""
+
+    recipient_root = find_project_root(recipient_path)
+    where = f"external root '{recipient_root.name}'" if recipient_root else "a declared external root"
+    why = (
+        f"AIPASS_CALLER_CWD {caller_cwd} sits in no project" if caller_cwd else "no AIPASS_CALLER_CWD reached delivery"
+    )
+    logger.warning("[delivery] external-tier mail refused, sender unverifiable (%s): %s", why, to_branch)
+    return True, (
+        f"Out of scope: {to_branch} is a citizen of {where}, outside the AIPass fleet, and this sender "
+        f"cannot be verified ({why}), so there is no project to check it against. Unverified mail never "
+        f"crosses into an external root (#754) — only @devpulse's verified-admin lane may initiate there. "
+        f"From your own seat you may reply to an existing message from {to_branch}."
+    )
+
+
 def _check_cross_project_boundary(
-    recipient_path: Path, sender_email: str, email_data: Optional[Dict] = None, to_branch: str = ""
+    recipient_path: Path,
+    sender_email: str,
+    email_data: Optional[Dict] = None,
+    to_branch: str = "",
+    external_tier: bool = False,
 ) -> Tuple[bool, str]:
     """Refuse mail when sender and recipient are in different projects.
 
@@ -369,15 +408,24 @@ def _check_cross_project_boundary(
     (FPLAN-0401 phase 5). The exemption is checked LAST, only once a refusal is
     otherwise certain, so ordinary same-project mail never touches the grant.
 
+    A sender with no project (no AIPASS_CALLER_CWD, or none above it) gives
+    nothing to compare. Fleet mail from one still passes — @trigger's in-process
+    sends carry no caller cwd. A recipient found only by the declared-roots
+    external tier fails CLOSED instead: the address map no longer refuses it,
+    so this is the last wall (#754).
+
+    Args:
+        external_tier: True when ``to_branch`` resolved through the external
+            tier and no earlier one. Only the resolver knows this.
+
     Returns:
         (True, error_message) to refuse, (False, "") to allow.
     """
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
-    if not caller_cwd:
-        return False, ""
-
-    sender_root = find_project_root(Path(caller_cwd))
+    sender_root = find_project_root(Path(caller_cwd)) if caller_cwd else None
     if sender_root is None:
+        if external_tier:
+            return _refuse_unverified_external(recipient_path, to_branch, caller_cwd)
         return False, ""
 
     recipient_root = find_project_root(recipient_path)
@@ -619,17 +667,19 @@ def deliver_email_to_branch(
 
             branches.update(get_project_tree_branches(_REPO_ROOT))
 
+    via_external = False
     if to_branch not in branches:
         # The declared-roots external tier - last, so every local source has
         # already missed, exactly as wake.resolve_branch orders it. Ungated like
         # the wake tier (declaration IS the credential); the cross-project
-        # boundary check downstream still refuses an unverified sender, so this
-        # widens DISCOVERY, not policy. Before 2026-09-02 an admin dispatch to
-        # @vera (Vera-Studio) died here as "Unknown branch email" while the wake
-        # already knew the address.
+        # boundary check downstream holds the policy, and needs to be TOLD this
+        # tier answered - an unverifiable sender fails closed only here (#754).
+        # Before 2026-09-02 an admin dispatch to @vera (Vera-Studio) died here as
+        # "Unknown branch email" while the wake already knew the address.
         from aipass.ai_mail.apps.handlers.registry.read import get_external_branches
 
         branches.update(get_external_branches(_REPO_ROOT))
+        via_external = to_branch in branches
 
     if to_branch not in branches:
         # Refusal is correct here; the STATED REASON is what was wrong. Explain
@@ -649,7 +699,7 @@ def deliver_email_to_branch(
 
     # Cross-project boundary: refuse mail when sender and recipient are in different projects
     refused, refusal_msg = _check_cross_project_boundary(
-        branch_path, sender_email, email_data=email_data, to_branch=to_branch
+        branch_path, sender_email, email_data=email_data, to_branch=to_branch, external_tier=via_external
     )
     if refused:
         return False, refusal_msg

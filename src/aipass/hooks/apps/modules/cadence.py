@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-08-19
+# Modified: 2026-09-10
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -464,9 +464,17 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
             token = f"{int(now * 1000)}-{pid}"
             armed_at = now
 
+        state = {"turn": -1, "token": -1, "regroup_token": token, "regroup_armed_at": armed_at}
+        if debounced:
+            # A duplicate reset on the SAME compact boundary must not cancel the
+            # re-ground parts still queued for it (issue #752); a new compaction
+            # (not debounced) starts over and rightly drops them.
+            for key in ("regroup_next", "regroup_total"):
+                if key in data:
+                    state[key] = data[key]
         fd.seek(0)
         fd.truncate()
-        fd.write(json.dumps({"turn": -1, "token": -1, "regroup_token": token, "regroup_armed_at": armed_at}))
+        fd.write(json.dumps(state))
         fd.flush()
         _close_fd(fd)
         fd = None
@@ -555,6 +563,121 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
         if fd is not None:
             _close_fd(fd)
         return False
+
+
+def _regroup_state_path(hook_data: dict | None) -> tuple[Path | None, str]:
+    """The cadence state file and a short session tag, same resolution as consume."""
+    path = _state_path()
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if path is None and hook_data:
+        fallback_id = hook_data.get("session_id", "")
+        if fallback_id:
+            path = _GUARD_DIR / f"aipass-cadence-{fallback_id}.json"
+            session_id = fallback_id
+    return path, (session_id[:8] if session_id else "none")
+
+
+def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
+    """Record that this compaction's re-ground was split into *total* parts, part 1 fired.
+
+    Issue #752: one PostToolUse additionalContext over Claude Code's 10,000-char
+    hook-output limit is persisted to a file and the agent sees a 2,000-char
+    preview, so the backstop now spreads the re-ground over consecutive tool
+    calls. The queue lives in the SAME state file as the regroup token, on
+    purpose. A real UserPromptSubmit truncates that file to {turn, token}
+    (_load_and_increment), and that is exactly when the remaining parts must
+    stop: the cadence turn-0 path then fires every loader as its own injection.
+    A new compaction's reset_counter() rewrites the file as well, so a queue
+    left over from one compaction can never leak into the next.
+    """
+    if total < 2:
+        return
+    path, session_short = _regroup_state_path(hook_data)
+    if path is None:
+        return
+    fd = None
+    try:
+        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        _lock(fd)
+        fd.seek(0)
+        content = fd.read()
+        data = json.loads(content) if content.strip() else {}
+        data["regroup_next"] = 2
+        data["regroup_total"] = total
+        fd.seek(0)
+        fd.truncate()
+        fd.write(json.dumps(data))
+        fd.flush()
+        _close_fd(fd)
+        fd = None
+        logger.info("[HOOKS] cadence: regroup queued %d more part(s) session=%s", total - 1, session_short)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.info("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
+        if fd is not None:
+            _close_fd(fd)
+
+
+def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
+    """Atomically take the next queued re-ground part as (index, total), or None.
+
+    Each index is handed out exactly once — read, advance and write happen under
+    one flock — and the keys are removed with the last part, so the sequence
+    ends silent however many tool calls follow. That keeps DPLAN-0276's cure:
+    one re-ground per compaction, now delivered as at most *total* fires.
+    """
+    path, session_short = _regroup_state_path(hook_data)
+    if path is None or not path.exists():
+        return None
+    fd = None
+    try:
+        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        _lock(fd)
+        fd.seek(0)
+        content = fd.read()
+        data = json.loads(content) if content.strip() else {}
+        index, total = data.get("regroup_next"), data.get("regroup_total")
+        part = None
+        if isinstance(index, int) and isinstance(total, int) and index <= total:
+            part = (index, total)
+            if index >= total:
+                data.pop("regroup_next", None)
+                data.pop("regroup_total", None)
+            else:
+                data["regroup_next"] = index + 1
+            fd.seek(0)
+            fd.truncate()
+            fd.write(json.dumps(data))
+            fd.flush()
+        _close_fd(fd)
+        fd = None
+        return part
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.info("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
+        if fd is not None:
+            _close_fd(fd)
+        return None
+
+
+def log_regroup_fire(loaders: str, part: int, total: int, text: str, budget: int, hook_data=None) -> None:
+    """One cadence.log line per re-ground fire, sized, so an over-budget fire is one grep.
+
+    ``bytes`` is the UTF-8 size (what ``wc -c`` shows on a persisted file);
+    ``chars`` is the UTF-16 length Claude Code compares against its limit.
+    """
+    _, session_short = _regroup_state_path(hook_data)
+    chars = len(text.encode("utf-16-le")) // 2
+    over = chars > budget
+    (logger.warning if over else logger.info)(
+        "[HOOKS] regroup fired loader=%s part=%d/%d bytes=%d chars=%d budget=%d%s session=%s",
+        loaders,
+        part,
+        total,
+        len(text.encode("utf-8")),
+        chars,
+        budget,
+        " OVER-BUDGET" if over else "",
+        session_short,
+    )
 
 
 # =============================================================================

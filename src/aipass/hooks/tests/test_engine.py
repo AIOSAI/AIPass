@@ -1579,3 +1579,130 @@ class TestJsonHandlerNotApplicable:
 
         assert hasattr(engine, "_log")
         assert callable(engine._log)
+
+
+# =============================================================================
+# One hook output, one document (#752 residue, devpulse bc1bcc45)
+#
+# Claude Code parses a hook's stdout as ONE document. The engine used to join
+# fan-out outputs with a newline, and two JSON objects on two lines are a
+# non-blocking hook error with neither applied: four post-compact re-grounds
+# were lost that way in the transcripts (devpulse x3, trigger x1), each riding
+# an Edit where auto_fix printed {"systemMessage": "[diagnostics] ok"}.
+# =============================================================================
+
+_MERGE = "aipass.hooks.apps.handlers.config.output_merge"
+_REGROUP = "aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding.handle"
+_AUTO_FIX = "aipass.hooks.apps.handlers.lifecycle.auto_fix.handle"
+
+
+def _post_tool_use(stdouts: dict, event: str = "PostToolUse") -> str:
+    """Dispatch *event* through handlers whose stdout is given per handler, in order."""
+    handlers = {"auto_fix_diagnostics": _AUTO_FIX, "post_compact_regrounding": _REGROUP, "regroup_renamed": _REGROUP}
+    config = {"hooks_enabled": True, event: {}}
+    for name in stdouts:
+        config[event][name] = {"enabled": True, "handler": handlers[name], "matcher": ""}
+
+    def run(handler, _data, timeout_s=30):
+        name = next(n for n in stdouts if handlers[n] == handler)
+        return {"exit_code": 0, "stdout": stdouts[name], "stderr": "", "elapsed_ms": 1}
+
+    with (
+        patch("aipass.hooks.apps.modules.engine._log"),
+        patch("aipass.hooks.apps.modules.engine._run_handler", side_effect=run),
+    ):
+        stdout, code = dispatch(event, '{"tool_name": "Edit"}', config)
+    assert code == 0
+    return stdout
+
+
+def _context(text: str) -> str:
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}})
+
+
+class TestOneDocumentPerEvent:
+    def test_two_json_handlers_become_one_object(self, mock_logger):
+        """The transcript shape, both contexts delivered, in handler order."""
+        outputs = {
+            "auto_fix_diagnostics": json.dumps(
+                {
+                    "systemMessage": "[diagnostics] 1 issue",
+                    "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "DIAG"},
+                }
+            ),
+            "post_compact_regrounding": _context("RE-GROUND 1/3"),
+        }
+        with pytest.raises(json.JSONDecodeError):
+            json.loads("\n".join(outputs.values()))  # the old join: what Claude Code could not parse
+        doc = json.loads(_post_tool_use(outputs))
+        assert doc["hookSpecificOutput"] == {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "DIAG\n\nRE-GROUND 1/3",
+        }
+        assert doc["systemMessage"] == "[diagnostics] 1 issue"
+
+    def test_over_the_limit_the_regroup_part_wins_and_the_drop_is_logged(self, mock_logger):
+        """auto_fix runs FIRST, so handler order alone would have kept it and cut the re-ground."""
+        from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT, _cc_len
+
+        regroup = "R" * 9000
+        outputs = {"auto_fix_diagnostics": _context("D" * 2000), "post_compact_regrounding": _context(regroup)}
+        with patch(f"{_MERGE}.logger") as log:
+            doc = json.loads(_post_tool_use(outputs))
+        context = doc["hookSpecificOutput"]["additionalContext"]
+        assert context == regroup
+        assert _cc_len(context) <= CONTEXT_LIMIT == 10_000
+        dropped = [c.args for c in log.warning.call_args_list if "DROPPED" in c.args[0]]
+        assert len(dropped) == 1 and dropped[0][2] == "auto_fix_diagnostics" and dropped[0][3] == 2000
+
+    def test_a_total_exactly_at_the_limit_still_lands_whole(self, mock_logger):
+        """Claude Code keeps text inline while its length is <= the threshold."""
+        outputs = {"auto_fix_diagnostics": _context("D" * 998), "post_compact_regrounding": _context("R" * 9000)}
+        doc = json.loads(_post_tool_use(outputs))
+        assert doc["hookSpecificOutput"]["additionalContext"] == "D" * 998 + "\n\n" + "R" * 9000
+
+    def test_the_limit_counts_utf16_units(self, mock_logger):
+        """An emoji is one Python character and two units to Claude Code."""
+        outputs = {
+            "auto_fix_diagnostics": _context("\U0001f600" * 600),
+            "post_compact_regrounding": _context("R" * 9000),
+        }
+        doc = json.loads(_post_tool_use(outputs))
+        assert doc["hookSpecificOutput"]["additionalContext"] == "R" * 9000
+
+    def test_the_priority_follows_the_handler_not_the_entry_name(self, mock_logger):
+        """A project config may name the entry anything; the handler path still identifies the re-ground."""
+        regroup = "R" * 9000
+        outputs = {"auto_fix_diagnostics": _context("D" * 2000), "regroup_renamed": _context(regroup)}
+        assert json.loads(_post_tool_use(outputs))["hookSpecificOutput"]["additionalContext"] == regroup
+
+    def test_a_single_output_passes_through_byte_identical(self, mock_logger):
+        """Compact spacing on purpose: a re-serialised document would not match it."""
+        raw = '{"systemMessage":"[diagnostics] ok"}\n'
+        assert _post_tool_use({"auto_fix_diagnostics": raw}) == raw
+
+    def test_plain_outputs_are_joined_as_before(self, mock_logger):
+        assert _post_tool_use({"auto_fix_diagnostics": "A", "post_compact_regrounding": "B"}) == "A\nB"
+
+    def test_plain_text_beside_json_keeps_its_audience(self, mock_logger):
+        """Plain PostToolUse stdout is shown to the user, so it rides as systemMessage;
+        plain UserPromptSubmit stdout is model context, so it rides as context."""
+        doc = json.loads(_post_tool_use({"auto_fix_diagnostics": "note", "post_compact_regrounding": _context("R")}))
+        assert doc["systemMessage"] == "note"
+        assert doc["hookSpecificOutput"]["additionalContext"] == "R"
+        ups = {"auto_fix_diagnostics": "branch prompt", "post_compact_regrounding": _context("R")}
+        doc = json.loads(_post_tool_use(ups, event="UserPromptSubmit"))
+        assert doc["hookSpecificOutput"] == {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "branch prompt\n\nR",
+        }
+
+    def test_a_conflicting_key_keeps_the_first_handlers_value_and_says_so(self, mock_logger):
+        outputs = {
+            "auto_fix_diagnostics": json.dumps({"decision": "block", "reason": "lint"}),
+            "post_compact_regrounding": json.dumps({"decision": "approve", "reason": "other"}),
+        }
+        with patch(f"{_MERGE}.logger") as log:
+            doc = json.loads(_post_tool_use(outputs))
+        assert (doc["decision"], doc["reason"]) == ("block", "lint")
+        assert sum("conflicts" in c.args[0] for c in log.warning.call_args_list) == 2

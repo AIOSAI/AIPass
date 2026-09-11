@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (47/47) | **Tests:** 1491 test functions across 47 files; pytest expands to 1589 cases, 1589 pass | **Functions:** 243 public (223 tested)
-**Last Updated:** 2026-09-08
+**Seedgo:** 100% (47/47) | **Tests:** 1499 test functions across 47 files; pytest expands to 1602 cases, 1602 pass | **Functions:** 243 public (223 tested)
+**Last Updated:** 2026-09-10
 
 *EVERY REFUSAL THIS BRANCH PRINTED REPORTED SUCCESS. A module returning True
 from `handle_command` means "I recognised this command", never "it worked", and
@@ -1360,6 +1360,6 @@ audit refresh; the README kept it standing until tonight.
 
 ---
 
-*Last Updated: 2026-09-08*
+*Last Updated: 2026-09-10*
 
 [← Back to AIPass](../../../README.md)

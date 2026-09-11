@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-09-07
+# Modified: 2026-09-10
 # =============================================
 
 """Tests for testwrite_gate — Patrick's 2026-09-01 no-agent-test-creation ruling.
@@ -35,6 +35,16 @@ The file is organised by the question each block answers:
     itself is always writable — have pins of their own.
  5. The admin seat passes on a VERIFIED grant only, and never on a directory
     name, mirroring test_edit_gate_bash.py's discipline.
+
+POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
+IS the test data - a command string is what the gate reads, spelled as agents
+type it.
+
+A path put INTO a command string is spelled with as_posix(), the form bash takes
+on every OS (C:/... on Windows). str() handed windows-setup a raw
+C:\\Users\\... cd target. Bash eats those backslashes, and the gate's reading
+of that did what bash would: cd'd into a directory named C:Users..., so an
+existing test looked like a new one (devpulse 401ee814, PR #762).
 """
 
 import json
@@ -490,6 +500,30 @@ class TestRunningTestsIsNotWritingThem:
         _policy(project)
         body = "with o" + "pen('" + project["new_test"] + "','w') as f: pass"
         assert _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    def test_a_python_step_before_a_cd_does_not_double_the_run_path(self, project):
+        """devpulse 213c64fd, @aipass's shape from 2026-09-09: edit an EXISTING test
+        with a python heredoc, cd to the repo root, run it by its root-relative path.
+
+        The python step used to claim the pytest argument and resolve it from the
+        seat, naming <seat>/src/aipass/hooks/tests/... - a path that does not
+        exist - so the gate refused an edit of a real file as a creation."""
+        _policy(project)
+        own = "te" + "sts/" + Path(project["existing"]).name
+        from_root = Path(project["existing"]).relative_to(project["root"]).as_posix()
+        command = f"python3 - <<'EOF'\np = '{own}'\nEOF\ncd ../../.. && python3 -m pytest {from_root} -q"
+        assert not _blocked(_run(project["seat"], command=command))
+
+    def test_a_subshell_cd_resolves_its_own_edit(self, project):
+        _policy(project)
+        from_root = Path(project["existing"]).relative_to(project["root"]).as_posix()
+        root = project["root"].as_posix()
+        assert not _blocked(_run(project["seat"], command=f"(cd {root} && sed -i s/a/b/ {from_root})"))
+
+    def test_a_creation_on_line_two_is_refused(self, project):
+        """The newline hole: this command reported zero targets until 2026-09-10."""
+        _policy(project)
+        assert _blocked(_run(project["seat"], command=f"true\ntouch {Path(project['new_test']).as_posix()}"))
 
     def test_the_exemption_is_only_the_module_form(self):
         """A bare script argument named pytest must not buy the exemption."""

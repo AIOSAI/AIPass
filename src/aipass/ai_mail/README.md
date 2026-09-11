@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1422 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1463 cases**, 1463 passed / 0 skipped, measured 2026-09-08 from both rootdirs (branch and repo root)
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1428 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1472 cases**, 1472 passed / 0 skipped, measured 2026-09-10 from both rootdirs (branch and repo root)
 
 > Two numbers because they answer different questions: `def test_` counts what
 > was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
@@ -27,9 +27,11 @@
 > `async`, is the method — an unanchored search over-counts (it matches
 > `def test_` inside a docstring) and an unindented-only search returns roughly
 > half, because most of this suite's units are methods on `Test...` classes.
-> The number above is what that anchored method returns AND what seedgo's
-> pytest_quality corpus reader counts by parsing the AST: two independent
-> methods, one answer, re-measured every time this line moves. It is written
+> The number above is what that anchored method returns AND what a parse of
+> the AST returns (every `def`/`async def` named `test_*`, at any depth): two
+> independent methods, one answer, re-measured every time this line moves. The
+> 2026-09-08 edition's AST count came from seedgo's pytest_quality corpus
+> reader; the 2026-09-10 one from a direct `ast.walk`. It is written
 > down because an earlier edition carried 1410 while the corpus read 1412 on
 > the same day, and nobody could tell which grep had produced it.
 >
@@ -1082,6 +1084,14 @@ There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and 
 
 **Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins — the fleet ruling's own tie-break — and an error line names every losing claimant. This was a known gap for one day: `declared_roots()` returned `sorted(found)`, so the winner was alphabetical-by-resolved-path and the tie-break the ruling names could not reach this door. Re-reading the anchor here to recover it would have been a second reader of the file the gateway exists to own, so the collision was made loud and the disagreement raised with @memory instead — who dropped the sort (`registry_scope` 4.1.0, 2026-08-30). The error line stays: a tie-break being correct does not make a collision expected.
 
+### Mailing a citizen outside this repo — the last wall (#754)
+
+Delivery reads the same external tier, last. Once it answers, the address map refuses nothing, so `_check_cross_project_boundary()` is the only wall left — and only the resolver knows which tier answered, so it passes `external_tier=True` rather than the check re-deriving it.
+
+A sender that cannot be placed in a project — no `AIPASS_CALLER_CWD` (drone omits it when it cannot read the cwd; @trigger's in-process sends never carry one), or a cwd with no registry above it — is **refused** for an external-tier recipient, and the reason names the wall. The same sender to a fleet branch still lands, so @trigger's mail to owners is untouched. The verified-admin grant still crosses, checked last. A reply stamp does not: a reply's proof only counts inside the sender's own project, and with none a stamped `reply_path` could name any mailbox on disk.
+
+Until 2026-09-10 the check returned ALLOW the moment the caller cwd was missing — measured on 09-02: cwd set, refused; cwd unset, allowed.
+
 ## The Import Guard Needs No Filesystem
 
 `apps/handlers/__init__.py` runs a branch-access check at import time. It used to
@@ -1223,8 +1233,8 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 48 test modules + conftest.py; 1399 def test_,
-                                # 1463 collected cases (selection below)
+└── tests/                      # 47 test modules + conftest.py + __init__.py;
+                                # 1428 def test_, 1472 collected cases (selection below)
     ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

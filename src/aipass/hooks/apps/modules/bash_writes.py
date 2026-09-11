@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.3.0
+# Version: 1.4.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-07
+# Modified: 2026-09-10
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -38,7 +38,7 @@ Two reading modes, because shell commands are two different things:
 
 import re
 import shlex
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -47,6 +47,22 @@ CONSOLE = err_console
 
 # Shell operators that end one command and start the next.
 _SEPARATORS = frozenset({"&&", "||", ";", "|", "&", "\n"})
+
+# The lexer's operator characters. The newline is one of them ON PURPOSE: shlex
+# counts it as blank space by default, so until 2026-09-10 "\n" sat in
+# _SEPARATORS and never arrived. Every command after the first line of a
+# multi-line Bash call was glued onto line one as extra operands: a write on
+# line two was invisible to both gates, and a cd on line two never moved the
+# ground (found measuring devpulse's 213c64fd).
+_PUNCTUATION = "();<>|&\n"
+
+# A subshell's cd ends with the subshell; the parentheses scope it.
+_SUBSHELL_OPEN, _SUBSHELL_CLOSE = "(", ")"
+
+# The lexer glues a run of operator characters into ONE token: ");", "&&\n",
+# "\n\n". These are the pieces that end a command, pulled out of such a run.
+# Redirections (">>", ">&", "2>&1"'s ">&") contain none of them and stay whole.
+_OPERATOR_SPLIT = re.compile(r"(\n|&&|\|\||;|\(|\))")
 
 # Every operand is a write target.
 _ALL_OPERANDS = frozenset({"tee", "touch", "mkdir", "truncate"})
@@ -91,6 +107,11 @@ _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 # Trailing syntax that rides along when a path is lifted out of source code.
 _TRAILING_JUNK = ",;:)]}'\"`"
 
+# Git Bash's own spelling of a drive: /c/Users/me is C:\Users\me. Its pwd prints
+# it and every command it runs accepts it, so an agent on Windows copies it
+# into the next command.
+_GIT_BASH_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
+
 # What this parser does NOT see. Stated as data so the reply, the README and the
 # tests all quote the same list instead of three drifting prose copies.
 NOT_CAUGHT: tuple[str, ...] = (
@@ -101,6 +122,8 @@ NOT_CAUGHT: tuple[str, ...] = (
     "metadata-only changes: chmod, chown, touch -t on an existing file",
     "git, gh, drone and aipass — they name no write verb this parser reads; their own fences apply",
     "writes made by a process the command merely starts (a server, a test runner)",
+    "paths an interpreter receives from ANOTHER command — through a pipe, a file or an argument "
+    "list built elsewhere. Only the paths in its own command and its own heredoc are read as held.",
     "a path spelled for the OTHER operating system's filesystem — 'C:\\Proj\\x' read on Linux "
     "names no drive that exists here, so it resolves relative and reads as local. Separators are "
     "understood on every OS; ROOTS are only walkable on the OS that has them.",
@@ -141,22 +164,72 @@ def _strip_heredoc_bodies(command: str) -> str:
     path it holds — that catch was the point of the interpreter mode and it is
     pinned by its own test.
     """
+    return _split_heredocs(command)[0]
+
+
+def _split_heredocs(command: str) -> tuple[str, list[str]]:
+    """The command with heredoc bodies blanked, and the bodies, in opener order.
+
+    The bodies are kept so an interpreter can be handed the heredoc IT opened
+    and no one else's text (see :func:`write_targets_by_segment`).
+    """
     if "<<" not in command:
-        return command
+        return command, []
     lines = command.split("\n")
     out: list[str] = []
     pending: list[str] = []
+    bodies: list[str] = []
+    current: list[str] = []
     for line in lines:
         if pending:
+            out.append("")
             if line.strip() == pending[0]:
                 pending.pop(0)
-                out.append("")
-                continue
-            out.append("")
+                bodies.append("\n".join(current))
+                current = []
+            else:
+                current.append(line)
             continue
         out.append(line)
         pending.extend(match.group(2) for match in _HEREDOC_OPEN.finditer(line))
-    return "\n".join(out)
+    # An unterminated body is not returned: its opener then has no partner, and
+    # the pairing falls back to the whole-command read, which still holds it.
+    return "\n".join(out), bodies
+
+
+def _strip_comments(command: str) -> str:
+    """Drop shell comments, keeping the newline that ends each one.
+
+    shlex's own comment handling was wrong twice over for this reader: it
+    treated ``#`` as a comment ANYWHERE in a word (``curl host/#x && touch f``
+    lost everything after the ``#``), and it swallowed the newline with the
+    comment, which would merge the next line back into this one. The shell's
+    rule is narrower: ``#`` opens a comment only where a word starts, and never
+    inside quotes.
+    """
+    if "#" not in command:
+        return command
+    out: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and quote != "'" and index + 1 < len(command):
+            out.append(command[index : index + 2])
+            index += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or command[index - 1] in " \t\n;&|()"):
+            end = command.find("\n", index)
+            index = len(command) if end < 0 else end
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def _tokenize(command: str) -> list[str]:
@@ -170,12 +243,21 @@ def _tokenize(command: str) -> list[str]:
     write targets.
     """
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=_PUNCTUATION)
         lexer.whitespace_split = True
-        return list(lexer)
+        lexer.whitespace = " \t\r"
+        lexer.commenters = ""
+        tokens = list(lexer)
     except ValueError as exc:
         logger.info("[HOOKS] bash_writes: lexer fell back to whitespace split (%s)", exc)
-        return command.split()
+        return [token for line in command.split("\n") for token in (*line.split(), "\n")]
+    out: list[str] = []
+    for token in tokens:
+        if len(token) > 1 and all(char in _PUNCTUATION for char in token):
+            out.extend(piece for piece in _OPERATOR_SPLIT.split(token) if piece)
+        else:
+            out.append(token)
+    return out
 
 
 def _readings(command: str) -> list[list[str]]:
@@ -204,19 +286,32 @@ def _readings(command: str) -> list[list[str]]:
     foreign by it — while the reverse, the escape reading, is exactly how a
     foreign write became local on Windows.
     """
-    readings = [_tokenize(_strip_heredoc_bodies(command))]
-    if "\\" in command:
-        protected = _tokenize(_strip_heredoc_bodies(command).replace("\\", "\\\\"))
+    # A backslash-newline is a line continuation: the shell joins the lines, so
+    # the reader must too, before a newline starts meaning "next command".
+    shell = _strip_comments(_strip_heredoc_bodies(command).replace("\\\n", ""))
+    readings = [_tokenize(shell)]
+    if "\\" in shell:
+        protected = _tokenize(shell.replace("\\", "\\\\"))
         if protected != readings[0]:
             readings.append(protected)
     return readings
 
 
 def _segments(tokens: list[str]) -> list[list[str]]:
-    """Group tokens into individual commands, split on shell separators."""
+    """Group tokens into individual commands, split on shell separators.
+
+    Subshell parentheses split too and are kept as one-token segments, so the
+    caller can scope a cd to the subshell it was made in.
+    """
     out: list[list[str]] = []
     current: list[str] = []
     for token in tokens:
+        if token in (_SUBSHELL_OPEN, _SUBSHELL_CLOSE):
+            if current:
+                out.append(current)
+            out.append([token])
+            current = []
+            continue
         if token in _SEPARATORS:
             if current:
                 out.append(current)
@@ -246,6 +341,17 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     token = token.strip().strip(_TRAILING_JUNK)
     if not token:
         return None
+    # A Windows path cannot hold a Git Bash drive (FPLAN-0537, measured under a
+    # Windows flavour): WindowsPath("/c/Users/me") has a root but no drive, so
+    # it joined the seat's drive and named C:\c\Users\me. That directory holds
+    # no registry, so edit_gate let a foreign write spelled that way through,
+    # and testwrite_gate called an edit of an existing test a creation. Read
+    # only on a Windows cwd, because on POSIX /c is an ordinary directory.
+    # Paths lifted out of interpreter source get the same reading, though python
+    # itself would not translate them. That reading is broader than the write,
+    # the safe way for a fence to be wrong.
+    if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(token)):
+        token = f"{drive.group(1).upper()}:/{token[drive.end() :].lstrip('/')}"
     # Separators are normalised on EVERY OS, not just Windows. pathlib accepts
     # "/" natively on Windows (WindowsPath("C:/a/b") is absolute and correct),
     # so one spelling reaches Path from both dialects and the parser's reading
@@ -318,10 +424,17 @@ def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
 def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[Path, str]]:
     """Collect every path an interpreter invocation is handed.
 
-    The raw segment text is scanned, not just the tokens: a heredoc body reaches
-    the lexer as mangled words — an open-call arrives with its quotes stripped
-    and its arguments glued to the path — and lifting the
-    slash-bearing run out of the raw text is the only reading that survives it.
+    *raw* is the interpreter's OWN text — its command and the heredoc it opened
+    — scanned as text, not just tokens, so a path glued into source code by the
+    lexer (an open-call with its quotes stripped) still comes out whole.
+
+    Until 2026-09-10 the caller passed the WHOLE command here, although this
+    docstring already said "the segment". So an interpreter claimed every path
+    the command held and resolved it against its OWN directory. A python step
+    standing before ``cd ../../..`` took the later pytest argument, resolved it
+    from the wrong place, and named a doubled path that does not exist, which
+    testwrite_gate refused as a new test (devpulse 213c64fd, @aipass hit it
+    twice while curing PR #761).
     """
     verb = Path(segment[0]).name
     if verb not in _INTERPRETERS:
@@ -382,10 +495,20 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
     # interpreter read (a heredoc handed to python really can write anything).
     grouped: list[tuple[list[str], list[tuple[Path, str]]]] = []
     seen: set[tuple[Path, str]] = set()
+    bodies = _split_heredocs(command)[1]
     for tokens in _readings(command):
         current = base
-        for segment in _segments(tokens):
+        subshells: list[Path] = []
+        segments = _segments(tokens)
+        owned = _heredocs_by_segment(segments, bodies)
+        for index, segment in enumerate(segments):
             if not segment:
+                continue
+            if segment == [_SUBSHELL_OPEN]:
+                subshells.append(current)
+                continue
+            if segment == [_SUBSHELL_CLOSE]:
+                current = subshells.pop() if subshells else current
                 continue
             verb = Path(segment[0]).name
 
@@ -403,7 +526,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
             for hit in (
                 *_redirect_targets(segment, current),
                 *_verb_targets(segment, current),
-                *_interpreter_targets(segment, command, current),
+                *_interpreter_targets(segment, owned.get(index, command), current),
             ):
                 # The two readings overlap heavily; a caller told the same
                 # thing twice would see a refusal that names one write as two.
@@ -414,6 +537,31 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
             grouped.append((segment, hits))
 
     return grouped
+
+
+def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[int, str]:
+    """Each segment's own text: its tokens plus the heredoc bodies it opened.
+
+    Openers and bodies are matched in order. If they do not pair up one to one
+    (a ``<<`` the lexer and the heredoc reader disagree on), nothing is returned
+    and every interpreter falls back to reading the whole command, which is the
+    old, broader reading: a fence that cannot tell whose text is whose keeps
+    all of it.
+    """
+    openers = [sum(1 for token in segment if token == "<<") for segment in segments]
+    if sum(openers) != len(bodies):
+        if bodies:
+            logger.info(
+                "[HOOKS] bash_writes: %d heredoc bodies, %d openers - whole-command read", len(bodies), sum(openers)
+            )
+        return {}
+    owned: dict[int, str] = {}
+    taken = 0
+    for index, segment in enumerate(segments):
+        own = bodies[taken : taken + openers[index]]
+        taken += openers[index]
+        owned[index] = "\n".join([" ".join(segment), *own])
+    return owned
 
 
 def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
