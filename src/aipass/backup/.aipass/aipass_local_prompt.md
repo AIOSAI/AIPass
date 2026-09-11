@@ -67,7 +67,7 @@ apps/
 - Project-owned design: .backup/ and .backupignore live in the TARGET project, not centrally
 - Normal citizen namespace: uses `from aipass.backup.apps.modules.*` / `from aipass.backup.apps.handlers.*`
 - Entry point sets AIPASS_BRANCH_NAME env var for Prax
-- templates/backupignore.template is the single source for default ignore patterns
+- templates/backupignore.template seeds each project's .backupignore; the one rule every project gets regardless (`*.tmp`) is BUILTIN_IGNORE_PATTERNS in handlers/ignore/patterns.py
 
 ## Known Gotchas
 

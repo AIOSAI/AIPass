@@ -4,11 +4,13 @@
 **Module:** `aipass.backup`
 **Version:** 1.0.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-11
 
 > Every number and command in this file was re-measured against the tree on
 > **2026-09-05** (FPLAN-0490). Anything that could not be verified tonight is
-> marked *unverified* where it is claimed, not left standing green.
+> marked *unverified* where it is claimed, not left standing green. Later
+> additions carry their own measurement date (the `*.tmp` floor: 2026-09-11,
+> FPLAN-0547).
 
 ---
 
@@ -53,7 +55,7 @@ apps/
     ├── copy/              # File copying (snapshot + versioned)
     ├── diff/              # Diff generation + restore from the versioned store
     ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
-    ├── ignore/            # .backupignore patterns + whitelist
+    ├── ignore/            # .backupignore patterns + whitelist + the built-in *.tmp floor
     ├── json/              # The fleet's json shim — BINDS @prax's service, identical
     │                      #   in every branch (DPLAN-0325). sha256 3456b766…,
     │                      #   1724 B, mode 664 — re-verified 2026-09-05
@@ -185,12 +187,35 @@ The root `.gitignore` covers all three with a single `.backup/` entry.
 
 ## How Ignores Work
 
-Two layers — seed and runtime:
+Three layers — seed, built-in floor, runtime:
 
 1. **`templates/backupignore.template`** — the **seed**. Read by `setup._build_backupignore()` and written into a new project's `.backupignore` at `register` time. Never consulted at backup time. If this file is missing, registration raises — an empty seed would back up everything and crash the machine.
-2. **`.backupignore`** — the **runtime source of truth**. `load_spec()` reads it on every backup; the seed template is not applied. True pathspec/gitwildmatch semantics: `#` comments, `!` negation, trailing `/` for dirs, last-match-wins.
+2. **`BUILTIN_IGNORE_PATTERNS`** in `handlers/ignore/patterns.py` — the **built-in floor**, today exactly one rule: `*.tmp`. `load_spec()` puts it ahead of the project's own lines on every run, so it reaches every project, including every `.backupignore` seeded before the rule existed.
+3. **`.backupignore`** — the **runtime source of truth**. `load_spec()` reads it on every backup; the seed template is not applied. True pathspec/gitwildmatch semantics: `#` comments, `!` negation, trailing `/` for dirs, last-match-wins.
 
-There is no static fallback. The seed IS the safety mechanism — an empty or missing `.backupignore` means back up everything (`.venv`, `node_modules`, `.git`), which can crash the machine. Keep the template sane.
+The floor is not a fallback for the seed. An empty or missing `.backupignore` still means back up everything except `*.tmp` (`.venv`, `node_modules`, `.git` included), which can crash the machine. The seed IS the safety mechanism. Keep the template sane.
+
+### Why `*.tmp` is built in (DPLAN-0338)
+
+The fleet's json service writes through a sibling staging temp (`.<pid>_<n>.tmp`,
+older era `tmpXXXX.tmp`) inside `*_json` folders and renames it over the real
+file. A writer killed mid-write leaves the temp behind. The real json is intact
+either way, so a temp is never anyone's work, and backing one up only copies
+litter. Patrick, 2026-09-11: "backup needs to ignore temporary files".
+
+- **One rule, one place.** `load_spec()` is the only ignore source for every lane: `snapshot`, `versioned`, `all` (one shared scan) and `drive_sync` (which re-filters the versioned store through it before uploading). `DIFF_IGNORE_PATTERNS` in `handlers/diff/generator.py` decides only which files get a diff, never which files get copied, so it is not a copy rule.
+- **Why not the seed?** The seed reaches only projects registered after the edit, and `.backupignore` is never overwritten. AIPass's own `/.backupignore` (hand-maintained) does not name `*.tmp`, and that store is where the temps piled up.
+- **Overridable.** The floor goes first, so a project that genuinely keeps `.tmp` files re-includes them with `!*.tmp` in its own `.backupignore` (last match wins). A `whitelist` entry in `.backup/config.json` also overrides it, as it overrides any ignore.
+- **Scope of the match.** gitwildmatch `*.tmp` matches at any depth and also matches a *directory* named `*.tmp`, which drops that directory's contents too. Near-misses such as `notes.tmpl`, `tmp.json`, `state.tmp.json` or `tmp/data.json` are not matched (pinned in `tests/test_ignore_pathspec.py`).
+
+Measured 2026-09-11 on a scratch copy of `src/aipass/prax/prax_json` (599 files: 452 temps, 145 json, 2 others), outside the repo:
+
+| Run | Snapshot store | Versioned store |
+|---|---|---|
+| Before the rule | 452 `*.tmp`, 145 json | 904 `*.tmp` files (452 × current + baseline), 290 json |
+| After the rule, fresh project | 0 `*.tmp`, 145 json | 0 `*.tmp`, 290 json |
+
+Re-running the *before* project after the rule still left its 452 old copies in `snapshots/`: the rule stops new copies, it does not remove old ones (see "Store Cleanup").
 
 - To change defaults for **new** projects → edit `templates/backupignore.template`
 - To change ignores for an **existing** project → edit its `.backupignore`
@@ -261,6 +286,24 @@ module's own temp file when an atomic write fails — it never touches a store.)
 Treat `max_versions` as advertised-but-unimplemented until a pruning lane exists.
 
 Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
+
+**The `*.tmp` copies made before the rule (2026-09-11).** The AIPass store
+(`/.backup/`, last snapshotted 2026-08-15) held 498 temp copies in `snapshots/`
+(14,265,519 B) and 996 in `versioned/` (498 file-folders × current + baseline,
+28,531,038 B), every one from a `*_json` folder: 458 prax, 36 memory, 3 trigger,
+1 seedgo. None of the 498 snapshot copies still had a source.
+
+- `snapshots/` — **pruned** with `drone rm --stale 10d .backup/snapshots`, the
+  fleet's logged delete: 498 matched, 498 deleted, 0 refusals, 0 left. They
+  could never be restored as anything useful, and with no source they would
+  only have gone at the next AIPass snapshot.
+- `versioned/` — **left in place, 996 files.** The stale sweep matches only
+  files directly inside a `*_json` folder, and this store wraps each file in a
+  `<name>.tmp/` folder. The plain `drone rm` lane refuses the folders
+  (`Protected: path is inside sibling branch memory/`) because the store
+  mirrors `src/aipass/<branch>/`. The gate is not routed around. The copies
+  are inert: `drive_sync` re-filters the store through `load_spec()`, so they
+  never upload. They go when a pruning lane exists.
 
 ---
 
@@ -349,18 +392,23 @@ from where the caller's shell happened to be standing.
 
 ## Tests
 
-**298 test functions across 13 files in `tests/`; pytest expands them to 371
-cases.** Both numbers re-measured 2026-09-08 — the first by counting `def test_`
+**305 test functions across 13 files in `tests/`; pytest expands them to 378
+cases.** Both numbers re-measured 2026-09-11 — the first by counting `def test_`
 lines the way the seedgo readme rule counts them, the second from a full run:
 
 ```
-python -m pytest src/aipass/backup/tests -q     # 371 passed
+python -m pytest src/aipass/backup/tests -q     # 378 passed
 ```
 
-The drop from the 2026-09-05 figures (302 defs / 14 files / 383 cases) is one
-file, not attrition: `tests/test_json_handler.py` (6 defs, 14 cases) was
-archived on 2026-09-07 to `tests/.archive/`. 302 − 6 + 2 = 298 and
-383 − 14 + 2 = 371, the +2 being this wave's two added units.
+The +7 over the 2026-09-08 figures (298 defs / 371 cases) are the `*.tmp`
+floor's pins (DPLAN-0338): six in `TestBuiltinTmpFloor`
+(`test_ignore_pathspec.py`: the spec with and without a `.backupignore`, the
+`!*.tmp` escape, and the snapshot, versioned and `all` lanes end to end) and
+one in `test_drive_pipeline.py` (a pre-rule store's temps never upload).
+
+The 2026-09-08 drop from 302 defs / 14 files / 383 cases was one file, not
+attrition: `tests/test_json_handler.py` (6 defs, 14 cases) was archived on
+2026-09-07 to `tests/.archive/`.
 
 The gap is parametrisation, concentrated in `test_drive_pipeline.py` (71 defs)
 and `test_dead_cwd_imports.py` (37 defs). Run it from the **repo root** — from

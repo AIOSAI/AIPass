@@ -3,7 +3,7 @@
 # Description: Tests for filesystem handlers -- scan, ignore, path, project
 # Version: 1.1.0
 # Created: 2026-06-12
-# Modified: 2026-09-03
+# Modified: 2026-09-11
 # =============================================
 
 """Test filesystem handlers -- scan, ignore, path, copy, project."""
@@ -107,7 +107,7 @@ class TestIgnorePatterns:
     """Test ignore pattern loading."""
 
     def test_load_spec_missing_file(self, tmp_path: Path) -> None:
-        """With no .backupignore the spec matches NOTHING -- nothing is ignored.
+        """With no .backupignore the spec matches nothing but the *.tmp floor.
 
         The type alone permitted a spec that ignored the whole project, which
         for a backup tool is the silent-data-loss direction: every file
