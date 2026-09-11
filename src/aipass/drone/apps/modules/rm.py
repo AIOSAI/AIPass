@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-02
 # Modified: 2026-09-11
 # =============================================
@@ -36,7 +36,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "Contained safe-delete (project + tmp)",
 }
 
@@ -147,6 +147,7 @@ def print_help() -> None:
     console.print("  • Symlinks are resolved; refuses if target escapes allowed roots")
     console.print("  • Nonexistent paths produce a clean error")
     console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
+    console.print("  • A project folder that CONTAINS another citizen is refused, naming the first one")
     console.print()
     console.print("[bold]Every delete is recorded:[/bold]")
     console.print("  Successes AND refusals land in [cyan]<project>/.ai_central/deletions.jsonl[/cyan]")

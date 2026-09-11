@@ -453,6 +453,25 @@ Innermost-wins produced two bugs from one mimicry — refusals named `aipass_fra
 
 Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the project boundary.
 
+### A folder that contains a citizen
+
+The sibling guard walks **up** from the target, so it only sees a citizen the target sits *inside*. Nothing above a branch carries `.trinity/`, so a target above the branches passed it. From any branch, `drone rm ..` is `src/aipass/` and `drone rm ../..` is `src/`. Both also passed containment, and rmtree would have taken every branch, `.trinity/` and all (measured 2026-09-11 with the guards alone; DPLAN-0338 follow-up).
+
+`check_contained_citizens()` walks **down** and refuses at the first foreign citizen, naming it:
+
+```
+Protected: path contains citizen ai_mail/ (…/src/aipass/ai_mail) — another branch's tree
+```
+
+- **Bounded.** The walk is sorted and stops at the first foreign `.trinity/`. The live `..` answers in about a millisecond.
+- **The caller's own tree is pruned whole**, template skeleton included (outermost-wins makes the skeleton the caller's). A target already inside a branch returns at once, because the sibling guard has answered for everything below it.
+- **Unchanged:** targets inside the caller's own branch, and targets in the system temp dir, where a `.trinity/` is test scaffolding, not a citizen. Stale mode is unaffected; it never reaches this lane.
+- **A symlink is not a citizen.** rmtree unlinks the link and never touches what it points at.
+- **A folder the walk cannot list refuses the delete.** A guard that could not look must not report clear.
+- Refusals are recorded like every other refusal. A caller standing outside every branch finds every citizen foreign.
+
+Same change, same lane: the delete now acts on the **resolved** path, the one every guard judged. Before, it acted on the path as typed. `drone rm ..` handed rmtree `spawn/..`, which emptied the tree and then failed its last `rmdir`, because `spawn` was gone by then. The ledger recorded `failed` for a delete that had happened.
+
 ### Stale mode — `drone rm --stale`
 
 `drone rm --stale AGE [--dry-run] DIR [DIR...]` sweeps staging temps: the `*.tmp` a staged write (temp + fsync + rename) leaves behind when its process is killed between the two (DPLAN-0338). It is a second, narrower lane on the same verb; without `--stale` the verb is unchanged.
@@ -609,7 +628,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-**1319 tests pass, 0 skip**, across 31 test files — measured 2026-09-11 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1211 `def test_` functions**, which parametrization expands to **1319 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1319:
+**1329 tests pass, 0 skip**, across 31 test files — measured 2026-09-11 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1220 `def test_` functions**, which parametrization expands to **1329 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1329:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -618,7 +637,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 76 |
-| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 186 |
+| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 196 |
 | Deletion record | `test_deletion_log.py` | 38 |
 | Broker | `test_broker.py` | 61 |
 | Standards | `test_cli_routing.py` | 81 |
@@ -633,7 +652,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 **What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1319 passed in 150s on 2026-09-11.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1329 passed in 143s on 2026-09-11.
 
 ---
 
@@ -643,7 +662,7 @@ Measured 2026-09-08, all numbers from this tree tonight:
 
 | What | Measured | How |
 |---|---|---|
-| Tests | 1319 pass, 0 skip, 31 files (1211 `def test_` functions) — remeasured 2026-09-11 | `python -m pytest tests/ -q`, both rootdirs |
+| Tests | 1329 pass, 0 skip, 31 files (1220 `def test_` functions) — remeasured 2026-09-11 | `python -m pytest tests/ -q`, both rootdirs |
 | Seedgo audit | 100 on every CI-scored category; 100 on all eleven v5 pytest_quality rules | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
 | Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
 | Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
@@ -659,12 +678,12 @@ Measured 2026-09-08, all numbers from this tree tonight:
 - `apps/drone.py`'s file header says **`Version: 1.2.1`** (line 4) while the runtime constant 42 lines below is `VERSION = "1.1.0"` (line 46) — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). The 08-25 entry recorded this mismatch as `1.1.1`; remeasured 2026-09-05 it is `1.2.1`, so the header has moved twice while the constant stood still. Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. A code fix, out of scope for a README-only pass
 - Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
 - **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 943 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Patrick ruled on 2026-09-07: annotate, do not delete. The 211 rows stand exactly as written and one record-shaped annotation row was appended after them — same 12 keys, `lane` and `outcome` both `annotation`, `entry_count` 211 — so a reader who reaches the store finds the correction in the store's own language rather than in a document they would have to know to look for. A ledger someone edits to look right is worth less than one with a documented wrong patch in it. The annotation row has no writer and no test pinning it: it was appended by hand, once, with @devpulse's sanction, and nothing in the code path can produce another
-- **The plain verb has no fence above the branches.** Measured 2026-09-11 by calling the guards directly; no delete was run. From any branch, `drone rm ..` (`src/aipass/`) and `drone rm ../..` (`src/`) both pass containment, because each is a strict child of the project root. Both also pass the carve-outs: the sibling fence walks UP from the target looking for `.trinity/`, and nothing above a branch has one (the same fact that makes outermost-wins safe). `shutil.rmtree` would then take every branch, `.trinity/` and all, and the hooks rm gate lets every `drone rm` through untouched. Stale mode never reaches that lane, since every `--stale` spelling is caught. But a stale command with the flag removed entirely is a plain `drone rm ../..`. Not changed here, because DPLAN-0338 wave 1b froze the plain verb byte for byte. Raised with @devpulse for a ruling. The natural cure is to refuse a target that CONTAINS a citizen other than the caller
+- **Fixed 2026-09-11 — the plain verb now fences above the branches.** `drone rm ..` and `drone rm ../..` from a branch passed containment and the sibling fence (which walks UP and finds no `.trinity/` above `src/aipass/`), and rmtree would have taken every branch. Found during DPLAN-0338 wave 1b by calling the guards directly; no delete was run. Cured in its follow-up: a project folder that contains another citizen is now refused, naming the first one (see *A folder that contains a citizen*)
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1319 pass, 0 skip | **Last Updated:** 2026-09-11
+**Seedgo:** 100% | **Tests:** 1329 pass, 0 skip | **Last Updated:** 2026-09-11
 
 ---
 [← Back to AIPass](../../../README.md)

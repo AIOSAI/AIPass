@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-02
 # Modified: 2026-09-11
 # =============================================
@@ -13,8 +13,9 @@ constrained to project root and system temp directories. Provider-agnostic
 alternative to shell ``rm``.
 
 Matches Codex sandbox boundaries: writable = {project, /tmp, $TMPDIR}.
-Hard carve-outs protect .git, .trinity, .aipass, .codex, .agents, and
-sibling branch worktrees even inside allowed roots.
+Hard carve-outs protect .git, .trinity, .aipass, .codex, .agents, sibling
+branch worktrees, and any project directory that CONTAINS another citizen,
+even inside allowed roots.
 
 Stale mode (``--stale AGE``, DPLAN-0338) is a second, narrower lane: it walks
 directories and unlinks only staging temps — ``*.tmp`` regular files directly
@@ -123,8 +124,8 @@ def _find_branch_root(path: Path, project_root: Path) -> Path | None:
     return outermost
 
 
-def _detect_current_branch(project_root: Path | None) -> str | None:
-    """Return the branch name the CWD lives in, or None.
+def _current_branch_root(project_root: Path | None) -> Path | None:
+    """Return the root of the branch the CWD lives in, or None.
 
     Already Optional, and "no CWD" is one more way the answer is unknown — the
     branch is inferred from where the caller stands, not from who they are.
@@ -134,7 +135,12 @@ def _detect_current_branch(project_root: Path | None) -> str | None:
     cwd = caller_cwd()
     if cwd is None:
         return None
-    branch_root = _find_branch_root(cwd.resolve(), project_root)
+    return _find_branch_root(cwd.resolve(), project_root)
+
+
+def _detect_current_branch(project_root: Path | None) -> str | None:
+    """Return the branch name the CWD lives in, or None."""
+    branch_root = _current_branch_root(project_root)
     return branch_root.name if branch_root else None
 
 
@@ -187,6 +193,58 @@ def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, st
             if current_branch is None or target_branch_root.name != current_branch:
                 return True, f"Protected: path is inside sibling branch {target_branch_root.name}/"
 
+    return check_contained_citizens(resolved, project_root)
+
+
+def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
+    """Refuse a project directory that CONTAINS a citizen other than the caller.
+
+    The sibling fence walks UP from the target, so it only sees a citizen the
+    target sits inside. A target ABOVE the branches — ``drone rm ..`` from a
+    branch is ``src/aipass/``, ``../..`` is ``src/`` — has no ``.trinity``
+    above it, passed every guard, and rmtree would have taken the fleet
+    (DPLAN-0338 follow-up). This walks DOWN and stops at the first foreign
+    citizen, which the refusal names.
+
+    Scope, so nothing that worked before changes:
+      - only directories under the project root; the system temp dir is not
+        a place citizens live and keeps its old behaviour;
+      - a target already inside a branch returns at once. Everything below it
+        shares that branch's owner (outermost wins), the sibling fence has
+        answered for it, and a template skeleton under @spawn stays @spawn's;
+      - the caller's own branch is pruned whole, for the same reason;
+      - a symlink is not a citizen: rmtree unlinks the link, never what it
+        points at, and the walk does not follow one.
+
+    A folder the walk cannot list refuses the delete: a guard that could not
+    look must not report clear. Returns ``(blocked, reason)``.
+    """
+    if project_root is None or not resolved.is_relative_to(project_root) or not resolved.is_dir():
+        return False, ""
+    if _find_branch_root(resolved, project_root) is not None:
+        return False, ""
+
+    own = _current_branch_root(project_root)
+    unreadable: list[OSError] = []
+    for dirpath, dirnames, _filenames in os.walk(resolved, onerror=unreadable.append):
+        if unreadable:
+            break
+        here = Path(dirpath)
+        dirnames.sort()
+        for name in list(dirnames):
+            child = here / name
+            if child.is_symlink() or not os.path.isdir(child / ".trinity"):
+                continue
+            if child != own:
+                return True, f"Protected: path contains citizen {name}/ ({child}) — another branch's tree"
+            dirnames.remove(name)
+
+    if unreadable:
+        exc = unreadable[0]
+        return True, (
+            f"Protected: cannot verify {resolved} holds no citizen — {exc.filename} is unreadable "
+            f"({exc.strerror or exc})"
+        )
     return False, ""
 
 
@@ -308,12 +366,17 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         measurement = deletion_log.measure(absolute)
 
         try:
+            # A link is removed as the link. Anything else is deleted at the
+            # RESOLVED path, the one every guard above judged: `drone rm ..`
+            # handed rmtree "spawn/..", which emptied the tree and then failed
+            # its last rmdir, because spawn was gone by then. The ledger said
+            # "failed" for a delete that had happened.
             if absolute.is_symlink():
                 absolute.unlink()
-            elif absolute.is_dir():
-                shutil.rmtree(absolute)
+            elif resolved.is_dir():
+                shutil.rmtree(resolved)
             else:
-                absolute.unlink()
+                resolved.unlink()
             message = f"Deleted: {resolved}"
             results.append((path_str, True, message))
             logger.info("rm: deleted %s (resolved %s)", path_str, resolved)

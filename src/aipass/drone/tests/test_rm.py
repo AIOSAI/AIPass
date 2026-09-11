@@ -45,6 +45,11 @@ POSIX_TMP = Path(os.sep, "tmp")
 #: Why the POSIX-only units skip. Spelled once: three tests share the reason.
 _POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win32 platforms only"
 
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
+#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
+_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
+_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -594,6 +599,14 @@ class TestTemplateSkeletonIsNotACitizen:
         assert blocked is True
         assert "spawn" in reason
 
+    def test_a_citizen_can_clear_its_own_templates_folder(self, project_with_template, monkeypatch):
+        """The contains-fence must not read spawn's own skeleton as a stranger."""
+        spawn = project_with_template / "src" / "aipass" / "spawn"
+        monkeypatch.chdir(spawn)
+        ((_path, ok, message),) = safe_delete(["templates"])
+        assert ok is True, message
+        assert not (spawn / "templates").exists()
+
 
 class TestGitWorktreePointerUnchanged:
     def test_git_file_worktree_pointer_still_protected(self, project_dir):
@@ -606,6 +619,102 @@ class TestGitWorktreePointerUnchanged:
         blocked, reason = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
+
+
+# ---------------------------------------------------------------------------
+# A folder that CONTAINS a citizen — the fence above the branches
+#
+# The sibling fence walks UP from the target, so `drone rm ..` from a branch
+# (src/aipass) and `drone rm ../..` (src) found no .trinity above them and
+# passed every guard: rmtree would have taken the fleet. Measured 2026-09-11
+# with the guards alone, no delete (DPLAN-0338 follow-up). The cure walks DOWN
+# and stops at the first foreign citizen, which the refusal names.
+# ---------------------------------------------------------------------------
+
+
+class TestContainedCitizens:
+    @pytest.fixture()
+    def at_drone(self, project_with_branches, monkeypatch):
+        """Stand in @drone; @api and @flow are the neighbours."""
+        monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
+        return project_with_branches
+
+    @pytest.mark.parametrize("spelling", ["..", os.path.join("..", "..")], ids=["up-one", "up-two"])
+    def test_the_two_spellings_are_refused_from_a_branch(self, at_drone, spelling):
+        ((_path, ok, message),) = safe_delete([spelling])
+        assert ok is False
+        assert "contains citizen api/" in message, "the walk is sorted, so the first foreign citizen is api"
+        for branch in ("api", "drone", "flow"):
+            assert (at_drone / "src" / "aipass" / branch / ".trinity").is_dir()
+
+    def test_the_refusal_is_recorded(self, at_drone, tmp_path):
+        safe_delete([".."])
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "refused"
+        assert "contains citizen api/" in record["reason"]
+
+    def test_a_caller_outside_every_branch_is_refused_too(self, project_with_branches, monkeypatch):
+        monkeypatch.chdir(project_with_branches)
+        ((_path, ok, message),) = safe_delete(["src"])
+        assert ok is False
+        assert "contains citizen api/" in message
+
+    def test_a_folder_holding_only_the_callers_own_tree_is_allowed(self, project_dir, monkeypatch):
+        """The caller's tree is pruned whole — its template skeleton included,
+        which is spawn's by outermost-wins and must not read as a stranger."""
+        aipass = project_dir / "src" / "aipass"
+        spawn = aipass / "spawn"
+        (spawn / ".trinity").mkdir(parents=True)
+        (spawn / "templates" / "aipass_framework" / ".trinity").mkdir(parents=True)
+        monkeypatch.chdir(spawn)
+        ((_path, ok, message),) = safe_delete([".."])
+        assert ok is True, message
+        assert not aipass.exists()
+
+    def test_a_temp_dir_target_is_unchanged(self, at_drone, tmp_path_factory):
+        """Outside the project a .trinity is scaffolding, not a citizen."""
+        scratch = tmp_path_factory.mktemp("scratch")
+        (scratch / "sandbox_branch" / ".trinity").mkdir(parents=True)
+        ((_path, ok, message),) = safe_delete([str(scratch)])
+        assert ok is True, message
+        assert not scratch.exists()
+
+    def test_a_symlink_to_a_citizen_is_not_contained(self, at_drone):
+        """rmtree unlinks the link and never touches what it points at."""
+        api = at_drone / "src" / "aipass" / "api"
+        junk = at_drone / "junk"
+        junk.mkdir()
+        (junk / "api_link").symlink_to(api, target_is_directory=True)
+        ((_path, ok, message),) = safe_delete([str(junk)])
+        assert ok is True, message
+        assert (api / ".trinity").is_dir()
+
+    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
+    def test_an_unreadable_folder_refuses_rather_than_skips(self, at_drone):
+        junk = at_drone / "junk"
+        locked = junk / "locked"
+        locked.mkdir(parents=True)
+        locked.chmod(0)
+        try:
+            ((_path, ok, message),) = safe_delete([str(junk)])
+        finally:
+            locked.chmod(0o700)
+        assert ok is False
+        assert "cannot verify" in message
+        assert junk.exists()
+
+    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
+    def test_the_walk_stops_at_the_first_foreign_citizen(self, at_drone):
+        """A locked folder sorted AFTER api is never reached, so the refusal
+        names api. A walk that went on would meet the lock and say so."""
+        locked = at_drone / "src" / "aipass" / "zz_locked"
+        locked.mkdir()
+        locked.chmod(0)
+        try:
+            ((_path, _ok, message),) = safe_delete([".."])
+        finally:
+            locked.chmod(0o700)
+        assert "contains citizen api/" in message
 
 
 # ---------------------------------------------------------------------------
@@ -1038,9 +1147,7 @@ class TestStaleSummary:
     def test_a_refusal_fails_the_run(self, stale_tree):
         assert handle_command("--stale", ["10d", str(stale_tree["api"] / "nope")]) is False
 
-    @pytest.mark.skipif(
-        sys.platform == "win32" or os.geteuid() == 0, reason="needs POSIX permissions that bind the caller"
-    )
+    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
     def test_an_unreadable_folder_is_a_refusal_not_a_silence(self, stale_tree):
         locked = stale_tree["api"] / "locked_json"
         locked.mkdir()
