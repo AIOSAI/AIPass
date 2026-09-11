@@ -54,8 +54,12 @@ jobs:
         run: |
           source .venv/Scripts/activate
           export PYTHONUTF8=1
+          # pipefail: the pipe returns pytest's status, not tee's. shell: bash
+          # above already implies -eo pipefail on GitHub runners, so this job
+          # failed honestly before; the line is explicit so the two OS jobs read
+          # the same and nobody removes the shell key thinking it is cosmetic.
+          set -o pipefail
           pytest -v --tb=short --rootdir=. -n auto --dist loadscope 2>&1 | tee pytest-output.txt
-          echo "EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: Upload test results
         if: always()
