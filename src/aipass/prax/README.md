@@ -5,7 +5,7 @@
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
 **Version:** 2.4.0 — the string `drone @prax --version` actually prints (`apps/prax.py:211`)
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-11
 
 ---
 
@@ -18,17 +18,18 @@ is a single-machine reading rather than a property of the system, it says so.
 Anything that could not be verified is marked **UNVERIFIED** in place rather
 than left standing green.
 
-- **Tests:** 1404 test functions across 36 files; pytest expands them to 1487
-  cases, all passing from both rootdirs. Re-measured 2026-09-08: the FPLAN-0512
-  wave rewrote 80 units in place and added none, so all three counts are
-  unchanged from 09-07.
+- **Tests:** 1414 test functions across 36 files; pytest expands them to 1502
+  cases, all passing from both rootdirs. Re-measured 2026-09-11: FPLAN-0542
+  added 10 test functions (15 cases) to `test_json_handler.py`; the file count
+  is unchanged.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last structural change:** FPLAN-0512 (2026-09-08) — the exit seam: a
-  handler that printed an error used to exit 0, and now exits 2. Described under
-  Command Routing. The same wave closed prax's six open v5 test-quality rules by
-  giving 80 nominated test units a real oracle.
+- **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
+  module's json triplet is wired: each `log_operation` that lands bumps
+  `operations_total` and stamps `last_operation`/`last_updated` in
+  `<module>_data.json`, merged never replaced, and rate_tracker's save no longer
+  rebuilds that document. Described under The fleet json service.
 
 ---
 
@@ -535,9 +536,32 @@ itself with `for_module(__file__)`. Branch code calls its own shim
 (`from aipass.<branch>.apps.handlers.json import json_handler`) and gets the
 bound names — `load_json`, `save_json`, `log_operation`, and the rest.
 
+**Three documents per module, three jobs (FPLAN-0542, 2026-09-11).** The log
+(`<module>_log.json`) is the per-module operation trail, one entry per
+`log_operation`, rotating at the config's cap. The data document
+(`<module>_data.json`) is lifetime state: every log write that lands also bumps
+`operations_total` and stamps `last_operation` and `last_updated`, merging those
+keys into the document and never replacing it, and a data document missing its
+base keys (`created`/`last_updated` — `prax_json/prax_logger_data.json` is
+literally `{}`) is healed, not refused. The config (`<module>_config.json`) is
+the rotation cap, `config.max_log_entries`, default 100. The bump is telemetry:
+a data write that fails logs a warning and `log_operation` still answers the
+log's own `True`. There is no success/failure counter, because the call carries
+no success signal; the old-era `operations_successful`/`operations_failed` keys
+are left exactly as they are. The bump is a read-modify-write like the log
+itself, so under racing writers `operations_total` is a lower bound, not an
+exact count. It also costs one more staged write per call: median 9.5 ms before,
+14.7 ms after, per `log_operation` (a single-machine reading, 5 interleaved runs
+of 200 calls). `rate_tracker` keeps its `files` in that same
+`rate_tracker_data.json`, and its save now sets only `files` (and `module_name`
+when absent) on the document it loaded. The old save rebuilt the whole dict,
+which re-stamped `created` on every scan and would have wiped the counters.
+
 **Healing is per module, per call — there is no sweep.** `ensure_json_exists`
 regenerates exactly one document (`<module>_<type>.json`) when it is missing,
-empty, unreadable or structurally invalid, and `ensure_module_jsons` does the
+empty, unreadable or structurally invalid. The one exception is a data document
+that parses as a dict: it is healed in place (missing base keys added, every
+other key kept) rather than regenerated. `ensure_module_jsons` does the
 three types for one module. Nothing walks a directory and nothing repairs
 another module's documents: a self-heal that ranges wider than the call that
 triggered it would rewrite state nobody asked about, in a process that may only
@@ -788,7 +812,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1404 test functions, 36 files (1487 cases)
+└── tests/                             # 1414 test functions, 36 files (1502 cases)
 ```
 
 ### Design Pattern
@@ -869,8 +893,8 @@ through `error()`.
 
 ## Tests
 
-**1404 test functions across 36 files; pytest expands them to 1487 cases**, all
-passing from both rootdirs (measured 2026-09-07). The two numbers differ because
+**1414 test functions across 36 files; pytest expands them to 1502 cases**, all
+passing from both rootdirs (measured 2026-09-11). The two numbers differ because
 of parametrisation — the table below counts collected cases, which is what a
 suite run reports.
 
@@ -879,8 +903,8 @@ suite run reports.
 | test_filesystem_handler.py | 141 | Multi-CLI adapters, Codex branch detection |
 | test_monitoring_handlers.py | 141 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
 | test_operations.py | 96 | Dashboard operations, write-through |
+| test_json_handler.py | 96 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the data-leg bump and heal (incl. rate_tracker sharing the document), the shim binds-never-wraps |
 | test_log_watcher.py | 84 | Log file tailing, agent activity parsing |
-| test_json_handler.py | 81 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
 | test_monitor_module.py | 80 | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
 | test_config.py | 61 | Config loading, path resolution, log levels |
@@ -953,7 +977,7 @@ suite run reports.
 
 ---
 
-*Last Updated: 2026-09-07*
+*Last Updated: 2026-09-11*
 
 ---
 [← Back to AIPass](../../../README.md)

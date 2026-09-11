@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-09-04
+# Modified: 2026-09-11
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -11,6 +11,9 @@
 Every branch's ``apps/handlers/json/json_handler.py`` is a byte-identical shim
 that binds this module's names to a handle for its own branch. There is no
 second implementation and nothing per-branch lives here.
+
+Each module owns three legs: log = the per-module operation trail (rotating,
+capped); data = lifetime state, bumped on every log write; config = the log's rotation cap.
 
 Reached through prax's lazy package init — ``from aipass.prax import
 json_handler`` — never by importing this path from another branch.
@@ -423,11 +426,18 @@ class JsonHandle:
         """Ensure a module's typed document exists and is structurally valid.
 
         Missing, empty, unreadable or structurally invalid documents are
-        regenerated from the in-code default.
+        regenerated from the in-code default — with one exception. A "data"
+        document that parses as a dict but lacks a base key is HEALED, not
+        replaced: the absent base keys are added (today's date) and every key
+        it already carries is kept, its own values winning. The data leg is
+        lifetime state that other writers share (rate_tracker keeps its
+        ``files`` there), so regenerating it would wipe state nobody asked to
+        reset — and log_operation runs this before every bump.
 
         Returns:
             True once the document is in place; False only if the write could
-            not land.
+            not land, or a data document to be healed could not be written back
+            (it is then left exactly as it was, never replaced).
         """
         json_path = self.get_json_path(module_name, json_type)
 
@@ -440,6 +450,19 @@ class JsonHandle:
         existing = self.read_json(json_path)
         if existing is not None and self.validate_json_structure(existing, json_type):
             return True
+
+        if json_type == "data" and isinstance(existing, dict):
+            for key, value in _default_document(json_type, module_name).items():
+                existing.setdefault(key, value)
+            try:
+                return self.write_json(json_path, existing)
+            except (TypeError, ValueError) as exc:
+                # json.load accepts NaN/Infinity that the writer refuses. Such a
+                # document cannot be written back as-is; destroying the keys it
+                # carries to make it valid is the one thing the heal exists not
+                # to do, so it stays as it was and ensure answers False.
+                logger.warning("json_service: cannot heal '%s' without losing its keys: %s", json_path, exc)
+                return False
 
         return self.write_json(json_path, _default_document(json_type, module_name))
 
@@ -507,6 +530,10 @@ class JsonHandle:
         silent half-death. A structurally invalid document is a caller bug and
         stays loud.
 
+        Once the log entry has landed, the module's data document is bumped
+        (see _bump_data). A failed log never counts, and a failed bump never
+        changes the answer: it is logged and the log's own result stands.
+
         Args:
             operation: Operation name.
             data: Optional payload attached to the entry.
@@ -537,12 +564,62 @@ class JsonHandle:
             if len(log) > max_entries:
                 log = log[-max_entries:]
 
-            return self.save_json(module_name, "log", log)
+            logged = self.save_json(module_name, "log", log)
         except InvalidDocument:
             raise
         except (OSError, TypeError, ValueError) as exc:
             logger.warning("json_service: log_operation('%s') failed for '%s': %s", operation, module_name, exc)
             return False
+
+        self._bump_data(module_name, operation)
+        return logged
+
+    def _bump_data(self, module_name: str, operation: str) -> None:
+        """Count one more operation in the module's lifetime data document.
+
+        Sets ``operations_total`` (+1), ``last_operation`` (the name) and, via
+        save_json, ``last_updated``. Read-modify-write, never a fresh dict:
+        every other key is written back as it was read — rate_tracker's
+        ``files``, the old-era ``operations_successful``/``operations_failed``
+        (left alone; the call carries no success signal to count them by). A
+        document that is not a dict starts from the default; a missing or
+        non-integer total (a bool included) restarts at 0 before the +1.
+
+        The count is a read-modify-write exactly like the log trail itself, so
+        under racing writers (threads or processes) it is a LOWER BOUND, not an
+        exact figure — two writers that read the same total both write total+1.
+
+        Never raises: this is telemetry on the monitor's threads, and the log
+        entry it follows has already landed. A failure is logged as a warning.
+
+        Args:
+            module_name: The module whose data document is bumped.
+            operation: The operation name just logged.
+        """
+        try:
+            document = self.load_json(module_name, "data")
+            if not isinstance(document, dict):
+                document = _default_document("data", module_name)
+
+            today = datetime.now().date().isoformat()
+            document.setdefault("module_name", module_name)
+            document.setdefault("created", today)
+            document.setdefault("last_updated", today)
+
+            current = document.get("operations_total")
+            if isinstance(current, bool) or not isinstance(current, int):
+                current = 0
+            document["operations_total"] = current + 1
+            document["last_operation"] = operation
+
+            self.save_json(module_name, "data", document)
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "json_service: data bump after '%s' failed for '%s' — the log entry landed, the count did not: %s",
+                operation,
+                module_name,
+                exc,
+            )
 
     def _max_log_entries(self, module_name: str) -> int:
         """The module's declared log cap, or the default.

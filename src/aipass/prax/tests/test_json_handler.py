@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-28
-# Modified: 2026-09-03
+# Modified: 2026-09-11
 # =============================================
 
 """Tests for the fleet's one json service (DPLAN-0325), exercised through prax's
@@ -22,8 +22,10 @@ shim has no attributes to patch.
 """
 
 import json
+import logging
 import os
 import stat
+from datetime import date
 
 import pytest
 
@@ -625,6 +627,223 @@ class TestLogOperation:
 
         entries = json.loads((sandbox / "test_json_handler_log.json").read_text(encoding="utf-8"))
         assert entries[-1]["operation"] == "auto"
+
+
+# =============================================
+# THE DATA LEG — lifetime state (FPLAN-0542)
+# =============================================
+
+
+def _seed_data(sandbox, module_name, document):
+    """Put a data document on disk exactly as given, bypassing the service."""
+    sandbox.mkdir(parents=True, exist_ok=True)
+    (sandbox / f"{module_name}_data.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def _read_data(sandbox, module_name):
+    """The data document as bytes on disk say it is, not as the service reads it."""
+    return json.loads((sandbox / f"{module_name}_data.json").read_text(encoding="utf-8"))
+
+
+class TestTheDataLegIsHealedNotReplaced:
+    """ensure_json_exists adds a data document's missing base keys and keeps the rest.
+
+    Replace-on-invalid was harmless while nothing wrote the data leg. Once every
+    log write bumps it, and rate_tracker keeps its ``files`` in it, a replace
+    would wipe live state on the way to counting — log_operation runs ensure
+    before every bump.
+    """
+
+    def test_a_data_document_missing_its_base_keys_keeps_every_key_it_has(self, handle, sandbox):
+        """Existing keys win: ``created`` is not re-stamped, ``files`` is not dropped."""
+        _seed_data(sandbox, "partial", {"created": "2020-01-01", "files": {"a.log": {"last_offset": 7}}})
+
+        assert handle.ensure_json_exists("partial", "data") is True
+
+        assert _read_data(sandbox, "partial") == {
+            "created": "2020-01-01",
+            "files": {"a.log": {"last_offset": 7}},
+            "last_updated": date.today().isoformat(),
+        }
+
+    def test_the_config_leg_is_still_regenerated_not_merged(self, handle, sandbox):
+        """The heal is the data leg's alone: an invalid config comes back as the
+        default, with nothing of the invalid one carried over."""
+        sandbox.mkdir(parents=True, exist_ok=True)
+        (sandbox / "stray_config.json").write_text(
+            json.dumps({"module_name": "stray", "stray": True}), encoding="utf-8"
+        )
+
+        assert handle.ensure_json_exists("stray", "config") is True
+
+        written = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
+        assert written == json_service._default_document("config", "stray")
+
+    def test_a_data_document_that_cannot_be_written_back_is_left_as_it_was(self, handle, sandbox):
+        """json.load reads NaN; the writer refuses it. Healing such a document
+        would mean dropping keys, so it is neither raised on nor replaced — and
+        the log leg beside it still works."""
+        sandbox.mkdir(parents=True, exist_ok=True)
+        target = sandbox / "nan_data.json"
+        target.write_text('{"rate": NaN}', encoding="utf-8")
+
+        assert handle.ensure_json_exists("nan", "data") is False
+        assert target.read_text(encoding="utf-8") == '{"rate": NaN}'
+        assert handle.log_operation("still_logs", module_name="nan") is True
+        assert target.read_text(encoding="utf-8") == '{"rate": NaN}'
+
+
+class TestEveryLogWriteBumpsTheDataLeg:
+    """log_operation counts itself into the module's lifetime data document."""
+
+    def test_every_logged_operation_counts_exactly_once(self, handle, sandbox):
+        for name in ("first", "second", "third"):
+            assert handle.log_operation(name, module_name="counted") is True
+
+        document = _read_data(sandbox, "counted")
+        assert document["operations_total"] == 3
+        assert document["last_operation"] == "third"
+        assert document["last_updated"] == date.today().isoformat()
+
+    def test_keys_the_bump_does_not_own_survive_it(self, handle, sandbox):
+        """Read-modify-write, never a fresh dict. The old-era success/failure
+        counters stay exactly as they were: the call carries no success signal."""
+        seeded = {
+            "module_name": "keeper",
+            "created": "2020-01-01",
+            "last_updated": "2020-01-01",
+            "operations_total": 41,
+            "operations_successful": 0,
+            "operations_failed": 0,
+            "files": {"/logs/a.log": {"last_offset": 7, "rates": [[1.0, 2.0]]}},
+        }
+        _seed_data(sandbox, "keeper", seeded)
+
+        assert handle.log_operation("kept", module_name="keeper") is True
+
+        assert _read_data(sandbox, "keeper") == {
+            **seeded,
+            "operations_total": 42,
+            "last_operation": "kept",
+            "last_updated": date.today().isoformat(),
+        }
+
+    def test_an_empty_data_document_is_healed_and_counted_not_refused(self, handle, sandbox):
+        """The live case: prax_json/prax_logger_data.json is literally ``{}``.
+        save_json's structure check refuses that, so without the heal every log
+        call for such a module would fail its bump."""
+        _seed_data(sandbox, "blank", {})
+
+        assert handle.log_operation("first", module_name="blank") is True
+
+        today = date.today().isoformat()
+        assert _read_data(sandbox, "blank") == {
+            "created": today,
+            "last_updated": today,
+            "module_name": "blank",
+            "operations_total": 1,
+            "last_operation": "first",
+        }
+
+    @pytest.mark.parametrize("junk", ["abc", True, None, [3]], ids=["str", "bool", "null", "list"])
+    def test_a_total_that_is_not_an_integer_restarts_at_one(self, handle, sandbox, junk):
+        """A bool is an int to Python — True + 1 would count to 2 from nothing.
+
+        The type is asserted too: ``True == 1``, so an untouched ``true`` on
+        disk would pass an equality alone.
+        """
+        _seed_data(sandbox, "junky", {"created": "2020-01-01", "last_updated": "2020-01-01", "operations_total": junk})
+
+        assert handle.log_operation("recount", module_name="junky") is True
+
+        total = _read_data(sandbox, "junky")["operations_total"]
+        assert total == 1 and type(total) is int, total
+
+    def test_a_log_entry_that_did_not_land_is_not_counted(self, handle, sandbox, monkeypatch):
+        """The bump follows the log write; a failed log is not an operation."""
+        _seed_data(sandbox, "unlogged", {"created": "2020-01-01", "last_updated": "2020-01-01"})
+        real_save = handle.save_json
+
+        def refuse_the_log(module_name, json_type, data):
+            if json_type == "log":
+                raise json_service.WriteFailed("log leg refused")
+            return real_save(module_name, json_type, data)
+
+        monkeypatch.setattr(handle, "save_json", refuse_the_log)
+
+        assert handle.log_operation("lost", module_name="unlogged") is False
+        assert "operations_total" not in _read_data(sandbox, "unlogged")
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            json_service.WriteFailed("data leg refused"),
+            json_service.InvalidDocument("data leg invalid"),
+            TypeError("data leg unserialisable"),
+        ],
+        ids=["writefailed", "invaliddocument", "typeerror"],
+    )
+    def test_a_failed_bump_never_breaks_the_log(self, handle, sandbox, monkeypatch, caplog, failure):
+        """Telemetry on the monitor's threads: the log entry already landed, so
+        the answer stays the log's own True and the failure is a warning."""
+        real_save = handle.save_json
+
+        def refuse_the_data(module_name, json_type, data):
+            if json_type == "data":
+                raise failure
+            return real_save(module_name, json_type, data)
+
+        monkeypatch.setattr(handle, "save_json", refuse_the_data)
+
+        with caplog.at_level(logging.WARNING, logger=json_service.logger.name):
+            answer = handle.log_operation("survives", module_name="fragile")
+
+        assert answer is True
+        entries = json.loads((sandbox / "fragile_log.json").read_text(encoding="utf-8"))
+        assert [entry["operation"] for entry in entries] == ["survives"]
+        assert "operations_total" not in _read_data(sandbox, "fragile")
+        warned = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == json_service.logger.name and record.levelno == logging.WARNING
+        ]
+        assert any("fragile" in message and str(failure) in message for message in warned), warned
+
+
+class TestRateTrackerKeepsKeysItDoesNotOwn:
+    """rate_tracker_data.json is both the tracker's state and its data leg."""
+
+    def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch):
+        """The real tracker against the real shim, both writing one document.
+
+        The old _save_state rebuilt the dict every scan: ``created`` re-stamped
+        to today and the service's counters wiped. Now each writer sets only its
+        own keys — and the bump that follows a save keeps the tracker's files.
+        """
+        import importlib
+
+        tracker = importlib.import_module("aipass.prax.apps.handlers.monitoring.rate_tracker")
+        monkeypatch.setattr(tracker, "json_handler", json_handler)
+        monkeypatch.setattr(tracker, "_tracked", {})
+        _seed_data(sandbox, "rate_tracker", {"created": "2020-01-01", "last_updated": "2020-01-01"})
+
+        json_handler.log_operation("runaway_detected", module_name="rate_tracker")
+        json_handler.log_operation("runaway_detected", module_name="rate_tracker")
+        tracker._tracked["/logs/a.log"] = tracker.FileRateState(4096, 1000.0)
+        tracker._save_state()
+
+        saved = _read_data(sandbox, "rate_tracker")
+        assert saved["operations_total"] == 2
+        assert saved["last_operation"] == "runaway_detected"
+        assert saved["created"] == "2020-01-01"
+        assert saved["module_name"] == "rate_tracker"
+        assert saved["files"] == {"/logs/a.log": tracker.FileRateState(4096, 1000.0).to_dict()}
+
+        json_handler.log_operation("runaway_detected", module_name="rate_tracker")
+
+        bumped = _read_data(sandbox, "rate_tracker")
+        assert bumped["operations_total"] == 3
+        assert bumped["files"] == saved["files"]
 
 
 # =============================================

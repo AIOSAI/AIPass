@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rate_tracker.py
 # Description: Log file rate tracking for runaway detection
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-07-14
-# Modified: 2026-08-08
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -22,6 +22,7 @@ across process restarts and CLI invocations can display meaningful data.
 
 import time
 from collections import deque
+from datetime import date
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -185,20 +186,30 @@ def _load_state() -> None:
 
 
 def _save_state() -> None:
-    """Persist current tracking state to disk."""
+    """Persist current tracking state to disk.
+
+    Read-modify-write: the tracker owns ``files`` (and ``module_name`` when it
+    is absent) and nothing else. The document is also rate_tracker's data leg,
+    which the json service bumps on every log write (``operations_total``,
+    ``last_operation``), and its ``created`` dates from the first write. The
+    old whole-dict rebuild re-stamped ``created`` to today and wiped the
+    counters on every scan (FPLAN-0542).
+    """
     files = {}
     for file_key, state in _tracked.items():
         files[file_key] = state.to_dict()
 
-    from datetime import date
-
+    data = json_handler.load_json(_DATA_FILE, "data")
+    if not isinstance(data, dict):
+        data = {}
+    # The service heals a data document before handing it back; these only
+    # matter when that heal could not land, and never overwrite a value.
     today = date.today().isoformat()
-    data = {
-        "module_name": _DATA_FILE,
-        "created": today,
-        "last_updated": today,
-        "files": files,
-    }
+    data.setdefault("created", today)
+    data.setdefault("last_updated", today)
+    data.setdefault("module_name", _DATA_FILE)
+    data["files"] = files
+
     # save_json raises rather than answering False since DPLAN-0325 — a lost
     # document must not look like success. This is called from scan_rates(),
     # which runs on the monitor's threads, so the raise is caught here: a
