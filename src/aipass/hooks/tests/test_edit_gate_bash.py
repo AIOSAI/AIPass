@@ -25,11 +25,15 @@ Two halves, one boundary:
 POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
 IS the test data - a command string is what the gate reads, spelled as agents
 type it.
+
+A path put INTO a command string is spelled with as_posix(), the form bash takes
+on every OS (devpulse 401ee814, PR #762). The Windows backslash spelling is
+tested on purpose, through _win(), only in the classes that pin it.
 """
 
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
@@ -437,7 +441,7 @@ class TestEveryLineIsACommand:
     def test_a_cd_on_its_own_line_moves_the_ground(self, tmp_path: Path):
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
-        targets = write_targets(f"cd {tmp_path / 'sub'}\nsed -i s/a/b/ f.json", str(tmp_path))
+        targets = write_targets(f"cd {(tmp_path / 'sub').as_posix()}\nsed -i s/a/b/ f.json", str(tmp_path))
         assert _names(targets, "sub", "f.json"), targets
 
     def test_a_continued_line_is_still_one_command(self, tmp_path: Path):
@@ -479,17 +483,17 @@ class TestEveryLineIsACommand:
     def test_a_subshell_cd_ends_with_the_subshell(self, tmp_path: Path):
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
-        command = f"(cd {tmp_path / 'sub'} && touch inner.json); touch outer.json"
+        command = f"(cd {(tmp_path / 'sub').as_posix()} && touch inner.json); touch outer.json"
         targets = write_targets(command, str(tmp_path))
         assert _names(targets, "sub", "inner.json"), targets
         assert _names(targets, tmp_path.name, "outer.json"), targets
 
     def test_the_fence_now_sees_a_foreign_write_on_line_two(self, sibling_projects: dict, grant_withheld):
-        command = f"true\nsed -i s/a/b/ {sibling_projects['foreign_file']}"
+        command = f"true\nsed -i s/a/b/ {Path(sibling_projects['foreign_file']).as_posix()}"
         assert _blocked(_run(sibling_projects["plain_seat"], command=command))
 
     def test_the_fence_now_follows_a_cd_on_line_one(self, sibling_projects: dict, grant_withheld):
-        command = f"cd {sibling_projects['vera']}\nsed -i s/a/b/ .daemon/schedule.json"
+        command = f"cd {sibling_projects['vera'].as_posix()}\nsed -i s/a/b/ .daemon/schedule.json"
         assert _blocked(_run(sibling_projects["plain_seat"], command=command))
 
 
@@ -505,7 +509,7 @@ class TestAnInterpreterHoldsOnlyItsOwnText:
     def test_another_commands_path_is_not_claimed(self, tmp_path: Path):
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
-        command = f"python3 - <<'EOF'\nprint(1)\nEOF\ncd {tmp_path / 'sub'} && cat data/x.json"
+        command = f"python3 - <<'EOF'\nprint(1)\nEOF\ncd {(tmp_path / 'sub').as_posix()} && cat data/x.json"
         targets = write_targets(command, str(tmp_path))
         assert not any("x.json" in t.parts for t, _ in targets), targets
 
@@ -513,9 +517,8 @@ class TestAnInterpreterHoldsOnlyItsOwnText:
         """Attribution AND ground: the second body resolves where the second python stands."""
         from aipass.hooks.apps.modules.bash_writes import write_targets
 
-        command = (
-            f"python3 - <<'A'\nopen('one/x.json')\nA\ncd {tmp_path / 'sub'} && python3 - <<'B'\nopen('two/y.json')\nB"
-        )
+        sub = (tmp_path / "sub").as_posix()
+        command = f"python3 - <<'A'\nopen('one/x.json')\nA\ncd {sub} && python3 - <<'B'\nopen('two/y.json')\nB"
         targets = write_targets(command, str(tmp_path))
         assert _names(targets, tmp_path.name, "one", "x.json"), targets
         assert _names(targets, "sub", "two", "y.json"), targets
@@ -730,16 +733,12 @@ class TestTargetSpellingIsNotPartOfTheContract:
         way, so without this one I would be shipping a fix to a Windows failure
         with no evidence it addresses the Windows failure.
         """
-        from pathlib import PureWindowsPath
-
         as_windows = [(PureWindowsPath(r"\other\Project\x.json"), "python3 (interpreter)")]
 
         assert _names(as_windows, "other", "Project", "x.json")
 
     def test_names_does_not_match_a_shorter_tail(self):
         """A comparison loose enough to pass anywhere proves nothing."""
-        from pathlib import PurePosixPath
-
         targets = [(PurePosixPath("/somewhere/else/x.json"), "why")]
 
         assert not _names(targets, "other", "Project", "x.json")
@@ -762,3 +761,93 @@ class TestTargetSpellingIsNotPartOfTheContract:
         assert all(isinstance(t, LocalPath) for t, _ in targets), (
             f"targets are not the local Path flavour the fence must walk: {targets}"
         )
+
+
+def _read_as(monkeypatch, pure: type) -> None:
+    """The platform oracle: bash_writes builds every path in *pure*'s flavour.
+
+    The reader decides what a drive spelling means from the flavour of the path
+    it resolves against, so swapping the class it builds with is the one change
+    that makes Linux read a command the way Windows does (and Windows the way
+    Linux does). Nothing about the host is asserted. expanduser is the only
+    concrete method the reader calls, and a pure path has none.
+    """
+
+    class Flavour(pure):
+        def expanduser(self):
+            return self
+
+    monkeypatch.setattr("aipass.hooks.apps.modules.bash_writes.Path", Flavour)
+
+
+class TestTheGitBashDriveSpelling:
+    """devpulse 401ee814 (PR #762 windows-setup), FPLAN-0537 - a reader branch, not only a pin.
+
+    Git Bash spells drive C as /c: its pwd prints /c/Users/me, and every command it
+    runs accepts that. A Windows path cannot hold that spelling. WindowsPath("/c/Users/me")
+    has a root and no drive, so it joined the seat's drive and named
+    C:\\c\\Users\\me, a directory that holds no registry. So edit_gate ALLOWED a
+    foreign write spelled that way, and testwrite_gate called an edit of an
+    existing test a creation. Measured under the oracle before the cure: no
+    Windows box needed, only a Windows path.
+    """
+
+    SEAT = r"C:\Work\AIPass\src\aipass\hooks"
+    VERA_FILE = PureWindowsPath(r"C:\Work\Vera-Studio\f.json")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sed -i s/a/b/ /c/Work/Vera-Studio/f.json",
+            "cd /c/Work/Vera-Studio && sed -i s/a/b/ f.json",
+            "cd /c/Work/Vera-Studio\nsed -i s/a/b/ f.json",
+            "sed -i s/a/b/ C:/Work/Vera-Studio/f.json",
+        ],
+    )
+    def test_a_drive_path_names_the_drive_on_windows(self, monkeypatch, command):
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        _read_as(monkeypatch, PureWindowsPath)
+
+        assert [t for t, _ in write_targets(command, self.SEAT)] == [self.VERA_FILE]
+
+    def test_the_bare_drive_is_its_root(self, monkeypatch):
+        """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        _read_as(monkeypatch, PureWindowsPath)
+
+        assert [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT)] == [PureWindowsPath(r"C:\x.json")]
+
+    def test_a_longer_first_component_is_not_a_drive(self, monkeypatch):
+        """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        _read_as(monkeypatch, PureWindowsPath)
+
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT)]
+        assert targets == [PureWindowsPath(r"C:\cache\f.json")], targets
+
+    def test_the_respelled_ci_pin_lands_on_the_existing_test(self, monkeypatch):
+        """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
+
+        The half that matters: on Linux as_posix() changes nothing, so the pin
+        is green here either way. This is the evidence that C:/... reaches the
+        real file on Windows, rather than a directory under the seat.
+        """
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        _read_as(monkeypatch, PureWindowsPath)
+        command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
+
+        targets = [t for t, _ in write_targets(command, self.SEAT)]
+        assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
+
+    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, monkeypatch):
+        """The drive reading is Windows-only. On Linux /c is a real directory named c."""
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        _read_as(monkeypatch, PurePosixPath)
+
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", "/work/AIPass")]
+        assert targets == [PurePosixPath("/c/Work/f.json")], targets

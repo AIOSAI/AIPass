@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
@@ -38,7 +38,7 @@ Two reading modes, because shell commands are two different things:
 
 import re
 import shlex
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -106,6 +106,11 @@ _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 
 # Trailing syntax that rides along when a path is lifted out of source code.
 _TRAILING_JUNK = ",;:)]}'\"`"
+
+# Git Bash's own spelling of a drive: /c/Users/me is C:\Users\me. Its pwd prints
+# it and every command it runs accepts it, so an agent on Windows copies it
+# into the next command.
+_GIT_BASH_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
 
 # What this parser does NOT see. Stated as data so the reply, the README and the
 # tests all quote the same list instead of three drifting prose copies.
@@ -336,6 +341,17 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     token = token.strip().strip(_TRAILING_JUNK)
     if not token:
         return None
+    # A Windows path cannot hold a Git Bash drive (FPLAN-0537, measured under a
+    # Windows flavour): WindowsPath("/c/Users/me") has a root but no drive, so
+    # it joined the seat's drive and named C:\c\Users\me. That directory holds
+    # no registry, so edit_gate let a foreign write spelled that way through,
+    # and testwrite_gate called an edit of an existing test a creation. Read
+    # only on a Windows cwd, because on POSIX /c is an ordinary directory.
+    # Paths lifted out of interpreter source get the same reading, though python
+    # itself would not translate them. That reading is broader than the write,
+    # the safe way for a fence to be wrong.
+    if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(token)):
+        token = f"{drive.group(1).upper()}:/{token[drive.end() :].lstrip('/')}"
     # Separators are normalised on EVERY OS, not just Windows. pathlib accepts
     # "/" natively on Windows (WindowsPath("C:/a/b") is absolute and correct),
     # so one spelling reaches Path from both dialects and the parser's reading

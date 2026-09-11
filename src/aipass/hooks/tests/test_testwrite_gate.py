@@ -39,6 +39,12 @@ The file is organised by the question each block answers:
 POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
 IS the test data - a command string is what the gate reads, spelled as agents
 type it.
+
+A path put INTO a command string is spelled with as_posix(), the form bash takes
+on every OS (C:/... on Windows). str() handed windows-setup a raw
+C:\\Users\\... cd target. Bash eats those backslashes, and the gate's reading
+of that did what bash would: cd'd into a directory named C:Users..., so an
+existing test looked like a new one (devpulse 401ee814, PR #762).
 """
 
 import json
@@ -511,12 +517,13 @@ class TestRunningTestsIsNotWritingThem:
     def test_a_subshell_cd_resolves_its_own_edit(self, project):
         _policy(project)
         from_root = Path(project["existing"]).relative_to(project["root"]).as_posix()
-        assert not _blocked(_run(project["seat"], command=f"(cd {project['root']} && sed -i s/a/b/ {from_root})"))
+        root = project["root"].as_posix()
+        assert not _blocked(_run(project["seat"], command=f"(cd {root} && sed -i s/a/b/ {from_root})"))
 
     def test_a_creation_on_line_two_is_refused(self, project):
         """The newline hole: this command reported zero targets until 2026-09-10."""
         _policy(project)
-        assert _blocked(_run(project["seat"], command=f"true\ntouch {project['new_test']}"))
+        assert _blocked(_run(project["seat"], command=f"true\ntouch {Path(project['new_test']).as_posix()}"))
 
     def test_the_exemption_is_only_the_module_form(self):
         """A bare script argument named pytest must not buy the exemption."""

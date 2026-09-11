@@ -87,7 +87,7 @@ apps/
       output_merge.py      #   Fan-out stdouts -> ONE hook document (CC reads one; two JSON objects = neither applied)
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 51 files, 1928 cases (1926 pass, 2 skips: 1 env, 1 win32-only)
+tests/                     # 51 files, 1936 cases (1934 pass, 2 skips: 1 env, 1 win32-only)
   .archive/                # removed suites, never deleted -- header says what each pinned
 ```
 

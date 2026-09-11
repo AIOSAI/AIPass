@@ -154,7 +154,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1846 test functions across 51 files; pytest expands to 1928 cases (1926 pass, 2 skipped — 1 env, 1 win32-only)
+└── tests/                       # 1851 test functions across 51 files; pytest expands to 1936 cases (1934 pass, 2 skipped — 1 env, 1 win32-only)
     └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 
@@ -553,6 +553,23 @@ above rather than left to be discovered. The tests pin the Windows spelling in-p
 back-slashing a real local path (`str(p).replace("/", "\\")`) — a no-op on Windows, and on Linux the
 exact spelling that killed the parser, still resolving to the same real file under the same real
 fence.
+
+**Git Bash's own drive spelling is read too (2026-09-10, FPLAN-0537, devpulse 401ee814).** Git Bash
+spells drive C as `/c`: its `pwd` prints `/c/Users/me`, and every command it runs accepts that. A
+Windows path cannot hold that spelling: `WindowsPath("/c/Users/me")` has a root and no drive, so it
+joined the seat's drive and named `C:\c\Users\me`. That directory has no registry, so `edit_gate`
+**allowed** a foreign write spelled that way, and `testwrite_gate` called an edit of an existing test
+a creation. `/x` or `/x/...` (one letter) now reads as drive `X:` whenever the path being resolved
+against is a Windows path. On POSIX, `/c` stays an ordinary directory. Paths lifted out of
+interpreter source get the same reading, although python itself would not translate them: broader
+than the write, which is the safe direction for a fence. The pins use a platform oracle: `bash_writes`
+is made to build every path in one flavour (`PureWindowsPath` or `PurePosixPath`), so Linux reads a
+command the way Windows does, and nothing about the host is asserted.
+
+A path put *into* a command string in these suites is spelled with `as_posix()`, the form bash takes
+on every OS. `str()` once handed windows-setup an unquoted `C:\Users\...` cd target. Bash eats those
+backslashes, and the reader, reading as bash does, `cd`'d into a directory named `C:Users...`, where
+an existing test looked new (PR #762).
 
 > **CONFIG WIRE — landed 2026-08-30, the lane is live.** `pre_edit_gate` now carries
 > `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` (the matcher `git_gate`
