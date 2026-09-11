@@ -392,6 +392,168 @@ class TestConsumeRegroupPending:
             assert consume_regroup_pending() is False
 
 
+class TestRegroupPartQueue:
+    """Issue #752: the re-ground is spread over consecutive tool calls, one part each.
+
+    The queue shares the regroup token's state file ON PURPOSE, so the two
+    things that end a re-ground end the queue too: a real UserPromptSubmit
+    (the cadence turn-0 path takes over) and a new compaction (it starts over).
+    """
+
+    def setup_method(self):
+        _reset_module_globals()
+
+    def _env(self, tmp_path):
+        return (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        )
+
+    def test_nothing_queued_pops_nothing(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            assert pop_regroup_part() is None
+            reset_counter()
+            assert pop_regroup_part() is None
+
+    def test_each_part_is_handed_out_exactly_once_then_silence(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            queue_regroup_parts(3)
+            assert [pop_regroup_part() for _ in range(6)] == [(2, 3), (3, 3), None, None, None, None]
+
+    def test_the_last_pop_removes_the_keys(self, tmp_path):
+        """An exhausted queue must not linger as state a later reader misreads."""
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            queue_regroup_parts(2)
+            pop_regroup_part()
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        assert "regroup_next" not in state
+        assert "regroup_total" not in state
+
+    def test_a_single_part_regroup_queues_nothing(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            queue_regroup_parts(1)
+            assert pop_regroup_part() is None
+
+    def test_queueing_keeps_the_token_state_intact(self, tmp_path):
+        """The queue writes beside the token; it must not re-arm or erase it."""
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            assert consume_regroup_pending() is True
+            queue_regroup_parts(3)
+            assert consume_regroup_pending() is False
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        assert state["turn"] == -1
+
+    def test_a_real_prompt_cancels_the_remaining_parts(self, tmp_path):
+        """The cadence turn-0 path re-injects every loader on that prompt, so the
+        backstop's remaining parts would only repeat it."""
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter, should_fire
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            queue_regroup_parts(3)
+            assert pop_regroup_part() == (2, 3)
+        _reset_module_globals()
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            assert should_fire("global") is True
+            assert pop_regroup_part() is None
+
+    def test_a_new_compaction_drops_the_old_queue(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg, patch(f"{MODULE}._REGROUP_DEBOUNCE_S", 0.0):
+            reset_counter()
+            queue_regroup_parts(3)
+            reset_counter()
+            assert pop_regroup_part() is None
+
+    def test_a_duplicate_reset_on_the_same_boundary_keeps_the_queue(self, tmp_path):
+        """Two PreCompact callers reacting to one compaction (DPLAN-0278) are one
+        boundary: the second must not cancel parts the first one's re-ground owes."""
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        guard, env, cfg = self._env(tmp_path)
+        with guard, env, cfg:
+            reset_counter()
+            queue_regroup_parts(3)
+            reset_counter()
+            assert pop_regroup_part() == (2, 3)
+
+    def test_fallback_to_hook_data_session_id(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import pop_regroup_part, queue_regroup_parts, reset_counter
+
+        hook_data = {"session_id": "fallback-id"}
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            env = dict(__import__("os").environ)
+            env.pop("CLAUDE_CODE_SESSION_ID", None)
+            with patch.dict("os.environ", env, clear=True):
+                reset_counter(hook_data=hook_data)
+                queue_regroup_parts(2, hook_data=hook_data)
+                assert pop_regroup_part(hook_data=hook_data) == (2, 2)
+                assert pop_regroup_part(hook_data=hook_data) is None
+
+
+class TestRegroupFireLog:
+    """Issue #752, pin 4: one sized cadence.log line per fire — a one-grep diagnosis."""
+
+    def test_the_line_names_loader_part_and_both_sizes(self):
+        from aipass.hooks.apps.modules import cadence
+
+        with patch.object(cadence, "logger") as log:
+            cadence.log_regroup_fire("branch,identity", 1, 3, "ab—c", 9000)
+
+        log.info.assert_called_once()
+        fmt, *args = log.info.call_args.args
+        line = fmt % tuple(args)
+        assert "[HOOKS] regroup fired loader=branch,identity part=1/3" in line
+        assert "bytes=6" in line  # the em dash is three UTF-8 bytes
+        assert "chars=4" in line
+        log.warning.assert_not_called()
+
+    def test_an_over_budget_fire_is_a_warning_that_says_so(self):
+        from aipass.hooks.apps.modules import cadence
+
+        with patch.object(cadence, "logger") as log:
+            cadence.log_regroup_fire("navmap", 2, 2, "x" * 12, 10)
+
+        log.warning.assert_called_once()
+        fmt, *args = log.warning.call_args.args
+        assert "OVER-BUDGET" in fmt % tuple(args)
+        log.info.assert_not_called()
+
+    def test_chars_are_utf16_units_the_way_claude_code_counts(self):
+        """A non-BMP character is ONE Python code point and TWO JS length units."""
+        from aipass.hooks.apps.modules import cadence
+
+        with patch.object(cadence, "logger") as log:
+            cadence.log_regroup_fire("kernel", 1, 1, "\U0001f600", 9000)
+
+        fmt, *args = log.info.call_args.args
+        assert "chars=2" in fmt % tuple(args)
+
+
 class TestConfig:
     def setup_method(self):
         _reset_module_globals()

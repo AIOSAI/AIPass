@@ -129,7 +129,7 @@ src/aipass/hooks/
 │   │   │   ├── auto_watchdog(disabled).py # RETIRED 2026-09-07 — was watchdog arming after dispatch
 │   │   │   ├── compact.py       #   Pre-compact memory archival
 │   │   │   ├── session_boot.py  #   Boot wrapper (main() CLI, not a hook — no handle())
-│   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction (PostToolUse, DPLAN-0276)
+│   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction, in budgeted parts (PostToolUse, DPLAN-0276, #752)
 │   │   │   ├── pre_compact_prep.py # Mechanical AUTO-COMPACT SNAPSHOT stamp (fill %, git, locks, plans)
 │   │   │   ├── rollover.py      #   Pre-compact memory rollover
 │   │   │   └── session_start.py #   Cadence reset on new chat / clear (SessionStart)
@@ -153,7 +153,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1762 test functions across 51 files; pytest expands to 1844 cases (1842 pass, 2 skipped — 1 env, 1 win32-only)
+└── tests/                       # 1837 test functions across 51 files; pytest expands to 1919 cases (1917 pass, 2 skipped — 1 env, 1 win32-only)
     └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 
@@ -293,7 +293,7 @@ ruled *project* below reaches Vera-Studio, wren and `projects/*` on their next a
 | `context_gauge` | UserPromptSubmit | **project** | Reads the Claude Code transcript and nudges `/prep` before the compact ceiling. That is a Claude Code fact, not an AIPass one — every project manager compacts. |
 | `persistent_alert` | UserPromptSubmit | **project** | Reads the project's *own* `.aipass/alerts.json`; the walk-up stops at the project root. No file means silent, so it costs nothing and hands projects an alert channel they currently cannot use. |
 | `pre_compact_prep` | PreCompact | **project** | Stamps the compacting branch's own `.trinity/local.json`. Memory that survives compaction is the platform's headline promise, and it is not AIPass-specific. |
-| `post_compact_regrounding` | PostToolUse | **project** | Re-injects kernel/navmap/branch/identity after a compact — the four files `init` scaffolds into every project. Also the carrier for the `release_notice` compact path. |
+| `post_compact_regrounding` | PostToolUse | **project** | Re-injects branch/identity/kernel/navmap after a compact — the four files `init` scaffolds into every project — in parts of at most 9,000 chars, one per tool call, branch first. Claude Code shows the agent only a 2,000-char preview of a hook context over 10,000 (issue #752); every part logs `[HOOKS] regroup fired loader=… part=k/N bytes=… chars=…` to `hooks_cadence.log`. Also the carrier for the `release_notice` compact path. |
 | `registry_gate` | PreToolUse | **project** | Every project has a `*_REGISTRY.json` (measured 2026-09-09: all four under `projects/`, plus Vera-Studio). Without this gate a project's sealed registry is an ordinary editable file. |
 | `feedback_pulse` | UserPromptSubmit | **project**, ships `enabled: false` | Its own docstring scopes it to "external user projects (not the AIPass host)" — it belongs here more than in the framework file. Off by default, same as in the framework, so a project opts in. |
 | `presence_gate` | UserPromptSubmit | framework-only | Enforces one interactive brain per branch across the AIPass fleet. A solo project has no competing citizen to fence, and a false block costs the user their session. Revisit if a project ever runs several citizens. |
@@ -328,8 +328,8 @@ Two doors, one code path:
 
 | Door | Wiring | Provider entry needed |
 |---|---|---|
-| SessionStart (`source` `startup` / `clear`; `resume` and `compact` skipped) | `project_hooks.json` → `SessionStart.release_notice` | **Yes** — `claude.py SessionStart:release_notice`. SessionStart is wired per handler, so until that entry exists this hook is configured but never dispatched. |
-| Post-compact regroup | `post_compact_regrounding` appends the block after its grounding sections | No — PostToolUse is a fan-out event |
+| SessionStart (`source` `startup` / `clear`; `resume` and `compact` skipped) | `project_hooks.json` → `SessionStart.release_notice` | **Yes** — `claude.py SessionStart:release_notice`, in the provider manifest and live settings since 2026-09-09. SessionStart is wired per handler: without that entry this hook is configured but never dispatched. |
+| Post-compact regroup | `post_compact_regrounding` opens its branch section with the block, so it lands in part 1 of the re-ground on every seat | No — PostToolUse is a fan-out event |
 
 ## Git Gate
 
@@ -497,10 +497,15 @@ modes:
 | Mode | Commands | What is reported |
 |---|---|---|
 | Directed verbs | `>`, `>>`, `tee`, `sed -i`, `cp`, `mv`, `ln`, `install`, `rsync`, `dd of=`, `touch`, `mkdir`, `truncate` | The target the verb's own grammar names — so `cat /other/x > ./mine` names `./mine`, and reading a foreign file stays legal |
-| Interpreters | `python`, `python3`, `node`, `perl`, `ruby`, `php`, `sh`, `bash`, `zsh`, `awk` — inline script or heredoc | **Every** path the command holds, because arbitrary code has no grammar naming its target |
+| Interpreters | `python`, `python3`, `node`, `perl`, `ruby`, `php`, `sh`, `bash`, `zsh`, `awk` — inline script or heredoc | **Every** path in its own command and the heredoc it opened, because arbitrary code has no grammar naming its target. Not another command's arguments: until 2026-09-10 it read the whole command line, so a python step standing before a `cd` claimed the later pytest argument and resolved it from the wrong directory (devpulse 213c64fd) |
 
 `cd` inside a chain moves the ground the next segment stands on, so `cd ../Other && sed -i s/a/b/ f.json`
-is resolved against `../Other`.
+is resolved against `../Other`; a `cd` inside `( … )` ends with the subshell.
+
+Every line is a command. Until 2026-09-10 a newline never separated (the lexer counted it as blank
+space), so line two of a multi-line Bash call was glued onto line one: its write was invisible to both
+gates and its `cd` never moved. A backslash-newline still joins two lines into one command, and a `#`
+opens a comment only where a word starts outside quotes (the lexer's own rule cut the line at any `#`).
 
 **What it deliberately does NOT catch.** A perfect shell parser is not the bar and is not achievable;
 the residual is published as data in `bash_writes.NOT_CAUGHT` and printed by `drone @hooks` module
@@ -513,6 +518,8 @@ introspection, so this list and the code cannot drift apart:
 - metadata-only changes: `chmod`, `chown`, `touch -t` on an existing file
 - `git`, `gh`, `drone`, `aipass` — they name no write verb this parser reads; their own fences apply
 - writes made by a process the command merely starts (a server, a test runner)
+- paths an interpreter receives from *another* command — through a pipe, a file or an argument list
+  built elsewhere; only the paths in its own command and its own heredoc are read as held
 - a path spelled for the *other* operating system's filesystem — `C:\Proj\x` read on Linux names no
   drive that exists here, so it resolves relative and reads as local
 

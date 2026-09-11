@@ -398,11 +398,14 @@ class TestReleaseNoticeCompactDoor:
         ):
             return post_compact_regrounding.handle({"cwd": str(cwd)})
 
-    def test_the_notice_rides_the_regroup(self, tmp_path):
+    def test_the_notice_rides_the_regroup_ahead_of_the_grounding(self, tmp_path):
+        """Issue #752 moved it: the notice opens the regroup with the branch section,
+        so it lands in part 1 on every seat instead of trailing a payload whose tail
+        is exactly what a display cap cuts."""
         result = self._reground(tmp_path, {"return_value": "NOTICE-BLOCK"})
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert "NOTICE-BLOCK" in context
-        assert context.index("KERNEL") < context.index("NOTICE-BLOCK")
+        assert context.index("NOTICE-BLOCK") < context.index("KERNEL")
 
     def test_a_raising_notice_does_not_cost_the_regroup(self, tmp_path):
         result = self._reground(tmp_path, {"side_effect": RuntimeError("boom")})
@@ -428,3 +431,163 @@ class TestReleaseNoticeCompactDoor:
 
         assert result == {"stdout": "", "exit_code": 0}
         spy.assert_not_called()
+
+
+# =============================================================================
+# Issue #752 — one fire must stay under Claude Code's hook display limit
+#
+# Claude Code 2.1.267 persists a hook additionalContext longer than 10,000
+# UTF-16 units to a file and shows the agent a 2,000-char preview. The backstop
+# used to send ~21,500 in one fire. These pin the budgeted, ordered, multi-part
+# re-ground against sections at the sizes measured on 2026-09-10 (the largest
+# of each across the hooks, devpulse, memory, vera and baud seats).
+# =============================================================================
+
+_PCR = "aipass.hooks.handlers.lifecycle.post_compact_regrounding"
+_GC = "aipass.hooks.apps.modules.grounding_content"
+
+TODAYS_SIZES = {"branch": 8840, "identity": 3428, "kernel": 3034, "navmap": 7886}
+NOTICE_SIZE = 405
+
+
+def _section(tag, size):
+    """Multi-line text of exactly *size* chars whose every line is uniquely tagged,
+    so 'nothing lost' can be checked line by line across the parts."""
+    width = 80
+    lines = [f"{tag}-L{i:04d} ".ljust(width - 1, "x") for i in range(max(1, size // width))]
+    lines[-1] += "x" * (size - len("\n".join(lines)))
+    return "\n".join(lines)
+
+
+class TestRegroupBudget752:
+    def _sequence(self, tmp_path, sizes=None, notice_size=NOTICE_SIZE, events=12, resets=1):
+        """Real cadence (autouse-isolated state), real packer, sized sections.
+        Returns the additionalContext of every non-silent fire, in order."""
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+        from aipass.hooks.apps.modules import cadence
+
+        sizes = sizes or TODAYS_SIZES
+        cadence._turn = None
+        with (
+            patch(f"{_GC}.load_branch", return_value=_section("BRANCH", sizes["branch"])),
+            patch(f"{_GC}.load_identity", return_value=_section("IDENTITY", sizes["identity"])),
+            patch(f"{_GC}.load_kernel", return_value=_section("KERNEL", sizes["kernel"])),
+            patch(f"{_GC}.load_navmap", return_value=_section("NAVMAP", sizes["navmap"])),
+            patch(f"{_RN}.build_notice", return_value=_section("NOTICE", notice_size) if notice_size else ""),
+        ):
+            for _ in range(resets):
+                cadence.reset_counter()
+            fired = []
+            for _ in range(events):
+                result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+                if result["stdout"]:
+                    fired.append(json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"])
+        return fired
+
+    def test_the_budget_sits_below_the_measured_limit(self):
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+        assert post_compact_regrounding.REGROUP_FIRE_BUDGET < 10_000
+        assert "sgr = 1e4" in post_compact_regrounding.__doc__
+
+    def test_a_manager_seat_at_todays_sizes_never_exceeds_the_budget(self, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET, _cc_len
+
+        fired = self._sequence(tmp_path)
+        assert len(fired) > 1, "today's sizes cannot fit one fire - the split is the point"
+        assert sum(_cc_len(f) for f in fired) > 20_000, "the fixture must be at today's scale"
+        for part, context in enumerate(fired, 1):
+            assert _cc_len(context) <= REGROUP_FIRE_BUDGET, f"part {part} is {_cc_len(context)} units"
+
+    def test_nothing_is_lost_across_the_parts(self, tmp_path):
+        """VACUITY GUARD for the budget pin: a packer that met the cap by dropping
+        or truncating content would pass it. Every tagged line arrives exactly once."""
+        stream = "\n".join(self._sequence(tmp_path))
+        for tag, size in [*TODAYS_SIZES.items(), ("notice", NOTICE_SIZE)]:
+            for line in _section(tag.upper(), size).split("\n"):
+                assert stream.count(line) == 1, f"{line[:20]}... arrived {stream.count(line)} times"
+
+    def test_branch_then_identity_then_kernel_then_navmap(self, tmp_path):
+        """A cap, if one ever bites, must cut the least important tail."""
+        stream = "\n".join(self._sequence(tmp_path))
+        order = [stream.index(f"{tag}-L0000") for tag in ("BRANCH", "IDENTITY", "KERNEL", "NAVMAP")]
+        assert order == sorted(order)
+
+    def test_the_manager_notice_lands_in_part_one(self, tmp_path):
+        fired = self._sequence(tmp_path)
+        assert "NOTICE-L0000" in fired[0]
+        assert fired[0].index("NOTICE-L0000") < fired[0].index("BRANCH-L0000")
+
+    def test_the_active_instruction_rides_part_one_only(self, tmp_path):
+        fired = self._sequence(tmp_path)
+        assert "ACTIVE RE-GROUNDING" in fired[0]
+        assert all("ACTIVE RE-GROUNDING" not in later for later in fired[1:])
+
+    def test_every_header_states_the_count_actually_emitted(self, tmp_path):
+        fired = self._sequence(tmp_path)
+        total = len(fired)
+        for part, context in enumerate(fired, 1):
+            assert context.startswith(f"[POST-COMPACT RE-GROUND {part}/{total} ")
+
+    def test_one_regroup_per_compaction_however_many_tool_calls_follow(self, tmp_path):
+        """DPLAN-0276's 17-fires-per-session defect stays cured: three resets on one
+        boundary, forty tool calls, and the sequence is exactly the planned parts."""
+        fired = self._sequence(tmp_path, events=40, resets=3)
+        assert 1 < len(fired) <= 4
+        assert len(set(fired)) == len(fired)
+
+    def test_each_fire_writes_one_sized_log_line(self, tmp_path):
+        from aipass.hooks.apps.modules import cadence
+
+        with patch.object(cadence, "logger") as log:
+            fired = self._sequence(tmp_path)
+        lines = [c.args[0] % tuple(c.args[1:]) for c in log.info.call_args_list]
+        fire_lines = [line for line in lines if line.startswith("[HOOKS] regroup fired ")]
+        assert len(fire_lines) == len(fired)
+        for part, line in enumerate(fire_lines, 1):
+            assert f"part={part}/{len(fired)}" in line
+            assert "bytes=" in line and "chars=" in line
+        log.warning.assert_not_called()
+
+    def test_a_section_larger_than_a_whole_part_is_split_between_lines(self, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import REGROUP_FIRE_BUDGET, _cc_len
+
+        sizes = {"branch": 25_000, "identity": 10, "kernel": 10, "navmap": 10}
+        fired = self._sequence(tmp_path, sizes=sizes, notice_size=0)
+        assert all(_cc_len(f) <= REGROUP_FIRE_BUDGET for f in fired)
+        stream = "\n".join(fired)
+        for line in _section("BRANCH", 25_000).split("\n"):
+            assert stream.count(line) == 1
+
+    def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self):
+        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import (
+            REGROUP_FIRE_BUDGET,
+            _cc_len,
+            _pack,
+        )
+
+        line = "".join(chr(ord("a") + i % 26) for i in range(20_000))
+        parts = _pack([("branch", line)], "INSTRUCTION")
+        assert all(_cc_len(text) <= REGROUP_FIRE_BUDGET for text, _ in parts)
+        rejoined = "".join(
+            text.split("\n\n", 1)[1]
+            .replace("[… continued from the previous re-ground part]\n", "")
+            .replace("\n[… continued in the next re-ground part]", "")
+            for text, _ in parts
+        )
+        assert line in rejoined.replace("INSTRUCTION\n\n", "")
+
+    def test_the_budget_counts_utf16_units_not_code_points(self):
+        """Claude Code compares a JS string length. An emoji is one Python char and
+        two JS units, so a packer counting len() would overshoot on emoji-heavy text."""
+        from aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding import (
+            REGROUP_FIRE_BUDGET,
+            _cc_len,
+            _pack,
+        )
+
+        text = "\n".join("\U0001f600" * 60 for _ in range(100))  # 6,000 code points, 12,000 units
+        assert len(text) < REGROUP_FIRE_BUDGET < _cc_len(text)
+        parts = _pack([("branch", text)], "I")
+        assert len(parts) > 1
+        assert all(_cc_len(p) <= REGROUP_FIRE_BUDGET for p, _ in parts)
