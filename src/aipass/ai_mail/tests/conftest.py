@@ -143,6 +143,22 @@ def _strip_ambient_identity_source(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_wake_depth(monkeypatch):
+    """Start EVERY test with AIPASS_WAKE_DEPTH absent, and undo whatever it becomes.
+
+    _wake_sender() bumps the var with a raw os.environ write, which monkeypatch
+    never sees. The old per-test delenv(raising=False) recorded no undo when the
+    var was absent, so each wake-back test left depth=1 behind for the next test
+    on the worker (measured: 15 TestWakeSender tests, before None, after "1").
+
+    setenv first so the ORIGINAL state (absent, or an ambient depth from a woken
+    session) is what the undo restores; delenv then gives the test its clean start.
+    """
+    monkeypatch.setenv("AIPASS_WAKE_DEPTH", "0")
+    monkeypatch.delenv("AIPASS_WAKE_DEPTH")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_dispatch_register(tmp_path, monkeypatch):
     """Point the register and the reports directory at tmp_path for EVERY test.
 
