@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-12
 # Modified: 2026-09-10
 # =============================================
@@ -36,6 +36,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     OUTCOME_MISSED,
     OUTCOME_SKIPPED,
     OUTCOME_WOKEN,
+    ROSTER_SCOPE,
     build_roster,
     get_rotation_state,
     next_target,
@@ -84,7 +85,9 @@ def print_help():
     console.print("  on the roster with the rounds prompt, then advances the pointer — busy")
     console.print("  targets are logged as a miss and get their next turn in the cycle.")
     console.print("\n[yellow]ROSTER RULES:[/yellow]")
-    console.print("  [cyan]*[/cyan] Alphabetical by email, across every tier")
+    console.print("  [cyan]*[/cyan] Framework fleet only — branches under this install's src/aipass/;")
+    console.print("    projects/* residents and external roots are excluded by ruling (2026-09-10)")
+    console.print("  [cyan]*[/cyan] Alphabetical by email")
     console.print("  [cyan]*[/cyan] @devpulse is never on the roster")
     console.print("  [cyan]*[/cyan] Managers are excluded unless config.include_managers is true")
     console.print("  [cyan]*[/cyan] Manager wakes also need ai_mail's scheduled lane — skipped if absent")
@@ -270,6 +273,7 @@ def _build_status(job: Optional[dict], runstate: dict) -> dict:
         "job_owner": job["owner"] if job else None,
         "enabled": enabled,
         "time": job["schedule"].get("time") if job else None,
+        "scope": ROSTER_SCOPE,
         "include_managers": include_managers,
         "manager_lane_available": _scheduled_lane_available(),
         "roster_size": len(roster),
@@ -294,6 +298,7 @@ def _print_status(status: dict) -> None:
         state = "[green]ON[/green]" if status["enabled"] else "[red]OFF[/red]"
         console.print(f"  Job:      {status['job_owner']}/{status['job_id']}  {state}  daily @ {status['time']}")
 
+    console.print(f"  Scope:    {status['scope']}")
     managers = "included" if status["include_managers"] else "excluded"
     lane = "available" if status["manager_lane_available"] else "not built yet"
     console.print(f"  Managers: {managers} [dim](ai_mail scheduled lane: {lane})[/dim]")

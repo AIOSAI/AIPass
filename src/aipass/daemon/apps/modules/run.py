@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-15
-# Modified: 2026-09-07
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -259,6 +259,10 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             # Deciding it per-target would mean reading the target's passport
             # here — a second copy of the manager gate wake_branch owns.
             scheduled=True,
+            # A clock fired this, so the daemon never wants the answer: no job
+            # prompt asks for one, and a wake-back would spend a whole @daemon
+            # session reading a reply that does not exist (DPLAN-0337 R2).
+            wake_back=False,
         )
         if ok:
             _log(f"OK: {owner}/{job_id} — {status.summary}")

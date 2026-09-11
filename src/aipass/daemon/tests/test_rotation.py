@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-12
 # Modified: 2026-09-10
 # =============================================
@@ -25,6 +25,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     OUTCOME_WOKEN,
     ROTATION_STATE_KEY,
     ROUNDS_PROMPT_TEMPLATE,
+    ROSTER_SCOPE,
     build_roster,
     get_rotation_state,
     next_target,
@@ -32,6 +33,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
+from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, framework_root
 from aipass.daemon.apps.modules import rotation as rotation_module
 from aipass.daemon.apps.modules import run as run_module
 
@@ -45,25 +47,40 @@ SCHEDULE_FILE = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json
 # ── Fixtures ──────────────────────────────────────────
 
 
+FRAMEWORK = framework_root()
+INSTALL = FRAMEWORK.parents[1]
+OUTSIDE = INSTALL.parent / "EXTERNAL-ROOT"
+
+
 def citizen(email: str, source: str = "aipass") -> dict:
-    """Build a citizen record as discovery.active_citizens() returns them."""
+    """Build a citizen record as discovery.active_citizens() returns them.
+
+    The path follows the tier the source names. The scope rule reads the path,
+    so a fixture whose label and path disagree — every fixture here lived under
+    src/aipass until 2026-09-10, "projects/baud" included — would pin nothing.
+    """
     name = email.lstrip("@")
-    return {
-        "name": name.upper(),
-        "email": email,
-        "dir_name": name,
-        "path": Path(f"/repo/src/aipass/{name}"),
-        "source": source,
-    }
+    if source == "aipass":
+        path = FRAMEWORK / name
+    elif source.startswith("projects/"):
+        path = INSTALL / source
+    else:
+        path = OUTSIDE / source.split("/", 1)[-1] / name
+    return {"name": name.upper(), "email": email, "dir_name": name, "path": path, "source": source}
 
 
 @pytest.fixture
 def fleet():
-    """A small fleet: two framework citizens, devpulse, and a project manager."""
+    """Two framework citizens, a framework manager, devpulse, and a project manager.
+
+    @bastion carries the manager-knob tests: since the scope ruling a projects/*
+    manager like @baud is never served, knob or no knob.
+    """
     return [
         citizen("@backup"),
         citizen("@devpulse"),
         citizen("@commons"),
+        citizen("@bastion"),
         citizen("@baud", source="projects/baud"),
     ]
 
@@ -75,6 +92,7 @@ def classes():
         "@backup": "aipass_framework",
         "@devpulse": "manager",
         "@commons": "aipass_framework",
+        "@bastion": "manager",
         "@baud": "manager",
     }
 
@@ -136,28 +154,24 @@ class TestBuildRoster:
             patch(f"{HANDLER}.citizen_class_for", side_effect=lambda p: classes[f"@{p.name}"]),
         ):
             included = build_roster(include_managers=True)
-        assert [c["email"] for c in included] == ["@backup", "@baud", "@commons"]
+        assert [c["email"] for c in included] == ["@backup", "@bastion", "@commons"]
+        assert "@baud" not in [c["email"] for c in included], "the knob admits managers, never a projects/* one"
 
     def test_roster_is_alphabetical_whatever_the_registry_order(self):
         """Registry order was the walk until 2026-09-10; alphabetical is the walk now.
 
-        The fleet arrives reverse-sorted with a project citizen in the middle, so a
-        roster that kept registry order (or grouped by tier) reads red here. The
-        other fixtures happen to be sorted already and cannot tell the two apart.
+        The fleet arrives reverse-sorted, so a roster that kept registry order reads
+        red here. The other fixtures happen to be sorted already and cannot tell
+        the two apart.
         """
-        fleet = [
-            citizen("@seedgo"),
-            citizen("@flow"),
-            citizen("@earmark", source="projects/earmark"),
-            citizen("@ai_mail"),
-        ]
+        fleet = [citizen("@seedgo"), citizen("@flow"), citizen("@drone"), citizen("@ai_mail")]
         with (
             patch(f"{HANDLER}.active_citizens", return_value=fleet),
             patch(f"{HANDLER}.citizen_class_for", return_value="aipass_framework"),
         ):
             roster = build_roster()
-        assert [c["email"] for c in roster] == ["@ai_mail", "@earmark", "@flow", "@seedgo"]
-        assert roster[1]["source"] == "projects/earmark", "sorting must carry each record whole"
+        assert [c["email"] for c in roster] == ["@ai_mail", "@drone", "@flow", "@seedgo"]
+        assert roster[1]["path"] == FRAMEWORK / "drone", "sorting must carry each record whole"
 
     def test_empty_fleet_gives_empty_roster(self):
         with patch(f"{HANDLER}.active_citizens", return_value=[]):
@@ -309,16 +323,16 @@ class TestFireRotation:
         ):
             with_managers = build_roster(include_managers=True)
 
-        # Alphabetical: @backup, @baud, @commons - the manager follows @backup.
+        # Alphabetical: @backup, @bastion, @commons - the manager follows @backup.
         runstate = {ROTATION_STATE_KEY: {"@daemon/rounds": {"last_target": "@backup"}}}
         job = rotation_job(config={"include_managers": True})
         ok, detail, mock_wake = self._fire(with_managers, runstate, (True, "", False), job=job, lane=False)
 
         assert ok is True
-        assert "@baud" in detail
+        assert "@bastion" in detail
         mock_wake.assert_not_called()
         state = get_rotation_state(runstate, "@daemon/rounds")
-        assert state["last_target"] == "@baud"
+        assert state["last_target"] == "@bastion"
         assert state["history"][0]["outcome"] == OUTCOME_SKIPPED
 
     def test_manager_woken_when_lane_available(self, fleet, classes):
@@ -545,18 +559,24 @@ class TestRoundsNight:
     clock passed it.
     """
 
-    # Registry order on purpose — an alphabetical walk must not follow it.
+    # Registry order on purpose, and two outsiders that sort AHEAD of @ai_mail:
+    # a projects/* resident and an external-root citizen, both declaring the
+    # framework class, so only the scope rule keeps them off the first night.
     FLEET = [
         citizen("@seedgo"),
         citizen("@devpulse"),
+        citizen("@aardvark", source="projects/aardvark"),
         citizen("@ai_mail"),
+        citizen("@abacus", source="external/DEMO"),
         citizen("@baud", source="projects/baud"),
         citizen("@backup"),
     ]
     CLASSES = {
         "@seedgo": "aipass_framework",
         "@devpulse": "manager",
+        "@aardvark": "aipass_framework",
         "@ai_mail": "aipass_framework",
+        "@abacus": "aipass_framework",
         "@baud": "manager",
         "@backup": "aipass_framework",
     }
@@ -587,7 +607,7 @@ class TestRoundsNight:
 
         assert results["fired"] == 1
         mock_wake.assert_called_once()
-        assert mock_wake.call_args.args[0] == "@ai_mail", "registry order would have picked @seedgo"
+        assert mock_wake.call_args.args[0] == "@ai_mail", "@aardvark/@abacus sort first; registry order picks @seedgo"
         assert mock_save.called
 
     def test_the_wake_carries_patricks_ruling(self):
@@ -625,3 +645,74 @@ class TestRoundsNight:
         results, mock_wake, _save = self._tick({}, at)
         assert results["fired"] == 0
         mock_wake.assert_not_called()
+
+
+# ── the scope ruling (Patrick, 2026-09-10 21:47) ──────
+
+
+class TestRoundsScope:
+    """The rounds serve src/aipass/* only — marked very important.
+
+    Driven through discovery's real active_citizens() on a temp install, with
+    @memory's fleet stubbed at its seam as the sweep's scope pins do: one
+    framework branch, one projects/* resident, one citizen under an external
+    root. All three declare the same trusted class, so only the path can tell
+    them apart — which is the rule.
+    """
+
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+
+    @pytest.fixture
+    def install(self, tmp_path):
+        repo = tmp_path / "install"
+        framework = repo / "src" / "aipass" / "flow"
+        resident = repo / "projects" / "earmark"
+        external = tmp_path / "VERA-STUDIO" / "research"
+        for branch in (framework, resident, external):
+            branch.mkdir(parents=True)
+        rows = [
+            {"name": "flow", "path": framework, "registry": "AIPASS_REGISTRY.json", "email": "@flow"},
+            {"name": "earmark", "path": resident, "registry": "EARMARK_REGISTRY.json", "email": "@earmark"},
+            {"name": "research", "path": external, "registry": "VERA-STUDIO_REGISTRY.json", "email": "@research"},
+        ]
+        return repo, rows
+
+    def _roster(self, repo, rows, **kwargs):
+        with (
+            patch(f"{self.FLEET}.fleet_branches", return_value=rows),
+            patch(f"{HANDLER}.citizen_class_for", return_value="aipass_framework"),
+        ):
+            return build_roster(repo_root=repo, **kwargs)
+
+    def test_discovery_sees_all_three_tiers(self, install):
+        """Without this, the next pin could pass because the stub never reached discovery."""
+        repo, rows = install
+        with patch(f"{self.FLEET}.fleet_branches", return_value=rows):
+            seen = active_citizens(repo)
+        assert [(c["email"], c["source"]) for c in seen] == [
+            ("@flow", "aipass"),
+            ("@earmark", "projects/earmark"),
+            ("@research", "external/VERA-STUDIO"),
+        ]
+
+    def test_only_the_framework_branch_is_served(self, install):
+        repo, rows = install
+        assert [c["email"] for c in self._roster(repo, rows)] == ["@flow"]
+
+    def test_the_manager_knob_cannot_widen_the_scope(self, install):
+        repo, rows = install
+        assert [c["email"] for c in self._roster(repo, rows, include_managers=True)] == ["@flow"]
+
+    def test_status_names_the_scope(self, roster, capsys):
+        with (
+            patch(f"{MODULE}.find_rotation_jobs", return_value=[rotation_job()]),
+            patch(f"{MODULE}.load_runstate", return_value={}),
+            patch(f"{MODULE}.build_roster", return_value=roster),
+            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
+            patch(f"{MODULE}._scheduled_lane_available", return_value=True),
+        ):
+            rotation_module.handle_command("rotation", [])
+            status = rotation_module._build_status(rotation_job(), {})
+        assert f"Scope:    {ROSTER_SCOPE}" in capsys.readouterr().out
+        assert status["scope"] == ROSTER_SCOPE
+        assert "projects and externals excluded by ruling" in ROSTER_SCOPE

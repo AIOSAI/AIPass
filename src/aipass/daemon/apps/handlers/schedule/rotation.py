@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds roster, pointer state and prompt rendering
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-12
 # Modified: 2026-09-10
 # =============================================
@@ -21,11 +21,17 @@ include_managers knob without silently re-serving the front of the roster.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, active_citizens, citizen_class_for
+from aipass.daemon.apps.handlers.schedule.discovery import (
+    MANAGER_CLASS,
+    active_citizens,
+    citizen_class_for,
+    framework_root,
+)
 
 # Top-level runstate key — rotation state is per rotation job, kept apart from
 # the per-job "jobs" map so orphan pruning never touches it.
@@ -41,6 +47,14 @@ ALWAYS_EXCLUDED = frozenset({"@devpulse"})
 # Managers are dark until ai_mail ships the scheduled headless lane; the knob is
 # the switch, the signature check is the safety catch.
 DEFAULT_INCLUDE_MANAGERS = False
+
+# THE SCOPE RULE. Patrick, 2026-09-10 21:47 (DPLAN-0337 R2), marked very important:
+# the rounds are AIPass maintaining its OWN agents. A citizen is served only when its
+# branch lives under this install's src/aipass/. projects/* residents and every
+# declared external root are out whatever their citizen_class — Vera keeps her own
+# schedule, and the projects are nowhere near a trust stage. Decided on the PATH,
+# never on the source label: discovery's _source_label is presentation-only.
+ROSTER_SCOPE = "framework fleet only — projects and externals excluded by ruling"
 
 OUTCOME_WOKEN = "woken"
 OUTCOME_MISSED = "missed"
@@ -70,7 +84,12 @@ ROUNDS_PROMPT_TEMPLATE = (
 BRANCH_PLACEHOLDER = "{branch}"
 
 
-def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS) -> List[dict]:
+def in_framework_fleet(branch_path: Path, repo_root: Optional[Path] = None) -> bool:
+    """The scope rule: does this branch live under this install's src/aipass/?"""
+    return Path(branch_path).resolve().is_relative_to(framework_root(repo_root).resolve())
+
+
+def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: Optional[Path] = None) -> List[dict]:
     """
     Return the ordered list of citizens eligible for a steward night.
 
@@ -79,12 +98,19 @@ def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS) -> List[dict
     registry a branch lives in, and nobody could predict a night from the roster
     alone. Each record carries citizen_class so the caller can route managers
     down the scheduled headless lane.
+
+    ROSTER_SCOPE is applied before the passport is read, so no citizen_class can
+    carry a projects/* or external citizen onto the roster.
     """
     roster = []
-    for citizen in active_citizens():
+    for citizen in active_citizens(repo_root):
         email = citizen["email"]
         if email.lower() in ALWAYS_EXCLUDED:
             logger.info("[rotation] %s excluded from roster (always)", email)
+            continue
+
+        if not in_framework_fleet(citizen["path"], repo_root):
+            logger.info("[rotation] %s excluded from roster (%s: %s)", email, ROSTER_SCOPE, citizen.get("source", "?"))
             continue
 
         entry = dict(citizen)

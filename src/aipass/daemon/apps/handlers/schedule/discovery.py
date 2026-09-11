@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-06-15
-# Modified: 2026-08-31
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -242,6 +242,17 @@ def active_branch_map(repo_root: Optional[Path] = None) -> dict:
     directories to owners without reaching into the private helpers.
     """
     return {c["dir_name"]: c["email"] for c in active_citizens(repo_root)}
+
+
+def framework_root(repo_root: Optional[Path] = None) -> Path:
+    """This install's src/aipass/ — the directory every framework citizen's branch lives in.
+
+    Computed per call from the same root active_citizens() walks, not frozen at
+    import like _SRC_AIPASS, so a temp-tree test (or a patched _REPO_ROOT) moves
+    the fleet and the framework boundary together.
+    """
+    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    return root / "src" / "aipass"
 
 
 def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:

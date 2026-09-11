@@ -144,6 +144,17 @@ class TestScheduledLane:
         (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True)
         assert fake_wake.call_args.kwargs["sender"] == "@daemon"
 
+    def test_a_clock_fired_wake_declines_the_wake_back(self):
+        """DPLAN-0337 R2: the daemon never wants the answer to a scheduled wake.
+
+        No job prompt asks for a reply to @daemon (read 2026-09-10 across all nine
+        discovered jobs), so a wake-back would only spend a @daemon session reading
+        a reply that does not exist. Checked across owners, as the scheduled flag is.
+        """
+        for owner in ("@vera", "@commons", "@backup"):
+            (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True, job=_job(owner=owner))
+            assert fake_wake.call_args.kwargs["wake_back"] is False, owner
+
 
 # ── Half 2: blocked is not ran ───────────────────────
 

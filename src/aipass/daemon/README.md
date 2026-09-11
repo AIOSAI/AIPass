@@ -227,7 +227,7 @@ default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min*
 `626320000` ns) and roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's
 own output appends to `~/.aipass/daemon-tick.log`.
 
-**Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it.
+**Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it. The sweep covers all three tiers; the nightly rounds serve only the first — see *Nightly Rounds*.
 
 **Who counts as a citizen is no longer decided here (FPLAN-0460).** The core-registry read, the `projects/*` glob, the dot-filter and the two-key resident rule all used to live in `discovery.py` as a second copy of the fleet definition. They are now one call to `fleet.fleet_branches()` in @memory — a fleet definition with two implementations agrees only by coincidence. `discovery.py:159` consumes that list rather than mirroring it, which is why the federated-external tier above arrived here without a line changing in this branch.
 
@@ -311,6 +311,7 @@ repeat the same miss ~500 times before midnight.
 
 - `fresh` (bool) — start a fresh Claude session (true) or resume (false)
 - `model` (string, optional) — `"haiku"` or `"sonnet"` recommended for light wakes
+- no wake-back, and not an option: every wake the daemon fires passes `wake_back=False`, so no job's finish wakes `@daemon` to read a reply nobody sends (DPLAN-0337 R2, 2026-09-10)
 
 ### What a fire consumes (2026-08-30)
 
@@ -495,9 +496,11 @@ The night watch doing its rounds: one citizen a night, woken fresh on opus for a
 |------|-------|
 | Job | `@daemon/rounds`, type `rotation`, in daemon's `.daemon/schedule.json` |
 | When | 05:00 window (+/-15 min — the first tick inside it fires, so about 04:45); `catch_up` off, a missed night is not woken late |
-| Who | Alphabetical by email across every tier. `@devpulse` never; managers excluded (`include_managers: false`) |
-| Wake | `fresh: true`, `model: opus`, `sender: @daemon` |
+| Who | **Framework fleet only** — citizens whose branch lives under this install's `src/aipass/` (17 on 2026-09-10). `projects/*` residents and every external root are out, whatever their class. Alphabetical by email. `@devpulse` never; managers excluded (`include_managers: false`) |
+| Wake | `fresh: true`, `model: opus`, `sender: @daemon`, `wake_back: false` |
 | Busy target | Logged as a miss, pointer advances, that citizen gets its next turn in the cycle |
+
+**Scope, by ruling.** Patrick, 2026-09-10 21:47, marked very important: the rounds are AIPass maintaining its own agents. Vera keeps her own schedule, and the projects are nowhere near a trust stage. `ROSTER_SCOPE` in `apps/handlers/schedule/rotation.py` is a named rule applied inside `build_roster` before any passport is read. It is decided on the branch PATH, never on the tier label, which stays presentation-only. `drone @daemon rotation` prints it on its `Scope:` line. Pinned by `TestRoundsScope`: a temp install holding a framework branch, a projects resident and an external-root citizen, all declaring the same class, serves only the first.
 
 **What a citizen does on its night:** inbox to zero; reconcile `.trinity` todos against reality; refresh and read its dashboard; review its logs; run its seedgo self-audit; do mailed-in work only if it sits in its own domain and fits one session; small fixes in its own branch, red-first.
 
