@@ -8,14 +8,7 @@
 
 """Tests for the skills validator handler."""
 
-import sys
-from pathlib import Path
-
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
-from aipass.skills.apps.handlers.validator import validate_skill  # noqa: E402
+from aipass.skills.apps.handlers.validator import validate_skill
 
 
 class TestValidateSkill:
@@ -57,16 +50,11 @@ class TestValidateSkill:
         assert result["valid"] is False
         assert "NONEXISTENT_VAR_XYZ" in result["missing_config"]
 
-    def test_set_config(self):
-        import os
-
-        os.environ["_TEST_SKILLS_VAR"] = "value"
-        try:
-            result = validate_skill({"requires": {"config": ["_TEST_SKILLS_VAR"]}})
-            assert result["valid"] is True
-            assert result["missing_config"] == []
-        finally:
-            del os.environ["_TEST_SKILLS_VAR"]
+    def test_set_config(self, monkeypatch):
+        monkeypatch.setenv("_TEST_SKILLS_VAR", "value")
+        result = validate_skill({"requires": {"config": ["_TEST_SKILLS_VAR"]}})
+        assert result["valid"] is True
+        assert result["missing_config"] == []
 
     def test_mixed_pass_fail(self):
         result = validate_skill(
