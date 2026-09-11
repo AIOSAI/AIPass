@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1428 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1472 cases**, 1472 passed / 0 skipped, measured 2026-09-10 from both rootdirs (branch and repo root)
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1442 test functions across 47 files in `tests/test_*.py`; pytest expands them to **1486 cases**, 1486 passed / 0 skipped, measured 2026-09-10 from both rootdirs (branch and repo root)
 
 > Two numbers because they answer different questions: `def test_` counts what
 > was *written*, pytest counts what *ran*. Parametrization is the whole gap — a
@@ -611,7 +611,12 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      `blocked_depth`, `skipped_sender`, `skipped_self`, `failed` — so "notified"
      is never inferred from a bare boolean. It was: the manager gate returns
      `True` having woken nothing, and trusting that bool logged "woken" for a
-     wake that never happened
+     wake that never happened.
+     Library callers such as @daemon's scheduled nudges may pass
+     `wake_back=False` to `wake_branch()` (carried to the monitor as the
+     `--no-wake-back` argv flag, logged and recorded as `declined` in
+     `dispatch_wake.log`); the `dispatch` and `dispatch wake` CLI verbs always
+     arm the wake-back
 
 ### Safety Limits
 
@@ -1234,7 +1239,7 @@ ai_mail/
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
 └── tests/                      # 47 test modules + conftest.py + __init__.py;
-                                # 1428 def test_, 1472 collected cases (selection below)
+                                # 1442 def test_, 1486 collected cases (selection below)
     ├── conftest.py             # Shared fixtures (mock_infrastructure, mock_logger)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

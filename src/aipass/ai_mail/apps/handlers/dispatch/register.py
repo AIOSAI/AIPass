@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-09-07
+# Modified: 2026-09-10
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -252,6 +252,7 @@ def open_dispatch(
     subject: str,
     expected_seconds: int,
     repo_root: Optional[Path] = None,
+    wake_back: bool = True,
 ) -> Optional[str]:
     """Record that a dispatch was promised, and return its id.
 
@@ -271,6 +272,10 @@ def open_dispatch(
             taking a while": a live monitor kills the run at HARD_TIMEOUT and
             writes its report, so it can never legitimately overrun.
         repo_root: Re-root the register (tests, other projects)
+        wake_back: Whether the dispatcher is woken/mailed back on completion
+            (wake_branch's own ``wake_back``). Recorded as ``"wake_back": false``
+            ONLY when False — an absent key means the default, so every default
+            row stays byte-identical to the rows written before the option.
 
     Returns:
         The dispatch id, or None if the register could not be written — the
@@ -283,7 +288,7 @@ def open_dispatch(
     dispatch_id = str(uuid.uuid4())
     now = datetime.now().astimezone()
 
-    record = {
+    record: Dict[str, object] = {
         "dispatch_id": dispatch_id,
         "ts": now.isoformat(),
         "sender": str(sender),
@@ -292,6 +297,9 @@ def open_dispatch(
         "expected_by": (now + timedelta(seconds=expected_seconds)).isoformat(),
         "status": STATUS_OUTSTANDING,
     }
+    if not wake_back:
+        # A reader can then tell a declined wake-back from a lost one.
+        record["wake_back"] = False
 
     if not _append(record, repo_root):
         logger.warning(

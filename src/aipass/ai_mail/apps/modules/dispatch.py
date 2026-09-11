@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2026-02-02
-# Modified: 2026-09-02
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -55,6 +55,10 @@ WAKE ONLY:
   drone @ai_mail dispatch wake @branch "custom"              # Wake with custom prompt
   drone @ai_mail dispatch wake @branch --model opus          # Wake with Opus model
   drone wake @branch                                         # Shortcut via drone
+
+WAKE-BACK:
+  Library callers such as @daemon's scheduled nudges may pass wake_back=False to
+  wake_branch(); the dispatch and dispatch wake verbs always arm the wake-back.
 
 MODEL OPTIONS:
   --model opus     Claude Opus 4.6 (default — full reasoning for all tasks)
