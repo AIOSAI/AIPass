@@ -384,6 +384,7 @@ class TestWakeOwner:
         assert kwargs["auto"] is True
         assert kwargs["fresh"] is True
         assert kwargs["model"] == inbox_sweep.WAKE_MODEL
+        assert kwargs["wake_back"] is False, "a nudge must never wake @daemon back"
 
     def test_wake_exception_is_caught(self):
         wake_branch = MagicMock(side_effect=RuntimeError("boom"))
@@ -443,20 +444,23 @@ class TestCliRouting:
 
 
 class TestScheduleEntry:
-    """The daemon's own .daemon/schedule.json must survive discovery validation."""
+    """Nothing scheduled runs the inbox sweep (DPLAN-0337 R2, 2026-09-10).
 
-    def test_schedule_file_is_a_valid_job(self):
+    Was: daemon's own schedule.json carries an enabled daily inbox-sweep job.
+    Patrick deleted it — up to five wakes every morning — and the nightly rounds
+    took inbox-to-zero over. The command is a hand tool now, so the pin inverts:
+    no job may carry the name, and no job's prompt may run the command.
+    """
+
+    def test_no_job_runs_the_sweep(self):
         from aipass.daemon.apps.handlers.schedule.discovery import _validate_job
 
         schedule_file = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
         data = json.loads(schedule_file.read_text(encoding="utf-8"))
 
         assert data["branch"] == "@daemon"
-        jobs = [j for j in data["jobs"] if j["id"] == "inbox-sweep"]
-        assert len(jobs) == 1
-
-        job = jobs[0]
-        assert _validate_job(job, schedule_file) is True
-        assert job["enabled"] is True
-        assert job["schedule"]["type"] == "daily"
-        assert "inbox-sweep" in job["prompt"]
+        assert data["jobs"], "an empty job list would pass every check below vacuously"
+        for job in data["jobs"]:
+            assert job["id"] != "inbox-sweep"
+            assert "inbox-sweep" not in job.get("prompt", "")
+            assert _validate_job(job, schedule_file) is True

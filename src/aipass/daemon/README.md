@@ -18,7 +18,7 @@ drone @daemon update                    # Status digest
 drone @daemon activity                  # Quick 24h activity summary
 drone @daemon queue                     # View pending scheduled jobs
 drone @daemon run                       # Fire all due jobs now
-drone @daemon rotation                  # Whose steward night is next
+drone @daemon rotation                  # Whose rounds night is next
 drone @daemon inbox-sweep --dry-run     # Who is sitting on stale unread mail
 drone @daemon branch-health DAEMON      # Deep dive on a branch
 drone @daemon install-timer             # Enable systemd 2-min timer
@@ -34,8 +34,8 @@ Framework citizen -- full 3-layer architecture with identity and memory. DAEMON 
 - Route CLI commands to discovered modules (update, run, queue, activity_report, rotation, inbox_sweep)
 - Fire the decentralized scheduler: discover every citizen's `.daemon/schedule.json`, wake due owners
 - Generate activity reports across all branches (24h summary, detailed, per-branch)
-- Run the fleet inbox sweep — wake branches sitting on mail unread past 24h
-- Run the nightly steward rotation — one citizen a night gets a maintenance turn
+- Keep the fleet inbox sweep as a hand tool — wake branches sitting on mail unread past 24h (no scheduled job)
+- Run the nightly rounds — one citizen a night gets a maintenance turn (05:00, opus)
 - Detect red flags (code changes without memory updates, stale branches)
 - Produce status digests (inbox, actionable items, escalations)
 
@@ -58,7 +58,7 @@ daemon/
 │   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
-│   │   ├── rotation.py        # Steward rotation — wake policy + status surface
+│   │   ├── rotation.py        # Rounds — wake policy + status surface
 │   │   ├── timer_install.py   # systemd user timer install/uninstall
 │   │   ├── schedule.py        # (retired) prints migration notice only
 │   │   ├── actions.py         # (retired) prints migration notice only
@@ -79,7 +79,7 @@ daemon/
 │   │   │   ├── catch_up_lane.py       # Tick-side glue: detect+queue the gap, drain one
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
 │   │   │   ├── recovery.py            # Gap detection, missed windows, queue, wake headers
-│   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
+│   │   │   ├── rotation.py            # Rounds roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
 │   │   │   ├── tick_lock.py           # Single-instance advisory lock for the tick
@@ -207,8 +207,8 @@ drone @daemon <command> --help
 | `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
-| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
-| `rotation` | Nightly steward rotation — roster, pointer, turn history | Operational *(job ships disabled)* |
+| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job since 2026-09-10)* |
+| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` ON since 2026-09-10: 05:00, opus, one citizen a night)* |
 
 ---
 
@@ -487,6 +487,26 @@ against the journal after my own probes wrote false sentences into it:
 landed at `0d14e8c1`: never run the `run` verb from a seat against it. Every
 experiment takes a `tmp_path` copy of the runstate and the schedule file.
 
+## Nightly Rounds (2026-09-10, DPLAN-0337 R2)
+
+The night watch doing its rounds: one citizen a night, woken fresh on opus for a maintenance turn inside its own branch. Designed in August as DPLAN-0287, shipped disabled as `fleet-steward`, renamed `rounds` and switched on by Patrick's ruling of 2026-09-10.
+
+| Knob | Value |
+|------|-------|
+| Job | `@daemon/rounds`, type `rotation`, in daemon's `.daemon/schedule.json` |
+| When | 05:00 window (+/-15 min — the first tick inside it fires, so about 04:45); `catch_up` off, a missed night is not woken late |
+| Who | Alphabetical by email across every tier. `@devpulse` never; managers excluded (`include_managers: false`) |
+| Wake | `fresh: true`, `model: opus`, `sender: @daemon` |
+| Busy target | Logged as a miss, pointer advances, that citizen gets its next turn in the cycle |
+
+**What a citizen does on its night:** inbox to zero; reconcile `.trinity` todos against reality; refresh and read its dashboard; review its logs; run its seedgo self-audit; do mailed-in work only if it sits in its own domain and fits one session; small fixes in its own branch, red-first.
+
+**Budget, stated in the prompt:** never dispatch or wake another citizen; at most 2 sub-agents, sonnet or lower; never edit another branch; no fleet-wide investigations; anything out of lane is written down for @devpulse, not chased.
+
+**The night's one artefact** is a single mail to @devpulse: health verdict, what it did, what it noticed, what it needs. There is no dispatch to reply to — a rounds wake is a session prompt, not a mail — and no APLAN step.
+
+`drone @daemon rotation` shows the roster, whose night is next, and the last ten turns. Pinned by `TestShippedRoundsJob` (the stanza as shipped) and `TestRoundsNight` (a real tick at 05:01, wake caught at ai_mail's `wake_branch` seam).
+
 ## Fleet Inbox Sweep
 
 Replies never wake their recipient, so a reply landing in a sleeping branch's inbox stays invisible until something looks. `inbox-sweep` is that something.
@@ -504,7 +524,7 @@ It reads every active branch's `.ai_mail.local/inbox.json`, finds mailboxes hold
 | Cap | 5 wakes per pass (`--limit N`); entries are oldest-first, and deferred branches are named in the output, not silently dropped |
 | Wake model | `sonnet`, staggered 2s apart |
 
-Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbox-sweep`). Run `drone @daemon inbox-sweep --dry-run` any time to see who is sitting on stale mail without waking anyone.
+**Not scheduled since 2026-09-10.** The daily 09:00 job is deleted (DPLAN-0337 R2): waking up to five agents every morning was, in Patrick's words, nuisance token waste, and the nightly rounds now take each citizen's inbox to zero, one citizen a night. The command stays as a hand tool; `drone @daemon inbox-sweep --dry-run` shows who is sitting on stale mail without waking anyone.
 
 ---
 
@@ -569,7 +589,7 @@ surfaces here rather than blanking this report.
 
 ### Provides To
 - The fleet — job discovery and firing for any citizen that writes a `.daemon/schedule.json`
-- The fleet — the unread-mail backstop (`inbox-sweep`) and the steward rotation
+- The fleet — the nightly rounds, and the unread-mail backstop (`inbox-sweep`) as a hand tool
 - `@skills` bot — `queue --json`, a frozen schema
 - Note: Telegram handlers archived — moving to skills system. See `apps/handlers/telegram/.archive/`
 
@@ -584,7 +604,7 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 | Plugin | Target | Status |
 |--------|--------|--------|
-| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `fleet-steward` job |
+| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `rounds` job |
 | `daily_audit` | @seed | Archived — targeted @seed, renamed to @seedgo years prior |
 | `heartbeat` | @vera | Archived — @vera was not in `AIPASS_REGISTRY.json` then and is not now. It *is* a live citizen tonight, via the federated-external tier (`external/VERA-STUDIO`), so the target exists again — the plugin does not |
 | `botfather_reminder` | @dev_central | Archived — Telegram stripped |

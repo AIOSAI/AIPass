@@ -236,11 +236,11 @@ class TestRotationDelegation:
     def test_rotation_job_goes_to_the_rotation_module(self):
         job = {
             "owner": "@daemon",
-            "id": "fleet-steward",
+            "id": "rounds",
             "enabled": True,
             "schedule": {"type": "rotation", "time": "05:00"},
             "wake": {},
-            "prompt": "STEWARD NIGHT for {branch}.",
+            "prompt": "ROUNDS for {branch}.",
         }
         runstate = {"jobs": {}}
         # fire_rotation keeps its own (ok, detail) answer; _fire_job maps it onto

@@ -295,10 +295,10 @@ class TestDiscoverJobs:
             "version": 1,
             "jobs": [
                 {
-                    "id": "fleet-steward",
+                    "id": "rounds",
                     "schedule": {"type": "rotation", "time": "05:00"},
                     "config": {"include_managers": True},
-                    "prompt": "STEWARD NIGHT for {branch}.",
+                    "prompt": "ROUNDS for {branch}.",
                 }
             ],
         }

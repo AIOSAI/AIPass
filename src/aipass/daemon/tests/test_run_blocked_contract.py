@@ -379,7 +379,7 @@ class TestRotationIsUnchanged:
     """A rotation miss already advances the pointer — it must keep consuming the night."""
 
     def test_rotation_miss_is_not_reclassified_as_blocked(self):
-        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="fleet-steward")
+        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
         with patch(f"{RUN}.fire_rotation", return_value=(True, "missed @backup: lock")) as mock_rotation:
             outcome, detail = _fire_job(job, {"jobs": {}})
         assert outcome == OUTCOME_FIRED
@@ -387,7 +387,7 @@ class TestRotationIsUnchanged:
         mock_rotation.assert_called_once()
 
     def test_rotation_failure_is_a_failure(self):
-        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="fleet-steward")
+        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
         with patch(f"{RUN}.fire_rotation", return_value=(False, "rotation roster is empty")):
             outcome, _detail = _fire_job(job, {"jobs": {}})
         assert outcome == OUTCOME_FAILED

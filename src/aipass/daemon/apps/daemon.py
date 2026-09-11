@@ -193,7 +193,7 @@ def print_help(modules: List[Any]):
     console.print("  [yellow]Scheduler:[/yellow]")
     console.print("    [dim]drone @daemon queue[/dim]                             [dim]# View pending jobs[/dim]")
     console.print("    [dim]drone @daemon run[/dim]                               [dim]# Fire due jobs now[/dim]")
-    console.print("    [dim]drone @daemon rotation[/dim]                          [dim]# Whose steward night[/dim]")
+    console.print("    [dim]drone @daemon rotation[/dim]                          [dim]# Whose rounds night[/dim]")
     console.print("    [dim]drone @daemon install-timer[/dim]                     [dim]# Enable systemd timer[/dim]")
     console.print()
     console.print("  [yellow]Fleet mail:[/yellow]")
