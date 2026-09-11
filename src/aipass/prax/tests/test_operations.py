@@ -683,6 +683,33 @@ class TestRefreshSingleDashboard:
         assert result["branch"] == "FAILING"
         assert "boom" in result["error"]
 
+    def test_a_branch_with_no_mail_central_row_gets_its_own_inbox_count(self, tmp_path, monkeypatch):
+        """The mail count is the branch's own inbox, so a branch the central never lists is not stamped 0.
+
+        An external project's branch has no row in AIPass's AI_MAIL.central.json
+        (18 core rows, measured 2026-09-11), and its project has no mail central
+        at all. The central here lists only FLOW.
+        """
+        mod = _load_refresh()
+        verify = tmp_path / "verify"
+        (verify / ".ai_mail.local").mkdir(parents=True)
+        # "c" carries no status and no read flag: the reader counts that as new.
+        messages = [{"id": "a", "status": "new"}, {"id": "b", "status": "new"}, {"id": "c"}]
+        inbox = {"messages": [*messages, {"id": "d", "status": "opened"}]}
+        (verify / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
+
+        monkeypatch.setattr(mod, "read_all_centrals", lambda: {"ai_mail": {"branch_stats": {"FLOW": {"unread": 9}}}})
+        monkeypatch.setattr(
+            mod, "create_fresh_dashboard", lambda bp: {"branch": bp.name.upper(), "sections": {}, "quick_status": {}}
+        )
+        saved: dict = {}
+        monkeypatch.setattr(mod, "save_dashboard", lambda bp, data: saved.update(data))
+
+        assert mod.refresh_single_dashboard(verify)["status"] == "success"
+        assert saved["quick_status"]["new_mail"] == 3
+        assert saved["quick_status"]["opened_mail"] == 1
+        assert saved["quick_status"]["summary"] == "3 new emails, 1 opened"
+
 
 # =============================================
 # get_branch_paths (status.py)
@@ -756,6 +783,57 @@ class TestGetBranchPaths:
 
 class TestResolveBranchPath:
     """Tests for resolve_branch_path -- resolves @branch ref to filesystem path."""
+
+    @staticmethod
+    def _core(root: Path, rows: list, monkeypatch, mod) -> Path:
+        """Point the module at an AIPASS_REGISTRY.json under ``root`` holding ``rows``."""
+        root.mkdir(parents=True, exist_ok=True)
+        registry = root / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: root)
+        return root
+
+    @staticmethod
+    def _studio(root: Path, rows: list) -> Path:
+        """An external project root holding its own STUDIO_REGISTRY.json with ``rows``."""
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "STUDIO_REGISTRY.json").write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        return root
+
+    def test_a_core_miss_resolves_through_the_callers_project_registry(self, tmp_path, monkeypatch):
+        """Vera Studio 77f3335d: a branch only its own project declares resolves, relative to THAT registry.
+
+        The caller stands two levels inside the branch, so the walk has to climb
+        to the project root. The relative path must resolve against the
+        registry's directory: against core's root or the cwd it names nothing.
+        """
+        mod = _load_status()
+        self._core(tmp_path / "aipass", [], monkeypatch, mod)
+        studio = self._studio(tmp_path / "studio", [{"name": "VERIFY", "path": "src/studio/verify"}])
+        verify = studio / "src" / "studio" / "verify"
+        (verify / "apps").mkdir(parents=True)
+
+        assert mod.resolve_branch_path("@verify", verify / "apps") == verify
+
+    def test_core_wins_a_collision_and_the_log_names_both_rows(self, tmp_path, monkeypatch):
+        """A name in core and in the caller's project resolves to core, and the warning names both."""
+        from unittest.mock import MagicMock
+
+        mod = _load_status()
+        core = self._core(tmp_path / "aipass", [{"name": "FLOW", "path": "src/flow"}], monkeypatch, mod)
+        (core / "src" / "flow").mkdir(parents=True)
+        studio = self._studio(tmp_path / "studio", [{"name": "flow", "path": "flow"}])
+        (studio / "flow").mkdir()
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
+
+        assert mod.resolve_branch_path("@flow", studio / "flow") == core / "src" / "flow"
+        template, *values = log.warning.call_args.args
+        rendered = template % tuple(values)
+        assert str(studio / "STUDIO_REGISTRY.json") in rendered
+        assert str(core / "src" / "flow") in rendered
+        assert str(studio / "flow") in rendered
 
     def test_resolves_existing_branch(self, tmp_path, monkeypatch):
         """Existing branch reference resolves to its directory path."""
@@ -1628,6 +1706,8 @@ class TestHandleRefresh:
         # built (a home directory's own .aipass, say) — planting the marker
         # here is what makes tmp_path itself the first, and only, match.
         (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        # The caller's directory outranks the process cwd; under drone it is set.
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
@@ -1647,8 +1727,9 @@ class TestHandleRefresh:
         from unittest.mock import patch as _patch
 
         # See test_refresh_cwd_success: the marker keeps the ancestor walk
-        # inside the sandbox this test built.
+        # inside the sandbox this test built, and the caller's directory is unset.
         (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         monkeypatch.setattr(
             mod,
             "refresh_single_dashboard",
@@ -1659,6 +1740,51 @@ class TestHandleRefresh:
 
         assert f"[dim]Refreshing {tmp_path.name.upper()} dashboard...[/dim]" in _printed_lines(mod)
         mod.error.assert_called_once_with("Failed: no dashboard")
+
+    def test_bare_refresh_refreshes_the_callers_branch_not_prax(self, tmp_path, monkeypatch):
+        """drone runs prax with cwd at prax, so the caller's branch comes from AIPASS_CALLER_CWD.
+
+        Measured 2026-09-11: a bare `drone @prax dashboard refresh` from
+        src/aipass/flow refreshed PRAX. Here the process cwd is a prax that has
+        its own dashboard, exactly as under drone.
+        """
+        from unittest.mock import patch as _patch
+
+        mod = _load_dashboard_module()
+        prax, flow = tmp_path / "prax", tmp_path / "flow"
+        for branch in (prax, flow):
+            (branch / "apps").mkdir(parents=True)
+            (branch / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(flow / "apps"))
+        refreshed: list = []
+        monkeypatch.setattr(
+            mod,
+            "refresh_single_dashboard",
+            lambda bp: refreshed.append(bp) or {"status": "success", "branch": bp.name.upper()},
+        )
+
+        with _patch("pathlib.Path.cwd", return_value=prax):
+            mod._handle_refresh([])
+
+        assert refreshed == [flow]
+        assert "[green]Refreshed FLOW[/green]" in _printed_lines(mod)
+
+    def test_bare_refresh_with_no_caller_directory_refuses_by_name(self, monkeypatch):
+        """No caller variable and a deleted cwd: say how to name the branch, refresh nothing."""
+        from unittest.mock import patch as _patch
+
+        mod = _load_dashboard_module()
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        refreshed: list = []
+        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp))
+
+        with _patch("pathlib.Path.cwd", side_effect=FileNotFoundError("deleted")):
+            mod._handle_refresh([])
+
+        assert refreshed == []
+        mod.error.assert_called_once_with(
+            "No caller directory, so no branch to refresh. Name it: drone @prax dashboard refresh @branch"
+        )
 
 
 # =============================================
@@ -1981,10 +2107,43 @@ class TestResolveBranchPathWrapper:
         monkeypatch.setattr(
             mod,
             "resolve_branch_path",
-            lambda ref: Path("/fake/flow"),
+            lambda ref, caller=None: Path("/fake/flow"),
         )
         result = mod._resolve_branch_path("@flow")
         assert result == Path("/fake/flow")
+
+    def test_hands_the_handler_the_callers_directory(self, tmp_path, monkeypatch):
+        """The project walk starts where the CALLER stands, so the wrapper must pass AIPASS_CALLER_CWD on.
+
+        A wrapper that drops it leaves the handler core-only, and Vera Studio's
+        `refresh @verify` answers "not found" again with every handler test green.
+        """
+        mod = _load_dashboard_module()
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        seen: list = []
+        monkeypatch.setattr(mod, "resolve_branch_path", lambda ref, caller=None: seen.append((ref, caller)))
+
+        mod._resolve_branch_path("@verify")
+
+        assert seen == [("@verify", tmp_path)]
+
+
+class TestCallerDir:
+    """_caller_dir -- where the caller stands, which under drone is not the process cwd."""
+
+    @pytest.mark.parametrize("value", ["", None], ids=["empty", "unset"])
+    def test_an_empty_or_unset_variable_falls_back_to_the_process_cwd(self, tmp_path, monkeypatch, value):
+        """An empty AIPASS_CALLER_CWD is absence: Path('') would name wherever the process stands."""
+        from unittest.mock import patch as _patch
+
+        mod = _load_dashboard_module()
+        if value is None:
+            monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        else:
+            monkeypatch.setenv("AIPASS_CALLER_CWD", value)
+
+        with _patch("pathlib.Path.cwd", return_value=tmp_path):
+            assert mod._caller_dir() == tmp_path
 
 
 # =============================================

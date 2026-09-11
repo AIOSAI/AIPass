@@ -18,13 +18,18 @@ is a single-machine reading rather than a property of the system, it says so.
 Anything that could not be verified is marked **UNVERIFIED** in place rather
 than left standing green.
 
-- **Tests:** 1414 test functions across 36 files; pytest expands them to 1502
-  cases, all passing from both rootdirs. Re-measured 2026-09-11: FPLAN-0542
-  added 10 test functions (15 cases) to `test_json_handler.py`; the file count
-  is unchanged.
+- **Tests:** 1421 test functions across 36 files; pytest expands them to 1510
+  cases, all passing from both rootdirs. Re-measured 2026-09-11: FPLAN-0548
+  added 7 test functions (8 cases) to `test_operations.py`. Earlier the same
+  day, FPLAN-0542 added 10 test functions (15 cases) to `test_json_handler.py`.
+  The file count is unchanged.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
+- **Last behaviour change:** FPLAN-0548 (2026-09-11). `dashboard refresh @branch`
+  resolves an external project's branch through the caller's own project
+  registry, and a bare `refresh` refreshes the caller's branch rather than
+  always PRAX. Described under Dashboard.
 - **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
   module's json triplet is wired: each `log_operation` that lands bumps
   `operations_total` and stamps `last_operation`/`last_updated` in
@@ -345,7 +350,8 @@ same day. Its sibling `handlers/cli/arg_gate.py` answers the opposite question �
 ```bash
 drone @prax dashboard                    # Show dashboard sections
 drone @prax dashboard refresh --all      # Refresh all branch dashboards from centrals
-drone @prax dashboard refresh @flow      # Refresh a specific branch
+drone @prax dashboard refresh @flow      # Refresh a specific branch (core, then the caller's project registry)
+drone @prax dashboard refresh            # Refresh the branch the CALLER stands in
 drone @prax dashboard status             # Show dashboard status
 drone @prax dashboard template           # Show the template schema
 drone @prax dashboard template-status    # Per-branch template sync state
@@ -357,6 +363,40 @@ drone @prax dashboard --help             # Dashboard usage
 `refresh --all` writes every branch's `DASHBOARD.local.json`. It accepts and
 silently ignores unknown flags, so `refresh --all --dry-run` is a real
 fleet-wide write, not a preview — there is no dry-run mode.
+
+**`refresh @branch` reaches external projects (2026-09-11, FPLAN-0548).** The
+name is looked up in `AIPASS_REGISTRY.json` first, exactly as before. On a
+miss, prax looks in the caller's own project registry: the nearest
+`*_REGISTRY.json` at or above the directory the caller stands in. A relative
+path there resolves against that registry's own directory. A name declared in
+both registries goes to core, and a warning names both rows. Before this, a
+Vera Studio branch running `drone @prax dashboard refresh @verify` got
+`Branch 'VERIFY' not found in registry` (exit 2), which is step 2 of the
+post-compact re-ground. So every external branch's dashboard stayed as it was:
+verify's still said `last_updated` 2026-07-09 and `new_mail` 0, while its inbox
+held 5 unread. `--all` is unchanged and still covers core only.
+
+**The caller's directory is `AIPASS_CALLER_CWD`, not the process cwd.** drone
+runs every branch with its cwd set to the *target* branch, so inside prax
+`Path.cwd()` is always prax. Measured the same day: a bare
+`drone @prax dashboard refresh` from `src/aipass/flow` refreshed **PRAX**. Both
+the project walk and the bare `refresh` now start from `_caller_dir()` in
+`apps/modules/dashboard.py`. That reads `AIPASS_CALLER_CWD` first (an empty
+value counts as unset) and falls back to the process cwd only for a direct run.
+With neither, the bare form refuses and tells you to name the branch. It is
+prax's one sanctioned working-directory read, the single entry in
+`tests/test_repo_root.py`'s allowlist, so it stays in the module. The handler
+`resolve_branch_path(ref, caller=None)` takes the directory as an argument and
+never reads a cwd. Called without one, it is core-only, as before.
+
+**Mail counts come from the branch's own inbox, never from the ai_mail central.**
+`calculate_quick_status` counts `<branch>/.ai_mail.local/inbox.json`. The
+refresh also builds an `ai_mail` section from `AI_MAIL.central.json`, but
+nothing reads it and it is popped before save. So a branch with no central row,
+which is every external branch today, still gets its true count. Pinned in
+`tests/test_operations.py`: a central listing only FLOW, a branch inbox with 3
+new, and `new_mail` 3. The comment in `refresh.py` used to say the section fed
+the counts, and it misled a measurement that same day. It has been corrected.
 
 ### The discovery watcher cannot kill its own thread
 
@@ -881,7 +921,7 @@ prax/
 ├── .daemon/schedule.json              # Daemon command job: tmp-sweep-weekly (DPLAN-0338)
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1414 test functions, 36 files (1502 cases)
+└── tests/                             # 1421 test functions, 36 files (1510 cases)
 ```
 
 ### Design Pattern
@@ -962,7 +1002,7 @@ through `error()`.
 
 ## Tests
 
-**1414 test functions across 36 files; pytest expands them to 1502 cases**, all
+**1421 test functions across 36 files; pytest expands them to 1510 cases**, all
 passing from both rootdirs (measured 2026-09-11). The two numbers differ because
 of parametrisation — the table below counts collected cases, which is what a
 suite run reports.
@@ -971,7 +1011,7 @@ suite run reports.
 |-----------|-------|----------|
 | test_filesystem_handler.py | 141 | Multi-CLI adapters, Codex branch detection |
 | test_monitoring_handlers.py | 141 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
-| test_operations.py | 96 | Dashboard operations, write-through |
+| test_operations.py | 104 | Dashboard operations, write-through; `refresh @branch` through the caller's project registry (core wins a collision), the caller's directory over the process cwd, mail counted from the branch's own inbox |
 | test_json_handler.py | 96 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the data-leg bump and heal (incl. rate_tracker sharing the document), the shim binds-never-wraps |
 | test_log_watcher.py | 84 | Log file tailing, agent activity parsing |
 | test_monitor_module.py | 80 | Monitor commands, thread lifecycle (4-thread), branch scoping |
