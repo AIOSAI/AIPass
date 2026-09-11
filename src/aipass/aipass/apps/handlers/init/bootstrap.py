@@ -753,7 +753,15 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             manifest_next[rel] = recorded[rel]
 
     stamp_pending = stamped != installed
-    pending = bool(writes or retires or symlinks or handlers or stamp_pending)
+    file_writes = bool(writes or retires or symlinks or handlers)
+    pending = file_writes or stamp_pending
+    # Stamp-only: nothing in the project changes but the manifest's record of
+    # which AIPass last looked at it. Patrick, 2026-09-10 (DPLAN-0337 R1): this
+    # one case applies without a go, because the receipt — not the go — is the
+    # contract, and a go spent on a plan that touches no file is a go that
+    # teaches people to approve without reading. Derived from the same queues
+    # as ``pending`` so the two can never disagree about what apply would do.
+    stamp_only = stamp_pending and not file_writes
 
     # --- Apply: every write in this run happens below this line ---
 
@@ -777,6 +785,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         "aipass_version": installed,
         "stamped_version": stamped,
         "stamp_pending": stamp_pending,
+        "stamp_only": stamp_only,
         "applied": apply,
         "pending": pending,
         "files": files,

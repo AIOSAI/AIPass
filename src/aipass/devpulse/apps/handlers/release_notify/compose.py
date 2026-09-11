@@ -180,13 +180,14 @@ def compose_body(version: str, headline: list[str]) -> str:
 
     parts.extend(
         [
-            "Your project scaffold does not update itself, and nothing updates it without your go.",
+            "Your project scaffold does not update itself, and nothing that changes a file happens without your go.",
             "The ritual, in this order:",
             "",
             "  1. aipass doctor - run it from your project root",
             "  2. aipass init update <your project root> --dry-run - read the plan, nothing is written",
-            "  3. ask Patrick or devpulse with that plan - apply only on a go",
-            "  4. aipass init update <your project root> - applies it",
+            "  3. ask Patrick or devpulse with that plan - apply only on a go. Exception: a plan that",
+            "     says stamp only (no file would change) needs no go - run the apply, read the receipt",
+            "  4. aipass init update <your project root> - applies it and prints a receipt of what it did",
             "  5. aipass doctor again - confirms the scaffold is current",
             "",
             "Reply to devpulse if the preview shows anything you do not understand.",

@@ -1167,7 +1167,10 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
 
     console.print("")
     if result.get("stamp_pending"):
-        console.print(f"  [yellow]stamp[/yellow]   {stamped} → {result.get('aipass_version', '?')} pending")
+        # On apply the stamp has already been written by the time this prints;
+        # "pending" there would be a lie in the one block that is the receipt.
+        state = "pending" if dry_run else "written"
+        console.print(f"  [yellow]stamp[/yellow]   {stamped} → {result.get('aipass_version', '?')} {state}")
     if result.get("trust_reenrol"):
         console.print(
             "  [green]trust[/green]   re-enrolled" if not dry_run else "  [green]trust[/green]   re-enrol on apply"
@@ -1232,7 +1235,16 @@ def _handle_init_update(args: list[str]) -> int:
         # Nothing above this line wrote a byte. git-auth is planned only too,
         # so the whole command stays a read.
         if not as_json:
-            console.print("[dim]Preview only — nothing written. Apply needs Patrick's or devpulse's go.[/dim]")
+            if result.get("stamp_only"):
+                # DPLAN-0337 R1: no file would change, only the manifest's record
+                # of the version — so the manager's next move is the apply
+                # itself, not a message asking permission for it.
+                console.print(
+                    "[dim]Preview only — nothing written. Stamp only: no file would change, "
+                    f"so no go is needed. Run: aipass init update {target}[/dim]"
+                )
+            else:
+                console.print("[dim]Preview only — nothing written. Apply needs Patrick's or devpulse's go.[/dim]")
         auth_rc = _run_git_auth_provisioning(target, dry_run=True)
         if auth_rc != 0:
             return auth_rc
