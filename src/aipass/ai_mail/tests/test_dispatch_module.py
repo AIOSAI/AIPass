@@ -16,6 +16,7 @@ All handler dependencies are mocked -- these tests verify orchestration
 logic, not business logic.
 """
 
+import json
 from contextlib import ExitStack
 
 import pytest
@@ -52,6 +53,7 @@ _H_REG = "aipass.ai_mail.apps.handlers.registry.read"
 _H_CENTRAL = "aipass.ai_mail.apps.handlers.central_writer"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 _H_TRIGGER = "aipass.trigger.apps.modules.core"
+_H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
 
 def _mock_console(printed: list[str]) -> MagicMock:
@@ -1294,3 +1296,73 @@ class TestWakeBackPromiseMatchesDelivery:
         dmod._announce_wake_back("@canary", "@prax")
         line = " ".join(printed).lower()
         assert "woken" in line
+
+
+# ===========================================================================
+# One seat, two verbs, one manager-gate verdict (#754's second owed pin)
+# ===========================================================================
+
+
+class TestBothVerbsAgreeAtTheManagerGate:
+    """92d0e977: from the admin seat, `dispatch @vera` spawned while `dispatch
+    wake @vera` answered "manager - wake skipped" - the wake verb never asked
+    for the grant. The REAL wake_branch decides here. Only resolution and what
+    sits past the gate are stubbed; the lock step is the stop, since an agent
+    already holding the lock routes to inbox and spawns nothing.
+    """
+
+    @pytest.fixture(autouse=True)
+    def manager(self, tmp_path, monkeypatch):
+        """A manager-class citizen that every address resolves to."""
+        branch = tmp_path / "mgr"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "manager"}}), encoding="utf-8"
+        )
+        monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: (branch, "@mgr"))
+        monkeypatch.setattr(f"{_H_WAKE}._clean_zombies", lambda: 0)
+        monkeypatch.setattr(f"{_H_WAKE}._check_lock", lambda path: {"pid": 4242, "timestamp": "held"})
+        monkeypatch.setattr(f"{MOD}.console", MagicMock())
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+    @staticmethod
+    def _verdicts_from_both_verbs() -> list:
+        """The manager step each verb's wake recorded: [wake verb, send+wake verb]."""
+        import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+
+        real_wake = wake_mod.wake_branch
+        verdicts: list = []
+
+        def _spy(*args, **kwargs):
+            """Run the real wake and keep its manager verdict."""
+            status, ok = real_wake(*args, **kwargs)
+            verdicts.append(status.find_step("manager"))
+            return status, ok
+
+        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send, _orchestrate_wake
+
+        with patch(f"{_H_WAKE}.wake_branch", _spy):
+            _orchestrate_wake(["@mgr"])
+        with _send_patches({f"{_H_WAKE}.wake_branch": _spy}):
+            _orchestrate_dispatch_send(["@mgr", "Subject", "Body"])
+        return verdicts
+
+    def test_admin_seat_gets_one_verdict_from_both_verbs(self, monkeypatch):
+        """Both verbs pass the gate on the verified grant."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        with patch(f"{_H_VERIFIED}.verify_admin_caller", return_value=(True, "admin grant verified")):
+            verdicts = self._verdicts_from_both_verbs()
+
+        assert len(verdicts) == 2
+        assert verdicts[0] == verdicts[1]
+        assert verdicts[0][0] == "ok" and "verified admin dispatch" in verdicts[0][2]
+
+    def test_ordinary_seat_gets_one_verdict_from_both_verbs(self, monkeypatch):
+        """The control: the gate is seen to CLOSE, so agreement above is not two Nones."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        verdicts = self._verdicts_from_both_verbs()
+
+        assert len(verdicts) == 2
+        assert verdicts[0] == verdicts[1]
+        assert verdicts[0][0] == "info" and "wake skipped" in verdicts[0][2]

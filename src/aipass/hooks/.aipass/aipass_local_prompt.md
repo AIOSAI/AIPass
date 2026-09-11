@@ -84,9 +84,10 @@ apps/
       loader.py            #   hooks.json discovery + validation, config-independent trust checks
       trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
       diagnostics.py       #   JSONL diagnostics config
+      output_merge.py      #   Fan-out stdouts -> ONE hook document (CC reads one; two JSON objects = neither applied)
 logs/
   engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 51 files, 1919 cases (1917 pass, 2 skips: 1 env, 1 win32-only)
+tests/                     # 51 files, 1928 cases (1926 pass, 2 skips: 1 env, 1 win32-only)
   .archive/                # removed suites, never deleted -- header says what each pinned
 ```
 
@@ -107,7 +108,7 @@ tests/                     # 51 files, 1919 cases (1917 pass, 2 skips: 1 env, 1 
 4. Engine runs matching hooks sequentially, logs each to JSONL
 5. `{"decision": "block"}` with exit code 2 = block the action
 6. Exit code 2 without JSON = crash (log error, continue to next hook)
-7. All hook stdout concatenated and returned to platform
+7. Hook stdouts merged into ONE document (output_merge.py): JSON answers become one object, additionalContext capped at 10,000 UTF-16 units (re-ground first, a drop is a WARNING)
 
 ## New handler? Check the provider wire
 

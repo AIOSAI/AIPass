@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-05-18",
-    "updated": "2026-09-09",
+    "updated": "2026-09-10",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — seedgo's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1325,6 +1325,11 @@
       "file": "apps/handlers/lifecycle/release_notice.py",
       "standard": "json_structure",
       "reason": "Thin SessionStart wiring — imports the module at call time and returns its string. No JSON operations at all, same profile as prompt/identity.py."
+    },
+    {
+      "file": "apps/handlers/config/output_merge.py",
+      "standard": "json_structure",
+      "reason": "Parses each handler's stdout and serialises the ONE hook-protocol document Claude Code reads, in memory, with stdlib json (FPLAN-0535). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as post_compact_regrounding.py and the security gates' hook protocol responses."
     }
   ],
   "notes": {

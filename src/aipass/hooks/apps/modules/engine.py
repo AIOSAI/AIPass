@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-08-16
+# Modified: 2026-09-10
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -23,6 +23,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
+from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
 from aipass.hooks.apps.handlers.module_root import module_file
 
 CONSOLE = err_console
@@ -445,7 +446,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             )
 
         if result["stdout"]:
-            outputs.append(result["stdout"])
+            outputs.append((hook_name, handler, result["stdout"]))
             if budget_cfg and budget_state is not None:
                 hs = budget_state.setdefault(hook_name, {})
                 hs["fire_count"] = hs.get("fire_count", 0) + 1
@@ -469,7 +470,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         }
     )
 
-    return "\n".join(outputs), 0
+    return combine_outputs(event_type, outputs), 0
 
 
 # =============================================================================

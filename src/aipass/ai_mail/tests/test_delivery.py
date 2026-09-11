@@ -618,3 +618,126 @@ def test_cross_project_delivery_same_project_allowed(tmp_path, repo_root, noop_i
 
     assert success is True
     assert error == ""
+
+
+# ---- #754: an unverifiable sender at the external tier ------------------------
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Write one JSON document, creating its directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _empty_inbox() -> dict:
+    """The inbox document delivery appends to."""
+    return {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}
+
+
+@pytest.fixture
+def external_world(tmp_path, monkeypatch, noop_inbox_lock):
+    """AIPass home with two fleet branches, plus a declared sibling root holding @vera.
+
+    The seam is delivery's _REPO_ROOT, as in test_external_tier_resolution.py:
+    @memory's real gateway reads the AIPASS_ROOTS.json written here, so @vera
+    resolves through the external tier exactly as it does live. Patching the
+    gateway would only prove the mock answers. Caller env is cleared - this suite
+    runs inside dispatched agents that carry their own.
+    """
+    home = tmp_path / "AIPass"
+    target = home / "src" / "aipass" / "target"
+    devpulse = home / "src" / "aipass" / "devpulse"
+    _write_json(target / ".ai_mail.local" / "inbox.json", _empty_inbox())
+    _write_json(devpulse / ".trinity" / "passport.json", {"branch_info": {"branch_name": "devpulse"}})
+    fleet_rows = [
+        {"name": "target", "email": "@target", "path": str(target)},
+        {"name": "devpulse", "email": "@devpulse", "path": str(devpulse)},
+    ]
+    _write_json(home / "AIPASS_REGISTRY.json", {"branches": fleet_rows})
+
+    studio = tmp_path / "Vera-Studio"
+    vera = studio / "src" / "vera_studio" / "vera"
+    _write_json(vera / ".trinity" / "passport.json", {"branch_info": {"branch_name": "vera", "email": "@vera"}})
+    _write_json(
+        studio / "VERA-STUDIO_REGISTRY.json",
+        {"branches": [{"name": "vera", "email": "@vera", "status": "active", "path": str(vera)}]},
+    )
+    _write_json(
+        home / "AIPASS_ROOTS.json",
+        {"roots": [{"path": "../Vera-Studio", "label": "vera-studio", "status": "active"}]},
+    )
+
+    monkeypatch.setattr(delivery_mod, "_REPO_ROOT", home)
+    monkeypatch.setattr(delivery_mod, "get_all_branches", lambda *a, **kw: fleet_rows)
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+    return {"tmp": tmp_path, "target": target, "devpulse": devpulse, "vera": vera}
+
+
+def _set_unverifiable_caller(world: dict, shape: str, monkeypatch) -> None:
+    """The two ways a sender cannot be placed in any project."""
+    if shape == "cwd_in_no_project":
+        nowhere = world["tmp"] / "nowhere"
+        nowhere.mkdir()
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(nowhere))
+
+
+_UNVERIFIABLE = ["no_caller_cwd", "cwd_in_no_project"]
+
+
+@pytest.mark.parametrize("shape", _UNVERIFIABLE)
+def test_unverified_sender_is_refused_at_the_external_tier(external_world, monkeypatch, shape):
+    """#754 pin 1: once the external tier resolves @vera, the boundary check is the last wall."""
+    _set_unverifiable_caller(external_world, shape, monkeypatch)
+
+    success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@trigger", recipient="@vera"))
+
+    assert success is False
+    assert "Unknown branch email" not in error, "the address resolved - the wall must refuse it, not the map"
+    assert "@vera" in error and "external root 'Vera-Studio'" in error and "cannot be verified" in error
+    assert not (external_world["vera"] / ".ai_mail.local").exists(), "no inbox may be provisioned"
+
+
+def test_a_reply_stamp_buys_nothing_without_a_sender_project(external_world):
+    """A reply's proof is bounded by the sender's project; with none, a stamp could name any mailbox."""
+    laundering_inbox = external_world["target"] / ".ai_mail.local" / "inbox.json"
+    _write_json(laundering_inbox, {**_empty_inbox(), "messages": [{"id": "m-vera", "from": "@vera"}]})
+    email = _make_email_data(
+        sender="@trigger", recipient="@vera", in_reply_to="m-vera", reply_path=str(laundering_inbox)
+    )
+
+    success, error = deliver_email_to_branch("@vera", email)
+
+    assert success is False
+    assert "cannot be verified" in error
+    assert not (external_world["vera"] / ".ai_mail.local").exists()
+
+
+@pytest.mark.parametrize("shape", _UNVERIFIABLE)
+def test_same_sender_to_a_fleet_branch_still_lands(external_world, monkeypatch, shape):
+    """#754 pin 2: trigger's in-process path - no caller cwd, fleet recipient - is untouched."""
+    _set_unverifiable_caller(external_world, shape, monkeypatch)
+
+    success, error = deliver_email_to_branch("@target", _make_email_data(sender="@trigger", recipient="@target"))
+
+    assert (success, error) == (True, "")
+    inbox = json.loads((external_world["target"] / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    assert [m["from"] for m in inbox["messages"]] == ["@trigger"]
+
+
+@pytest.mark.parametrize("caller_cwd", ["no_caller_cwd", "admin_seat"])
+def test_verified_admin_still_crosses_to_the_external_tier(external_world, monkeypatch, caller_cwd):
+    """#754 pin 3: the verified-admin bridge, with and without a caller cwd."""
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    if caller_cwd == "admin_seat":
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(external_world["devpulse"]))
+
+    with patch(
+        "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller",
+        return_value=(True, "admin grant verified"),
+    ):
+        success, error = deliver_email_to_branch("@vera", _make_email_data(sender="@devpulse", recipient="@vera"))
+
+    assert (success, error) == (True, "")
+    inbox = json.loads((external_world["vera"] / ".ai_mail.local" / "inbox.json").read_text(encoding="utf-8"))
+    assert [m["from"] for m in inbox["messages"]] == ["@devpulse"]

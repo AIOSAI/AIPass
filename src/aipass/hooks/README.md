@@ -55,7 +55,7 @@ drone @hooks --help              # Full help reference
 
 Hooks operate on two tiers:
 
-**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry concatenates every handler's stdout into one blob, which buries prompt injection past Claude Code's inline preview; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
+**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry answers with ONE merged document whose `additionalContext` shares one 10,000-unit display limit (How It Works, step 7), which the prompt injectors together would cross; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
 
 **Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. Edit `enabled` flags to turn hooks on/off per project. Use `drone @hooks status` to view current config.
 
@@ -142,7 +142,8 @@ src/aipass/hooks/
 │   ├── handlers/config/         # Config utilities (not hooks — no handle())
 │   │   ├── loader.py            #   hooks.json discovery + validation
 │   │   ├── trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
-│   │   └── diagnostics.py       #   JSONL logging for hook execution
+│   │   ├── diagnostics.py       #   JSONL logging for hook execution
+│   │   └── output_merge.py      #   Fan-out stdouts merged into ONE hook document (FPLAN-0535)
 │   ├── handlers/cli/            # CLI utilities (not hooks — no handle())
 │   │   └── help_flags.py        #   Help-flag detection — did the caller ask, or instruct?
 │   ├── handlers/json/           # JSON utilities (not hooks — no handle())
@@ -153,7 +154,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1837 test functions across 51 files; pytest expands to 1919 cases (1917 pass, 2 skipped — 1 env, 1 win32-only)
+└── tests/                       # 1846 test functions across 51 files; pytest expands to 1928 cases (1926 pass, 2 skipped — 1 env, 1 win32-only)
     └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 
@@ -165,7 +166,10 @@ src/aipass/hooks/
 4. Engine runs matching hooks sequentially, logs each to JSONL
 5. First hook returning `{"decision": "block"}` with exit code 2 = bail (block the action)
 6. Exit code 2 without JSON = crash (log error, continue to next hook)
-7. All hook stdout concatenated and returned to platform
+7. Hook stdouts returned to the platform as ONE document (`handlers/config/output_merge.py`). Claude Code parses a hook's stdout as a single document: two JSON objects on two lines are a non-blocking hook error and NEITHER is applied. So:
+   - a single output passes through untouched, and plain-only outputs are newline-joined as before;
+   - once any handler answers in JSON, the answer is one object: `additionalContext` joined in handler order by a blank line, `systemMessage` joined by a newline, other keys first-handler-wins (a conflict is logged);
+   - the merged context stays within Claude Code's 10,000 UTF-16-unit display limit. The post-compact re-ground is placed first, and a context that would cross the limit is dropped with a WARNING naming it — never silently.
 
 ## Importing Without a Working Directory
 
