@@ -26,10 +26,11 @@ than left standing green.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last behaviour change:** FPLAN-0552 (2026-09-12). The first log line no
-  longer fires `trigger.fire("startup")` — that fire was 94% of the line's cost
-  and its catch-up scan found 0 errors in 100 of 100 runs. First `.info()` drops
-  from 0.420 s to 0.016 s. Described under the first log line.
+- **Last behaviour change:** FPLAN-0553 (2026-09-12). Discovery is a scheduled
+  scan: `drone @prax discover run` daily, and the first log line of a process starts
+  no filesystem watcher. A process that logs now costs 0 inotify watches instead
+  of 1,589, and the registry went from 250 modules to 1,442. Described under
+  Discovery.
 - **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
   module's json triplet is wired: each `log_operation` that lands bumps
   `operations_total` and stamps `last_operation`/`last_updated` in
@@ -221,7 +222,7 @@ fleet.
 ### Status
 
 ```bash
-drone @prax status                       # System health (modules, loggers, watcher state)
+drone @prax status                       # System health (modules, loggers, last discovery scan)
 drone @prax status sync                  # ⚠ STILL WIRED — recreates repo-root STATUS.md (see below)
 drone @prax status --help                # Status usage
 ```
@@ -340,6 +341,59 @@ What is deliberately NOT in this step: the `died` record, `trigger.fire(
 "startup")` on the first log line (94% of that line's cost), and the background
 watcher start itself. Those are separate, separately ruled. The startup fire went
 in step 3, immediately below; the other two are still open.
+
+### Discovery is a scheduled scan
+
+**DPLAN-0339 step 4, 2026-09-12.** `drone @prax discover run` walks the ecosystem
+once and writes `prax_registry.json` as a **snapshot**: modules added, modules
+whose file is gone removed, `discovered_time` carried over for anything already
+on record. It runs daily as `module-scan-daily` in `.daemon/schedule.json`
+(04:30, `timeout_seconds` 60, `notify: false`). The verb existed before and was
+archived 2026-03-18 when discovery became a per-process watch; this brings it
+back and retires the watch. Bare `drone @prax discover` shows introspection and
+scans nothing — the fleet's module standard, and the right default for a verb
+that rewrites a registry.
+
+**What it replaced.** `SystemLogger._ensure_watcher` started
+`start_file_watcher_in_background()` on the **first log line of every process**:
+a daemon thread that walked 1,589 directories and installed one inotify watch per
+directory, then died with the process. Short-lived processes never finished it.
+Long-lived processes that merely logged carried a whole-tree watch by accident —
+6,356 of this machine's 6,634 inotify watches were four such processes.
+
+**It was also not working.** Measured 2026-09-11: the registry held **250 of the
+1,442 modules a scan finds — 17%** — because a module was registered only if it
+happened to be created while some process was both alive and still walking. It
+never pruned either: the first real scan removed **55** entries, including probe
+files deleted in August and flagged as unpruned back on 09-04.
+
+| | before | after |
+|---|---|---|
+| modules in the registry | 250 | **1,442** |
+| inotify watches held by a process that logs | ~1,589 | **0** |
+| threads started by the first log line | 1 (`prax-watcher-start`) | **0** |
+| first `.info()` | 0.420 s | **0.011 s** |
+| steady state | 0.402 ms/line | **0.232 ms/line** |
+
+The first scan reported **+1,245 / -55 / 197 unchanged**; a second run over the
+unchanged tree reports **0 and 0**, which is what makes it safe to schedule. A
+full scan is 5.5 s wall end to end (the walk alone is 0.18 s).
+
+**Steady state improved, which was not the plan.** Step 3 measured 0.402 ms/line
+with the background walk still running; the walk was contending with the caller
+for the GIL for its whole life. With it gone the line costs 0.232 ms. The
+contention DPLAN-0339 measured in both directions is simply not there any more.
+
+**Logging never depended on discovery.** A module gets its log file when it logs,
+not when it is registered; nothing outside prax reads the registry, and nothing
+anywhere reads `discovered_time`. What the registry feeds is prax's own dedupe
+and the module count in `drone @prax status`.
+
+**What still starts a watcher.** `initialize_logging_system()` →
+`run_initialize` → `start_file_watcher()`, synchronously, for the life of that
+process. That door is deliberate and unchanged, and it is why the liveness check,
+the `died` record and the `file_watcher_died` fire all stay: a process that opens
+it can still lose its watchdog dispatcher (DPLAN-0305) and must still find out.
 
 ### The first log line no longer fires a startup event
 
@@ -789,6 +843,11 @@ tests across 15 branches went red on `AttributeError`. Names come from
 `os.getpid()` + `itertools.count()` now. Worth writing down: the fleet contract
 caught a prax defect within minutes of it existing.
 
+**Superseded 2026-09-12 (DPLAN-0339 step 4): the logger starts no watcher at all
+any more.** The section below is the record of how the cost was chased around
+the process before the walk was removed from the logging path entirely; see
+"Discovery is a scheduled scan" above.
+
 **The watcher start does not block the first log line.** `SystemLogger._ensure_watcher`
 called `start_file_watcher()` inline, and watchdog installs one inotify watch per
 directory under the ecosystem root. Measured 2026-09-04 on this machine, 1605
@@ -1112,7 +1171,11 @@ suite run reports.
   `runaway_log_detected`, `file_watcher_died`). Every import site is guarded by
   `except (ImportError, OSError)`: prax runs without it. The logging path no
   longer touches it at all — the per-process `startup` fire was removed in
-  DPLAN-0339 step 3.
+  DPLAN-0339 step 3, and the events that remain fire only from the discovery
+  watcher, which now runs only when an operator starts it explicitly.
+- `watchdog` is no longer on the logging path either (step 4). It is imported by
+  the discovery watcher and by Mission Control, both of which are started on
+  purpose by somebody.
 - `watchdog` — File system monitoring (inotify + polling fallback)
 - Python stdlib (`pathlib`, `logging`, `threading`, `argparse`, `importlib`)
 - **@drone is not an import.** prax never imports drone; it *parses* the

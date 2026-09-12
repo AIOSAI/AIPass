@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: save.py
 # Description: Save Module Registry Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-07
-# Modified: 2026-03-09
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -32,7 +32,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT, ECOSYSTEM_ROOT
 from aipass.prax.apps.handlers.json import json_handler
@@ -50,6 +50,22 @@ REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 # =============================================
 # INTERNAL HELPERS
 # =============================================
+
+
+def _existing_last_scan() -> Optional[Dict[str, Any]]:
+    """The last_scan block already on disk, or None when there is none.
+
+    Never raises: a registry that cannot be read is a registry about to be
+    overwritten, and losing the previous scan stamp must not cost the write.
+    """
+    try:
+        with open(REGISTRY_FILE, "r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+    except (OSError, ValueError) as exc:
+        logger.debug("save: no previous last_scan to carry over (%s)", exc)
+        return None
+    block = existing.get("last_scan") if isinstance(existing, dict) else None
+    return block if isinstance(block, dict) else None
 
 
 def _atomic_write(json_path: Path, content: str) -> None:
@@ -81,7 +97,7 @@ def _atomic_write(json_path: Path, content: str) -> None:
 # =============================================
 
 
-def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
+def save_module_registry(modules: Dict[str, Dict[str, Any]], scan_stats: Optional[Dict[str, Any]] = None) -> bool:
     """Save module registry to prax_registry.json (system registry)
 
     Args:
@@ -123,6 +139,17 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
                 "scan_location": str(ECOSYSTEM_ROOT),
             },
         }
+
+        # A scan says when it ran and what it changed; any other writer says
+        # nothing and must not erase what the last scan said. So the key is
+        # written only by a caller that passed stats, and carried over otherwise
+        # (DPLAN-0339 step 4). This is what `drone @prax status` reports.
+        if scan_stats is not None:
+            registry_structure["last_scan"] = scan_stats
+        else:
+            previous = _existing_last_scan()
+            if previous is not None:
+                registry_structure["last_scan"] = previous
 
         # Save to file atomically (temp file + rename)
         content = json.dumps(registry_structure, indent=2, ensure_ascii=False)

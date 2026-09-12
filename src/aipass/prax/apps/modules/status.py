@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2026-03-10
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -39,6 +39,25 @@ def print_help():
     console.print("  [white]status sync[/white]         Scan all branches, build STATUS.md at repo root")
     console.print("  [white]status help[/white]         Show this help")
     console.print()
+
+
+def _format_last_scan(last_scan: dict) -> str:
+    """One line describing the last discovery scan.
+
+    There used to be a `File Watcher: Active/Inactive` line here. It reported
+    `is_file_watcher_active()`, which answers for the CALLING process — and the
+    status command never started a watcher, so it read "Inactive" on every run
+    while discovery was perfectly healthy. A field that is always wrong is worse
+    than no field. Since DPLAN-0339 step 4 discovery is a scheduled scan, so the
+    honest facts are when it last ran and what it changed.
+    """
+    if not last_scan:
+        return "never — run: drone @prax discover run"
+
+    when = str(last_scan.get("timestamp", "unknown"))
+    added = last_scan.get("added", "?")
+    removed = last_scan.get("removed", "?")
+    return f"{when} (+{added} / -{removed})"
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -85,7 +104,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"  System Logs Dir: {status['system_logs_dir']}")
     console.print(f"  Module Logs Dir: {status['module_logs_dir']}")
     console.print(f"  Registry File:   {status['registry_file']}")
-    console.print(f"  File Watcher:    {'Active' if status['file_watcher_active'] else 'Inactive'}")
+    console.print(f"  Last Scan:       {_format_last_scan(status['last_scan'])}")
     console.print(f"  Logger Override: {'Active' if status['logger_override_active'] else 'Inactive'}")
     console.print("=" * 60)
     console.print()

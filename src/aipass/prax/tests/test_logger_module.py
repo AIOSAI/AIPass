@@ -241,6 +241,7 @@ class TestGetSystemStatus:
         assert sorted(result) == [
             "file_watcher_active",
             "individual_loggers",
+            "last_scan",
             "logger_override_active",
             "module_logs_dir",
             "registry_file",
@@ -860,3 +861,67 @@ class TestLazyInitImportFootprint:
         assert "aipass.prax.apps.modules.logger" not in footprint
         assert not any(n == "watchdog" or n.startswith("watchdog.") for n in footprint)
         assert not any(n == "aipass.trigger" or n.startswith("aipass.trigger.") for n in footprint)
+
+
+# =============================================
+# The first log line starts nothing (DPLAN-0339 step 4)
+# =============================================
+
+
+class TestEnsureWatcherStartsNothing:
+    """Logging is not a reason to watch the filesystem.
+
+    Until 2026-09-12 the first log line of every process started a recursive
+    inotify watch over the whole ecosystem on an unjoined daemon thread: 1,589
+    watches per long-lived process, a thread that short processes killed
+    mid-walk, and a registry that was still 83% incomplete after all of it.
+    Discovery is a scheduled scan now (`drone @prax discover`). These pin that
+    the logging path costs the machine nothing.
+    """
+
+    def test_first_log_line_starts_no_watcher(self, monkeypatch):
+        """The whole point of step 4."""
+        mod, mocks = _inject_and_import(monkeypatch)
+        watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
+        watcher.start_file_watcher_in_background = MagicMock()
+        mod.SystemLogger._watcher_started = False
+
+        mod.SystemLogger()._ensure_watcher()
+
+        watcher.start_file_watcher_in_background.assert_not_called()
+        watcher.start_file_watcher.assert_not_called()
+
+    def test_the_logger_no_longer_binds_the_background_start(self, monkeypatch):
+        """A name the module does not import cannot be called by accident, and
+        a re-added call would have to re-add the import in the same edit."""
+        mod, _ = _inject_and_import(monkeypatch)
+
+        assert not hasattr(mod, "start_file_watcher_in_background")
+
+    def test_later_log_lines_still_check_liveness(self, monkeypatch):
+        """The check is what serves the explicit door
+        (`initialize_logging_system`), where a watcher really is running and can
+        still die under its process — DPLAN-0305."""
+        mod, _ = _inject_and_import(monkeypatch)
+        # Patched on the MODULE, not on the watcher mock: logger.py from-imports
+        # the name, so the module's own binding is what the call resolves.
+        liveness = MagicMock()
+        monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)
+        mod.SystemLogger._watcher_started = True
+
+        mod.SystemLogger()._ensure_watcher()
+
+        liveness.assert_called_once()
+
+    def test_the_first_line_does_not_pay_for_the_liveness_check(self, monkeypatch):
+        """`_watcher_started` now means "past the first log line", which is the
+        one moment no watcher can exist yet."""
+        mod, _ = _inject_and_import(monkeypatch)
+        liveness = MagicMock()
+        monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)
+        mod.SystemLogger._watcher_started = False
+
+        mod.SystemLogger()._ensure_watcher()
+
+        liveness.assert_not_called()
+        assert mod.SystemLogger._watcher_started is True
