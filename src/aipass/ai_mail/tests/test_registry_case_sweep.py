@@ -38,6 +38,7 @@ NEGATIVE control proving the instrument can still say no.
 """
 
 import ast
+import fnmatch
 import json
 import os
 import re
@@ -139,10 +140,12 @@ _GLOB_MAGIC = re.compile(r"[*?[]")
 
 @pytest.fixture
 def folding_volume(monkeypatch):
-    """Make this Linux box's VOLUME fold case, leaving the glob MATCHER as it was.
+    """Make the VOLUME fold case, leaving the glob MATCHER as it was.
 
-    Alone, that is CPython 3.13 on a default macOS volume. Requested after
-    ``case_insensitive_fs`` it is the Windows world, where both halves fold.
+    Half a world, never a whole one. Requested after ``posix_matcher`` it is the
+    macOS world (``mac_world``); after ``case_insensitive_fs`` it is Windows.
+    Alone it inherits the HOST's matcher, which folds on Windows — the Mac-world
+    pins asked for alone went red there (Windows run 34710099534, head c69720c2).
       - A lookup by name finds the file whatever its spelling: ``Path.exists``,
         and a glob component with no wildcard, which 3.13 answers with
         ``os.path.lexists`` (``Lib/glob.py`` 3.13:408, ``literal_selector``)
@@ -173,6 +176,42 @@ def folding_volume(monkeypatch):
 
     monkeypatch.setattr(Path, "exists", _exists)
     monkeypatch.setattr(Path, "glob", _glob)
+
+
+@pytest.fixture
+def posix_matcher(monkeypatch):
+    """Install the posix flavour's case-sensitive wildcard matcher on ANY host.
+
+    The Mac world needs a matcher that does not fold, and on a Windows host the
+    installed one does: ``WindowsPath.glob`` takes the windows flavour's rule. A
+    Mac world that manufactured only the volume was a Mac world on posix hosts
+    alone. Each component is matched over the real directory listing with
+    ``fnmatch.fnmatchcase``, case-sensitive everywhere; ``**`` is refused by name
+    rather than half-emulated, because no pin here needs it.
+    """
+
+    def _glob(self, pattern, *args, **kwargs):
+        if "**" in pattern:
+            raise NotImplementedError("posix_matcher matches one level per component, not **")
+        found = [self]
+        for part in pattern.split("/"):
+            found = [
+                child
+                for parent in found
+                if parent.is_dir()
+                for child in parent.iterdir()
+                if fnmatch.fnmatchcase(child.name, part)
+            ]
+        yield from found
+
+    monkeypatch.setattr(Path, "glob", _glob)
+
+
+@pytest.fixture
+def mac_world(posix_matcher, folding_volume):
+    """CPython 3.13 on a default macOS volume, complete on any host: the posix
+    matcher is installed first and the folding volume over it, in the order the
+    two are requested here."""
 
 
 def _volume_folds_case(directory: Path) -> bool:
@@ -225,10 +264,12 @@ def test_the_volume_probe_agrees_with_a_direct_stat(tmp_path):
     assert _volume_folds_case(tmp_path) is by_stat
 
 
-def test_the_two_probes_ask_different_questions(tmp_path, folding_volume):
+def test_the_two_probes_ask_different_questions(tmp_path, mac_world):
     """The crux of FPLAN-0554, manufactured here: a folding volume under a
     case-sensitive matcher. On the Mac they disagree, so neither probe may stand
-    in for the other."""
+    in for the other. Both halves are manufactured, so this is a pin about the
+    probes on every host rather than a posix host fact (Windows run 34710099534
+    read True here while only the volume was manufactured)."""
     assert _volume_folds_case(tmp_path) is True
     assert _matcher_folds_case(tmp_path) is False
 
@@ -419,13 +460,17 @@ class TestTheInstrumentIsHonest:
         _claims_of_the_negative_control(tmp_path)
         _claims_of_the_link(tmp_path)
 
-    def test_the_mac_row_is_driven_here_so_it_cannot_rot(self, tmp_path, folding_volume):
+    def test_the_mac_row_is_driven_here_so_it_cannot_rot(self, tmp_path, mac_world):
         """The two macOS reds, reproduced on Linux before they were cured: a
         folding volume under a case-sensitive matcher. With the old single probe
         the negative control and the link failed in this world with the runner's
         own text ("host was probed as case-folding, so the raw glob must see the
         decoy", and ``in []) is True``). Now the volume folds, the matcher does
         not, the raw glob sees nothing, and the reader refuses the counter anyway.
+
+        The matcher is manufactured as well as the volume. With the volume alone
+        this pin was a Mac world on posix hosts only, and the Windows runner read
+        its own folding matcher here (run 34710099534, head c69720c2).
         """
         assert _MATCHER_FOLDS_BY_PLATFORM["darwin"] is False
 
