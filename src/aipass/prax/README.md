@@ -26,10 +26,10 @@ than left standing green.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last behaviour change:** FPLAN-0550 (2026-09-12). `start_file_watcher()` no
-  longer writes a `discovery_watcher_event` `started` record — the write raced
-  its own process's exit and was 87% of the ecosystem's orphaned staging temps.
-  It had no reader. Described under the weekly tmp sweep.
+- **Last behaviour change:** FPLAN-0552 (2026-09-12). The first log line no
+  longer fires `trigger.fire("startup")` — that fire was 94% of the line's cost
+  and its catch-up scan found 0 errors in 100 of 100 runs. First `.info()` drops
+  from 0.420 s to 0.016 s. Described under the first log line.
 - **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
   module's json triplet is wired: each `log_operation` that lands bumps
   `operations_total` and stamps `last_operation`/`last_updated` in
@@ -338,7 +338,42 @@ is load-dependent — the same 40-process run that gave 3 of 40 on 09-11 gave 0 
 
 What is deliberately NOT in this step: the `died` record, `trigger.fire(
 "startup")` on the first log line (94% of that line's cost), and the background
-watcher start itself. Those are separate, separately ruled.
+watcher start itself. Those are separate, separately ruled. The startup fire went
+in step 3, immediately below; the other two are still open.
+
+### The first log line no longer fires a startup event
+
+**DPLAN-0339 step 3, 2026-09-12.** `SystemLogger._ensure_watcher` used to end
+with `trigger.fire("startup")`, so every process in the fleet fired a startup
+event on its first log line. That fire *was* the first log line: **0.339 s of its
+0.361 s, 94%**, nearly all of it importing the `aipass.trigger` graph so that one
+event could reach one handler.
+
+What it bought was an error catch-up scan in trigger's `handle_startup`. At 5.1
+fires a minute, **100 of 100** of those runs found 0 errors — and because every
+process shared one throttle, a hook or a drone command routinely consumed the
+recovery window seconds before the scan that actually needed it. Recovery now has
+a real owner: trigger's `log_watcher_service` calls `run_error_catchup()` itself
+at service start, and `last_scan_timestamp` advances only after a scan that
+covered every file (FPLAN-0551, live since 00:28). Medic's digest lane never rode
+the fire — it calls `run_startup_catchup()` directly, deliberately.
+
+Measured here, 12 throwaway processes each side, `AIPASS_TEST_LOG_DIR` redirect,
+live tree untouched:
+
+| | median | range |
+|---|---|---|
+| first `.info()` before | 0.420 s | 0.336-0.826 |
+| first `.info()` after | **0.016 s** | 0.012-0.021 |
+| steady state before | 0.390 ms/line | 0.240-0.488 |
+| steady state after | 0.402 ms/line | 0.384-0.574 |
+
+**The first log line got ~26x cheaper; the steady state did not move.** The event
+still exists and still has exactly one listener, and `drone @trigger fire startup`
+still works — nothing fires it per-process any more, by design. Proof that the
+per-process fire is gone: trigger's `startup_log.json` ring gained **40 records
+from a batch of 40 short processes before the change and 0 after** (counted by
+timestamp, because the ring is capped at 100 rows and a raw count is saturated).
 
 ### Asking for help never does the thing
 
@@ -518,7 +553,9 @@ hook before ruling, and the diagnosis does not survive:
 **Importing prax writes nothing. The first `logger.info()` writes 26 times, and
 the second writes nothing.** All three spellings are identical because the writes
 come from the *call*, not the binding — the first call is what starts the file
-watcher, fires `trigger.fire("startup")` and auto-creates the per-module JSON.
+watcher and auto-creates the per-module JSON. (It also fired
+`trigger.fire("startup")` when this was measured; that fire was removed in
+DPLAN-0339 step 3, see below.)
 Changing the recommended import would have moved a number that does not depend
 on it.
 
@@ -1071,9 +1108,11 @@ suite run reports.
 
 ### Depends On
 - `aipass.cli` — Console output, headers, success/error formatting (imported)
-- `aipass.trigger` — Optional event firing (`module_discovered`, `startup`,
+- `aipass.trigger` — Optional event firing (`module_discovered`,
   `runaway_log_detected`, `file_watcher_died`). Every import site is guarded by
-  `except (ImportError, OSError)`: prax runs without it.
+  `except (ImportError, OSError)`: prax runs without it. The logging path no
+  longer touches it at all — the per-process `startup` fire was removed in
+  DPLAN-0339 step 3.
 - `watchdog` — File system monitoring (inotify + polling fallback)
 - Python stdlib (`pathlib`, `logging`, `threading`, `argparse`, `importlib`)
 - **@drone is not an import.** prax never imports drone; it *parses* the

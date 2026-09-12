@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2026-08-11
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -112,8 +112,9 @@ class SystemLogger:
         with SystemLogger._watcher_lock:
             if SystemLogger._watcher_started:
                 return  # Double-check after acquiring lock
-            # Set flag FIRST to prevent recursion: trigger.fire() uses logger
-            # internally, which would re-enter _ensure_watcher() before we return
+            # Set the flag FIRST, before anything below runs: the block is
+            # double-checked locking, and a re-entrant log from the start path
+            # must hit the early return instead of recursing.
             SystemLogger._watcher_started = True
             # Start prax watcher (Python file discovery) WITHOUT waiting for it.
             # Scheduling the recursive watch is one inotify syscall per directory
@@ -125,13 +126,25 @@ class SystemLogger:
             # it with the same words; there is no caller left to hand it to.
             if not is_file_watcher_active():
                 start_file_watcher_in_background()
-            # Fire startup event (trigger auto-initializes handlers)
-            try:
-                from aipass.trigger.apps.modules.core import trigger
-
-                trigger.fire("startup")
-            except (ImportError, OSError) as e:
-                logger.warning("Trigger startup fire skipped (not available or inotify full): %s", e)
+            # NO STARTUP EVENT IS FIRED HERE, DELIBERATELY (DPLAN-0339 step 3,
+            # 2026-09-12). A call stood here that fired the `startup` event on
+            # trigger's bus, so every process that logged fired one on its first
+            # log line, and that fire WAS the first log line: 0.339 s of
+            # its 0.361 s, 94%, almost all of it importing the aipass.trigger
+            # graph so one event could be dispatched to one handler.
+            #
+            # What it bought: trigger's handle_startup ran an error catch-up
+            # scan. At 5.1 fires a minute, 100 of 100 of those runs found 0
+            # errors, and the processes shared one throttle, so a hook or a drone
+            # command routinely consumed the recovery window seconds before the
+            # scan that needed it. Recovery now has a real owner: trigger's
+            # log_watcher_service calls run_error_catchup() itself at service
+            # start, and last_scan_timestamp only advances after a completed scan
+            # (FPLAN-0551). The per-process fire is pure cost.
+            #
+            # The event still exists and still has exactly one listener
+            # (trigger registry.py handle_startup); `drone @trigger fire startup`
+            # still works. Nothing fires it per-process any more, by design.
 
     def info(self, message, *args, **kwargs):
         """Log info message to calling module's log file"""
