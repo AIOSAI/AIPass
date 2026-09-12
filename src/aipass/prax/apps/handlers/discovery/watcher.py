@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-26
-# Modified: 2026-03-09
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -231,7 +231,26 @@ def start_file_watcher():
         _observer = new_observer
         _LIVENESS.death_reported = False  # New observer: a previous death is no longer the current state.
 
-    json_handler.log_operation("discovery_watcher_event", {"action": "started", "watch_root": str(ECOSYSTEM_ROOT)})
+    # NO "started" RECORD HERE, DELIBERATELY (DPLAN-0339 step 1, 2026-09-12).
+    # This used to be `json_handler.log_operation("discovery_watcher_event",
+    # {"action": "started", ...})`, and it was the single largest source of
+    # orphaned staging temps in the ecosystem: 87% of the new-era
+    # `.<pid>_<n>.tmp` files in prax_json/ were staging this one record.
+    #
+    # The cause is a race the record cannot win. Since 2026-09-04 this function
+    # runs on `prax-watcher-start`, a daemon thread nobody joins, and it reaches
+    # this line at ~0.43s (measured: walk 0.431-0.440s wall). A short-lived
+    # process - a hook, a drone command - logs once and exits at ~0.39-0.43s.
+    # Interpreter exit kills a daemon thread wherever it stands, temp-and-rename
+    # included, so the write lands inside its own destruction window. It is one
+    # staged write for the log and a second for the data bump that rides on every
+    # log_operation: two orphan chances per process, every process.
+    #
+    # It cost that and bought nothing. `watcher_log.json` has no reader - not in
+    # production, not in the tests, nowhere in the fleet (re-grepped 2026-09-12).
+    # Do not restore it. Joining the thread or moving the write earlier were both
+    # considered and rejected on the contention numbers (DPLAN-0339 option B).
+    # The `died` record at _report_watcher_death stays: it is decided separately.
 
 
 def start_file_watcher_in_background() -> None:

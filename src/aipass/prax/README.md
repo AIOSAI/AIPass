@@ -26,10 +26,10 @@ than left standing green.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last behaviour change:** FPLAN-0548 (2026-09-11). `dashboard refresh @branch`
-  resolves an external project's branch through the caller's own project
-  registry, and a bare `refresh` refreshes the caller's branch rather than
-  always PRAX. Described under Dashboard.
+- **Last behaviour change:** FPLAN-0550 (2026-09-12). `start_file_watcher()` no
+  longer writes a `discovery_watcher_event` `started` record — the write raced
+  its own process's exit and was 87% of the ecosystem's orphaned staging temps.
+  It had no reader. Described under the weekly tmp sweep.
 - **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
   module's json triplet is wired: each `log_operation` that lands bumps
   `operations_total` and stamps `last_operation`/`last_updated` in
@@ -296,7 +296,7 @@ delete takes 1.2 s. So the cost is about 54 ms per deleted file, because each on
 writes a ledger row and a log line. At that rate 120 s covers about 2,100 files a
 week. A timeout marks the row FAILED but keeps whatever it already deleted.
 
-**Where the orphans come from (measured 2026-09-11, not yet acted on).** Each
+**Where the orphans come from (measured 2026-09-11, cured 2026-09-12).** Each
 new-era `.<pid>_<n>.tmp` still holds the document it was staging, so its content
 names the writer. Of the 442 in `prax_json/` (09-04 to 09-11), **384 (87%)**
 were staging one record: `discovery_watcher_event` with `action: started`. That
@@ -316,8 +316,29 @@ same `started` record. That bump added a second staged write to every
 `log_operation`, so each dying process now has two windows instead of one. The
 strip DPLAN-0338 leaves open (the creation-time records) is aimed at
 `introspection_resolved`, and by this count that is one of the smallest
-writers. The cause is reported to @devpulse; the cure is unruled and is not in
-this change.
+writers. **The cure (DPLAN-0339 step 1, 2026-09-12).** The `started` record is gone from
+`start_file_watcher()`. It had no reader — not in production, not in the tests,
+nowhere in the fleet — so nothing was traded away for it. The numbers that
+convicted it, re-measured on HEAD `d6deeb42`: the walk thread finishes at
+**0.431-0.440 s** wall (CPU 0.133 s, so 70% of it is GIL waiting) and a
+short-lived process exits at **0.394-0.433 s**, which means the record was
+written inside its own destruction window on every process, every time. Removing
+the one `log_operation` call removes both staged writes, because the data-leg
+bump rides on it.
+
+Proof, 240 throwaway processes each side under `AIPASS_TEST_LOG_DIR` with the
+live tree untouched: **6 orphans before, 0 after** — and `watcher_log.json` came
+through all 240 with its mtime unchanged, so the record is not merely unobserved,
+it is never written. The after-run carried *higher* load than the before-run
+(7.71 vs 3.71), so the race had more chance to fire, not less. First-log-line
+cost is unchanged, as expected: this step is litter, not speed. The orphan rate
+is load-dependent — the same 40-process run that gave 3 of 40 on 09-11 gave 0 of
+40 on 09-12 before the change, because a slower first line pushes exit past the
+0.43 s write. That is why the baseline here is 240 processes and not 40.
+
+What is deliberately NOT in this step: the `died` record, `trigger.fire(
+"startup")` on the first log line (94% of that line's cost), and the background
+watcher start itself. Those are separate, separately ruled.
 
 ### Asking for help never does the thing
 
