@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
 # Modified: 2026-09-12
 # =============================================
@@ -162,6 +162,27 @@ system_logger = SystemLogger()
 # =============================================
 # LIFECYCLE FUNCTIONS
 # =============================================
+#
+# These two are the explicit system lifecycle doors seedgo's trigger standard
+# names (trigger.md Pattern 9, `initialize_*_system` / `shutdown_*_system`), so
+# each announces itself on trigger's bus: `logging_system_initialized` and
+# `logging_system_shutdown`. The standard's event table names no lifecycle
+# event, so those two names are prax's, following its rules (lowercase,
+# underscore-separated, past tense).
+#
+# BOTH IMPORT TRIGGER INSIDE THEMSELVES, never at module level, and that is the
+# whole design. `from aipass.prax import logger` and every log line the fleet
+# writes must stay clear of the aipass.trigger import graph: DPLAN-0339 step 3
+# took a fire off the first log line of every process and it was worth 0.339 s
+# of that line's 0.361 s, nearly all of it importing that graph. A door called
+# deliberately, once, can afford what a hot path cannot.
+#
+# Each fire is guarded (ImportError, OSError) exactly as the removed one was:
+# these doors must still work on a host where trigger cannot import or inotify
+# is exhausted. A fire that fails is a warning, never a failed initialize.
+#
+# Nothing listens to either event today, by design — the point of the standard
+# is that a handler can plug in later without prax changing again.
 
 
 def initialize_logging_system():
@@ -174,8 +195,10 @@ def initialize_logging_system():
     4. Setup system logger
     5. Install logger override
     6. Start file watcher
+    7. Fire `logging_system_initialized`
 
     MODULE orchestration pattern: Thin wrapper that delegates to handler.
+    See the section header above for why the trigger import is local.
     """
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
@@ -186,6 +209,13 @@ def initialize_logging_system():
 
     console.print(f"\\[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
 
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        trigger.fire("logging_system_initialized", modules_count=result["modules_count"])
+    except (ImportError, OSError) as e:
+        logger.warning("Trigger logging_system_initialized fire skipped (not available or inotify full): %s", e)
+
 
 def shutdown_logging_system():
     """Shutdown logging system cleanly
@@ -194,8 +224,11 @@ def shutdown_logging_system():
     1. Stop file watcher
     2. Restore original logger
     3. Log shutdown operation
+    4. Fire `logging_system_shutdown`
 
     MODULE orchestration pattern: Thin wrapper that delegates to handler.
+    Fired last on purpose: the event says the system IS down, not that it is
+    going down, so a handler that reacts by writing is not racing the teardown.
     """
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
@@ -205,6 +238,13 @@ def shutdown_logging_system():
     run_shutdown(MODULE_NAME)
 
     console.print(f"\\[{MODULE_NAME}] Shutdown complete")
+
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        trigger.fire("logging_system_shutdown")
+    except (ImportError, OSError) as e:
+        logger.warning("Trigger logging_system_shutdown fire skipped (not available or inotify full): %s", e)
 
 
 # =============================================

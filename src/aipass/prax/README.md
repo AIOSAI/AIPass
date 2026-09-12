@@ -26,11 +26,14 @@ than left standing green.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last behaviour change:** FPLAN-0553 (2026-09-12). Discovery is a scheduled
-  scan: `drone @prax discover run` daily, and the first log line of a process starts
-  no filesystem watcher. A process that logs now costs 0 inotify watches instead
-  of 1,589, and the registry went from 250 modules to 1,442. Described under
-  Discovery.
+- **Last behaviour change:** FPLAN-0555 (2026-09-12). The two explicit lifecycle
+  doors, `initialize_logging_system()` and `shutdown_logging_system()`, now fire
+  `logging_system_initialized` and `logging_system_shutdown` on the trigger bus,
+  with the trigger import inside each function so the logging path stays clear of
+  it. Described under Lifecycle events. Before that, FPLAN-0553 (2026-09-12) made
+  discovery a scheduled scan: `drone @prax discover run` daily, and the first log
+  line of a process starts no filesystem watcher — 0 inotify watches instead of
+  1,589, registry 250 modules to 1,442. Described under Discovery.
 - **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
   module's json triplet is wired: each `log_operation` that lands bumps
   `operations_total` and stamps `last_operation`/`last_updated` in
@@ -394,6 +397,8 @@ and the module count in `drone @prax status`.
 process. That door is deliberate and unchanged, and it is why the liveness check,
 the `died` record and the `file_watcher_died` fire all stay: a process that opens
 it can still lose its watchdog dispatcher (DPLAN-0305) and must still find out.
+(The `died` *record* works; the *fire* does not currently reach the bus — see
+Lifecycle events for why, measured 2026-09-12.)
 
 ### The first log line no longer fires a startup event
 
@@ -428,6 +433,45 @@ still works — nothing fires it per-process any more, by design. Proof that the
 per-process fire is gone: trigger's `startup_log.json` ring gained **40 records
 from a batch of 40 short processes before the change and 0 after** (counted by
 timestamp, because the ring is capped at 100 rows and a raw count is saturated).
+
+### The lifecycle doors fire, the log line does not
+
+**FPLAN-0555, 2026-09-12.** Removing the hot-path `startup` fire in step 3 left
+`logger.py` with no `trigger.fire` anywhere, and seedgo's Trigger standard reads
+that file-level: its Pattern 9 checks `initialize_*_system` / `shutdown_*_system`
+only when the file contains no fire at all, so the two doors had been passing on
+a technicality the whole time. Once the technicality went, the audit dropped to
+99% and the CI gate went red (Linux run 34682737344).
+
+The cure is the one the standard actually asks for. `initialize_logging_system()`
+fires `logging_system_initialized` (carrying `modules_count`) after
+`run_initialize` returns; `shutdown_logging_system()` fires
+`logging_system_shutdown` after `run_shutdown`, last, so the event says the
+system *is* down rather than that it is going down. seedgo's event table names no
+system-lifecycle event, so those two names are prax's, following the convention
+it does state: lowercase, underscore-separated, past tense.
+
+**Both imports are inside their function, and that is the design, not a style
+choice.** `from aipass.prax import logger` and every log line the fleet writes
+must stay clear of the `aipass.trigger` import graph — that graph was 0.339 s of
+a 0.361 s first log line before step 3. A door called deliberately, once, can
+afford what a hot path cannot. Each fire is guarded `(ImportError, OSError)`
+exactly as the removed one was: these doors must still work on a host where
+trigger cannot import or inotify is exhausted, so a failed fire is a warning and
+never a failed initialize. Nothing listens to either event today, by design — the
+point of the standard is that a handler can plug in later without prax changing.
+
+Measured on a fresh interpreter that imports the logger and logs one line:
+nothing under `aipass.trigger.apps.modules` is loaded, and the first `.info()`
+still costs about 0.011 s. Three `aipass.trigger` *package shells* do appear, and
+they are not from this change: `handlers/discovery/watcher.py:57` attempts a
+module-level trigger import, that import raises `ImportError` (a circular import
+back into the partially initialised watcher), and Python keeps the parent
+packages it had already created. The consequence is that `watcher._HAS_TRIGGER`
+is **False in every live process**, so `module_discovered` and
+`file_watcher_died` never actually fire. Found while proving this change,
+reported to @devpulse, not fixed here — it is a separate decision. Both facts are
+pinned in `test_logger_module.py::TestLoggingPathIsTriggerFree`.
 
 ### Asking for help never does the thing
 
