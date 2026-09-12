@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-12
 
 ---
 
@@ -227,17 +227,17 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 281 test functions in 13 files
-                           #   (pytest expands to 286 cases)
+  tests/                   # Branch suite: 297 test functions in 13 files
+                           #   (pytest expands to 302 cases)
 ```
 
-Counted 2026-09-07. That 281 is the branch suite alone — the figure the seedgo
+Counted 2026-09-12. That 297 is the branch suite alone — the figure the seedgo
 readme rule checks, `def test_` under `tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
 1090 `def test_` functions expanding to 1101 cases, and `lib/screen_lock/tests/`
-adds 22. All three together run 1409 passing, 0 skipped — the same number from
-the branch root and from the repo root.
+adds 22. All three together run 1425 passing, 0 skipped — the same number from
+the branch root (`pytest .`) and from the repo root.
 
 ---
 
@@ -353,6 +353,51 @@ be computed must not be guessed at.
 
 ---
 
+## The system_status Skill Off Linux
+
+`lib/system_status/handler.py` asked `/proc` three times — `meminfo`, `uptime`
+and the process table — so on the macOS runner `memory`, `uptime` and
+`processes` each answered `success: False` every run, and `summary` reported
+`success: True` over a disk line plus an Errors trailer (FPLAN-0554, runs
+34704362515 and 34707099650). The four cases in `tests/test_runner.py` carried
+`skipif(sys.platform == "win32")`, a guard that named the one platform that was
+never the problem.
+
+All three now ask **psutil** — `virtual_memory()`, `boot_time()`, `pids()` —
+which is a declared dependency of this project (`psutil>=5.9`) and answers on
+Linux, macOS and Windows. Disk was always portable (`shutil.disk_usage`) and is
+untouched. Two things that are not obvious:
+
+- **`summary` fails when a section fails.** It returns `success: False` with
+  `error` naming the missing sections, and still hands back the sections that
+  did answer. The old shape put the failures in an `Errors:` trailer inside
+  `output` and kept `success: True`, which is a caller reading a disk line as a
+  system report.
+- **No psutil means a refusal, not a partial.** The three actions return
+  `success: False` naming the install recipe; `disk` still answers.
+
+The macOS half is manufactured on this Linux box in `tests/test_runner.py`, and
+the psutil stand-in is part of the world rather than a shortcut around it:
+psutil's *Linux* backend reads `/proc` through plain `open()`, so denying
+`/proc` with the real psutil in place would have manufactured a failure no Mac
+can have — there psutil answers from the kernel. The world is
+`sys.platform == "darwin"` + every `/proc` read refused + a stand-in shaped like
+macOS's `virtual_memory` (no `buffers`, no `cached`), with three controls: the
+denial is live, the denial can still say yes, and the process table is gone too.
+Against the pre-cure handler 11 of these cases go red on behaviour; 8 mutants
+were killed.
+
+**Not cured, reported:** the audit corpus is `apps/` (and `tests/` for the
+branch-level arms) — it never enters `lib/`, where all seven built-in skills
+live. That is why `Host_Portability` read **100** on this branch while the skill
+was red on every macOS run. Measured 2026-09-12, `lib/` also holds three `/proc`
+reads in `telegram/apps/handlers/base_bot.py` (2721, 2757, 3984 — all inside
+`except OSError`, so they degrade honestly; the third's guard says
+`sys.platform != "win32"`, which is again the wrong platform named) and tmux /
+systemctl calls in the telegram skill. Reported to @devpulse and @seedgo.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -384,7 +429,7 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1409 passing, 0 skipped, identical from the branch root and
+stay masked. Suite 1425 passing, 0 skipped, identical from the branch root and
 the repo root. seedgo audit 100 on every CI-scored category.
 
 **Unverified — the telegram skill's runtime.** The skill is discovered, listed
@@ -427,7 +472,7 @@ headless session's.
 
 ---
 
-*Last Updated: 2026-09-05*
+*Last Updated: 2026-09-12*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -1,10 +1,10 @@
 ---
 name: system_status
 description: Check system health -- disk usage, memory, running processes, uptime
-version: 1.0.0
+version: 2.0.0
 tags: [system, monitoring, health]
 requires:
-  pip: []
+  pip: [psutil]
   bins: []
   config: []
 has_handler: true
@@ -19,8 +19,8 @@ Check system health metrics without leaving your workflow. Returns structured da
 | Action      | Description                                    |
 |-------------|------------------------------------------------|
 | `disk`      | Disk usage for the root filesystem             |
-| `memory`    | Memory usage from /proc/meminfo (Linux)        |
-| `uptime`    | System uptime from /proc/uptime                |
+| `memory`    | Memory and swap usage (psutil, portable)       |
+| `uptime`    | System uptime from psutil's boot time          |
 | `processes` | Count of currently running processes            |
 | `summary`   | All of the above combined into one report       |
 
@@ -51,8 +51,14 @@ All actions return structured dicts:
 
 ## Notes
 
-- All data comes from stdlib / procfs -- no external dependencies
-- Memory info reads from `/proc/meminfo` (Linux only)
-- Uptime reads from `/proc/uptime` (Linux only)
-- Disk usage uses `shutil.disk_usage()` (cross-platform)
-- Process count uses `/proc` directory listing (Linux only)
+- Disk usage uses `shutil.disk_usage()` -- stdlib, portable
+- Memory, uptime and process count use `psutil` (`psutil>=5.9`, a declared
+  dependency of this project), which answers them on Linux, macOS and Windows
+- Until 2026-09-12 those three read `/proc` directly, so every one of them
+  returned `success: False` on macOS and `summary` reported `success: True`
+  over a disk line and an Errors trailer (FPLAN-0554)
+- `summary` is `success: False` whenever any section fails, and `error` names
+  the sections that are missing; the sections that did answer are still in
+  `output`
+- On a host without psutil the three actions refuse and name the install
+  recipe -- they never answer a partial
