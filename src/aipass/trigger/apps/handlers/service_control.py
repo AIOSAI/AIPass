@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_control.py
 # Description: systemd unit lifecycle for the trigger log watcher
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-12
 # =============================================
 
 """The systemd user unit behind the log watcher, and nothing else.
@@ -18,9 +18,19 @@ detail; which branch is muted is not.
 Every name here is imported back into medic under its original spelling, so
 ``patch.object(medic, "_systemctl", ...)`` in the suite still binds the symbol
 medic's own code resolves. The move is a move: no behaviour changed with it.
+
+SYSTEMD IS A HOST FACT, NOT A GIVEN (2026-09-12, seedgo host_portability).
+``systemctl`` exists only where systemd runs: macOS has none, Windows has none,
+and a Linux container may have none either. A missing binary raises
+FileNotFoundError out of exec, so ``check=False`` does not help — every call
+probes with ``shutil.which("systemctl")`` first and refuses BY NAME when the
+answer is None. The refusal is the point: a door that reads "failed" where the
+truth is "there is no systemd here" sends its caller looking for a broken unit
+that was never installed.
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -34,6 +44,19 @@ MODULE_NAME = "service_control"
 SERVICE_NAME = "trigger-log-watcher.service"
 _SERVICE_UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / SERVICE_NAME
 _TEMPLATE_PATH = TRIGGER_ROOT / "templates" / f"{SERVICE_NAME}.template"
+
+#: Said in one place so the log, the CLI and the tests all quote the same fact.
+NO_SYSTEMD_REASON = "this host has no systemctl — the log watcher service door needs systemd"
+
+
+def systemd_available() -> bool:
+    """True when this host has a systemctl to talk to.
+
+    Public on purpose: medic prints the difference between "the unit is
+    stopped" and "there is no systemd here", and that is not a distinction a
+    caller can make from a False return.
+    """
+    return shutil.which("systemctl") is not None
 
 
 def _get_aipass_home() -> Path:
@@ -56,7 +79,16 @@ def _get_aipass_home() -> Path:
 
 
 def _ensure_service_installed() -> bool:
-    """Install systemd unit from template if missing. Returns True if ready."""
+    """Install systemd unit from template if missing. Returns True if ready.
+
+    The systemd probe comes before the ``exists`` short-circuit: a unit file
+    left behind by another host is not a ready service, and answering True for
+    one is exactly the assumed-running the standard refuses.
+    """
+    if shutil.which("systemctl") is None:
+        logger.warning("[MEDIC] Service install refused: %s", NO_SYSTEMD_REASON)
+        return False
+
     if _SERVICE_UNIT_PATH.exists():
         return True
 
@@ -78,36 +110,57 @@ def _ensure_service_installed() -> bool:
         module_name=MODULE_NAME,
     )
 
-    _systemctl("daemon-reload")
-    subprocess.run(
-        ["systemctl", "--user", "enable", SERVICE_NAME],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    _run_systemctl("daemon-reload")
+    _run_systemctl("enable", SERVICE_NAME)
     return True
 
 
-def _systemctl(action: str) -> bool:
-    """Run systemctl --user action on the log watcher service.
+def _run_systemctl(*args: str) -> bool:
+    """Run ``systemctl --user <args>`` and report whether it succeeded.
+
+    Takes the argv tail whole rather than one action, because two of the four
+    calls are not unit-scoped: ``daemon-reload`` takes no unit at all, and
+    ``systemctl --user daemon-reload trigger-log-watcher.service`` exits 1 with
+    "Too many arguments." — measured 2026-09-12 — so the reload that was meant
+    to run between installing the unit and enabling it had never run once.
 
     Args:
-        action: systemctl action (start, stop, restart, is-active)
+        args: the systemctl argv after ``--user``
 
     Returns:
-        True if command succeeded (exit code 0)
+        True if the command succeeded (exit code 0); False when it failed and
+        False when this host has no systemd, each said by name in the log.
     """
+    spelled = " ".join(args)
+    if shutil.which("systemctl") is None:
+        logger.warning("[MEDIC] systemctl %s refused: %s", spelled, NO_SYSTEMD_REASON)
+        return False
     try:
         result = subprocess.run(
-            ["systemctl", "--user", action, SERVICE_NAME],
+            ["systemctl", "--user", *args],
             capture_output=True,
             text=True,
             timeout=10,
         )
         return result.returncode == 0
-    except Exception as exc:
-        logger.warning(f"[MEDIC] systemctl {action} failed: {exc}")
+    except FileNotFoundError as exc:
+        logger.warning("[MEDIC] systemctl %s refused: %s (%s)", spelled, NO_SYSTEMD_REASON, exc)
         return False
+    except Exception as exc:
+        logger.warning(f"[MEDIC] systemctl {spelled} failed: {exc}")
+        return False
+
+
+def _systemctl(action: str) -> bool:
+    """Run a systemctl --user action against the log watcher unit.
+
+    Args:
+        action: unit-scoped systemctl action (start, stop, restart, is-active)
+
+    Returns:
+        True if command succeeded (exit code 0)
+    """
+    return _run_systemctl(action, SERVICE_NAME)
 
 
 def _is_service_active() -> bool:

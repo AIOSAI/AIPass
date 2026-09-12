@@ -756,3 +756,44 @@ class TestErrorCatchupDoor:
         medic.handle_command("medic", ["catchup"])
 
         scan.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# host portability — a host with no systemd (2026-09-12, seedgo FPLAN-0554)
+# ---------------------------------------------------------------------------
+
+
+def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on():
+    """ "stopped — run medic on" is advice that cannot work where there is no systemd.
+
+    macOS and Windows have no systemctl at all; the watcher there is not
+    stopped, it is unavailable, and telling a reader to start it sends them
+    after a unit that can never exist.
+    """
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.is_enabled.return_value = True
+
+    with patch.object(medic, "_is_service_active", return_value=False):
+        with patch.object(medic, "systemd_available", return_value=False):
+            medic.handle_command("status", [])
+
+    output = "\n".join(_get_print_str_args(_get_console()))
+    assert "no systemd on this host" in output, output
+    assert "run [bold]medic on[/bold]" not in output, output
+
+
+def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_systemd():
+    """ "failed to start" reads as a broken unit; the truth is a hostless door."""
+    medic = _import_medic()
+
+    with patch.object(medic, "_systemctl", return_value=False):
+        with patch.object(medic, "_is_service_active", return_value=False):
+            with patch.object(medic, "_ensure_service_installed", return_value=False):
+                with patch.object(medic, "systemd_available", return_value=False):
+                    medic.handle_command("on", [])
+
+    panel_text = "\n".join(
+        str(arg) for call in sys.modules["rich.panel"].Panel.call_args_list for arg in call.args if isinstance(arg, str)
+    )
+    assert "unavailable — no systemd on this host" in panel_text, panel_text

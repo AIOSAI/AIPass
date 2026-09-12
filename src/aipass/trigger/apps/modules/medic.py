@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-12
 # Modified: 2026-09-12
 # =============================================
@@ -38,6 +38,7 @@ from aipass.trigger.apps.handlers.service_control import (
     _ensure_service_installed,
     _is_service_active,
     _systemctl,
+    systemd_available,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -390,6 +391,8 @@ def _handle_status(console) -> None:
 
     if watcher_active:
         watcher_text = "[green]running[/green] (systemd)"
+    elif not systemd_available():
+        watcher_text = "[yellow]unavailable[/yellow] — no systemd on this host"
     elif enabled:
         watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
     else:
@@ -430,7 +433,12 @@ def _handle_on(console) -> None:
         else:
             logger.warning("[MEDIC] Could not start log watcher service")
 
-    watcher_status = "running" if _is_service_active() else "failed to start"
+    if _is_service_active():
+        watcher_status = "running"
+    elif not systemd_available():
+        watcher_status = "unavailable — no systemd on this host"
+    else:
+        watcher_status = "failed to start"
     console.print(
         Panel(
             "[bold green]Medic ENABLED[/bold green]\n\n"
