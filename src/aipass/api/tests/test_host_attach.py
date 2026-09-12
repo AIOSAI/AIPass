@@ -765,7 +765,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         login_tty.assert_called_once_with(0)
 
-    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
+    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> None:
         """
         The property itself, on a real process rather than a mock.
 
@@ -773,18 +773,38 @@ class TestTheRoomCanActuallyHearAResize:
         terminal's session — and it only HAS one if something claimed the
         terminal. Before the fix this raised ENOTTY, which is the kernel saying
         'nobody is listening', and is precisely why SIGWINCH went nowhere.
+
+        BOTH READS HAPPEN WHILE THE CHILD IS ALIVE, and the host that insists on
+        it is manufactured below. macOS run 34707099650 raised
+        ProcessLookupError on the `getpgid` line: the `finally` block had
+        hung up and reaped the child, and macOS answers ESRCH for a pid that is
+        gone. Linux keeps a zombie's pgid readable until its parent reaps it, so
+        a read taken after the subject died was green here for a reason that has
+        nothing to do with the property under test. The stand-in refuses once
+        the session is closed, exactly as the runner does, so moving either read
+        back below the hangup goes red on this box too.
         """
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
+        real_getpgid = os.getpgid
+
+        def macos_getpgid(pid: int) -> int:
+            if session.closed:
+                raise ProcessLookupError(errno.ESRCH, "No such process")
+            return real_getpgid(pid)
+
+        monkeypatch.setattr(os, "getpgid", macos_getpgid)
+
         try:
             time.sleep(0.3)
             foreground = os.tcgetpgrp(session.descriptor)
+            child_group = os.getpgid(session.process.pid)
         finally:
             session.hangup()
 
         assert foreground > 0
-        assert foreground == os.getpgid(session.process.pid)
+        assert foreground == child_group
 
 
 @pty_required
