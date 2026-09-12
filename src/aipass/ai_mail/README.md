@@ -600,8 +600,12 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
      builder-class sender is **woken**; a **manager sender is MAILED, never
      woken** (`_mail_wake_back()`), because the manager gate is deliberate and
      stays — telling a manager "you will be woken" was a promise the lane could
-     not keep, and the manager then heard nothing at all (two live cases
-     2026-08-21). `dispatch` announces which of the two will happen, by reading
+     not keep, and the manager then heard nothing at all — three live cases on
+     2026-08-21 alone, and 223 `skipped_manager` rows across the fleet's
+     `dispatch_wake.log` files from 2026-08-04 on (298 counting `projects/`;
+     measured 2026-09-12 with `find src/aipass -name dispatch_wake.log -exec grep
+     -c skipped_manager {} +`, summed). `dispatch` announces which of the two
+     will happen, by reading
      `is_manager(sender)` up front rather than guessing.
      Wake-back sessions carry an empty sender, so chains terminate at the
      original dispatcher, and `AIPASS_WAKE_DEPTH` caps the chain at

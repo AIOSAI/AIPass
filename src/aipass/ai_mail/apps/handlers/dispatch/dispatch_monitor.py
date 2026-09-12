@@ -3,7 +3,7 @@
 # Description: Agent Lifecycle Monitor
 # Version: 2.5.0
 # Created: 2026-03-02
-# Modified: 2026-09-10
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -194,7 +194,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
     running job (the OSPREY kill). The defect was never the blocklist: it was that
     wake_branch returned True having done nothing, so the message built for the
     sender was dropped and the manager was TOLD it would be woken and then was not
-    (@devpulse, confirmed live twice on 2026-08-21). A manager learned a dispatch
+    (@devpulse, three logged cases on 2026-08-21 alone). A manager learned a dispatch
     had finished only if the agent happened to volunteer an email.
 
     Same transport as _send_bounce, for the same reason: `drone` resolves routing,

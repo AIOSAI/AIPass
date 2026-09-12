@@ -3,7 +3,7 @@
 # Description: Sent/Deleted Auto-Purge Handler
 # Version: 2.0.0
 # Created: 2026-02-04
-# Modified: 2026-02-04
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -226,8 +226,8 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
             )
 
         # Call @memory vectorization via subprocess (handler independence)
-        # THE GAP IS CLOSED — this operation is real now. It was NOT, for about
-        # four months: @memory's handler had no `vectorize_and_store`, answered
+        # THE GAP IS CLOSED — this operation is real now. It was NOT from March
+        # 2026 until the fix on 2026-08-24: @memory's handler had no `vectorize_and_store`, answered
         # this call with success:false at exit 0, and purge read that refusal as
         # a store and deleted the originals. @memory shipped the operation in
         # chroma_subprocess 1.4.0 (2026-08-24) and the seam is verified live from

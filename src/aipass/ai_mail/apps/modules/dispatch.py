@@ -3,7 +3,7 @@
 # Description: Dispatch Module
 # Version: 3.3.0
 # Created: 2026-02-02
-# Modified: 2026-09-10
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -517,8 +517,9 @@ def _announce_wake_back(target: str, sender: str) -> None:
 
     Managers are never woken — the blocklist is deliberate and stays. Telling a
     manager "you will be woken" was a promise the lane could not keep, and the
-    manager then heard nothing at all: two live cases on 2026-08-21 (@devpulse
-    dispatching @ai_mail and @drone back to back). The wake-back now mails them,
+    manager then heard nothing at all: three live cases on 2026-08-21 alone
+    (@devpulse dispatching @ai_mail, @drone, then @ai_mail again, 19:26-22:05,
+    each logged skipped_manager). The wake-back now mails them,
     so the promise says mail.
 
     Args:
