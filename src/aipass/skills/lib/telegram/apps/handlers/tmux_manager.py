@@ -55,10 +55,13 @@ def _send_rename(session_name: str, branch_name: str) -> None:
     """Send /rename to a tmux session after Claude initializes."""
     time.sleep(RENAME_DELAY)
     rename_cmd = f"/rename {branch_name.upper()}-telegram"
-    subprocess.run(
-        ["tmux", "send-keys", "-t", session_name, rename_cmd, "Enter"],
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["tmux", "send-keys", "-t", session_name, rename_cmd, "Enter"],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        logger.warning("tmux not found — could not rename session %s", session_name)
 
 
 def has_tmux() -> bool:
@@ -77,10 +80,16 @@ def session_exists(branch_name: str) -> bool:
         True if session is alive
     """
     name = _session_name(branch_name)
-    result = subprocess.run(
-        ["tmux", "has-session", "-t", name],
-        capture_output=True,
-    )
+    # send_message, kill_session and get_session_pane all call this BEFORE
+    # their own try, so a raise here escaped all three on a host without tmux.
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", name],
+            capture_output=True,
+        )
+    except FileNotFoundError:
+        logger.warning("tmux not found — session %s cannot exist", name)
+        return False
     return result.returncode == 0
 
 

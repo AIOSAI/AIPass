@@ -1287,11 +1287,40 @@ def test_a_proc_read_in_a_pty_gated_class_is_still_convicted(tmp_path):
 
 
 def test_a_module_level_skipif_alias_acquits_a_proc_read(tmp_path):
-    """aipass tests/test_doctor.py:249 -- `_posix_only` bound once, used as @.
+    """The `_posix_only` spelling -- a mark bound once at module level, used as @.
 
     17+ guards fleet-wide are spelled this way. A reader that only understands
     the inline `@pytest.mark.skipif(...)` form convicts every one of them, and
-    a rule with that acquittal rate is off within a week.
+    a rule with that acquittal rate is off within a week. The alias acquits
+    when its predicate names the host that HAS the recipe.
+    """
+    source = (
+        "import os\n"
+        "import sys\n"
+        "import pytest\n"
+        "from pathlib import Path\n"
+        "\n"
+        "_linux_only = pytest.mark.skipif(sys.platform != 'linux', reason='reads procfs')\n"
+        "\n"
+        "\n"
+        "@_linux_only\n"
+        "def test_parent_comm():\n"
+        '    assert Path(f"/proc/{os.getppid()}/comm").read_text(encoding="utf-8")\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_doctor_like.py")
+
+    assert violations == []
+
+
+def test_a_windows_only_alias_no_longer_acquits_a_proc_read(tmp_path):
+    """The same alias naming Windows -- `os.name == 'nt'` -- launders nothing now.
+
+    This fixture used to be the acquittal pin, cited to aipass test_doctor.py:249.
+    The real site is correct for a reason the fixture minimised away: it
+    replaces the module's Path and forces os.name, so it never reads the host.
+    Stripped of that, the unit runs on macOS (os.name is 'posix' there) and
+    reads a filesystem macOS does not have.
     """
     source = (
         "import os\n"
@@ -1308,7 +1337,8 @@ def test_a_module_level_skipif_alias_acquits_a_proc_read(tmp_path):
 
     violations, _ = _scan_source(tmp_path, source, name="test_doctor_like.py")
 
-    assert violations == []
+    assert _lines(violations) == [10]
+    assert "Linux-only" in violations[0][1]
 
 
 def test_a_proc_path_used_as_a_mock_dict_key_is_not_convicted(tmp_path):
@@ -1333,11 +1363,14 @@ def test_a_proc_path_used_as_a_mock_dict_key_is_not_convicted(tmp_path):
     assert violations == []
 
 
-def test_the_prose_of_a_skipif_reason_is_not_convicted(tmp_path):
-    """devpulse tests/test_watchdog_wire.py:738, prax tests/test_instance_lock.py:172.
+def test_the_prose_of_a_skipif_reason_is_not_a_read_but_the_gate_it_explains_is(tmp_path):
+    """prax tests/test_instance_lock.py:172 before d57b60fc -- red on every macOS run.
 
-    The literal IS the guard's own explanation. Convicting a rule's cure for
-    describing itself is how a standard gets switched off.
+    Two claims on one decorator. Arm A still never reads the reason's literal:
+    the prose opens nothing. Arm C convicts the GATE the prose explains - it
+    says /proc is Linux's and then names Windows, so macOS, which has no procfs
+    either, ran the unit (34707762639, 34707861282, 34708132945). Until
+    FPLAN-0554 round three this pin asserted the shape was clean.
     """
     source = (
         "import pytest\n"
@@ -1345,13 +1378,15 @@ def test_the_prose_of_a_skipif_reason_is_not_convicted(tmp_path):
         "\n"
         "\n"
         '@pytest.mark.skipif(sys.platform == "win32", reason="/proc is Linux-only")\n'
-        "def test_reads_proc_truth():\n"
-        "    assert True\n"
+        "def test_current_boot_id_reads_proc_on_linux():\n"
+        "    assert _current_boot_id()\n"
     )
 
-    violations, _ = _scan_source(tmp_path, source, name="test_wire_like.py")
+    violations, _ = _scan_source(tmp_path, source, name="test_instance_lock_like.py")
 
-    assert violations == []
+    assert _lines(violations) == [5]
+    assert "declares a Linux recipe" in violations[0][1]
+    assert "Linux-only (absent" not in violations[0][1]
 
 
 def test_a_proc_argv_element_is_not_convicted(tmp_path):
@@ -1438,3 +1473,307 @@ def test_a_bare_proc_string_that_never_reaches_the_filesystem_is_not_convicted(t
     violations, _ = _scan_source(tmp_path, source)
 
     assert violations == []
+
+
+# -- ARM A through a bound name (FPLAN-0554 round three) ---------------------
+
+
+def test_a_proc_literal_bound_to_a_name_is_convicted_where_the_name_is_read(tmp_path):
+    """skills lib/system_status/handler.py:96 spelled every read this way.
+
+    The literal goes into a variable and the variable goes to open(). A reader
+    that took only a literal argument never nominated one of them.
+    """
+    source = (
+        "def read_meminfo():\n"
+        '    meminfo_path = "/proc/meminfo"\n'
+        '    with open(meminfo_path, encoding="utf-8") as handle:\n'
+        "        return handle.read()\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [3]
+
+
+def test_the_skills_handler_existence_refusal_still_acquits(tmp_path):
+    """skills handler.py before 8d1c6ef6 -- the product half of that red was honest.
+
+    It refused by name on a host with no /proc ("not available (non-Linux
+    system?)") with success False. The red lived in four TESTS asserting
+    success on macOS behind a Windows-only skip, which arm C convicts; the
+    existence early-out stays a guard, measured at 1 live fleet site.
+    """
+    source = (
+        "import os\n"
+        "\n"
+        "\n"
+        "def memory_info():\n"
+        '    meminfo_path = "/proc/meminfo"\n'
+        "    if not os.path.exists(meminfo_path):\n"
+        '        return {"success": False, "error": "meminfo not available (non-Linux system?)"}\n'
+        '    with open(meminfo_path, encoding="utf-8") as handle:\n'
+        '        return {"success": True, "output": handle.read()}\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_a_bound_path_is_judged_at_its_read_not_its_constructor(tmp_path):
+    """skills lib/telegram base_bot.py:2721 -- Path() outside the try, iterdir inside.
+
+    Building a Path touches nothing. The constructor line was a false row
+    beside a read that is already inside `except OSError`.
+    """
+    source = (
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def scan_pid_fds(pid):\n"
+        '    fd_dir = Path(f"/proc/{pid}/fd")\n'
+        "    try:\n"
+        "        return list(fd_dir.iterdir())\n"
+        "    except OSError:\n"
+        "        return None\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_an_unguarded_read_of_a_bound_path_convicts_the_read_line(tmp_path):
+    """The same shape with no handler: the row is the iterdir, not the Path()."""
+    source = (
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def scan_pid_fds(pid):\n"
+        '    fd_dir = Path(f"/proc/{pid}/fd")\n'
+        "    return list(fd_dir.iterdir())\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [6]
+
+
+def test_a_name_rebound_to_something_else_is_not_followed(tmp_path):
+    """Which value reaches the call is a question one pass cannot answer -- no row."""
+    source = (
+        'def pick(tmp):\n    path = "/proc/meminfo"\n    path = tmp\n    return open(path, encoding="utf-8").read()\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+# -- ARM C: a skip that names the wrong host (tests lane) --------------------
+
+
+def test_a_windows_only_skip_on_a_unit_whose_reason_names_linux_proc_is_convicted(tmp_path):
+    """skills tests/test_runner.py before 8d1c6ef6 -- four of these, red every macOS run.
+
+    Class-nested, multi-line decorator, and the reason names the recipe
+    ("reads Linux /proc/meminfo") while the predicate names Windows. The row
+    sits on the decorator: that is the line the owner changes.
+    """
+    source = (
+        "import sys\n"
+        "\n"
+        "import pytest\n"
+        "\n"
+        "\n"
+        "class TestRunSkillHandler:\n"
+        "    @pytest.mark.skipif(\n"
+        '        sys.platform == "win32",\n'
+        '        reason="system_status memory reads Linux /proc/meminfo; unavailable on Windows",\n'
+        "    )\n"
+        "    def test_run_system_status_memory(self):\n"
+        '        assert run_skill("system_status", action="memory")["success"] is True\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_runner_like.py")
+
+    assert _lines(violations) == [7]
+    assert "test_run_system_status_memory" in violations[0][1]
+
+
+def test_a_skip_naming_the_recipe_host_acquits_the_linux_named_unit(tmp_path):
+    """prax tests/test_instance_lock.py after d57b60fc -- the cure, pinned clean."""
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform != "linux", reason="reads boot_id - no procfs on this host")\n'
+        "def test_current_boot_id_reads_proc_on_linux():\n"
+        "    assert _current_boot_id()\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_instance_lock_like.py")
+
+    assert violations == []
+
+
+def test_a_windows_only_skip_on_a_posix_recipe_is_correct_and_not_convicted(tmp_path):
+    """hooks tests/test_cc_sessions.py:76 -- `ps` is on Linux AND macOS.
+
+    The reason names Linux, but beside macOS and no Linux-only recipe word;
+    excluding Windows is exactly right for a ps-based helper.
+    """
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="ps-based; Linux + macOS only by contract")\n'
+        "def test_reports_our_real_parent():\n"
+        "    assert _get_ppid_portable() == 1\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_cc_like.py")
+
+    assert violations == []
+
+
+def test_a_reason_naming_proc_beside_a_macos_lane_is_not_convicted(tmp_path):
+    """devpulse tests/test_watchdog_wire.py:832 -- /proc OR lsof, and macOS has lsof.
+
+    Measured and rejected: a rule firing on any /proc word in a reason
+    convicts this correct gate, which deliberately keeps macOS in the run
+    because the lsof branch is the code the test exists for.
+    """
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        "@pytest.mark.skipif(\n"
+        '    sys.platform == "win32",\n'
+        '    reason="neither /proc nor lsof answers on Windows; NOT widened to darwin, macOS has lsof",\n'
+        ")\n"
+        "def test_stdout_target_reads_proc_truth():\n"
+        "    assert _stdout_target(1)\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_wire_like.py")
+
+    assert violations == []
+
+
+def test_a_linux_named_unit_with_no_gate_at_all_is_not_convicted(tmp_path):
+    """aipass tests/test_cross_os.py:189 -- the rejected shape, 5 fleet hits, 5 false.
+
+    A name alone says nothing about the host: this unit hands the STRING
+    "linux" to a pure function. Only a gate that names the wrong host is read.
+    """
+    source = (
+        "def test_filter_linux_only_all_rows(tmp_path):\n"
+        '    assert gaps_for_platform("linux", start=tmp_path) == ["9"]\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_cross_os_like.py")
+
+    assert violations == []
+
+
+def test_a_unit_that_forces_its_own_platform_lane_is_not_convicted(tmp_path):
+    """ai_mail tests/test_wake.py:283 shape -- the unit sets sys.platform itself.
+
+    Its gate is not what makes it portable; the patch is. The host is never asked.
+    """
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="Linux-only lane, forced below")\n'
+        "def test_get_pid_cwd_linux(monkeypatch):\n"
+        '    monkeypatch.setattr(wake.sys, "platform", "linux")\n'
+        '    assert wake._get_pid_cwd("100") is None\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_wake_like.py")
+
+    assert violations == []
+
+
+def test_a_module_pytestmark_naming_windows_convicts_at_its_own_line(tmp_path):
+    """A file-wide gate is read like a decorator; the row is the pytestmark line."""
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        'pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="systemd units are Linux-only")\n'
+        "\n"
+        "\n"
+        "def test_unit_file_renders():\n"
+        "    assert render_unit()\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_unit_like.py")
+
+    assert _lines(violations) == [4]
+
+
+def test_a_unit_named_on_linux_behind_a_windows_only_skip_is_convicted_by_its_name(tmp_path):
+    """The name alone declares the recipe; the reason here says nothing about it."""
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="needs the boot id")\n'
+        "def test_current_boot_id_reads_proc_on_linux():\n"
+        "    assert _current_boot_id()\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_instance_lock_like.py")
+
+    assert _lines(violations) == [5]
+
+
+def test_the_off_linux_half_is_not_read_as_a_linux_name(tmp_path):
+    """devpulse tests/test_watchdog_registry.py:219 -- off_linux is the portable half."""
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="ps is POSIX")\n'
+        "def test_is_zombie_off_linux_reads_the_ps_state():\n"
+        '    assert is_zombie_via_ps("Z+")\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_registry_like.py")
+
+    assert violations == []
+
+
+# -- CORPUS: lib/ ------------------------------------------------------------
+
+
+def test_lib_is_in_the_corpus(tmp_path):
+    """skills lib/ -- all seven built-in skills live there and were never scored.
+
+    lib/system_status/handler.py read /proc on every macOS run while this
+    standard read skills 100, because the walk stopped at apps/ and tests/.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+
+    handlers = tmp_path / "lib" / "telegram" / "apps" / "handlers"
+    handlers.mkdir(parents=True)
+    (handlers / "tmux_manager.py").write_text(
+        'import subprocess\n\n\ndef has(name):\n    subprocess.run(["tmux", "has-session", "-t", name])\n',
+        encoding="utf-8",
+    )
+
+    result = host_portability_check.check_branch(str(tmp_path))
+
+    assert result["score"] == 0
+    failing = [c for c in result["checks"] if not c["passed"]]
+    assert failing[0]["violations"][0]["file"] == "lib/telegram/apps/handlers/tmux_manager.py"

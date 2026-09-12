@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-12
 # Modified: 2026-09-12
 # =============================================
@@ -68,13 +68,37 @@ here (git, bash, sh, drone, python3, sleep, gh, ps, lsof, pgrep, npm, ruff)
 carry 134 sites and zero known bugs, so they are allowlisted by omission: only
 the ten names below are read at all.
 
+ARM C READS THE GATE, NOT THE HOST CALL (FPLAN-0554 round three). Eight
+macOS reds in a row were TESTS whose own skip named the wrong host:
+``skipif(sys.platform == "win32", reason="/proc is Linux-only")`` on prax
+``test_current_boot_id_reads_proc_on_linux``, and the same predicate on four
+skills ``test_runner`` units whose reason said "reads Linux /proc/meminfo".
+None of them spelled /proc in a filesystem call - the product did - so arms A
+and B could never see them. The predicate named ONE host that lacks the
+recipe; macOS lacks it too and ran the unit. Arm C convicts a platform skip
+that names only Windows on a unit that DECLARES a Linux recipe, by its name
+(``_on_linux``) or its reason ("Linux-only", or Linux beside /proc, /sys or
+systemd). It acquits a unit that manufactures its own lane (patches the
+platform or the filesystem primitive). Two wider shapes were measured and
+rejected: a Linux-named unit with no gate at all (5 fleet hits, 5 false - a
+pure function handed the string "linux"), and any /proc word in a reason
+(devpulse's wire gate names /proc beside lsof, and macOS HAS the lsof lane).
+
+The same rule now binds arm A: a skip acquits a /proc read only when its
+predicate names the host that HAS the recipe (``!= "linux"``, ``"darwin"``,
+a /proc probe, ``shutil.which``). ``os.name == "nt"`` names Windows and no
+longer launders a read macOS will fail.
+
 Interface: AUDIT_SCOPE = "branch_level", entry point ``check_branch``.
-The corpus is ``apps/`` AND ``tests/`` — a test that reads /proc is exactly
-what turned the macOS leg red, and the per-file audit lane never enters
-``tests/``, which is why this checker walks the branch itself.
+The corpus is ``apps/``, ``tests/`` AND ``lib/`` — a test that reads /proc is
+exactly what turned the macOS leg red, the per-file audit lane never enters
+``tests/``, and skills keeps all seven built-in skills in ``lib/``, where
+``system_status/handler.py`` read /proc on every macOS run while this standard
+read 100.
 """
 
 import ast
+import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Set, Tuple
 
@@ -84,7 +108,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import (
     _collect_child_linenos,
     _find_enclosing_function,
-    _has_platform_skipif,
     _is_platform_guard,
     _lines_in_guarded_blocks,
     _references_platform,
@@ -101,13 +124,19 @@ _BYPASS_KEY = "host_portability"
 #: Split so this file's own source cannot be read as an occurrence of the
 #: literal it hunts. Same device windows_compat_check uses for /tmp.
 _PROC_ROOT = "/" + "proc"
+_SYS_ROOT = "/" + "sys/"
 
 #: Directories this checker never walks, plus the two trees that are not source.
 _SKIP_DIRS = SOURCE_SKIP_DIRS
 
-#: The two roots a branch's own code lives in. `tests/` is here on purpose:
-#: every macOS failure this standard exists to prevent was a test.
-_CORPUS_ROOTS = ("apps", "tests")
+#: The roots a branch's own code lives in. `tests/` is here on purpose: every
+#: macOS failure this standard exists to prevent was a test. `lib/` is where
+#: skills keeps its seven built-in skills; lib/system_status/handler.py read
+#: /proc on every macOS run and this standard read 100 because it never looked
+#: (FPLAN-0554 round three). Widened HERE only: the per-file audit corpus stays
+#: apps/, because moving every standard onto skills' tier-2 layout at once
+#: needs the SKILL.md architecture exemption designed first.
+_CORPUS_ROOTS = ("apps", "tests", "lib")
 
 #: Calls that hand a string to the filesystem. A `/proc` literal ANYWHERE else
 #: - a dict key, an argv element, a skipif reason - opens nothing and is not
@@ -126,8 +155,12 @@ _FS_METHODS = frozenset(
         "read_text",
         "read_bytes",
         "open",
+        "iterdir",
     }
 )
+
+#: Constructors whose result is a path object, not a filesystem touch.
+_PATH_CONSTRUCTORS = frozenset({"Path", "PosixPath", "PurePath"})
 
 #: Except types that make a missing /proc (or a missing binary) a handled fact
 #: rather than a crash. `_lines_in_guarded_blocks` already covers OSError and
@@ -301,66 +334,136 @@ def _has_existence_exit(func: ast.AST) -> bool:
 
 
 # =============================================
-# SKIPIF, INCLUDING MODULE-LEVEL ALIASES
+# SKIP MARKS, INCLUDING MODULE-LEVEL ALIASES
 # =============================================
 
+#: Hosts whose name in a skipif predicate means "the host that HAS the recipe".
+_RECIPE_HOSTS = frozenset({"linux", "darwin"})
 
-def _platform_skip_aliases(tree: ast.Module) -> frozenset:
-    """Module-level names bound to a PLATFORM skipif.
+#: (owner, attribute) pairs whose patch forces the platform lane.
+_PLATFORM_ATTRS = frozenset({("sys", "platform"), ("os", "name"), ("platform", "system")})
+
+#: Filesystem primitives whose patch means the unit supplies the answer itself.
+_FS_PRIMITIVES = frozenset(
+    {"open", "listdir", "readlink", "scandir", "stat", "lstat", "iterdir", "read_text", "read_bytes", "exists", "Path"}
+)
+
+_PATCH_CALLS = frozenset({"setattr", "patch", "object"})
+
+
+def _tail_name(node: ast.expr) -> str:
+    """The last name in ``a.b.c`` or ``c``, else ""."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _mark_kind(mark: ast.expr) -> str:
+    """ "skip" or "skipif" for a pytest skip mark, called or bare, else ""."""
+    target = mark.func if isinstance(mark, ast.Call) else mark
+    if isinstance(target, ast.Attribute) and target.attr in ("skip", "skipif"):
+        return target.attr
+    return ""
+
+
+def _module_skip_marks(tree: ast.Module) -> Tuple[Dict[str, ast.expr], List[ast.expr]]:
+    """Module-level names bound to a skip mark, and the module's own ``pytestmark``.
 
     ``_posix_only = pytest.mark.skipif(os.name == "nt", reason=...)`` then
     ``@_posix_only`` is how 17+ guards fleet-wide are spelled, and a reader
-    that only understands the inline form convicts every one of them.
-
-    The predicate must actually read a platform. ``pty_required =
-    pytest.mark.skipif(not host_attach.is_available(), ...)`` is a PTY probe,
-    and macOS has a PTY - it is not a platform guard and must not become one.
+    that only understands the inline form cannot judge any of them.
     """
-    aliases: Set[str] = set()
+    aliases: Dict[str, ast.expr] = {}
+    module_marks: List[ast.expr] = []
     for node in ast.iter_child_nodes(tree):
-        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+        if not isinstance(node, ast.Assign):
             continue
-        call = node.value
-        if not isinstance(call.func, ast.Attribute):
+        values = node.value.elts if isinstance(node.value, (ast.List, ast.Tuple)) else [node.value]
+        marks = [value for value in values if _mark_kind(value)]
+        names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        if not marks:
             continue
-        if call.func.attr == "skip":
-            qualifies = True
-        elif call.func.attr == "skipif":
-            qualifies = any(_reads_platform(arg) for arg in call.args)
-        else:
-            continue
-        if not qualifies:
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                aliases.add(target.id)
-    return frozenset(aliases)
+        for name in names:
+            if name == "pytestmark":
+                module_marks.extend(marks)
+            else:
+                aliases[name] = marks[0]
+    return aliases, module_marks
 
 
-def _skip_guarded(decorators: List[ast.expr], aliases: frozenset) -> bool:
-    """True when these decorators skip the unit on a non-Linux host."""
-    if _has_platform_skipif(decorators):
-        return True
-    for dec in decorators:
-        if isinstance(dec, ast.Name) and dec.id in aliases:
-            return True
-        if isinstance(dec, ast.Attribute) and dec.attr in aliases:
+def _skip_marks(decorators: Iterable[ast.expr], aliases: Dict[str, ast.expr]) -> List[ast.expr]:
+    """The skip marks among these decorators, aliases resolved."""
+    resolved = [aliases.get(dec.id, dec) if isinstance(dec, ast.Name) else dec for dec in decorators]
+    return [mark for mark in resolved if _mark_kind(mark)]
+
+
+def _names_recipe_host(predicate: ast.expr) -> bool:
+    """True when a skipif predicate names the host that HAS the recipe, or probes the recipe.
+
+    ``sys.platform != "linux"``, ``not Path("/proc").exists()`` and
+    ``shutil.which("tmux") is None`` all do. ``sys.platform == "win32"`` does
+    not: it names one host that lacks the recipe, and macOS - which lacks it
+    too - runs the unit.
+    """
+    for child in ast.walk(predicate):
+        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+            if child.value.lower() in _RECIPE_HOSTS or child.value.startswith((_PROC_ROOT, _SYS_ROOT)):
+                return True
+        if isinstance(child, ast.Call) and _tail_name(child.func) == "which":
             return True
     return False
 
 
-def _skip_guarded_lines(tree: ast.Module, aliases: frozenset) -> Set[int]:
-    """Every line of every test unit (or class) carrying a platform skip."""
+def _is_guard_mark(mark: ast.expr) -> bool:
+    """An unconditional skip, or a skipif whose predicate names the recipe host."""
+    if _mark_kind(mark) == "skip":
+        return True
+    return isinstance(mark, ast.Call) and any(_names_recipe_host(arg) for arg in mark.args)
+
+
+def _guarded_unit_lines(tree: ast.Module, aliases: Dict[str, ast.expr], module_marks: List[ast.expr]) -> Set[int]:
+    """Every line of every unit (or class) whose skip names the recipe host."""
+    if any(_is_guard_mark(mark) for mark in module_marks):
+        return _collect_child_linenos(tree)
     lines: Set[int] = set()
     for node in ast.walk(tree):
-        decorators = getattr(node, "decorator_list", None)
-        if not decorators:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and _skip_guarded(
-            decorators, aliases
-        ):
+        if any(_is_guard_mark(mark) for mark in _skip_marks(node.decorator_list, aliases)):
             lines.update(_collect_child_linenos(node))
     return lines
+
+
+def _patched_pair(call: ast.Call) -> Tuple[str, str]:
+    """(owner, attribute) a monkeypatch.setattr / patch / patch.object call replaces."""
+    if _tail_name(call.func) not in _PATCH_CALLS or not call.args:
+        return "", ""
+    first = call.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        parts = first.value.split(".")
+        return (parts[-2] if len(parts) > 1 else ""), parts[-1]
+    second = call.args[1] if len(call.args) > 1 else None
+    if isinstance(second, ast.Constant) and isinstance(second.value, str):
+        return _tail_name(first), second.value
+    return "", ""
+
+
+def _manufactures_its_lane(unit: ast.AST) -> bool:
+    """True when the unit patches the platform, or the filesystem primitive a read reaches.
+
+    ai_mail test_wake.py replaces ``builtins.open``; aipass test_doctor.py
+    replaces the module's ``Path`` and forces ``os.name``. Neither asks the
+    host anything, so neither one's gate is what makes it portable.
+    """
+    for node in ast.walk(unit):
+        if not isinstance(node, ast.Call):
+            continue
+        owner, attr = _patched_pair(node)
+        if (owner, attr) in _PLATFORM_ATTRS or attr in _FS_PRIMITIVES:
+            return True
+    return False
 
 
 # =============================================
@@ -408,27 +511,72 @@ def _is_fs_call(node: ast.Call) -> bool:
     return False
 
 
+def _unwrap_path(node: ast.expr) -> ast.expr:
+    """The argument of ``Path(x)`` and its kin, or the node itself."""
+    if isinstance(node, ast.Call) and _tail_name(node.func) in _PATH_CONSTRUCTORS and node.args:
+        return node.args[0]
+    return node
+
+
+def _proc_bindings(tree: ast.Module) -> Tuple[Dict[str, str], Set[int]]:
+    """Names bound ONLY to /proc literals, and the ids of those bound value nodes.
+
+    skills lib/system_status/handler.py spelled all three of its reads this
+    way - ``meminfo_path = "/proc/meminfo"`` then ``open(meminfo_path)`` - and
+    a reader that took only a literal argument never nominated one. A name
+    bound to anything else anywhere in the file is dropped: which value
+    reaches the call is then a question one pass cannot answer.
+    """
+    texts: Dict[str, str] = {}
+    values: Dict[str, List[int]] = {}
+    other: Set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        name = node.targets[0].id
+        text = _proc_literal(_unwrap_path(node.value))
+        if not text:
+            other.add(name)
+            continue
+        texts.setdefault(name, text)
+        values.setdefault(name, []).append(id(node.value))
+    bound = {name: text for name, text in texts.items() if name not in other}
+    return bound, {value for name in bound for value in values[name]}
+
+
+def _fs_operands(node: ast.Call) -> List[ast.expr]:
+    """The arguments a filesystem call reads, plus the receiver of a method call."""
+    operands: List[ast.expr] = list(node.args) + [kw.value for kw in node.keywords]
+    if isinstance(node.func, ast.Attribute):
+        operands.append(node.func.value)
+    return operands
+
+
 def _proc_nominations(tree: ast.Module) -> List[Tuple[int, str]]:
-    """Every ``/proc`` literal passed DIRECTLY to a filesystem call."""
+    """Every ``/proc`` literal that reaches a filesystem call, directly or through a name.
+
+    A ``Path(...)`` bound to a name is judged where the name is USED, not where
+    it is built, because building a Path touches nothing: telegram
+    base_bot.py:2721 builds ``Path(f"/proc/{pid}/fd")`` outside its try and
+    lists it inside ``except OSError``, and the constructor line was a false row.
+    """
+    bound, bound_values = _proc_bindings(tree)
     found: List[Tuple[int, str]] = []
     seen: Set[Tuple[int, str]] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_fs_call(node):
+        if not isinstance(node, ast.Call) or id(node) in bound_values or not _is_fs_call(node):
             continue
-        arguments: List[ast.expr] = list(node.args) + [kw.value for kw in node.keywords]
-        for arg in arguments:
-            text = _proc_literal(arg)
-            if not text:
-                continue
+        for arg in _fs_operands(node):
+            text = _proc_literal(arg) or (bound.get(arg.id, "") if isinstance(arg, ast.Name) else "")
             key = (arg.lineno, text)
-            if key in seen:
+            if not text or key in seen:
                 continue
             seen.add(key)
             found.append(key)
     return found
 
 
-def _proc_violations(tree: ast.Module, aliases: frozenset, predicates: frozenset) -> List[Tuple[int, str]]:
+def _proc_violations(tree: ast.Module, skipped: Set[int], predicates: frozenset) -> List[Tuple[int, str]]:
     """Arm A: unguarded reads of the Linux-only /proc filesystem."""
     nominations = _proc_nominations(tree)
     if not nominations:
@@ -436,7 +584,6 @@ def _proc_violations(tree: ast.Module, aliases: frozenset, predicates: frozenset
 
     platform_lines = _platform_branch_lines(tree, predicates)
     handled = _lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
-    skipped = _skip_guarded_lines(tree, aliases)
     caller_guarded = _caller_guarded_functions(tree, platform_lines)
 
     violations: List[Tuple[int, str]] = []
@@ -554,12 +701,98 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
 
 
 # =============================================
+# ARM C - A SKIP THAT NAMES THE WRONG HOST (tests lane)
+# =============================================
+
+#: A unit NAMED for Linux. The other half (non_linux, off_linux, not_linux) is
+#: the portable case and is excluded by name.
+_LINUX_NAME = re.compile(r"(?:^|_)linux(?:_|$)")
+_OTHER_HALF_NAME = re.compile(r"(?:non|off|not)_linux")
+
+#: A reason saying the recipe is Linux's: "Linux-only", or Linux beside a
+#: Linux-only recipe word. "Linux + macOS only by contract" (hooks, ps-based)
+#: names Linux and no such recipe, and its Windows-only gate is correct.
+_LINUX_ONLY_PROSE = re.compile(r"linux[- ]only|only on linux", re.IGNORECASE)
+_LINUX_WORD = re.compile(r"linux", re.IGNORECASE)
+_RECIPE_PROSE = re.compile(
+    "|".join(re.escape(word) for word in (_PROC_ROOT, _SYS_ROOT, "systemd", "systemctl")), re.IGNORECASE
+)
+
+
+def _reason_text(mark: ast.expr) -> str:
+    """Every string in a mark's ``reason=``, joined."""
+    if not isinstance(mark, ast.Call):
+        return ""
+    reasons = [kw.value for kw in mark.keywords if kw.arg == "reason"]
+    return " ".join(
+        child.value
+        for reason in reasons
+        for child in ast.walk(reason)
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    )
+
+
+def _declares_linux_recipe(name: str, gates: List[ast.expr]) -> bool:
+    """True when the unit's name, or its gate's reason, says the recipe is Linux's."""
+    if _LINUX_NAME.search(name) and not _OTHER_HALF_NAME.search(name):
+        return True
+    for gate in gates:
+        reason = _reason_text(gate)
+        if _LINUX_ONLY_PROSE.search(reason) or (_LINUX_WORD.search(reason) and _RECIPE_PROSE.search(reason)):
+            return True
+    return False
+
+
+def _test_units(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.expr]]]:
+    """Each test function with the decorators it inherits from its class."""
+    units: List[Tuple[ast.AST, List[ast.expr]]] = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            units.extend(
+                (member, list(getattr(member, "decorator_list", [])) + node.decorator_list) for member in node.body
+            )
+        else:
+            units.append((node, list(getattr(node, "decorator_list", []))))
+    return [
+        (unit, decorators)
+        for unit, decorators in units
+        if isinstance(unit, (ast.FunctionDef, ast.AsyncFunctionDef)) and unit.name.startswith("test")
+    ]
+
+
+def _gate_violations(
+    tree: ast.Module, aliases: Dict[str, ast.expr], module_marks: List[ast.expr]
+) -> List[Tuple[int, str]]:
+    """Arm C: a platform skip naming only Windows, on a unit that declares a Linux recipe."""
+    violations: List[Tuple[int, str]] = []
+    for unit, decorators in _test_units(tree):
+        marks = _skip_marks(decorators, aliases) + module_marks
+        if any(_is_guard_mark(mark) for mark in marks):
+            continue
+        gates: List[ast.expr] = [
+            mark for mark in marks if isinstance(mark, ast.Call) and any(_reads_platform(a) for a in mark.args)
+        ]
+        name = getattr(unit, "name", "")
+        if not gates or not _declares_linux_recipe(name, gates) or _manufactures_its_lane(unit):
+            continue
+        violations.append(
+            (
+                gates[0].lineno,
+                f"{name} is skipped where the predicate names Windows, but declares a Linux recipe - "
+                "macOS runs it and lacks the recipe too; skip where the recipe is absent "
+                "(sys.platform != 'linux') and name the recipe in the reason",
+            )
+        )
+    return violations
+
+
+# =============================================
 # CORPUS
 # =============================================
 
 
 def _corpus_files(branch_root: Path, ignore_entries: list) -> List[Path]:
-    """Every auditable .py file under apps/ and tests/."""
+    """Every auditable .py file under apps/, tests/ and lib/."""
     files: List[Path] = []
     for root_name in _CORPUS_ROOTS:
         root = branch_root / root_name
@@ -586,7 +819,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
-    """Both arms over one file. Returns (violations, acquitted binary sites).
+    """All three arms over one file. Returns (violations, acquitted binary sites).
 
     A file that cannot be read or parsed reports NOTHING rather than a
     violation: this standard is about what the code does, and an unparseable
@@ -605,10 +838,11 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
         return [], 0
 
     predicates = _platform_predicate_names(tree)
-    aliases = _platform_skip_aliases(tree)
-    violations = _proc_violations(tree, aliases, predicates)
+    aliases, module_marks = _module_skip_marks(tree)
+    violations = _proc_violations(tree, _guarded_unit_lines(tree, aliases, module_marks), predicates)
     binary_violations, acquitted = _binary_violations(tree, predicates)
     violations.extend(binary_violations)
+    violations.extend(_gate_violations(tree, aliases, module_marks))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 
@@ -666,7 +900,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     if not files:
         return _result(
             100,
-            [{"name": "Host portability", "passed": True, "message": "No apps/ or tests/ Python files to check"}],
+            [{"name": "Host portability", "passed": True, "message": "No apps/, tests/ or lib/ Python files to check"}],
             branch_path,
         )
 

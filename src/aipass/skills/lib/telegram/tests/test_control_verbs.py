@@ -382,3 +382,47 @@ class TestControlBotAipassBranchName:
 
         sent_text = bot.send_message.call_args[0][1]  # type: ignore[union-attr]
         assert "Welcome — what this bot is and how to use it" in sent_text
+
+
+# =============================================
+# A host without tmux (FPLAN-0554 round three)
+# =============================================
+
+
+class TestControlVerbsWithoutTmux:
+    """has-session already answered 'tmux not found'. These are the calls after it."""
+
+    def test_start_when_tmux_is_gone_at_new_session(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        branch_info = {"name": "skills", "path": "/tmp/skills"}
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["tmux", "has-session"]:
+                return _run(returncode=1)
+            raise FileNotFoundError("tmux")
+
+        with (
+            patch("subprocess.run", side_effect=side_effect) as mock_run,
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.validate_branch",
+                return_value=branch_info,
+            ),
+        ):
+            bot._handle_control_start(chat_id=1, branch_arg="skills")
+
+        assert mock_run.call_count == 2
+        bot.send_message.assert_called_once_with(1, "tmux not found on this machine.")  # type: ignore[union-attr]
+
+    def test_kill_when_tmux_is_gone_at_kill_session(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["tmux", "has-session"]:
+                return _run(returncode=0)
+            raise FileNotFoundError("tmux")
+
+        with patch("subprocess.run", side_effect=side_effect) as mock_run:
+            bot._handle_control_kill(chat_id=1, branch_arg="skills")
+
+        assert mock_run.call_count == 2
+        bot.send_message.assert_called_once_with(1, "tmux not found on this machine.")  # type: ignore[union-attr]

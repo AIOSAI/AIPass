@@ -1,5 +1,5 @@
 # Host Portability
-**Status:** Draft v1
+**Status:** Draft v1.1 (arm C, lib/ corpus — FPLAN-0554 round three)
 **Date:** 2026-09-12
 
 ---
@@ -24,7 +24,8 @@ Mac and on Windows. Nothing in the pack had a name for either.
 
 ## What the Checker Scans For
 
-AST-parses every `.py` file under `apps/` **and** `tests/`. Both arms score.
+AST-parses every `.py` file under `apps/`, `tests/` **and** `lib/`. All three
+arms score.
 
 ### Arm A — `/proc` as a filesystem argument
 
@@ -65,15 +66,57 @@ variable, and that spelling is usually the *cure* — hooks `sound.py` picks
 `afplay` on darwin and `aplay` otherwise inside a platform `if`, then runs
 `_PLAY_CMD`. A rule that guessed would convict the fix.
 
+**Through a bound name, too.** `meminfo_path = "/proc/meminfo"` then
+`open(meminfo_path)` is nominated at the `open` — skills
+`lib/system_status/handler.py` spelled all three of its reads that way. A name
+bound to anything else anywhere in the file is not followed. A `Path(...)` bound
+to a name is judged where it is **read**, not where it is built: building a
+Path touches nothing (telegram `base_bot.py:2721` was a false row on its
+constructor line, beside a read already inside `except OSError`).
+
+### Arm C — a skip that names the wrong host (tests lane)
+
+A test unit whose platform `skipif` names **only Windows**
+(`sys.platform == "win32"`, `os.name == "nt"`) while the unit **declares a Linux
+recipe**: its name says `_linux` (not `non_`/`off_`/`not_linux`), or its reason
+says "Linux-only", or names Linux beside `/proc`, `/sys/`, `systemd` or
+`systemctl`. macOS lacks the recipe too, and runs the unit.
+
+Eight macOS reds in a row (runs 34707762639 → 34708132945) were this shape and
+none spelled `/proc` in a filesystem call — the product did — so arms A and B
+could not see them:
+
+| Site (pre-cure) | Gate | Declared by |
+|---|---|---|
+| prax `test_instance_lock.py:172` | `sys.platform == "win32"` | name `_on_linux`, reason "/proc is Linux-only" |
+| skills `test_runner.py` ×4 | `sys.platform == "win32"` | reason "reads Linux /proc/meminfo" |
+
+**Acquitted:** a unit that manufactures its lane — it patches `sys.platform` /
+`os.name`, or the filesystem primitive (`builtins.open`, `os.listdir`, the
+module's `Path`, `read_text`). Its gate is not what makes it portable.
+
+**Measured and rejected:**
+- a Linux-named unit with **no gate at all** — 5 fleet hits, 5 false
+  (`test_filter_linux_only_all_rows` hands the string `"linux"` to a pure function)
+- any `/proc` word in a reason — devpulse `test_watchdog_wire.py:832` names
+  "/proc nor lsof" and keeps macOS in on purpose, because macOS has the lsof lane
+
+**Write the reason as the recipe unavailable, not the state** (drone's
+`WINDOWS_CWD_REASON`, now prax's):
+`reason="reads /proc/sys/kernel/random/boot_id - no procfs on this host"`.
+
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,
   `platform.system()`
 - `try: ... except OSError / FileNotFoundError / Exception:`
-- an existence early-out: `if not path.exists(): return`
-- `@pytest.mark.skipif` on the unit **or its class**, including a module-level
-  alias — `_posix_only = pytest.mark.skipif(os.name == "nt", ...)` then
-  `@_posix_only`. There are 17+ such aliases fleet-wide; a reader that only
-  understands the inline form convicts every one of them.
+- an existence early-out: `if not path.exists(): return` — kept after measuring:
+  skills' pre-cure handler refused by name with `success: False` on a host with
+  no `/proc`; its red was in the tests. 1 live fleet site acquits only this way.
+- `@pytest.mark.skipif` on the unit, **its class** or the module's
+  `pytestmark`, including a module-level alias (`_linux_only = ...` then
+  `@_linux_only`, 17+ fleet-wide) — **when the predicate names the host that
+  HAS the recipe**: `sys.platform != "linux"`, `"darwin"`, a `/proc` probe, or
+  `shutil.which`. `os.name == "nt"` names Windows and no longer acquits a read.
 - **one hop:** a function whose *every* call site in the module sits under a
   platform test, including a named predicate (`if _openat2_available():` where
   that function returns `sys.platform == "linux" and ...`)
@@ -136,8 +179,11 @@ except (OSError, subprocess.SubprocessError) as exc:
 
 ## Scoring
 - **Scope:** AUDIT_SCOPE = "branch_level", entry point `check_branch()`
-- **Corpus:** `apps/` **and** `tests/` — the per-file audit lane never enters
-  `tests/`, and every macOS failure this exists to prevent was a test
+- **Corpus:** `apps/`, `tests/` **and** `lib/` — the per-file audit lane never
+  enters `tests/`, every macOS failure this exists to prevent was a test, and
+  skills keeps all seven built-in skills in `lib/` (widened for this standard
+  only; the per-file corpus stays `apps/` until tier-2 skill handlers have a
+  SKILL.md-keyed architecture exemption)
 - **Score:** `clean files / total files x 100` — the same number the `all_files`
   lane produces by averaging a 100-or-0 per file
 - **Score 100:** no unguarded host assumptions anywhere in the branch
@@ -165,6 +211,53 @@ Convictions:
 | trigger | `apps/handlers/service_control.py:82` | B |
 
 Every other branch scores 100.
+
+### Round three (2026-09-12, after every FPLAN-0554 owner cure landed)
+
+Before: every branch 100. After arm C, bound-name reads, the recipe-host skip
+rule and `lib/`: **every branch 100 except skills, 97** — 12 rows in 3 files, all
+arm B, all in the telegram skill (off since 2026-08-18):
+
+| File | Rows |
+|---|---|
+| `lib/telegram/apps/handlers/base_bot.py` | tmux :1743 :1749 :1792 :1913 :1918 :1957, systemctl :2358 |
+| `lib/telegram/apps/handlers/bot_factory.py` | tmux :370 :380 :397 |
+| `lib/telegram/apps/handlers/tmux_manager.py` | tmux :58 :80 |
+
+**Skills cured all 12 the same day, no bypass** (host_portability 97 → 100 from its seat and from mine):
+`tmux_manager.session_exists` was called above the try in three callers, so a missing tmux raised
+out of all three — one row was a live escape, not a technicality. Shape: the exec failure caught where
+the call sits, `FileNotFoundError` named, a verdict returned; no `which` beside a call every unit mocks.
+
+Arm C and the bound-name reads convict **0** live sites: every instance of the
+shape that went red was cured by its owner before the rule landed. The pins
+reproduce each pre-cure shape instead.
+
+---
+
+## Candidates weighed, not built (FPLAN-0554 round three)
+
+Each came out of an owner's cure. Recorded with its evidence so a later pass
+starts from the measurement instead of re-deriving it.
+
+| Shape | From | Why not a rule yet |
+|---|---|---|
+| one argv builder for N verbs of different arity: `_systemctl(action)` appended the unit to every call, so `daemon-reload` exited 1 "Too many arguments" under a bare except and had not run since 2026-08-31 | trigger d496923d | needs each call site's verb read against the builder's constant tail; one instance fleet-wide, no second to measure acquittals on |
+| a test that stubs the spawned argv but leaves the product's `shutil.which` preflight live, so Linux green measured the runner's package list | api 3ef3d571 | host-coupled with no host API in the test file; needs fixtures read against product preflights |
+| an exception-class assertion where the same class is raised at more than one site on the path | api 3ef3d571 | needs the call graph; pytest_quality candidate |
+| a mock wider than the unit's claim (`Popen` explodes on ANY spawn; the claim is "no process left running") | devpulse dab115fb | the claim is prose; pytest_quality candidate |
+| a security-gate test asserting "allowed" for an input that spells the guarded binary (`/usr/bin/git push`) | hooks 474895f5 | pytest_quality / security candidate |
+| a debounce unit correlating calls by wall clock and never setting the product's correlation key | hooks 474895f5 | needs the product constant paired with the test's key |
+| `os.kill(pid, 0)` reached under a forced platform on a Windows host | devpulse 7262e9ec | kernel semantics; taught in platform_oracle.md |
+| a read on a pid after the call that ends it (`getpgid` after `hangup()`) | api 950495c9 | kernel semantics; taught in platform_oracle.md |
+
+**Shapes recommended when curing a row here:**
+- at a subprocess seam that every unit mocks, the honest probe is the **exec
+  failure** caught, named and returned as a verdict (hooks) — a `shutil.which`
+  there reads the real PATH inside mocked units and re-couples the suite to the host
+- when a fixture must force `shutil.which`, answer a stand-in for the **one**
+  name under test and delegate every other name to the real `which` (api) — a
+  blanket stand-in hides the next dependency
 
 ---
 

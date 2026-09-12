@@ -247,7 +247,7 @@ by accident while the table was wrong.
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | everywhere | --help content quality |
-| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads and non-portable binaries (corpus: apps/ **and** tests/) |
+| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, and a test skip that names Windows on a Linux recipe (corpus: apps/, tests/ **and** lib/) |
 | imports | all_files | everywhere | Import ordering and grouping |
 | introspection | all_files | everywhere | No-args introspection gate |
 | json_handler | branch_level | everywhere | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |

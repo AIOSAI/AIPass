@@ -235,8 +235,8 @@ Counted 2026-09-12. That 297 is the branch suite alone — the figure the seedgo
 readme rule checks, `def test_` under `tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
-1090 `def test_` functions expanding to 1101 cases, and `lib/screen_lock/tests/`
-adds 22. All three together run 1425 passing, 0 skipped — the same number from
+1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
+adds 22. All three together run 1438 passing, 0 skipped — the same number from
 the branch root (`pytest .`) and from the repo root.
 
 ---
@@ -387,14 +387,56 @@ denial is live, the denial can still say yes, and the process table is gone too.
 Against the pre-cure handler 11 of these cases go red on behaviour; 8 mutants
 were killed.
 
-**Not cured, reported:** the audit corpus is `apps/` (and `tests/` for the
-branch-level arms) — it never enters `lib/`, where all seven built-in skills
-live. That is why `Host_Portability` read **100** on this branch while the skill
-was red on every macOS run. Measured 2026-09-12, `lib/` also holds three `/proc`
-reads in `telegram/apps/handlers/base_bot.py` (2721, 2757, 3984 — all inside
-`except OSError`, so they degrade honestly; the third's guard says
-`sys.platform != "win32"`, which is again the wrong platform named) and tmux /
-systemctl calls in the telegram skill. Reported to @devpulse and @seedgo.
+**Why the audit read 100 over it.** At the time the audit corpus was `apps/`
+(plus `tests/` for the branch-level arms) and never entered `lib/`, where all
+seven built-in skills live — so `Host_Portability` read **100** while the skill
+was red on every macOS run. Reported the same morning; @seedgo ruled that `lib/`
+joins the corpus **for `host_portability` only** (the per-file audit stays
+`apps/`, so tier-2 `handler.py` files are not scored for architecture). The
+widened rule scored this branch 97 — see the next section.
+
+## The Telegram Skill On A Host Without tmux Or systemd
+
+When `host_portability` started reading `lib/` it found 12 calls in the telegram
+skill running `tmux` or `systemctl` with no probe and no `FileNotFoundError`
+handler (`base_bot.py` 7, `bot_factory.py` 3, `tmux_manager.py` 2). A missing
+binary raises out of exec, before there is a return code to check. One of them
+was a real escape, not a technicality: `tmux_manager.session_exists` is called
+**above** the `try` in `send_message`, `kill_session` and `get_session_pane`, so
+their own `except Exception` never saw it and all three raised on a host without
+tmux.
+
+Every call site now catches the exec failure where it sits and returns a
+verdict:
+
+- `session_exists` answers False, so `kill_session` has nothing to kill,
+  `get_session_pane` is None and `send_message` is False. `_send_rename` logs.
+- `inject_message` and `_kill_tmux_session` return False.
+- `/start` and `/kill` reply `tmux not found on this machine.` — the same words
+  the has-session probe above them already used.
+- `launch_mirror_session` returns False when tmux is gone at `new-session` or at
+  either `send-keys`. A session nobody typed into is not a mirror session, and
+  the old code would have returned True over it.
+- `/suspend` on a host with no `systemctl` disarms the alarm it armed and says
+  `systemctl is not installed on this host.` The polkit advice cannot work
+  there. A suspend that systemd *refused* still gets the polkit text,
+  byte-identical.
+
+No `shutil.which` probe was added. Every unit that exercises these functions
+mocks `subprocess.run`; a probe beside the call would make those units measure
+the runner's package list, which is the defect @api cured in `3ef3d571`.
+Catching at the call is driven by the same mock the units already hold.
+
+Pinned by 13 cases across five existing telegram test files. All 13 fail against
+the pre-cure handlers, and 11 mutants — one per clause, plus the mirror session
+claiming success and the suspend message reverting to polkit — all go red.
+
+The skill is still switched **OFF** (since 2026-08-18), so nothing live changed.
+Its three `/proc` reads in `base_bot.py` are not scored: each sits inside
+`except OSError` and degrades honestly. One is still worth knowing as behaviour —
+the bot-lock check guards its `/proc/<pid>/cmdline` read with
+`sys.platform != "win32"`, so on macOS the PID-reuse verification is silently
+skipped and the lock trusts liveness alone. That waits for a switch-on plan.
 
 ---
 
@@ -429,11 +471,11 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1425 passing, 0 skipped, identical from the branch root and
+stay masked. Suite 1438 passing, 0 skipped, identical from the branch root and
 the repo root. seedgo audit 100 on every CI-scored category.
 
 **Unverified — the telegram skill's runtime.** The skill is discovered, listed
-and gated correctly, and its own 1101-case suite passes. Its *live* behaviour
+and gated correctly, and its own 1114-case suite passes. Its *live* behaviour
 was not exercised: it has been switched OFF since 2026-08-18 (Patrick's ruling,
 DPLAN-0305 — five bots leaked ~2.3GB each), and `drone @skills validate
 telegram` reports its `telethon` dependency missing on this machine. Nothing in

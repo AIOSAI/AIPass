@@ -460,3 +460,37 @@ class TestConfigChatId:
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         bot._config_chat_id = 42
         assert bot._config_chat_id == 42
+
+
+# =============================================
+# A host without tmux (FPLAN-0554 round three)
+# =============================================
+
+
+class TestLaunchMirrorSessionWithoutTmux:
+    """has-session already refuses a missing tmux. These are the three calls after it."""
+
+    def test_new_session_without_tmux_returns_false(self):
+        side = [MagicMock(returncode=1), FileNotFoundError("tmux")]
+        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.subprocess.run", side_effect=side) as mock_run:
+            result = launch_mirror_session(session_name="telegram-api", bot_id="api", work_dir="/tmp/test")
+
+        assert result is False
+        assert mock_run.call_count == 2
+
+    def test_export_send_keys_without_tmux_returns_false(self):
+        """A session nobody typed into is not a mirror session - True would claim one."""
+        side = [MagicMock(returncode=1), MagicMock(returncode=0), FileNotFoundError("tmux")]
+        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.subprocess.run", side_effect=side) as mock_run:
+            result = launch_mirror_session(session_name="telegram-api", bot_id="api", work_dir="/tmp/test")
+
+        assert result is False
+        assert mock_run.call_count == 3
+
+    def test_claude_send_keys_without_tmux_returns_false(self):
+        side = [MagicMock(returncode=1), MagicMock(returncode=0), MagicMock(returncode=0), FileNotFoundError("tmux")]
+        with patch("aipass.skills.lib.telegram.apps.handlers.bot_factory.subprocess.run", side_effect=side) as mock_run:
+            result = launch_mirror_session(session_name="telegram-api", bot_id="api", work_dir="/tmp/test")
+
+        assert result is False
+        assert mock_run.call_count == 4
