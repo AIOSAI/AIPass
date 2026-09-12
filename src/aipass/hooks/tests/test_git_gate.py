@@ -262,11 +262,88 @@ class TestGitGateWordBoundary:
         _assert_allowed(_bash("drone @git push"))
         _assert_blocked(_bash("git push"))
 
-    def test_path_git_not_matched(self):
-        _assert_allowed(_bash("/usr/bin/git push"))
+    def test_a_path_spelled_git_is_still_git(self):
+        """REPLACES test_path_git_not_matched, which pinned the hole as the rule.
+
+        The old unit asserted ``/usr/bin/git push`` was ALLOWED. It passed for
+        its whole life because RAW_GIT_RE's lookbehind excludes a leading slash,
+        and it made the one mechanical layer holding git writes behind drone a
+        full path away from being bypassed. A green test naming the defect is
+        worse than no test: it answers the question before anyone asks it.
+        Reported 2026-09-11 by an external reader, via @devpulse (static).
+        """
+        _assert_blocked(_bash("/usr/bin/git push"))
 
     def test_dotgit_not_matched(self):
         _assert_allowed(_bash("cat .git/config"))
+
+
+class TestPathSpelledExecutable:
+    """A git/gh spelled as a path, read only at a command position.
+
+    The four re cases from the report are pinned verbatim (@devpulse
+    2026-09-12, from an external reader of a public drone post): the first was
+    the hole, the other three were the pattern's working behaviour and must
+    stay working. Everything below the blocks is the other half of the rule —
+    a path that merely NAMES the binary is not an invocation of it, or the cure
+    would refuse `ls /usr/bin/git` and be routed around within the day.
+    """
+
+    def test_absolute_path_git_write_is_blocked(self):
+        _assert_blocked(_bash("/usr/bin/git commit -m x"))
+
+    def test_bare_git_write_is_still_blocked(self):
+        _assert_blocked(_bash("git commit -m x"))
+
+    def test_env_wrapped_git_is_still_blocked(self):
+        _assert_blocked(_bash("env git commit"))
+
+    def test_command_wrapped_git_is_still_blocked(self):
+        _assert_blocked(_bash("command git commit"))
+
+    def test_relative_and_home_paths_are_blocked_too(self):
+        """Wider than reported: the lookbehind excludes `.` as well as `/`."""
+        _assert_blocked(_bash("./git commit"))
+        _assert_blocked(_bash("~/bin/git commit"))
+        _assert_blocked(_bash("/usr/local/bin/git push"))
+
+    def test_assignments_and_flags_before_the_path_do_not_hide_it(self):
+        _assert_blocked(_bash("VAR=1 env -i /usr/bin/git commit"))
+
+    def test_a_path_git_in_a_later_clause_is_blocked(self):
+        _assert_blocked(_bash("cd /tmp && /usr/bin/git reset --hard"))
+
+    def test_a_bare_path_git_with_no_verb_is_blocked(self):
+        """No verb is not a read verb, and a path is nobody's usage print."""
+        _assert_blocked(_bash("/usr/bin/git"))
+
+    def test_the_word_git_alone_stays_allowed(self):
+        """What the `/` requirement in _path_exec_tail is actually for.
+
+        RAW_GIT_RE matches `git\\s`, so a bare `git` with no arguments was never
+        in scope — it prints usage and touches nothing. Dropping the separator
+        test from _path_exec_tail would make the new rule read that usage print
+        as an unverbed invocation and refuse it. Found by mutation: the mutant
+        that removed the check survived every other unit in this class.
+        """
+        _assert_allowed(_bash("git"))
+        _assert_allowed(_bash("echo done; git"))
+
+    def test_a_path_git_read_verb_is_allowed_like_the_bare_form(self):
+        _assert_allowed(_bash("/usr/bin/git status"))
+        _assert_allowed(_bash("./git log --oneline"))
+
+    def test_a_path_that_only_names_git_is_not_an_invocation(self):
+        _assert_allowed(_bash("ls /usr/bin/git"))
+        _assert_allowed(_bash("rm -rf /path/to/git"))
+        _assert_allowed(_bash("cat /srv/proj/.git/config"))
+        _assert_allowed(_bash("bash /opt/tools/git_helper.sh"))
+
+    def test_path_spelled_gh_is_ruled_the_same_way(self):
+        """Same lookbehind, same file, same hole — `gh` was never read either."""
+        _assert_blocked(_bash("/usr/bin/gh pr create"))
+        _assert_allowed(_bash("/usr/bin/gh api repos/x"))
+        _assert_allowed(_bash("ls /usr/bin/gh"))
 
 
 class TestGitGateGhCommands:

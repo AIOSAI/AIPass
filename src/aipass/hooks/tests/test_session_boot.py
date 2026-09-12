@@ -1428,6 +1428,62 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
             assert session_boot._find_tmux_session_for_pid(1234) is None
             assert session_boot._tmux_session_exists("hooks") is False
 
+    def test_kill_session_answers_false_when_tmux_is_absent(self):
+        """check=False ignores an exit code; a missing binary never reaches one.
+
+        seedgo host_portability arm B, FPLAN-0554: the three kill-session calls
+        ran tmux with no probe and no handler, so FileNotFoundError came out of
+        exec and took the caller with it.
+        """
+        with patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")):
+            assert session_boot._tmux_kill_session("hooks") is False
+
+    def test_kill_session_answers_true_when_the_kill_was_delivered(self):
+        with patch.object(session_boot.subprocess, "run", return_value=MagicMock(returncode=0)) as mock_run:
+            assert session_boot._tmux_kill_session("hooks") is True
+        assert "kill-session" in str(mock_run.call_args)
+
+    def test_a_hung_tmux_does_not_hang_the_kill(self):
+        with patch.object(
+            session_boot.subprocess, "run", side_effect=session_boot.subprocess.TimeoutExpired("tmux", 5)
+        ):
+            assert session_boot._tmux_kill_session("hooks") is False
+
+    def test_stop_session_falls_back_to_sigterm_when_tmux_cannot_kill(self):
+        """The old line claimed "killed tmux session" for a kill it never made."""
+        with (
+            patch.object(session_boot, "_find_tmux_session_for_pid", return_value="hooks"),
+            patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
+            patch.object(session_boot.os, "kill") as mock_kill,
+        ):
+            result = session_boot._stop_session({"pid": 4242, "kind": "interactive"}, "/usr/local/bin/claude")
+        assert "SIGTERM" in result
+        assert "killed tmux session" not in result
+        mock_kill.assert_called_once()
+
+    def test_exec_in_tmux_still_launches_when_the_stale_kill_cannot_run(self):
+        with (
+            patch.object(session_boot, "_tmux_session_exists", return_value=True),
+            patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
+            patch.object(session_boot.os, "execvp") as mock_exec,
+        ):
+            result = session_boot._exec_in_tmux("hooks", "", "/usr/local/bin/claude", ["/usr/local/bin/claude"])
+        assert result["action"] == "started"
+        mock_exec.assert_called_once()
+
+    def test_start_fresh_still_launches_when_the_stale_kill_cannot_run(self, tmp_path):
+        pointer = MagicMock()
+        pointer.mint_session_id.return_value = "sid-1"
+        with (
+            patch.object(session_boot, "_tmux_session_exists", return_value=True),
+            patch.object(session_boot, "_session_pointer", return_value=pointer),
+            patch.object(session_boot.subprocess, "run", side_effect=FileNotFoundError(2, "No such file")),
+            patch.object(session_boot.os, "execvp") as mock_exec,
+        ):
+            result = session_boot._start_fresh("hooks", "/usr/local/bin/claude", [], None, cwd=str(tmp_path))
+        assert result["action"] == "started"
+        mock_exec.assert_called_once()
+
     def test_the_menu_still_renders_without_tmux(self, tmp_path, fake_projects, capsys):
         """The failure that mattered: the whole menu, not one label."""
         make_transcript(fake_projects, tmp_path, "chat-1", "A chat", 4)

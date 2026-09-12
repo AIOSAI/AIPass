@@ -110,6 +110,28 @@ def _tmux_session_exists(name: str) -> bool:
     return result.returncode == 0
 
 
+def _tmux_kill_session(name: str) -> bool:
+    """Kill a tmux session by name. True when the kill was actually delivered.
+
+    ``check=False`` is not a guard here: a missing tmux raises
+    FileNotFoundError out of ``exec``, before there is any exit code to ignore
+    (seedgo host_portability, arm B). No tmux on this host means there is no
+    session to kill, which is a fact about the world and not a failure of this
+    call — so the exec failure is caught and NAMED rather than swallowed, and
+    the caller learns the kill did not happen.
+
+    The exec failure is the probe, deliberately: a ``shutil.which`` here would
+    read the REAL PATH in every test that mocks ``subprocess.run`` and nothing
+    else, which is the host-coupled unit this standard exists to prevent.
+    """
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", name], check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[SESSION_BOOT] tmux kill-session unavailable: %s", exc)
+        return False
+    return True
+
+
 def _find_tmux_session_for_pid(pid: int) -> str | None:
     """Find which tmux session hosts the given PID (as a descendant of a pane).
 
@@ -244,8 +266,7 @@ def _stop_session(session: dict, claude_bin: str) -> str:
         return f"PID {pid}: bg session — no per-job stop available"
 
     tmux_session = _find_tmux_session_for_pid(pid) if pid else None
-    if tmux_session:
-        subprocess.run(["tmux", "kill-session", "-t", tmux_session], check=False)
+    if tmux_session and _tmux_kill_session(tmux_session):
         logger.info("[SESSION_BOOT] Killed tmux session '%s' (PID %d)", tmux_session, pid)
         return f"PID {pid}: killed tmux session '{tmux_session}'"
 
@@ -310,7 +331,7 @@ def _exec_in_tmux(branch: str, session_id: str, claude_bin: str, claude_cmd: lis
     """Exec a claude command inside a new tmux session."""
     session_name = _make_session_name(branch, session_id)
     if _tmux_session_exists(session_name):
-        subprocess.run(["tmux", "kill-session", "-t", session_name], check=False)
+        _tmux_kill_session(session_name)
     logger.info("[SESSION_BOOT] Launching in tmux '%s': %s", session_name, " ".join(claude_cmd))
     os.execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)
     return {"exit_code": 0, "action": "started", "tmux_session": session_name}
@@ -1075,7 +1096,7 @@ def _start_fresh(
 
     if _tmux_session_exists(session_name):
         logger.info("[SESSION_BOOT] Killing stale tmux session '%s'", session_name)
-        subprocess.run(["tmux", "kill-session", "-t", session_name], check=False)
+        _tmux_kill_session(session_name)
 
     sp = _session_pointer()
     session_id = sp.mint_session_id()

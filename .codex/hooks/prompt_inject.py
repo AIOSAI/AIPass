@@ -3,6 +3,7 @@
 
 Injects branch identity, email notifications, and current time on every prompt.
 """
+
 import json
 import sys
 from datetime import datetime
@@ -32,10 +33,17 @@ def get_branch_from_cwd(repo_root):
 
 
 def main():
+    # stdin is DRAINED, not read: Codex writes the event JSON here and nothing
+    # this hook injects depends on a field of it, but a hook that never reads
+    # the pipe can hand the provider a broken one. The parse is what proves the
+    # pipe was consumed; the value was bound to a name nobody used (ruff F841).
     try:
-        input_data = json.loads(sys.stdin.read())
-    except Exception:
-        input_data = {}
+        json.loads(sys.stdin.read())
+    except (OSError, ValueError):
+        # Named and narrow rather than bare: an unreadable or unparseable event
+        # changes nothing this hook prints, and there is nowhere to log from a
+        # stdlib-only provider hook whose stdout IS the injected context.
+        pass
 
     repo_root = find_repo_root()
     if not repo_root:
@@ -78,21 +86,13 @@ def main():
                 mail = json.loads(inbox.read_text(encoding="utf-8"))
                 unread = mail.get("unread_count", 0)
                 if unread > 0:
-                    context_parts.append(
-                        f"You have {unread} new emails - check with: "
-                        f"drone @ai_mail inbox"
-                    )
+                    context_parts.append(f"You have {unread} new emails - check with: drone @ai_mail inbox")
             except Exception:
                 pass
 
     if context_parts:
         context = "\n\n".join(context_parts)
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": context
-            }
-        }
+        output = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
     else:
         output = {}
 
