@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_instance_lock.py
 # Description: Tests for the monitor single-instance lock
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-10
-# Modified: 2026-08-02
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py
@@ -169,7 +169,17 @@ class TestBootIdentity:
         with patch("pathlib.Path.read_text", side_effect=OSError("no /proc")):
             assert mod._current_boot_id() is None
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="/proc is Linux-only")
+    # The guard names the platform that HAS the recipe, not one platform that
+    # lacks it. It used to read `sys.platform == "win32"`, which let this run on
+    # macOS, where there is no procfs either: _current_boot_id() correctly
+    # answered None and `assert boot_id` went red on every macOS CI run
+    # (34707762639, 34707861282, 34708132945). The portable half of the contract
+    # — no procfs means None, never an exception — is the sibling above, which
+    # patches the read and so runs on every OS.
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="reads /proc/sys/kernel/random/boot_id - no procfs on this host; the recipe is unavailable, not the state",
+    )
     def test_current_boot_id_reads_proc_on_linux(self):
         """Linux exposes a non-empty boot id that is stable within a boot."""
         mod = _import_lock()
