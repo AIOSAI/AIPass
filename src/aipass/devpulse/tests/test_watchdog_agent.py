@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-14
 # Modified: 2026-09-12
 # =============================================
@@ -534,7 +534,6 @@ def test_watch_agent_live_dispatch_completes():
     assert result["agent_state"] in ("completed_replied", "completed_silent", "crashed")
 
 
-@pytest.mark.integration
 # ─────────────────────────────────────────────────────────────────────────────
 # Sub-agent visibility + bookkeeping-line masking (false STALLED, 2026-08-08)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -881,11 +880,30 @@ def test_a_live_agent_off_linux_is_still_alive(monkeypatch):
     assert agent_handler._pid_alive(os.getpid()) is True
 
 
-def test_the_zombie_rule_is_not_duplicated_in_this_module(monkeypatch):
+def test_the_zombie_rule_is_not_duplicated_in_this_module():
     """One implementation, in registry.py. A private copy here would drift, and
-    a drifted liveness rule is how a dead watch passes for a live one."""
+    a drifted liveness rule is how a dead watch passes for a live one.
+
+    Split from the call-through below so this half runs EVERYWHERE: whether a
+    second copy of the rule exists in this module is a fact about the source,
+    and no host changes it.
+    """
     assert not hasattr(agent_handler, "_is_zombie_linux")
 
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows has no zombie state, so the rule is not duplicated there — it is ABSENT by design: "
+    "_pid_alive answers from OpenProcess/GetExitCodeProcess and never asks registry.is_zombie at all. "
+    "A call-through pin cannot see a call that correctly never happens. The no-second-copy half above "
+    "still runs on this host.",
+)
+def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch):
+    """The other half: the single implementation is actually REACHED.
+
+    Not having a private copy proves nothing on its own — a liveness check that
+    simply forgot to ask is the same silent lie by another route.
+    """
     calls: list = []
     monkeypatch.setattr(watch_registry, "is_zombie", lambda pid: calls.append(pid) or False)
 

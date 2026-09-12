@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-14
 # Modified: 2026-09-12
 # =============================================
@@ -260,6 +260,14 @@ def test_a_live_pid_off_linux_is_still_alive(monkeypatch):
     assert watch_registry.is_pid_alive(os.getpid()) is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX-only RECIPE, not a POSIX-only rule: this is the one off-Linux test that goes through "
+    "list_active, so it takes _FileLock — which imports fcntl on every platform that is not win32. "
+    "Forcing darwin here tells the lock it is on POSIX, and on Windows that import does not exist. "
+    "The zombie state it prunes on has no Windows spelling either (ps -o state= is POSIX). Pruning "
+    "itself is pinned on this host and on macOS.",
+)
 def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch):
     """What the bug cost operationally: a dead watch stayed listed forever."""
     watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
