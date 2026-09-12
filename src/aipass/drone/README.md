@@ -468,6 +468,7 @@ Protected: path contains citizen ai_mail/ (…/src/aipass/ai_mail) — another b
 - **Unchanged:** targets inside the caller's own branch, and targets in the system temp dir, where a `.trinity/` is test scaffolding, not a citizen. Stale mode is unaffected; it never reaches this lane.
 - **A symlink is not a citizen.** rmtree unlinks the link and never touches what it points at.
 - **A folder the walk cannot list refuses the delete.** A guard that could not look must not report clear.
+- **Whether you may delete the folder you are standing in is the host's call, not ours.** POSIX allows it, so `drone rm ..` from a branch completes. Windows holds the current directory open without delete sharing and refuses with `WinError 32` (CI run 34686193857) — the fence's verdict is identical on both hosts, and what fails there is the removal. The message and the record now name where the process was standing and say to run it from outside. The suite marks the end-to-end case `deletable_cwd`, which Windows skips, and pins the verdict itself beside it on every OS.
 - Refusals are recorded like every other refusal. A caller standing outside every branch finds every citizen foreign.
 
 Same change, same lane: the delete now acts on the **resolved** path, the one every guard judged. Before, it acted on the path as typed. `drone rm ..` handed rmtree `spawn/..`, which emptied the tree and then failed its last `rmdir`, because `spawn` was gone by then. The ledger recorded `failed` for a delete that had happened.
@@ -496,6 +497,19 @@ rm --stale 10d (dry run): folders scanned 1539, files matched 706 (35602375 byte
 ```
 
 706 = prax_json 655 + memory_json 36 + trigger_json 13 + seedgo_json 2, all old-era `tmpXXXXXXXX.tmp`. The new-era dot-prefixed temps started on 09-04, so all of them are under ten days old and none match yet; 461 younger temps were skipped. Two of the seedgo temps hold 21.9 MB of the 35.6 MB. From a branch, `../..` is `src/`, not `src/aipass/`. `src/` holds only `aipass/`, so the set is the same.
+
+### The broker's path resolution — two lanes, one contract
+
+`resolve_beneath()` re-resolves an agent-supplied path server-side, so the broker never trusts the string it was handed. Linux x86-64 gets `openat2(2)` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, where the kernel enforces containment. Every other host walks the path one component at a time, opening each relative to its parent's fd with `O_NOFOLLOW` — the only fd-based way to say "and no symlinks" without that syscall.
+
+Both lanes must answer the same question: *which path did I just verify?* Until 2026-09-12 the walk answered it by reading `/proc/self/fd/<fd>`. `/proc` is Linux furniture, so the fallback raised `FileNotFoundError` on exactly the hosts it exists for — every broker path resolution on macOS (CI run 34686193857; seedgo's `host_portability`, the 47th standard). The same spelling in the openat2 lane is correct and stays: nothing off Linux ever reaches it.
+
+The walk now answers portably, and keeps the property that made it worth having:
+
+- **The leaf is measured, not opened** — `lstat` relative to its verified parent's fd. A symlink there is refused exactly as `O_NOFOLLOW` refuses one above it, and a fifo cannot block an open that never happens.
+- **The path is proved before it is returned.** It is assembled from the real base plus the verified components and handed back only if it `lstat`s to the same `(device, inode)` the walk verified. Swap a component under the walk and the caller gets an error instead of a path nobody checked — the anti-swap property the `/proc` readlink bought, bought another way.
+- **The flags come from `os`, never from a written-down number.** `0o0400000` is `O_NOFOLLOW` on Linux and `O_NOCTTY` on macOS: the literal would have quietly traversed the symlinks it was there to block, which is a worse bug than the crash it sat behind.
+- **A host with neither `O_NOFOLLOW` nor `dir_fd` support is refused**, not served unverified.
 
 ### Tag lanes — AIPass vs an external repo
 
@@ -628,7 +642,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-**1329 tests pass, 0 skip**, across 31 test files — measured 2026-09-11 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1220 `def test_` functions**, which parametrization expands to **1329 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1329:
+**1339 tests pass, 0 skip on Linux**, across 31 test files — measured 2026-09-12 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1230 `def test_` functions**, which parametrization expands to **1339 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1339 (eleven of them carry `deletable_cwd`, which Windows skips and Linux runs):
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -637,9 +651,9 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 76 |
-| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 196 |
+| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 198 |
 | Deletion record | `test_deletion_log.py` | 38 |
-| Broker | `test_broker.py` | 61 |
+| Broker | `test_broker.py` | 69 |
 | Standards | `test_cli_routing.py` | 81 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 | Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
@@ -652,7 +666,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 **What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1329 passed in 143s on 2026-09-11.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1339 passed in 138s on 2026-09-12.
 
 ---
 
@@ -662,7 +676,7 @@ Measured 2026-09-08, all numbers from this tree tonight:
 
 | What | Measured | How |
 |---|---|---|
-| Tests | 1329 pass, 0 skip, 31 files (1220 `def test_` functions) — remeasured 2026-09-11 | `python -m pytest tests/ -q`, both rootdirs |
+| Tests | 1339 pass, 0 skip on Linux, 31 files (1230 `def test_` functions) — remeasured 2026-09-12 | `python -m pytest tests/ -q`, both rootdirs |
 | Seedgo audit | 100 on every CI-scored category; 100 on all eleven v5 pytest_quality rules | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
 | Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
 | Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |

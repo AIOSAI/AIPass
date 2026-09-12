@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
+from aipass.drone.apps.handlers.broker import path_resolver
 from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
 from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
 from aipass.drone.apps.handlers.broker.client import (
@@ -239,6 +240,122 @@ class TestPathResolver:
         base = repo_root / "src" / "aipass" / "testbranch"
         with pytest.raises(OSError):
             resolve_beneath(base, "does_not_exist.txt")
+
+    # -- the walk fallback: the lane every non-Linux host takes ---------------
+
+    @pytest.fixture()
+    def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stand the resolver on a host with no openat2 and no /proc to read.
+
+        That is macOS, and it is the lane that used to raise FileNotFoundError
+        on every call: the fallback asked /proc for the fd's own path, and /proc
+        is Linux furniture. A walk that reaches for it at all fails here.
+        """
+        real_readlink = os.readlink
+
+        def no_proc(path, *args, **kwargs):
+            if str(path).startswith("/proc"):
+                raise FileNotFoundError(2, "No such file or directory", str(path))
+            return real_readlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(path_resolver, "_openat2_available", lambda: False)
+        monkeypatch.setattr(os, "readlink", no_proc)
+
+    def test_walk_resolves_with_no_proc(self, repo_root: Path, walk_host: None) -> None:
+        """The fallback resolves a nested path on a host without /proc."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        result = resolve_beneath(base, "subdir/nested.txt")
+        assert result == (base / "subdir" / "nested.txt").resolve()
+
+    def test_walk_resolves_the_base_itself(self, repo_root: Path, walk_host: None) -> None:
+        """'.' walks no components and still answers the base."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        assert resolve_beneath(base, ".") == base.resolve()
+
+    def test_both_lanes_return_the_same_path(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The portable walk answers what the kernel lane answers, or it is a
+        different resolver wearing the same name."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        by_kernel = resolve_beneath(base, "subdir/nested.txt")
+        monkeypatch.setattr(path_resolver, "_openat2_available", lambda: False)
+        assert resolve_beneath(base, "subdir/nested.txt") == by_kernel
+
+    def test_walk_refuses_a_symlinked_directory(self, repo_root: Path, walk_host: None) -> None:
+        """O_NOFOLLOW comes from `os`, so it is the host's own value: 0o0400000
+        is O_NOFOLLOW on Linux and O_NOCTTY on macOS, and the second one would
+        have opened this link instead of refusing it."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        link = base / "link"
+        link.symlink_to("/tmp")
+        try:
+            with pytest.raises(OSError, match="Component 'link' failed"):
+                resolve_beneath(base, "link/something")
+        finally:
+            link.unlink()
+
+    def test_walk_refuses_a_symlinked_leaf(self, repo_root: Path, walk_host: None) -> None:
+        """The leaf is stat'd rather than opened, so it needs its own refusal —
+        without it a symlinked last component would resolve."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        link = base / "leaf_link"
+        link.symlink_to("/etc/passwd")
+        try:
+            with pytest.raises(OSError, match="Symbolic link"):
+                resolve_beneath(base, "leaf_link")
+        finally:
+            link.unlink()
+
+    def test_walk_refuses_a_path_swapped_under_it(
+        self,
+        repo_root: Path,
+        walk_host: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """The contract the /proc readlink used to hold: the path handed back
+        names the inode the walk verified. Point the assembled path at a decoy
+        of the same shape and the caller gets an error, not a path nobody
+        checked."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        decoy = tmp_path / "decoy"
+        (decoy / "subdir").mkdir(parents=True)
+        (decoy / "subdir" / "nested.txt").write_text("not the verified file", encoding="utf-8")
+        real_realpath = os.path.realpath
+        monkeypatch.setattr(
+            os.path,
+            "realpath",
+            lambda p, **kw: str(decoy) if str(p) == str(base) else real_realpath(p, **kw),
+        )
+        with pytest.raises(OSError, match="changed under the walk"):
+            resolve_beneath(base, "subdir/nested.txt")
+
+    def test_walk_refuses_when_the_verified_path_is_gone(
+        self,
+        repo_root: Path,
+        walk_host: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Verification that cannot lstat the answer is a refusal too."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        real_realpath = os.path.realpath
+        monkeypatch.setattr(
+            os.path,
+            "realpath",
+            lambda p, **kw: str(tmp_path / "gone") if str(p) == str(base) else real_realpath(p, **kw),
+        )
+        with pytest.raises(OSError, match="went away mid-walk"):
+            resolve_beneath(base, "subdir/nested.txt")
+
+    def test_walk_refuses_a_host_without_nofollow(
+        self, repo_root: Path, walk_host: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows has neither O_NOFOLLOW nor dir_fd, so the walk cannot hold
+        its contract there and says so instead of resolving unverified."""
+        base = repo_root / "src" / "aipass" / "testbranch"
+        monkeypatch.setattr(path_resolver, "_WALK_SUPPORTED", False)
+        with pytest.raises(OSError, match="refusing rather than resolving"):
+            resolve_beneath(base, "deleteme.txt")
 
 
 # ---------------------------------------------------------------------------

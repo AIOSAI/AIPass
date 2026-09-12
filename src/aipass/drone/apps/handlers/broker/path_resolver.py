@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: path_resolver.py
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-09
-# Modified: 2026-06-09
+# Modified: 2026-09-12
 # =============================================
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.
@@ -14,14 +14,18 @@ RESOLVE_NO_SYMLINKS to guarantee the final target is strictly beneath an
 allowed base directory and traverses no symlinks.
 
 Falls back to a pure-Python per-component walk (O_NOFOLLOW openat) when
-openat2 is unavailable (non-Linux, older kernels).
+openat2 is unavailable (non-Linux, older kernels). That fallback is the lane
+every non-Linux host takes, so it holds the same containment contract with
+portable spellings only -- no /proc, no hardcoded Linux flag numbers.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import errno
 import os
+import stat
 import struct
 import sys
 from pathlib import Path
@@ -32,8 +36,16 @@ from aipass.drone.apps.handlers.json import json_handler
 RESOLVE_BENEATH = 0x08
 RESOLVE_NO_SYMLINKS = 0x04
 SYS_OPENAT2 = 437
+
+# openat2(2) is handed raw kernel flags, so O_PATH here is the Linux number by
+# definition. The walk below runs on hosts that spell these flags differently --
+# 0o0400000 is O_NOFOLLOW on Linux and O_NOCTTY on macOS -- so it takes its own
+# from `os`, which always carries the value of the host it is running on.
 O_PATH = 0o010000000
-O_NOFOLLOW = 0o0400000
+
+_WALK_O_PATH = getattr(os, "O_PATH", 0)
+_WALK_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_WALK_SUPPORTED = bool(_WALK_O_NOFOLLOW) and os.open in os.supports_dir_fd
 
 _OPEN_HOW_SIZE = 24
 
@@ -58,8 +70,8 @@ def _openat2(dirfd: int, pathname: bytes, flags: int, resolve: int) -> int:
         ctypes.c_size_t(_OPEN_HOW_SIZE),
     )
     if result < 0:
-        errno = ctypes.get_errno()
-        raise OSError(errno, os.strerror(errno), pathname.decode(errors="replace"))
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), pathname.decode(errors="replace"))
     return result
 
 
@@ -107,21 +119,72 @@ def _resolve_via_openat2(base: Path, cleaned: str) -> Path:
         os.close(dirfd)
 
 
+def _stat_leaf(component: str, dir_fd: int) -> os.stat_result:
+    """Measure the last component relative to its already-verified parent.
+
+    The leaf is stat'd, not opened: an open would need a read right the caller
+    may not hold and would block on a fifo, and its identity is all the
+    verification below asks for. A symlink is refused here exactly as
+    O_NOFOLLOW refuses one on the components above it.
+    """
+    info = os.stat(component, dir_fd=dir_fd, follow_symlinks=False)
+    if stat.S_ISLNK(info.st_mode):
+        raise OSError(errno.ELOOP, "Symbolic link not followed", component)
+    return info
+
+
+def _verify_leaf(resolved: Path, leaf: os.stat_result, parts: list[str]) -> None:
+    """Prove the path handed back still names the inode the walk verified.
+
+    This is what the Linux lane gets from reading the fd's own path out of
+    /proc, and there is no portable door to that. So the contract is closed
+    from the other side: the walk verified an inode through fds, one per
+    component, that no rename can redirect; the assembled path is returned only
+    if it lstats to that same (device, inode) right now. Swap a component under
+    the walk and the pair no longer matches, so the caller gets an error rather
+    than a path pointing at something nobody checked.
+    """
+    try:
+        seen = os.lstat(resolved)
+    except OSError as exc:
+        raise OSError(
+            exc.errno,
+            f"Resolved path went away mid-walk: {exc.strerror}",
+            "/".join(parts),
+        ) from exc
+
+    if (seen.st_dev, seen.st_ino) != (leaf.st_dev, leaf.st_ino):
+        raise OSError(
+            errno.ESTALE,
+            f"Resolved path changed under the walk: {resolved}",
+            "/".join(parts),
+        )
+
+
 def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
     """Fallback: per-component walk using O_NOFOLLOW to block symlinks."""
+    if not _WALK_SUPPORTED:
+        raise OSError(
+            errno.ENOTSUP,
+            "Path resolution needs O_NOFOLLOW and dir_fd support, and this host "
+            "has neither -- refusing rather than resolving unverified",
+            "/".join(parts),
+        )
+
+    components = [c for c in parts if c not in ("", ".")]
     current_fd = os.open(str(base), os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for i, component in enumerate(parts):
-            if component in ("", "."):
-                continue
-
-            is_last = i == len(parts) - 1
-            flags = O_PATH | O_NOFOLLOW
-            if not is_last:
-                flags |= os.O_DIRECTORY
-
+        leaf = os.fstat(current_fd)
+        for i, component in enumerate(components):
             try:
-                next_fd = os.open(component, flags, dir_fd=current_fd)
+                if i == len(components) - 1:
+                    leaf = _stat_leaf(component, current_fd)
+                    break
+                next_fd = os.open(
+                    component,
+                    _WALK_O_PATH | _WALK_O_NOFOLLOW | os.O_DIRECTORY,
+                    dir_fd=current_fd,
+                )
             except OSError as exc:
                 raise OSError(
                     exc.errno,
@@ -132,7 +195,8 @@ def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
             os.close(current_fd)
             current_fd = next_fd
 
-        resolved = Path(os.readlink(f"/proc/self/fd/{current_fd}"))
+        resolved = Path(os.path.realpath(base)).joinpath(*components)
+        _verify_leaf(resolved, leaf, parts)
         logger.info("resolve_beneath: walk resolved %s -> %s", "/".join(parts), resolved)
         return resolved
     finally:

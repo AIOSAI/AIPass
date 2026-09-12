@@ -7,6 +7,7 @@ and sibling branches are protected even inside allowed roots.
 Stale-mode tests (DPLAN-0338) sit at the bottom.
 """
 
+import errno
 import json
 import os
 import shutil
@@ -659,17 +660,75 @@ class TestContainedCitizens:
         assert ok is False
         assert "contains citizen api/" in message
 
-    def test_a_folder_holding_only_the_callers_own_tree_is_allowed(self, project_dir, monkeypatch):
-        """The caller's tree is pruned whole — its template skeleton included,
-        which is spawn's by outermost-wins and must not read as a stranger."""
-        aipass = project_dir / "src" / "aipass"
-        spawn = aipass / "spawn"
+    @pytest.fixture()
+    def only_my_own_tree(self, project_dir, monkeypatch):
+        """Stand in spawn, whose parent holds spawn and its skeleton and nobody
+        else — the one shape the contains-fence must let through."""
+        spawn = project_dir / "src" / "aipass" / "spawn"
         (spawn / ".trinity").mkdir(parents=True)
         (spawn / "templates" / "aipass_framework" / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(spawn)
+        return spawn.parent
+
+    @pytest.mark.deletable_cwd
+    def test_a_folder_holding_only_the_callers_own_tree_is_allowed(self, only_my_own_tree):
+        """The caller's tree is pruned whole — its template skeleton included,
+        which is spawn's by outermost-wins and must not read as a stranger.
+
+        Marked: standing in your own tree while deleting its parent IS deleting
+        the directory you stand in, and Windows refuses that (run 34686193857,
+        WinError 32 — see WINDOWS_CWD_REASON in conftest). The recipe is what
+        that host lacks, not the verdict; the two cases below make the verdict
+        on every OS.
+        """
         ((_path, ok, message),) = safe_delete([".."])
         assert ok is True, message
-        assert not aipass.exists()
+        assert not only_my_own_tree.exists()
+
+    def test_the_fence_itself_allows_the_callers_own_tree_on_every_os(self, only_my_own_tree, project_dir):
+        """The same verdict, asked of the guard instead of proved by a delete,
+        so the claim above is not the skipped host's only cover."""
+        blocked, reason = check_carveouts(only_my_own_tree.resolve(), project_dir.resolve())
+        assert blocked is False, reason
+
+    def test_a_host_that_refuses_to_delete_a_live_cwd_is_not_a_refusal_of_ours(
+        self, only_my_own_tree, tmp_path, monkeypatch
+    ):
+        """The Windows half of the case above, manufactured here rather than
+        asked of this host.
+
+        The rule is injected at the seam: rmtree refuses to remove a directory
+        the process stands in, which is all WinError 32 is. What that shows is
+        whose refusal it is — every drone guard passed, the message is the
+        host's own and carries the way out of it, the ledger says failed, and
+        the tree is still standing. It models the refusal only; a real rmtree
+        empties what it can reach before raising.
+        """
+        real_rmtree = shutil.rmtree
+
+        def windows_rmtree(path, *args, **kwargs):
+            here = Path.cwd()
+            target = Path(path)
+            if here == target or target in here.parents:
+                raise PermissionError(
+                    errno.EACCES,
+                    "[WinError 32] The process cannot access the file because it is being used by another process",
+                    str(target),
+                )
+            real_rmtree(path, *args, **kwargs)
+
+        monkeypatch.setattr(shutil, "rmtree", windows_rmtree)
+
+        ((_path, ok, message),) = safe_delete([".."])
+
+        assert ok is False
+        assert "WinError 32" in message
+        assert "Protected:" not in message, "no guard of ours refused this one"
+        assert f"run drone rm from outside {only_my_own_tree.resolve()}" in message
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "failed"
+        assert "standing in" in record["reason"], "the durable half must carry the way out too"
+        assert only_my_own_tree.exists()
 
     def test_a_temp_dir_target_is_unchanged(self, at_drone, tmp_path_factory):
         """Outside the project a .trinity is scaffolding, not a citizen."""

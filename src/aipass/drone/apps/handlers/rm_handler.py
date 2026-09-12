@@ -276,6 +276,22 @@ def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
     return _safe_delete_direct(paths)
 
 
+def _standing_inside(resolved: Path, cwd: Path | None) -> str:
+    """Name the caller's own position when that is what blocked the delete.
+
+    Windows holds a process's current directory open without delete sharing, so
+    removing a tree you are standing in fails with WinError 32 — and the fleet's
+    normal spelling puts you there, because the target is an argument and nobody
+    cds first: ``drone rm ..`` from a branch deletes the parent of your own cwd.
+    POSIX permits that delete, so this only ever appends on the host that
+    refused, and it says the one thing that gets the caller unstuck. Added to
+    the message only; whose refusal it was does not change.
+    """
+    if cwd is None or not cwd.is_relative_to(resolved):
+        return ""
+    return f" — this process is standing in {cwd}; run drone rm from outside {resolved}"
+
+
 def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
@@ -389,14 +405,15 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 measurement=measurement,
             )
         except Exception as exc:
-            results.append((path_str, False, f"Delete failed: {exc}"))
+            message = f"Delete failed: {exc}{_standing_inside(resolved, cwd)}"
+            results.append((path_str, False, message))
             logger.error("rm: delete failed for %s: %s", path_str, exc)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
                 outcome=deletion_log.OUTCOME_FAILED,
                 requested=path_str,
                 resolved=resolved,
-                reason=f"Delete failed: {exc}",
+                reason=message,
                 measurement=measurement,
             )
 
