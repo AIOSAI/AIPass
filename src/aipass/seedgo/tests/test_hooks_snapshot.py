@@ -269,3 +269,46 @@ class TestBranchHooksSnapshot:
             assert expected_cmds == actual_cmds, (
                 f"Branch {branch} hooks don't match baseline.\nExpected: {expected_cmds}\nActual: {actual_cmds}"
             )
+
+
+# -- Fixture is not allowed to fall behind the installer -----------------------
+
+
+class TestTheSnapshotTracksTheManifest:
+    """The provider fixture must equal the repo's own provider manifest.
+
+    ``TestProviderHooksSnapshot`` reads ``~/.claude/settings.json`` — a personal,
+    untracked file — and skips where it is absent. That made the fixture a
+    hand-copied snapshot of one machine: when ``SessionStart:release_notice``
+    entered ``.claude/provider_manifest.json`` and the installer started writing
+    it, the fixture stayed behind and every host that had run ``setup.sh`` went
+    red (macOS run 34682737363, and this branch's own Linux checkout).
+
+    This pins the two tracked files against each other instead, so it runs on
+    every host including CI, and the fixture can no longer drift silently.
+    """
+
+    @staticmethod
+    def _manifest_commands() -> dict[str, list[str]]:
+        """Read {event: [normalized commands]} from the repo's provider manifest."""
+        manifest = json.loads((_REPO_ROOT / ".claude" / "provider_manifest.json").read_text(encoding="utf-8"))
+        result: dict[str, list[str]] = {}
+        for hook in manifest["cli"]["claude"]["hooks"]:
+            result.setdefault(hook["event"], []).append(_normalize_command(hook["command"]))
+        return {event: sorted(commands) for event, commands in result.items()}
+
+    def test_the_manifest_is_readable_and_not_empty(self):
+        """Guard the oracle itself: an empty manifest would make the next test vacuous."""
+        manifest = self._manifest_commands()
+        assert manifest, "provider_manifest.json declares no claude hooks — the comparison below would prove nothing"
+        assert sum(len(c) for c in manifest.values()) > 1
+
+    def test_fixture_matches_the_manifest(self):
+        """Every command the installer writes is in the fixture, and nothing else is."""
+        expected = self._manifest_commands()
+        actual = _extract_hook_commands(_load_fixture("provider_hooks_snapshot.json"))
+        assert expected == actual, (
+            "provider_hooks_snapshot.json has drifted from .claude/provider_manifest.json. "
+            "The manifest is the source of truth for what setup.sh installs; regenerate the "
+            f"fixture from it.\nManifest: {expected}\nFixture: {actual}"
+        )

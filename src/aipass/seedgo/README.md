@@ -2,7 +2,7 @@
 
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 45 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
+**Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 46 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
 **Version:** 2.0.1
 **Created:** 2026-03-05
@@ -22,7 +22,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 ## Overview
 
 ### What I Do
-- Audit all 18 citizen branches against 45 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, gateway boundary, etc.)
+- Audit all 18 citizen branches against 46 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, gateway boundary, etc.)
 - Score files 0-100 per standard and report violations with actionable details
 - Manage bypass rules (`.seedgo/bypass.json`) for deliberate exceptions
 - Run pyright diagnostics across branches for type error detection
@@ -51,14 +51,14 @@ drone @seedgo --help                                   # Usage guide (see the ga
 drone @seedgo --version                                # Version string — "seedgo v2.0.1"
 
 # Audit
-drone @seedgo audit aipass                             # Audit all 18 citizens (45 standards + diagnostics)
+drone @seedgo audit aipass                             # Audit all 18 citizens (46 standards + diagnostics)
 drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
 drone @seedgo standard                                 # List every standard name across ALL THREE packs (57)
 drone @seedgo standard cli                             # Show standard content (short form)
-drone @seedgo standards_query aipass_standards         # List the 45 standards in the aipass pack
+drone @seedgo standards_query aipass_standards         # List the 46 standards in the aipass pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
 
 # Per-file Check
@@ -247,6 +247,7 @@ by accident while the table was wrong.
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | everywhere | --help content quality |
+| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads and non-portable binaries (corpus: apps/ **and** tests/) |
 | imports | all_files | everywhere | Import ordering and grouping |
 | introspection | all_files | everywhere | No-args introspection gate |
 | json_handler | branch_level | everywhere | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |
@@ -275,8 +276,10 @@ by accident while the table was wrong.
 | unused_function | branch_level | everywhere | No unreferenced public functions |
 | windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
 
-The audit consults **46** entries for a branch — these 45 plus `diagnostics` (pyright), which has
-no `_check.py` of its own. That 46 is what CI's `EXPECTED_STANDARDS` pins.
+The audit consults **47** entries for a branch — these 46 plus `diagnostics` (pyright), which has
+no `_check.py` of its own. That 47 is what CI's `EXPECTED_STANDARDS` pins.
+`host_portability` landed 2026-09-12 and is the 46th checker; `.github/scripts/seedgo_audit.py`
+must carry `EXPECTED_STANDARDS = 47` or every branch trips the tripwire.
 
 **`test_quality` (v4) left this table on 2026-09-07.** It was the pack's only
 `APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an item for finding a
@@ -391,7 +394,7 @@ Counted 2026-09-07, both ways, because the two numbers answer different question
 
 | Signal | Value | How it was measured |
 |--------|-------|---------------------|
-| Self-audit | **100** on all 46 consulted entries | `drone @seedgo audit aipass --full` |
+| Self-audit | **100** on all 47 consulted entries | `drone @seedgo audit aipass --full` |
 | Tests | 3695 passed, 5 skipped, 0 failed | `python -m pytest src/aipass/seedgo -c pyproject.toml --rootdir=.` |
 | Type errors | 0 | pyright, via the audit pipeline |
 | Proof certification | **NOT CERTIFIED** — 3 of 5 pass | `drone @seedgo proof aipass` |
@@ -488,11 +491,13 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
 
 ---
 
-## Latest Audit (2026-09-07)
+## Latest Audit (2026-09-12)
 
-- **Seedgo score:** 100% — **46** consulted entries (45 standards + diagnostics), every one at 100,
-  nothing `not_applicable`. 47 until 2026-09-07; `test_quality` retiring is the whole difference,
-  and CI's `EXPECTED_STANDARDS` tripwire moves with it.
+- **Seedgo score:** 100% — **47** consulted entries (46 standards + diagnostics), every one at 100,
+  nothing `not_applicable`. 46 until 2026-09-12; `host_portability` landing is the whole difference
+  (FPLAN-0554, after the macOS red of run 34682737363), and CI's `EXPECTED_STANDARDS` tripwire in
+  `.github/scripts/seedgo_audit.py` moved 46 → 47 in the same change — it must, or every branch
+  trips it.
 - **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
   drift, not seedgo's code (see the run result above). 3028 test functions across 62 files; pytest
   expands them to 3897 cases.

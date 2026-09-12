@@ -3,7 +3,7 @@
 # Description: Trigger Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -23,6 +23,7 @@ Valid bypass categories for .seedgo/bypass.json:
 - utility: Helper called by event-firing function
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -367,6 +368,114 @@ def check_handler_naming(_content: str, lines: List[str], _module_path: str) -> 
     }
 
 
+def _fires_trigger(node: ast.AST) -> bool:
+    """Whether this AST subtree contains a trigger.fire(...) call.
+
+    A nested def counts as inside its parent: the fire still happens on the
+    outer function's watch, which is what the standard asks about.
+
+    The receiver is matched by name, not by identity, because the fleet
+    reaches the bus by several spellings -- ``trigger.fire(...)``, the
+    lazy-load ``_trigger.fire(...)``, ``get_trigger().fire(...)``. All of
+    them are the same promise.
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "fire":
+            try:
+                receiver = ast.unparse(sub.func.value)
+            except Exception as e:  # pragma: no cover - unparse is total on parsed trees
+                logger.info("[trigger_check] could not unparse fire receiver: %s", e)
+                receiver = ""
+            if "trigger" in receiver.lower():
+                return True
+    return False
+
+
+def _called_names(node: ast.AST) -> set:
+    """Every name this subtree calls, attribute calls reduced to the attribute."""
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            if isinstance(func, ast.Name):
+                names.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                names.add(func.attr)
+    return names
+
+
+def _function_index(content: str) -> Optional[List[Dict]]:
+    """Every def in the module with its line span and whether it satisfies the standard.
+
+    This is the fix for a file-level flag that was answering a per-function
+    question: one ``trigger.fire(`` anywhere in a file used to exempt every
+    pattern in it. Prax's initialize_logging_system/shutdown_logging_system
+    fired nothing for months and passed, because an unrelated hot-path
+    ``trigger.fire("startup")`` lived in the same file; the day that fire was
+    removed the lint finally surfaced. The checker had been passing code that
+    never met the standard.
+
+    ``satisfied`` is True when the function fires in its OWN body (nested defs
+    included, see _fires_trigger) or when it calls -- in ONE hop -- another
+    function defined in the same module that does. The one-hop acquittal is
+    measured, not generous: swept over the whole audit corpus (18 branches,
+    839 files), delegation was the only shape the per-function rule newly
+    convicted, and all of it was correct code (aipass install.py's two lock
+    helpers, which both delegate to the local _fire_lock_removed).
+
+    Returns None when the file does not parse, and the caller then keeps the
+    old file-level behaviour rather than dropping the check entirely.
+    """
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as e:
+        logger.info("[trigger_check] unparseable module, falling back to file-level flag: %s", e)
+        return None
+
+    functions: List[Dict] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(
+                {
+                    "name": node.name,
+                    "start": node.lineno,
+                    "end": getattr(node, "end_lineno", node.lineno) or node.lineno,
+                    "fires": _fires_trigger(node),
+                    "calls": _called_names(node),
+                }
+            )
+
+    firers = {f["name"] for f in functions if f["fires"]}
+    for f in functions:
+        f["satisfied"] = f["fires"] or bool(f["calls"] & firers)
+    return functions
+
+
+def _function_at(functions: Optional[List[Dict]], line: int) -> Optional[Dict]:
+    """The function whose ``def`` is on this line, if any.
+
+    None when the regex matched something that is not a real def -- a string,
+    a comment, a docstring example. Those keep the file-level answer.
+    """
+    if functions is None:
+        return None
+    for f in functions:
+        if f["start"] == line:
+            return f
+    return None
+
+
+def _enclosing_function(functions: Optional[List[Dict]], line: int) -> Optional[Dict]:
+    """The innermost function containing this line, or None at module level."""
+    if functions is None:
+        return None
+    best = None
+    for f in functions:
+        if f["start"] <= line <= f["end"] and (best is None or f["start"] > best["start"]):
+            best = f
+    return best
+
+
 def check_missing_trigger_events(content: str, lines: List[str], _module_path: str) -> Optional[Dict]:
     """
     Detect event-like patterns that should use trigger.fire() but don't.
@@ -377,21 +486,41 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
     - Email/messaging patterns (deliver_*, send_*)
     - State change patterns (mark_*)
 
+    THE EXEMPTION IS PER FUNCTION BODY. Patterns 1-9 are rules about specific
+    functions, so each one is answered by its own body (plus a one-hop
+    delegation to a firing function in the same module -- see _function_index).
+    A fire in function A no longer exempts function B. Pattern 10 is about
+    inline .unlink()/.rename() calls rather than a def, so its unit is the
+    enclosing function; a call at module level keeps the file-level answer,
+    as does any file that fails to parse.
+
     Returns violations with line numbers for easy navigation.
     """
     violations = []
     has_trigger_fire = "trigger.fire(" in content
+    functions = _function_index(content)
 
-    def find_pattern_lines(pattern: str) -> List[int]:
-        """Find all line numbers where pattern matches"""
+    def find_pattern_lines(pattern: str, inline: bool = False) -> List[int]:
+        """Lines matching pattern whose OWN function does not fire.
+
+        inline=False anchors on the def line the regex matched; inline=True
+        (Pattern 10) anchors on the innermost function enclosing the line.
+        """
         matched_lines = []
         for i, line in enumerate(lines, 1):
-            if re.search(pattern, line):
+            if not re.search(pattern, line):
+                continue
+            owner = _enclosing_function(functions, i) if inline else _function_at(functions, i)
+            if not (owner["satisfied"] if owner else has_trigger_fire):
                 matched_lines.append(i)
         return matched_lines
 
     # Pattern 1: watchdog FileSystemEventHandler without trigger
-    if "FileSystemEventHandler" in content and not has_trigger_fire:
+    # The class marker stays a file-level gate (it only says "this file plugs
+    # into watchdog"), but the exemption is per METHOD: on_created firing is no
+    # reason to let on_deleted stay silent. A method that hands the event to a
+    # local dispatcher which fires is acquitted by the one-hop rule.
+    if "FileSystemEventHandler" in content:
         event_methods = ["on_created", "on_deleted", "on_modified", "on_moved"]
         for method in event_methods:
             pattern = rf"def\s+{method}\s*\("
@@ -408,11 +537,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+restore_\w+\s*\(", "restore_*"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_type in lifecycle_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_type} function on lines {matched}")
+    for pattern, func_type in lifecycle_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_type} function on lines {matched}")
 
     # Pattern 3: Email/messaging patterns (common in ai_mail, other branches)
     messaging_patterns = [
@@ -420,11 +548,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+send_(?!notification)\w+\s*\(", "send_*"),  # Exclude send_notification
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_type in messaging_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_type} function on lines {matched}")
+    for pattern, func_type in messaging_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_type} function on lines {matched}")
 
     # Pattern 4: State change patterns (mark_as_*, archive_*)
     state_patterns = [
@@ -432,11 +559,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+archive_\w+\s*\(", "archive_*"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_type in state_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_type} function on lines {matched}")
+    for pattern, func_type in state_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_type} function on lines {matched}")
 
     # Pattern 5: Registry/JSON update patterns (significant state changes)
     # These modify shared state that other systems care about
@@ -450,11 +576,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+ping_registry\s*\(", "ping_registry"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_name in registry_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_name} on lines {matched}")
+    for pattern, func_name in registry_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_name} on lines {matched}")
 
     # Pattern 6: Central file operations (cross-branch shared state)
     central_patterns = [
@@ -464,11 +589,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+aggregate_central\s*\(", "aggregate_central"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_name in central_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_name} on lines {matched}")
+    for pattern, func_name in central_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_name} on lines {matched}")
 
     # Pattern 7: Auto-repair and recovery operations
     repair_patterns = [
@@ -477,11 +601,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+_?heal_\w+\s*\(", "heal_*"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_name in repair_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_name} on lines {matched}")
+    for pattern, func_name in repair_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_name} on lines {matched}")
 
     # Pattern 8: Cleanup and backup operations (state deletion/preservation)
     cleanup_patterns = [
@@ -489,11 +612,10 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+backup_\w+\s*\(", "backup_*"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_name in cleanup_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_name} on lines {matched}")
+    for pattern, func_name in cleanup_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_name} on lines {matched}")
 
     # Pattern 9: System lifecycle (initialize/shutdown entire systems)
     lifecycle_system_patterns = [
@@ -501,24 +623,23 @@ def check_missing_trigger_events(content: str, lines: List[str], _module_path: s
         (r"def\s+shutdown_\w+_system\s*\(", "shutdown_*_system"),
     ]
 
-    if not has_trigger_fire:
-        for pattern, func_name in lifecycle_system_patterns:
-            matched = find_pattern_lines(pattern)
-            if matched:
-                violations.append(f"{func_name} on lines {matched}")
+    for pattern, func_name in lifecycle_system_patterns:
+        matched = find_pattern_lines(pattern)
+        if matched:
+            violations.append(f"{func_name} on lines {matched}")
 
     # Pattern 10: Inline filesystem operations (method calls, not function defs)
-    # These directly modify filesystem state - file deletions and moves
-    if not has_trigger_fire:
-        # .unlink() - file deletion
-        unlink_lines = find_pattern_lines(r"\.\s*unlink\s*\(")
-        if unlink_lines:
-            violations.append(f".unlink() file deletion on lines {unlink_lines}")
+    # These directly modify filesystem state - file deletions and moves.
+    # The unit here is the ENCLOSING function, since there is no def to anchor on.
+    # .unlink() - file deletion
+    unlink_lines = find_pattern_lines(r"\.\s*unlink\s*\(", inline=True)
+    if unlink_lines:
+        violations.append(f".unlink() file deletion on lines {unlink_lines}")
 
-        # .rename() - file move/rename
-        rename_lines = find_pattern_lines(r"\.\s*rename\s*\(")
-        if rename_lines:
-            violations.append(f".rename() file move on lines {rename_lines}")
+    # .rename() - file move/rename
+    rename_lines = find_pattern_lines(r"\.\s*rename\s*\(", inline=True)
+    if rename_lines:
+        violations.append(f".rename() file move on lines {rename_lines}")
 
     if not violations:
         return None

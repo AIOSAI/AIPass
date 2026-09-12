@@ -3,7 +3,7 @@
 # Description: Trigger Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -85,6 +85,30 @@ def get_trigger_standards() -> str:
         "  [yellow]Inline operations (method calls):[/yellow]",
         "  [dim]10.[/dim] Filesystem: .unlink() file deletion, .rename() file move",
         "",
+        "[bold cyan]SCOPE - THE EXEMPTION IS PER FUNCTION BODY:[/bold cyan]",
+        "",
+        "  A function matching patterns 1-9 passes only when [green]trigger.fire([/green] is",
+        "  [bold]inside that function's own body[/bold] (a nested def counts as inside it), or",
+        "  when it calls, in [bold]one hop[/bold], another function in the same module that fires.",
+        "  Pattern 10 is answered by the [bold]enclosing[/bold] function; module level by the file.",
+        "",
+        "  [red]A fire in function A is NOT an exemption for function B in the same file.[/red]",
+        "  [dim]Until 2026-09-12 the flag was file-level: one fire anywhere exempted the",
+        "  whole file. Prax's initialize_logging_system / shutdown_logging_system fired",
+        "  nothing for months and passed on an unrelated hot-path fire in the same module",
+        "  (DPLAN-0339). Cure against the text, not the regex.[/dim]",
+        "",
+        "[bold cyan]SYSTEM LIFECYCLE EVENTS (PATTERN 9):[/bold cyan]",
+        "",
+        "  [yellow]initialize_{system}_system()[/yellow] must fire [green]{system}_system_initialized[/green]",
+        "  [yellow]shutdown_{system}_system()[/yellow] must fire [green]{system}_system_shutdown[/green]",
+        "",
+        "  [dim]Live precedent - prax/apps/modules/logger.py:[/dim]",
+        "  [dim]trigger.fire('logging_system_initialized', modules_count=n)[/dim]",
+        "  [dim]trigger.fire('logging_system_shutdown')  # fired LAST: the system IS down[/dim]",
+        "  [dim]Import trigger inside the door, guard the fire (ImportError, OSError).[/dim]",
+        "  [dim]No listener is required - a handler plugs in later without this branch changing.[/dim]",
+        "",
         "[bold cyan]WHEN TO FIRE EVENTS:[/bold cyan]",
         "",
         "  [green]DO:[/green] Lifecycle transitions (startup, plan_closed)",
@@ -107,7 +131,7 @@ def get_trigger_standards() -> str:
         "",
         "[bold cyan]CURRENT INTEGRATIONS:[/bold cyan]",
         "",
-        "  [green]Prax:[/green] trigger.fire('startup') in logger.py",
+        "  [green]Prax:[/green] trigger.fire('logging_system_initialized') in modules/logger.py",
         "  [green]CLI:[/green] trigger.fire('cli_header_displayed') in display.py",
         "  [yellow]Flow:[/yellow] JSON logging only - needs migration",
         "  [yellow]Drone:[/yellow] No events - ready to adopt",

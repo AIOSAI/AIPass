@@ -1,0 +1,143 @@
+# =================== AIPass ====================
+# Name: host_portability_content.py
+# Description: Host Portability Standards Content Handler
+# Version: 1.0.0
+# Created: 2026-09-12
+# Modified: 2026-09-12
+# =============================================
+
+"""
+Host Portability Standards Content Handler
+
+Provides formatted Host Portability standards content.
+Module orchestrates, handler implements.
+"""
+
+from aipass.seedgo.apps.handlers.json import json_handler
+
+_PROC = "/" + "proc"
+
+
+def get_host_portability_standards() -> str:
+    """Return formatted host_portability standards content with Rich markup.
+
+    Returns:
+        str: Formatted standards text with Rich styling
+    """
+    lines = [
+        "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
+        "  Code must run on macOS as well as Linux. Two LINUX assumptions break",
+        f"  there and pass every Windows rule we already have: reading [yellow]{_PROC}[/yellow]",
+        "  as a filesystem, and shelling out to a binary that is not on every host.",
+        "  A macOS CI leg went red with [red]32 failures[/red] while every branch",
+        "  carrying one read [green]100[/green] on the audit.",
+        "",
+        "[bold cyan]WHAT IT CHECKS:[/bold cyan]",
+        "  Parses every [dim]apps/[/dim] and [dim]tests/[/dim] Python file with",
+        "  [dim]ast.parse()[/dim] and runs two arms. Both SCORE.",
+        "",
+        f"  [red]ARM A -- {_PROC} as a filesystem argument[/red]",
+        f"     A string starting [dim]{_PROC}[/dim] handed DIRECTLY to",
+        "     [dim]open()[/dim], [dim]Path()[/dim], [dim]os.readlink[/dim],",
+        "     [dim]os.listdir[/dim], [dim]os.stat[/dim], [dim].read_text()[/dim],",
+        "     [dim].read_bytes()[/dim] or [dim].exists()[/dim].",
+        "     The argument restriction is the rule: a dict key in a mock table,",
+        "     an argv element, or the [dim]reason=[/dim] prose of the skipif that",
+        "     already handles it all open nothing and are never nominated.",
+        "",
+        "  [red]ARM B -- assumed non-portable binary[/red]",
+        "     A [dim]subprocess.run/Popen/check_output/call/check_call[/dim] whose",
+        "     argv[0] is a bare literal in the curated list:",
+        "     [dim]tmux, systemctl, loginctl, sysctl, gnome-terminal,[/dim]",
+        "     [dim]xfce4-terminal, konsole, xterm, wt, tasklist[/dim].",
+        "     A missing binary raises [yellow]FileNotFoundError[/yellow] out of exec,",
+        "     so [dim]check=False[/dim] does NOT help.",
+        "",
+        "  [yellow]Valid guards (checker recognizes):[/yellow]",
+        "  - [dim]if sys.platform == 'linux':[/dim] / [dim]os.name[/dim] /",
+        "    [dim]platform.system()[/dim] anywhere in the enclosing function",
+        "  - [dim]try: ... except OSError / FileNotFoundError / Exception:[/dim]",
+        "  - [dim]if not path.exists(): return[/dim] -- an existence early-out",
+        "  - [dim]@pytest.mark.skipif(sys.platform == 'win32', ...)[/dim], INCLUDING",
+        "    a module-level alias: [dim]_posix_only = pytest.mark.skipif(...)[/dim]",
+        "    then [dim]@_posix_only[/dim]",
+        "  - one hop: a function whose every call site sits under a platform test",
+        "  - [dim]shutil.which('tmux')[/dim] in the same function (Arm B)",
+        "",
+        "  [yellow]Deliberately NOT guards:[/yellow]",
+        "  - a skipif whose predicate is a CAPABILITY probe --",
+        "    [dim]skipif(not is_available(), ...)[/dim] is a PTY probe, and macOS",
+        "    has a PTY. The predicate must actually name a platform.",
+        "  - [dim]check=False[/dim] on a subprocess call (wrong failure mode)",
+        "",
+        "  [yellow]Skips:[/yellow]",
+        "  - dynamic argv[0] (a variable, an f-string, a starred element) -- the",
+        "    invisible spelling is usually the CURE -- e.g. the macOS player",
+        "    vs the ALSA one, chosen",
+        "    inside a platform [dim]if[/dim] and then run from a variable",
+        "  - portable binaries: [dim]git, bash, sh, drone, python3, sleep, gh,[/dim]",
+        "    [dim]ps, lsof, pgrep, npm, ruff[/dim]",
+        "",
+        "[bold cyan]VIOLATIONS:[/bold cyan]",
+        "",
+        f"  [red]Bad -- the non-Linux fallback reads {_PROC}:[/red]",
+        "  [dim]def _resolve_via_walk(base, parts):       # reached when NOT Linux[/dim]",
+        '  [dim]    return Path(os.readlink(f"' + _PROC + '/self/fd/{fd}"))[/dim]',
+        "",
+        "  [red]Bad -- a binary that is not everywhere:[/red]",
+        '  [dim]subprocess.run(["tmux", "kill-session", "-t", name], check=False)[/dim]',
+        "",
+        "[bold cyan]HOW TO FIX:[/bold cyan]",
+        "",
+        "  [green]Good -- platform test in the enclosing function:[/green]",
+        '  [dim]if sys.platform != "linux":[/dim]',
+        "  [dim]    return None[/dim]",
+        '  [dim]raw = Path(f"' + _PROC + '/{pid}/stat").read_text(encoding="utf-8")[/dim]',
+        "",
+        "  [green]Good -- the missing file is a handled fact:[/green]",
+        "  [dim]try:[/dim]",
+        '  [dim]    return Path("' + _PROC + '/meminfo").read_text(encoding="utf-8")[/dim]',
+        "  [dim]except OSError:[/dim]",
+        "  [dim]    return None[/dim]",
+        "",
+        "  [green]Good -- probe the binary first:[/green]",
+        '  [dim]if not shutil.which("tmux"):[/dim]',
+        "  [dim]    return False[/dim]",
+        '  [dim]subprocess.run(["tmux", "kill-session", "-t", name], check=False)[/dim]',
+        "",
+        "  [green]Good -- catch the exec failure:[/green]",
+        "  [dim]try:[/dim]",
+        '  [dim]    subprocess.run(["systemctl", "--user", "enable", unit])[/dim]',
+        "  [dim]except (OSError, subprocess.SubprocessError) as exc:[/dim]",
+        '  [dim]    logger.info("systemctl unavailable: %s", exc)[/dim]',
+        "",
+        "[yellow]SCOPE:[/yellow]",
+        "  AUDIT_SCOPE = [bold]branch_level[/bold]",
+        "  Corpus is [bold]apps/ AND tests/[/bold] -- the per-file lane never enters",
+        "  tests/, and every macOS failure this exists to prevent was a test",
+        "",
+        "[bold cyan]SCORING:[/bold cyan]",
+        "  [bold]clean files / total files x 100[/bold] -- the same number the",
+        "  all_files lane produces by averaging a 100-or-0 per file",
+        "  [green]100[/green] = no unguarded host assumptions anywhere",
+        "  Reports up to 3 offending file:line rows with descriptions",
+        "  A second [dim]passed: True[/dim] line counts the binary calls that ALREADY",
+        "  carry a guard -- context, never scored",
+        "  Overall pass threshold: [yellow]75%[/yellow]",
+        "",
+        "[bold cyan]BYPASS:[/bold cyan]",
+        "  Via [dim].seedgo/bypass.json[/dim] -- supports standard, file-level,",
+        "  and line-level bypass rules",
+        "",
+        "  [dim]Example bypass entry:[/dim]",
+        '  [dim]{{"file": "apps/handlers/linux_only.py", "standard": "host_portability",[/dim]',
+        '  [dim] "reason": "systemd integration, Linux-only by design"}}[/dim]',
+        "",
+        "[bold cyan]REFERENCE:[/bold cyan]",
+        "  [dim]See: seedgo standards pack (host_portability)[/dim]",
+        "  [dim]Checker: host_portability_check.py[/dim]",
+        "  [dim]Sibling: windows_compat (same helpers, different host)[/dim]",
+    ]
+
+    json_handler.log_operation("standard_content_queried", {"standard": "host_portability"})
+    return "\n".join(lines)

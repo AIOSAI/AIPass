@@ -995,3 +995,446 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 # A test whose subject is archived cannot go red; it can only ImportError.
 # Verbatim disposal copy: tests/.archive/deleted_2026-09-07_test_quality_v4.py
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Tests -- host_portability_check (HOST_PORTABILITY)
+#
+# Every fixture below is a minimised reproduction of a REAL fleet site, named
+# in its docstring. Synthetic rather than live-file pins on purpose: a pin on
+# `drone path_resolver.py:135` goes red the next time drone adds a line above
+# it, which teaches the fleet to delete the pin. The shape is what the rule
+# reads, so the shape is what is pinned; the live file:line list is produced by
+# running the checker across the registry and lives in host_portability.md.
+# ---------------------------------------------------------------------------
+
+
+def _scan_source(tmp_path, source, name="sample.py"):
+    """Write *source* to a file and return (violations, acquitted_binary_sites)."""
+    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+
+    target = tmp_path / name
+    target.write_text(source, encoding="utf-8")
+    return host_portability_check.scan_file(str(target))
+
+
+def _lines(violations):
+    """Just the line numbers, which is what every pin below actually claims."""
+    return [lineno for lineno, _ in violations]
+
+
+def test_host_portability_declares_the_branch_level_contract():
+    """AUDIT_SCOPE and the entry point the audit pipeline dispatches on.
+
+    branch_level, not all_files: the per-file lane's corpus is apps/ only, and
+    this standard's whole reason for existing is that tests/ broke macOS CI.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+
+    assert host_portability_check.AUDIT_SCOPE == "branch_level"
+    assert callable(host_portability_check.check_branch)
+
+
+def test_a_clean_branch_scores_100_and_reports_the_file_count(tmp_path):
+    """check_branch returns the pack's dict shape: passed/checks/score/standard."""
+    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    (apps / "clean.py").write_text("import os\n\n\ndef where():\n    return os.getcwd()\n", encoding="utf-8")
+
+    result = host_portability_check.check_branch(str(tmp_path))
+
+    assert result["standard"] == "HOST_PORTABILITY"
+    assert result["score"] == 100
+    assert result["passed"] is True
+    assert all(check["passed"] for check in result["checks"])
+
+
+def test_a_branch_with_one_dirty_file_scores_by_clean_file_share(tmp_path):
+    """Score is clean/total x 100 -- the number the all_files lane averages to.
+
+    Two files, one of them running tmux bare: 50, not 0 and not 99.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    (apps / "clean.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
+    (apps / "dirty.py").write_text(
+        'import subprocess\n\n\ndef kill(name):\n    subprocess.run(["tmux", "kill-session", "-t", name])\n',
+        encoding="utf-8",
+    )
+
+    result = host_portability_check.check_branch(str(tmp_path))
+
+    assert result["score"] == 50
+    failing = [c for c in result["checks"] if not c["passed"]]
+    assert len(failing) == 1
+    assert failing[0]["violations"][0]["file"] == "apps/dirty.py"
+
+
+# -- ARM B: assumed non-portable binary --------------------------------------
+
+
+def test_tmux_kill_session_with_check_false_is_convicted(tmp_path):
+    """hooks session_boot.py:248, :313 and :1078 -- the fleet's three tmux bugs.
+
+    check=False is the trap this pin exists for. A missing binary raises
+    FileNotFoundError out of exec, BEFORE there is an exit code to ignore, so
+    check=False suppresses nothing at all.
+    """
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def stop(session):\n"
+        '    subprocess.run(["tmux", "kill-session", "-t", session], check=False)\n'
+    )
+
+    violations, acquitted = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [5]
+    assert "tmux" in violations[0][1]
+    assert acquitted == 0
+
+
+def test_systemctl_enable_with_no_guard_is_convicted(tmp_path):
+    """trigger service_control.py:82 -- systemctl --user enable, bare.
+
+    The sibling at :101 in the same file wraps the identical call in
+    `except Exception` and acquits; only this one is naked.
+    """
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def install(unit):\n"
+        '    subprocess.run(["systemctl", "--user", "enable", unit], timeout=10)\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [5]
+    assert "systemctl" in violations[0][1]
+
+
+def test_a_which_probe_in_the_same_function_acquits_the_binary(tmp_path):
+    """aipass handoff_platform launch_tmux -- shutil.which('tmux') then run it.
+
+    Function-scoped on purpose. hooks session_boot HAS a `shutil.which("tmux")`
+    at module line 90, inside a different function, and its three bare calls
+    must still convict.
+    """
+    source = (
+        "import shutil\n"
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def launch(session):\n"
+        '    if not shutil.which("tmux"):\n'
+        "        return False\n"
+        '    subprocess.run(["tmux", "new-session", "-d", "-s", session])\n'
+        "    return True\n"
+    )
+
+    violations, acquitted = _scan_source(tmp_path, source)
+
+    assert violations == []
+    assert acquitted == 1
+
+
+def test_a_filenotfounderror_handler_acquits_the_binary(tmp_path):
+    """daemon tests/conftest.py:90 -- systemctl inside except FileNotFoundError.
+
+    Counted as context in a passed check line, never scored: about two dozen
+    fleet sites are already written this way and convicting them would teach
+    the fleet to switch the rule off.
+    """
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def ask(*args):\n"
+        "    try:\n"
+        '        return subprocess.run(["systemctl", "--user", *args], timeout=15)\n'
+        "    except (FileNotFoundError, OSError):\n"
+        "        return None\n"
+    )
+
+    violations, acquitted = _scan_source(tmp_path, source)
+
+    assert violations == []
+    assert acquitted == 1
+
+
+def test_platform_dispatch_into_a_variable_argv0_is_not_convicted(tmp_path):
+    """hooks apps/sound.py -- afplay on darwin, aplay otherwise, run from a var.
+
+    190 of the fleet's 374 subprocess sites spell argv[0] dynamically and that
+    spelling is usually the CURE. A rule that guessed at dynamic argv[0] would
+    convict this file, which is the correct answer written correctly.
+    """
+    source = (
+        "import subprocess\n"
+        "import sys\n"
+        "\n"
+        'if sys.platform == "darwin":\n'
+        '    _PLAY_CMD = ["afplay"]\n'
+        "else:\n"
+        '    _PLAY_CMD = ["aplay", "-q"]\n'
+        "\n"
+        "\n"
+        "def play(path):\n"
+        "    subprocess.Popen(_PLAY_CMD + [str(path)])\n"
+    )
+
+    violations, acquitted = _scan_source(tmp_path, source)
+
+    assert violations == []
+    assert acquitted == 0
+
+
+def test_a_portable_binary_is_never_read(tmp_path):
+    """git/bash/gh and nine more carry 134 fleet sites and zero known bugs."""
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def head():\n"
+        '    subprocess.run(["git", "rev-parse", "HEAD"])\n'
+        '    subprocess.run(["gh", "pr", "list"])\n'
+        '    subprocess.run(["bash", "-c", "echo hi"])\n'
+    )
+
+    violations, acquitted = _scan_source(tmp_path, source)
+
+    assert violations == []
+    assert acquitted == 0
+
+
+# -- ARM A: /proc as a filesystem argument -----------------------------------
+
+
+def test_the_openat2_twin_acquits_and_the_walk_fallback_convicts(tmp_path):
+    """drone path_resolver.py -- :101 acquitted, :135 convicted. The one-hop pair.
+
+    Both functions read the same Linux-only path 34 lines apart. The openat2
+    one is reached only from `if _openat2_available():`, and that predicate
+    returns `sys.platform == "linux" and ...`. The walk one is the NON-Linux
+    fallback -- it runs precisely when the platform is not Linux, and then
+    reads a filesystem only Linux has. That is the fleet's one genuine product
+    bug of this class, and without the caller hop it is one row of noise
+    beside its own guarded twin.
+    """
+    source = (
+        "import os\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def _openat2_available():\n"
+        '    return sys.platform == "linux" and os.uname().machine == "x86_64"\n'
+        "\n"
+        "\n"
+        "def resolve(base, cleaned, parts):\n"
+        "    if _openat2_available():\n"
+        "        return _via_openat2(base, cleaned)\n"
+        "    return _via_walk(base, parts)\n"
+        "\n"
+        "\n"
+        "def _via_openat2(base, cleaned):\n"
+        "    fd = os.open(str(base), os.O_RDONLY)\n"
+        '    return Path(os.readlink(f"/proc/self/fd/{fd}"))\n'
+        "\n"
+        "\n"
+        "def _via_walk(base, parts):\n"
+        "    fd = os.open(str(base), os.O_RDONLY)\n"
+        '    return Path(os.readlink(f"/proc/self/fd/{fd}"))\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [23]
+    assert "Linux-only" in violations[0][1]
+
+
+def test_a_proc_read_in_a_pty_gated_class_is_still_convicted(tmp_path):
+    """api tests/test_host_attach.py:912 and :919 -- @pty_required is not a guard.
+
+    The class carries `pty_required = pytest.mark.skipif(not is_available(),
+    ...)`, which probes for a PTY. macOS HAS a PTY, so the unit runs there and
+    then calls os.listdir on a filesystem macOS does not have. The predicate
+    has to name a platform to acquit, and this one names a capability.
+    """
+    source = (
+        "import os\n"
+        "import pytest\n"
+        "\n"
+        "pty_required = pytest.mark.skipif(not _is_available(), reason='needs a pty')\n"
+        "\n"
+        "\n"
+        "@pty_required\n"
+        "class TestOpeningAnAttach:\n"
+        "    def test_no_descriptor_leak(self):\n"
+        '        before = len(os.listdir("/proc/self/fd"))\n'
+        '        assert len(os.listdir("/proc/self/fd")) <= before + 1\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_host.py")
+
+    assert _lines(violations) == [10, 11]
+
+
+def test_a_module_level_skipif_alias_acquits_a_proc_read(tmp_path):
+    """aipass tests/test_doctor.py:249 -- `_posix_only` bound once, used as @.
+
+    17+ guards fleet-wide are spelled this way. A reader that only understands
+    the inline `@pytest.mark.skipif(...)` form convicts every one of them, and
+    a rule with that acquittal rate is off within a week.
+    """
+    source = (
+        "import os\n"
+        "import pytest\n"
+        "from pathlib import Path\n"
+        "\n"
+        "_posix_only = pytest.mark.skipif(os.name == 'nt', reason='forces posix')\n"
+        "\n"
+        "\n"
+        "@_posix_only\n"
+        "def test_parent_comm():\n"
+        '    assert Path(f"/proc/{os.getppid()}/comm").read_text(encoding="utf-8")\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_doctor_like.py")
+
+    assert violations == []
+
+
+def test_a_proc_path_used_as_a_mock_dict_key_is_not_convicted(tmp_path):
+    """ai_mail tests/test_wake.py:337 and :348 -- a dict key opens nothing.
+
+    The argument restriction is the whole rule. This literal is a key in a
+    lookup table handed to a fake-open factory; no filesystem is touched, on
+    any host, ever.
+    """
+    source = (
+        "def test_is_zombie(monkeypatch, tmp_path):\n"
+        '    status_file = tmp_path / "status"\n'
+        '    status_file.write_text("State:\\tS\\n")\n'
+        "    monkeypatch.setattr(\n"
+        '        "builtins.open",\n'
+        '        _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),\n'
+        "    )\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_wake_like.py")
+
+    assert violations == []
+
+
+def test_the_prose_of_a_skipif_reason_is_not_convicted(tmp_path):
+    """devpulse tests/test_watchdog_wire.py:738, prax tests/test_instance_lock.py:172.
+
+    The literal IS the guard's own explanation. Convicting a rule's cure for
+    describing itself is how a standard gets switched off.
+    """
+    source = (
+        "import pytest\n"
+        "import sys\n"
+        "\n"
+        "\n"
+        '@pytest.mark.skipif(sys.platform == "win32", reason="/proc is Linux-only")\n'
+        "def test_reads_proc_truth():\n"
+        "    assert True\n"
+    )
+
+    violations, _ = _scan_source(tmp_path, source, name="test_wire_like.py")
+
+    assert violations == []
+
+
+def test_a_proc_argv_element_is_not_convicted(tmp_path):
+    """aipass sandbox_checker.py:71 -- `--proc /proc` is an argv pair for bwrap.
+
+    Not a path this caller opens: bwrap mounts it inside a namespace it
+    creates. The FS-argument rule never nominates it.
+    """
+    source = (
+        "import subprocess\n"
+        "\n"
+        "\n"
+        "def probe(bwrap):\n"
+        '    subprocess.run([bwrap, "--dev", "/dev", "--proc", "/proc", "true"], check=False)\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_a_platform_test_in_the_enclosing_function_acquits_a_proc_read(tmp_path):
+    """hooks cc_sessions.py:163 -- `if sys.platform != "linux": return None`."""
+    source = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def start_ticks(pid):\n"
+        '    if sys.platform != "linux":\n'
+        "        return None\n"
+        '    return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_an_oserror_handler_acquits_a_proc_read(tmp_path):
+    """devpulse watchdog/wire.py:275 -- the missing file is a handled fact."""
+    source = (
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def cmdline(pid):\n"
+        "    try:\n"
+        '        return Path(f"/proc/{pid}/cmdline").read_bytes()\n'
+        "    except OSError:\n"
+        '        return b""\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_an_existence_early_out_acquits_a_proc_read(tmp_path):
+    """aipass system_detector.py:172 -- `if not meminfo.exists(): return 0`.
+
+    The guard sits BELOW the literal, which is why the existence check is read
+    over the whole function rather than only the lines above the read.
+    """
+    source = (
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def read_meminfo_kb():\n"
+        '    meminfo = Path("/proc/meminfo")\n'
+        "    if not meminfo.exists():\n"
+        "        return 0\n"
+        '    return int(meminfo.read_text(encoding="utf-8").split()[1])\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
+
+
+def test_a_bare_proc_string_that_never_reaches_the_filesystem_is_not_convicted(tmp_path):
+    """seedgo platform_oracle_check.py:187 -- a prefix in a tuple of constants."""
+    source = 'DEVICE_PATH_PREFIXES = ("/dev/null/", "/proc/", "/sys/")\n'
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert violations == []
