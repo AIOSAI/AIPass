@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-26
 # Modified: 2026-09-12
 # =============================================
@@ -40,27 +40,52 @@ from aipass.prax.apps.handlers.registry.save import save_module_registry
 from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
 
-# Trigger integration - graceful fallback if trigger not available.
-#
-# The except is (ImportError, OSError), matching modules/logger.py's own trigger
-# import, and the second half is not decoration. MEASURED 2026-08-31: @trigger's
-# handlers/__init__.py guard resolves a frame filename at import time, and in a
-# process with no readable working directory that raises FileNotFoundError — an
-# OSError, never an ImportError. So this clause, which exists precisely to say
-# "we can live without trigger", let a failure in the dependency we can live
-# without kill the import of every prax consumer, including the fleet's logger.
-#
-# The rule that fixed it: an optional dependency's fallback must be at least as
-# wide as the failures its import can produce. A peer branch being broken is
-# allowed; us dying of it is not.
-try:
-    from aipass.trigger.apps.modules.core import trigger
+# =============================================
+# TRIGGER — OPTIONAL, AND FETCHED AT THE FIRE SITE
+# =============================================
 
-    _HAS_TRIGGER = True
-except (ImportError, OSError) as e:
-    logger.info(f"[watcher] trigger module not available, falling back: {e}")
-    trigger = None  # type: ignore[assignment]
-    _HAS_TRIGGER = False
+
+def _get_trigger() -> Any:
+    """The trigger bus, or None when this host cannot hand us one.
+
+    IMPORTED HERE AND NOT AT MODULE LEVEL, and the reason is not style. A
+    module-level `from aipass.trigger.apps.modules.core import trigger` sat at
+    the top of this file until 2026-09-12 and it NEVER SUCCEEDED. The cycle:
+    this module is still executing its own import when it reaches that line →
+    trigger's `core.py:20` does `from aipass.prax.apps.modules.logger import
+    system_logger` → prax's logger does `from ...discovery.watcher import
+    is_file_watcher_active` → we are partially initialised and those names do
+    not exist yet → ImportError. Python then discards `core` but keeps the three
+    `aipass.trigger` package shells it had already created, so every process
+    that imported the logger carried them and used none of them.
+
+    The visible cost was worse than the shells: the fallback set a module-level
+    `_HAS_TRIGGER = False` that nothing could ever set back to True, so both
+    fires in this file — `module_discovered` and `file_watcher_died` — were
+    permanently unreachable. `file_watcher_died` in particular was a fire the
+    fleet believed it had (DPLAN-0305, and a step-4 decision in DPLAN-0339 was
+    made about keeping it). Found while proving FPLAN-0555, cured in FPLAN-0556.
+    By the time a fire site runs, this module is fully imported and the cycle is
+    gone, so the same import succeeds.
+
+    The guard stays `(ImportError, OSError)` and the reason it is that wide is
+    older and still true. MEASURED 2026-08-31: @trigger's `handlers/__init__.py`
+    guard resolves a frame filename at import time, and in a process with no
+    readable working directory that raises FileNotFoundError — an OSError, never
+    an ImportError. An optional dependency's fallback must be at least as wide
+    as the failures its import can produce. A peer branch being broken is
+    allowed; us dying of it is not.
+
+    Returns:
+        The `trigger` bus object, or None when it cannot be imported.
+    """
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+    except (ImportError, OSError) as e:
+        logger.info(f"[watcher] trigger module not available, falling back: {e}")
+        return None
+    return trigger
+
 
 # Global observer instance
 _observer: Any = None
@@ -185,7 +210,8 @@ class PythonFileWatcher(FileSystemEventHandler):
         save_module_registry(modules)
 
         # Fire trigger event for module discovery
-        if _HAS_TRIGGER and trigger is not None:
+        trigger = _get_trigger()
+        if trigger is not None:
             try:
                 trigger.fire(
                     "module_discovered",
@@ -346,7 +372,8 @@ def _report_watcher_death() -> None:
         "steady memory growth (see DPLAN-0305). Restart this process to recover."
     )
 
-    if _HAS_TRIGGER and trigger is not None:
+    trigger = _get_trigger()
+    if trigger is not None:
         try:
             trigger.fire("file_watcher_died", watch_root=str(ECOSYSTEM_ROOT), queued_events=queued)
         except Exception as e:  # noqa: BLE001 - a failed trigger must not silence the log line above

@@ -970,20 +970,16 @@ def _trigger_modules_after_one_log_line(log_dir) -> list:
 
 
 # Measured 2026-09-12 on a fresh interpreter that imports the prax logger and
-# logs one line. These three are PACKAGE SHELLS, not the trigger graph:
-# watcher.py:57 attempts `from aipass.trigger.apps.modules.core import trigger`
-# at module level, that import raises ImportError (a circular import back into
-# the partially initialised watcher), and Python keeps the parent packages it
-# had already created while discarding the module that failed. Nothing under
-# aipass.trigger.apps.modules is ever loaded, which is the property that matters
-# for cost. The failed import is a real finding, reported to @devpulse — it also
-# means watcher.py's `_HAS_TRIGGER` is False in every live process — but it is
-# not this change's to fix, and this pin records the world as it is.
-_TRIGGER_SHELLS_AFTER_ONE_LOG_LINE = [
-    "aipass.trigger",
-    "aipass.trigger.apps",
-    "aipass.trigger.apps.handlers",
-]
+# logs one line: NOTHING under aipass.trigger, not even a package shell.
+#
+# It was three shells until FPLAN-0556. watcher.py held a module-level
+# `from aipass.trigger.apps.modules.core import trigger` that could never
+# succeed — trigger's core imports prax's logger, which imports the watcher,
+# which was still mid-import — so Python discarded `core` and kept the parent
+# packages it had already created, and every process that logged carried them
+# and used none of them. That import now lives at the fire sites, so this list
+# is empty and an entry appearing in it is a new edge onto the logging path.
+_TRIGGER_SHELLS_AFTER_ONE_LOG_LINE = []
 
 
 class TestLoggingPathIsTriggerFree:

@@ -26,11 +26,13 @@ than left standing green.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last behaviour change:** FPLAN-0555 (2026-09-12). The two explicit lifecycle
-  doors, `initialize_logging_system()` and `shutdown_logging_system()`, now fire
-  `logging_system_initialized` and `logging_system_shutdown` on the trigger bus,
-  with the trigger import inside each function so the logging path stays clear of
-  it. Described under Lifecycle events. Before that, FPLAN-0553 (2026-09-12) made
+- **Last behaviour change:** FPLAN-0556 (2026-09-12). `module_discovered` and
+  `file_watcher_died` reach the trigger bus for the first time — the module-level
+  import that gated them could never succeed. Before that, FPLAN-0555 (2026-09-12):
+  the two explicit lifecycle doors, `initialize_logging_system()` and
+  `shutdown_logging_system()`, fire `logging_system_initialized` and
+  `logging_system_shutdown`, with the trigger import inside each function so the
+  logging path stays clear of it. Both described under Lifecycle events. Before that, FPLAN-0553 (2026-09-12) made
   discovery a scheduled scan: `drone @prax discover run` daily, and the first log
   line of a process starts no filesystem watcher — 0 inotify watches instead of
   1,589, registry 250 modules to 1,442. Described under Discovery.
@@ -397,8 +399,8 @@ and the module count in `drone @prax status`.
 process. That door is deliberate and unchanged, and it is why the liveness check,
 the `died` record and the `file_watcher_died` fire all stay: a process that opens
 it can still lose its watchdog dispatcher (DPLAN-0305) and must still find out.
-(The `died` *record* works; the *fire* does not currently reach the bus — see
-Lifecycle events for why, measured 2026-09-12.)
+(Both the `died` record and the fire work as of FPLAN-0556 — until then the fire
+was gated behind an import that always failed. See "The watcher's own events".)
 
 ### The first log line no longer fires a startup event
 
@@ -462,16 +464,49 @@ never a failed initialize. Nothing listens to either event today, by design — 
 point of the standard is that a handler can plug in later without prax changing.
 
 Measured on a fresh interpreter that imports the logger and logs one line:
-nothing under `aipass.trigger.apps.modules` is loaded, and the first `.info()`
-still costs about 0.011 s. Three `aipass.trigger` *package shells* do appear, and
-they are not from this change: `handlers/discovery/watcher.py:57` attempts a
-module-level trigger import, that import raises `ImportError` (a circular import
-back into the partially initialised watcher), and Python keeps the parent
-packages it had already created. The consequence is that `watcher._HAS_TRIGGER`
-is **False in every live process**, so `module_discovered` and
-`file_watcher_died` never actually fire. Found while proving this change,
-reported to @devpulse, not fixed here — it is a separate decision. Both facts are
-pinned in `test_logger_module.py::TestLoggingPathIsTriggerFree`.
+**no `aipass.trigger` module at all**, not even a package shell, and the first
+`.info()` costs about 0.010 s. Pinned in
+`test_logger_module.py::TestLoggingPathIsTriggerFree`.
+
+### The watcher's own events were never reaching the bus
+
+**FPLAN-0556, 2026-09-12.** Proving the section above turned up three
+`aipass.trigger` *package shells* in a process that only logged, and pulling that
+thread found a fire that had never fired.
+
+`handlers/discovery/watcher.py` held a module-level
+`from aipass.trigger.apps.modules.core import trigger`. It could not succeed, and
+never had: this module is still executing its own import when it reaches that
+line → trigger's `core.py:20` does `from aipass.prax.apps.modules.logger import
+system_logger` → prax's logger does `from ...discovery.watcher import
+is_file_watcher_active` → the watcher is partially initialised and those names do
+not exist yet → `ImportError`. Python discarded `core` and kept the three parent
+packages it had already created, which is where the shells came from.
+
+The cost was not the shells. The fallback set a module-level
+`_HAS_TRIGGER = False` that nothing could ever set back to True, and both fires
+in the file sat behind it: **`module_discovered` and `file_watcher_died` had
+never once reached the bus.** `file_watcher_died` is the one that matters — it is
+the escalation path for DPLAN-0305, and the step-4 decision in DPLAN-0339 to keep
+it was made about a fire that was already dead. Nobody knew, because a gate that
+is always closed and a bus with no listener look identical from outside.
+
+The cure is the same shape as the lifecycle doors above: `_get_trigger()` imports
+at the fire site, guarded `(ImportError, OSError)` to a warning, and returns
+`None` when the host cannot give us a bus. `_HAS_TRIGGER` is gone — a flag that
+could only ever hold one value was not telling anyone anything. By the time a
+fire site runs, this module is fully imported and the cycle is gone, so the same
+import succeeds. Proven live: a throwaway that drives `on_created` and
+`_report_watcher_death` under `AIPASS_TEST_LOG_DIR` sees
+`[('module_discovered', 'fplan0556_probe_module'), ('file_watcher_died', 7)]` on
+a listener double attached to the real bus.
+
+What the 2026-08-31 Windows CI incident taught is kept in full — the guard is
+still `(ImportError, OSError)`, because trigger's own import guard can raise
+`FileNotFoundError` on a host with no readable working directory, and an optional
+dependency's fallback must be at least as wide as the failures its import can
+produce. Only the *placement* those pins encoded was dropped, and the placement
+was the defect.
 
 ### Asking for help never does the thing
 
