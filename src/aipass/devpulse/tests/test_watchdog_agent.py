@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-08-11
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for watch_agent (Phase 1, FPLAN-0186).
@@ -20,6 +20,7 @@ a live ai_mail dispatch flow. They're skipped by default in CI.
 
 import json
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -841,3 +842,52 @@ def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_pa
     monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
 
     assert agent_handler._resolve_branch_path("@ext") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Zombies off Linux — FPLAN-0554, from macOS CI run 34682737363
+#
+# os.kill(pid, 0) SUCCEEDS for a zombie, so gating the zombie check on
+# `sys.platform == "linux"` made an exited-but-unreaped agent read ALIVE off
+# Linux and the watch never ended. The rule now lives once, in registry.py
+# (agent.py already imports that module; registry.py imports nothing from here,
+# so there is no cycle and no second copy to drift), and it is called
+# unconditionally. Run on THIS Linux box by pretending to be darwin.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_a_zombie_agent_is_not_alive_off_linux(monkeypatch):
+    """This pid genuinely answers os.kill(pid, 0) — the ps state is the only
+    thing that can call it a corpse, and before FPLAN-0554 nobody asked."""
+    monkeypatch.setattr(sys, "platform", "darwin")  # one module object, both checks
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="Z+\n", stderr=""),
+    )
+
+    assert agent_handler._pid_alive(os.getpid()) is False
+
+
+def test_a_live_agent_off_linux_is_still_alive(monkeypatch):
+    """The other half: the portable probe must not bury a working agent."""
+    monkeypatch.setattr(sys, "platform", "darwin")  # one module object, both checks
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="S+\n", stderr=""),
+    )
+
+    assert agent_handler._pid_alive(os.getpid()) is True
+
+
+def test_the_zombie_rule_is_not_duplicated_in_this_module(monkeypatch):
+    """One implementation, in registry.py. A private copy here would drift, and
+    a drifted liveness rule is how a dead watch passes for a live one."""
+    assert not hasattr(agent_handler, "_is_zombie_linux")
+
+    calls: list = []
+    monkeypatch.setattr(watch_registry, "is_zombie", lambda pid: calls.append(pid) or False)
+
+    agent_handler._pid_alive(os.getpid())
+    assert calls == [os.getpid()]

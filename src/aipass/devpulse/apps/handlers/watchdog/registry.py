@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Watchdog Watch Registry — multi-watch tracking + lifecycle
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-09-12
 # =============================================
 
 # Storage: .watchdog/watchdog_active.json with atomic write (tmp + os.replace).
 # Relocated out of .trinity/ (2026-08-27, File set ruling): .trinity/ holds
 # identity and memory only — operational state lives in its own dot-dir.
 # Devpulse root resolved same way timer.py does (walk upward to AIPASS_REGISTRY.json).
-# Linux-only zombie detection via /proc/<pid>/status. Concurrent register/deregister
-# uses fcntl.flock for a cross-process write lock — simple and correct on Linux,
-# which is the only platform devpulse targets.
+# Zombie detection reads /proc/<pid>/status on Linux and `ps -o state=` everywhere
+# else (FPLAN-0554): os.kill(pid, 0) SUCCEEDS for a zombie, so skipping the check
+# off Linux made an exited-but-unreaped pid read alive. Concurrent
+# register/deregister uses fcntl.flock for a cross-process write lock.
 
 """
 Watchdog Watch Registry — register/deregister/list/kill active watches.
@@ -22,6 +23,7 @@ Public surface:
   deregister(handle, storage_path=None) -> bool
   list_active(storage_path=None, prune_stale=True) -> list[dict]
   is_pid_alive(pid) -> bool
+  is_zombie(pid) -> bool
   kill_watch(handle, storage_path=None) -> dict
   kill_all(storage_path=None) -> list[dict]
 
@@ -46,6 +48,7 @@ import json
 import os
 import secrets
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -60,6 +63,10 @@ _STORAGE_VERSION = 1
 _HANDLE_HASH_LEN = 6
 _KILL_WAIT_SECONDS = 2.0
 _KILL_POLL_INTERVAL = 0.1
+
+# Ceiling on the off-Linux ``ps`` probe. It answers in milliseconds on a healthy
+# host; the timeout is there so a wedged one cannot hang a liveness check.
+_PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def _devpulse_root() -> Path:
@@ -171,6 +178,43 @@ def _is_zombie_linux(pid: int) -> bool:
     return False
 
 
+def _is_zombie_ps(pid: int) -> bool:
+    """``ps -o state= -p <pid>`` — the portable half of ``is_zombie``.
+
+    The trailing ``=`` suppresses the header, so the whole answer is the state
+    code: ``Z`` (BSD) or ``Z+``/``Zs`` with the modifier flags appended. False on
+    any failure, and a gone pid prints nothing — not-a-zombie is the right
+    answer there, because the liveness caller has already proved otherwise.
+    """
+    try:
+        done = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[watchdog.registry] ps state unusable for pid=%s: %s", pid, exc)
+        return False
+    return done.stdout.strip().startswith("Z")
+
+
+def is_zombie(pid: int) -> bool:
+    """True if ``pid`` has exited but has not been reaped. False on any error.
+
+    Linux reads /proc/<pid>/status as the fast path; every other host asks
+    ``ps``. This has to be portable, not skipped: ``os.kill(pid, 0)`` SUCCEEDS
+    for a zombie, so gating the check on Linux made a killed-but-unreaped pid
+    read ALIVE off Linux — ``kill_watch`` then reported killed=False "still
+    alive after 2.0s" for a process it had just killed, and a dead watch stayed
+    listed (macOS CI 34682737363, FPLAN-0554).
+    """
+    if sys.platform == "linux":
+        return _is_zombie_linux(pid)
+    return _is_zombie_ps(pid)
+
+
 def _pid_alive_windows(pid: int) -> bool:
     """Windows-safe liveness via OpenProcess + GetExitCodeProcess (mirrors agent.py)."""
     import ctypes
@@ -219,7 +263,7 @@ def is_pid_alive(pid: int) -> bool:
         # Process exists but is owned by someone else — still "alive".
         logger.info("[watchdog.registry] PID %s permission denied (alive): %s", pid, exc)
         return True
-    if sys.platform == "linux" and _is_zombie_linux(pid):
+    if is_zombie(pid):
         return False
     return True
 

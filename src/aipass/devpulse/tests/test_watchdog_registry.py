@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for watchdog registry — register/deregister/list/kill (Phase 4)."""
@@ -188,6 +188,85 @@ def test_is_pid_alive_rejects_invalid_input():
     assert watch_registry.is_pid_alive(0) is False
     # Non-int input can't be used by os.kill — handled defensively.
     assert watch_registry.is_pid_alive("1234") is False  # type: ignore[arg-type]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Zombies off Linux — FPLAN-0554, from macOS CI run 34682737363
+#
+# os.kill(pid, 0) SUCCEEDS for a zombie: the process has exited but has not been
+# reaped, so its pid still resolves. The zombie check used to be gated on
+# `sys.platform == "linux"`, which meant that off Linux a killed process read
+# ALIVE — kill_watch answered killed=False "still alive after 2.0s" for a pid it
+# had just SIGTERMed, and list_active(prune_stale=True) kept a dead watch listed.
+#
+# These run on THIS Linux box by pretending to be darwin: sys.platform is
+# monkeypatched and subprocess.run answers in the shape real `ps -o state=`
+# prints (a state code, optionally with BSD modifier flags appended).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _fake_ps(stdout: str, argv_seen: list | None = None):
+    """A subprocess.run stand-in that prints ``stdout`` and records its argv."""
+
+    def _run(argv, **kwargs):
+        if argv_seen is not None:
+            argv_seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    return _run
+
+
+def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch):
+    argv_seen: list = []
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n", argv_seen))
+
+    assert watch_registry.is_zombie(4242) is True
+    assert argv_seen == [["ps", "-o", "state=", "-p", "4242"]]
+
+
+def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch):
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_ps("S\n"))
+
+    assert watch_registry.is_zombie(4242) is False
+
+
+def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch):
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+
+    def _explode(argv, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", "ps")
+
+    monkeypatch.setattr(subprocess, "run", _explode)
+    assert watch_registry.is_zombie(4242) is False
+
+
+def test_a_zombie_is_not_alive_off_linux(monkeypatch):
+    """Row 3 in one assertion. This pid genuinely answers os.kill(pid, 0) — the
+    ps state is the ONLY thing that can say it is a corpse, and before FPLAN-0554
+    nothing asked it off Linux."""
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
+
+    assert watch_registry.is_pid_alive(os.getpid()) is False
+
+
+def test_a_live_pid_off_linux_is_still_alive(monkeypatch):
+    """The other half: the portable probe must not bury the living."""
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_ps("S+\n"))
+
+    assert watch_registry.is_pid_alive(os.getpid()) is True
+
+
+def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch):
+    """What the bug cost operationally: a dead watch stayed listed forever."""
+    watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
+    monkeypatch.setattr(watch_registry.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
+
+    assert watch_registry.list_active(storage_path=store_path, prune_stale=True) == []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
