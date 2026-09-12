@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: test_startup_handler.py
 # Description: Tests for startup event handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for startup event handler."""
 
 import pytest
 from unittest.mock import MagicMock
+from datetime import datetime
 from pathlib import Path
 
 
@@ -155,7 +156,7 @@ class TestCatchupOccurrenceCounting:
             by_hash,
         )
 
-        assert ok is True
+        assert ok is None, "no limit was hit, so nothing stopped the walk"
         assert len(errors) == 1, "one distinct error, not 37 events"
         assert errors[0]["count"] == 37
 
@@ -238,5 +239,168 @@ class TestCatchupOccurrenceCounting:
         errors: list = []
         ok = mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), set(), errors, time.monotonic(), {})
 
-        assert ok is False, "the limit must still stop the scan"
+        assert ok is not None, "the limit must still stop the scan"
+        assert "MAX_ERRORS_PER_SCAN" in ok, "the reason has to name the limit that stopped it"
         assert len(errors) == limit
+
+
+class TestRowTwelveTimestampGate:
+    """last_scan_timestamp advances only after a scan that covered every file.
+
+    Row 12 of DPLAN-0298, re-verified open 2026-09-11 and cured here. It used
+    to advance unconditionally, so any DPLAN-037 limit threw away the window
+    it aborted in: files the scan never reached fell behind the new cutoff and
+    their errors were unrecoverable.
+    """
+
+    HELD = "2026-09-01T00:00:00"
+
+    @staticmethod
+    def _state(mod, last_scan, hashes=()):
+        """Plant catch-up state and return the file it was written to."""
+        import json
+
+        mod.CATCHUP_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        mod.CATCHUP_STATE_FILE.write_text(
+            json.dumps({"error_catchup": {"last_scan_timestamp": last_scan, "processed_hashes": list(hashes)}}),
+            encoding="utf-8",
+        )
+        return mod.CATCHUP_STATE_FILE
+
+    @staticmethod
+    def _read(mod):
+        import json
+
+        return json.loads(mod.CATCHUP_STATE_FILE.read_text(encoding="utf-8"))["error_catchup"]
+
+    def test_completed_scan_advances_the_timestamp(self) -> None:
+        """The normal path is unchanged — a clean scan still moves the cursor."""
+        mod = _import_startup()
+        self._state(mod, self.HELD)
+        mod._scan_system_logs_for_errors = MagicMock(return_value=mod.ScanOutcome([], True, ""))
+
+        mod._run_error_catchup(None)
+
+        assert self._read(mod)["last_scan_timestamp"] != self.HELD
+
+    def test_aborted_scan_holds_the_timestamp(self) -> None:
+        """An incomplete scan leaves the cursor so the next run re-covers it."""
+        mod = _import_startup()
+        self._state(mod, self.HELD)
+        mod._scan_system_logs_for_errors = MagicMock(
+            return_value=mod.ScanOutcome([], False, "time budget exceeded between files (5.0s >= 5.0s)")
+        )
+
+        mod._run_error_catchup(None)
+
+        assert self._read(mod)["last_scan_timestamp"] == self.HELD
+
+    def test_held_timestamp_still_persists_processed_hashes(self) -> None:
+        """Re-covering the window must not re-dispatch what was already found.
+
+        The hashes are the only thing stopping that, so they are written on the
+        aborted path too — holding the cursor back and dropping the hashes
+        would turn one abort into a duplicate dispatch storm.
+        """
+        mod = _import_startup()
+        self._state(mod, self.HELD)
+
+        def _scan(since, processed_hashes):
+            processed_hashes.add("deadbeef")
+            return mod.ScanOutcome([], False, "MAX_ERRORS_PER_SCAN (50) reached")
+
+        mod._scan_system_logs_for_errors = _scan
+
+        mod._run_error_catchup(None)
+
+        state = self._read(mod)
+        assert state["last_scan_timestamp"] == self.HELD
+        assert "deadbeef" in state["processed_hashes"]
+
+    def test_size_skipped_file_holds_the_timestamp(self, tmp_path: Path) -> None:
+        """A file too large to read is a hole in the window, so the cursor waits.
+
+        @devpulse's wording for row 12 is "aborted OR skipped files". A file
+        over MAX_FILE_SIZE_BYTES is never read at any window width, so
+        advancing past it would lose its errors for good.
+        """
+        mod = _import_startup()
+        monkey_dir = tmp_path / "system_logs"
+        monkey_dir.mkdir()
+        fat = monkey_dir / "flow_ops.log"
+        fat.write_text("x" * (mod.MAX_FILE_SIZE_BYTES + 1), encoding="utf-8")
+        mod.SYSTEM_LOGS_DIR = monkey_dir
+
+        outcome = mod._scan_system_logs_for_errors(None, set())
+
+        assert outcome.completed is False
+        assert "MAX_FILE_SIZE_BYTES" in outcome.reason
+
+    def test_missing_system_logs_dir_counts_as_completed(self, tmp_path: Path) -> None:
+        """Nothing to read is not a failure to read — no window is left behind."""
+        mod = _import_startup()
+        mod.SYSTEM_LOGS_DIR = tmp_path / "does_not_exist"
+
+        outcome = mod._scan_system_logs_for_errors(None, set())
+
+        assert outcome == mod.ScanOutcome([], True, "")
+
+    def test_clean_scan_of_a_real_dir_reports_completed(self, tmp_path: Path) -> None:
+        """The completed verdict is measured off a real walk, not only mocked."""
+        mod = _import_startup()
+        logs = tmp_path / "system_logs"
+        logs.mkdir()
+        (logs / "flow_ops.log").write_text(
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | flow.runner | ERROR | disk full\n",
+            encoding="utf-8",
+        )
+        mod.SYSTEM_LOGS_DIR = logs
+
+        outcome = mod._scan_system_logs_for_errors(None, set())
+
+        assert outcome.completed is True
+        assert outcome.reason == ""
+        assert len(outcome.errors) == 1
+
+    def test_record_carries_the_completed_verdict(self) -> None:
+        """The startup_catchup record says whether the cursor moved and why not.
+
+        Without this the ring cannot distinguish "found nothing" from "never
+        looked at half the tree" — the two readings that matter to an operator
+        are identical at errors_found 0.
+        """
+        mod = _import_startup()
+        self._state(mod, self.HELD)
+        mod._scan_system_logs_for_errors = MagicMock(
+            return_value=mod.ScanOutcome([], False, "MAX_ERRORS_PER_SCAN (50) reached")
+        )
+
+        mod._run_error_catchup(None)
+
+        op, payload = mod.json_handler.log_operation.call_args[0]
+        assert op == "startup_catchup"
+        assert payload["completed"] is False
+        assert payload["reason"] == "MAX_ERRORS_PER_SCAN (50) reached"
+
+
+class TestRunStartupCatchupDoor:
+    """The explicit door a long-lived process uses instead of the event bus."""
+
+    def test_passes_fire_event_through(self) -> None:
+        """A recovered error still reaches the registry and medic."""
+        mod = _import_startup()
+        mod._run_error_catchup = MagicMock()
+        fire_event = MagicMock()
+
+        mod.run_startup_catchup(fire_event)
+
+        mod._run_error_catchup.assert_called_once_with(fire_event)  # type: ignore[union-attr]
+
+    def test_defaults_to_no_dispatch(self) -> None:
+        """Called bare it scans and records without firing anything."""
+        mod = _import_startup()
+        mod._run_error_catchup = MagicMock()
+
+        mod.run_startup_catchup()
+
+        mod._run_error_catchup.assert_called_once_with(None)  # type: ignore[union-attr]

@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-12
 # =============================================
 
 import sys
@@ -709,3 +709,50 @@ def test_help_flag_survives_module_name_routing(monkeypatch):
     assert result is True
     printed.assert_called_once()
     muted.assert_not_called()
+
+
+class TestErrorCatchupDoor:
+    """medic.run_error_catchup — the module-level door to cold-start recovery.
+
+    log_watcher_service is an entry point, so it must reach the startup
+    handler through a module (seedgo encapsulation rule 3). This function is
+    that seam, and it must stay a thin pass-through: the moment it starts
+    deciding anything, the service and the `startup` event stop recovering
+    identically.
+    """
+
+    def test_delegates_to_the_startup_handler(self, monkeypatch) -> None:
+        """The scan itself stays the handler's; the module only exposes it."""
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+        fire_event = MagicMock()
+
+        medic.run_error_catchup(fire_event)
+
+        scan.assert_called_once_with(fire_event)
+
+    def test_defaults_to_no_dispatch(self, monkeypatch) -> None:
+        """Called bare it scans and records without firing anything."""
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+
+        medic.run_error_catchup()
+
+        scan.assert_called_once_with(None)
+
+    def test_is_not_a_cli_command(self, monkeypatch) -> None:
+        """It is a library door, not a subcommand — `medic catchup` must not route.
+
+        Adding it to the command table would put a live fleet-wide error scan
+        one typo away from an operator's shell.
+        """
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+        monkeypatch.setattr(medic, "print_help", MagicMock())
+
+        medic.handle_command("medic", ["catchup"])
+
+        scan.assert_not_called()
