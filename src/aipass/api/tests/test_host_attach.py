@@ -38,6 +38,7 @@ import errno
 import json
 import os
 import re
+import shutil
 import signal
 import threading
 import time
@@ -86,6 +87,81 @@ def quiet():
     """Silence the attach lane's own logging."""
     with patch(PATCH_ATTACH_JSON), patch(PATCH_ATTACH_LOGGER):
         yield
+
+
+# The portable door onto this process's own open descriptors: Linux serves it
+# as a symlink to /proc/self/fd, macOS mounts fdescfs there. /proc itself is
+# Linux-only and reading it is what took this file's leak census down on the
+# macOS runner (run 34704362515).
+FD_DIR = "/dev/fd"
+
+
+def _open_descriptors() -> int:
+    """
+    Count the descriptors this process holds open.
+
+    Returns:
+        The number of open descriptors, the listing's own handle included.
+    """
+    return len(os.listdir(FD_DIR))
+
+
+fd_census_required = pytest.mark.skipif(
+    not os.path.isdir(FD_DIR),
+    reason="this host exposes no /dev/fd, so open descriptors cannot be counted",
+)
+
+
+# A path that exists on no host. Every case holding `tmux_preflight` replaces
+# the argv before anything spawns, so this value is only ever read for its
+# truthiness — if one of them ever tries to EXEC it, the failure says so by
+# name rather than quietly running whatever tmux the runner happened to have.
+TMUX_STANDIN = "/nonexistent/bin/tmux"
+
+
+def _forced_tmux_which(host_which: Any) -> Any:
+    """
+    The preflight rule: tmux is answered for, every other binary is the host's.
+
+    Shared by the `tmux_preflight` fixture and the case that manufactures a
+    runner with nothing installed, so the rule under test and the rule the
+    file runs on are one object rather than two that agree today.
+
+    Args:
+        host_which: The `shutil.which` this rule stands in front of.
+
+    Returns:
+        A `which` answering TMUX_STANDIN for tmux and delegating the rest.
+    """
+
+    def _which(binary: str) -> Any:
+        return TMUX_STANDIN if binary == host_attach.TMUX_BINARY else host_which(binary)
+
+    return _which
+
+
+@pytest.fixture
+def tmux_preflight(monkeypatch: Any):
+    """
+    Satisfy `open_attach`'s tmux preflight on a host that has no tmux.
+
+    RUN 34704362515 (macOS, 2026-09-12): 15 failed and 8 errors in this file,
+    every one of them `AttachUnavailable: tmux is not installed on this host`.
+    Not one of those cases runs tmux — they replace the argv with `cat`, `echo`
+    or `pwd`, or patch `Popen` outright — so what they measured was the runner's
+    package list rather than this lane. The precedent is already in this file
+    (`TestOneRoomHonoursAnOutsideSeat`, which forces the same preflight because
+    argv composition is string work no binary takes part in).
+
+    One of the fifteen was worse than a red: `test_a_failed_spawn_leaks_no_
+    descriptors` asserts `AttachUnavailable` from a spawn that raises, and on a
+    tmux-less host the preflight raised that exact class three lines earlier —
+    the case would have passed while measuring nothing.
+
+    Only the tmux binary is answered for; every other lookup goes to the real
+    `shutil.which`, so the monitor lane's own drone preflight is untouched.
+    """
+    monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(shutil.which))
 
 
 @pytest.fixture
@@ -154,7 +230,7 @@ def seated(tmp_path: Path, monkeypatch: Any):
 
 
 @pytest.fixture
-def cat_session(quiet: Any):
+def cat_session(quiet: Any, tmux_preflight: Any):
     """
     A real PTY running `cat` — an echo chamber that proves the pump.
 
@@ -501,7 +577,7 @@ class TestThePumpMovesRealBytes:
         assert data, "the pump returned nothing within five seconds"
         assert isinstance(data, bytes), f"the pump decoded to text: {type(data).__name__}"
 
-    def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any) -> None:
+    def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         EOF is how a PTY reports end-of-life, and the pump reads it as 'stop'.
 
@@ -540,7 +616,7 @@ class TestTheRoomCanActuallyHearAResize:
     rendering against a geometry the room does not have.
     """
 
-    def test_the_pty_opens_at_the_size_the_docstring_promises(self, quiet: Any) -> None:
+    def test_the_pty_opens_at_the_size_the_docstring_promises(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         openpty hands back 0x0, and a tmux client reads that, calls it invalid
         and falls back to its OWN 80x24. This lane has always DOCUMENTED 80x24
@@ -563,7 +639,7 @@ class TestTheRoomCanActuallyHearAResize:
         assert (cols, rows) == (host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)
         assert (cols, rows) != (0, 0)
 
-    def test_the_size_is_stamped_before_the_child_exists(self, quiet: Any) -> None:
+    def test_the_size_is_stamped_before_the_child_exists(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         Order matters: a client started against a 0x0 terminal has ALREADY
         chosen its fallback by the time a later ioctl arrives. Setting the size
@@ -580,7 +656,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         assert calls == ["winsize", "popen"]
 
-    def test_the_child_takes_a_controlling_terminal(self, quiet: Any) -> None:
+    def test_the_child_takes_a_controlling_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The half that makes SIGWINCH have a destination.
 
@@ -597,7 +673,7 @@ class TestTheRoomCanActuallyHearAResize:
         assert kwargs["preexec_fn"] is host_attach._acquire_controlling_tty
         assert "start_new_session" not in kwargs
 
-    def test_the_child_is_still_isolated_from_our_signals(self, quiet: Any) -> None:
+    def test_the_child_is_still_isolated_from_our_signals(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The property `start_new_session` was there for, kept.
 
@@ -689,7 +765,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         login_tty.assert_called_once_with(0)
 
-    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any) -> None:
+    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The property itself, on a real process rather than a mock.
 
@@ -767,7 +843,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
     and it is the single behaviour a bug here would destroy silently.
     """
 
-    def test_hangup_sends_sighup_and_not_a_kill(self, quiet: Any) -> None:
+    def test_hangup_sends_sighup_and_not_a_kill(self, quiet: Any, tmux_preflight: Any) -> None:
         """The signal itself, captured — a detaching terminal sends SIGHUP."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
@@ -777,7 +853,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
         session.process.send_signal.assert_called_once_with(signal.SIGHUP)
 
-    def test_hangup_closes_the_descriptor(self, quiet: Any) -> None:
+    def test_hangup_closes_the_descriptor(self, quiet: Any, tmux_preflight: Any) -> None:
         """A leaked master descriptor per attach is a file handle leak per glance."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
@@ -790,7 +866,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
         assert caught.value.errno == errno.EBADF
 
-    def test_a_second_hangup_touches_nothing(self, quiet: Any) -> None:
+    def test_a_second_hangup_touches_nothing(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         A socket that errors and then closes calls this twice, and the second
         call must be a no-op at the SYSCALL level — not merely quiet.
@@ -816,7 +892,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
         assert not session.process.send_signal.called
         assert session.closed is True
 
-    def test_the_child_is_in_its_own_session(self, quiet: Any) -> None:
+    def test_the_child_is_in_its_own_session(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         start_new_session, so a signal aimed at this server's process group
         cannot take the operator's room down with it.
@@ -841,7 +917,7 @@ class TestOpeningAnAttach:
         with pytest.raises(host_attach.AttachRefused):
             host_attach.open_attach("")
 
-    def test_a_room_override_needs_no_branch(self, quiet: Any, tmp_path: Path) -> None:
+    def test_a_room_override_needs_no_branch(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
         """
         The shell door: a named room IS the subject, so the branch-required
         rule steps aside. The session's label falls back to the room name —
@@ -884,7 +960,7 @@ class TestOpeningAnAttach:
 
         spawn.assert_not_called()
 
-    def test_a_room_override_wins_over_the_naming_rule(self, quiet: Any, tmp_path: Path) -> None:
+    def test_a_room_override_wins_over_the_naming_rule(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
         """A branch AND a room: the room decides the name, the branch the label."""
         with patch.object(host_attach.subprocess, "Popen") as spawn:
             spawn.return_value = MagicMock(pid=1234)
@@ -903,22 +979,93 @@ class TestOpeningAnAttach:
 
         assert "tmux" in str(caught.value)
 
-    def test_a_failed_spawn_leaks_no_descriptors(self, quiet: Any) -> None:
+    def test_a_pty_case_opens_on_a_host_that_has_no_tmux(self, quiet: Any, monkeypatch: Any) -> None:
+        """
+        The other half of the case above, and the whole macOS red in one line.
+
+        The host here is manufactured to be the runner's: `shutil.which` answers
+        None for EVERY binary, which is what a macOS box with no tmux looks like
+        from inside this lane. The preflight is satisfied by the fixture rather
+        than by the host, the argv is `cat` as it always was, and the session
+        opens — so the real-PTY cases in this file measure the pump instead of
+        the runner's package list.
+
+        Run against a case without the preflight (the shape of every one of them
+        before this change) the same manufactured host raises AttachUnavailable,
+        which is precisely run 34704362515's 15 failed and 8 errors.
+        """
+        empty_host = MagicMock(return_value=None)
+        monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(empty_host))
+
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
+            session = host_attach.open_attach("api")
+
+        try:
+            assert session.room == "baud-api"
+            assert session.process.pid > 0, "no child on a host the preflight was supposed to let through"
+            assert not empty_host.called, "tmux must be answered by the rule, never looked up on this host"
+        finally:
+            session.hangup()
+
+    def test_the_forced_preflight_answers_for_tmux_and_nothing_else(self, tmux_preflight: Any) -> None:
+        """
+        A fixture that answered a path for every binary would be a lie with
+        reach: the monitor lane runs its own `shutil.which` preflight on drone,
+        and a blanket yes would report a watch opening on a host with no drone
+        installed — green here, blank terminal there.
+        """
+        assert host_attach.shutil.which(host_attach.TMUX_BINARY) == TMUX_STANDIN
+        assert host_attach.shutil.which("aipass-binary-that-exists-on-no-host") is None
+
+    @fd_census_required
+    def test_a_failed_spawn_leaks_no_descriptors(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The error path is where descriptors leak, because nobody exercises it.
 
         Counted before and after: a spawn that raises must give both ends back.
         """
-        before = len(os.listdir("/proc/self/fd"))
+        before = _open_descriptors()
 
         with patch.object(host_attach.subprocess, "Popen", side_effect=OSError("no exec")):
             for _ in range(5):
                 with pytest.raises(host_attach.AttachUnavailable):
                     host_attach.open_attach("api")
 
-        assert len(os.listdir("/proc/self/fd")) <= before + 1
+        assert _open_descriptors() <= before + 1
 
-    def test_the_room_is_created_in_the_branch_directory(self, quiet: Any, tmp_path: Path) -> None:
+    @fd_census_required
+    def test_the_descriptor_census_counts_this_process_without_proc(self, monkeypatch: Any) -> None:
+        """
+        The instrument above, measured on a host that has no /proc.
+
+        RUN 34704362515 (macOS): the case above died on `FileNotFoundError:
+        '/proc/self/fd'` before it could measure anything — /proc is a Linux
+        filesystem and the runner is macOS. `/dev/fd` is the portable spelling
+        of the same question (a symlink to /proc/self/fd here, fdescfs there),
+        and the kernel resolves that symlink itself, which is why the poison
+        below leaves the census standing while the old spelling dies under it.
+
+        Both halves in one case: the census must survive a /proc-less host AND
+        still see a descriptor, because a census that answers a constant would
+        have passed the leak test with the descriptors leaking.
+        """
+        real_listdir = os.listdir
+
+        def no_proc(path: Any, *args: Any, **kwargs: Any) -> Any:
+            if str(path).startswith("/proc"):
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(path))
+            return real_listdir(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "listdir", no_proc)
+
+        before = _open_descriptors()
+        holder = open(os.devnull, "rb")
+        try:
+            assert _open_descriptors() == before + 1, "the census does not see this process's own descriptors"
+        finally:
+            holder.close()
+
+    def test_the_room_is_created_in_the_branch_directory(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
         """
         Attach-or-create lands somewhere that makes sense.
 
@@ -932,7 +1079,7 @@ class TestOpeningAnAttach:
 
         assert spawn.call_args.kwargs["cwd"] == str(tmp_path)
 
-    def test_the_child_gets_a_usable_term(self, quiet: Any, tmp_path: Path) -> None:
+    def test_the_child_gets_a_usable_term(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
         """
         A client inheriting a bare TERM renders in the wrong capability set,
         which looks like an application bug rather than an environment one.
