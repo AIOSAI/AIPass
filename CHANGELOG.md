@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-09-13] — main green day: the daemon slot-seeding test owns its clock and the Windows Test bound is 45 minutes (the two reds that painted main), the monitor wheel's first two rows (skills `machine_vitals()`, api `GET /v1/machine`), memory caps with a draft target beside every `.trinity` cap, the hooks cut-point rejection and the `.trinity` shell tripwire, api's `store_usage_data` read-modify-write (DPLAN-0341 / DPLAN-0342 / FPLAN-0584 / CPLAN-0002, merged as PR #767, v2.8.8)
 
 ### Added
 
