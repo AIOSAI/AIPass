@@ -373,31 +373,37 @@ def launch_mirror_session(
             capture_output=True,
             env=env,
         )
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         logger.error("Failed to create tmux session '%s': %s", session_name, e)
         return False
 
-    subprocess.run(
-        [
-            "tmux",
-            "send-keys",
-            "-t",
-            session_name,
-            f"export AIPASS_BOT_ID={bot_id}",
-            "Enter",
-        ],
-        capture_output=True,
-    )
-
     import time
 
-    time.sleep(0.3)
-
     claude_cmd = f"AIPASS_SESSION_TYPE=interactive-mirror {CLAUDE_BIN} --dangerously-skip-permissions"
-    subprocess.run(
-        ["tmux", "send-keys", "-t", session_name, claude_cmd, "Enter"],
-        capture_output=True,
-    )
+    try:
+        subprocess.run(
+            [
+                "tmux",
+                "send-keys",
+                "-t",
+                session_name,
+                f"export AIPASS_BOT_ID={bot_id}",
+                "Enter",
+            ],
+            capture_output=True,
+        )
+
+        time.sleep(0.3)
+
+        subprocess.run(
+            ["tmux", "send-keys", "-t", session_name, claude_cmd, "Enter"],
+            capture_output=True,
+        )
+    except FileNotFoundError as e:
+        # The session exists but nothing was typed into it, so it is not a
+        # mirror session. Reporting True here would claim one.
+        logger.error("tmux not found while configuring mirror session '%s': %s", session_name, e)
+        return False
 
     logger.info(
         "Mirror session '%s' launched (bot_id=%s, work_dir=%s, skip-perms=true)",

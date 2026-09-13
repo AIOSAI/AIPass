@@ -1011,6 +1011,96 @@ class TestInitUpdateGitAuth:
         assert rc == 2
         mock_run.assert_not_called()
 
+    @staticmethod
+    def _stamp_behind_scaffold(root: Path) -> Path:
+        """A real scaffold under tmp_path whose only drift is the version stamp.
+
+        Built by the real init, never copied from a live project, so the door
+        is exercised end to end — the plan is computed by the real handler.
+        """
+        from aipass.aipass.apps.handlers.init.bootstrap import init_project
+
+        target = root / "proj"
+        target.mkdir()
+        init_project(target, project_name="stamp")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["aipass_version"] = "0.0.1"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return target
+
+    @staticmethod
+    def _printed(mock_console: MagicMock) -> str:
+        """Everything the door printed, joined — the sentence is the contract here."""
+        return "\n".join(str(c.args[0]) for c in mock_console.print.call_args_list if c.args)
+
+    def test_stamp_only_dry_run_says_no_go_is_needed_and_still_exits_2(self, tmp_path: Path) -> None:
+        """DPLAN-0337 R1: the preview names the apply as the next move, not a request.
+
+        Exit stays 2 — the stamp IS pending, and 2 keeps meaning "there is a
+        plan"; the sentence is what changes, because the go does not apply here.
+        """
+        target = self._stamp_behind_scaffold(tmp_path)
+        with (
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
+            patch(f"{_MOD_UPDATE}.console") as mock_console,
+        ):
+            rc = _handle_init_update([str(target), "--dry-run"])
+
+        assert rc == 2
+        printed = self._printed(mock_console)
+        assert "Stamp only: no file would change, so no go is needed" in printed
+        assert f"Run: aipass init update {target}" in printed
+        assert "Apply needs Patrick's or devpulse's go" not in printed
+
+    def test_a_plan_that_writes_a_file_still_asks_for_the_go(self, tmp_path: Path) -> None:
+        """The other half of R1: one file write and today's sentence stands."""
+        target = self._stamp_behind_scaffold(tmp_path)
+        (target / ".claude" / "commands" / "prep.md").write_text("# mine\n", encoding="utf-8")
+        with (
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
+            patch(f"{_MOD_UPDATE}.console") as mock_console,
+        ):
+            rc = _handle_init_update([str(target), "--dry-run"])
+
+        assert rc == 2
+        printed = self._printed(mock_console)
+        assert "Apply needs Patrick's or devpulse's go" in printed
+        assert "no go is needed" not in printed
+
+    def test_json_carries_stamp_only_for_a_managers_agent(self, tmp_path: Path) -> None:
+        """A manager's agent reads the key, never the prose."""
+        target = self._stamp_behind_scaffold(tmp_path)
+        with (
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
+            patch(f"{_MOD_UPDATE}.console") as mock_console,
+        ):
+            rc = _handle_init_update([str(target), "--dry-run", "--json"])
+
+        assert rc == 2
+        emitted = json.loads(mock_console.print_json.call_args[0][0])
+        assert emitted["stamp_only"] is True
+        assert emitted["pending"] is True
+
+    def test_applying_stamp_only_prints_the_stamp_as_written(self, tmp_path: Path) -> None:
+        """The receipt reports what happened: after apply the stamp is written,
+        not pending — the one word that would have been a lie in the receipt."""
+        target = self._stamp_behind_scaffold(tmp_path)
+        with (
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
+            patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+            patch(f"{_MOD_UPDATE}.console") as mock_console,
+            patch(f"{_MOD_UPDATE}.success"),
+            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
+        ):
+            rc = _handle_init_update([str(target)])
+
+        assert rc == 0
+        stamp_lines = [line for line in self._printed(mock_console).splitlines() if "[yellow]stamp[/yellow]" in line]
+        assert len(stamp_lines) == 1
+        assert stamp_lines[0].rstrip().endswith("written")
+        assert "0.0.1 →" in stamp_lines[0]
+
     def test_json_flag_emits_the_plan_as_parseable_json(self, tmp_path: Path) -> None:
         """--json prints the plan document itself, not a rendered table."""
         self._project(tmp_path)

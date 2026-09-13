@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-09-08
+**Last Updated:** 2026-09-11
 
 ---
 
@@ -18,7 +18,7 @@ drone @daemon update                    # Status digest
 drone @daemon activity                  # Quick 24h activity summary
 drone @daemon queue                     # View pending scheduled jobs
 drone @daemon run                       # Fire all due jobs now
-drone @daemon rotation                  # Whose steward night is next
+drone @daemon rotation                  # Whose rounds night is next
 drone @daemon inbox-sweep --dry-run     # Who is sitting on stale unread mail
 drone @daemon branch-health DAEMON      # Deep dive on a branch
 drone @daemon install-timer             # Enable systemd 2-min timer
@@ -33,9 +33,10 @@ Framework citizen -- full 3-layer architecture with identity and memory. DAEMON 
 ### What I Do
 - Route CLI commands to discovered modules (update, run, queue, activity_report, rotation, inbox_sweep)
 - Fire the decentralized scheduler: discover every citizen's `.daemon/schedule.json`, wake due owners
+- Run command jobs: a drone command on a schedule, as a subprocess, with no agent woken (DPLAN-0338)
 - Generate activity reports across all branches (24h summary, detailed, per-branch)
-- Run the fleet inbox sweep — wake branches sitting on mail unread past 24h
-- Run the nightly steward rotation — one citizen a night gets a maintenance turn
+- Keep the fleet inbox sweep as a hand tool — wake branches sitting on mail unread past 24h (no scheduled job)
+- Run the nightly rounds — one citizen a night gets a maintenance turn (05:00, opus)
 - Detect red flags (code changes without memory updates, stale branches)
 - Produce status digests (inbox, actionable items, escalations)
 
@@ -54,11 +55,11 @@ daemon/
 │   ├── .archive/              # scheduler_cron (archived — superseded by run.py)
 │   ├── modules/
 │   │   ├── update.py          # Status digest module — summarizes DAEMON activity
-│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones (585 lines)
+│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones (570 lines)
 │   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
-│   │   ├── rotation.py        # Steward rotation — wake policy + status surface
+│   │   ├── rotation.py        # Rounds — wake policy + status surface
 │   │   ├── timer_install.py   # systemd user timer install/uninstall
 │   │   ├── schedule.py        # (retired) prints migration notice only
 │   │   ├── actions.py         # (retired) prints migration notice only
@@ -77,9 +78,11 @@ daemon/
 │   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
 │   │   │   ├── catch_up_lane.py       # Tick-side glue: detect+queue the gap, drain one
+│   │   │   ├── command_job.py         # Command jobs: validate, run a drone subprocess, notify mail
+│   │   │   ├── job_reference.py       # The authoring reference run --help prints (data only)
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
 │   │   │   ├── recovery.py            # Gap detection, missed windows, queue, wake headers
-│   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
+│   │   │   ├── rotation.py            # Rounds roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
 │   │   │   ├── tick_lock.py           # Single-instance advisory lock for the tick
@@ -103,7 +106,7 @@ daemon/
 ├── dropbox/                    # Incoming file drops
 ├── logs/                       # Prax log output
 ├── tools/                      # Branch verification utilities
-└── tests/                      # Test suite — 534 test functions in 19 files (pytest expands to 598)
+└── tests/                      # Test suite — 599 test functions in 19 files (pytest expands to 698)
 ```
 
 ---
@@ -206,9 +209,9 @@ drone @daemon <command> --help
 | `scheduler_ops` | *(archived)* Scheduler cron facade — went to `.archive/` with scheduler_cron.py | Archived |
 | `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
-| `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
-| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
-| `rotation` | Nightly steward rotation — roster, pointer, turn history | Operational *(job ships disabled)* |
+| `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones — a wake, or a drone subprocess for a command job | Operational |
+| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job since 2026-09-10)* |
+| `rotation` | Nightly rounds — alphabetical roster, pointer, turn history | Operational *(job `rounds` ON since 2026-09-10: 05:00, opus, one citizen a night)* |
 
 ---
 
@@ -227,7 +230,7 @@ default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min*
 `626320000` ns) and roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's
 own output appends to `~/.aipass/daemon-tick.log`.
 
-**Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it.
+**Three tiers are swept (measured 2026-09-05: 28 citizens).** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) — 18 tonight. Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`) — 4 tonight: AIPASS_SITE, BAUD, EARMARK, FINCH. And **federated externals** — citizens in separate repos entirely, reached through their own registries — 6 tonight: VERA, RESEARCH, VERIFY and WRITER under `external/VERA-STUDIO`, plus `external/WREN` and `external/DEMO`. `drone @daemon rotation` prints the tier label; nothing routes on it. The sweep covers all three tiers; the nightly rounds serve only the first — see *Nightly Rounds*.
 
 **Who counts as a citizen is no longer decided here (FPLAN-0460).** The core-registry read, the `projects/*` glob, the dot-filter and the two-key resident rule all used to live in `discovery.py` as a second copy of the fleet definition. They are now one call to `fleet.fleet_branches()` in @memory — a fleet definition with two implementations agrees only by coincidence. `discovery.py:159` consumes that list rather than mirroring it, which is why the federated-external tier above arrived here without a line changing in this branch.
 
@@ -252,6 +255,10 @@ The trust model behind the fleet definition remains asymmetric on purpose: a pas
   ]
 }
 ```
+
+A job carries **exactly one** of `prompt` (wake the owner with it) or `command` (run a drone
+command, wake nobody; see *Command jobs* below). Both, or neither, is refused at discovery and
+logged, the same way a missing `id` or `schedule` is.
 
 ### Schedule types
 
@@ -311,6 +318,111 @@ repeat the same miss ~500 times before midnight.
 
 - `fresh` (bool) — start a fresh Claude session (true) or resume (false)
 - `model` (string, optional) — `"haiku"` or `"sonnet"` recommended for light wakes
+- no wake-back, and not an option: every wake the daemon fires passes `wake_back=False`, so no job's finish wakes `@daemon` to read a reply nobody sends (DPLAN-0337 R2, 2026-09-10)
+
+### Command jobs (2026-09-11, DPLAN-0338)
+
+A job can run a drone command instead of waking an agent. It runs as a subprocess of the tick, so
+it uses no seat, no session and no tokens. Patrick asked for this on 2026-09-11 because a
+housekeeping sweep should not cost a Claude session: *"if it runs there's a log, if it passed or
+failed there's a log, we can change the 10 days to 5 days by one character change."* The first
+one is @prax's weekly sweep of stale staging temps (DPLAN-0338 wave 2a):
+
+```json
+{
+  "id": "tmp-sweep-weekly",
+  "enabled": true,
+  "schedule": { "type": "interval", "interval_minutes": 10080, "slot": "2026-09-14T04:00:00" },
+  "command": "drone rm --stale 10d ../..",
+  "timeout_seconds": 600,
+  "notify": { "email": "@devpulse" }
+}
+```
+
+It lives in `src/aipass/prax/.daemon/schedule.json`, so it runs from `src/aipass/prax/`. A
+relative path in the command resolves from there, which makes `../..` the `src/` directory.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `command` | yes, instead of `prompt` | One drone command line. `drone` must be the first token. |
+| `timeout_seconds` | no, default **600** | A positive whole number. When it runs out, the command's whole process tree is stopped and the fire is FAILED. 600 matches drone's own executor default. |
+| `notify` | no | `false` silences the Telegram pings. `{"email": "@devpulse"}` also sends an ai_mail **email** (never a wake) on start and on finish. |
+| `wake` | ignored | A command job wakes nobody. Discovery drops the block and logs a warning if one is present. |
+
+**The rules, and why each one exists.**
+
+- **`drone` is the first token, and nothing else can be.** A schedule file is per-branch and its
+  owner can edit it, so whatever it names runs with the tick's authority. Holding command jobs to
+  drone verbs means drone's own gates decide what a scheduled command may do: rm's fence, git's
+  refusal, the argument gates. `bash -c ...`, `env drone ...`, `/usr/local/bin/drone` and
+  `rm ...` are all refused at discovery.
+- **No shell.** The command is split with `shlex.split`, which applies POSIX quoting on every
+  platform, and runs as an argv list with `shell=False`. That means no globs, no pipes, no `;`
+  and no variable expansion. `drone rm *.tmp ; echo x` reaches drone as the literal arguments
+  `*.tmp`, `;`, `echo`, `x`. Nothing in a JSON string can turn into a second command.
+- **It runs in the owner's branch directory.** Drone reads cwd as identity, so the work is logged
+  as the citizen whose schedule asked for it. The directory comes from the same citizen record
+  that vouched for the schedule file, looked up by email. It is not looked up again by directory
+  name, because two citizens can share one across federated roots. A job with no branch directory
+  is refused, never run from the tick's own cwd (the repo root, which would sign it as the project).
+- **Never a rotation.** A rotation wakes tonight's citizen on the roster. A command wakes nobody,
+  so the two cannot be combined, and the combination is refused.
+
+**What a fire records.** Exit 0 is `fired`. A non-zero exit, a timeout, or a command that could
+not start is `failed`, with the detail `exit 2, 0.4s — <last lines of output>`. A command job is
+**never** `blocked`: no seat is in use, so no gate can refuse it, and it never takes the
+active-agent lock. The runstate row is exactly a wake job's row (`last_run`, `last_status`,
+`last_success_at` / `last_failure_at`, `last_error`, and `completed` for `once`). Catch-up,
+interval, daily, slot and backoff logic is unchanged, because due-ness never reads what a job does.
+`drone @daemon queue` shows `command: <the command>` in the preview column. The frozen `--json`
+keys are unchanged.
+
+**Two log lines every fire, pass or fail**, written to both the tick log
+(`~/.aipass/daemon-tick.log`) and `logs/run.log`:
+
+```
+FIRE: @daemon/dplan-0338-proof -> command: drone @daemon --help
+DONE: @daemon/dplan-0338-proof — exit 0, 1.5s —   Fleet mail: | ... |   drone @daemon <command> --help
+```
+
+**Notify.** The Telegram pings follow the rule every job follows (`_should_notify`: on unless
+`notify` is false). A `notify` block counts as on. `notify.email` sends one mail as the command
+starts (owner, id, command, timeout) and one as it finishes (exit code, duration, output tail).
+The mail goes out as a `drone @ai_mail email` subprocess from daemon's own directory, so it is
+signed `@daemon`. It is not sent through an in-process ai_mail import, for two reasons: ai_mail has
+no public send function that takes an explicit sender, and the tick runs from the repo root, so an
+in-process send would sign the mail as the project. A mail that fails is logged as a WARNING and
+never changes the fire's answer. Each mail costs about 5 to 7 seconds of tick time (measured
+on the proof). That is fine for a weekly job and a reason not to set `notify.email` on a job that
+runs every few minutes.
+
+**How the subprocess runs.** It uses `Popen`, not `subprocess.run(capture_output=True)`, for two
+measured reasons:
+
+- **Output goes to an anonymous temp file, not a pipe.** A pipe only reaches EOF when every
+  holder of its write end has closed it. A drone verb that starts anything in the background hands
+  that process the pipe, so a command that exited 0 in a second would be reported as a 600-second
+  timeout. Mutation-proved: swapping in the pipe form turns
+  `test_a_background_child_holding_the_output_is_not_a_timeout` red. `TemporaryFile` is unlinked
+  the moment it is created, so it leaves no `.tmp` litter behind.
+- **A timeout stops the whole process tree.** Drone runs every `@branch` verb in a child of its own
+  (`drone/apps/handlers/executor.py`), so killing drone alone would orphan exactly the work that
+  overran. On POSIX the command gets its own session, and the timeout sends SIGTERM to the group,
+  waits 2 s, then sends SIGKILL. Windows has no process group to signal: the direct child is killed
+  and a grandchild may outlive it. That is the known residual.
+
+stdin is `/dev/null`: a scheduled command has no human to answer a prompt.
+
+**While a command runs, it holds the tick.** Ticks are single-instance, so a command that takes
+ten minutes makes the next four or five timer fires step aside (`Another scheduler instance is
+running`). A windowed job still has its ±15 minutes, and the 600 s default stays well under the
+30-minute gap threshold. It is still a reason to keep command jobs short.
+
+**Proof on the real clock (2026-09-11).** A `once` job running `drone @daemon --help`, with
+`notify.email` set to `@daemon`, went into daemon's own schedule. The live timer fired it at
+13:03:45: FIRE, then DONE `exit 0, 1.5s`, a runstate row with `last_status: success` and
+`completed` set, and both mails in the inbox (13:03:50 started, 13:03:59 passed). The job was then
+removed.
 
 ### What a fire consumes (2026-08-30)
 
@@ -360,7 +472,7 @@ Interval jobs have `slot` (above) — declare the hour you want and the first fi
 
 ## run.py's split (2026-09-08, PR #759 row 13)
 
-`run.py` reached 690 lines against seedgo's 650 cap and held one direct file
+`run.py` reached 690 lines against seedgo's module cap and held one direct file
 operation — `LOCK_FILE.parent.mkdir` — which a module may not do. Both were the last
 red row on PR #759. Two coherent pieces came out; the tick lane itself did not move.
 
@@ -386,6 +498,16 @@ one definition means they cannot drift.
 Result: **run.py 690 → 585 lines**, zero direct file operations, `Modules` 100,
 `drone @seedgo audit aipass @daemon` **100%**. No behaviour changed and
 `RECOVERY_LANE_LIVE` stayed `False` throughout.
+
+**The cap is 600 lines, not 650** (measured 2026-09-11 in seedgo's
+`handlers/aipass_standards/modules_check.py`: 600 or more fails as "too large"). This section
+said 650 until then. DPLAN-0338 wave 1a's command-job arm took run.py from 589 to 647 and cost
+the audit a point. The 79 lines of static job-authoring reference that `run --help` prints moved
+to `handlers/schedule/job_reference.py` as data, and run.py still does the printing. Result:
+**run.py 570 lines**, with `run --help` output byte-identical before and after (diffed at
+`COLUMNS=200`). The fire logic stayed in run.py on purpose. Prax names a log file after the
+nearest calling frame, so the FIRE and DONE lines reach `logs/run.log` only when run.py
+writes them.
 
 ## Recovery after a gap (2026-09-08, DPLAN-0332)
 
@@ -487,6 +609,28 @@ against the journal after my own probes wrote false sentences into it:
 landed at `0d14e8c1`: never run the `run` verb from a seat against it. Every
 experiment takes a `tmp_path` copy of the runstate and the schedule file.
 
+## Nightly Rounds (2026-09-10, DPLAN-0337 R2)
+
+The night watch doing its rounds: one citizen a night, woken fresh on opus for a maintenance turn inside its own branch. Designed in August as DPLAN-0287, shipped disabled as `fleet-steward`, renamed `rounds` and switched on by Patrick's ruling of 2026-09-10.
+
+| Knob | Value |
+|------|-------|
+| Job | `@daemon/rounds`, type `rotation`, in daemon's `.daemon/schedule.json` |
+| When | 05:00 window (+/-15 min — the first tick inside it fires, so about 04:45); `catch_up` off, a missed night is not woken late |
+| Who | **Framework fleet only** — citizens whose branch lives under this install's `src/aipass/` (17 on 2026-09-10). `projects/*` residents and every external root are out, whatever their class. Alphabetical by email. `@devpulse` never; managers excluded (`include_managers: false`) |
+| Wake | `fresh: true`, `model: opus`, `sender: @daemon`, `wake_back: false` |
+| Busy target | Logged as a miss, pointer advances, that citizen gets its next turn in the cycle |
+
+**Scope, by ruling.** Patrick, 2026-09-10 21:47, marked very important: the rounds are AIPass maintaining its own agents. Vera keeps her own schedule, and the projects are nowhere near a trust stage. `ROSTER_SCOPE` in `apps/handlers/schedule/rotation.py` is a named rule applied inside `build_roster` before any passport is read. It is decided on the branch PATH, never on the tier label, which stays presentation-only. `drone @daemon rotation` prints it on its `Scope:` line. Pinned by `TestRoundsScope`: a temp install holding a framework branch, a projects resident and an external-root citizen, all declaring the same class, serves only the first.
+
+**What a citizen does on its night:** inbox to zero; reconcile `.trinity` todos against reality; refresh and read its dashboard; review its logs; run its seedgo self-audit; do mailed-in work only if it sits in its own domain and fits one session; small fixes in its own branch, red-first.
+
+**Budget, stated in the prompt:** never dispatch or wake another citizen; at most 2 sub-agents, sonnet or lower; never edit another branch; no fleet-wide investigations; anything out of lane is written down for @devpulse, not chased.
+
+**The night's one artefact** is a single mail to @devpulse: health verdict, what it did, what it noticed, what it needs. There is no dispatch to reply to — a rounds wake is a session prompt, not a mail — and no APLAN step.
+
+`drone @daemon rotation` shows the roster, whose night is next, and the last ten turns. Pinned by `TestShippedRoundsJob` (the stanza as shipped) and `TestRoundsNight` (a real tick at 05:01, wake caught at ai_mail's `wake_branch` seam).
+
 ## Fleet Inbox Sweep
 
 Replies never wake their recipient, so a reply landing in a sleeping branch's inbox stays invisible until something looks. `inbox-sweep` is that something.
@@ -504,7 +648,7 @@ It reads every active branch's `.ai_mail.local/inbox.json`, finds mailboxes hold
 | Cap | 5 wakes per pass (`--limit N`); entries are oldest-first, and deferred branches are named in the output, not silently dropped |
 | Wake model | `sonnet`, staggered 2s apart |
 
-Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbox-sweep`). Run `drone @daemon inbox-sweep --dry-run` any time to see who is sitting on stale mail without waking anyone.
+**Not scheduled since 2026-09-10.** The daily 09:00 job is deleted (DPLAN-0337 R2): waking up to five agents every morning was, in Patrick's words, nuisance token waste, and the nightly rounds now take each citizen's inbox to zero, one citizen a night. The command stays as a hand tool; `drone @daemon inbox-sweep --dry-run` shows who is sitting on stale mail without waking anyone.
 
 ---
 
@@ -569,7 +713,7 @@ surfaces here rather than blanking this report.
 
 ### Provides To
 - The fleet — job discovery and firing for any citizen that writes a `.daemon/schedule.json`
-- The fleet — the unread-mail backstop (`inbox-sweep`) and the steward rotation
+- The fleet — the nightly rounds, and the unread-mail backstop (`inbox-sweep`) as a hand tool
 - `@skills` bot — `queue --json`, a frozen schema
 - Note: Telegram handlers archived — moving to skills system. See `apps/handlers/telegram/.archive/`
 
@@ -584,7 +728,7 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 | Plugin | Target | Status |
 |--------|--------|--------|
-| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `fleet-steward` job |
+| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `rounds` job |
 | `daily_audit` | @seed | Archived — targeted @seed, renamed to @seedgo years prior |
 | `heartbeat` | @vera | Archived — @vera was not in `AIPASS_REGISTRY.json` then and is not now. It *is* a live citizen tonight, via the federated-external tier (`external/VERA-STUDIO`), so the target exists again — the plugin does not |
 | `botfather_reminder` | @dev_central | Archived — Telegram stripped |
@@ -743,6 +887,14 @@ the damage to re-derive a known fact is not evidence, it is a second outage.
 
 ## Test Suite
 
+**2026-09-11 (FPLAN-0543, DPLAN-0338 wave 1a):** 616 → **698 passed** from both rootdirs. The
+82 new cases pin command jobs: validation in `test_discovery.py`, the subprocess and fire path and
+the runstate row in `test_run_module.py`, and the queue preview in `test_scheduler_bot.py`. 20 of
+20 mutants went red, and each harness restored the tree byte-identical. `tests/conftest.py` gained
+`_seal_command_launcher`, an autouse seal on `command_job.LAUNCHER`, so no test can start the
+real drone or send a real mail. That seal was not mutation-run: removing it would do exactly that.
+The counts below are the 2026-09-08 baseline.
+
 All numbers below re-measured 2026-09-08 (FPLAN-0527), not carried.
 
 - **534 test functions** across 19 test files; parametrization expands these to **598 cases**
@@ -769,7 +921,7 @@ All numbers below re-measured 2026-09-08 (FPLAN-0527), not carried.
 - *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
   emptying the list is a seedgo-side change, out of scope for a docs pass.
 
-*Last Updated: 2026-09-08*
+*Last Updated: 2026-09-11*
 
 ---
 [← Back to AIPass](../../../README.md)

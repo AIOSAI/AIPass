@@ -41,7 +41,7 @@ if sys.platform == "win32":
 # Kept in step with the README header by test_trigger_entry.py — this string sat
 # at 2.2.0 through four documented feature releases (found by the APLAN-0008
 # audit), so the two are now pinned to each other rather than to a human's memory.
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 # =============================================================================
 # MODULE DISCOVERY

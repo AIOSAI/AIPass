@@ -96,7 +96,7 @@ aipass/
 | `aipass init <path> [name]` | Scaffold AIPass files into an existing path (absent from `init --help`) |
 | `aipass init agent <name>` | Create an agent via `drone @spawn` (absent from `init --help`) |
 | `aipass init update [target]` | Print the scaffold plan, then apply it + provision owner-tier repo auth |
-| `aipass init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending |
+| `aipass init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending (stamp-only plans say no go is needed) |
 | `aipass init update --json` | The same plan as a JSON document, for machines |
 | `aipass install` | One-command bootstrap — clone + setup.sh + hooks, then a concierge welcome chat |
 | `aipass install --path DIR` / `--here` | Choose the install home |
@@ -140,7 +140,11 @@ and nothing else does it.
    Exit 2 means there is a plan to read; exit 0 means nothing to do.
 3. Paste the plan to Patrick or devpulse and ask. **Apply only on a go** — an
    update can replace files, so it is a decision, not a repair. `doctor --fix`
-   deliberately will not do it for you.
+   deliberately will not do it for you. **One exception (Patrick, DPLAN-0337
+   R1):** a *stamp-only* plan — no file would change, only the manifest's
+   record of the version — applies without a go. The preview says so in its
+   last line, and `--json` carries `"stamp_only": true`. The receipt apply
+   prints is the contract, not the go.
 4. `aipass init update <root>` — backs up every file it overwrites into
    `.aipass/.backup/scaffold_<stamp>/`, writes, stamps the manifest, re-enrols
    trust.

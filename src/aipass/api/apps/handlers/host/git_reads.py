@@ -304,9 +304,12 @@ def _parsed(result: Any, lane: str) -> Dict[str, Any]:
 
     Raises:
         ReadUnavailable: There was no document. drone's OWN sentence travels
-            when it left one on stderr — which is exactly the foreign-project
-            case, where the caller-verification check refuses before the door
-            runs and prints its reason there. An empty change list invented
+            when it left one on stderr — a caller-verification refusal is the
+            shape that takes, refusing before the door runs and printing its
+            reason there. NOT the foreign-project case: this server runs drone
+            from its own citizen directory with the project as an argument, so
+            verification passes and every project answers (@baud, 2026-08-16;
+            #737 closed as designed, 2026-09-10). An empty change list invented
             here would paint such a branch as clean when nothing was measured.
     """
     stderr = (result.stderr or "").strip()
@@ -589,10 +592,13 @@ def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") 
     Raises:
         ReadRefused: Unknown branch, or a project with no such branch.
         ReadUnavailable: drone could not be run, timed out, or refused the
-            command — including the case where drone declines to verify a
-            caller outside an AIPass citizen directory, which is every foreign
-            project. An empty change list would paint such a branch as clean
-            when nothing was ever measured, so their sentence travels instead.
+            command — including a caller-verification refusal, which reading a
+            foreign project does NOT provoke: drone is run from this server's
+            own citizen directory with the project as an argument, so a foreign
+            project is read like any other (@baud, 2026-08-16; #737 closed as
+            designed, 2026-09-10). An empty change list would paint a branch as
+            clean when nothing was ever measured, so their sentence travels
+            instead.
     """
     grain = _checked_grain(grain)
     root = resolve_branch_root(branch, project)

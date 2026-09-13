@@ -764,3 +764,167 @@ def test_find_pattern_lines_detects_rename():
     assert result is not None
     assert result["passed"] is False
     assert ".rename()" in result["message"]
+
+
+# ===========================================================================
+# 15. trigger_check -- the exemption is PER FUNCTION BODY (DPLAN-0339)
+# ===========================================================================
+#
+# The flag used to be file-level: one `trigger.fire(` anywhere exempted every
+# pattern in the file. Prax's initialize_logging_system/shutdown_logging_system
+# fired nothing for months and still passed, because an unrelated hot-path
+# `trigger.fire("startup")` lived in the same module. These pins hold the two
+# halves of that proof plus the scoping rules around it.
+
+# The live precedent, reduced: src/aipass/prax/apps/modules/logger.py. Same
+# function names, same event names, same unrelated hot-path fire in
+# _ensure_watcher that used to carry the whole file.
+_PRAX_LOGGER_SHAPE = '''
+class SystemLogger:
+    def _ensure_watcher(self):
+        SystemLogger._watcher_started = True
+
+
+def initialize_logging_system():
+    """Initialize the complete logging system"""
+    from aipass.trigger.apps.modules.core import trigger
+
+    result = run_initialize(MODULE_NAME)
+    trigger.fire("logging_system_initialized", modules_count=result["modules_count"])
+
+
+def shutdown_logging_system():
+    """Shutdown logging system cleanly"""
+    from aipass.trigger.apps.modules.core import trigger
+
+    run_shutdown(MODULE_NAME)
+    trigger.fire("logging_system_shutdown")
+'''
+
+# The same file with both fires moved OUT of the lifecycle doors and one
+# unrelated fire left behind — exactly the shape that passed for months.
+_PRAX_LOGGER_SHAPE_BROKEN = '''
+class SystemLogger:
+    def _ensure_watcher(self):
+        from aipass.trigger.apps.modules.core import trigger
+
+        SystemLogger._watcher_started = True
+        trigger.fire("startup")
+
+
+def initialize_logging_system():
+    """Initialize the complete logging system"""
+    result = run_initialize(MODULE_NAME)
+
+
+def shutdown_logging_system():
+    """Shutdown logging system cleanly"""
+    run_shutdown(MODULE_NAME)
+'''
+
+
+def test_per_function_prax_logger_shape_accepts():
+    """Lifecycle doors that fire in their OWN bodies pass (live prax precedent)."""
+    content = _PRAX_LOGGER_SHAPE
+    lines = _lines(content)
+
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    assert check_missing_trigger_events(content, lines, "/fake/prax/apps/modules/logger.py") is None
+
+
+def test_per_function_prax_logger_shape_rejects_when_fires_move_out():
+    """An unrelated fire elsewhere in the file no longer covers the lifecycle doors."""
+    content = _PRAX_LOGGER_SHAPE_BROKEN
+    lines = _lines(content)
+    assert "trigger.fire(" in content  # the file still fires — file-level flag would pass it
+
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    result = check_missing_trigger_events(content, lines, "/fake/prax/apps/modules/logger.py")
+    assert result is not None
+    assert result["passed"] is False
+    assert "initialize_*_system" in result["message"]
+    assert "shutdown_*_system" in result["message"]
+
+
+def test_fire_in_one_function_does_not_exempt_another():
+    """A fire in function A is not an exemption for function B in the same file."""
+    content = 'def create_thing():\n    trigger.fire("thing_created")\n\n\ndef delete_thing():\n    pass\n'
+    lines = _lines(content)
+
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    assert result is not None
+    assert "delete_*" in result["message"]
+    assert "create_*" not in result["message"]
+
+
+def test_one_hop_delegation_acquits():
+    """Delegating the fire to a local helper is still firing (aipass install.py shape)."""
+    content = (
+        "def _fire_lock_removed(path, reason):\n"
+        '    trigger.fire("file_deleted", path=str(path), reason=reason)\n'
+        "\n\n"
+        "def _release_install_lock(lock):\n"
+        "    lock.unlink()\n"
+        '    _fire_lock_removed(lock, "install_lock_released")\n'
+    )
+    lines = _lines(content)
+
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    assert check_missing_trigger_events(content, lines, "/fake/module.py") is None
+
+
+def test_pattern10_unlink_scoped_to_enclosing_function():
+    """An .unlink() is answered by the function it sits in, not by the whole file."""
+    content = 'def purge_cache(path):\n    trigger.fire("cache_purged")\n\n\ndef wipe_state(path):\n    path.unlink()\n'
+    lines = _lines(content)
+
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    result = check_missing_trigger_events(content, lines, "/fake/module.py")
+    assert result is not None
+    assert ".unlink() file deletion on lines [6]" in result["message"]
+
+
+def test_pattern10_module_level_keeps_file_level_behaviour():
+    """A call outside any function has no function body to ask, so the file answers."""
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    exempt = 'trigger.fire("started")\nPath("a").unlink()\n'
+    assert check_missing_trigger_events(exempt, _lines(exempt), "/fake/module.py") is None
+
+    bare = 'Path("a").unlink()\n'
+    result = check_missing_trigger_events(bare, _lines(bare), "/fake/module.py")
+    assert result is not None
+    assert ".unlink()" in result["message"]
+
+
+def test_unparseable_file_falls_back_to_file_level():
+    """A file that does not parse keeps the old behaviour instead of dropping the check."""
+    from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
+        check_missing_trigger_events,
+    )
+
+    broken_exempt = 'def create_thing(:\n    trigger.fire("thing_created")\n'
+    assert check_missing_trigger_events(broken_exempt, _lines(broken_exempt), "/fake/module.py") is None
+
+    broken_bare = "def create_thing(:\n    pass\n"
+    result = check_missing_trigger_events(broken_bare, _lines(broken_bare), "/fake/module.py")
+    assert result is not None
+    assert "create_*" in result["message"]

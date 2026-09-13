@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-03-02
-# Modified: 2026-08-30
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -930,6 +930,7 @@ def wake_branch(
     scheduled: bool = False,
     admin: bool = False,
     subject: Optional[str] = None,
+    wake_back: bool = True,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -959,6 +960,13 @@ def wake_branch(
                AIPASS_CALLER_*, which its in-process callers do not carry.
                WAKE_BLOCKLIST still refuses — admin raises the stakes, not the
                fence. Default False = today's manager gate, untouched.
+        wake_back: Keyword-only. True (default) = the dispatcher is woken, or
+               mailed if a manager, when the target finishes — the team-mission
+               contract. False = a library caller (e.g. @daemon's scheduled
+               nudges, which owe no reply) declines it; dispatch_monitor gets
+               --no-wake-back on argv. `sender` still passes through unchanged:
+               bounce mail and the manager gate's @daemon self-wake exception
+               read it. The interactive tmux lane has no wake-back to decline.
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
@@ -1176,8 +1184,25 @@ def wake_branch(
     stderr_log = str(log_dir / "dispatch_stderr.log")
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
-    # Build monitor command
-    monitor_cmd = [sys.executable, str(MONITOR_SCRIPT), email, lock_file_path, sender, stderr_log, "--", *claude_cmd]
+    # Build monitor command. Monitor flags sit between the four positionals and
+    # "--"; a default wake passes none, so its argv is exactly what it was.
+    # wake_back rides argv, never spawn_env: spawn_env becomes the agent's own
+    # environment and would leak the choice into any dispatch the agent makes
+    # (the AIPASS_DISPATCH_ID leak class, popped below).
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
+
+    monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
+    monitor_cmd = [
+        sys.executable,
+        str(MONITOR_SCRIPT),
+        email,
+        lock_file_path,
+        sender,
+        stderr_log,
+        *monitor_flags,
+        "--",
+        *claude_cmd,
+    ]
 
     # Prepare environment
     spawn_env = os.environ.copy()
@@ -1228,6 +1253,7 @@ def wake_branch(
         target=email,
         subject=subject or "",
         expected_seconds=HARD_TIMEOUT,
+        wake_back=wake_back,
     )
     if dispatch_id:
         spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id

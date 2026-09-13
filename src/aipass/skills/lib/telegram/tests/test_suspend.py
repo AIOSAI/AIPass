@@ -1196,3 +1196,31 @@ class TestLockVerb:
 
         assert "lock" in control_bot.get_custom_commands()
         assert "lock" not in branch_bot.get_custom_commands()
+
+
+# =============================================
+# A host without systemctl (FPLAN-0554 round three)
+# =============================================
+
+
+class TestSuspendWithoutSystemctl:
+    def test_missing_systemctl_disarms_and_names_the_host_fact(self, tmp_path, _patch_base_bot_deps):
+        """The polkit advice cannot work on a host with no systemd, so it is not the message."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        def side_effect(cmd, **kwargs):
+            if cmd[:2] == ["systemctl", "suspend"]:
+                raise FileNotFoundError(2, "No such file or directory", "systemctl")
+            return MagicMock()
+
+        with patch("subprocess.run", side_effect=side_effect) as mock_run:
+            bot._handle_control_suspend(chat_id=1, arg="8h")
+
+        # rtcwake arm, systemctl suspend (missing), rtcwake disable (best-effort disarm)
+        assert mock_run.call_count == 3
+        assert mock_run.call_args_list[2].args[0] == ["sudo", "-n", RTCWAKE_BIN, "-m", "disable"]
+        error_text = bot.send_message.call_args_list[-1].args[1]  # type: ignore[union-attr]
+        assert "systemctl is not installed on this host" in error_text
+        assert "polkit" not in error_text
+        assert bot._suspend_heartbeat_active is False
+        assert bot._suspend_alarm_at is None

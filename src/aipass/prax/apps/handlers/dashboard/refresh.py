@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.6.0
+# Version: 0.6.1
 # Created: 2026-02-25
-# Modified: 2026-08-13
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -31,7 +31,7 @@ from ..central.reader import read_all_centrals  # noqa: E402
 
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
 from .template_pusher import DEPRECATED_SECTIONS  # noqa: E402
-from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.repo_root import find_repo_root  # noqa: E402
 
 # Sections managed by the refresh path — everything else is write-through only
 REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory"}
@@ -406,7 +406,12 @@ def refresh_all_dashboards() -> Dict:
             _preserve_write_through_sections(dashboard, branch_path, branch_name)
             _prune_deprecated_sections(dashboard)
 
-            # Calculate quick status (ai_mail section still present for counts).
+            # Calculate quick status. Mail counts come from the branch's OWN
+            # .ai_mail.local/inbox.json (status.py::_read_mail_counts), never from
+            # the ai_mail section above: that section is built from the central,
+            # read by nothing, and popped before save. A branch with no central
+            # row still gets its true count. This comment used to say the
+            # section fed the counts, and that misled a measurement (2026-09-11).
             # Merged over what is already on disk: the dashboard was rebuilt from
             # the template, so other services' keys live only in the old file.
             dashboard["quick_status"] = merge_quick_status(

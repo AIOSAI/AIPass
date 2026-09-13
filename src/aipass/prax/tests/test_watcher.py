@@ -304,6 +304,16 @@ class TestDiscoveryWatcher:
         setattr(mod, "WatchdogObserver", mock_observer_cls)
         return mod, mock_observer_instance, mock_observer_cls
 
+    def test_the_module_holds_no_trigger_at_import_time(self):
+        """FPLAN-0556. A name the module does not bind cannot be consulted, and
+        re-adding the fire gate would have to re-add the import in the same
+        edit — which is the edit that put three dead package shells into every
+        process that logged."""
+        mod, _inst, _cls = self._import_discovery_watcher()
+
+        assert not hasattr(mod, "_HAS_TRIGGER")
+        assert not hasattr(mod, "trigger")
+
     def test_start_file_watcher_creates_and_starts_observer(self):
         mod, observer_inst, _cls = self._import_discovery_watcher()
         setattr(mod, "_observer", None)  # Ensure clean state
@@ -664,6 +674,80 @@ class TestDispatcherSurvivesHandlerFailure:
 
         assert len(calls) == 1, f"expected exactly one stat() on the target, got {len(calls)}"
 
+    def test_a_discovered_module_reaches_the_bus(self, tmp_path, monkeypatch):
+        """FPLAN-0556. `module_discovered` had never once fired: the gate in
+        front of it read `_HAS_TRIGGER`, and the module-level import that set it
+        could never succeed (circular back into the partially initialised
+        watcher), so the flag was False in every live process."""
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+
+        new_file = tmp_path / "brand_new.py"
+        new_file.write_text("x = 1\n")
+
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(new_file)
+        mod.PythonFileWatcher().dispatch(event)
+
+        assert bus.fire.call_count == 1
+        assert bus.fire.call_args[0][0] == "module_discovered"
+        assert bus.fire.call_args[1]["module_name"] == "brand_new"
+
+    def test_a_failed_discovery_fire_does_not_lose_the_registry_write(self, tmp_path, monkeypatch):
+        """The registry entry is the product; the event is the notification.
+
+        The fire now runs for real, so a trigger that raises has to be survivable
+        at the fire site — the module-level flag used to make that unreachable.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        bus = MagicMock()
+        bus.fire.side_effect = OSError("trigger bus unavailable")
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+
+        new_file = tmp_path / "survivor.py"
+        new_file.write_text("x = 1\n")
+
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(new_file)
+        mod.PythonFileWatcher().dispatch(event)  # must not raise
+
+        assert "survivor" in saved, "a broken trigger cost the registry its entry"
+
+    def test_a_host_without_trigger_still_registers_the_module(self, tmp_path, monkeypatch):
+        """`_get_trigger()` returning None is the normal answer on such a host."""
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+
+        new_file = tmp_path / "lonely.py"
+        new_file.write_text("x = 1\n")
+
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(new_file)
+        mod.PythonFileWatcher().dispatch(event)
+
+        assert "lonely" in saved
+
 
 class TestWatcherLiveness:
     """A liveness check that cannot fire after startup is not a liveness check.
@@ -794,13 +878,39 @@ class TestWatcherLiveness:
         monkeypatch.setattr(mod, "_observer", self._dead_observer())
         errors = []
         monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
-        monkeypatch.setattr(mod, "_HAS_TRIGGER", True)
         broken = MagicMock()
         broken.fire.side_effect = OSError("trigger bus unavailable")
-        monkeypatch.setattr(mod, "trigger", broken)
+        monkeypatch.setattr(mod, "_get_trigger", lambda: broken)
 
         mod.check_file_watcher_liveness(force=True)
         assert errors, "a broken trigger swallowed the death report"
+
+    def test_the_death_actually_reaches_the_bus(self, monkeypatch):
+        """FPLAN-0556. Until 2026-09-12 this fire was unreachable: the trigger
+        import at the top of watcher.py always failed on a circular import, so
+        `_HAS_TRIGGER` was False in every live process and the gate in front of
+        this fire never opened. The fleet believed it had this signal."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        bus = MagicMock()
+        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
+
+        mod.check_file_watcher_liveness(force=True)
+
+        assert bus.fire.call_count == 1
+        assert bus.fire.call_args[0][0] == "file_watcher_died"
+
+    def test_a_trigger_that_cannot_be_imported_is_simply_skipped(self, monkeypatch):
+        """`_get_trigger` returning None is the normal answer on a host without
+        trigger — the death report still goes out, nothing raises."""
+        mod = self._fresh_module()
+        monkeypatch.setattr(mod, "_observer", self._dead_observer())
+        errors = []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        monkeypatch.setattr(mod, "_get_trigger", lambda: None)
+
+        assert mod.check_file_watcher_liveness(force=True) is False
+        assert errors, "no trigger meant no death report at all"
 
     def test_the_common_case_does_not_touch_the_lock(self, monkeypatch):
         """The hot path must stay lock-free.
@@ -919,17 +1029,53 @@ class TestOptionalTriggerIntegration:
         )
 
     def test_an_oserror_from_the_optional_import_falls_back(self):
-        """Prax imports, and knows trigger is absent, when trigger raises OSError."""
+        """The fallback answers None, and it answers at the FIRE SITE.
+
+        Rewritten for FPLAN-0556. This used to assert a module-level
+        `_HAS_TRIGGER is False` after importing the watcher, which encoded the
+        placement rather than the lesson — and the placement was itself the
+        defect: the module-level import could never succeed, so that flag was
+        False whether trigger was denied or perfectly healthy, and the pin was
+        green for the wrong reason. What the 2026-08-31 incident actually taught
+        is kept here in full: an OSError from the optional import must be caught,
+        and prax must keep running.
+        """
         result = _run_with_trigger_denied(
-            "\nfrom aipass.prax.apps.handlers.discovery import watcher\nprint('HAS_TRIGGER', watcher._HAS_TRIGGER)\n"
+            "\nfrom aipass.prax.apps.handlers.discovery import watcher\n"
+            "print('IMPORTED OK')\n"
+            "print('TRIGGER', watcher._get_trigger())\n"
         )
         assert result.returncode == 0, (
             "an OSError from the OPTIONAL trigger import killed prax's watcher import.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "HAS_TRIGGER False" in result.stdout, (
-            "the import survived but still believes trigger is available — the fallback "
-            f"did not run.\nstdout: {result.stdout}"
+        assert "IMPORTED OK" in result.stdout
+        assert "TRIGGER None" in result.stdout, (
+            "the fire site did not fall back — an OSError escaped the guard.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    def test_a_denied_trigger_does_not_stop_the_discovery_scan(self):
+        """The behaviour the guard exists for: work completes without trigger."""
+        result = _run_with_trigger_denied(
+            "\nfrom aipass.prax.apps.handlers.discovery import watcher\n"
+            "watcher.load_module_registry = lambda: {}\n"
+            "watcher.save_module_registry = lambda modules, **kw: True\n"
+            "from unittest.mock import MagicMock\n"
+            "from pathlib import Path\n"
+            "probe = Path(watcher.ECOSYSTEM_ROOT) / 'prax' / 'docs.local' / 'denied_trigger_probe.py'\n"
+            "probe.parent.mkdir(parents=True, exist_ok=True)\n"
+            "probe.write_text('# throwaway\\n', encoding='utf-8')\n"
+            "ev = MagicMock(); ev.is_directory = False; ev.src_path = str(probe)\n"
+            "try:\n"
+            "    watcher.PythonFileWatcher().on_created(ev)\n"
+            "    print('SCAN OK')\n"
+            "finally:\n"
+            "    probe.unlink(missing_ok=True)\n"
+        )
+        assert "SCAN OK" in result.stdout, (
+            "a denied trigger import stopped the file-discovery path.\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
     def test_the_public_logger_survives_it_too(self):

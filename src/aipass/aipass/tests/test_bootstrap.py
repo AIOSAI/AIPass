@@ -474,6 +474,7 @@ def test_update_project_return_dict_structure(tmp_path):
         "aipass_version",
         "stamped_version",
         "stamp_pending",
+        "stamp_only",
         "applied",
         "pending",
         "files",
@@ -568,6 +569,115 @@ def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monk
     assert first["kept_files"] == []
     assert second["updated_files"] == []
     assert not (target / ".claude" / "commands" / "prep.md.aipass-new").exists()
+
+
+def _age_the_stamp(target: Path) -> None:
+    """Rewind a project's manifest to an older AIPass, leaving every file alone.
+
+    The state every existing project is in the morning after a release that
+    changed no template: files current, record behind.
+    """
+    manifest_path = target / ".aipass" / "scaffold_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["aipass_version"] = "0.0.1"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def test_a_plan_that_only_moves_the_version_is_stamp_only(tmp_path):
+    """DPLAN-0337 R1: nothing written but the manifest -> stamp_only, still pending.
+
+    Pending stays True on purpose — the stamp IS a write, and exit 2 keeps
+    meaning "there is a plan to read". stamp_only is the separate fact that
+    no FILE would change, which is what lets that plan apply without a go.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="stamponly")
+    _age_the_stamp(target)
+
+    plan = update_project(target, apply=False)
+
+    assert plan["stamp_pending"] is True
+    assert plan["pending"] is True
+    assert plan["stamp_only"] is True
+    assert not any(entry["writes"] for entry in plan["files"])
+    assert plan["handlers"] == []
+
+
+def test_a_current_project_is_not_stamp_only(tmp_path):
+    """Nothing to write AND nothing to stamp is "current", not "stamp only".
+
+    Found by mutation: dropping the stamp half of the predicate survived every
+    pin above, because each one aged the stamp first. On a current project that
+    mutant would tell the manager "no go is needed — run the apply" for a plan
+    with nothing in it.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="current")
+
+    plan = update_project(target, apply=False)
+
+    assert plan["stamp_pending"] is False
+    assert plan["pending"] is False
+    assert plan["stamp_only"] is False
+
+
+def test_a_kept_file_still_needing_its_sidecar_is_not_stamp_only(tmp_path):
+    """One kept-local file whose template has not been written beside it yet
+    means apply WOULD write a file — so this plan still needs a go."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="keptnew")
+    _age_the_stamp(target)
+    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
+
+    plan = update_project(target, apply=False)
+
+    kept = [e for e in plan["files"] if e["action"] == "kept-local"]
+    assert len(kept) == 1 and kept[0]["writes"] is True
+    assert plan["stamp_only"] is False
+
+
+def test_a_kept_file_whose_sidecar_is_current_stays_stamp_only(tmp_path):
+    """The Vera-Studio shape: kept files already settled beside their template.
+
+    Kept is a standing decision, not a pending write, so a project that has
+    already received its sidecars is stamp-only on the next release — which
+    is exactly the live case R1 was ruled on (0 of 8 would change).
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="keptold")
+    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
+    update_project(target)  # writes the sidecar once
+    _age_the_stamp(target)
+
+    plan = update_project(target, apply=False)
+
+    kept = [e for e in plan["files"] if e["action"] == "kept-local"]
+    assert len(kept) == 1 and kept[0]["writes"] is False
+    assert plan["stamp_only"] is True
+
+
+def test_applying_a_stamp_only_plan_changes_nothing_but_the_stamp(tmp_path):
+    """The receipt's promise, checked against the disk: every tracked file
+    byte-identical, no backup taken, and the manifest's version moved."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="stampapply")
+    _age_the_stamp(target)
+    before = {rel: (target / rel).read_bytes() for rel in bootstrap._MANIFEST_TRACKED if (target / rel).is_file()}
+
+    result = update_project(target)
+
+    assert result["stamp_only"] is True
+    assert result["updated_files"] == []
+    assert result["backup_dir"] is None
+    after = {rel: (target / rel).read_bytes() for rel in before}
+    assert after == before
+    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["aipass_version"] == result["aipass_version"] != "0.0.1"
 
 
 def test_update_project_already_current_after_init(tmp_path, monkeypatch):

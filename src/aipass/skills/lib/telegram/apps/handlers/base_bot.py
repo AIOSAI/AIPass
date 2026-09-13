@@ -1753,6 +1753,9 @@ class BaseBot:
             )
             logger.info("Message injected into tmux session")
             return True
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot inject into '%s'", self.session_name)
+            return False
         except subprocess.CalledProcessError as e:
             logger.error(
                 "Failed to inject message: %s",
@@ -1796,6 +1799,11 @@ class BaseBot:
             )
             logger.info("Killed tmux session '%s'", self.session_name)
             return True
+        except FileNotFoundError:
+            # _tmux_session_exists already answers False without tmux, so this
+            # is the PATH changing between that probe and this exec.
+            logger.error("tmux not found — cannot kill '%s'", self.session_name)
+            return False
         except subprocess.CalledProcessError as e:
             logger.error(
                 "Failed to kill tmux session '%s': %s",
@@ -1920,6 +1928,10 @@ class BaseBot:
                 check=True,
                 capture_output=True,
             )
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot start '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
         except subprocess.CalledProcessError as e:
             logger.error("Failed to start '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
             self.send_message(chat_id, f"Failed to start '{branch}' — see logs.")
@@ -1959,6 +1971,10 @@ class BaseBot:
                 check=True,
                 capture_output=True,
             )
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot kill '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
         except subprocess.CalledProcessError as e:
             logger.error("Failed to kill '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
             self.send_message(chat_id, f"Failed to kill '{branch}' — see logs.")
@@ -2356,14 +2372,22 @@ class BaseBot:
 
         try:
             subprocess.run(["systemctl", "suspend"], check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            detail = e.stderr.decode() if e.stderr else str(e)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            if isinstance(e, subprocess.CalledProcessError):
+                detail = e.stderr.decode() if e.stderr else str(e)
+                cause = (
+                    "the login1.suspend polkit grant isn't installed yet. See tools/suspend/install_suspend_grants.sh."
+                )
+            else:
+                # No systemd on this host. The polkit advice cannot work here,
+                # so it is not the message.
+                detail = str(e)
+                cause = "systemctl is not installed on this host."
             logger.error("Failed to suspend: %s", detail)
             subprocess.run(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)
             self.send_message(
                 chat_id,
-                "Wake alarm armed, but suspend failed — the login1.suspend polkit grant isn't "
-                "installed yet. See tools/suspend/install_suspend_grants.sh. Disarmed the alarm; staying awake.",
+                f"Wake alarm armed, but suspend failed — {cause} Disarmed the alarm; staying awake.",
             )
             self._suspend_heartbeat_active = False
             self._suspend_alarm_at = None

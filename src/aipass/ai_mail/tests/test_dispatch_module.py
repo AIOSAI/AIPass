@@ -3,7 +3,7 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for dispatch.py orchestrator functions.
@@ -1283,8 +1283,8 @@ class TestWakeBackPromiseMatchesDelivery:
         return printed, dmod
 
     def test_manager_sender_is_promised_mail_not_a_wake(self, monkeypatch):
-        """@devpulse was told 'sender will be woken' twice on 2026-08-21 and was
-        not woken either time. Managers get mail; the promise must say mail."""
+        """@devpulse was told 'sender will be woken' three times on 2026-08-21
+        and was not woken any of them. Managers get mail; the promise must say mail."""
         printed, dmod = self._run(monkeypatch, sender_is_manager=True)
         dmod._announce_wake_back("@canary", "@devpulse")
         line = " ".join(printed).lower()

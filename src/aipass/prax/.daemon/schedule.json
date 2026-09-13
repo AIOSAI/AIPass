@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "branch": "@prax",
+  "jobs": [
+    {
+      "id": "tmp-sweep-weekly",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 10080,
+        "slot": "2026-09-13T04:00:00"
+      },
+      "command": "drone rm --stale 10d ..",
+      "timeout_seconds": 120,
+      "notify": {
+        "email": "@devpulse"
+      },
+      "_note": "WHAT: the fleet's weekly sweep of stale staging temps (DPLAN-0338 wave 2a, FPLAN-0546). A command job: the daemon tick runs it as a subprocess from src/aipass/prax/, so no agent is woken and no tokens are spent. drone rm --stale deletes only regular *.tmp files directly inside *_json folders whose mtime is older than the age, walking recursively under the target; '..' from this directory is src/aipass, so one call covers every branch's json folder (the sibling-branch fence is crossed in stale mode only, by design). These temps are what a staged write (temp + fsync + rename) leaves when its process is killed between the two; the real document is intact whatever happens to them. WHEN: Sunday 04:00 local, weekly - Patrick 2026-09-11 'once a week, I really don't care'; the quiet hour, clear of @seedgo's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot names one Sunday: devpulse's dispatch wrote 2026-09-14, which is a Monday, so the Sunday of that week is used here. A never-run job is seeded from the slot by the tick, so the first fire lands on the slot, never on the tick that discovers the file; a missed Sunday (machine off) fires on the first tick after. WHY 10d: Patrick 2026-09-11 11:18, matching systemd-tmpfiles' /tmp default; the temps hold no work, so the age is tidiness only. CHANGING THE AGE is editing the command string: '10d' -> '5d' (m/h/d accepted, zero refused). Turning it off is enabled:false. WHERE IT SHOWS: daemon logs/run.log and ~/.aipass/daemon-tick.log (FIRE and DONE lines with exit code, duration, output tail), the runstate row prax:tmp-sweep-weekly in daemon_json/daemon_runstate.json, one row per deleted file in .ai_central/deletions.jsonl, and a start and a finish mail to @devpulse. timeout 120s because a command job holds the tick lock for its whole run. Measured 2026-09-11, first sweep by hand: 706 files in 39 s wall, the scan alone 1.2 s, so about 54 ms per deleted file (each writes a ledger row and a log line); 120 s covers roughly 2,100 files a week, about 300 orphans a day. A timeout is FAILED on the runstate row but keeps what it already deleted, and the next week finishes the rest; if the DONE lines start showing runs near 120 s, raise timeout_seconds here."
+    },
+    {
+      "id": "module-scan-daily",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 1440,
+        "slot": "2026-09-13T04:30:00"
+      },
+      "command": "drone @prax discover run",
+      "timeout_seconds": 60,
+      "notify": false,
+      "_note": "WHAT: the fleet's daily module discovery scan (DPLAN-0339 step 4, FPLAN-0553). A command job: the daemon tick runs 'drone @prax discover run' as a subprocess from src/aipass/prax/, so no agent is woken and no tokens are spent. One walk of ECOSYSTEM_ROOT (src/aipass) through the existing scanner, then prax_registry.json is rewritten as a SNAPSHOT - modules added, modules whose file is gone removed, discovered_time carried over for anything already on record. WHY IT EXISTS: discovery used to be a recursive inotify watch that every process started on its first log line, on an unjoined daemon thread. Measured 2026-09-11: it left the registry holding 250 of the 1,442 modules a scan finds (17%), never pruned a deleted file, and cost the machine 1,589 watches per long-lived process (6,356 of 6,634 in use on this box). The first real scan, 2026-09-12: +1,245 / -55, and the 55 removed included probe files deleted in August that the incremental path had carried since. Patrick's requirement - prax keeps auto-discovering new modules - is met by this job, not by the watch. WHEN: 04:30 local, daily. Clear of @seedgo's Sunday 03:00 shadow cycle, @daemon's 09:00, and prax's own Sunday 04:00 tmp sweep, which holds the tick lock for up to 120 s. A never-run job is seeded from the slot by the tick, so the first fire lands on the slot and never on the tick that discovers the file; a missed day (machine off) fires on the first tick after. WHY DAILY: the only readers of the registry are prax's own dedupe and the count in 'drone @prax status', so a module discovered within a day is well inside what anything needs; nothing in the fleet reads discovered_time at all. WHY NO MAIL: notify is false deliberately. A daily job that reports '0 added, 0 removed' on most days is noise in @devpulse's inbox, and daemon's notify.email costs 5-7 s of tick time per mail on start AND on finish - there is no failure-only option (daemon README, Notify). The record is the FIRE and DONE lines in logs/run.log and ~/.aipass/daemon-tick.log with exit code, duration and output tail, plus the runstate row prax:module-scan-daily in daemon_json/daemon_runstate.json, plus the last_scan block written into prax_registry.json itself, which 'drone @prax status' prints as the Last Scan line. TIMEOUT 60s: measured 2026-09-12, a full scan is 5.5 s wall end to end (the walk alone 0.18 s; the rest is the per-file stat and the 1,442-entry write), so 60 s is an order of magnitude of headroom on a job that holds the tick lock for its whole run. If the DONE lines start showing runs near 60 s, raise timeout_seconds here. Turning it off is enabled:false - and then nothing discovers new modules, because nothing else does any more."
+    }
+  ]
+}

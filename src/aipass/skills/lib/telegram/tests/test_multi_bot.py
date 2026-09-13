@@ -1732,3 +1732,32 @@ class TestLockPidReuse:
         self.bot._lock_file.write_text("not json", encoding="utf-8")
         assert self.bot._check_lock() is False
         assert not self.bot._lock_file.exists()
+
+
+# =============================================
+# 13. A HOST WITHOUT TMUX (FPLAN-0554 round three)
+# =============================================
+
+
+class TestTmuxMissingOnThisHost:
+    """A missing binary raises out of exec. These pin a verdict instead of a raise."""
+
+    def test_inject_without_tmux_returns_false(self, base_bot):
+        with patch(
+            "aipass.skills.lib.telegram.apps.handlers.base_bot.subprocess.run",
+            side_effect=FileNotFoundError("tmux"),
+        ) as mock_run:
+            assert base_bot.inject_message("hello") is False
+        assert mock_run.call_count == 1
+
+    def test_kill_without_tmux_returns_false(self, base_bot):
+        """The session probe said yes, then tmux was gone at exec."""
+        with (
+            patch.object(base_bot, "_tmux_session_exists", return_value=True),
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.subprocess.run",
+                side_effect=FileNotFoundError("tmux"),
+            ) as mock_run,
+        ):
+            assert base_bot._kill_tmux_session() is False
+        assert mock_run.call_count == 1

@@ -168,3 +168,43 @@ def test_handle_command_sync_routes_to_handler(mock_prax_infrastructure, monkeyp
     # Verify handler result influenced console output (synced branch count)
     calls = [str(c) for c in mock_prax_infrastructure.console.print.call_args_list]
     assert any("sync" in c.lower() for c in calls)
+
+
+# =============================================
+# The Last Scan line (DPLAN-0339 step 4)
+# =============================================
+
+
+def _format_last_scan():
+    """The formatter, freshly imported like every other symbol in this file."""
+    mod_name = "aipass.prax.apps.modules.status"
+    sys.modules.pop(mod_name, None)
+    from aipass.prax.apps.modules.status import _format_last_scan as fn
+
+    return fn
+
+
+def test_last_scan_never_run_says_how_to_run_it(mock_prax_infrastructure, monkeypatch):
+    """An empty block is a real answer: this registry has never been scanned."""
+    _ensure_sync_mock(monkeypatch)
+
+    assert _format_last_scan()({}) == "never — run: drone @prax discover run"
+
+
+def test_last_scan_shows_the_stamp_and_both_deltas(mock_prax_infrastructure, monkeypatch):
+    """The line that replaced `File Watcher`, which reported the calling
+    process and therefore read Inactive on every run while discovery was
+    healthy."""
+    _ensure_sync_mock(monkeypatch)
+
+    line = _format_last_scan()({"timestamp": "2026-09-12T07:57:47+00:00", "added": 1245, "removed": 55})
+
+    assert line == "2026-09-12T07:57:47+00:00 (+1245 / -55)"
+
+
+def test_last_scan_survives_a_block_missing_its_counts(mock_prax_infrastructure, monkeypatch):
+    """A registry written by an older prax has a timestamp and no deltas; the
+    status command must still print a line rather than raise."""
+    _ensure_sync_mock(monkeypatch)
+
+    assert _format_last_scan()({"timestamp": "2026-09-12T07:57:47+00:00"}) == "2026-09-12T07:57:47+00:00 (+? / -?)"

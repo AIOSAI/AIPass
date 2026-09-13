@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-11
-# Modified: 2026-09-07
+# Modified: 2026-09-10
 # =============================================
 
 """
@@ -12,6 +12,12 @@ Inbox sweep — the fleet's unread-mail backstop (drone @daemon inbox-sweep).
 Replies never wake their recipient, so a reply landing in a sleeping branch's
 inbox stays invisible indefinitely. This sweep looks at every branch mailbox
 and wakes the owner of any inbox holding NEW mail older than 24h.
+
+HAND TOOL ONLY since 2026-09-10 (DPLAN-0337 R2). Nothing scheduled calls this:
+Patrick deleted the daily 09:00 job - up to five wakes a morning was token
+waste, and the nightly rounds (drone @daemon rotation) now take each citizen's
+inbox to zero, one citizen a night. The command stays for anyone to run by hand;
+--dry-run is the cheap look.
 
 Rules:
   - at most one wake per branch per sweep
@@ -91,7 +97,8 @@ def print_help():
     console.print("  [cyan]*[/cyan] Managers are never woken — their mail lands live")
     console.print(f"  [cyan]*[/cyan] At most {MAX_WAKES} wakes per pass, oldest mailbox first")
     console.print("\n[yellow]SCHEDULE:[/yellow]")
-    console.print("  Runs daily from .daemon/schedule.json (job id: inbox-sweep)")
+    console.print("  None — hand tool only since 2026-09-10. The nightly rounds")
+    console.print("  (drone @daemon rotation) take each citizen's inbox to zero.")
     console.print()
 
 
@@ -151,6 +158,9 @@ def _wake_owner(entry: dict) -> tuple:
             auto=True,
             sender="@daemon",
             model=WAKE_MODEL,
+            # A nudge, not a dispatch: the woken branch owes @daemon no reply, so
+            # nothing may wake @daemon back to read one (ai_mail ruling (a), 2026-09-10).
+            wake_back=False,
         )
     except Exception as e:
         logger.error("[inbox_sweep] Exception waking %s: %s", owner, e)

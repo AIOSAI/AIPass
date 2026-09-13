@@ -157,6 +157,23 @@ def _inject_and_import(monkeypatch):
     return logger_mod, mocks
 
 
+def _inject_trigger(monkeypatch):
+    """Mock the trigger core that the two lifecycle doors import lazily.
+
+    Deliberately NOT in HANDLER_DEPS: logger.py imports trigger inside
+    initialize_logging_system and shutdown_logging_system and nowhere else, and
+    that separation is the whole point of DPLAN-0339 step 3. Injecting it per
+    test keeps the module-level dependency list honest about what logging costs.
+
+    Returns the mock `trigger` object the functions will call fire() on.
+    """
+    core = MagicMock()
+    core.trigger = MagicMock()
+    core.trigger.fire = MagicMock(return_value={"handlers": 0, "ran": 0, "failed": 0})
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core)
+    return core.trigger
+
+
 # =============================================
 # get_system_logger
 # =============================================
@@ -241,6 +258,7 @@ class TestGetSystemStatus:
         assert sorted(result) == [
             "file_watcher_active",
             "individual_loggers",
+            "last_scan",
             "logger_override_active",
             "module_logs_dir",
             "registry_file",
@@ -405,6 +423,8 @@ class TestInitializeLoggingSystem:
             mock_lifecycle,
         )
 
+        _inject_trigger(monkeypatch)
+
         mod.initialize_logging_system()
 
         mock_lifecycle.run_initialize.assert_called_once_with("prax_logger")
@@ -425,12 +445,43 @@ class TestInitializeLoggingSystem:
             mock_lifecycle,
         )
 
+        _inject_trigger(monkeypatch)
+
         mod.initialize_logging_system()
 
         console = mocks["aipass.cli.apps.modules"].console
         calls = [str(c) for c in console.print.call_args_list]
         assert any("Initializing" in c for c in calls)
         assert any("initialized" in c.lower() for c in calls)
+
+    def test_fires_the_lifecycle_event_after_run_initialize(self, monkeypatch):
+        """seedgo trigger.md Pattern 9: the explicit system lifecycle doors
+        announce themselves. The standard's event table names no lifecycle
+        event, so prax names it: `logging_system_initialized`."""
+        mod, _ = _inject_and_import(monkeypatch)
+        mock_lifecycle = MagicMock()
+        mock_lifecycle.run_initialize = MagicMock(return_value={"modules_count": 42})
+        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        trigger = _inject_trigger(monkeypatch)
+
+        mod.initialize_logging_system()
+
+        trigger.fire.assert_called_once_with("logging_system_initialized", modules_count=42)
+
+    def test_a_failed_fire_does_not_fail_the_initialize(self, monkeypatch):
+        """These doors must still work on a host where trigger cannot import or
+        inotify is exhausted — the guard the removed startup fire carried."""
+        mod, mocks = _inject_and_import(monkeypatch)
+        mock_lifecycle = MagicMock()
+        mock_lifecycle.run_initialize = MagicMock(return_value={"modules_count": 7})
+        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        trigger = _inject_trigger(monkeypatch)
+        trigger.fire.side_effect = OSError("inotify watch limit reached")
+
+        mod.initialize_logging_system()  # must not raise
+
+        console = mocks["aipass.cli.apps.modules"].console
+        assert any("initialized" in str(c).lower() for c in console.print.call_args_list)
 
 
 # =============================================
@@ -453,6 +504,8 @@ class TestShutdownLoggingSystem:
             mock_lifecycle,
         )
 
+        _inject_trigger(monkeypatch)
+
         mod.shutdown_logging_system()
 
         mock_lifecycle.run_shutdown.assert_called_once_with("prax_logger")
@@ -469,12 +522,40 @@ class TestShutdownLoggingSystem:
             mock_lifecycle,
         )
 
+        _inject_trigger(monkeypatch)
+
         mod.shutdown_logging_system()
 
         console = mocks["aipass.cli.apps.modules"].console
         calls = [str(c) for c in console.print.call_args_list]
         assert any("Shutting down" in c for c in calls)
         assert any("complete" in c.lower() for c in calls)
+
+    def test_fires_the_lifecycle_event_after_run_shutdown(self, monkeypatch):
+        """The other half of the Pattern 9 pair. Fired last, so the event says
+        the system IS down rather than that it is going down."""
+        mod, _ = _inject_and_import(monkeypatch)
+        mock_lifecycle = MagicMock()
+        mock_lifecycle.run_shutdown = MagicMock()
+        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        trigger = _inject_trigger(monkeypatch)
+
+        mod.shutdown_logging_system()
+
+        trigger.fire.assert_called_once_with("logging_system_shutdown")
+
+    def test_a_failed_fire_does_not_fail_the_shutdown(self, monkeypatch):
+        """A shutdown that cannot announce itself is still a shutdown."""
+        mod, mocks = _inject_and_import(monkeypatch)
+        mock_lifecycle = MagicMock()
+        mock_lifecycle.run_shutdown = MagicMock()
+        monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.logging.lifecycle", mock_lifecycle)
+        trigger = _inject_trigger(monkeypatch)
+        trigger.fire.side_effect = ImportError("no aipass.trigger on this host")
+
+        mod.shutdown_logging_system()  # must not raise
+
+        mock_lifecycle.run_shutdown.assert_called_once_with("prax_logger")
 
 
 # =============================================
@@ -860,3 +941,132 @@ class TestLazyInitImportFootprint:
         assert "aipass.prax.apps.modules.logger" not in footprint
         assert not any(n == "watchdog" or n.startswith("watchdog.") for n in footprint)
         assert not any(n == "aipass.trigger" or n.startswith("aipass.trigger.") for n in footprint)
+
+
+# =============================================
+# The logging path never reaches trigger (DPLAN-0339 step 3, held open)
+# =============================================
+
+_TRIGGER_PROBE = """
+import json, sys
+from aipass.prax import logger
+logger.info("probe line")
+print(json.dumps(sorted(n for n in sys.modules if n == "aipass.trigger" or n.startswith("aipass.trigger."))))
+"""
+
+
+def _trigger_modules_after_one_log_line(log_dir) -> list:
+    """aipass.trigger modules a fresh interpreter holds after logging once."""
+    result = subprocess.run(
+        [sys.executable, "-c", _TRIGGER_PROBE],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[3]),
+        env={**os.environ, "AIPASS_TEST_LOG_DIR": str(log_dir)},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+# Measured 2026-09-12 on a fresh interpreter that imports the prax logger and
+# logs one line: NOTHING under aipass.trigger, not even a package shell.
+#
+# It was three shells until FPLAN-0556. watcher.py held a module-level
+# `from aipass.trigger.apps.modules.core import trigger` that could never
+# succeed — trigger's core imports prax's logger, which imports the watcher,
+# which was still mid-import — so Python discarded `core` and kept the parent
+# packages it had already created, and every process that logged carried them
+# and used none of them. That import now lives at the fire sites, so this list
+# is empty and an entry appearing in it is a new edge onto the logging path.
+_TRIGGER_SHELLS_AFTER_ONE_LOG_LINE = []
+
+
+class TestLoggingPathIsTriggerFree:
+    """Lifecycle events live on the two explicit doors, not on the hot path.
+
+    initialize_logging_system and shutdown_logging_system fire on trigger's bus,
+    but they import it INSIDE themselves. If that import ever drifts to module
+    level, every process that logs pays the aipass.trigger graph again — which
+    was 0.339 s of a 0.361 s first log line before DPLAN-0339 step 3. Only a
+    fresh interpreter can see this; pytest has trigger loaded already.
+    """
+
+    def test_logging_a_line_does_not_load_the_trigger_core(self, tmp_path):
+        """The cost is the graph under aipass.trigger.apps.modules, and a process
+        that only logs must not load any of it."""
+        loaded = _trigger_modules_after_one_log_line(tmp_path)
+
+        assert not any(n.startswith("aipass.trigger.apps.modules") for n in loaded), (
+            f"the logging path reached trigger's core: {loaded}"
+        )
+
+    def test_the_trigger_footprint_of_a_log_line_is_the_measured_set(self, tmp_path):
+        """The exact list. A new trigger import on the logging path is a
+        decision, not a drift — and if watcher.py's dead module-level import is
+        ever cured, this fails and someone updates it on purpose."""
+        assert _trigger_modules_after_one_log_line(tmp_path) == _TRIGGER_SHELLS_AFTER_ONE_LOG_LINE
+
+
+# =============================================
+# The first log line starts nothing (DPLAN-0339 step 4)
+# =============================================
+
+
+class TestEnsureWatcherStartsNothing:
+    """Logging is not a reason to watch the filesystem.
+
+    Until 2026-09-12 the first log line of every process started a recursive
+    inotify watch over the whole ecosystem on an unjoined daemon thread: 1,589
+    watches per long-lived process, a thread that short processes killed
+    mid-walk, and a registry that was still 83% incomplete after all of it.
+    Discovery is a scheduled scan now (`drone @prax discover`). These pin that
+    the logging path costs the machine nothing.
+    """
+
+    def test_first_log_line_starts_no_watcher(self, monkeypatch):
+        """The whole point of step 4."""
+        mod, mocks = _inject_and_import(monkeypatch)
+        watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
+        watcher.start_file_watcher_in_background = MagicMock()
+        mod.SystemLogger._watcher_started = False
+
+        mod.SystemLogger()._ensure_watcher()
+
+        watcher.start_file_watcher_in_background.assert_not_called()
+        watcher.start_file_watcher.assert_not_called()
+
+    def test_the_logger_no_longer_binds_the_background_start(self, monkeypatch):
+        """A name the module does not import cannot be called by accident, and
+        a re-added call would have to re-add the import in the same edit."""
+        mod, _ = _inject_and_import(monkeypatch)
+
+        assert not hasattr(mod, "start_file_watcher_in_background")
+
+    def test_later_log_lines_still_check_liveness(self, monkeypatch):
+        """The check is what serves the explicit door
+        (`initialize_logging_system`), where a watcher really is running and can
+        still die under its process — DPLAN-0305."""
+        mod, _ = _inject_and_import(monkeypatch)
+        # Patched on the MODULE, not on the watcher mock: logger.py from-imports
+        # the name, so the module's own binding is what the call resolves.
+        liveness = MagicMock()
+        monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)
+        mod.SystemLogger._watcher_started = True
+
+        mod.SystemLogger()._ensure_watcher()
+
+        liveness.assert_called_once()
+
+    def test_the_first_line_does_not_pay_for_the_liveness_check(self, monkeypatch):
+        """`_watcher_started` now means "past the first log line", which is the
+        one moment no watcher can exist yet."""
+        mod, _ = _inject_and_import(monkeypatch)
+        liveness = MagicMock()
+        monkeypatch.setattr(mod, "check_file_watcher_liveness", liveness)
+        mod.SystemLogger._watcher_started = False
+
+        mod.SystemLogger()._ensure_watcher()
+
+        liveness.assert_not_called()
+        assert mod.SystemLogger._watcher_started is True

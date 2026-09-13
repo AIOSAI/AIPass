@@ -11,6 +11,7 @@
 import json
 import os
 import subprocess
+import sys
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
@@ -1727,6 +1728,94 @@ class TestAdminManagerLane:
         assert status.find_step("admin") is None
 
 
+# --- wake-back opt-out (library callers) -------------------------------
+
+
+class TestWakeBackOptOut:
+    """wake_back=False: a library caller (@daemon's scheduled nudges) declines
+    the completion wake-back. A nudge owes no reply, so waking @daemon back to
+    read an empty inbox was a wasted session.
+
+    It travels to the monitor as an ARGV flag between the four positionals and
+    '--', never an env var: spawn_env becomes the agent's own environment and
+    would leak into any dispatch that agent makes (the AIPASS_DISPATCH_ID class).
+    """
+
+    def test_wake_back_is_keyword_only_and_defaults_true(self):
+        """Every existing call site keeps the wake-back without saying so."""
+        import inspect
+
+        param = inspect.signature(wake_branch).parameters["wake_back"]
+        assert param.default is True
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+
+    def test_declining_puts_the_flag_before_the_separator(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", custom_message="nudge", sender="@daemon", wake_back=False)
+
+        assert ok is True
+        spawned = calls["popen"][0]
+        cmd = spawned["cmd"]
+        sep = cmd.index("--")
+        assert sep == 7, "the flag sits between the four positionals and '--'"
+        assert cmd[2] == "@testbranch" and cmd[4] == "@daemon", "sender passes through unchanged"
+        assert cmd[sep - 1] == "--no-wake-back"
+        assert "--no-wake-back" not in cmd[sep + 1 :], "the flag must not reach claude's argv"
+        assert not any("WAKE_BACK" in key for key in spawned["env"]), "carried by argv, never by env"
+
+    def test_the_default_argv_keeps_the_separator_right_after_the_positionals(self, tmp_path, monkeypatch):
+        """Byte-identical to the shape before the option existed."""
+        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", custom_message="work", sender="@devpulse")
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        assert cmd[:7] == [
+            sys.executable,
+            str(wake_mod.MONITOR_SCRIPT),
+            "@testbranch",
+            str(branch_path / ".ai_mail.local" / ".dispatch.lock"),
+            "@devpulse",
+            str(branch_path / "logs" / "dispatch_stderr.log"),
+            "--",
+        ]
+        assert "--no-wake-back" not in cmd
+
+    def test_the_flag_is_the_only_difference_a_decline_makes(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch", custom_message="work", sender="@daemon")
+        wake_branch("@testbranch", custom_message="work", sender="@daemon", wake_back=True)
+        wake_branch("@testbranch", custom_message="work", sender="@daemon", wake_back=False)
+
+        default_cmd, explicit_cmd, declined_cmd = (c["cmd"] for c in calls["popen"])
+        assert explicit_cmd == default_cmd
+        assert declined_cmd != default_cmd
+        assert [a for a in declined_cmd if a != "--no-wake-back"] == default_cmd
+
+    def test_a_declined_wake_back_is_written_on_the_register_row(self, tmp_path, monkeypatch):
+        """A reader of the register can tell a declined wake-back from a lost one."""
+        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
+
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch", custom_message="nudge", sender="@daemon", wake_back=False)
+
+        rows = register_mod.outstanding()
+        assert len(rows) == 1
+        assert rows[0]["wake_back"] is False
+
+
 # --- session pointer wiring --------------------------------------------
 
 
@@ -1762,6 +1851,7 @@ class TestWakeSessionPointer:
         """
         wake_mod.session_pointer.write_pointer(branch_path, session_id, "test")
         transcript = wake_mod.session_pointer.transcript_file(branch_path, session_id)
+        assert transcript is not None, "fake_home did not take — no home, no transcript path"
         transcript.parent.mkdir(parents=True, exist_ok=True)
         transcript.write_text("{}\n", encoding="utf-8")
         return transcript
@@ -2425,6 +2515,12 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
             "Tell them before moving one — their block-vs-fail classification depends on it."
         )
 
+    @staticmethod
+    def _kind(status, label):
+        """The step's kind ("ok", "fail", ...), or None when the label is absent."""
+        step = status.find_step(label)
+        return step[0] if step is not None else None
+
     def test_pause_is_a_named_fail_step(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
         pause = tmp_path / ".aipass" / "autonomous_pause"
@@ -2434,7 +2530,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         status, ok = wake_branch("@testbranch", auto=True)
 
         assert ok is False
-        assert status.find_step("pause")[0] == "fail"
+        assert self._kind(status, "pause") == "fail"
 
     def test_an_active_lock_is_a_named_fail_step_under_auto(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -2443,7 +2539,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         status, ok = wake_branch("@testbranch", auto=True)
 
         assert ok is False
-        assert status.find_step("lock")[0] == "fail"
+        assert self._kind(status, "lock") == "fail"
 
     def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -2452,7 +2548,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         status, ok = wake_branch("@testbranch", auto=True)
 
         assert ok is False
-        assert status.find_step("blocked")[0] == "fail"
+        assert self._kind(status, "blocked") == "fail"
 
     def test_a_refused_lock_acquire_is_its_own_named_step(self, tmp_path, monkeypatch):
         _make_wake_fixtures(tmp_path, monkeypatch)
@@ -2461,7 +2557,7 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
 
         status, ok = wake_branch("@testbranch", auto=True)
 
-        assert status.find_step("lock-acquire")[0] == "fail"
+        assert self._kind(status, "lock-acquire") == "fail"
 
     def test_resolve_and_blocklist_stay_failures_on_purpose(self, tmp_path, monkeypatch):
         """The other half of their rule, pinned so it is not "fixed" into
@@ -2472,5 +2568,5 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         status, ok = wake_branch("@nonexistent")
 
         assert ok is False
-        assert status.find_step("resolve")[0] == "fail"
+        assert self._kind(status, "resolve") == "fail"
         assert status.find_step("blocked") is None, "a missing branch is not a transient block"

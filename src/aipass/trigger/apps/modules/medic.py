@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-02-12
-# Modified: 2026-03-01
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -20,18 +20,25 @@ Two mute classes, deliberately independent:
 
 Commands: on, off, status, mute, unmute, volume-mute, volume-unmute
 Architecture: Module orchestrates, medic_state handler manages persistence
+
+Also the public door for medic's cold-start recovery — run_error_catchup().
+It is not a command; it exists because log_watcher_service is an ENTRY POINT
+and entry points import modules, not handlers (seedgo encapsulation rule 3).
 """
 
 import os
 import sys
 from pathlib import Path
+from typing import Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+from aipass.trigger.apps.handlers.events.startup import run_startup_catchup
 from aipass.trigger.apps.handlers.service_control import (
     _ensure_service_installed,
     _is_service_active,
     _systemctl,
+    systemd_available,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -58,6 +65,29 @@ if sys.platform == "win32":
         _reconfigure = getattr(_stream, "reconfigure", None)
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
+
+
+def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
+    """Scan system_logs for errors missed while no watcher was up.
+
+    Medic's cold-start recovery, and the module-level door to it. The scan
+    itself is the startup handler's (handlers/events/startup.py); this is the
+    public entry point log_watcher_service.main() calls once its watchers are
+    up, so recovery belongs to the process that owns the watching instead of
+    arriving by accident on prax's per-process `startup` fire (DPLAN-0339
+    step 2, the prerequisite for prax dropping that fire).
+
+    Deliberately a direct call rather than `trigger.fire("startup")`: a fire
+    with no registered listener returns `handlers: 0` and reports success, so
+    the day someone unwires the handler, recovery would go silent and nothing
+    would say so. Trigger has that exact failure live elsewhere — prax fires
+    `file_watcher_died` into zero handlers — and this path must not join it.
+
+    Args:
+        fire_event: Callback used to fire error_detected for each error found.
+            None scans and records without dispatching.
+    """
+    run_startup_catchup(fire_event)
 
 
 def print_introspection():
@@ -361,6 +391,8 @@ def _handle_status(console) -> None:
 
     if watcher_active:
         watcher_text = "[green]running[/green] (systemd)"
+    elif not systemd_available():
+        watcher_text = "[yellow]unavailable[/yellow] — no systemd on this host"
     elif enabled:
         watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
     else:
@@ -401,7 +433,12 @@ def _handle_on(console) -> None:
         else:
             logger.warning("[MEDIC] Could not start log watcher service")
 
-    watcher_status = "running" if _is_service_active() else "failed to start"
+    if _is_service_active():
+        watcher_status = "running"
+    elif not systemd_available():
+        watcher_status = "unavailable — no systemd on this host"
+    else:
+        watcher_status = "failed to start"
     console.print(
         Panel(
             "[bold green]Medic ENABLED[/bold green]\n\n"

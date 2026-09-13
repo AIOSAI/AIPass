@@ -151,6 +151,20 @@ class TestActiveStartupInstruction:
         assert "drone @prax dashboard refresh" in context
         assert "DASHBOARD.local.json" in context
 
+    def test_step_two_is_honest_outside_the_fleet(self, tmp_path):
+        """Measured by @verify from an external project (via @devpulse 2026-09-11).
+
+        The refresh answers "Branch VERIFY not found in registry" there — the
+        project carries its own registry — and the DASHBOARD.local.json the step
+        points at was four months stale and read new_mail 0 while the inbox held
+        three. Step 2 is kept rather than skipped (prax owns the resolver half),
+        but it now names the failure and aims the agent at last_updated, because
+        a stale dashboard reported as current is worse than no dashboard.
+        """
+        context = self._ground(tmp_path)
+        assert "not in the registry" in context
+        assert "last_updated" in context
+
     def test_instruction_precedes_the_injected_content(self, tmp_path):
         """It says 'do this BEFORE resuming' — it has to arrive before the wall of
         re-injected prompt text, not buried under it."""
@@ -324,21 +338,37 @@ class TestReleaseNoticeModule:
         assert snapshot() == before
 
 
+def _parsed_version(text: str) -> tuple[int, ...]:
+    """`_version_tuple` with its None branch asserted away, for the comparisons.
+
+    `_is_behind` takes non-optional tuples while the parser answers
+    `tuple[int, ...] | None`, so handing one straight to the other type-errored
+    this file (10 findings) — and it hid a claim worth making: every spelling in
+    these units must PARSE, not merely compare. The unparseable spellings have
+    their own unit below.
+    """
+    from aipass.hooks.apps.modules.release_notice import _version_tuple
+
+    parsed = _version_tuple(text)
+    assert parsed is not None, f"{text!r} did not parse"
+    return parsed
+
+
 class TestReleaseNoticeVersionCompare:
     def test_short_and_long_forms_of_the_same_version_are_equal(self):
         """Without zero-padding, (2, 8) < (2, 8, 0) and a scaffold stamped '2.8'
         would be reported behind '2.8.0' forever."""
-        from aipass.hooks.apps.modules.release_notice import _is_behind, _version_tuple
+        from aipass.hooks.apps.modules.release_notice import _is_behind
 
-        assert _is_behind(_version_tuple("2.8"), _version_tuple("2.8.0")) is False
-        assert _is_behind(_version_tuple("2.8.0"), _version_tuple("2.8")) is False
+        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.8.0")) is False
+        assert _is_behind(_parsed_version("2.8.0"), _parsed_version("2.8")) is False
 
     def test_patch_and_minor_bumps_read_as_behind(self):
-        from aipass.hooks.apps.modules.release_notice import _is_behind, _version_tuple
+        from aipass.hooks.apps.modules.release_notice import _is_behind
 
-        assert _is_behind(_version_tuple("2.8.1"), _version_tuple("2.8.4")) is True
-        assert _is_behind(_version_tuple("2.8"), _version_tuple("2.9.0")) is True
-        assert _is_behind(_version_tuple("2.10.0"), _version_tuple("2.9.0")) is False
+        assert _is_behind(_parsed_version("2.8.1"), _parsed_version("2.8.4")) is True
+        assert _is_behind(_parsed_version("2.8"), _parsed_version("2.9.0")) is True
+        assert _is_behind(_parsed_version("2.10.0"), _parsed_version("2.9.0")) is False
 
     def test_a_prerelease_suffix_parses_to_its_numeric_core(self):
         from aipass.hooks.apps.modules.release_notice import _version_tuple
@@ -488,6 +518,9 @@ class TestRegroupBudget752:
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
         assert post_compact_regrounding.REGROUP_FIRE_BUDGET < 10_000
+        # `__doc__` is `str | None`, and a module stripped of its docstring must
+        # fail this claim rather than type-error the file on the `in`.
+        assert post_compact_regrounding.__doc__ is not None
         assert "sgr = 1e4" in post_compact_regrounding.__doc__
 
     def test_a_manager_seat_at_todays_sizes_never_exceeds_the_budget(self, tmp_path):

@@ -144,6 +144,7 @@ def print_help():
     console.print("  [cyan]log-audit[/cyan]   Audit log file sizes and health")
     console.print("  [cyan]log-health[/cyan]  Log growth rates (scan / snapshot)")
     console.print("  [cyan]dashboard[/cyan]   System dashboard")
+    console.print("  [cyan]discover[/cyan]    Scan the ecosystem into the module registry")
     console.print()
 
     console.print("[yellow]Flags:[/yellow]")
@@ -156,6 +157,7 @@ def print_help():
     console.print("  $ drone @prax status")
     console.print("  $ drone @prax log-audit audit")
     console.print("  $ drone @prax dashboard")
+    console.print("  $ drone @prax discover run")
     console.print()
 
 

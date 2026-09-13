@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher_service.py
 # Description: Tests for the log watcher service entry point
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for log_watcher_service — the persistent service entry point."""
@@ -44,6 +44,23 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
         sys.modules,
         "aipass.trigger.apps.modules.log_events",
         mock_system,
+    )
+
+    # Stub the catch-up. main() now calls it for real (DPLAN-0339 step 2), and
+    # the real one walks the LIVE system_logs and fires error_detected for
+    # anything it finds — every main() test below would scan the tree and
+    # dispatch other branches' errors through medic. The tests that care about
+    # the call assert on this mock.
+    #
+    # Stubbed at the MEDIC MODULE, which is where the service binds it from:
+    # log_watcher_service is an entry point, so it reaches the handler through
+    # a module (seedgo encapsulation rule 3), not directly.
+    mock_medic = MagicMock()
+    mock_medic.run_error_catchup = MagicMock()
+    monkeypatch.setitem(
+        sys.modules,
+        "aipass.trigger.apps.modules.medic",
+        mock_medic,
     )
 
     # Force re-import so mocks take effect
@@ -374,3 +391,108 @@ class TestReloadExit:
 
         assert mod.stop_branch_watcher.called
         assert mod.stop_system_watcher.called
+
+
+class TestStartupCatchup:
+    """The service runs its own error catch-up (DPLAN-0339 step 2, part a).
+
+    Before this, recovery reached this process only because prax's logger
+    fires `startup` on the first log line of every process (logger.py:132).
+    The one long-lived process that owns recovery got it as a side effect,
+    exactly like a two-second drone command did — and since
+    last_scan_timestamp is a single shared value, whichever short-lived
+    process fired last had usually already consumed this service's window.
+    Measured 2026-09-11: 0 of the last 100 catch-up runs found anything.
+    """
+
+    @staticmethod
+    def _run(mod, monkeypatch):
+        """Drive main() to completion with both watchers up."""
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        mod.start_branch_watcher = MagicMock(return_value=True)
+        mod.start_system_watcher = MagicMock(return_value=True)
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: None)
+        mod.main()
+
+    def test_main_runs_the_catchup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Recovery no longer depends on anything firing the startup event."""
+        mod = _import_module()
+
+        self._run(mod, monkeypatch)
+
+        mod.run_error_catchup.assert_called_once()
+
+    def test_catchup_gets_a_fire_event_so_errors_reach_medic(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Scanning without dispatching would recover errors into silence."""
+        mod = _import_module()
+
+        self._run(mod, monkeypatch)
+
+        assert mod.run_error_catchup.call_args[0][0] == mod.trigger.fire
+
+    def test_catchup_runs_after_the_watchers_are_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Order is deliberate: overlap is safe, a gap is not.
+
+        An error arriving between the scan and the first watch would fall
+        through if the scan ran first. Scanning after means the watcher may
+        also see the line, which the registry dedupes on fingerprint.
+        """
+        mod = _import_module()
+        order: list[str] = []
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        mod.start_branch_watcher = MagicMock(side_effect=lambda: order.append("branch") or True)
+        mod.start_system_watcher = MagicMock(side_effect=lambda: order.append("system") or True)
+        mod.run_error_catchup = MagicMock(side_effect=lambda *a: order.append("catchup"))
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: None)
+
+        mod.main()
+
+        assert order == ["branch", "system", "catchup"]
+
+    def test_a_failed_catchup_does_not_stop_the_watchers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The watchers are the service's job; recovery is best-effort.
+
+        A raising catch-up used to be impossible here because there was no
+        call. Now there is one, and it must not be able to take the process
+        down on start — that would trade a missed scan for no watching at all.
+        """
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        mod.start_branch_watcher = MagicMock(return_value=True)
+        mod.start_system_watcher = MagicMock(return_value=True)
+        mod.run_error_catchup = MagicMock(side_effect=RuntimeError("scan blew up"))
+        mock_stop_branch = MagicMock()
+        mod.stop_branch_watcher = mock_stop_branch
+        errors: list[str] = []
+        monkeypatch.setattr(mod.logger, "info", lambda *a, **kw: None)
+        monkeypatch.setattr(mod.logger, "error", lambda *a, **kw: errors.append(str(a)))
+
+        mod.main()
+
+        mock_stop_branch.assert_called_once(), "the service still ran and shut down cleanly"
+        assert any("catch-up failed" in e for e in errors), "and the failure is reported, not swallowed"
+
+    def test_no_catchup_when_both_watchers_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Nothing will be watching, so there is no window to recover into."""
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+        mod.start_branch_watcher = MagicMock(return_value=None)
+        mod.start_system_watcher = MagicMock(return_value=None)
+
+        with pytest.raises(SystemExit):
+            mod.main()
+
+        mod.run_error_catchup.assert_not_called()

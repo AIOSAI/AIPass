@@ -4,6 +4,17 @@
 
 Catches silent handler drift. Every branch's `apps/handlers/json/json_handler.py` must be a canonical handler capable of creating the full config/data/log triplet — not a stripped log-only fork that passes json_structure but cannot create config or data files.
 
+Each leg answers a different question, which is why a module missing one has lost
+something. **log** (`*_log.json`) is the module's operation trail: one timestamped
+entry per `log_operation`, oldest dropped once the list passes its cap, so it shows
+what the module did recently. **data** (`*_data.json`) is the module's lifetime
+state: since FPLAN-0542 every log write bumps it (`operations_total` +1,
+`last_operation`, `last_updated`), read-modify-write so every other key survives,
+and other writers keep their own keys there — prax's rate_tracker keeps `files`.
+**config** (`*_config.json`) holds the rotation cap the log obeys,
+`config.max_log_entries`. Together they let a reader open any module and see its
+state beside its recent operations.
+
 ## What Is Checked
 
 ### 1. Handler Capability (one accept path, and only one)
@@ -100,6 +111,12 @@ own rather than growing this one.
 
 ## History
 
+- 2026-09-11: FPLAN-0542 (prax, c16528a0) — the data leg starts counting: every
+  `log_operation` bumps it, every other key kept. `ensure_json_exists` still
+  regenerates a missing or invalid document, with one exception: a data document
+  that parses as a dict but lacks a base key is healed in place (missing keys
+  added, its own kept), never replaced. Purpose now names what each leg is for;
+  check logic and scoring unchanged.
 - 2026-09-03: DPLAN-0325 — the fleet moves to ONE json service (prax-owned).
   Two passing shapes become four accept paths ordered by strength, with the
   canonical shim's sha256 as the endpoint. The citizen template becomes an

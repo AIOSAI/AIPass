@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.0.0
+# Version: 2.2.0
 # Created: 2026-08-19
-# Modified: 2026-08-22
+# Modified: 2026-09-12
 # =============================================
 
 """Tests for arm_wire — delivering THIS seat's dispatch completions.
@@ -29,9 +29,18 @@ never the one that SENT the work, so this seat used to be woken fleet-wide.
 
 Every test passes ``repo_root``/``storage_path`` explicitly and drives loops by
 replacing the handler's own ``_sleep`` — no test waits a real tick.
+
+One thing here is about the HOST rather than the wire. ``_stdout_target`` has a
+recipe on Linux (/proc) and off it (``lsof``), and none at all on Windows, where
+a continuous arm therefore refuses. ``_a_stdout_target_this_host_can_name``
+below hands the arm a target on such a host so the ~35 pins that are about
+delivery keep running there; the pins that are about stdout resolution itself
+opt out of it by naming ``raw_stdout_probe``.
 """
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -84,6 +93,49 @@ def _no_signal_rebind(monkeypatch):
     """arm_wire installs a SIGTERM handler for clean deregistration; inside
     pytest that rebinding must not leak past the test."""
     monkeypatch.setattr(wire.signal, "signal", lambda *a, **kw: None)
+
+
+@pytest.fixture
+def raw_stdout_probe():
+    """Opt-out token for ``_a_stdout_target_this_host_can_name`` below.
+
+    A test whose SUBJECT is ``_stdout_target`` — its probes, or the refusal a
+    None answer earns — has to meet the real function or it would be pinning
+    the fixture instead of the code. Naming this fixture is how it says so.
+    """
+    return None
+
+
+@pytest.fixture(autouse=True)
+def _a_stdout_target_this_host_can_name(request, tmp_path, monkeypatch):
+    """Hand the arm a stdout target on a host that owns no way to find one.
+
+    What is missing on such a host is the RECIPE, never the STATE these tests
+    pin. ``_stdout_target`` reads ``/proc`` on Linux and shells out to ``lsof``
+    off it; Windows has neither, so every answer there is None — and since
+    FPLAN-0554 a CONTINUOUS ``arm_wire`` refuses on None, correctly: a wire that
+    cannot name its wrapper cannot know anyone would hear a delivery. Left
+    alone, that turns every continuous arm in this file into ``SystemExit(1)``
+    on Windows CI and takes ~35 behaviour pins off the board in one go, not one
+    of which is about resolving stdout.
+
+    Which host that is, is decided by ASKING the primitive rather than by
+    naming a platform: the honest question is whether the answer comes back,
+    and a spelled-out ``sys.platform`` test would also fire on a Linux box with
+    no lsof, where /proc answers perfectly well. On Linux and on macOS the
+    probe answers and this fixture does nothing at all.
+
+    The substitute is a plain regular file, deliberately NOT under a ``tasks``
+    directory, so ``_session_dir_of`` stays None and the run_in_background
+    tripwire stays quiet. Other pids still answer None — off Linux that is the
+    truth, and the sweep is written for it.
+    """
+    if "raw_stdout_probe" in request.fixturenames or wire._stdout_target() is not None:
+        return None
+    target = tmp_path / "host-stdout.log"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: target if pid is None else None)
+    return target
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -396,21 +448,65 @@ def test_live_follow_delivers_an_appended_completion(tmp_path, capsys, monkeypat
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_wire_never_spawns_anything(tmp_path, monkeypatch):
-    """Rule 2: idle is zero running processes. The arm door used to spawn a daemon."""
+_REAL_LSOF = pytest.mark.skipif(
+    shutil.which("lsof") is None,
+    reason="the darwin lane drives the REAL lsof probe; a host without one (Windows) cannot exercise it",
+)
+
+
+@pytest.mark.parametrize(
+    "lane",
+    [
+        pytest.param("host", id="host"),
+        pytest.param("darwin", id="darwin", marks=_REAL_LSOF),
+    ],
+)
+def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch, lane):
+    """Rule 2: idle is zero running processes. The arm door used to spawn a daemon.
+
+    The claim is about what is LEFT RUNNING, and the mock has to read no wider
+    than that. An earlier version of this pin replaced ``subprocess.Popen`` with
+    a function that exploded on ANY spawn, and macOS CI run 34704362515
+    collected the bill: FPLAN-0554 gave ``_stdout_target`` an ``lsof`` fallback
+    off Linux, the arm WAITS for that probe, and the pin failed on
+    ``['lsof', '-p', ..., '-Fn']`` while the wire had in fact left nothing
+    running. On Linux the ``/proc`` fast path never reaches subprocess at all,
+    so the same pin passed here and the red was invisible until CI.
+
+    So the REAL Popen runs. Every instance is recorded, a DETACHED spawn still
+    fails by name — that is the daemon shape this test exists for — and once the
+    arm has returned, every process it started must already be reaped.
+
+    The darwin lane forces the off-Linux branch on this box so the probes are
+    actually exercised rather than assumed. A literal "linux" lane is
+    deliberately absent: on the real macOS runner it would read a ``/proc`` that
+    is not there, get None, and the continuous arm would refuse.
+    """
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
+    if lane == "darwin":
+        monkeypatch.setattr(wire.sys, "platform", "darwin")
 
-    spawn_attempts: list = []
+    spawned: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
 
-    def explode(*a, **kw):
-        spawn_attempts.append(a)
-        raise AssertionError(f"the wire must not spawn a process: {a}")
+    class _Recorded(real_popen):
+        """A real child process that records itself and refuses to be detached."""
 
-    monkeypatch.setattr(subprocess, "Popen", explode)
+        def __init__(self, *args, **kwargs):
+            detached = [flag for flag in ("start_new_session", "creationflags") if kwargs.get(flag)]
+            assert not detached, f"the wire must not detach a process: {detached} in {args[:1] or kwargs}"
+            super().__init__(*args, **kwargs)
+            spawned.append(self)
+
+    monkeypatch.setattr(subprocess, "Popen", _Recorded)
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
-    assert spawn_attempts == []
+
+    still_running = [proc.args for proc in spawned if proc.poll() is None]
+    assert still_running == [], f"the arm returned with a process still running: {still_running}"
+    if lane == "darwin":
+        assert spawned, "the darwin lane must reach the real lsof/ps probes, or it pins nothing"
 
 
 _POSIX_ARGV0 = pytest.mark.skipif(
@@ -735,10 +831,13 @@ def test_session_dir_requires_tasks_parent(tmp_path):
 
 @pytest.mark.skipif(
     sys.platform == "win32",
-    reason="/proc fd inspection is POSIX-only — on Windows _stdout_target answers None "
-    "(cannot tell), by design and logged, never a wrong path",
+    reason="POSIX-only fixture: it spawns `sleep` and reads another process's fd table. "
+    "On Windows _stdout_target has no probe that can answer (neither /proc nor lsof) and "
+    "returns None (cannot tell), by design and logged, never a wrong path. NOT widened to "
+    "darwin — macOS has both `sleep` and `lsof`, and the lsof branch is exactly the code "
+    "FPLAN-0554 added; skipping there would hide the hole it was written to close.",
 )
-def test_stdout_target_reads_proc_truth(tmp_path):
+def test_stdout_target_reads_proc_truth(tmp_path, raw_stdout_probe):
     """The identity primitive against a real process with a known stdout."""
     target = tmp_path / "known.output"
     with open(target, "wb") as fh:
@@ -749,9 +848,141 @@ def test_stdout_target_reads_proc_truth(tmp_path):
         proc.kill()
 
 
-def test_dead_pid_has_no_stdout_target():
+def test_dead_pid_has_no_stdout_target(raw_stdout_probe):
     assert not watch_registry.is_pid_alive(DEAD_PID)
     assert wire._stdout_target(DEAD_PID) is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Off Linux — FPLAN-0554, from macOS CI run 34682737363
+#
+# /proc does not exist on macOS, and answering ""/None for every pid was never
+# graceful degradation. It was three silent lies:
+#   1. _cmdline "" -> _looks_like_ours False for EVERY pid -> every live wire
+#      read as a recycled pid, was left alone, and nothing was ever taken over;
+#   2. _stdout_target None -> wrapper recorded "foreground", stdout null, and
+#      the wire announced "armed" while no wrapper could hear a single line;
+#   3. the zombie check skipped (registry/agent) -> an exited pid read alive.
+#
+# These run on THIS Linux box by pretending to be darwin: sys.platform is
+# monkeypatched and subprocess.run answers in the shape the real ps/lsof print.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _fake_run(stdout: str, argv_seen: list | None = None):
+    """A subprocess.run stand-in that prints ``stdout`` and records its argv."""
+
+    def _run(argv, **kwargs):
+        if argv_seen is not None:
+            argv_seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    return _run
+
+
+def _missing_binary(name: str):
+    """What exec does when the binary is not installed — before any exit code."""
+
+    def _run(argv, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory", name)
+
+    return _run
+
+
+def test_cmdline_off_linux_asks_ps(monkeypatch):
+    argv_seen: list = []
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline --once\n", argv_seen))
+
+    assert wire._cmdline(4242) == "drone @devpulse watchdog baseline --once"
+    assert argv_seen == [["ps", "-p", "4242", "-o", "command="]]
+
+
+def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch):
+    """Row 1 in one assertion: with "" this was False for every pid, so a live
+    wire was buried as a recycled pid instead of taken over."""
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline\n"))
+
+    assert wire._looks_like_ours(4242) is True
+
+
+def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch):
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _missing_binary("ps"))
+
+    assert wire._cmdline(4242) == ""
+
+
+def test_stdout_target_off_linux_asks_lsof(monkeypatch, raw_stdout_probe):
+    argv_seen: list = []
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _fake_run("p4242\nfd1\nn/Users/p/.claude/sess-abc/tasks/t.output\n", argv_seen),
+    )
+
+    assert wire._stdout_target(4242) == Path("/Users/p/.claude/sess-abc/tasks/t.output")
+    assert argv_seen == [["lsof", "-p", "4242", "-a", "-d", "1", "-Fn"]]
+
+
+def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_stdout_probe):
+    """pid None means "me". /proc spells that "self"; lsof needs the number."""
+    argv_seen: list = []
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_run("nsocket:[4532132]\n", argv_seen))
+
+    assert wire._stdout_target() == Path("socket:[4532132]")
+    assert argv_seen == [["lsof", "-p", str(os.getpid()), "-a", "-d", "1", "-Fn"]]
+
+
+def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, raw_stdout_probe):
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _fake_run("p4242\nfd1\n"))
+
+    assert wire._stdout_target(4242) is None
+
+
+def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe):
+    """None is "cannot tell". A guessed path would be read as a wrapper."""
+    monkeypatch.setattr(wire.sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run", _missing_binary("lsof"))
+
+    assert wire._stdout_target(4242) is None
+
+
+def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsys, monkeypatch, raw_stdout_probe):
+    """Row 2's product half. "armed" with no way of being heard is the exact
+    lie this whole file exists to remove — refuse by name, non-zero, no entry."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: None)
+
+    with pytest.raises(SystemExit) as exit_info:
+        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert exit_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "stdout target unresolvable" in captured.err
+    assert "BASELINE DEAD: stdout target unresolvable" in captured.out
+    assert "armed handle=" not in captured.err
+    assert _entries(store) == []
+
+
+def test_once_still_arms_when_the_stdout_target_is_unknowable(tmp_path, capsys, monkeypatch, raw_stdout_probe):
+    """--once exits on delivery, so ANY wrapper hears it. The refusal belongs to
+    the continuous wire alone; widening it would kill the bg-safe shape."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: None)
+
+    result = wire.arm_wire(once=True, repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert result["state"] == "stopped"
+    assert "BASELINE DEAD" not in capsys.readouterr().out
 
 
 def test_find_repo_root_walks_up_to_the_registry(tmp_path):

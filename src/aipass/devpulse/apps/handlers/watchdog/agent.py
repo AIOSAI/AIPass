@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-14
-# Modified: 2026-08-11
+# Modified: 2026-09-12
 # =============================================
 
 # Signal choice: ai_mail dispatch lock file polling.
@@ -149,19 +149,6 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
     return None
 
 
-def _is_zombie_linux(pid: int) -> bool:
-    """Linux-only zombie check via /proc. Returns True if zombie."""
-    try:
-        status_text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-    except OSError as exc:
-        logger.info("[watchdog.agent] /proc/%s/status unreadable: %s", pid, exc)
-        return False
-    for line in status_text.splitlines():
-        if line.startswith("State:"):
-            return "Z" in line
-    return False
-
-
 def _pid_alive_windows(pid: int) -> bool:
     """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
     import ctypes
@@ -209,7 +196,13 @@ def _pid_alive(pid: int) -> bool:
     except OSError as exc:
         logger.info("[watchdog.agent] PID %s os.kill error (assuming dead): %s", pid, exc)
         return False
-    if sys.platform == "linux" and _is_zombie_linux(pid):
+    # Portable, never gated on Linux: os.kill(pid, 0) SUCCEEDS for a zombie, so
+    # skipping this off Linux made an exited-but-unreaped agent read alive and
+    # the watch never ended (macOS CI 34682737363, FPLAN-0554). The one
+    # implementation lives in registry.py — this module already imports it, and
+    # registry.py imports nothing from here, so there is no cycle and no second
+    # copy of a rule that must not drift.
+    if _registry.is_zombie(pid):
         return False
     return True
 

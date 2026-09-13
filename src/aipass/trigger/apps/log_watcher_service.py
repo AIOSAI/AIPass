@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-08-31
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -25,6 +25,8 @@ import threading
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger.apps.modules.medic import run_error_catchup
 from aipass.trigger.apps.modules.branch_log_events import (
     start as start_branch_watcher,
     stop as stop_branch_watcher,
@@ -108,6 +110,34 @@ def main() -> None:
     if system_ok:
         started.append("system")
     logger.info(f"[trigger-log-watcher] Running ({', '.join(started)} watchers active)")
+
+    # RECOVERY IS OURS TO RUN (DPLAN-0339 step 2)
+    #
+    # The error catch-up — scan system_logs for ERRORs that landed while no
+    # watcher was up — used to reach this process only by accident. Nothing
+    # here called it; it hung on the `startup` event, and the only thing firing
+    # that event was prax's logger on the first log line of EVERY process
+    # (logger.py:132). So the one long-lived process that actually owns
+    # recovery ran its catch-up as a side effect of its own first log line,
+    # exactly like a two-second drone command did.
+    #
+    # That was not merely untidy. last_scan_timestamp is a single shared value
+    # in error_catchup.json, and at the measured 5.1 fires/min some unrelated
+    # hook or drone command advanced it seconds before this service scanned —
+    # so the window this process is here to cover was usually already consumed.
+    # Measured 2026-09-11: 0 of the last 100 catch-up runs found anything.
+    #
+    # Called AFTER the watchers are up, not before: an error arriving between
+    # the scan and the first watch would otherwise fall in the gap. Overlap is
+    # safe (the registry dedupes on fingerprint), a hole is not.
+    #
+    # fire_event is trigger.fire so a recovered error still reaches the
+    # registry and medic, exactly as it does on the event path.
+    try:
+        run_error_catchup(trigger.fire)
+        logger.info("[trigger-log-watcher] Startup error catch-up complete")
+    except Exception as exc:  # noqa: BLE001 - recovery must never stop the watchers
+        logger.error(f"[trigger-log-watcher] Startup error catch-up failed: {exc}")
 
     # Watch our OWN handler code for changes. This process holds those modules
     # in memory for its whole life, so a fix shipped to disk does nothing until

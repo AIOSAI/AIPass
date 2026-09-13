@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: rotation.py
-# Description: Steward rotation roster, pointer state and prompt rendering
-# Version: 1.0.0
+# Description: Rounds roster, pointer state and prompt rendering
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-10
 # =============================================
 
 """
-Steward rotation — who gets tonight's maintenance turn (DPLAN-0287 piece 1).
+Rounds — who gets tonight's maintenance turn (DPLAN-0287 piece 1; switched on as
+`rounds` by DPLAN-0337 R2).
 
 Pure roster/pointer logic: builds the ordered roster of citizens eligible for a
 steward night, decides whose turn is next, and records the outcome. No waking
@@ -20,11 +21,17 @@ include_managers knob without silently re-serving the front of the roster.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, active_citizens, citizen_class_for
+from aipass.daemon.apps.handlers.schedule.discovery import (
+    MANAGER_CLASS,
+    active_citizens,
+    citizen_class_for,
+    framework_root,
+)
 
 # Top-level runstate key — rotation state is per rotation job, kept apart from
 # the per-job "jobs" map so orphan pruning never touches it.
@@ -41,6 +48,14 @@ ALWAYS_EXCLUDED = frozenset({"@devpulse"})
 # the switch, the signature check is the safety catch.
 DEFAULT_INCLUDE_MANAGERS = False
 
+# THE SCOPE RULE. Patrick, 2026-09-10 21:47 (DPLAN-0337 R2), marked very important:
+# the rounds are AIPass maintaining its OWN agents. A citizen is served only when its
+# branch lives under this install's src/aipass/. projects/* residents and every
+# declared external root are out whatever their citizen_class — Vera keeps her own
+# schedule, and the projects are nowhere near a trust stage. Decided on the PATH,
+# never on the source label: discovery's _source_label is presentation-only.
+ROSTER_SCOPE = "framework fleet only — projects and externals excluded by ruling"
+
 OUTCOME_WOKEN = "woken"
 OUTCOME_MISSED = "missed"
 OUTCOME_FAILED = "failed"
@@ -48,36 +63,54 @@ OUTCOME_SKIPPED = "skipped"
 
 # Fallback used when a rotation job ships without prompt text. The live template
 # lives in the job stanza so it can be reworded without a code change.
-STEWARD_PROMPT_TEMPLATE = (
-    "STEWARD NIGHT for {branch}. The daemon rotation woke you - tonight is your maintenance turn. "
-    "Stay inside your own branch; mail owners about anything cross-branch; never edit other branches. "
-    "1) Inbox to zero. "
-    "2) Reconcile your .trinity todos against reality - delete done, rescope stale. "
-    "3) Review your logs and dashboard for anomalies. "
-    "4) Run your seedgo self-audit. "
-    "5) Open or create your branch-audit APLAN via drone @flow create . with type aplan - "
-    "update Quick Status, Issues Found, What Needs Doing. "
-    "6) Small fixes in your own branch only, red-first, tests green. "
-    "7) Reply to this dispatch with a steward report: health verdict, fixed, flagged, APLAN id. "
-    "Then STOP."
+# No "reply to this dispatch": a rounds wake is a session prompt, not a mail, so
+# there is nothing to reply to - the @devpulse mail is the night's one artefact.
+ROUNDS_PROMPT_TEMPLATE = (
+    "ROUNDS for {branch}. The daemon woke you for your maintenance turn, once every roster cycle. "
+    "Fresh start, nothing to resume. "
+    "Do, inside your own branch only: inbox to zero (answer what you can, close what is done); "
+    "reconcile your .trinity todos against reality (delete done, rescope stale); "
+    "refresh and read your dashboard; review your logs for anomalies; run your seedgo self-audit; "
+    "do the work that other citizens or devpulse have asked of you by mail IF it sits in your own "
+    "domain and fits one session; small fixes in your own branch only, red-first, tests green. "
+    "Budget, not negotiable: never dispatch or wake another citizen; at most 2 sub-agents, sonnet "
+    "or lower; never edit another branch; no fleet-wide investigations; if you find something "
+    "outside your lane or you need another branch, write it down for devpulse and stop, do not chase it. "
+    "Report: mail @devpulse (drone @ai_mail email @devpulse) one message with four short parts: "
+    "health verdict, what you did, what you noticed, what you need. "
+    "Then update your .trinity memories and STOP."
 )
 
 BRANCH_PLACEHOLDER = "{branch}"
 
 
-def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS) -> List[dict]:
+def in_framework_fleet(branch_path: Path, repo_root: Optional[Path] = None) -> bool:
+    """The scope rule: does this branch live under this install's src/aipass/?"""
+    return Path(branch_path).resolve().is_relative_to(framework_root(repo_root).resolve())
+
+
+def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: Optional[Path] = None) -> List[dict]:
     """
     Return the ordered list of citizens eligible for a steward night.
 
-    Order is registry order (framework citizens, then project citizens), which
-    is the order the rotation walks. Each record carries citizen_class so the
-    caller can route managers down the scheduled headless lane.
+    Order is alphabetical by email, which is the order the rounds walk. Registry
+    order was the walk until 2026-09-10; it made the next citizen depend on which
+    registry a branch lives in, and nobody could predict a night from the roster
+    alone. Each record carries citizen_class so the caller can route managers
+    down the scheduled headless lane.
+
+    ROSTER_SCOPE is applied before the passport is read, so no citizen_class can
+    carry a projects/* or external citizen onto the roster.
     """
     roster = []
-    for citizen in active_citizens():
+    for citizen in active_citizens(repo_root):
         email = citizen["email"]
         if email.lower() in ALWAYS_EXCLUDED:
             logger.info("[rotation] %s excluded from roster (always)", email)
+            continue
+
+        if not in_framework_fleet(citizen["path"], repo_root):
+            logger.info("[rotation] %s excluded from roster (%s: %s)", email, ROSTER_SCOPE, citizen.get("source", "?"))
             continue
 
         entry = dict(citizen)
@@ -89,6 +122,7 @@ def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS) -> List[dict
 
         roster.append(entry)
 
+    roster.sort(key=lambda c: c["email"].lower())
     logger.info("[rotation] Roster built: %d citizen(s), include_managers=%s", len(roster), include_managers)
     return roster
 
@@ -160,8 +194,8 @@ def render_prompt(template: str, branch: str) -> str:
     """
     text = (template or "").strip()
     if not text:
-        logger.warning("[rotation] Rotation job has no prompt text — using built-in steward template")
-        text = STEWARD_PROMPT_TEMPLATE
+        logger.warning("[rotation] Rotation job has no prompt text — using built-in rounds template")
+        text = ROUNDS_PROMPT_TEMPLATE
 
     if BRANCH_PLACEHOLDER not in text:
         logger.info("[rotation] Prompt has no %s placeholder — sending as-is to %s", BRANCH_PLACEHOLDER, branch)

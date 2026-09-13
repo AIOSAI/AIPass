@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.1.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-11
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -40,7 +40,6 @@ __all__ = [
 ]
 
 import logging
-import threading
 from typing import Dict, Any
 
 # NOTE: CLI imports are done lazily inside functions to avoid circular dependency.
@@ -56,11 +55,10 @@ from aipass.prax.apps.handlers.logging.setup import (
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 from aipass.prax.apps.handlers.logging.override import is_override_active
 from aipass.prax.apps.handlers.discovery.watcher import (
-    start_file_watcher_in_background,
     is_file_watcher_active,
     check_file_watcher_liveness,
 )
-from aipass.prax.apps.handlers.registry.load import load_module_registry
+from aipass.prax.apps.handlers.registry.load import load_module_registry, load_last_scan
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir, get_module_logs_dir, PRAX_JSON_DIR
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
@@ -94,44 +92,35 @@ class SystemLogger:
     """Auto-routing logger that writes to calling module's log file"""
 
     _watcher_started = False
-    _watcher_lock = threading.Lock()
 
     def _ensure_watcher(self):
-        """Lazy-start file watchers on first logger use, then keep them honest.
+        """Keep an explicitly started discovery watcher honest. Starts nothing.
 
-        `_watcher_started` is set once and never reset, so everything below the
-        early return runs exactly ONCE in the life of a process. That is correct
-        for *starting* the watcher and was wrong for *trusting* it: the watcher
-        can die at any moment afterwards (DPLAN-0305 — it did, in six processes
-        at once, and no one found out for 15 hours). The throttled liveness call
-        is the only thing here that runs after startup.
+        Until 2026-09-12 the first log line of every process started a recursive
+        inotify watch over the whole ecosystem on an unjoined daemon thread.
+        That is gone (DPLAN-0339 step 4): discovery is a scheduled scan now
+        (`drone @prax discover`, daily), so a process that merely logs costs the
+        machine no watches and no thread. Logging itself never depended on the
+        watcher — a module gets its log file when it logs, not when it is
+        discovered.
+
+        What is left is the liveness check, and it still has a job: a process
+        that opens the explicit door (`initialize_logging_system()`, which starts
+        the watcher synchronously and keeps it for the life of that process) must
+        still find out if the watchdog dispatcher dies under it — DPLAN-0305,
+        where it died in six processes at once and nobody knew for 15 hours. In
+        every other process the check answers "no watcher here" and costs a
+        throttled boolean.
+
+        `_watcher_started` is therefore no longer a "did we start it" flag; it
+        means "this process is past its first log line", which is the one moment
+        a watcher cannot yet exist. No lock guards it any more: it gates nothing
+        but a cheap check, and a racing double-set is the same value twice.
         """
         if SystemLogger._watcher_started:
             check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
             return
-        with SystemLogger._watcher_lock:
-            if SystemLogger._watcher_started:
-                return  # Double-check after acquiring lock
-            # Set flag FIRST to prevent recursion: trigger.fire() uses logger
-            # internally, which would re-enter _ensure_watcher() before we return
-            SystemLogger._watcher_started = True
-            # Start prax watcher (Python file discovery) WITHOUT waiting for it.
-            # Scheduling the recursive watch is one inotify syscall per directory
-            # (1605 of them here) and costs 0.119s on an idle thread but 13.9s
-            # when any other Python thread is busy — measured 2026-09-04. This is
-            # the first log line of the process, so that bill used to land on
-            # whoever logged first, which in a test suite is the suite. The
-            # background start swallows the inotify-limit OSError itself and logs
-            # it with the same words; there is no caller left to hand it to.
-            if not is_file_watcher_active():
-                start_file_watcher_in_background()
-            # Fire startup event (trigger auto-initializes handlers)
-            try:
-                from aipass.trigger.apps.modules.core import trigger
-
-                trigger.fire("startup")
-            except (ImportError, OSError) as e:
-                logger.warning("Trigger startup fire skipped (not available or inotify full): %s", e)
+        SystemLogger._watcher_started = True
 
     def info(self, message, *args, **kwargs):
         """Log info message to calling module's log file"""
@@ -173,6 +162,27 @@ system_logger = SystemLogger()
 # =============================================
 # LIFECYCLE FUNCTIONS
 # =============================================
+#
+# These two are the explicit system lifecycle doors seedgo's trigger standard
+# names (trigger.md Pattern 9, `initialize_*_system` / `shutdown_*_system`), so
+# each announces itself on trigger's bus: `logging_system_initialized` and
+# `logging_system_shutdown`. The standard's event table names no lifecycle
+# event, so those two names are prax's, following its rules (lowercase,
+# underscore-separated, past tense).
+#
+# BOTH IMPORT TRIGGER INSIDE THEMSELVES, never at module level, and that is the
+# whole design. `from aipass.prax import logger` and every log line the fleet
+# writes must stay clear of the aipass.trigger import graph: DPLAN-0339 step 3
+# took a fire off the first log line of every process and it was worth 0.339 s
+# of that line's 0.361 s, nearly all of it importing that graph. A door called
+# deliberately, once, can afford what a hot path cannot.
+#
+# Each fire is guarded (ImportError, OSError) exactly as the removed one was:
+# these doors must still work on a host where trigger cannot import or inotify
+# is exhausted. A fire that fails is a warning, never a failed initialize.
+#
+# Nothing listens to either event today, by design — the point of the standard
+# is that a handler can plug in later without prax changing again.
 
 
 def initialize_logging_system():
@@ -185,8 +195,10 @@ def initialize_logging_system():
     4. Setup system logger
     5. Install logger override
     6. Start file watcher
+    7. Fire `logging_system_initialized`
 
     MODULE orchestration pattern: Thin wrapper that delegates to handler.
+    See the section header above for why the trigger import is local.
     """
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
@@ -197,6 +209,13 @@ def initialize_logging_system():
 
     console.print(f"\\[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
 
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        trigger.fire("logging_system_initialized", modules_count=result["modules_count"])
+    except (ImportError, OSError) as e:
+        logger.warning("Trigger logging_system_initialized fire skipped (not available or inotify full): %s", e)
+
 
 def shutdown_logging_system():
     """Shutdown logging system cleanly
@@ -205,8 +224,11 @@ def shutdown_logging_system():
     1. Stop file watcher
     2. Restore original logger
     3. Log shutdown operation
+    4. Fire `logging_system_shutdown`
 
     MODULE orchestration pattern: Thin wrapper that delegates to handler.
+    Fired last on purpose: the event says the system IS down, not that it is
+    going down, so a handler that reacts by writing is not racing the teardown.
     """
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
@@ -216,6 +238,13 @@ def shutdown_logging_system():
     run_shutdown(MODULE_NAME)
 
     console.print(f"\\[{MODULE_NAME}] Shutdown complete")
+
+    try:
+        from aipass.trigger.apps.modules.core import trigger
+
+        trigger.fire("logging_system_shutdown")
+    except (ImportError, OSError) as e:
+        logger.warning("Trigger logging_system_shutdown fire skipped (not available or inotify full): %s", e)
 
 
 # =============================================
@@ -232,7 +261,8 @@ def get_system_status() -> Dict[str, Any]:
         - individual_loggers: Number of active loggers
         - module_logs_dir: Path to prax module logs
         - registry_file: Path to module registry
-        - file_watcher_active: Watcher status
+        - file_watcher_active: Watcher status in THIS process (see status.py)
+        - last_scan: what the last `drone @prax discover` reported, {} if never
         - logger_override_active: Override status
     """
     modules = load_module_registry()
@@ -244,6 +274,7 @@ def get_system_status() -> Dict[str, Any]:
         "module_logs_dir": str(get_module_logs_dir("prax")),
         "registry_file": str(DATA_FILE),
         "file_watcher_active": is_file_watcher_active(),
+        "last_scan": load_last_scan(),
         "logger_override_active": is_override_active(),
     }
 
@@ -287,10 +318,9 @@ def print_introspection():
     console.print()
     console.print("  [cyan]handlers/discovery/[/cyan]")
     console.print(
-        "    [dim]→ watcher.py (start_file_watcher_in_background — starts the module discovery "
-        "watcher without waiting for the inotify walk)[/dim]"
+        "    [dim]→ watcher.py (check_file_watcher_liveness — reports a watcher that died under "
+        "an explicit starter; the logger starts none)[/dim]"
     )
-    console.print("    [dim]→ watcher.py (stop_file_watcher — stops the filesystem watcher)[/dim]")
     console.print("    [dim]→ watcher.py (is_file_watcher_active — checks watcher status)[/dim]")
     console.print()
     console.print("  [cyan]handlers/registry/[/cyan]")

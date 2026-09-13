@@ -137,6 +137,15 @@
           "timeout": 30
         }
       ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:release_notice",
+          "timeout": 30
+        }
+      ]
     }
   ],
   "PostToolUse": [

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-12-04
-# Modified: 2026-08-09
+# Modified: 2026-09-12
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -24,6 +24,12 @@ template's created/last_updated keys, so a single trio call resolving to caller
 module "trigger" would have blanked the processed-hash set and re-dispatched
 every already-handled error. Same defect as the medic state move; see
 medic_state.py. _load_trigger_data() migrates on first read.
+
+last_scan_timestamp advances ONLY after a scan that covered every candidate
+file (DPLAN-0339 step 2, row 12). It used to advance unconditionally, so any
+of the DPLAN-037 limits above silently discarded the window they aborted in:
+the files the scan never reached fell behind the new cutoff and their errors
+were never recoverable. See ScanOutcome and _run_error_catchup.
 """
 
 import json
@@ -31,7 +37,7 @@ import hashlib
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
     TRIGGER_ROOT,
@@ -110,6 +116,33 @@ def _log_suppression(reason: str) -> None:
     entry = {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason}
     if not append_trail(SUPPRESSED_LOG, entry):
         logger.warning("log suppression write failed")
+
+
+class ScanOutcome(NamedTuple):
+    """What one catch-up scan found, and whether it got through the whole tree.
+
+    `completed` is the row-12 gate: it is True only when the scan read every
+    candidate file to its end. Anything that cut the walk short — a DPLAN-037
+    limit, or a file skipped for size — makes it False, and the caller then
+    leaves last_scan_timestamp where it was so the next run covers the same
+    window again. `reason` names what stopped it, for the log line; it is ""
+    exactly when `completed` is True.
+
+    Holding the timestamp back cannot re-dispatch what was already found:
+    processed_hashes is persisted on every run, aborted or not, and the
+    fingerprint gate drops a hash it has seen. What it re-covers is only the
+    part of the window the scan never read.
+
+    The cost of holding it back is bounded by MAX_LOOKBACK_HOURS, so the worst
+    case is a 24-hour window instead of a one-minute one. Measured on this tree
+    2026-09-11, 363 files: 181 ms cold (full 24 h) against 161 ms warm — 20 ms.
+    That bound is what makes it safe to treat a permanently oversized file as
+    "not completed" rather than inventing a second, softer verdict for it.
+    """
+
+    errors: List[Dict[str, Any]]
+    completed: bool
+    reason: str
 
 
 def _generate_error_hash(source_module: str, message: str) -> str:
@@ -234,7 +267,7 @@ def _scan_single_log_file(
     errors: List[Dict[str, Any]],
     scan_start: float,
     by_hash: Dict[str, Dict[str, Any]],
-) -> bool:
+) -> Optional[str]:
     """Scan a single log file for ERROR entries.
 
     Args:
@@ -243,7 +276,10 @@ def _scan_single_log_file(
             — the same error in two logs is one error.
 
     Returns:
-        True if scanning should continue, False if a limit was hit.
+        None when the whole file was read and scanning should continue, or the
+        reason string naming the limit that stopped it. A reason means files
+        after this one were never read, which is what row 12 has to know: it
+        travels up to ScanOutcome rather than being flattened back to a bool.
     """
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -251,11 +287,11 @@ def _scan_single_log_file(
                 _log_suppression(
                     f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached. Stopping scan to prevent event storm."
                 )
-                return False
+                return f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached"
 
             elapsed = time.monotonic() - scan_start
             if elapsed >= SCAN_TIME_BUDGET_SECONDS:
-                return False
+                return f"time budget exceeded mid-file ({elapsed:.1f}s >= {SCAN_TIME_BUDGET_SECONDS}s)"
 
             line = line.strip()
             if not line:
@@ -299,23 +335,24 @@ def _scan_single_log_file(
             by_hash[error_hash] = entry
             processed_hashes.add(error_hash)
 
-    return True
+    return None
 
 
-def _scan_system_logs_for_errors(
-    since_timestamp: Optional[datetime], processed_hashes: Set[str]
-) -> List[Dict[str, Any]]:
+def _scan_system_logs_for_errors(since_timestamp: Optional[datetime], processed_hashes: Set[str]) -> ScanOutcome:
     """Scan system logs for ERROR entries since timestamp.
 
-    DPLAN-037 safeguards:
+    DPLAN-037 safeguards, every one of which can cut the walk short:
         - Skips files larger than MAX_FILE_SIZE_BYTES
         - Stops after MAX_ERRORS_PER_SCAN new errors found
         - Aborts if total scan time exceeds SCAN_TIME_BUDGET_SECONDS
 
     Returns:
-        List of error dicts with: branch, module, message, log_file, error_hash,
-        timestamp, level, and the occurrence facts count / first_seen / last_seen.
-        One dict per distinct error, `count` holding how many lines produced it.
+        ScanOutcome. `errors` holds one dict per distinct error — branch,
+        module, message, log_file, error_hash, timestamp, level, and the
+        occurrence facts count / first_seen / last_seen, with `count` holding
+        how many lines produced it. `completed` and `reason` report whether
+        every candidate file was read; see ScanOutcome for why the caller needs
+        that and not just the list.
     """
     errors: List[Dict[str, Any]] = []
     # Same list, keyed for O(1) repeat lookup. MAX_ERRORS_PER_SCAN still measures
@@ -324,7 +361,9 @@ def _scan_system_logs_for_errors(
     scan_start = time.monotonic()
 
     if not SYSTEM_LOGS_DIR.exists():
-        return errors
+        # Nothing to read is not a failure to read: there is no unscanned
+        # window being left behind, so the timestamp may advance.
+        return ScanOutcome(errors, True, "")
 
     cutoff = since_timestamp
     if cutoff is None:
@@ -332,13 +371,13 @@ def _scan_system_logs_for_errors(
 
     files_skipped_size = 0
 
+    abort_reason = ""
+
     for log_file in SYSTEM_LOGS_DIR.glob("*.log"):
         elapsed = time.monotonic() - scan_start
         if elapsed >= SCAN_TIME_BUDGET_SECONDS:
-            _log_suppression(
-                f"Time budget exceeded ({elapsed:.1f}s >= {SCAN_TIME_BUDGET_SECONDS}s). "
-                f"Found {len(errors)} errors so far, aborting scan."
-            )
+            abort_reason = f"time budget exceeded between files ({elapsed:.1f}s >= {SCAN_TIME_BUDGET_SECONDS}s)"
+            _log_suppression(f"{abort_reason}. Found {len(errors)} errors so far, aborting scan.")
             break
 
         try:
@@ -351,25 +390,37 @@ def _scan_system_logs_for_errors(
             continue
 
         try:
-            should_continue = _scan_single_log_file(log_file, cutoff, processed_hashes, errors, scan_start, by_hash)
-            if not should_continue:
+            abort_reason = _scan_single_log_file(log_file, cutoff, processed_hashes, errors, scan_start, by_hash) or ""
+            if abort_reason:
                 break
         except Exception as exc:
             logger.warning(f"scan log file {log_file}: {exc}")
             continue
 
     if files_skipped_size > 0:
-        _log_suppression(f"Skipped {files_skipped_size} file(s) exceeding MAX_FILE_SIZE_BYTES ({MAX_FILE_SIZE_BYTES})")
+        skipped = f"skipped {files_skipped_size} file(s) exceeding MAX_FILE_SIZE_BYTES ({MAX_FILE_SIZE_BYTES})"
+        _log_suppression(skipped.capitalize())
+        # A file too large to read is a hole in the window whether or not the
+        # walk finished, so it blocks the timestamp too — @devpulse's wording
+        # for row 12 is "aborted OR skipped files". An abort already found is
+        # the more specific answer, so it is the one reported.
+        abort_reason = abort_reason or skipped
 
-    return errors
+    return ScanOutcome(errors, not abort_reason, abort_reason)
 
 
 def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> None:
     """Catch-up on errors missed while Trigger wasn't running.
 
     Loads last_scan_timestamp from error_catchup.json, scans system logs for
-    ERROR entries since that time, fires error_logged events for new errors,
-    and updates state with new timestamp and processed hashes.
+    ERROR entries since that time, fires error_detected events for new errors,
+    and persists the processed hashes.
+
+    The timestamp is the one thing here that is conditional. It advances only
+    on a completed scan (row 12, DPLAN-0339 step 2); an aborted or
+    file-skipping scan leaves it alone so the next run re-covers the window it
+    did not read. Processed hashes are persisted either way — they are what
+    stops the re-covered window from re-dispatching what was already handled.
 
     DPLAN-037 safeguards applied via _scan_system_logs_for_errors().
 
@@ -390,10 +441,10 @@ def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> No
 
         processed_hashes = set(catchup.get("processed_hashes", []))
 
-        errors = _scan_system_logs_for_errors(since_ts, processed_hashes)
+        outcome = _scan_system_logs_for_errors(since_ts, processed_hashes)
 
-        if errors and fire_event is not None:
-            for error in errors:
+        if outcome.errors and fire_event is not None:
+            for error in outcome.errors:
                 fire_event("error_detected", **error)
 
         hash_list = list(processed_hashes)
@@ -401,17 +452,45 @@ def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> No
         if len(hash_list) > max_h:
             hash_list = hash_list[-max_h:]
 
-        catchup["last_scan_timestamp"] = datetime.now().isoformat()
+        if outcome.completed:
+            catchup["last_scan_timestamp"] = datetime.now().isoformat()
+        else:
+            _log_suppression(
+                f"last_scan_timestamp HELD at {last_scan} — scan did not cover every file: {outcome.reason}"
+            )
         catchup["processed_hashes"] = hash_list
         data["error_catchup"] = catchup
 
         _save_trigger_data(data)
 
-        json_handler.log_operation("startup_catchup", {"errors_found": len(errors)})
+        json_handler.log_operation(
+            "startup_catchup",
+            {"errors_found": len(outcome.errors), "completed": outcome.completed, "reason": outcome.reason},
+        )
 
     except Exception as exc:
         logger.warning(f"error catchup scan failed: {exc}")
         return
+
+
+def run_startup_catchup(fire_event: Optional[Callable[..., object]] = None) -> None:
+    """Run the error catch-up explicitly, without going through the event bus.
+
+    The door for a process that owns recovery and should not have to wait for
+    somebody else to fire an event at it. log_watcher_service.main() calls this
+    once its watchers are up, so the service recovers errors missed while it
+    was down whether or not anything fires `startup` (DPLAN-0339 step 2, the
+    prerequisite for prax dropping the per-process fire at logger.py:132).
+
+    Safe to run alongside that fire while it still exists: the scan dedupes on
+    persisted processed_hashes, so a second run moments later finds nothing new
+    and dispatches nothing twice.
+
+    Args:
+        fire_event: Callback used to fire error_detected for each error found.
+            None scans and records without dispatching.
+    """
+    _run_error_catchup(fire_event)
 
 
 def handle_startup(**kwargs: Any) -> None:

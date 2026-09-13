@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Module Registry Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-07
-# Modified: 2026-03-09
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -85,3 +85,23 @@ def load_module_registry() -> Dict[str, Dict[str, Any]]:
     except Exception as e:
         logger.warning("load: failed to load module registry from '%s': %s", REGISTRY_FILE, e)
         return {}
+
+
+def load_last_scan() -> Dict[str, Any]:
+    """What the last full scan reported, or {} when no scan is on record.
+
+    Written by ``run_scan`` through ``save_module_registry(scan_stats=...)``.
+    Empty is a real answer and means exactly what it says: this registry has
+    never been scanned, only added to (DPLAN-0339 step 4).
+    """
+    if not REGISTRY_FILE.exists():
+        return {}
+
+    try:
+        with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+            block = json.load(f).get("last_scan", {})
+    except Exception as e:
+        logger.warning("load: failed to read last_scan from '%s': %s", REGISTRY_FILE, e)
+        return {}
+
+    return block if isinstance(block, dict) else {}

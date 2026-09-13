@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for Drive sync pipeline -- fully mocked, zero real Google calls
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-11
 # =============================================
 
 """Tests for Drive sync pipeline -- fully mocked Google API.
@@ -928,6 +928,60 @@ class TestDriveSync:
         assert "app.py" in names
         assert "index.js" not in names
         assert "lib.js" not in names
+
+    def test_run_drive_sync_skips_legacy_tmp_copies(self, tmp_path: Path) -> None:
+        """Temps a pre-rule versioned run stored never go to Drive (DPLAN-0338).
+
+        The store is re-filtered through load_spec, so the built-in *.tmp floor
+        reaches copies made before it existed -- for a .backupignore that never
+        names *.tmp, which is every one seeded before the rule.
+        """
+        project = tmp_path / "project"
+        project.mkdir()
+        bs = project / ".backup" / "versioned"
+        for rel in (
+            "data_json/state.json/state.json",
+            "data_json/tmpab12cd34.tmp/tmpab12cd34.tmp",
+            "data_json/tmpab12cd34.tmp/tmpab12cd34-baseline-2026-08-15.tmp",
+            "data_json/.4242_7.tmp/.4242_7.tmp",
+        ):
+            (bs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (bs / rel).write_text("x", encoding="utf-8")
+        (project / ".backupignore").write_text("node_modules/\n", encoding="utf-8")
+
+        mod = _fresh_import("aipass.backup.apps.modules.drive_sync")
+        mock_class, mock_inst = self._make_mock_client_class(authenticate_rv=True)
+        mock_client_module = MagicMock()
+        mock_client_module.DriveClient = mock_class
+
+        mock_tracker_mod = MagicMock()
+        mock_tracker_mod.load_tracker.return_value = {}
+        mock_tracker_mod.check_needs_upload.return_value = True
+        mock_tracker_mod.save_tracker = MagicMock()
+
+        mock_upload_mod = MagicMock()
+        mock_upload_mod.upload_batch.return_value = {
+            "success": True,
+            "uploaded": 1,
+            "failed": 0,
+        }
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "aipass.backup.apps.handlers.drive.client": mock_client_module,
+                    "aipass.backup.apps.handlers.drive.tracker": mock_tracker_mod,
+                    "aipass.backup.apps.handlers.drive.upload": mock_upload_mod,
+                },
+            ),
+            patch.object(mod, "build_versioned_store", return_value=bs),
+        ):
+            result = mod.run_drive_sync(str(project), show_panels=False)
+
+        assert result["total"] == 1
+        uploaded_files = mock_upload_mod.upload_batch.call_args[0][1]
+        assert [f.relative_to(bs).as_posix() for f in uploaded_files] == ["data_json/state.json/state.json"]
 
     def test_handle_command_help(self) -> None:
         """--help returns True."""

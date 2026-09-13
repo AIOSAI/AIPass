@@ -1,22 +1,45 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: handler.py - System Status skill handler
-# Date: 2026-03-07
-# Version: 1.0.0
-# Category: skills/lib/system_status
+# =================== AIPass ====================
+# Name: handler.py
+# Description: System Status skill handler - disk, memory, uptime, processes
+# Version: 2.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-12
 # =============================================
 
 """
 System Status skill handler.
 
 Provides system health information: disk usage, memory, uptime, processes.
-All data sourced from stdlib and /proc (Linux).
+
+Disk comes from `shutil.disk_usage`, which is portable on its own. The other
+three used to read /proc directly, which made them Linux-only: on the macOS
+runner every one of them answered success=False and `summary` reported
+success=True over the wreckage (FPLAN-0554). They now ask psutil - a declared
+dependency of this project (psutil>=5.9) - which answers the same three
+questions on Linux, macOS and Windows. When psutil cannot be imported the
+actions refuse by name and give the install recipe; they never answer a
+partial.
 
 Called by: drone @skills run system_status <action>
 """
 
-import os
 import shutil
+import time
+
+from aipass.prax import logger
+
+# psutil is declared in pyproject (psutil>=5.9), so this import normally
+# succeeds. A host that lacks it still gets disk usage; the three actions that
+# need it refuse by name rather than answering a partial.
+try:
+    import psutil
+except ImportError:
+    psutil = None
+    logger.warning("psutil not importable — system_status memory/uptime/processes will refuse")
+
+# What to tell a caller whose host has no psutil. Naming the recipe is the
+# point: "not available" sent the reader looking at their kernel.
+PSUTIL_RECIPE = "psutil is not importable on this host - install it with: pip install 'psutil>=5.9'"
 
 
 def run(action, args=None, config=None):
@@ -53,6 +76,7 @@ def run(action, args=None, config=None):
     try:
         return handler_fn()
     except Exception as exc:
+        logger.error("system_status action '%s' failed: %s", action, exc)
         return {
             "success": False,
             "output": "",
@@ -79,6 +103,15 @@ def _format_bytes(num_bytes):
     return f"{num_bytes:.1f} PB"
 
 
+def _no_psutil(what):
+    """Refuse an action that needs psutil, naming what could not be measured."""
+    return {
+        "success": False,
+        "output": "",
+        "error": f"Cannot read {what}: {PSUTIL_RECIPE}",
+    }
+
+
 def _disk_usage():
     """Get disk usage for the root filesystem."""
     usage = shutil.disk_usage("/")
@@ -92,82 +125,50 @@ def _disk_usage():
 
 
 def _memory_info():
-    """Get memory info from /proc/meminfo (Linux)."""
-    meminfo_path = "/proc/meminfo"
-    if not os.path.exists(meminfo_path):
-        return {
-            "success": False,
-            "output": "",
-            "error": "/proc/meminfo not available (non-Linux system?)",
-        }
+    """Get memory and swap usage from psutil (portable)."""
+    if psutil is None:
+        return _no_psutil("memory")
 
-    data = {}
-    with open(meminfo_path, "r", encoding="utf-8") as f:
-        for line in f:
-            parts = line.split(":")
-            if len(parts) == 2:
-                key = parts[0].strip()
-                # Value is in kB typically, e.g. "8045264 kB"
-                val_str = parts[1].strip()
-                # Extract numeric part
-                val_parts = val_str.split()
-                if val_parts:
-                    try:
-                        data[key] = int(val_parts[0])
-                    except ValueError:
-                        data[key] = val_str
+    virtual = psutil.virtual_memory()
+    swap = psutil.swap_memory()
 
-    mem_total = data.get("MemTotal", 0)
-    _mem_free = data.get("MemFree", 0)
-    mem_available = data.get("MemAvailable", 0)
-    buffers = data.get("Buffers", 0)
-    cached = data.get("Cached", 0)
-    swap_total = data.get("SwapTotal", 0)
-    swap_free = data.get("SwapFree", 0)
+    # used = total - available, the same definition the /proc reader used, and
+    # the one psutil's own `percent` is computed from.
+    mem_used = virtual.total - virtual.available
+    mem_percent = (mem_used / virtual.total * 100) if virtual.total > 0 else 0
+    swap_percent = (swap.used / swap.total * 100) if swap.total > 0 else 0
 
-    # Values from /proc/meminfo are in kB
-    mem_used = mem_total - mem_available
-    mem_percent = (mem_used / mem_total * 100) if mem_total > 0 else 0
-    swap_used = swap_total - swap_free
-    swap_percent = (swap_used / swap_total * 100) if swap_total > 0 else 0
+    lines = [
+        "Memory",
+        f"  Total:     {_format_bytes(virtual.total)}",
+        f"  Used:      {_format_bytes(mem_used)} ({mem_percent:.1f}%)",
+        f"  Available: {_format_bytes(virtual.available)}",
+    ]
 
-    output = (
-        f"Memory\n"
-        f"  Total:     {_format_bytes(mem_total * 1024)}\n"
-        f"  Used:      {_format_bytes(mem_used * 1024)} ({mem_percent:.1f}%)\n"
-        f"  Available: {_format_bytes(mem_available * 1024)}\n"
-        f"  Buffers:   {_format_bytes(buffers * 1024)}\n"
-        f"  Cached:    {_format_bytes(cached * 1024)}\n"
-        f"Swap\n"
-        f"  Total:     {_format_bytes(swap_total * 1024)}\n"
-        f"  Used:      {_format_bytes(swap_used * 1024)} ({swap_percent:.1f}%)\n"
-        f"  Free:      {_format_bytes(swap_free * 1024)}"
-    )
-    return {"success": True, "output": output, "error": None}
+    # buffers/cached exist on Linux and BSD, not on macOS or Windows. Report
+    # them where the platform has them rather than printing a zero that reads
+    # like a measurement.
+    for label, field in (("Buffers", "buffers"), ("Cached", "cached")):
+        value = getattr(virtual, field, None)
+        if value is not None:
+            lines.append(f"  {label + ':':<11}{_format_bytes(value)}")
+
+    lines += [
+        "Swap",
+        f"  Total:     {_format_bytes(swap.total)}",
+        f"  Used:      {_format_bytes(swap.used)} ({swap_percent:.1f}%)",
+        f"  Free:      {_format_bytes(swap.free)}",
+    ]
+
+    return {"success": True, "output": "\n".join(lines), "error": None}
 
 
 def _system_uptime():
-    """Get system uptime from /proc/uptime (Linux)."""
-    uptime_path = "/proc/uptime"
-    if not os.path.exists(uptime_path):
-        return {
-            "success": False,
-            "output": "",
-            "error": "/proc/uptime not available (non-Linux system?)",
-        }
+    """Get system uptime from psutil's boot time (portable)."""
+    if psutil is None:
+        return _no_psutil("uptime")
 
-    with open(uptime_path, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-
-    parts = content.split()
-    if not parts:
-        return {
-            "success": False,
-            "output": "",
-            "error": "Could not parse /proc/uptime",
-        }
-
-    uptime_seconds = float(parts[0])
+    uptime_seconds = time.time() - psutil.boot_time()
     days = int(uptime_seconds // 86400)
     hours = int((uptime_seconds % 86400) // 3600)
     minutes = int((uptime_seconds % 3600) // 60)
@@ -189,34 +190,24 @@ def _system_uptime():
 
 
 def _process_count():
-    """Count running processes via /proc directory."""
-    proc_path = "/proc"
-    if not os.path.exists(proc_path):
-        return {
-            "success": False,
-            "output": "",
-            "error": "/proc not available (non-Linux system?)",
-        }
+    """Count running processes via psutil's pid census (portable)."""
+    if psutil is None:
+        return _no_psutil("the process table")
 
-    count = 0
-    try:
-        for entry in os.listdir(proc_path):
-            # Process directories are numeric PIDs
-            if entry.isdigit():
-                count += 1
-    except OSError as exc:
-        return {
-            "success": False,
-            "output": "",
-            "error": f"Failed to read /proc: {exc}",
-        }
+    count = len(psutil.pids())
 
     output = f"Running processes: {count}"
     return {"success": True, "output": output, "error": None}
 
 
 def _summary():
-    """Combine all status checks into one report."""
+    """Combine all status checks into one report.
+
+    A section that fails makes the whole summary a failure. The old version
+    returned success=True with the failures printed in an Errors trailer, so on
+    a host where three of the four sections were unreadable a caller that
+    checks `success` read a good answer over a disk line and nothing else.
+    """
     sections = []
     errors = []
 
@@ -238,6 +229,13 @@ def _summary():
     output = "\n---\n".join(sections)
 
     if errors:
-        output += "\n---\nErrors:\n  " + "\n  ".join(errors)
+        # The sections that did answer are still handed back - they are real -
+        # but success says the report is incomplete, and error names which
+        # sections are missing.
+        return {
+            "success": False,
+            "output": output,
+            "error": "Incomplete summary - " + "; ".join(errors),
+        }
 
     return {"success": True, "output": output, "error": None}

@@ -144,6 +144,17 @@ class TestScheduledLane:
         (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True)
         assert fake_wake.call_args.kwargs["sender"] == "@daemon"
 
+    def test_a_clock_fired_wake_declines_the_wake_back(self):
+        """DPLAN-0337 R2: the daemon never wants the answer to a scheduled wake.
+
+        No job prompt asks for a reply to @daemon (read 2026-09-10 across all nine
+        discovered jobs), so a wake-back would only spend a @daemon session reading
+        a reply that does not exist. Checked across owners, as the scheduled flag is.
+        """
+        for owner in ("@vera", "@commons", "@backup"):
+            (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True, job=_job(owner=owner))
+            assert fake_wake.call_args.kwargs["wake_back"] is False, owner
+
 
 # ── Half 2: blocked is not ran ───────────────────────
 
@@ -379,7 +390,7 @@ class TestRotationIsUnchanged:
     """A rotation miss already advances the pointer — it must keep consuming the night."""
 
     def test_rotation_miss_is_not_reclassified_as_blocked(self):
-        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="fleet-steward")
+        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
         with patch(f"{RUN}.fire_rotation", return_value=(True, "missed @backup: lock")) as mock_rotation:
             outcome, detail = _fire_job(job, {"jobs": {}})
         assert outcome == OUTCOME_FIRED
@@ -387,7 +398,7 @@ class TestRotationIsUnchanged:
         mock_rotation.assert_called_once()
 
     def test_rotation_failure_is_a_failure(self):
-        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="fleet-steward")
+        job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
         with patch(f"{RUN}.fire_rotation", return_value=(False, "rotation roster is empty")):
             outcome, _detail = _fire_job(job, {"jobs": {}})
         assert outcome == OUTCOME_FAILED

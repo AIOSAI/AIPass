@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for pathspec-based ignore matching (gitignore parity)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-11
 # =============================================
 
 """Tests for pathspec-based .backupignore — gitignore parity, single-source, seed."""
@@ -141,7 +141,7 @@ class TestLoadSpec:
         assert not is_ignored("important.log", spec)
 
     def test_load_missing_file(self, tmp_path):
-        """Missing .backupignore yields empty spec (nothing ignored)."""
+        """Missing .backupignore ignores nothing beyond the built-in *.tmp floor."""
         spec = load_spec(str(tmp_path))
         assert not is_ignored("anything.txt", spec)
 
@@ -331,6 +331,107 @@ class TestSeedTemplate:
         ignore.write_text("# custom\n")
         create_backup_dir(str(tmp_path))
         assert ignore.read_text() == "# custom\n"
+
+
+# --- built-in *.tmp floor (DPLAN-0338) ---
+
+# Both eras of the fleet's json staging temp, plus a bare and a nested one.
+_TEMP_SHAPES = ["data_json/.4242_7.tmp", "prax_json/tmpy531wjjf.tmp", "a/b/c.tmp", "root.tmp"]
+# Neighbours that only LOOK like temps -- the floor must not widen onto them.
+_KEPT_NEIGHBOURS = ["data_json/state.json", "notes.tmpl", "tmp.json", "state.tmp.json", "tmp/data.json"]
+
+
+def _json_folder_with_temps(root):
+    """A *_json folder the way a killed writer leaves it: the real json plus two orphaned temps."""
+    folder = root / "data_json"
+    folder.mkdir(parents=True)
+    real = b'{"ok": true}\n'
+    (folder / "state.json").write_bytes(real)
+    (folder / ".4242_7.tmp").write_bytes(b'{"ok": tr')
+    (folder / "tmpab12cd34.tmp").write_bytes(real)
+    return real
+
+
+class TestBuiltinTmpFloor:
+    """*.tmp is ignored by every project, whatever its .backupignore says.
+
+    Measured 2026-09-11: the AIPass store held 498 temp copies in snapshots/
+    and 996 in versioned/, all from *_json folders, because no .backupignore
+    seeded before the rule named them. The floor lives in load_spec, which
+    every copy lane and the Drive re-filter read.
+    """
+
+    def test_floor_applies_with_no_backupignore(self, tmp_path):
+        """No file at all: temps ignored, their neighbours kept."""
+        spec = load_spec(str(tmp_path))
+        assert [p for p in _TEMP_SHAPES if not is_ignored(p, spec)] == []
+        assert [p for p in _KEPT_NEIGHBOURS if is_ignored(p, spec)] == []
+
+    def test_floor_applies_when_the_file_never_names_tmp(self, tmp_path):
+        """The real case: a .backupignore written before the rule still gets it."""
+        (tmp_path / ".backupignore").write_text("node_modules/\n*.log\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert [p for p in _TEMP_SHAPES if not is_ignored(p, spec)] == []
+        assert [p for p in _KEPT_NEIGHBOURS if is_ignored(p, spec)] == []
+        assert is_ignored("app.log", spec) is True
+
+    def test_project_can_re_include_with_negation(self, tmp_path):
+        """The floor goes FIRST, so a project's own '!*.tmp' wins (last match wins)."""
+        (tmp_path / ".backupignore").write_text("!*.tmp\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert [p for p in _TEMP_SHAPES if is_ignored(p, spec)] == []
+
+    def test_snapshot_lane_skips_temps_and_keeps_the_json(self, tmp_path):
+        """run_snapshot: the temp beside the json is not copied, the json is."""
+        from aipass.backup.apps.handlers.path.builder import build_snapshot_path
+        from aipass.backup.apps.modules.snapshot import run_snapshot
+
+        root = tmp_path / "proj"
+        real = _json_folder_with_temps(root)
+        result = run_snapshot(str(root), show_panels=False)
+
+        assert result.success is True
+        dest = build_snapshot_path(str(root))
+        assert (dest / "data_json" / "state.json").read_bytes() == real
+        assert list(dest.rglob("*.tmp")) == []
+        # Not vacuous: both temps were in the tree the run walked, and still are.
+        assert sorted(p.name for p in (root / "data_json").glob("*.tmp")) == [".4242_7.tmp", "tmpab12cd34.tmp"]
+
+    def test_versioned_lane_skips_temps_and_keeps_the_json(self, tmp_path):
+        """run_versioned: no temp reaches the store, as a file-folder or a copy."""
+        from aipass.backup.apps.handlers.path.builder import build_versioned_store
+        from aipass.backup.apps.modules.versioned import run_versioned
+
+        root = tmp_path / "proj"
+        real = _json_folder_with_temps(root)
+        result = run_versioned(str(root), show_panels=False)
+
+        assert result.success is True
+        store = build_versioned_store(str(root))
+        assert (store / "data_json" / "state.json" / "state.json").read_bytes() == real
+        # A pre-rule run stored each temp as <name>.tmp/<name>.tmp plus a
+        # baseline; rglob('*.tmp') catches the folder and both copies.
+        assert list(store.rglob("*.tmp")) == []
+
+    def test_all_lane_skips_temps_in_both_stores(self, tmp_path):
+        """'all' shares one scan between both stores; neither gets a temp."""
+        from unittest.mock import patch
+
+        from aipass.backup.apps.handlers.path.builder import build_snapshot_path, build_versioned_store
+        from aipass.backup.apps.modules.all import handle_command
+
+        root = tmp_path / "proj"
+        real = _json_folder_with_temps(root)
+        # 'all' calls run_drive_sync unconditionally -- keep the suite off the network.
+        with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
+            assert handle_command("all", [str(root), "--quiet"]) is True
+
+        dest = build_snapshot_path(str(root))
+        store = build_versioned_store(str(root))
+        assert (dest / "data_json" / "state.json").read_bytes() == real
+        assert (store / "data_json" / "state.json" / "state.json").read_bytes() == real
+        assert list(dest.rglob("*.tmp")) == []
+        assert list(store.rglob("*.tmp")) == []
 
 
 # --- mirror cleanup uses source-existence, no exceptions ---

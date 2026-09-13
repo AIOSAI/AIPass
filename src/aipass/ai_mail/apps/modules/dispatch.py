@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2026-02-02
-# Modified: 2026-09-02
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -55,6 +55,10 @@ WAKE ONLY:
   drone @ai_mail dispatch wake @branch "custom"              # Wake with custom prompt
   drone @ai_mail dispatch wake @branch --model opus          # Wake with Opus model
   drone wake @branch                                         # Shortcut via drone
+
+WAKE-BACK:
+  Library callers such as @daemon's scheduled nudges may pass wake_back=False to
+  wake_branch(); the dispatch and dispatch wake verbs always arm the wake-back.
 
 MODEL OPTIONS:
   --model opus     Claude Opus 4.6 (default — full reasoning for all tasks)
@@ -513,8 +517,9 @@ def _announce_wake_back(target: str, sender: str) -> None:
 
     Managers are never woken — the blocklist is deliberate and stays. Telling a
     manager "you will be woken" was a promise the lane could not keep, and the
-    manager then heard nothing at all: two live cases on 2026-08-21 (@devpulse
-    dispatching @ai_mail and @drone back to back). The wake-back now mails them,
+    manager then heard nothing at all: three live cases on 2026-08-21 alone
+    (@devpulse dispatching @ai_mail, @drone, then @ai_mail again, 19:26-22:05,
+    each logged skipped_manager). The wake-back now mails them,
     so the promise says mail.
 
     Args:

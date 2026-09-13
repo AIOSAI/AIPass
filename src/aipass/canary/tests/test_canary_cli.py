@@ -195,6 +195,35 @@ def test_subcommand_help_on_unknown_command_exits_nonzero(monkeypatch, stub_modu
     assert "Unknown command" in capsys.readouterr().err
 
 
+def test_routed_command_that_refuses_exits_two(monkeypatch, capsys):
+    """A module that handles the command but refuses it must not exit 0.
+
+    handle_command returning True means "I handled this", not "it worked" —
+    the refusal travels through cli error()'s failure flag. Before the
+    resolve_exit wiring (2026-09-12) this exited 0.
+    """
+
+    class _Refusing:
+        __name__ = "aipass.canary.apps.modules.refusing"
+
+        def handle_command(self, command, args):
+            canary_entry.error("refused on purpose")
+            return True
+
+    monkeypatch.setattr(canary_entry, "discover_modules", lambda: [_Refusing()])
+
+    assert _run(monkeypatch, ["anything"]) == 2
+    assert "refused on purpose" in capsys.readouterr().err
+
+
+def test_failure_flag_from_an_earlier_command_does_not_leak(monkeypatch, stub_module, capsys):
+    """main() resets the flag first, so a clean command after a refusal exits 0."""
+    canary_entry.error("an earlier refusal in this process")
+    capsys.readouterr()
+
+    assert _run(monkeypatch, ["probe"]) == 0
+
+
 # =============================================================================
 # IMPORT-TIME INFRASTRUCTURE
 # =============================================================================

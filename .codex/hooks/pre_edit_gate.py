@@ -3,6 +3,7 @@
 
 Blocks edits to .trinity/passport.json and other protected paths.
 """
+
 import json
 import sys
 
@@ -31,11 +32,8 @@ def main():
     for pattern in PROTECTED_PATTERNS:
         if pattern in file_path:
             output = {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny"
-                },
-                "systemMessage": f"Edit blocked: {pattern} is a protected file."
+                "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"},
+                "systemMessage": f"Edit blocked: {pattern} is a protected file.",
             }
             print(json.dumps(output))
             return

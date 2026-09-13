@@ -3,7 +3,7 @@
 # Description: Shared path utilities for ai_mail handlers
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-08-31
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -54,8 +54,9 @@ def registries_in(directory: Path, pattern: str = REGISTRY_GLOB) -> list:
     """Registry files under *directory*, with the NAME re-checked case-sensitively.
 
     The one filtered reader every registry walk in this branch goes through.
-    ``pathlib`` delegates matching to the filesystem, so on Windows and default
-    macOS ``*_REGISTRY.json`` also matches ``*_registry.json`` — and this repo is
+    On Windows the ``pathlib`` glob matcher folds case, so ``*_REGISTRY.json``
+    also matches ``*_registry.json`` (a macOS volume folds too, but its matcher
+    does not — FPLAN-0554) — and this repo is
     full of bait: ``drone_command_registry.json`` sits beside drone's tree, every
     branch carries ``.spawn/.template_registry.json`` (pathlib ``*`` matches
     dotfiles, unlike the ``glob`` module), and @flow keeps ten

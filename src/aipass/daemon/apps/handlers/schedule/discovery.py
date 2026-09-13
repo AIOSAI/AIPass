@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.1.0
+# Version: 2.3.0
 # Created: 2026-06-15
-# Modified: 2026-08-31
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -82,6 +82,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 # importing it cross-branch failed encapsulation + handlers on the checklist.
 from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.module_root import module_file
+from aipass.daemon.apps.handlers.schedule import command_job
 
 _REPO_ROOT = module_file(__file__).parents[6]  # up to repo root
 _SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
@@ -101,7 +102,12 @@ PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 RESIDENCY_CORE = fleet.RESIDENCY_CORE
 RESIDENCY_RESIDENT = fleet.RESIDENCY_RESIDENT
 
-REQUIRED_JOB_KEYS = {"id", "schedule", "prompt"}
+REQUIRED_JOB_KEYS = {"id", "schedule"}
+
+# What a job DOES, and a job says exactly one (DPLAN-0338): a prompt wakes the
+# owner; a command runs a drone verb as a subprocess and wakes nobody. Both is
+# ambiguous and neither is empty, so either one is refused like a missing key.
+JOB_ACTION_KEYS = ("prompt", "command")
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
 
 # Source labels on a citizen record — which registry vouched for it.
@@ -244,6 +250,17 @@ def active_branch_map(repo_root: Optional[Path] = None) -> dict:
     return {c["dir_name"]: c["email"] for c in active_citizens(repo_root)}
 
 
+def framework_root(repo_root: Optional[Path] = None) -> Path:
+    """This install's src/aipass/ — the directory every framework citizen's branch lives in.
+
+    Computed per call from the same root active_citizens() walks, not frozen at
+    import like _SRC_AIPASS, so a temp-tree test (or a patched _REPO_ROOT) moves
+    the fleet and the framework boundary together.
+    """
+    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    return root / "src" / "aipass"
+
+
 def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
     """Return the on-disk path for a branch directory name.
 
@@ -280,6 +297,16 @@ def _validate_job(job: dict, file_path: Path) -> bool:
         logger.warning("[discovery] Job missing keys %s in %s", missing, file_path)
         return False
 
+    actions = [key for key in JOB_ACTION_KEYS if key in job]
+    if len(actions) != 1:
+        logger.warning(
+            "[discovery] Job '%s' must carry exactly one of prompt or command, found %s in %s",
+            job.get("id"),
+            " and ".join(actions) or "neither",
+            file_path,
+        )
+        return False
+
     schedule = job.get("schedule")
     if not isinstance(schedule, dict):
         logger.warning("[discovery] Job '%s' has non-dict schedule in %s", job.get("id"), file_path)
@@ -292,6 +319,17 @@ def _validate_job(job: dict, file_path: Path) -> bool:
         )
         return False
 
+    if "command" not in job:
+        if command_job.notify_email(job):
+            logger.warning("[discovery] Job '%s' in %s: notify.email works on command jobs only", job["id"], file_path)
+        return True
+
+    problem = command_job.command_job_problem(job)
+    if problem:
+        logger.warning("[discovery] Command job '%s' refused in %s: %s", job.get("id"), file_path, problem)
+        return False
+    if "wake" in job:
+        logger.warning("[discovery] Command job '%s' in %s: wake block ignored, nobody is woken", job["id"], file_path)
     return True
 
 
@@ -334,17 +372,27 @@ def _jobs_for_citizen(citizen: dict) -> List[dict]:
             if not _validate_job(job, sched_file):
                 continue
 
-            jobs.append(
-                {
-                    "owner": citizen["email"],
-                    "id": job["id"],
-                    "schedule": job["schedule"],
-                    "wake": job.get("wake", {}),
-                    "prompt": job["prompt"],
-                    "enabled": job.get("enabled", True),
-                    "config": job.get("config", {}),
-                }
-            )
+            entry = {
+                "owner": citizen["email"],
+                "id": job["id"],
+                "schedule": job["schedule"],
+                "wake": job.get("wake", {}),
+                "enabled": job.get("enabled", True),
+                "config": job.get("config", {}),
+            }
+            if "command" in job:
+                # The branch this schedule file was read from IS the command's cwd,
+                # and drone reads cwd as identity. Carried from the record that
+                # vouched for the file rather than looked up again by directory
+                # name, which two citizens can share across federated roots.
+                entry.update(command=job["command"], branch_path=str(citizen["path"]), wake={})
+                if "timeout_seconds" in job:
+                    entry["timeout_seconds"] = job["timeout_seconds"]
+            else:
+                entry["prompt"] = job["prompt"]
+            if "notify" in job:
+                entry["notify"] = job["notify"]
+            jobs.append(entry)
     return jobs
 
 
@@ -352,7 +400,9 @@ def discover_jobs() -> list:
     """
     Sweep every active citizen's .daemon/*.json and return validated Job dicts.
 
-    Each Job dict: {owner, id, schedule, wake, prompt, enabled, config}
+    Each Job dict: {owner, id, schedule, wake, enabled, config} plus either
+    prompt (a wake job) or command + branch_path [+ timeout_seconds] (a command
+    job, DPLAN-0338); notify rides along when the file sets it.
     Covers both src/aipass/* and projects/*/ citizens.
     """
     citizens = active_citizens()

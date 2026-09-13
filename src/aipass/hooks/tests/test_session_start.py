@@ -160,6 +160,19 @@ class TestSessionStartCadenceIntegration:
 
         _write_state(tmp_path, turn=3)
 
+        # The siblings are handed a transcript_path, which is what keeps them on
+        # ONE turn in production: the token is the transcript's size, identical
+        # across every loader of the same turn, and _should_increment refuses to
+        # increment while it matches. Without it the token is 0, the token guard
+        # is disabled, and the only thing holding the three calls together is
+        # the 2.0 s mtime debounce — so this unit went red whenever a loaded
+        # full-suite run put more than two seconds between the first call and
+        # the third (measured 2026-09-12: green alone, red twice in a 207 s
+        # run). A real clock was deciding a question about token identity.
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text('{"type": "user"}\n')
+        turn_data = {"transcript_path": str(transcript)}
+
         with (
             patch(f"{CADENCE_MODULE}._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
@@ -174,11 +187,11 @@ class TestSessionStartCadenceIntegration:
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
             patch(f"{CADENCE_MODULE}._CONFIG_PATH", config),
         ):
-            assert should_fire("tier0") is True
+            assert should_fire("tier0", turn_data) is True
             _reset_cadence_globals()
-            assert should_fire("navmap") is True
+            assert should_fire("navmap", turn_data) is True
             _reset_cadence_globals()
-            assert should_fire("branch") is True
+            assert should_fire("branch", turn_data) is True
 
     def test_resume_does_not_reset_counter_continues(self, tmp_path):
         from aipass.hooks.apps.handlers.lifecycle.session_start import handle

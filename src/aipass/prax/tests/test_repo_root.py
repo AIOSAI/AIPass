@@ -618,6 +618,9 @@ class TestBothConstructionsAgree:
 # The single sanctioned working-directory read in prax: `drone @prax dashboard
 # refresh` with no argument means "the branch I am standing in", and the cwd IS
 # the question there rather than a fallback for a question it could not answer.
+# Since 2026-09-11 the same read (`_caller_dir`, AIPASS_CALLER_CWD first) also
+# tells `refresh @branch` which project registry the caller stands in. It is
+# handed to the handler as an argument, so it is still one read in one file.
 CWD_ALLOWLIST = {"apps/modules/dashboard.py"}
 
 
@@ -1180,7 +1183,7 @@ class TestACallerNameIsNotAlwaysAModuleName:
     turned out to have nothing to do with it.
 
     `get_module_logs_dir()` derives its caller's module name from a frame and
-    then MKDIRS it. From `python -c`, from stdin, from an eval or a frozen
+    then MKDIRS it. From an interpreter `-c` string, from stdin, from an eval or a frozen
     loader, that frame's co_filename is a pseudo-filename — `<stdin>`,
     `<string>`, `<frozen importlib._bootstrap>` — and `Path("<stdin>").stem` is
     `<stdin>`. On Linux that silently creates a directory called `<stdin>`; I

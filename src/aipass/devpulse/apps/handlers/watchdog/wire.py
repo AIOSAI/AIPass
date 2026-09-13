@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-08-19
-# Modified: 2026-09-07
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -96,6 +96,7 @@ from everything else. It is long on purpose and it stays.
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -165,6 +166,11 @@ _WIRE_KIND = "baseline_wire"
 
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
+# Ceiling on the off-Linux process probes (``ps``, ``lsof``). They answer in
+# milliseconds on a healthy host; the timeout exists so a wedged one costs a
+# tick and not the wire.
+_PROBE_TIMEOUT_SECONDS = 5.0
+
 
 def find_repo_root(start: Path | None = None) -> Path | None:
     """Walk up from ``start`` (default CWD) to the dir holding the registry.
@@ -212,13 +218,45 @@ def _touch_heartbeat() -> None:
         logger.warning("[watchdog.wire] heartbeat touch failed %s: %s", HEARTBEAT_FILE, exc)
 
 
+def _stdout_target_via_lsof(pid: int) -> Path | None:
+    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``_stdout_target``.
+
+    ``-Fn`` is lsof's machine-readable mode: one field per line, each prefixed
+    by its field character, and ``n`` carries the name of the open file. None on
+    any failure — off Linux "cannot tell" is the honest answer, and a wrong path
+    would be read as a wrapper identity (see ``_wrapper_of``).
+    """
+    try:
+        done = subprocess.run(
+            ["lsof", "-p", str(pid), "-a", "-d", "1", "-Fn"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[watchdog.wire] lsof unusable for pid=%s: %s", pid, exc)
+        return None
+    for line in done.stdout.splitlines():
+        if line.startswith("n") and len(line) > 1:
+            return Path(line[1:])
+    logger.info("[watchdog.wire] lsof named no fd/1 for pid=%s", pid)
+    return None
+
+
 def _stdout_target(pid: int | None = None) -> Path | None:
     """Where a process's stdout actually goes — the wire-identity primitive.
 
-    /proc is the honest source for where writes LAND (env only says which
-    conversation spawned the process — a different namespace, see the header).
-    None when the pid is gone or fd/1 is unreadable.
+    On Linux ``/proc/<pid>/fd/1`` is the honest source for where writes LAND
+    (env only says which conversation spawned the process — a different
+    namespace, see the header). Off Linux there is no /proc, and answering None
+    for every pid armed a wire that reported "armed", recorded wrapper
+    ``foreground`` and delivered nothing forever (macOS CI 34682737363), so the
+    same question goes to ``lsof``. None when the pid is gone or fd/1 is
+    unreadable.
     """
+    if sys.platform != "linux":
+        return _stdout_target_via_lsof(os.getpid() if pid is None else pid)
     who = "self" if pid is None else str(pid)
     try:
         return Path(os.readlink(f"/proc/{who}/fd/1"))
@@ -269,8 +307,38 @@ def _wrapper_of(target: Path | None) -> str:
     return WRAPPER_FOREGROUND
 
 
+def _cmdline_via_ps(pid: int) -> str:
+    """``ps -p <pid> -o command=`` — the portable half of ``_cmdline``.
+
+    The trailing ``=`` suppresses the header, so a live pid prints exactly one
+    line: its command line, already space-joined. "" on any failure, and a gone
+    pid prints nothing, which is the same "" the /proc half returns.
+    """
+    try:
+        done = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("[watchdog.wire] ps unusable for pid=%s: %s", pid, exc)
+        return ""
+    return done.stdout.strip()
+
+
 def _cmdline(pid: int) -> str:
-    """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
+    """A process's cmdline, NUL-separated fields joined with spaces. "" on error.
+
+    Linux reads /proc as the fast path; every other host asks ``ps``. Answering
+    "" off Linux was not a graceful degradation — it made ``_looks_like_ours``
+    False for every pid, so every live wire read as a recycled pid, was left
+    alone instead of taken over, and dispatch completions were never delivered
+    (macOS CI 34682737363).
+    """
+    if sys.platform != "linux":
+        return _cmdline_via_ps(pid)
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError as exc:
@@ -566,6 +634,23 @@ def arm_wire(
     # until exit — the 12:34 failure — so it refuses to exist. The refusal
     # itself IS heard: bg-Bash notifies on exit, and this exits immediately.
     # ``--once`` stays legal there (it exits on first delivery = one wake).
+    # THE UNRESOLVABLE-STDOUT TRIPWIRE (FPLAN-0554, macOS CI 34682737363). The
+    # tripwire below can only refuse a wrapper it can SEE. When the stdout
+    # target is None the wrapper is unknowable — off Linux that was every arm,
+    # and the wire went on to record wrapper "foreground"/stdout null and
+    # announce "armed" while nothing could ever hear a line of it. A continuous
+    # wire that cannot prove it has ears refuses by name instead.
+    if not once and my_target is None:
+        reason = (
+            "stdout target unresolvable — this continuous wire cannot tell which wrapper carries it, "
+            "so it cannot know anyone would hear a delivery. Re-arm via the Monitor tool: "
+            "Monitor(command='drone @devpulse watchdog baseline', description='watchdog', persistent=true)"
+        )
+        _stderr(f"watchdog wire: REFUSED — {reason}")
+        _stdout_event(f"BASELINE DEAD: {reason}")
+        logger.error("[watchdog.wire] refused continuous arm, stdout target unresolvable")
+        raise SystemExit(1)
+
     if not once and my_target is not None and my_session is not None and my_target.is_file():
         _stdout_event(
             "BASELINE DEAD: continuous wire armed with run_in_background — its per-event stdout lines "

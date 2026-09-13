@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-08-20
-# Modified: 2026-08-22
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -37,10 +37,10 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.cli.apps.modules import console, error  # noqa: E402
+from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit  # noqa: E402
 from aipass.prax import logger  # noqa: E402
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -153,7 +153,9 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
-    console.print("  [dim]none registered — modules are added per test, then removed[/dim]")
+    console.print("  [cyan]note add TEXT[/cyan]   Append one note to the branch-local store")
+    console.print("  [cyan]note list[/cyan]       Print notes in order, with index and timestamp")
+    console.print("  [dim]modules are added per test, then removed — 'drone @canary' lists what is present[/dim]")
     console.print()
 
     console.print("[yellow]Flags:[/yellow]")
@@ -163,7 +165,8 @@ def print_help() -> None:
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  $ drone @canary")
-    console.print("  $ drone @canary --help")
+    console.print('  $ drone @canary note add "check the tick-5 interrupt"')
+    console.print("  $ drone @canary note list")
     console.print("  $ drone @canary --version")
     console.print()
 
@@ -221,9 +224,15 @@ def _print_subcommand_help(command: str, modules: List[Any]) -> bool:
 def main() -> int:
     """Main entry point - routes commands or shows help.
 
+    A module returning True from handle_command means "I handled this", not
+    "it worked": a refusal travels through cli error()'s failure flag, and
+    resolve_exit turns it into exit 2. Without that flip every routed refusal
+    exited 0 (the note store's parse refusal was the first to need it).
+
     Returns:
-        0 on success, 1 on an unknown command.
+        0 on success, 1 on an unknown command, 2 when a routed command refused.
     """
+    reset_command_state()
     args = sys.argv[1:]
 
     if not args:
@@ -250,7 +259,7 @@ def main() -> int:
         return 0 if _print_subcommand_help(command, modules) else 1
 
     if route_command(command, remaining, modules):
-        return 0
+        return resolve_exit(True)
 
     error(f"Unknown command: {command}")
     return 1

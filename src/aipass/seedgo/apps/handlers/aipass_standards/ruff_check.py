@@ -36,6 +36,10 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 AUDIT_SCOPE = "branch_level"
 ADVISORY = True
 
+# ruff format --check marks each unformatted file with this prefix; every other
+# stdout line is summary prose.
+_FORMAT_PREFIX = "Would reformat: "
+
 
 def _load_ruff_bypass(branch_path: Path) -> list:
     """Load .seedgo/ruff_bypass.json for ruff-specific bypass rules."""
@@ -280,8 +284,12 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "advisory": True,
         }
 
-    # Scan apps/ if present, otherwise full branch
-    scan_target = bp / "apps" if (bp / "apps").is_dir() else bp
+    # Scan apps/ AND tests/ — CI's gate is `ruff check src/ tests/` from the repo root,
+    # which reaches every branch's tests/ too. Scanning apps/ alone is why this branch
+    # read 100 on trigger while CI failed three of its test files on formatting
+    # (macOS run 34682737363, FPLAN-0554). Fall back to the whole branch when neither
+    # directory exists, so a branch with an unusual layout is still covered.
+    scan_targets = [d for d in (bp / "apps", bp / "tests") if d.is_dir()] or [bp]
 
     # Load ruff-specific bypass rules
     ruff_bypass = _load_ruff_bypass(bp)
@@ -289,7 +297,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     # Run ruff
     try:
         proc = subprocess.run(
-            ["ruff", "check", str(scan_target), "--output-format=json"],
+            ["ruff", "check", *(str(t) for t in scan_targets), "--output-format=json"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -355,13 +363,21 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     fmt_files: list[str] = []
     try:
         fmt_proc = subprocess.run(
-            ["ruff", "format", "--check", str(scan_target)],
+            ["ruff", "format", "--check", *(str(t) for t in scan_targets)],
             capture_output=True,
             text=True,
             timeout=60,
         )
         if fmt_proc.returncode != 0 and fmt_proc.stdout.strip():
-            fmt_files = [line.strip() for line in fmt_proc.stdout.strip().splitlines() if line.strip()]
+            # Only the "Would reformat: <path>" lines are files. ruff also prints a
+            # trailing summary ("2 files would be reformatted, 1 file already formatted");
+            # counting it inflated fmt_count by one and put that sentence into the
+            # message where a filename belongs (found while widening the corpus, FPLAN-0554).
+            fmt_files = [
+                line.split(_FORMAT_PREFIX, 1)[1].strip()
+                for line in fmt_proc.stdout.splitlines()
+                if line.startswith(_FORMAT_PREFIX)
+            ]
     except subprocess.TimeoutExpired:
         logger.warning("ruff format --check timed out on branch %s", branch_path)
     except Exception as exc:

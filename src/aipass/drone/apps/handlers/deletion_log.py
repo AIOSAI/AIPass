@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-31
+# Modified: 2026-09-11
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -274,6 +274,8 @@ def record_deletion(
     measurement: dict | None = None,
     caller: str | None = None,
     project_root: Path | None = None,
+    mode: str | None = None,
+    age: str | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
@@ -293,6 +295,12 @@ def record_deletion(
             same reason and from the same lane: a broker serving one repository
             while standing in another would otherwise write its record into the
             standing project's store. Left unset, the cwd walk answers.
+        mode: A lane's sub-mode, when it has one — ``stale`` for
+            ``rm --stale``. Given, the record gains ``mode`` and ``age`` keys
+            and the prax line names both. Left unset, the record keeps exactly
+            the twelve keys it always had, so a plain delete writes the same
+            bytes it did before stale mode existed.
+        age: The age limit the mode ran with, exactly as typed (``10d``).
 
     Never raises. A failed record is reported at ERROR and the caller carries
     on: losing the log must not turn into losing the delete.
@@ -312,9 +320,12 @@ def record_deletion(
         "reason": reason,
         **shape,
     }
+    if mode is not None:
+        record["mode"] = mode
+        record["age"] = age
 
     logger.info(
-        "deletion record: %s %s by %s — %s (%s, size=%s, entries=%s)",
+        "deletion record: %s %s by %s — %s (%s, size=%s, entries=%s)%s",
         outcome,
         record["path"],
         caller,
@@ -322,6 +333,7 @@ def record_deletion(
         record["kind"],
         record["size_bytes"],
         record["entry_count"],
+        f" mode={mode} age={age}" if mode is not None else "",
     )
 
     json_handler.log_operation(

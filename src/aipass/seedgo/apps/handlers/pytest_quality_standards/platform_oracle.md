@@ -326,6 +326,33 @@ one:
 3. **assert the type and the chain**, and put the name in **our** wrapper
 4. **resolve both sides**, or `os.path.samefile`
 5. **patch a seam the module owns**, and root the sandbox if the walk is the claim
+6. **run the module's EXISTING pins under every lane you add** — not just the new
+   cases. @devpulse's FPLAN-0554 cure proved its macOS lane on Linux by forcing
+   `sys.platform`, and the old pins in the same files were never run under it:
+   `test_wire_never_spawns_anything` patched `Popen` to explode on ANY spawn, the
+   new darwin lane's `lsof` probe went through `Popen`, and macOS went red
+   (34704362515). The same cure, never run under win32, turned 25 Windows units
+   red (34704362507). A lane you add is a lane every pin in the file now lives on.
+
+## Three divergences a fake cannot manufacture
+
+Absent binaries and absent `/proc` can be stood in for on Linux. These cannot,
+because the difference is in the kernel's semantics, not in what is installed:
+
+- **A read on a pid after the call that ends it.** @api's
+  `test_a_real_child_ends_up_owning_the_terminal` read `os.getpgid(pid)` after
+  `session.hangup()`. Linux keeps a hung-up child's pgid readable as a zombie
+  until the parent reaps; macOS answers `ESRCH` (34707099650). The tell: a
+  `finally` or teardown that hangs up or waits on the child, before an assertion
+  that still names its pid (`getpgid`, `getsid`, `kill(pid, 0)`, `/proc/<pid>`).
+  Cure: read while the subject is alive, hold the values, assert on the held values.
+- **`os.kill(pid, 0)` on Windows terminates the target.** It is a liveness probe on
+  POSIX. A test that forces `sys.platform = "darwin"` on a Windows host and reaches
+  it kills the process it meant to ask about.
+- **A working directory inside a tree being deleted.** Linux removes a directory
+  that is some process's cwd; Windows refuses with `WinError 32` (drone
+  `test_rm.py`, 34686193857, ruled a test defect and cured at d2f359d3). Step out
+  of the tree before deleting it, as a Windows user would have to.
 
 ## What this rule cannot see
 

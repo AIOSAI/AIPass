@@ -3055,6 +3055,172 @@ class TestWakeBackManagerHonesty:
         assert "sender=@devpulse" in written
 
 
+# === Wake-back declined by the caller ========================================
+#
+# @daemon's inbox-sweep wakes a branch only to nudge it to read its own mail.
+# A nudge owes no reply, yet on completion the monitor woke @daemon back to
+# "check its reply" — a fresh session reading an empty inbox (4 wake-backs on
+# 2026-09-10, 2 on 09-09). wake_branch(wake_back=False) now carries
+# --no-wake-back between the four positionals and "--", and the monitor then
+# neither wakes nor mails the sender. Everything else on completion stays.
+
+
+def _declining(argv):
+    """The same monitor argv with --no-wake-back where wake.py puts it: before '--'."""
+    sep = argv.index("--")
+    return [*argv[:sep], "--no-wake-back", *argv[sep:]]
+
+
+def _drone_sends(run_mock):
+    """Every `drone @ai_mail send ...` the run mock saw, as argv lists."""
+    return [
+        c.args[0]
+        for c in run_mock.call_args_list
+        if c.args and isinstance(c.args[0], list) and c.args[0][:3] == ["drone", "@ai_mail", "send"]
+    ]
+
+
+class TestWakeBackDeclinedByCaller:
+    """--no-wake-back: completion runs, the sender is neither woken nor mailed."""
+
+    @staticmethod
+    def _manager_gate_status():
+        """What wake_branch's manager gate returns — the path that MAILS the sender."""
+        status = DispatchStatus()
+        status.ok("resolve", "@sender → /repo/src/aipass/sender")
+        status.info("manager", "@sender is a manager — wake skipped, caller must mail")
+        return status
+
+    @staticmethod
+    def _builder_status():
+        status = DispatchStatus()
+        status.ok("resolve", "@sender → /repo/src/aipass/sender")
+        status.ok("spawn", "agent started")
+        return status
+
+    @staticmethod
+    def _run_main(monkeypatch, argv, wake_status, *, exit_code=0):
+        """Drive main() to the end with the REAL wake-back chain behind it.
+
+        _wake_sender, _mail_wake_back and _log_wake_result are the real ones
+        (the autouse fixture mocks the first and last; restored here). Only the
+        edges are faked: wake_branch, so nothing spawns, and subprocess.run, so
+        no mail leaves. Whatever the monitor decides, those mocks record it.
+        """
+        monkeypatch.setenv("AIPASS_WAKE_DEPTH", "0")  # registers an undo: _wake_sender bumps it
+        wake = MagicMock(return_value=(wake_status, True))
+        monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", wake)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+        mail = MagicMock(wraps=mod._mail_wake_back)
+        monkeypatch.setattr(mod, "_mail_wake_back", mail)
+        monkeypatch.setattr(mod, "_wake_sender", _wake_sender)
+        monkeypatch.setattr(mod, "_log_wake_result", _log_wake_result)
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
+        bounce = MagicMock(return_value=True)
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
+
+        monkeypatch.setattr("sys.argv", argv)
+        monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(exit_code, False)))
+        monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+        monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+            MagicMock(return_value=Path("/fake/repo")),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        return {"exit": exc_info.value.code, "wake": wake, "sent": sent, "mail": mail, "log": log, "bounce": bounce}
+
+    @staticmethod
+    def _wake_log(lock_file):
+        return (Path(lock_file).parent.parent / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
+
+    def test_declined_completion_neither_wakes_nor_mails_the_sender(self, monkeypatch, main_argv):
+        """The fix, red on the old monitor: it ignored the flag and ran the full
+        wake-back. The status is the MANAGER gate's on purpose — that is the one
+        path where a wake attempt turns into mail, so BOTH halves are observable."""
+        argv, lock_file, _ = main_argv
+
+        got = self._run_main(monkeypatch, _declining(argv), self._manager_gate_status())
+
+        assert got["exit"] == 0, "completion must still run to its end"
+        got["wake"].assert_not_called()
+        got["mail"].assert_not_called()
+        assert _drone_sends(got["sent"]) == [], "a declined wake-back must send no mail"
+
+    def test_without_the_flag_a_manager_sender_is_still_mailed(self, monkeypatch, main_argv):
+        """The default is today's contract, byte for byte: wake attempt, gate, mail."""
+        argv, lock_file, _ = main_argv
+
+        got = self._run_main(monkeypatch, argv, self._manager_gate_status())
+
+        got["wake"].assert_called_once()
+        assert got["wake"].call_args.args == ("@sender",)
+        assert got["wake"].call_args.kwargs["sender"] == ""
+        got["mail"].assert_called_once()
+        sends = _drone_sends(got["sent"])
+        assert len(sends) == 1 and sends[0][3] == "@sender"
+        assert "wake_result=mailed_manager" in self._wake_log(lock_file)
+
+    def test_without_the_flag_a_builder_sender_is_still_woken(self, monkeypatch, main_argv):
+        argv, lock_file, _ = main_argv
+
+        got = self._run_main(monkeypatch, argv, self._builder_status())
+
+        got["wake"].assert_called_once()
+        assert got["wake"].call_args.args == ("@sender",)
+        assert _drone_sends(got["sent"]) == []
+        assert "wake_result=success" in self._wake_log(lock_file)
+
+    def test_a_declined_wake_back_logs_one_info_line_naming_target_and_sender(self, monkeypatch, main_argv):
+        argv, _, _ = main_argv
+
+        got = self._run_main(monkeypatch, _declining(argv), self._builder_status())
+
+        declined = [c for c in got["log"].info.call_args_list if c.args and "declined by caller" in c.args[0]]
+        assert len(declined) == 1, f"expected one decline line, got {declined}"
+        assert "@test_branch" in declined[0].args[1:]
+        assert "@sender" in declined[0].args[1:]
+
+    def test_a_declined_wake_back_is_recorded_as_declined_in_the_wake_log(self, monkeypatch, main_argv):
+        """dispatch_wake.log still gets its line — with `declined` in place of a
+        wake result, so a quiet sender reads as a choice, not a lost wake."""
+        argv, lock_file, _ = main_argv
+
+        self._run_main(monkeypatch, _declining(argv), self._builder_status())
+
+        written = self._wake_log(lock_file)
+        assert "wake_result=declined" in written
+        assert "target=@test_branch" in written
+        assert "sender=@sender" in written
+
+    def test_a_declined_wake_back_still_bounces_a_failure_to_the_sender(self, monkeypatch, main_argv):
+        """The sender still rides argv because bounce mail reads it: declining
+        the wake-back is not declining to hear that the dispatch FAILED."""
+        argv, _, _ = main_argv
+
+        got = self._run_main(monkeypatch, _declining(argv), self._builder_status(), exit_code=1)
+
+        assert got["exit"] == 1
+        got["bounce"].assert_called_once()
+        assert got["bounce"].call_args.args[2] == "@sender"
+        got["wake"].assert_not_called()
+
+    def test_the_flag_is_read_only_before_the_separator(self, monkeypatch, main_argv):
+        """Everything after '--' is the claude command; the same token there is
+        claude's business and must not decline anything."""
+        argv, lock_file, _ = main_argv
+
+        got = self._run_main(monkeypatch, [*argv, "--no-wake-back"], self._builder_status())
+
+        got["wake"].assert_called_once()
+        assert "wake_result=success" in self._wake_log(lock_file)
+
+
 # --- session-pointer aware retry loop ---------------------------------
 #
 # wake.py now emits --resume <id> and --session-id <id> where it only ever

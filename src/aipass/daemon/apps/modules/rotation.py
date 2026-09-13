@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: rotation.py
-# Description: Steward rotation firing + status surface (drone @daemon rotation)
-# Version: 1.1.0
+# Description: Rounds firing + status surface (drone @daemon rotation)
+# Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-08-31
+# Modified: 2026-09-10
 # =============================================
 
 """
-Steward rotation — wakes one citizen a night for its maintenance turn.
+Rounds — the night watch: wakes one citizen a night for its maintenance turn.
 
-A single `rotation` job (daemon's own .daemon/schedule.json) fires daily, picks
-the next citizen off the roster, wakes it with the steward prompt, and advances
-the pointer. Busy target? The miss is logged with the branch named and the
-pointer advances anyway — that citizen gets its next turn in the cycle.
+A single rotation-type job, id `rounds` in daemon's own .daemon/schedule.json,
+fires at 05:00, picks the next citizen off the alphabetical roster, wakes it
+with the rounds prompt, and advances the pointer. Busy target? The miss is
+logged with the branch named and the pointer advances anyway — that citizen gets
+its next turn in the cycle.
 
 This module owns wake POLICY (blocklist, manager lane, model); the rotation
 handler owns roster and pointer state.
@@ -35,6 +36,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     OUTCOME_MISSED,
     OUTCOME_SKIPPED,
     OUTCOME_WOKEN,
+    ROSTER_SCOPE,
     build_roster,
     get_rotation_state,
     next_target,
@@ -46,9 +48,9 @@ HANDLED_COMMANDS = {"rotation"}
 
 ROTATION_TYPE = "rotation"
 
-# Steward work needs judgment (APLAN writing, audit reading) — heavier than the
-# inbox sweep's read-and-act wake.
-DEFAULT_WAKE_MODEL = "sonnet"
+# Patrick's ruling 2026-09-10 (DPLAN-0337 R2): rounds run on opus. The job stanza
+# names it as well; this is only the fallback for a stanza that omits it.
+DEFAULT_WAKE_MODEL = "opus"
 
 SKIP_BLOCKLIST = "wake-blocklist"
 SKIP_MANAGER_LANE = "manager-lane-unavailable"
@@ -59,7 +61,7 @@ def print_introspection():
     console.print()
     console.print("[bold cyan]rotation Module[/bold cyan]")
     console.print()
-    console.print("[dim]Steward rotation — one citizen per night, in registry order[/dim]")
+    console.print("[dim]Rounds — one citizen per night, alphabetical by email[/dim]")
     console.print()
     console.print("[yellow]Reads:[/yellow]")
     console.print("  [cyan]*[/cyan] AIPASS_REGISTRY.json + projects/*/[dim]*_REGISTRY.json (roster)[/dim]")
@@ -72,25 +74,27 @@ def print_introspection():
 
 def print_help():
     """Display usage information."""
-    console.print("\n[bold cyan]rotation — Nightly Steward Rotation[/bold cyan]")
+    console.print("\n[bold cyan]rotation — Nightly Rounds[/bold cyan]")
     console.print("\n[yellow]USAGE:[/yellow]")
     console.print("  drone @daemon rotation           Show roster, whose turn is next, recent turns")
     console.print("  drone @daemon rotation --json    Machine-readable rotation state")
     console.print("  drone @daemon rotation --help    Show this help message")
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
-    console.print("  The rotation fires from a `rotation` job in a .daemon/schedule.json.")
-    console.print("  Each night it wakes the next citizen on the roster with the steward")
-    console.print("  prompt, then advances the pointer — busy targets are logged as a miss")
-    console.print("  and get their next turn in the cycle.")
+    console.print("  The rounds fire from a rotation-type job (id: rounds) in daemon's")
+    console.print("  .daemon/schedule.json. Each night at 05:00 it wakes the next citizen")
+    console.print("  on the roster with the rounds prompt, then advances the pointer — busy")
+    console.print("  targets are logged as a miss and get their next turn in the cycle.")
     console.print("\n[yellow]ROSTER RULES:[/yellow]")
-    console.print("  [cyan]*[/cyan] Registry order — framework citizens, then project citizens")
-    console.print("  [cyan]*[/cyan] @devpulse is never stewarded")
+    console.print("  [cyan]*[/cyan] Framework fleet only — branches under this install's src/aipass/;")
+    console.print("    projects/* residents and external roots are excluded by ruling (2026-09-10)")
+    console.print("  [cyan]*[/cyan] Alphabetical by email")
+    console.print("  [cyan]*[/cyan] @devpulse is never on the roster")
     console.print("  [cyan]*[/cyan] Managers are excluded unless config.include_managers is true")
     console.print("  [cyan]*[/cyan] Manager wakes also need ai_mail's scheduled lane — skipped if absent")
     console.print("\n[yellow]JOB STANZA:[/yellow]")
-    console.print('  {"id": "fleet-steward", "schedule": {"type": "rotation", "time": "05:00"},')
-    console.print('   "wake": {"fresh": true, "model": "sonnet"},')
-    console.print('   "config": {"include_managers": false}, "prompt": "STEWARD NIGHT for {branch}..."}')
+    console.print('  {"id": "rounds", "schedule": {"type": "rotation", "time": "05:00"},')
+    console.print('   "wake": {"fresh": true, "model": "opus"},')
+    console.print('   "config": {"include_managers": false}, "prompt": "ROUNDS for {branch}..."}')
     console.print()
 
 
@@ -161,6 +165,9 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
         "auto": True,
         "sender": "@daemon",
         "model": model,
+        # A rounds night owes @daemon nothing — its report is the @devpulse mail.
+        # sender stays: the bounce and the manager gate's daemon exception read it.
+        "wake_back": False,
     }
 
     # Managers only travel the scheduled lane — never the interactive tmux path.
@@ -194,7 +201,7 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
 
     roster = _apply_wake_blocklist(build_roster(include_managers=include_managers))
     if not roster:
-        _log("ROTATION: roster is empty — nobody to steward")
+        _log("ROUNDS: roster is empty — nobody to wake")
         return False, "rotation roster is empty"
 
     state = get_rotation_state(runstate, key)
@@ -219,13 +226,13 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
     if header:
         prompt = compose_prompt(header, prompt)
 
-    _log(f"STEWARD: {email} — wake_branch(fresh={fresh}, model={model}, manager={is_manager})")
+    _log(f"ROUNDS: {email} — wake_branch(fresh={fresh}, model={model}, manager={is_manager})")
 
     ok, detail, errored = _wake_steward(target, prompt, model, fresh)
 
     if ok:
         _log(f"OK: {email} — {detail}")
-        logger.info("[rotation] Steward night started for %s", email)
+        logger.info("[rotation] Rounds night started for %s", email)
         record_rotation(runstate, key, email, OUTCOME_WOKEN, detail)
         return True, detail
 
@@ -266,6 +273,7 @@ def _build_status(job: Optional[dict], runstate: dict) -> dict:
         "job_owner": job["owner"] if job else None,
         "enabled": enabled,
         "time": job["schedule"].get("time") if job else None,
+        "scope": ROSTER_SCOPE,
         "include_managers": include_managers,
         "manager_lane_available": _scheduled_lane_available(),
         "roster_size": len(roster),
@@ -279,7 +287,7 @@ def _build_status(job: Optional[dict], runstate: dict) -> dict:
 def _print_status(status: dict) -> None:
     """Print the rotation status as a Rich view."""
     console.print()
-    console.print("[bold cyan]Steward Rotation[/bold cyan]")
+    console.print("[bold cyan]Rounds[/bold cyan]")
     console.print()
 
     if status["job_id"] is None:
@@ -290,6 +298,7 @@ def _print_status(status: dict) -> None:
         state = "[green]ON[/green]" if status["enabled"] else "[red]OFF[/red]"
         console.print(f"  Job:      {status['job_owner']}/{status['job_id']}  {state}  daily @ {status['time']}")
 
+    console.print(f"  Scope:    {status['scope']}")
     managers = "included" if status["include_managers"] else "excluded"
     lane = "available" if status["manager_lane_available"] else "not built yet"
     console.print(f"  Managers: {managers} [dim](ai_mail scheduled lane: {lane})[/dim]")
@@ -307,7 +316,7 @@ def _print_status(status: dict) -> None:
     history = status["history"]
     console.print(f"  [yellow]Recent turns ({len(history)}):[/yellow]")
     if not history:
-        console.print("  [dim]No steward night has run yet.[/dim]")
+        console.print("  [dim]No rounds night has run yet.[/dim]")
     for turn in history:
         console.print(f"    {turn['at'][:19]}  {turn['target']:<16} {turn['outcome']}")
     console.print()

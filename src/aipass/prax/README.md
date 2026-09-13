@@ -5,7 +5,7 @@
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
 **Version:** 2.4.0 — the string `drone @prax --version` actually prints (`apps/prax.py:211`)
-**Last Updated:** 2026-09-05
+**Last Updated:** 2026-09-11
 
 ---
 
@@ -18,17 +18,29 @@ is a single-machine reading rather than a property of the system, it says so.
 Anything that could not be verified is marked **UNVERIFIED** in place rather
 than left standing green.
 
-- **Tests:** 1404 test functions across 36 files; pytest expands them to 1487
-  cases, all passing from both rootdirs. Re-measured 2026-09-08: the FPLAN-0512
-  wave rewrote 80 units in place and added none, so all three counts are
-  unchanged from 09-07.
+- **Tests:** 1421 test functions across 36 files; pytest expands them to 1510
+  cases, all passing from both rootdirs. Re-measured 2026-09-11: FPLAN-0548
+  added 7 test functions (8 cases) to `test_operations.py`. Earlier the same
+  day, FPLAN-0542 added 10 test functions (15 cases) to `test_json_handler.py`.
+  The file count is unchanged.
 - **Standards:** `drone @seedgo audit aipass @prax` — 100% on every CI-scored
   category. `drone @seedgo audit pytest_quality @prax` — 100% on all eleven v5
   rules.
-- **Last structural change:** FPLAN-0512 (2026-09-08) — the exit seam: a
-  handler that printed an error used to exit 0, and now exits 2. Described under
-  Command Routing. The same wave closed prax's six open v5 test-quality rules by
-  giving 80 nominated test units a real oracle.
+- **Last behaviour change:** FPLAN-0556 (2026-09-12). `module_discovered` and
+  `file_watcher_died` reach the trigger bus for the first time — the module-level
+  import that gated them could never succeed. Before that, FPLAN-0555 (2026-09-12):
+  the two explicit lifecycle doors, `initialize_logging_system()` and
+  `shutdown_logging_system()`, fire `logging_system_initialized` and
+  `logging_system_shutdown`, with the trigger import inside each function so the
+  logging path stays clear of it. Both described under Lifecycle events. Before that, FPLAN-0553 (2026-09-12) made
+  discovery a scheduled scan: `drone @prax discover run` daily, and the first log
+  line of a process starts no filesystem watcher — 0 inotify watches instead of
+  1,589, registry 250 modules to 1,442. Described under Discovery.
+- **Last structural change:** FPLAN-0542 (2026-09-11) — the data leg of every
+  module's json triplet is wired: each `log_operation` that lands bumps
+  `operations_total` and stamps `last_operation`/`last_updated` in
+  `<module>_data.json`, merged never replaced, and rate_tracker's save no longer
+  rebuilds that document. Described under The fleet json service.
 
 ---
 
@@ -215,7 +227,7 @@ fleet.
 ### Status
 
 ```bash
-drone @prax status                       # System health (modules, loggers, watcher state)
+drone @prax status                       # System health (modules, loggers, last discovery scan)
 drone @prax status sync                  # ⚠ STILL WIRED — recreates repo-root STATUS.md (see below)
 drone @prax status --help                # Status usage
 ```
@@ -244,6 +256,257 @@ drone @prax log-audit --help             # Audit usage
 
 `audit` reports problems but always exits 0 — it flags unbounded and critical
 files in its output, so a health gate must read the text, not `$?`.
+
+### Scheduled job — the weekly tmp sweep (DPLAN-0338, 2026-09-11)
+
+prax owns one daemon job, in `.daemon/schedule.json`: **`tmp-sweep-weekly`**.
+It is a *command* job, so the daemon tick runs it as a subprocess from this
+directory. No agent is woken and no tokens are spent.
+
+```
+drone rm --stale 10d ..        # '..' from src/aipass/prax is src/aipass
+```
+
+- **What it sweeps.** Regular `*.tmp` files sitting directly inside any `*_json`
+  folder under `src/aipass`, with an mtime more than 10 days old. Nothing else.
+  The one call covers every branch's json folder: drone crosses its
+  sibling-branch fence in stale mode only, by design, because a stale staging
+  temp is nobody's work. A staged write is temp + fsync + rename, and a process
+  killed between the two leaves the temp behind. The real document is intact
+  whatever happens to it.
+- **When.** Weekly, Sunday 04:00 local. That is the quiet hour, clear of
+  @seedgo's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot is
+  `2026-09-13T04:00:00`. The tick seeded the runstate row from it at 13:31 on
+  09-11 (`last_run` 09-06 04:00, first fire 09-13 04:00), so the job never fires
+  at whatever minute a tick first discovers it. A Sunday missed while the
+  machine was off fires on the first tick after it is back.
+- **Where it shows.** The `FIRE` and `DONE` lines (exit code, duration, output
+  tail) in daemon's `logs/run.log` and in `~/.aipass/daemon-tick.log`. The
+  runstate row `@prax/tmp-sweep-weekly` in `daemon/daemon_json/daemon_runstate.json`.
+  One row per deleted file in `.ai_central/deletions.jsonl` (`mode: stale`,
+  `age: 10d`). A mail to @devpulse when the sweep starts and another when it
+  finishes. `drone @daemon queue` lists it; `--json` carries
+  `command: drone rm --stale 10d ..` as the preview.
+- **Changing it.** To change the age, edit the command string (`10d` → `5d`;
+  `m`/`h`/`d` are accepted, zero is refused). To turn it off, set
+  `enabled: false`. `timeout_seconds` is 120 because a command job holds the
+  tick lock for its whole run.
+
+**The first sweep, run by hand 2026-09-11 13:32.** The dry run printed
+`folders scanned 1539, files matched 706 (35602375 bytes)`. The real run deleted
+all 706, freed 35.6 MB, refused 0 and added 706 ledger rows. `*.tmp` under
+`src/aipass/*/*_json` went from 1170 to 466. Every file deleted was an old-era
+`tmpXXXX.tmp` from the retired handler. The 466 left are younger than 10 days
+and age in week by week. The run took **39 s wall**; a dry run with nothing to
+delete takes 1.2 s. So the cost is about 54 ms per deleted file, because each one
+writes a ledger row and a log line. At that rate 120 s covers about 2,100 files a
+week. A timeout marks the row FAILED but keeps whatever it already deleted.
+
+**Where the orphans come from (measured 2026-09-11, cured 2026-09-12).** Each
+new-era `.<pid>_<n>.tmp` still holds the document it was staging, so its content
+names the writer. Of the 442 in `prax_json/` (09-04 to 09-11), **384 (87%)**
+were staging one record: `discovery_watcher_event` with `action: started`. That
+is the last line of `start_file_watcher()` (`handlers/discovery/watcher.py:234`).
+Since 2026-09-04 it runs on `prax-watcher-start`, the daemon thread nobody joins
+(see "The watcher start does not block the first log line"). A short-lived
+process such as a hook logs once and exits while that thread is still walking or
+writing, and interpreter exit kills a daemon thread wherever it stands, between
+temp and rename included. That dates the rise DPLAN-0338 calls "cause unknown"
+to this move: about 5 a day in the old era, 18 to 73 a day since 09-04. The
+files come from 439 distinct pids, so it is one death per process, not one bad
+process. The rest: 28 empty or partial,
+`jsonl_append` 16, `introspection_resolved` 9, `direct_log_created` 3,
+`config_loaded` 2. On 09-11 the count jumped
+to 174 in 13 hours. 57 of those 174 are the FPLAN-0542 data-leg bump staging the
+same `started` record. That bump added a second staged write to every
+`log_operation`, so each dying process now has two windows instead of one. The
+strip DPLAN-0338 leaves open (the creation-time records) is aimed at
+`introspection_resolved`, and by this count that is one of the smallest
+writers. **The cure (DPLAN-0339 step 1, 2026-09-12).** The `started` record is gone from
+`start_file_watcher()`. It had no reader — not in production, not in the tests,
+nowhere in the fleet — so nothing was traded away for it. The numbers that
+convicted it, re-measured on HEAD `d6deeb42`: the walk thread finishes at
+**0.431-0.440 s** wall (CPU 0.133 s, so 70% of it is GIL waiting) and a
+short-lived process exits at **0.394-0.433 s**, which means the record was
+written inside its own destruction window on every process, every time. Removing
+the one `log_operation` call removes both staged writes, because the data-leg
+bump rides on it.
+
+Proof, 240 throwaway processes each side under `AIPASS_TEST_LOG_DIR` with the
+live tree untouched: **6 orphans before, 0 after** — and `watcher_log.json` came
+through all 240 with its mtime unchanged, so the record is not merely unobserved,
+it is never written. The after-run carried *higher* load than the before-run
+(7.71 vs 3.71), so the race had more chance to fire, not less. First-log-line
+cost is unchanged, as expected: this step is litter, not speed. The orphan rate
+is load-dependent — the same 40-process run that gave 3 of 40 on 09-11 gave 0 of
+40 on 09-12 before the change, because a slower first line pushes exit past the
+0.43 s write. That is why the baseline here is 240 processes and not 40.
+
+What is deliberately NOT in this step: the `died` record, `trigger.fire(
+"startup")` on the first log line (94% of that line's cost), and the background
+watcher start itself. Those are separate, separately ruled. The startup fire went
+in step 3, immediately below; the other two are still open.
+
+### Discovery is a scheduled scan
+
+**DPLAN-0339 step 4, 2026-09-12.** `drone @prax discover run` walks the ecosystem
+once and writes `prax_registry.json` as a **snapshot**: modules added, modules
+whose file is gone removed, `discovered_time` carried over for anything already
+on record. It runs daily as `module-scan-daily` in `.daemon/schedule.json`
+(04:30, `timeout_seconds` 60, `notify: false`). The verb existed before and was
+archived 2026-03-18 when discovery became a per-process watch; this brings it
+back and retires the watch. Bare `drone @prax discover` shows introspection and
+scans nothing — the fleet's module standard, and the right default for a verb
+that rewrites a registry.
+
+**What it replaced.** `SystemLogger._ensure_watcher` started
+`start_file_watcher_in_background()` on the **first log line of every process**:
+a daemon thread that walked 1,589 directories and installed one inotify watch per
+directory, then died with the process. Short-lived processes never finished it.
+Long-lived processes that merely logged carried a whole-tree watch by accident —
+6,356 of this machine's 6,634 inotify watches were four such processes.
+
+**It was also not working.** Measured 2026-09-11: the registry held **250 of the
+1,442 modules a scan finds — 17%** — because a module was registered only if it
+happened to be created while some process was both alive and still walking. It
+never pruned either: the first real scan removed **55** entries, including probe
+files deleted in August and flagged as unpruned back on 09-04.
+
+| | before | after |
+|---|---|---|
+| modules in the registry | 250 | **1,442** |
+| inotify watches held by a process that logs | ~1,589 | **0** |
+| threads started by the first log line | 1 (`prax-watcher-start`) | **0** |
+| first `.info()` | 0.420 s | **0.011 s** |
+| steady state | 0.402 ms/line | **0.232 ms/line** |
+
+The first scan reported **+1,245 / -55 / 197 unchanged**; a second run over the
+unchanged tree reports **0 and 0**, which is what makes it safe to schedule. A
+full scan is 5.5 s wall end to end (the walk alone is 0.18 s).
+
+**Steady state improved, which was not the plan.** Step 3 measured 0.402 ms/line
+with the background walk still running; the walk was contending with the caller
+for the GIL for its whole life. With it gone the line costs 0.232 ms. The
+contention DPLAN-0339 measured in both directions is simply not there any more.
+
+**Logging never depended on discovery.** A module gets its log file when it logs,
+not when it is registered; nothing outside prax reads the registry, and nothing
+anywhere reads `discovered_time`. What the registry feeds is prax's own dedupe
+and the module count in `drone @prax status`.
+
+**What still starts a watcher.** `initialize_logging_system()` →
+`run_initialize` → `start_file_watcher()`, synchronously, for the life of that
+process. That door is deliberate and unchanged, and it is why the liveness check,
+the `died` record and the `file_watcher_died` fire all stay: a process that opens
+it can still lose its watchdog dispatcher (DPLAN-0305) and must still find out.
+(Both the `died` record and the fire work as of FPLAN-0556 — until then the fire
+was gated behind an import that always failed. See "The watcher's own events".)
+
+### The first log line no longer fires a startup event
+
+**DPLAN-0339 step 3, 2026-09-12.** `SystemLogger._ensure_watcher` used to end
+with `trigger.fire("startup")`, so every process in the fleet fired a startup
+event on its first log line. That fire *was* the first log line: **0.339 s of its
+0.361 s, 94%**, nearly all of it importing the `aipass.trigger` graph so that one
+event could reach one handler.
+
+What it bought was an error catch-up scan in trigger's `handle_startup`. At 5.1
+fires a minute, **100 of 100** of those runs found 0 errors — and because every
+process shared one throttle, a hook or a drone command routinely consumed the
+recovery window seconds before the scan that actually needed it. Recovery now has
+a real owner: trigger's `log_watcher_service` calls `run_error_catchup()` itself
+at service start, and `last_scan_timestamp` advances only after a scan that
+covered every file (FPLAN-0551, live since 00:28). Medic's digest lane never rode
+the fire — it calls `run_startup_catchup()` directly, deliberately.
+
+Measured here, 12 throwaway processes each side, `AIPASS_TEST_LOG_DIR` redirect,
+live tree untouched:
+
+| | median | range |
+|---|---|---|
+| first `.info()` before | 0.420 s | 0.336-0.826 |
+| first `.info()` after | **0.016 s** | 0.012-0.021 |
+| steady state before | 0.390 ms/line | 0.240-0.488 |
+| steady state after | 0.402 ms/line | 0.384-0.574 |
+
+**The first log line got ~26x cheaper; the steady state did not move.** The event
+still exists and still has exactly one listener, and `drone @trigger fire startup`
+still works — nothing fires it per-process any more, by design. Proof that the
+per-process fire is gone: trigger's `startup_log.json` ring gained **40 records
+from a batch of 40 short processes before the change and 0 after** (counted by
+timestamp, because the ring is capped at 100 rows and a raw count is saturated).
+
+### The lifecycle doors fire, the log line does not
+
+**FPLAN-0555, 2026-09-12.** Removing the hot-path `startup` fire in step 3 left
+`logger.py` with no `trigger.fire` anywhere, and seedgo's Trigger standard reads
+that file-level: its Pattern 9 checks `initialize_*_system` / `shutdown_*_system`
+only when the file contains no fire at all, so the two doors had been passing on
+a technicality the whole time. Once the technicality went, the audit dropped to
+99% and the CI gate went red (Linux run 34682737344).
+
+The cure is the one the standard actually asks for. `initialize_logging_system()`
+fires `logging_system_initialized` (carrying `modules_count`) after
+`run_initialize` returns; `shutdown_logging_system()` fires
+`logging_system_shutdown` after `run_shutdown`, last, so the event says the
+system *is* down rather than that it is going down. seedgo's event table names no
+system-lifecycle event, so those two names are prax's, following the convention
+it does state: lowercase, underscore-separated, past tense.
+
+**Both imports are inside their function, and that is the design, not a style
+choice.** `from aipass.prax import logger` and every log line the fleet writes
+must stay clear of the `aipass.trigger` import graph — that graph was 0.339 s of
+a 0.361 s first log line before step 3. A door called deliberately, once, can
+afford what a hot path cannot. Each fire is guarded `(ImportError, OSError)`
+exactly as the removed one was: these doors must still work on a host where
+trigger cannot import or inotify is exhausted, so a failed fire is a warning and
+never a failed initialize. Nothing listens to either event today, by design — the
+point of the standard is that a handler can plug in later without prax changing.
+
+Measured on a fresh interpreter that imports the logger and logs one line:
+**no `aipass.trigger` module at all**, not even a package shell, and the first
+`.info()` costs about 0.010 s. Pinned in
+`test_logger_module.py::TestLoggingPathIsTriggerFree`.
+
+### The watcher's own events were never reaching the bus
+
+**FPLAN-0556, 2026-09-12.** Proving the section above turned up three
+`aipass.trigger` *package shells* in a process that only logged, and pulling that
+thread found a fire that had never fired.
+
+`handlers/discovery/watcher.py` held a module-level
+`from aipass.trigger.apps.modules.core import trigger`. It could not succeed, and
+never had: this module is still executing its own import when it reaches that
+line → trigger's `core.py:20` does `from aipass.prax.apps.modules.logger import
+system_logger` → prax's logger does `from ...discovery.watcher import
+is_file_watcher_active` → the watcher is partially initialised and those names do
+not exist yet → `ImportError`. Python discarded `core` and kept the three parent
+packages it had already created, which is where the shells came from.
+
+The cost was not the shells. The fallback set a module-level
+`_HAS_TRIGGER = False` that nothing could ever set back to True, and both fires
+in the file sat behind it: **`module_discovered` and `file_watcher_died` had
+never once reached the bus.** `file_watcher_died` is the one that matters — it is
+the escalation path for DPLAN-0305, and the step-4 decision in DPLAN-0339 to keep
+it was made about a fire that was already dead. Nobody knew, because a gate that
+is always closed and a bus with no listener look identical from outside.
+
+The cure is the same shape as the lifecycle doors above: `_get_trigger()` imports
+at the fire site, guarded `(ImportError, OSError)` to a warning, and returns
+`None` when the host cannot give us a bus. `_HAS_TRIGGER` is gone — a flag that
+could only ever hold one value was not telling anyone anything. By the time a
+fire site runs, this module is fully imported and the cycle is gone, so the same
+import succeeds. Proven live: a throwaway that drives `on_created` and
+`_report_watcher_death` under `AIPASS_TEST_LOG_DIR` sees
+`[('module_discovered', 'fplan0556_probe_module'), ('file_watcher_died', 7)]` on
+a listener double attached to the real bus.
+
+What the 2026-08-31 Windows CI incident taught is kept in full — the guard is
+still `(ImportError, OSError)`, because trigger's own import guard can raise
+`FileNotFoundError` on a host with no readable working directory, and an optional
+dependency's fallback must be at least as wide as the failures its import can
+produce. Only the *placement* those pins encoded was dropped, and the placement
+was the defect.
 
 ### Asking for help never does the thing
 
@@ -276,7 +539,8 @@ same day. Its sibling `handlers/cli/arg_gate.py` answers the opposite question �
 ```bash
 drone @prax dashboard                    # Show dashboard sections
 drone @prax dashboard refresh --all      # Refresh all branch dashboards from centrals
-drone @prax dashboard refresh @flow      # Refresh a specific branch
+drone @prax dashboard refresh @flow      # Refresh a specific branch (core, then the caller's project registry)
+drone @prax dashboard refresh            # Refresh the branch the CALLER stands in
 drone @prax dashboard status             # Show dashboard status
 drone @prax dashboard template           # Show the template schema
 drone @prax dashboard template-status    # Per-branch template sync state
@@ -288,6 +552,40 @@ drone @prax dashboard --help             # Dashboard usage
 `refresh --all` writes every branch's `DASHBOARD.local.json`. It accepts and
 silently ignores unknown flags, so `refresh --all --dry-run` is a real
 fleet-wide write, not a preview — there is no dry-run mode.
+
+**`refresh @branch` reaches external projects (2026-09-11, FPLAN-0548).** The
+name is looked up in `AIPASS_REGISTRY.json` first, exactly as before. On a
+miss, prax looks in the caller's own project registry: the nearest
+`*_REGISTRY.json` at or above the directory the caller stands in. A relative
+path there resolves against that registry's own directory. A name declared in
+both registries goes to core, and a warning names both rows. Before this, a
+Vera Studio branch running `drone @prax dashboard refresh @verify` got
+`Branch 'VERIFY' not found in registry` (exit 2), which is step 2 of the
+post-compact re-ground. So every external branch's dashboard stayed as it was:
+verify's still said `last_updated` 2026-07-09 and `new_mail` 0, while its inbox
+held 5 unread. `--all` is unchanged and still covers core only.
+
+**The caller's directory is `AIPASS_CALLER_CWD`, not the process cwd.** drone
+runs every branch with its cwd set to the *target* branch, so inside prax
+`Path.cwd()` is always prax. Measured the same day: a bare
+`drone @prax dashboard refresh` from `src/aipass/flow` refreshed **PRAX**. Both
+the project walk and the bare `refresh` now start from `_caller_dir()` in
+`apps/modules/dashboard.py`. That reads `AIPASS_CALLER_CWD` first (an empty
+value counts as unset) and falls back to the process cwd only for a direct run.
+With neither, the bare form refuses and tells you to name the branch. It is
+prax's one sanctioned working-directory read, the single entry in
+`tests/test_repo_root.py`'s allowlist, so it stays in the module. The handler
+`resolve_branch_path(ref, caller=None)` takes the directory as an argument and
+never reads a cwd. Called without one, it is core-only, as before.
+
+**Mail counts come from the branch's own inbox, never from the ai_mail central.**
+`calculate_quick_status` counts `<branch>/.ai_mail.local/inbox.json`. The
+refresh also builds an `ai_mail` section from `AI_MAIL.central.json`, but
+nothing reads it and it is popped before save. So a branch with no central row,
+which is every external branch today, still gets its true count. Pinned in
+`tests/test_operations.py`: a central listing only FLOW, a branch inbox with 3
+new, and `new_mail` 3. The comment in `refresh.py` used to say the section fed
+the counts, and it misled a measurement that same day. It has been corrected.
 
 ### The discovery watcher cannot kill its own thread
 
@@ -388,7 +686,9 @@ hook before ruling, and the diagnosis does not survive:
 **Importing prax writes nothing. The first `logger.info()` writes 26 times, and
 the second writes nothing.** All three spellings are identical because the writes
 come from the *call*, not the binding — the first call is what starts the file
-watcher, fires `trigger.fire("startup")` and auto-creates the per-module JSON.
+watcher and auto-creates the per-module JSON. (It also fired
+`trigger.fire("startup")` when this was measured; that fire was removed in
+DPLAN-0339 step 3, see below.)
 Changing the recommended import would have moved a number that does not depend
 on it.
 
@@ -535,9 +835,32 @@ itself with `for_module(__file__)`. Branch code calls its own shim
 (`from aipass.<branch>.apps.handlers.json import json_handler`) and gets the
 bound names — `load_json`, `save_json`, `log_operation`, and the rest.
 
+**Three documents per module, three jobs (FPLAN-0542, 2026-09-11).** The log
+(`<module>_log.json`) is the per-module operation trail, one entry per
+`log_operation`, rotating at the config's cap. The data document
+(`<module>_data.json`) is lifetime state: every log write that lands also bumps
+`operations_total` and stamps `last_operation` and `last_updated`, merging those
+keys into the document and never replacing it, and a data document missing its
+base keys (`created`/`last_updated` — `prax_json/prax_logger_data.json` is
+literally `{}`) is healed, not refused. The config (`<module>_config.json`) is
+the rotation cap, `config.max_log_entries`, default 100. The bump is telemetry:
+a data write that fails logs a warning and `log_operation` still answers the
+log's own `True`. There is no success/failure counter, because the call carries
+no success signal; the old-era `operations_successful`/`operations_failed` keys
+are left exactly as they are. The bump is a read-modify-write like the log
+itself, so under racing writers `operations_total` is a lower bound, not an
+exact count. It also costs one more staged write per call: median 9.5 ms before,
+14.7 ms after, per `log_operation` (a single-machine reading, 5 interleaved runs
+of 200 calls). `rate_tracker` keeps its `files` in that same
+`rate_tracker_data.json`, and its save now sets only `files` (and `module_name`
+when absent) on the document it loaded. The old save rebuilt the whole dict,
+which re-stamped `created` on every scan and would have wiped the counters.
+
 **Healing is per module, per call — there is no sweep.** `ensure_json_exists`
 regenerates exactly one document (`<module>_<type>.json`) when it is missing,
-empty, unreadable or structurally invalid, and `ensure_module_jsons` does the
+empty, unreadable or structurally invalid. The one exception is a data document
+that parses as a dict: it is healed in place (missing base keys added, every
+other key kept) rather than regenerated. `ensure_module_jsons` does the
 three types for one module. Nothing walks a directory and nothing repairs
 another module's documents: a self-heal that ranges wider than the call that
 triggered it would rewrite state nobody asked about, in a process that may only
@@ -598,6 +921,11 @@ the module's `time` to take the sleep out of the bounded retry — 45 contract
 tests across 15 branches went red on `AttributeError`. Names come from
 `os.getpid()` + `itertools.count()` now. Worth writing down: the fleet contract
 caught a prax defect within minutes of it existing.
+
+**Superseded 2026-09-12 (DPLAN-0339 step 4): the logger starts no watcher at all
+any more.** The section below is the record of how the cost was chased around
+the process before the walk was removed from the logging path entirely; see
+"Discovery is a scheduled scan" above.
 
 **The watcher start does not block the first log line.** `SystemLogger._ensure_watcher`
 called `start_file_watcher()` inline, and watchdog installs one inotify watch per
@@ -786,9 +1114,10 @@ prax/
 │       ├── registry/                  # Module registry load/save
 │       ├── status/                    # STATUS.md sync handler (trigger unwired, but `status sync` still reaches it)
 │       └── watcher/                   # Background system watchers
+├── .daemon/schedule.json              # Daemon command job: tmp-sweep-weekly (DPLAN-0338)
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1404 test functions, 36 files (1487 cases)
+└── tests/                             # 1421 test functions, 36 files (1510 cases)
 ```
 
 ### Design Pattern
@@ -869,8 +1198,8 @@ through `error()`.
 
 ## Tests
 
-**1404 test functions across 36 files; pytest expands them to 1487 cases**, all
-passing from both rootdirs (measured 2026-09-07). The two numbers differ because
+**1421 test functions across 36 files; pytest expands them to 1510 cases**, all
+passing from both rootdirs (measured 2026-09-11). The two numbers differ because
 of parametrisation — the table below counts collected cases, which is what a
 suite run reports.
 
@@ -878,9 +1207,9 @@ suite run reports.
 |-----------|-------|----------|
 | test_filesystem_handler.py | 141 | Multi-CLI adapters, Codex branch detection |
 | test_monitoring_handlers.py | 141 | Branch detector, stream output, event handling, the registry read that opens instead of checking |
-| test_operations.py | 96 | Dashboard operations, write-through |
+| test_operations.py | 104 | Dashboard operations, write-through; `refresh @branch` through the caller's project registry (core wins a collision), the caller's directory over the process cwd, mail counted from the branch's own inbox |
+| test_json_handler.py | 96 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the data-leg bump and heal (incl. rate_tracker sharing the document), the shim binds-never-wraps |
 | test_log_watcher.py | 84 | Log file tailing, agent activity parsing |
-| test_json_handler.py | 81 | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the shim binds-never-wraps |
 | test_monitor_module.py | 80 | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
 | test_config.py | 61 | Config loading, path resolution, log levels |
@@ -917,9 +1246,15 @@ suite run reports.
 
 ### Depends On
 - `aipass.cli` — Console output, headers, success/error formatting (imported)
-- `aipass.trigger` — Optional event firing (`module_discovered`, `startup`,
+- `aipass.trigger` — Optional event firing (`module_discovered`,
   `runaway_log_detected`, `file_watcher_died`). Every import site is guarded by
-  `except (ImportError, OSError)`: prax runs without it.
+  `except (ImportError, OSError)`: prax runs without it. The logging path no
+  longer touches it at all — the per-process `startup` fire was removed in
+  DPLAN-0339 step 3, and the events that remain fire only from the discovery
+  watcher, which now runs only when an operator starts it explicitly.
+- `watchdog` is no longer on the logging path either (step 4). It is imported by
+  the discovery watcher and by Mission Control, both of which are started on
+  purpose by somebody.
 - `watchdog` — File system monitoring (inotify + polling fallback)
 - Python stdlib (`pathlib`, `logging`, `threading`, `argparse`, `importlib`)
 - **@drone is not an import.** prax never imports drone; it *parses* the
@@ -953,7 +1288,7 @@ suite run reports.
 
 ---
 
-*Last Updated: 2026-09-07*
+*Last Updated: 2026-09-11*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -200,11 +200,38 @@ def print_template():
     console.print()
 
 
+def _caller_dir() -> "Path | None":
+    """The directory the CALLER stands in, which under drone is not this process's cwd.
+
+    drone runs every branch with its cwd set to the TARGET branch
+    (``router_handler.execute_command(cwd=branch_path)``), so inside prax
+    ``Path.cwd()`` is prax's own directory wherever the caller stood. Measured
+    2026-09-11: a bare ``drone @prax dashboard refresh`` from ``src/aipass/flow``
+    refreshed PRAX. drone hands the caller's directory over as
+    ``AIPASS_CALLER_CWD``, so that answers first. The process cwd is the answer
+    only when ``apps/prax.py`` is run directly, where it IS the caller's.
+
+    This is prax's one sanctioned working-directory read (the allowlist in
+    tests/test_repo_root.py names this file), so it lives here, not in a
+    handler. An empty variable is absence, not a location. A deleted working
+    directory is no answer, never a crash.
+    """
+    raw = os.environ.get("AIPASS_CALLER_CWD")
+    if raw:
+        return Path(raw)
+    try:
+        return Path.cwd()
+    except OSError as exc:
+        logger.warning("No caller directory: the working directory is unreadable (%s)", exc)
+        return None
+
+
 def _resolve_branch_path(branch_ref: str) -> Path:
     """
-    Resolve @branch reference to filesystem path via AIPASS_REGISTRY.json.
+    Resolve @branch reference to filesystem path: AIPASS_REGISTRY.json, then the caller's project registry.
 
-    Delegates to handler for file I/O (seedgo modules standard).
+    Delegates to handler for file I/O (seedgo modules standard), handing it the
+    caller's directory so an external project's branch resolves from inside it.
 
     Args:
         branch_ref: Branch reference like "@flow" or "@vera"
@@ -215,7 +242,7 @@ def _resolve_branch_path(branch_ref: str) -> Path:
     Raises:
         FileNotFoundError: If registry missing or branch not found
     """
-    return resolve_branch_path(branch_ref)
+    return resolve_branch_path(branch_ref, _caller_dir())
 
 
 def _handle_refresh(args: List[str]) -> None:
@@ -264,8 +291,12 @@ def _handle_refresh(args: List[str]) -> None:
             error(f"Failed: {result.get('error', 'unknown')}")
         return
 
-    # No args: refresh current branch (detect from CWD)
-    cwd = Path.cwd()
+    # No args: refresh the CALLER's branch. Not Path.cwd(): drone runs prax
+    # with its cwd at prax, so that refreshed PRAX from anywhere (2026-09-11).
+    cwd = _caller_dir()
+    if cwd is None:
+        error("No caller directory, so no branch to refresh. Name it: drone @prax dashboard refresh @branch")
+        return
     # Walk up to find a directory that has DASHBOARD.local.json or is a branch
     branch_path = cwd
     # Try CWD itself first, then walk up

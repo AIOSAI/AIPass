@@ -92,6 +92,28 @@ class TestWrittenBeforeAnythingSpawns:
         assert json.loads(_lines(repo)[0])["subject"] == ""
 
 
+class TestADeclinedWakeBackIsOnTheRow:
+    """wake_branch(wake_back=False) — @daemon's scheduled nudges — says so on the
+    row, and ONLY then: an absent key means the default, so every default row
+    stays byte-identical to the rows written before the option existed."""
+
+    def test_a_declined_wake_back_is_recorded_and_survives_the_pid_annotation(self, repo):
+        dispatch_id = register.open_dispatch("@daemon", "@api", "", 7200, repo_root=repo, wake_back=False)
+
+        assert dispatch_id
+        assert json.loads(_lines(repo)[0])["wake_back"] is False
+        assert register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+        assert _only_open_row(repo)["wake_back"] is False
+
+    def test_a_default_row_carries_no_wake_back_key(self, repo):
+        register.open_dispatch("@devpulse", "@api", "one", 7200, repo_root=repo)
+        register.open_dispatch("@devpulse", "@api", "two", 7200, repo_root=repo, wake_back=True)
+
+        rows = [json.loads(line) for line in _lines(repo)]
+        assert len(rows) == 2
+        assert all("wake_back" not in row for row in rows)
+
+
 class TestAppendOnly:
     """Closing rewrites nothing. The promise stays visible after it is answered."""
 

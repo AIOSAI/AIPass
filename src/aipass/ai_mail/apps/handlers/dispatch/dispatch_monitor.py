@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-03-02
-# Modified: 2026-08-21
+# Modified: 2026-09-12
 # =============================================
 
 """
@@ -22,6 +22,10 @@ Wraps a Claude agent spawn. Instead of fire-and-forget Popen, this process:
    result JSON parsed from stdout for diagnostics)
 5. Cleans up the dispatch lock it owns (PID-verified — a successor
    monitor's lock is never deleted)
+6. Wakes the dispatcher back on completion (mails it, if a manager) —
+   unless the caller passed --no-wake-back (wake_branch(wake_back=False),
+   e.g. @daemon's scheduled nudges), which is logged and recorded as
+   "declined" in dispatch_wake.log
 
 Spawned by wake.py in place of claude directly. The lock PID points to
 the monitor (which stays alive as long as claude does), so lock validity
@@ -92,6 +96,14 @@ def _connect_broker(repo_root: Path, branch_name: str) -> socket.socket:
 
 MAX_WAKE_DEPTH = 3
 
+# Monitor flag, read between the four positionals and "--" (wake.py builds it
+# from wake_branch(wake_back=False)). argv, not env: the monitor's env becomes
+# the agent's, and would leak the choice into any dispatch the agent makes.
+NO_WAKE_BACK_FLAG = "--no-wake-back"
+# The dispatch_wake.log tag main() records in place of a wake result when the
+# caller declined the wake-back — _wake_sender is then never called.
+WAKE_RESULT_DECLINED = "declined"
+
 
 def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str) -> str:
     """Wake the dispatcher back after target completion.
@@ -106,6 +118,9 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
     Returns a result tag for the dispatch_wake.log:
       success, blocked_occupied, blocked_locked, blocked_depth,
       skipped_sender, skipped_self, mailed_manager, failed_manager_mail, failed
+
+    Never called when the caller passed --no-wake-back: main() records
+    WAKE_RESULT_DECLINED ("declined") in that line instead.
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -179,7 +194,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
     running job (the OSPREY kill). The defect was never the blocklist: it was that
     wake_branch returned True having done nothing, so the message built for the
     sender was dropped and the manager was TOLD it would be woken and then was not
-    (@devpulse, confirmed live twice on 2026-08-21). A manager learned a dispatch
+    (@devpulse, three logged cases on 2026-08-21 alone). A manager learned a dispatch
     had finished only if the agent happened to volunteer an email.
 
     Same transport as _send_bounce, for the same reason: `drone` resolves routing,
@@ -222,7 +237,11 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, lock_file: s
 
 
 def _log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
-    """Append a wake-back result line to dispatch_wake.log under target's logs/."""
+    """Append a wake-back result line to dispatch_wake.log under target's logs/.
+
+    ``result`` is one of _wake_sender's tags, or "declined" when the caller
+    passed --no-wake-back.
+    """
     lock_path = Path(lock_file).resolve()
     logs_dir = lock_path.parent.parent / "logs"
     log_file = logs_dir / "dispatch_wake.log"
@@ -753,9 +772,12 @@ def _run_with_startup_check(
 
 def main():
     """
-    Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> -- <claude_args...>
+    Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back] -- <claude_args...>
 
     Runs claude with startup health check and auto-retry, handles cleanup.
+    Flags sit between the four positionals and "--"; none is today's default.
+    --no-wake-back: the caller declined the completion wake-back (sender is
+    still used for bounce mail).
     """
     if len(sys.argv) < 6 or "--" not in sys.argv:
         logger.warning("[monitor] Invalid arguments: %s", sys.argv)
@@ -766,6 +788,9 @@ def main():
     lock_file = sys.argv[2]
     sender = sys.argv[3]
     stderr_log = sys.argv[4]
+    # Only the window before "--": everything after it is claude's argv.
+    monitor_flags = sys.argv[5:sep_idx]
+    wake_back = NO_WAKE_BACK_FLAG not in monitor_flags
     claude_cmd = sys.argv[sep_idx + 1 :]
 
     if not claude_cmd:
@@ -1082,7 +1107,19 @@ def main():
     # assembled, and the report still lands before the lock is released. The
     # ordering below is the whole of FPLAN-0452 P0's second fix and it is not
     # arbitrary — see the block comment on the report write.
-    wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+    if wake_back:
+        wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
+    else:
+        # The caller declined (wake_branch(wake_back=False), e.g. @daemon's
+        # scheduled nudges): a nudge owes no reply, and waking the sender back
+        # only burned a session reading an empty inbox. No wake and no manager
+        # mail — _wake_sender owns both. Bounce mail above still used sender.
+        logger.info(
+            "[monitor] Wake-back declined by caller: %s finished, sender %s not woken or mailed",
+            branch_email,
+            sender,
+        )
+        wake_result = WAKE_RESULT_DECLINED
     _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
 
     # ─── The completion report, written BEFORE the lock is released ────────

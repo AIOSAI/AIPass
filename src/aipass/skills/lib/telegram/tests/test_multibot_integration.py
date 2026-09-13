@@ -399,3 +399,56 @@ class TestChunkText:
         assert len(chunks) == 2
         assert len(chunks[0]) == 100
         assert len(chunks[1]) == 100
+
+
+# ============================================================
+# A HOST WITHOUT TMUX (FPLAN-0554 round three)
+# ============================================================
+
+
+class TestTmuxManagerWithoutTmux:
+    """session_exists is called BEFORE the try in send_message, kill_session and
+    get_session_pane, so a raise there escaped all three."""
+
+    @patch(
+        "aipass.skills.lib.telegram.apps.handlers.tmux_manager.subprocess.run",
+        side_effect=FileNotFoundError("tmux"),
+    )
+    def test_session_exists_is_false(self, mock_run):
+        assert tg_tmux.session_exists("dev_central") is False
+        assert mock_run.call_count == 1
+
+    @patch(
+        "aipass.skills.lib.telegram.apps.handlers.tmux_manager.subprocess.run",
+        side_effect=FileNotFoundError("tmux"),
+    )
+    def test_kill_session_has_nothing_to_kill(self, mock_run):
+        assert tg_tmux.kill_session("dev_central") is True
+        assert mock_run.call_count == 1
+
+    @patch(
+        "aipass.skills.lib.telegram.apps.handlers.tmux_manager.subprocess.run",
+        side_effect=FileNotFoundError("tmux"),
+    )
+    def test_get_session_pane_is_none(self, mock_run):
+        assert tg_tmux.get_session_pane("dev_central") is None
+        assert mock_run.call_count == 1
+
+    @patch(
+        "aipass.skills.lib.telegram.apps.handlers.tmux_manager.subprocess.run",
+        side_effect=FileNotFoundError("tmux"),
+    )
+    def test_send_message_is_false(self, mock_run):
+        import asyncio
+
+        assert asyncio.run(tg_tmux.send_message("dev_central", "hello")) is False
+        assert mock_run.call_count == 1
+
+    def test_send_rename_reaches_exec_and_does_not_raise(self, monkeypatch):
+        monkeypatch.setattr(tg_tmux, "RENAME_DELAY", 0)
+        with patch(
+            "aipass.skills.lib.telegram.apps.handlers.tmux_manager.subprocess.run",
+            side_effect=FileNotFoundError("tmux"),
+        ) as mock_run:
+            tg_tmux._send_rename("telegram-dev_central", "dev_central")
+        assert mock_run.call_count == 1

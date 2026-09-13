@@ -320,3 +320,180 @@ class TestDiscoverPythonModules:
         scanner_module.discover_python_modules()
         mocks = mock_prax_infrastructure
         mocks.json_handler.log_operation.assert_called()
+
+
+# =============================================
+# scan.run_scan — the registry as a truthful snapshot (DPLAN-0339 step 4)
+# =============================================
+
+
+@pytest.fixture()
+def scan_module(monkeypatch):
+    """Import scan.py with its three collaborators replaced by doubles.
+
+    run_scan is orchestration: walk, diff, save. Doubling the walk and the
+    registry is what lets a test state a tree and read back the arithmetic.
+    """
+    import aipass.prax.apps.handlers.discovery.scan as scan_mod
+
+    scan_mod = importlib.reload(scan_mod)
+    saved = {}
+
+    def fake_save(modules, scan_stats=None):
+        saved["modules"] = modules
+        saved["scan_stats"] = scan_stats
+        return True
+
+    monkeypatch.setattr(scan_mod, "save_module_registry", fake_save)
+    monkeypatch.setattr(scan_mod, "json_handler", MagicMock())
+    scan_mod._saved = saved
+    return scan_mod
+
+
+def _walk(scan_mod, monkeypatch, before, found):
+    monkeypatch.setattr(scan_mod, "load_module_registry", lambda: before)
+    monkeypatch.setattr(scan_mod, "discover_python_modules", lambda: found)
+
+
+class TestRunScan:
+    """A scan replaces the registry; it does not merge into it."""
+
+    def test_counts_added_removed_and_unchanged(self, scan_module, monkeypatch):
+        """The three counts are the set arithmetic of before against found."""
+        _walk(
+            scan_module,
+            monkeypatch,
+            before={"kept": {}, "gone": {}},
+            found={"kept": {}, "fresh": {}},
+        )
+
+        result = scan_module.run_scan()
+
+        assert result["added"] == ["fresh"]
+        assert result["removed"] == ["gone"]
+        assert result["unchanged"] == 1
+        assert result["total"] == 2
+
+    def test_saved_registry_is_the_walk_not_a_merge(self, scan_module, monkeypatch):
+        """The defect this cures: a module whose file is gone stayed on record
+        forever, because the incremental path only ever added."""
+        _walk(scan_module, monkeypatch, before={"gone": {"file_path": "/dead.py"}}, found={"live": {}})
+
+        scan_module.run_scan()
+
+        assert "gone" not in scan_module._saved["modules"]
+        assert sorted(scan_module._saved["modules"]) == ["live"]
+
+    def test_discovered_time_is_carried_over_for_a_known_module(self, scan_module, monkeypatch):
+        """discovered_time means FIRST seen. A scan is not a rediscovery, so a
+        module already on record keeps its original stamp."""
+        _walk(
+            scan_module,
+            monkeypatch,
+            before={"old": {"discovered_time": "2026-07-28T02:39:24+00:00"}},
+            found={"old": {"discovered_time": "2026-09-12T00:00:00+00:00"}},
+        )
+
+        scan_module.run_scan()
+
+        assert scan_module._saved["modules"]["old"]["discovered_time"] == "2026-07-28T02:39:24+00:00"
+
+    def test_a_new_module_keeps_the_stamp_the_walk_gave_it(self, scan_module, monkeypatch):
+        """Nothing to carry over means the walk's own value stands."""
+        _walk(scan_module, monkeypatch, before={}, found={"fresh": {"discovered_time": "2026-09-12T00:00:00+00:00"}})
+
+        scan_module.run_scan()
+
+        assert scan_module._saved["modules"]["fresh"]["discovered_time"] == "2026-09-12T00:00:00+00:00"
+
+    def test_second_scan_of_an_unchanged_tree_reports_nothing(self, scan_module, monkeypatch):
+        """Idempotence is what makes this safe to schedule daily."""
+        tree = {"a": {}, "b": {}}
+        _walk(scan_module, monkeypatch, before=tree, found=dict(tree))
+
+        result = scan_module.run_scan()
+
+        assert result["added"] == []
+        assert result["removed"] == []
+        assert result["unchanged"] == 2
+
+    def test_scan_stats_go_to_the_registry_for_the_status_line(self, scan_module, monkeypatch):
+        """`drone @prax status` reads these; they are counts, never name lists."""
+        _walk(scan_module, monkeypatch, before={"gone": {}}, found={"fresh": {}})
+
+        scan_module.run_scan()
+        stats = scan_module._saved["scan_stats"]
+
+        assert stats["added"] == 1
+        assert stats["removed"] == 1
+        assert stats["total"] == 1
+        assert stats["timestamp"]
+
+    def test_a_failed_write_is_reported_not_swallowed(self, scan_module, monkeypatch):
+        """The counts describe the walk; `saved` is the only word on the file."""
+        _walk(scan_module, monkeypatch, before={}, found={"a": {}})
+        monkeypatch.setattr(scan_module, "save_module_registry", lambda modules, scan_stats=None: False)
+
+        assert scan_module.run_scan()["saved"] is False
+
+
+# =============================================
+# The discover module's command gate (DPLAN-0339 step 4)
+# =============================================
+
+
+@pytest.fixture()
+def discover_module(monkeypatch):
+    """Import discover.py with the scan and the console doubled."""
+    import aipass.prax.apps.modules.discover as discover_mod
+
+    discover_mod = importlib.reload(discover_mod)
+    monkeypatch.setattr(discover_mod, "console", MagicMock())
+    monkeypatch.setattr(discover_mod, "success", MagicMock())
+    monkeypatch.setattr(discover_mod, "error", MagicMock())
+    monkeypatch.setattr(discover_mod, "json_handler", MagicMock())
+    monkeypatch.setattr(discover_mod, "logger", MagicMock())
+    return discover_mod
+
+
+class TestDiscoverCommandGate:
+    """A module that does not check the command name answers for every module.
+
+    Found live during the build: without the guard, `discover` sorted first in
+    the entry point's glob and ran a full registry rewrite when someone typed
+    `drone @prax status`.
+    """
+
+    def test_another_modules_command_is_declined(self, discover_module, monkeypatch):
+        scanned = MagicMock()
+        monkeypatch.setattr(discover_module, "run_scan", scanned)
+
+        assert discover_module.handle_command("status", []) is False
+        scanned.assert_not_called()
+
+    def test_no_args_shows_introspection_and_scans_nothing(self, discover_module, monkeypatch):
+        """A bare word must not rewrite the registry."""
+        scanned = MagicMock()
+        monkeypatch.setattr(discover_module, "run_scan", scanned)
+
+        assert discover_module.handle_command("discover", []) is True
+        scanned.assert_not_called()
+
+    def test_run_performs_the_scan(self, discover_module, monkeypatch):
+        monkeypatch.setattr(
+            discover_module,
+            "run_scan",
+            lambda: {"added": [], "removed": [], "unchanged": 3, "total": 3, "saved": True},
+        )
+
+        assert discover_module.handle_command("discover", ["run"]) is True
+
+    def test_an_unknown_subcommand_is_refused(self, discover_module, monkeypatch):
+        """`discover scna` must not be indistinguishable from `discover`."""
+        refused = MagicMock(side_effect=RuntimeError("refused"))
+        monkeypatch.setattr(discover_module, "refuse", refused)
+        monkeypatch.setattr(discover_module, "run_scan", MagicMock())
+
+        with pytest.raises(RuntimeError):
+            discover_module.handle_command("discover", ["scna"])
+        refused.assert_called_once()

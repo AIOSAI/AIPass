@@ -4,8 +4,8 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through a 7-gate pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
-**Version:** 2.6.0
-**Last Updated:** 2026-09-08
+**Version:** 2.7.0
+**Last Updated:** 2026-09-12
 
 ## Quick Start
 
@@ -161,7 +161,7 @@ kept and marked, because those files are still on disk and the distinction is re
 
 | Event | Handler | Trigger | Action |
 |-------|---------|---------|--------|
-| `startup` | `startup.py` | First prax log call in **any** process (`prax` `logger.py`, in `_ensure_watcher()`) | Error catch-up scan over `system_logs/` — that is the whole handler (`startup.py:369-377`). It does **not** check memory rollover; this table claimed it did until 2026-08-14. The scan fires `error_detected` for what it finds — the handler's own docstring says `error_logged`, which is wrong and is tracked as a code fix, not a README one |
+| `startup` | `startup.py` | First prax log call in **any** process (`prax` `logger.py:132`, in `_ensure_watcher()`) — **plus**, since 2026-09-12, an explicit call from `log_watcher_service.main()` that does not use the bus at all | Error catch-up scan over `system_logs/` — that is the whole handler. It does **not** check memory rollover; this table claimed it did until 2026-08-14. The scan fires `error_detected` for what it finds. See "Who runs the catch-up" below: the per-process fire is prax's and is scheduled for removal (DPLAN-0339 step 3), which is why the service now runs its own |
 | `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 7-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
 | `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |
 | `memory_template_updated` | `memory_template_updated.py` | **Nothing fires it.** No `fire("memory_template_updated")` call site exists anywhere in the fleet (measured 2026-09-05) | **Stub — does nothing.** Writes one `json_handler` operation line and returns. Its own docstring claims it calls memory's `push_templates()`; there is no such import and no such call. The real build is planned in DPLAN-0318 |
@@ -274,6 +274,74 @@ A content mute means "expect error lines from me while I build" — it says noth
 Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` field — three values, not two: `suppressed` (alert dropped), `delivered` (sent anyway) and `observed` (the observe-only WARNING outcome: recorded, so it is not a suppression). Entries predating the field are all suppressions. Tonight the file holds 37 lines: 31 pre-field `branch_muted`, 5 `suppressed`/`cooldown`, 1 `observed`/`observe_only` (2026-09-05).
 
 **Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Handles SIGTERM/SIGINT for clean shutdown.
+
+## Who runs the catch-up, and when the cursor moves
+
+The error catch-up scans `system_logs/` for `ERROR` lines that landed while no
+watcher was up, and fires `error_detected` for each one so the registry and Medic
+see it. Two things about it were wrong until 2026-09-12 (DPLAN-0339 step 2), and
+both were found by re-measuring DPLAN-0298's August claims on live code.
+
+**It reached the service by accident.** `_run_error_catchup` hangs off the
+`startup` event, and the only thing in the fleet that fired `startup` was prax's
+logger on the first log line of *every* process (`prax/apps/modules/logger.py:132`).
+So `trigger-log-watcher.service` — the one long-lived process that exists to own
+recovery — ran its catch-up as a side effect of its own first log line, exactly
+like a two-second `drone` command did. `log_watcher_service.main()` now calls
+`medic.run_error_catchup(trigger.fire)` itself, once, **after** the watchers are
+up — through the medic *module*, because the service is an entry point and entry
+points import modules, not handlers (seedgo encapsulation rule 3).
+The order is deliberate: an error arriving between the scan and the first watch
+would fall through a gap if the scan ran first, whereas overlap is safe because
+the registry dedupes on fingerprint.
+
+This is the prerequisite for step 3, where prax drops the per-process fire. Until
+then both paths run; the second finds nothing because the scan dedupes on
+persisted hashes.
+
+The call is a direct one and deliberately **not** `trigger.fire("startup")`: a
+fire with no registered listener returns `handlers: 0` and reads as success, so
+unwiring the handler would silence recovery without saying so. Trigger has that
+exact failure live elsewhere — prax fires `file_watcher_died` into zero handlers
+— and this path must not join it. Pinned 2026-09-12: `handle_startup` is the **only** listener on
+`startup` anywhere in the fleet, and `logger.py:132` the only production firer —
+every other mention is documentation. A human can still fire it by hand with
+`drone @trigger fire startup`, which is the generic `fire <event>` door and not a
+dependency.
+
+**Why that mattered more than tidiness.** `last_scan_timestamp` in
+`error_catchup.json` is ONE value shared by every process in the fleet. At the
+measured 5.1 fires/min, an unrelated hook or `drone` command advanced it seconds
+before the service scanned, so the window the service exists to cover was usually
+already consumed. Measured 2026-09-11: **0 of the last 100 catch-up runs found
+anything.**
+
+**The cursor now advances only on a completed scan** (row 12 of DPLAN-0298, open
+since August). `_scan_system_logs_for_errors` returns a `ScanOutcome(errors,
+completed, reason)`. `completed` is True only when every candidate file was read
+to its end; any DPLAN-037 limit — the time budget, `MAX_ERRORS_PER_SCAN` — or a
+file skipped for exceeding `MAX_FILE_SIZE_BYTES` makes it False, and
+`last_scan_timestamp` then stays where it was so the next run re-covers the same
+window. It used to advance unconditionally, which silently discarded the window
+an aborted scan never reached: those files fell behind the new cutoff and their
+errors were unrecoverable.
+
+Two properties keep that safe rather than merely cautious:
+
+- **Processed hashes are persisted either way.** They are what stops a re-covered
+  window from re-dispatching errors already handled. Holding the cursor back
+  while dropping the hashes would turn one abort into a duplicate storm.
+- **The cost of holding it back is bounded by `MAX_LOOKBACK_HOURS`**, so the worst
+  case is a 24-hour window instead of a one-minute one. Measured on this tree,
+  363 files: **181 ms** cold against **161 ms** warm — a 20 ms difference. That
+  bound is why a permanently oversized file can be treated as "not completed"
+  without inventing a softer second verdict for it.
+
+The `startup_catchup` record in `trigger_json/startup_log.json` now carries
+`completed` and `reason` alongside `errors_found`, and a held cursor also writes
+its reason to `logs/medic_suppressed.jsonl`. Without those, an operator cannot
+tell "found nothing" from "never looked at half the tree" — at `errors_found: 0`
+the two readings are identical.
 
 **`system_logs/` has exactly one owner: the branch watcher** (Patrick's ruling,
 2026-08-14). Both watchers used to register the directory.
@@ -449,10 +517,10 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1017 test functions in 28 files (pytest expands to 1051)
+├── tests/                          # 1034 test functions in 28 files (pytest expands to 1068)
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
-│   ├── error_catchup.json          # Startup catch-up scan position + hashes
+│   ├── error_catchup.json          # Catch-up cursor + hashes — ONE value shared fleet-wide
 │   ├── error_registry.json         # All tracked errors
 │   ├── escalation_state.json       # Repeat-signature counts + digest cooldowns
 │   ├── trigger_cb_state.json       # Circuit breaker persistence
@@ -545,9 +613,11 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-**1017 test functions across 28 test files; pytest expands them to 1051 cases**, all
-passing (`1051 passed`, 0 failed, 0 skipped, 17.8s from the repo root and 25.1s from this
-directory — measured 2026-09-08). It read 1015 / 28 / 1049 the evening before; FPLAN-0508
+**1034 test functions across 28 test files; pytest expands them to 1068 cases**, all
+passing (`1068 passed`, 0 failed, 0 skipped, 15.2s from the repo root and 15.1s from this
+directory — measured 2026-09-12). It read 1017 / 28 / 1051 on 2026-09-08; FPLAN-0551 added
+sixteen cases across three existing files — the row-12 cursor gate, the service's own
+catch-up call, and the medic module door it reaches it through — and no new test file. FPLAN-0508
 wave 9 took every v5 pytest_quality rule to 100 by rewriting eighteen units in place, and
 added exactly two functions — both in `test_trigger_entry.py`, pinning the new exit seam.
 It read 1006 / 28 / 1039 earlier on 2026-09-07; FPLAN-0492 wave 5 added
@@ -598,15 +668,15 @@ docs-only truth pass — and each one is either owned here or already mailed out
 **Running now:** medic ENABLED, log watcher running under systemd, 12 branches content-muted
 (all auto-expiring inside 24h), 0 volume mutes. Error registry: 476 tracked errors —
 437 `new`, 37 `resolved`, 2 `suppressed`. Lifetime counters: 2116 suppressions, 217 rate
-limits. Suite 1049 passed; audit 100 with bypasses, 98 without.
+limits. Suite 1068 passed; audit 100 with bypasses, 98 without (2026-09-12).
 
 | Issue | Where | State |
 |---|---|---|
 | **Unexplained work in my own tree.** On 2026-09-07 01:30–01:32 `test_json_handler.py` was archived to `tests/.archive/deleted_2026-09-07_test_json_handler.py` and four test functions were removed from `test_error_detected.py` (50→49) and `test_log_watcher.py` (164→161). Not my edits, and the archived file carries no note of author or reason | `tests/` | **Reported, not reverted.** Coherent with the fleet json sweep — @seedgo now pins the shim by hash, so a per-branch wiring copy is redundant — but that is reconstruction, not attribution. Suite is green (1039 at the time, 1049 now) and the shim hash is unchanged (`3456b766…`). Raised with @devpulse 2026-09-07 |
-| `error_logged` is advertised as a real event by `log_events --help` and two docstrings, and nothing fires it anywhere in the fleet | `modules/log_events.py:71,135`, `handlers/watchers/log_watcher.py:17`, `events/startup.py:323` | **Open, mine.** Known since 2026-08-25 and still unfixed; the watchers fire `error_detected` and `warning_logged`, and nothing else |
+| `error_logged` is advertised as a real event by `log_events --help` and one docstring, and nothing fires it anywhere in the fleet | `modules/log_events.py:71,135`, `handlers/watchers/log_watcher.py:17` | **Open, mine.** Known since 2026-08-25. The fourth site, `events/startup.py`, was cured 2026-09-12 in passing — its `_run_error_catchup` docstring now names `error_detected`, which is what it actually fires. The watchers fire `error_detected` and `warning_logged`, and nothing else |
 | ~~`memory_pool_auto_processed` has a registered handler and no firer~~ | `events/memory_pool.py` | **Closed 2026-09-05, same night.** Found here, confirmed by @hooks, cured by @memory. The fire belonged in neither of the two places I offered: @hooks returns the instant a PID exists and cannot see the outcome, so it now fires from the child's own completion point. Verified end-to-end on my side — their exact payload gives `handlers: 1, ran: 1, failed: 0`, and a nested `error_detected` from inside a handler is deferred and then actually delivered, so the medic path is live again |
 | `memory_template_updated` has a registered handler, no firer, and the handler is a stub whose docstring claims a `push_templates()` call it does not make | `events/memory_template_updated.py` | **Open, mine.** DPLAN-0318 |
-| 15 stray `tmp*.tmp` files sit in `trigger_json/`, 14 of them zero-byte, oldest 2026-08-14 | `trigger_json/` | **Open, mine.** Staged temp files whose rename never landed; harmless but unswept, and the sweep belongs in the writer, not in a cron |
+| Stray `tmp*.tmp` files sit in `trigger_json/` — staged temp files whose rename never landed | `trigger_json/` | **Open, mine, smaller.** Re-measured 2026-09-12: **5**, all zero-byte, dated 09-01 and 09-10 (was 15). @prax's weekly sweep (FPLAN-0546) now clears the class fleet-wide, but the sweep still belongs in the writer rather than in a cron |
 | ~~`apps/json_templates/default/` still ships `config.json`, `data.json`, `log.json` after the json service moved defaults into code~~ | `apps/.archive/json_templates/` | **Closed 2026-09-07** (FPLAN-0492 wave 5). Measured at zero references outside its own directory, then moved to `apps/.archive/` — archived, never deleted. Nothing imported it, so the suite was unchanged by the move |
 | `drone @trigger status` always reports `Active: False` — it describes the CLI process you just started, never the systemd watcher | `modules/branch_log_events.py` | **Open, mine.** APLAN-0008. `medic status` is the command that reads the service |
 | `.aipass/aipass_local_prompt.md` still says "14 events, 14 handlers" and lists `log_events.py` / `branch_log_events.py` shapes from before the retirement | branch prompt | **Open, mine.** Prompt file, out of scope for this docs pass (README + `.trinity` only) |

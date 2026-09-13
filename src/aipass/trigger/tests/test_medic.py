@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-12
 # =============================================
 
 import sys
@@ -709,3 +709,91 @@ def test_help_flag_survives_module_name_routing(monkeypatch):
     assert result is True
     printed.assert_called_once()
     muted.assert_not_called()
+
+
+class TestErrorCatchupDoor:
+    """medic.run_error_catchup — the module-level door to cold-start recovery.
+
+    log_watcher_service is an entry point, so it must reach the startup
+    handler through a module (seedgo encapsulation rule 3). This function is
+    that seam, and it must stay a thin pass-through: the moment it starts
+    deciding anything, the service and the `startup` event stop recovering
+    identically.
+    """
+
+    def test_delegates_to_the_startup_handler(self, monkeypatch) -> None:
+        """The scan itself stays the handler's; the module only exposes it."""
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+        fire_event = MagicMock()
+
+        medic.run_error_catchup(fire_event)
+
+        scan.assert_called_once_with(fire_event)
+
+    def test_defaults_to_no_dispatch(self, monkeypatch) -> None:
+        """Called bare it scans and records without firing anything."""
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+
+        medic.run_error_catchup()
+
+        scan.assert_called_once_with(None)
+
+    def test_is_not_a_cli_command(self, monkeypatch) -> None:
+        """It is a library door, not a subcommand — `medic catchup` must not route.
+
+        Adding it to the command table would put a live fleet-wide error scan
+        one typo away from an operator's shell.
+        """
+        medic = _import_medic()
+        scan = MagicMock()
+        monkeypatch.setattr(medic, "run_startup_catchup", scan)
+        monkeypatch.setattr(medic, "print_help", MagicMock())
+
+        medic.handle_command("medic", ["catchup"])
+
+        scan.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# host portability — a host with no systemd (2026-09-12, seedgo FPLAN-0554)
+# ---------------------------------------------------------------------------
+
+
+def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on():
+    """ "stopped — run medic on" is advice that cannot work where there is no systemd.
+
+    macOS and Windows have no systemctl at all; the watcher there is not
+    stopped, it is unavailable, and telling a reader to start it sends them
+    after a unit that can never exist.
+    """
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.is_enabled.return_value = True
+
+    with patch.object(medic, "_is_service_active", return_value=False):
+        with patch.object(medic, "systemd_available", return_value=False):
+            medic.handle_command("status", [])
+
+    output = "\n".join(_get_print_str_args(_get_console()))
+    assert "no systemd on this host" in output, output
+    assert "run [bold]medic on[/bold]" not in output, output
+
+
+def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_systemd():
+    """ "failed to start" reads as a broken unit; the truth is a hostless door."""
+    medic = _import_medic()
+
+    with patch.object(medic, "_systemctl", return_value=False):
+        with patch.object(medic, "_is_service_active", return_value=False):
+            with patch.object(medic, "_ensure_service_installed", return_value=False):
+                with patch.object(medic, "systemd_available", return_value=False):
+                    medic.handle_command("on", [])
+
+    panel_text = "\n".join(
+        str(arg) for call in sys.modules["rich.panel"].Panel.call_args_list for arg in call.args if isinstance(arg, str)
+    )
+    assert "unavailable — no systemd on this host" in panel_text, panel_text

@@ -16,7 +16,7 @@ Before (hardcoded):
 
 After (event-driven):
     flow/close_plan.py → trigger.fire('plan_closed') → handlers respond
-    prax/logger.py → trigger.fire('startup') → handlers respond
+    prax/logger.py → trigger.fire('logging_system_initialized') → handlers respond
 ```
 
 **WHY:** Without events, every cross-branch integration is a hardcoded import. Add a new reaction? Edit the source file. Change behavior? Find all callers. Remove a feature? Hunt through imports. Events decouple action from reaction.
@@ -75,7 +75,9 @@ def fire_event(name, **data):
 ```
 
 **Current Lazy Loaders:**
-- `prax/apps/modules/logger.py` - Fires `startup`
+- `prax/apps/modules/logger.py` - Fires `logging_system_initialized` / `logging_system_shutdown`
+  from the two explicit lifecycle doors (it stopped firing `startup` on the first log line of
+  every process on 2026-09-12, DPLAN-0339 step 3 — that fire was 94% of the cost of that line)
 - `cli/apps/modules/display.py` - Fires `cli_header_displayed`
 
 ---
@@ -86,18 +88,43 @@ def fire_event(name, **data):
 
 | Event Name | Scope | Meaning |
 |------------|-------|---------|
-| `startup` | system | First logger use, system initializing |
+| `startup` | system | System initializing. No production firer since 2026-09-12 — fired by hand via `drone @trigger fire startup`; its one listener lives on at `trigger/apps/handlers/events/registry.py:87` |
 | `plan_created` | flow | New PLAN file created |
 | `plan_closed` | flow | PLAN marked as closed |
 | `memory_saved` | memory | Memory file updated |
 | `backup_completed` | backup | Backup operation finished |
 | `cli_header_displayed` | cli | Header printed to console |
+| `logging_system_initialized` | prax | The logging system is up |
+| `logging_system_shutdown` | prax | The logging system is down |
 
 **Rules:**
 - All lowercase
 - Underscore-separated words
 - Past tense for completed actions (`created`, `closed`, `saved`)
 - Present tense for ongoing states (`displayed`, `running`)
+
+### System Lifecycle Events (Pattern 9)
+
+`initialize_*_system` / `shutdown_*_system` are the explicit doors into and out of a
+whole subsystem, so each one must fire an event **from its own body** saying the
+subsystem is up or down. The names follow the system, not the function:
+
+| Function | Event it must fire |
+|----------|--------------------|
+| `initialize_{system}_system()` | `{system}_system_initialized` |
+| `shutdown_{system}_system()` | `{system}_system_shutdown` |
+
+**Live precedent:** `prax/apps/modules/logger.py` fires `logging_system_initialized`
+(with `modules_count=`) and `logging_system_shutdown`. Both import trigger *inside*
+the function, and both wrap the fire in `except (ImportError, OSError)` — a door
+called deliberately, once, can afford an import the hot path cannot, and a host where
+trigger will not import must still be able to initialize.
+
+Fire the shutdown event **last**: it says the system IS down, not that it is going
+down, so a handler that reacts by writing is not racing the teardown.
+
+Nothing has to listen yet. The point of the standard is that a handler can plug in
+later without the firing branch changing again.
 
 ---
 
@@ -274,7 +301,7 @@ Some cross-branch handler imports are intentional in Trigger. Configure in `.see
 3. **Caller Introspection**
    - `trigger.fire()` logs which branch fired the event
    - Uses `inspect.stack()` to identify caller
-   - Example log: `[TRIGGER] prax fired: startup`
+   - Example log: `[TRIGGER] prax fired: logging_system_initialized`
 
 4. **Graceful Degradation**
    - If Trigger not available, imports fail silently
@@ -286,6 +313,28 @@ Some cross-branch handler imports are intentional in Trigger. Configure in `.see
 ## Detected Pattern Categories (10)
 
 The trigger checker (`trigger_check.py v1.0.0`) detects these event-worthy patterns:
+
+### Scope: the exemption is PER FUNCTION BODY
+
+A function matching Patterns 1-9 is satisfied only when `trigger.fire(` appears
+**inside that function's own body** (a nested `def` inside it counts as inside it),
+or when it calls, in **one hop**, another function in the same module that fires.
+Pattern 10 is about inline calls rather than a `def`, so its unit is the *enclosing*
+function; a call at module level is answered by the file.
+
+A fire in function A is NOT an exemption for function B in the same file.
+
+**Why this is written down:** until 2026-09-12 the flag was file-level — one
+`trigger.fire(` anywhere in a file exempted every pattern in it. Prax's
+`initialize_logging_system` and `shutdown_logging_system` fired nothing for months
+and passed, because an unrelated hot-path `trigger.fire("startup")` lived in the same
+module; when that unrelated fire was removed (DPLAN-0339 step 3) the lint finally
+surfaced. The checker had been passing code that never met the standard.
+
+Cure against this text, not against the regex: adding a fire somewhere else in the
+file no longer works, and was never what the standard asked for. If the fire genuinely
+belongs elsewhere — a handler the module orchestrates, another branch — that is a
+`.seedgo/bypass.json` entry with a category and a reason, not a silent pass.
 
 ### Function Definitions (Patterns 1-9)
 
@@ -323,7 +372,8 @@ The trigger checker (`trigger_check.py v1.0.0`) detects these event-worthy patte
 
 9. **System Lifecycle Functions**
    - `initialize_*_system`, `shutdown_*_system`
-   - System-level lifecycle events
+   - Must fire `{system}_system_initialized` / `{system}_system_shutdown` from their
+     own bodies — see [System Lifecycle Events](#system-lifecycle-events-pattern-9)
 
 ### Inline Operations (Pattern 10)
 
@@ -340,7 +390,7 @@ The trigger checker (`trigger_check.py v1.0.0`) detects these event-worthy patte
 
 | Branch | Integration | Events |
 |--------|-------------|--------|
-| Prax | `trigger.fire('startup')` in logger.py | startup |
+| Prax | `trigger.fire('logging_system_initialized')` / `('logging_system_shutdown')` in modules/logger.py | logging_system_initialized, logging_system_shutdown |
 | CLI | `trigger.fire('cli_header_displayed')` in display.py | cli_header_displayed |
 | Flow | JSON logging only | needs migration |
 | Drone | No events | ready to adopt |

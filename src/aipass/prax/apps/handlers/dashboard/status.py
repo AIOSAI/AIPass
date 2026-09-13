@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dashboard Status Calculation Handler
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-08-13
+# Modified: 2026-09-11
 # =============================================
 
 """
@@ -15,10 +15,11 @@ All business logic for dashboard status operations.
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.monitoring.branch_detector import _exact_case_registries
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 logger = get_direct_logger()
@@ -227,15 +228,85 @@ def get_branch_paths() -> List[Path]:
     return paths
 
 
-def resolve_branch_path(branch_ref: str) -> Path:
+def _nearest_registries(start: Path) -> List[Path]:
+    """The ``*_REGISTRY.json`` files in the nearest directory at or above ``start`` that holds any.
+
+    Nearest wins, the way ``aipass init`` stamps one registry at a project root:
+    a caller in ``Vera-Studio/src/vera_studio/verify`` gets
+    ``Vera-Studio/VERA-STUDIO_REGISTRY.json``, and a caller anywhere in the
+    AIPass tree gets ``AIPASS_REGISTRY.json`` itself.
     """
-    Resolve @branch reference to filesystem path via AIPASS_REGISTRY.json.
+    for directory in (start, *start.parents):
+        registries = _exact_case_registries(directory)
+        if registries:
+            return registries
+    return []
+
+
+def _declared_path(registry_file: Path, name: str) -> Optional[Path]:
+    """The path ``registry_file`` declares for ``name``, or None.
+
+    A relative path resolves against the registry's OWN directory, never the
+    process cwd or AIPass's root: that is where the project that wrote it lives.
+    """
+    try:
+        data = json.loads(registry_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Project registry %s is unreadable (%s); it resolves nothing", registry_file, exc)
+        return None
+
+    branches = data.get("branches", []) if isinstance(data, dict) else []
+    for branch in branches:
+        if not isinstance(branch, dict) or str(branch.get("name", "")).upper() != name:
+            continue
+        path_str = branch.get("path")
+        if path_str:
+            raw = Path(path_str)
+            return raw if raw.is_absolute() else registry_file.parent / raw
+    return None
+
+
+def _caller_project_match(name: str, caller: Optional[Path]) -> Optional[Tuple[Path, Path]]:
+    """``(registry file, branch path)`` for ``name`` in the caller's project registry, or None.
+
+    The core registry is skipped here: it was already asked, and a caller
+    inside AIPass finds it as its nearest.
+    """
+    if caller is None:
+        return None
+
+    core = AIPASS_REGISTRY.resolve()
+    for registry_file in _nearest_registries(caller):
+        if registry_file.resolve() == core:
+            continue
+        path = _declared_path(registry_file, name)
+        if path is not None:
+            return registry_file, path
+    return None
+
+
+def resolve_branch_path(branch_ref: str, caller: Optional[Path] = None) -> Path:
+    """
+    Resolve @branch reference to filesystem path.
+
+    AIPASS_REGISTRY.json first, unchanged. On a miss, the caller's own project
+    registry: the nearest ``*_REGISTRY.json`` at or above ``caller``
+    (devpulse's ruling 2026-09-11, Vera Studio 77f3335d). Before that second
+    step, ``drone @prax dashboard refresh @verify`` run from inside Vera-Studio
+    answered "not found" and the branch's dashboard stayed stale. A name in
+    both registries resolves to core, and the log says so.
+
+    ``caller`` is an argument, never read here: a handler does not read the
+    working directory (tests/test_repo_root.py sweeps for it). The dashboard
+    module answers where the caller stands. With no caller this is core only,
+    exactly what it was before.
 
     Handler-layer function: performs file I/O to read registry and
     resolve branch name to its directory path.
 
     Args:
         branch_ref: Branch reference like "@flow" or "@vera"
+        caller: The directory the caller stands in, or None for core only
 
     Returns:
         Path to the branch directory
@@ -254,8 +325,28 @@ def resolve_branch_path(branch_ref: str) -> Path:
         if branch.get("name", "").upper() == name:
             raw = Path(branch["path"])
             path = raw if raw.is_absolute() else repo_root / raw
-            if path.exists():
-                return path
-            raise FileNotFoundError(f"Branch path does not exist: {path}")
+            if not path.exists():
+                raise FileNotFoundError(f"Branch path does not exist: {path}")
+            shadowed = _caller_project_match(name, caller)
+            if shadowed is not None:
+                logger.warning(
+                    "@%s is declared in AIPASS_REGISTRY.json and in %s; the core row wins (%s), "
+                    "so %s is not reachable by this name",
+                    name.lower(),
+                    shadowed[0],
+                    path,
+                    shadowed[1],
+                )
+            return path
 
-    raise FileNotFoundError(f"Branch '{name}' not found in registry")
+    project = _caller_project_match(name, caller)
+    if project is not None:
+        registry_file, path = project
+        if not path.exists():
+            raise FileNotFoundError(f"Branch path does not exist: {path} (declared in {registry_file})")
+        logger.info("Resolved @%s through the caller's project registry %s: %s", name.lower(), registry_file, path)
+        return path
+
+    raise FileNotFoundError(
+        f"Branch '{name}' not found in registry (AIPASS_REGISTRY.json, then the caller's project registry)"
+    )

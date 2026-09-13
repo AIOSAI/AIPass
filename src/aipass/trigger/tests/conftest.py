@@ -2,10 +2,11 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2025-11-08
-# Version: 1.2.0
+# Version: 1.3.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
 #   - v1.2.0 (2026-08-08): Autouse resync of parent-package attrs after sys.modules surgery (CI xdist red)
 #   - v1.1.0 (2026-08-08): Suite-wide escalation lane isolation
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -77,6 +78,43 @@ def isolate_escalation_state(monkeypatch: pytest.MonkeyPatch, escalation_sandbox
     _escalation._config_cache = (0.0, None)
     yield
     _escalation._config_cache = (0.0, None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_catchup_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep the error catch-up off live trigger_json/error_catchup.json.
+
+    THE LEAK THIS CLOSES (@ai_mail, 2026-09-10, found with sys.addaudithook on
+    os.rename): any test whose code logs a prax WARNING writes the REAL
+    error_catchup.json. prax's logger fires `startup` on the first log line of
+    a process, that event is wired to handle_startup, and the catch-up saves
+    its state through apps/config.py's own atomic write — the layer
+    mock_infrastructure below documents as NOT covered by the json seam,
+    because CATCHUP_STATE_FILE is a module constant built off TRIGGER_JSON_DIR
+    and no environment variable reaches it.
+
+    That is worse than a dirty file. last_scan_timestamp is a single shared
+    value, so a test run eats the recovery window the live watcher service
+    exists to cover (DPLAN-0339 step 2, row 12).
+
+    Resolved through sys.modules rather than a top-level import so the fixture
+    patches whichever copy of the module is currently registered — several
+    tests in this suite delete it and re-import it under a mocked config.
+
+    NOT a full cure: a suite running from ANOTHER branch's directory never
+    loads this conftest, so @ai_mail's own reproduction still writes the live
+    file. That needs a read-time seam on TRIGGER_JSON_DIR itself, which is a
+    change to a shared constant and carries its own plan.
+    """
+    import aipass.trigger.apps.handlers.events.startup  # noqa: F401 - registers in sys.modules
+
+    mod = sys.modules["aipass.trigger.apps.handlers.events.startup"]
+    sandbox = tmp_path / "_catchup_sandbox"
+    sandbox.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(mod, "CATCHUP_STATE_FILE", sandbox / "error_catchup.json")
+    monkeypatch.setattr(mod, "LEGACY_CATCHUP_STATE_FILE", sandbox / "trigger_data.json")
+    monkeypatch.setattr(mod, "SUPPRESSED_LOG", sandbox / "medic_suppressed.jsonl")
+    monkeypatch.setattr(mod, "logger", trail_logger(sandbox / "startup_handler.jsonl"))
 
 
 @pytest.fixture(autouse=True)

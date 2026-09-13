@@ -47,8 +47,12 @@ jobs:
       - name: Run full test suite
         run: |
           source .venv/bin/activate
+          # pipefail: the pipe returns pytest's status, not tee's. Without it
+          # this job could not fail on test failures (32 failed on the v2.8.6
+          # merge, job green; @verify c89af1b3, 2026-09-11). The step's own
+          # non-zero exit is the gate; upload below still runs on if: always().
+          set -o pipefail
           pytest -v --tb=short --rootdir=. -n auto --dist loadscope 2>&1 | tee pytest-output.txt
-          echo "EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: Upload test results
         if: always()

@@ -59,6 +59,7 @@ drone @git fix                       # fix broken states
  - Work done → `drone @git status`; suggest a commit when coherent — don't force.
  - Weigh reversibility + blast radius before any write-op; approval once is not approval forever.
  - commit → dev-pr → check CI when the run completes. Every commit gets pushed; after a CI fix, push immediately.
+ - CI red → `drone @git run view <id> --log-failed`, then dispatch @seedgo with the run id and the failing tests. Seedgo learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
  - Update `CHANGELOG.md` as work lands, not batched.
  - Every dev→main merge stamps a merge PPLAN first (`drone @flow create . "Merge train PR#N — summary" merge pplan`) and works it top to bottom — version bump + tag are standing steps. Never merge without one, unprompted.
  - Never `docker cp` into containers unless asked. Merge PR → pull → test.
