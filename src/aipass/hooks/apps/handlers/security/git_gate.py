@@ -44,6 +44,10 @@ READ_ALLOWED_GIT_SUBCOMMANDS = frozenset(
         "ls-tree",
         "show",
         "cat-file",
+        # Reads the ignore rules and answers; every option (-q -v --stdin -z -n
+        # --no-index) is output-shaping. Refusing it while GIT_REDIRECT promised
+        # read-only verbs run raw taught agents the message was unreliable.
+        "check-ignore",
         "rev-parse",
         "rev-list",
         "log",

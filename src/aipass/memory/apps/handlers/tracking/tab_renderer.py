@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-25
-# Modified: 2026-08-26
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -16,7 +16,8 @@ Generates per-section state-tab strings (e.g. ``⟦ rollover ON ... ⟧``) from
 Purpose:
     Make memory files self-documenting.  Each section carries a single-line
     banner that tells the editing agent whether rollover is ON/OFF, the keep
-    count, and the char cap — all derived from config so they never drift.
+    count, the char cap and the draft target — all derived from config so
+    they never drift.
 
 Independence:
     Uses config_loader for config, detector helpers for branch discovery,
@@ -185,13 +186,14 @@ def render_tab(
     section_limits = entry_types.get(section_name, {})
     max_chars = section_limits.get("max_chars", 300)
     field = section_limits.get("field", "value")
+    draft = entry_limits.draft_target(max_chars)
 
     # --- Todos are special: rollover OFF, static shape ------------------------
     # Numbers only. The RULE sentence that used to be appended here is prose,
     # and prose is the template's — it now rides after the placeholder in
     # LOCAL.template.json where every other section's semantics live.
     if section_name == "todos":
-        return f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars ⟧"
+        return f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars · draft to {draft} ⟧"
 
     # --- Rollover sections: ask the ONE resolver, never re-derive --------------
     # This banner is written INTO the agent's own memory file, where it reads as
@@ -207,9 +209,11 @@ def render_tab(
     if count is None:
         # No limit anywhere for this section — say so. Naming a number here
         # would be inventing an instruction nothing will honour.
-        return f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars ⟧"
+        return f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars · draft to {draft} ⟧"
 
-    return f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars ⟧"
+    return (
+        f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars · draft to {draft} ⟧"
+    )
 
 
 # =============================================================================

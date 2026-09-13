@@ -393,8 +393,56 @@ def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[d
     return hits
 
 
-def _format_violation(v: dict) -> str:
-    """Render one violation line.
+def _entry_text(v: dict, after: dict, limits: dict) -> str | None:
+    """The authored text behind an over-cap record, read back out of the proposed file.
+
+    @memory's six-key record carries the measurement, not the text, and that
+    shape is a published contract this gate does not get to grow. The text is
+    where the record says it is: the entry type names the container and field,
+    and the key is the dict key or list index in the SAME ``after`` document the
+    extractor measured. Anything that does not resolve to a string of exactly the
+    recorded length answers None — a cut drawn on text the record did not measure
+    would point at the wrong characters, and the measurement line alone is still
+    true without it.
+    """
+    type_def = limits.get("entry_types", {}).get(v.get("entry_type", ""))
+    if not isinstance(type_def, dict):
+        return None
+    container = after.get(type_def.get("container", ""))
+    key = str(v.get("key", ""))
+    if isinstance(container, list):
+        entry = container[int(key)] if key.isdigit() and int(key) < len(container) else None
+    elif isinstance(container, dict):
+        entry = container.get(key)
+    else:
+        return None
+    if isinstance(entry, dict):
+        entry = entry.get(type_def.get("field", "value"))
+    if not isinstance(entry, str) or len(entry) != v.get("length"):
+        logger.info("[HOOKS] edit_gate: no cut point for %s [%s] — text did not resolve", v.get("entry_type"), key)
+        return None
+    return entry
+
+
+def _cut_point(text: str, cap: int) -> str:
+    """Where the cap fell: the kept prefix, a bar, and the overflow past it (DPLAN-0342).
+
+    The fleet's median overage is 7% of the cap and 88% of overages sit under
+    20% — agents aim AT the line and land a few words past it. A refusal that
+    only says "336/300 (+36)" makes the rewrite a re-guess of the whole entry;
+    showing the 36 characters that crossed makes it a trim of a visible tail.
+    Both halves are JSON-quoted so a trailing space or a newline at the boundary
+    is visible, and ``len`` slices in code points — the unit the cap is measured
+    in — so the bar sits exactly at the cap. Display only: the block is unchanged
+    and nothing is ever truncated for the agent.
+    """
+    kept = json.dumps(text[:cap], ensure_ascii=False)
+    over = json.dumps(text[cap:], ensure_ascii=False)
+    return f"kept: {kept} | over: {over}"
+
+
+def _format_violation(v: dict, text: str | None = None) -> str:
+    """Render one violation line, plus the cut point when the text is known.
 
     A refusal that cannot be measured must not print as a measurement. The
     unmeasurable and missing-field species carry zeros in length/cap/over_by to
@@ -414,11 +462,14 @@ def _format_violation(v: dict) -> str:
             f"  {v['entry_type']} [{v['key']}]: unmeasurable — expected a string, "
             f"found {v.get('found_type', 'unknown')}. Cap is {v['cap']} chars."
         )
-    return f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})"
+    line = f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})"
+    if text is None:
+        return line
+    return f"{line}\n    {_cut_point(text, v['cap'])}"
 
 
-def _log_violation(v: dict) -> None:
-    """Warn-mode log line — carries the same cause the block would have named."""
+def _log_violation(v: dict, text: str | None = None) -> None:
+    """Warn-mode log line — carries the same cause, and cut, the block would have named."""
     if v.get("reason"):
         logger.warning(
             "[HOOKS] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
@@ -430,12 +481,13 @@ def _log_violation(v: dict) -> None:
         )
         return
     logger.warning(
-        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d) — warn only",
+        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d)%s — warn only",
         v["entry_type"],
         v["key"],
         v["length"],
         v["cap"],
         v["over_by"],
+        "" if text is None else f" {_cut_point(text, v['cap'])}",
     )
 
 
@@ -470,10 +522,11 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
     over = _dedupe_violations(over + _missing_field_violations(before, after, limits))
     if not over:
         return None
+    texts = [None if v.get("reason") else _entry_text(v, after, limits) for v in over]
     if limits.get("enforce"):
         lines = ["Unwritable .trinity entries (fix before saving):"]
-        for v in over:
-            lines.append(_format_violation(v))
+        for v, text in zip(over, texts, strict=True):
+            lines.append(_format_violation(v, text))
         # Say what this gate can actually see. Bash now reaches this handler, but
         # only its PROJECT fence — the cap check runs on the Edit/Write lane alone,
         # so a write made through python -c, a heredoc or sed is still unmeasured.
@@ -491,8 +544,8 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
             "exit_code": 2,
             "sound": "edit gate",
         }
-    for v in over:
-        _log_violation(v)
+    for v, text in zip(over, texts, strict=True):
+        _log_violation(v, text)
     return None
 
 

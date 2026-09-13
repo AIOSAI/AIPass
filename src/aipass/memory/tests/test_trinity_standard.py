@@ -888,6 +888,15 @@ class TestTheTabHonoursPerBranchCharCaps:
 
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "baud")
         assert "≤500 chars" in tab
+        assert "≤500 chars · draft to 400 ⟧" in tab
+
+    _DRAFT_CASES = ((300, 240), (200, 160), (150, 120), (500, 400), (77, 61))
+
+    @pytest.mark.parametrize(("cap", "draft"), _DRAFT_CASES)
+    def test_the_draft_target_is_eighty_percent_floored(self, cap, draft):
+        """77 -> 61 is the row that tells floor from round (61.6)."""
+        assert len(self._DRAFT_CASES) == 5
+        assert el.draft_target(cap) == draft
 
     def test_a_branch_without_an_override_still_reads_the_default(self):
         from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415

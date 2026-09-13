@@ -115,6 +115,7 @@ class TestRenderTabKeyLearnings:
         assert "rollover ON" in tab
         assert "keep 15" in tab
         assert "value ≤20" in tab  # ≤200
+        assert tab.endswith("value ≤200 chars · draft to 160 ⟧")
 
     def test_per_branch_override(self):
         mod = _get_module()
@@ -145,6 +146,7 @@ class TestRenderTabSessions:
         assert "keep 15" in tab
         assert "summary" in tab
         assert "≤30" in tab  # ≤300
+        assert tab.endswith("summary ≤300 chars · draft to 240 ⟧")
 
     def test_sessions_per_branch(self):
         mod = _get_module()
@@ -174,6 +176,7 @@ class TestRenderTabObservations:
         assert "rollover ON" in tab
         assert "keep 15" in tab
         assert "note" in tab
+        assert tab.endswith("note ≤300 chars · draft to 240 ⟧")
 
     def test_observations_per_branch(self):
         mod = _get_module()
@@ -203,6 +206,7 @@ class TestRenderTabTodos:
         assert "rollover OFF" in tab
         assert "cap ~10 entries" in tab
         assert "task ≤15" in tab  # ≤150
+        assert "task ≤150 chars · draft to 120 ⟧" in tab
         # The RULE sentence moved to LOCAL.template.json on 2026-08-25: the tab
         # carries numbers, the template carries prose, and compose_meta joins
         # them. Pinned there by test_trinity_standard.py.
@@ -635,6 +639,7 @@ class TestTabAgreesWithTheEngine:
 
         assert self._engine_count(cfg, "victim", "sessions") is None
         assert "no entry limit configured" in tab
+        assert tab.endswith("summary ≤300 chars · draft to 240 ⟧")
         assert "keep" not in tab
 
     @pytest.mark.parametrize("section", ["sessions", "key_learnings", "observations"])
