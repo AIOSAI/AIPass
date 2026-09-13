@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-09-12] — the portability day: seedgo's `host_portability` standard turns the Linux gate red by design and eight owners cure it, the first fully green three-OS head since the macOS job could fail, arm C plus `platform_oracle` cure 6, and canary's blind trial of the v5 test standard (FPLAN-0554 / DPLAN-0323 phase 8, merged as PR #763, v2.8.7)
 
 ### Added
 
