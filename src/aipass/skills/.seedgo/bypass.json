@@ -267,6 +267,14 @@
       "file": "apps/handlers/module_paths.py",
       "standard": "json_structure",
       "reason": "DPLAN-0325 - this is the branch's stdlib-only dead-cwd helper and MUST NOT carry the json seam: importing prax puts the logger's own construction (which reads the cwd) onto the very path the helper exists to protect, and log_operation() writes, so wiring it here would put a file write on the import path of every skills module. seedgo's own _is_prelogging_bootstrap names this class and exempted this file until 2026-09-03. Clause 1 (holds no aipass import) still passes. Clause 2 (the logging substrate's imports reach it) passed only because the OLD apps/handlers/json/json_handler.py imported module_file, and _bootstrap_chain is seeded from every branch's json_handler. The canonical shim imports 'from aipass.prax import json_handler' and nothing branch-local, so the chain now reaches the shim and stops - measured 2026-09-03: the chain holds 128 modules and skills' only member is the shim itself. skills is the ONLY branch in the fleet carrying apps/handlers/module_paths.py, so no other sweep leg hits this. Remove the moment clause 2 learns a module-scope importer that is itself in the corpus - reported to @devpulse and @seedgo on 2026-09-03."
+    },
+    {
+      "file": "lib/system_status/handler.py",
+      "standard": "unused_function",
+      "functions": [
+        "machine_vitals"
+      ],
+      "reason": "FPLAN-0561 row 1 (2026-09-12) - the published in-process door for @api's /v1/machine route (row 2), the screen_lock pattern. Its consumer lives in src/aipass/api, outside this per-branch scan, which states it cannot see cross-branch callers. Pinned by tests/test_machine_vitals.py (45 cases). Remove if a branch-local caller lands (text actions as renderings of the dict, a later row)."
     }
   ],
   "notes": {

@@ -1,7 +1,7 @@
 ---
 name: system_status
 description: Check system health -- disk usage, memory, running processes, uptime
-version: 2.0.0
+version: 2.1.0
 tags: [system, monitoring, health]
 requires:
   pip: [psutil]
@@ -23,6 +23,33 @@ Check system health metrics without leaving your workflow. Returns structured da
 | `uptime`    | System uptime from psutil's boot time          |
 | `processes` | Count of currently running processes            |
 | `summary`   | All of the above combined into one report       |
+
+## Published Function: `machine_vitals()`
+
+An in-process read for callers that want data, not text - the host API's
+`/v1/machine` route proxies it verbatim and BAUD's phone draws it (FPLAN-0561).
+
+```python
+from aipass.skills.lib.system_status import handler
+vitals = handler.machine_vitals()
+```
+
+- `{"ok": True, "schema": 1, "sampled_at": ...}` plus eight sections: `cpu`,
+  `load`, `memory`, `swap`, `temp`, `fan`, `network`, `processes`. Each carries
+  `available`, `reason`, `sentence`, `detail` beside its values. Never raises
+  for a reading; a value the host cannot give is `None`, never a zero.
+- Whole-function refusal: `{"ok": False, "reason", "detail"}` with
+  `psutil_missing` or `switched_off` (the off-switch is consulted, and an
+  unreadable switch state fails closed).
+- Reason codes (closed set, one sentence each in `REASONS`): `platform`,
+  `no_sensor`, `no_allowlisted_sensor`, `read_failed`, `warming`, `no_range`,
+  `switched_off`, `psutil_missing`.
+- CPU temperature and fans come from allowlists keyed by chip and label
+  (`coretemp` / `Package id 0`; `applesmc` fans). The fan range is a read-only
+  Linux sysfs read of `fanN_min` / `fanN_max`.
+
+The contract in full is in the branch README; it is pinned by
+`tests/test_machine_vitals.py`.
 
 ## Usage
 
