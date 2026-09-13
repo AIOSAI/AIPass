@@ -68,13 +68,13 @@ _PROSE = {
 
 # The three pinned tab formats, byte-for-byte, at the pinned config numbers.
 _TABS = {
-    "todos": "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars ⟧",
-    "key_learnings": ("⟦ rollover ON → oldest archived to @memory · keep 15 · value ≤200 chars ⟧"),
-    "sessions": ("⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars ⟧"),
-    "observations": ("⟦ rollover ON → oldest archived to @memory · keep 15 · note ≤300 chars ⟧"),
+    "todos": "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars · draft to 120 ⟧",
+    "key_learnings": ("⟦ rollover ON → oldest archived to @memory · keep 15 · value ≤200 chars · draft to 160 ⟧"),
+    "sessions": ("⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars · draft to 240 ⟧"),
+    "observations": ("⟦ rollover ON → oldest archived to @memory · keep 15 · note ≤300 chars · draft to 240 ⟧"),
 }
 
-_NO_COUNT_TAB = "⟦ rollover ON → no entry limit configured · summary ≤300 chars ⟧"
+_NO_COUNT_TAB = "⟦ rollover ON → no entry limit configured · summary ≤300 chars · draft to 240 ⟧"
 
 _GROUP_NAMES = (
     "Entry shapes",
@@ -1907,15 +1907,36 @@ class TestMetaComposition:
         line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"])
 
         assert line == (
-            "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars ⟧ " + _PROSE["todos"]
+            "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars · draft to 120 ⟧ "
+            + _PROSE["todos"]
         )
 
     def test_rollover_tab_with_a_count_is_pinned(self, trinity):
         line = trinity.expected_meta_line("sessions", _BRANCH, _CONFIG, _PROSE["sessions"])
 
         assert line == (
-            "⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars ⟧ " + _PROSE["sessions"]
+            "⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars · draft to 240 ⟧ "
+            + _PROSE["sessions"]
         )
+
+    @pytest.mark.parametrize(("cap", "draft"), [(300, 240), (200, 160), (150, 120), (500, 400), (77, 61), (1, 0)])
+    def test_the_draft_target_is_eighty_percent_of_the_cap_floored(self, trinity, cap, draft):
+        """DPLAN-0342: floor, not round - 77 drafts to 61, where round() says 62."""
+        capped = copy.deepcopy(_CONFIG)
+        capped["entry_limits"]["entry_types"]["sessions"]["max_chars"] = cap
+
+        line = trinity.expected_meta_line("sessions", _BRANCH, capped, _PROSE["sessions"])
+
+        assert f"≤{cap} chars · draft to {draft} ⟧" in line
+
+    def test_the_draft_follows_a_per_branch_cap_not_the_default(self, trinity):
+        """The draft comes from the SAME resolved cap the tab prints."""
+        overridden = copy.deepcopy(_CONFIG)
+        overridden["entry_limits"]["per_branch"] = {_BRANCH: {"todos": {"max_chars": 125}}}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, overridden, _PROSE["todos"])
+
+        assert "task ≤125 chars · draft to 100 ⟧" in line
 
     def test_rollover_tab_without_a_count_is_pinned(self, trinity):
         countless = copy.deepcopy(_CONFIG)

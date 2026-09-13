@@ -182,6 +182,12 @@ _ROLLOVER_KEYS = {
 _RENDERER_FALLBACK_MAX_CHARS = 300
 _RENDERER_FALLBACK_FIELD = "value"
 
+# The draft target every tab carries beside its cap (DPLAN-0342, Patrick's
+# ruling 2026-09-13). Mirrors @memory's entry_limits.DRAFT_PERCENT and
+# draft_target(): integer percent, floored, derived from the SAME resolved cap
+# (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never rounded.
+_DRAFT_PERCENT = 80
+
 _PLACEHOLDER_RE = re.compile(r"^\{\{[A-Z0-9_]+\}\} (?P<prose>.+)$", re.DOTALL)
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -403,16 +409,25 @@ def expected_meta_line(section: str, branch_name: str, config: dict, template_pr
     spec = _as_dict(limits.get(section))
     max_chars = spec.get("max_chars", _RENDERER_FALLBACK_MAX_CHARS)
     field = spec.get("field", _RENDERER_FALLBACK_FIELD)
+    # A non-integer cap is a config error the Char caps group reports; echo it
+    # rather than raise, so this function stays total.
+    draft = max_chars * _DRAFT_PERCENT // 100 if _is_int(max_chars) else max_chars
 
     if section == "todos":
-        tab = f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars ⟧"
+        tab = (
+            f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars"
+            f" · draft to {draft} ⟧"
+        )
         return f"{tab} {template_prose}"
 
     count = _resolve_rollover_count(_as_dict(config), section, branch_name)
     if count is None:
-        tab = f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars ⟧"
+        tab = f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars · draft to {draft} ⟧"
     else:
-        tab = f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars ⟧"
+        tab = (
+            f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars"
+            f" · draft to {draft} ⟧"
+        )
     return f"{tab} {template_prose}"
 
 

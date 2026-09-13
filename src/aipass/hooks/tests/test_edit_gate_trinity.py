@@ -278,6 +278,81 @@ class TestTrinityWriteOverLimitEnforced:
         assert "+10" in parsed["reason"]
 
 
+class TestRejectionNamesTheCutPoint:
+    """DPLAN-0342 row 1: the refusal shows WHERE the cap cut, not only by how much.
+
+    Fleet measurement (@devpulse, 2280 .trinity edits): the median overage is 7%
+    of the cap and 88% sit under 20% — agents aim at the line and land a few words
+    past it. "336/300 (+36)" makes the rewrite a re-guess of the whole entry; the
+    kept prefix and the overflow after a bar make it a trim of a visible tail. The
+    block itself does not change, and nothing is ever truncated.
+    """
+
+    def _reason(self, tmp_path, content: dict) -> str:
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_ENFORCE)):
+            result = handle(_hook_data(file_path, json.dumps(content), cwd=cwd))
+        assert result["exit_code"] == 2, "the block itself must not change"
+        return json.loads(result["stdout"])["reason"]
+
+    def test_a_list_entry_shows_the_kept_prefix_and_the_overflow(self, tmp_path):
+        reason = self._reason(tmp_path, {"sessions": [{"summary": "k" * 300 + " and past the line"}]})
+        assert "sessions [0]: 318/300 chars (+18)" in reason
+        assert f'kept: "{"k" * 300}" | over: " and past the line"' in reason
+
+    def test_the_cut_sits_on_the_line_after_its_measurement(self, tmp_path):
+        lines = self._reason(tmp_path, {"sessions": [{"summary": "k" * 300 + "TAIL"}]}).splitlines()
+        index = next(i for i, line in enumerate(lines) if "304/300" in line)
+        assert lines[index + 1].lstrip().startswith('kept: "')
+        assert lines[index + 1].endswith('| over: "TAIL"')
+
+    def test_a_dict_entry_resolves_by_its_key(self, tmp_path):
+        assert '| over: "yz"' in self._reason(tmp_path, {"key_learnings": {"k1": "x" * 200 + "yz"}})
+
+    def test_the_boundary_is_visible_when_it_is_whitespace_or_a_quote(self, tmp_path):
+        """JSON-quoted halves: a trailing space or a newline at the cut cannot hide."""
+        reason = self._reason(tmp_path, {"sessions": [{"summary": "a" * 299 + ' \n"q'}]})
+        assert f'kept: "{"a" * 299} "' in reason
+        assert 'over: "\\n\\"q"' in reason
+
+    def test_the_cut_counts_code_points_like_the_cap_does(self, tmp_path):
+        """len() is the unit the cap is measured in, so an accented letter is one."""
+        reason = self._reason(tmp_path, {"sessions": [{"summary": "é" * 300 + "Z"}]})
+        assert "301/300 chars (+1)" in reason
+        assert f'kept: "{"é" * 300}" | over: "Z"' in reason
+
+    def test_a_record_that_disagrees_with_the_document_draws_no_cut(self):
+        """A cut on text the record did not measure would point at the wrong characters."""
+        from unittest.mock import MagicMock
+
+        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
+
+        el = MagicMock()
+        el.changed_entries.return_value = [
+            {"entry_type": "sessions", "container": "sessions", "key": "0", "length": 999, "cap": 300, "over_by": 699}
+        ]
+        block = _evaluate_limits({}, {"sessions": [{"summary": "k" * 310}]}, _TEST_LIMITS_ENFORCE, el)
+        assert block is not None
+        reason = json.loads(block["stdout"])["reason"]
+        assert "999/300 chars (+699)" in reason
+        assert "kept:" not in reason
+
+    def test_warn_mode_logs_the_same_cut(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"key_learnings": {"k1": "x" * 200 + "past"}})
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+        assert result["exit_code"] == 0
+        assert '| over: "past"' in caplog.text
+        assert "warn only" in caplog.text
+
+
 class TestTrinityWriteOverLimitWarnOnly:
     """Write with over-limit entry + enforce=False -> allowed + warning logged."""
 
