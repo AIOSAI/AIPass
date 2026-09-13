@@ -55,6 +55,13 @@ class TestGitGateReadAllowed:
     def test_git_cat_file(self):
         _assert_allowed(_bash("git cat-file -p HEAD"))
 
+    def test_git_check_ignore(self):
+        """Refused twice at @canary 2026-09-12 while GIT_REDIRECT promised read-only
+        verbs run raw — a refusal that contradicts its own text teaches agents to
+        route around it. Every option shapes output; none writes."""
+        _assert_allowed(_bash("git check-ignore -v docs.local/notes.md"))
+        _assert_allowed(_bash("git check-ignore -q --no-index some/path"))
+
     def test_git_rev_parse(self):
         _assert_allowed(_bash("git rev-parse HEAD"))
 

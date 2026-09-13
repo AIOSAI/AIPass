@@ -21,14 +21,20 @@ subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411
 
 import json
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import machine as host_machine
+from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.skills.lib.system_status import handler as system_status
 
 
 # A real card, trimmed from @baud's verified run.
@@ -1019,3 +1025,229 @@ class TestTheRosterRoute:
 
         assert response.status_code == 500
         assert response.json()["error"]["code"] == "roster_misuse"
+
+
+# ============================================================================
+# The machine lane — GET /v1/machine, FPLAN-0561 row 2 (DPLAN-0341)
+# ============================================================================
+
+PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
+PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
+PATCH_CACHE_JSON = "aipass.api.apps.handlers.host.read_cache.json_handler"
+
+# The door itself, patched where it lives. machine.py imports it inside the
+# call, so the stand-in is what every read in these cases reaches.
+PATCH_VITALS_DOOR = "aipass.skills.lib.system_status.handler.machine_vitals"
+
+
+def _present(**values: Any) -> dict:
+    """A section that answered, in the skill's published shape."""
+    return {"available": True, "reason": None, "sentence": None, "detail": None, **values}
+
+
+def _absent(reason: str, **values: Any) -> dict:
+    """A section that did not, carrying the skill's OWN sentence for its code."""
+    return {"available": False, "reason": reason, "sentence": system_status.REASONS[reason], "detail": None, **values}
+
+
+def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
+    """
+    What machine_vitals() answers on a Mac running macOS, manufactured here.
+
+    psutil defines neither sensors_temperatures nor sensors_fans on macOS, so the
+    skill answers `platform` for both and a number for everything else. The
+    suite never needs a sensor chip: this box's applesmc plays no part.
+    """
+    return {
+        "ok": True,
+        "schema": 1,
+        "sampled_at": sampled_at,
+        "cpu": _present(percent=11.4, window_s=1.018),
+        "load": _present(one=0.52, five=0.61, fifteen=0.7),
+        "memory": _present(total_bytes=8000000000, used_bytes=5200000000, available_bytes=2800000000, percent=65.0),
+        "swap": _present(total_bytes=2000000000, used_bytes=0, free_bytes=2000000000, percent=0.0),
+        "temp": _absent("platform", chip=None, label=None, celsius=None, high=None, critical=None, seen=None),
+        "fan": _absent("platform", label=None, current=None, range=None, percent_of_range=None, fans=None, seen=None),
+        "network": _present(sent_bytes_per_s=1200.0, recv_bytes_per_s=5400.0, window_s=1.018),
+        "processes": _present(count=245),
+    }
+
+
+@pytest.fixture
+def machine_door():
+    """A stand-in for @skills' door, with a cold cache on both sides of the case."""
+    with patch(PATCH_MACHINE_LOGGER), patch(PATCH_MACHINE_JSON), patch(PATCH_CACHE_JSON):
+        host_machine._vitals.clear()
+        with patch(PATCH_VITALS_DOOR, autospec=True) as door:
+            yield door
+        host_machine._vitals.clear()
+
+
+@fastapi_required
+class TestTheMachineRoute:
+    """A proxy with one status line: absence is a 200, 503 is the owner unable to answer."""
+
+    def test_the_route_requires_a_token(self, client, machine_door) -> None:
+        """Vitals are machine state; they sit behind the same auth as everything."""
+        response = client.get("/v1/machine")
+
+        assert response.status_code == 401
+        machine_door.assert_not_called()
+
+    def test_a_mac_with_no_sensors_is_a_200_that_says_so(self, client, auth: dict, machine_door) -> None:
+        """
+        The manufactured macOS host: temp and fan answer `platform`, the rest are numbers.
+
+        Absence is the answer, not an error, and it arrives with the skill's own
+        sentence and a None where a zero would have been a lie. The whole body is
+        compared, so any adapter anywhere in the request path goes red.
+        """
+        machine_door.return_value = _macos_vitals()
+        assert all(name in machine_door.return_value for name in system_status.SECTIONS), "stand-in drifted"
+
+        response = client.get("/v1/machine", headers=auth)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body == _macos_vitals()
+        assert body["fan"]["available"] is False
+        assert body["fan"]["reason"] == "platform"
+        assert body["fan"]["sentence"] == system_status.REASONS["platform"]
+        assert body["fan"]["current"] is None
+        assert body["temp"]["celsius"] is None
+        assert body["cpu"]["percent"] == 11.4
+
+    @pytest.mark.parametrize(
+        ("reason", "detail"),
+        [
+            ("psutil_missing", system_status.PSUTIL_RECIPE),
+            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+            ("a_code_from_the_future", "a refusal this server has never seen"),
+        ],
+    )
+    def test_a_refusal_is_a_503_with_its_code_and_detail_intact(
+        self, client, auth: dict, machine_door, reason: str, detail: str
+    ) -> None:
+        """
+        The skill said no: 503, its code in `reason`, its detail as the message.
+
+        switched_off is 503 by the kill-switch rule (a closed switch names itself,
+        never a 200 dressed as a reading), and a code nobody here has seen is 503
+        with the code intact rather than guessed at.
+        """
+        machine_door.return_value = {"ok": False, "reason": reason, "detail": detail}
+
+        response = client.get("/v1/machine", headers=auth)
+
+        assert response.status_code == 503
+        assert response.json()["error"] == {"code": "machine_refused", "message": detail, "reason": reason}
+
+    def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
+        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        machine_door.side_effect = RuntimeError("boom inside the door")
+
+        response = client.get("/v1/machine", headers=auth)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "machine_door_failed"
+        assert "RuntimeError: boom inside the door" in error["message"]
+
+    @pytest.mark.parametrize("answer", [None, [], {"schema": 1}, {"ok": "yes"}])
+    def test_an_answer_outside_the_published_shape_is_a_503(
+        self, client, auth: dict, machine_door, answer: Any
+    ) -> None:
+        """No boolean `ok` means no way to tell an answer from a refusal, so nothing is served."""
+        machine_door.return_value = answer
+
+        response = client.get("/v1/machine", headers=auth)
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "machine_door_failed"
+
+    def test_a_parameter_is_refused_not_dropped(self, client, auth: dict, machine_door) -> None:
+        """A `section=fan` the route ignored would read as a filter that worked."""
+        response = client.get("/v1/machine?section=fan", headers=auth)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "machine_parameters_refused"
+        assert "section" in response.json()["error"]["message"]
+        machine_door.assert_not_called()
+
+
+class TestTheMachineCache:
+    """At most one read per second, and never a cached refusal."""
+
+    def test_two_reads_inside_a_second_are_one_read(self, machine_door) -> None:
+        """The second read is the first one's answer: one call, one sampled_at — absent sections included."""
+        machine_door.return_value = _macos_vitals()
+
+        first = host_machine.read_machine()
+        second = host_machine.read_machine()
+
+        assert machine_door.call_count == 1
+        assert second["sampled_at"] == first["sampled_at"]
+        assert second["fan"]["reason"] == "platform", "a success with absent sections is still a success"
+
+    def test_the_window_is_one_second(self, machine_door, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inside 1.0 s the stored answer; past it a fresh read. On a clock this case owns."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        machine_door.side_effect = [_macos_vitals("first"), _macos_vitals("second")]
+
+        assert host_machine.read_machine()["sampled_at"] == "first"
+        clock["now"] = 100.9
+        assert host_machine.read_machine()["sampled_at"] == "first"
+        clock["now"] = 101.1
+        assert host_machine.read_machine()["sampled_at"] == "second"
+        assert machine_door.call_count == 2
+
+    def test_a_refusal_is_never_cached(self, machine_door) -> None:
+        """A skill switched back on answers on the very next request, not after the window."""
+        machine_door.side_effect = [
+            {"ok": False, "reason": "switched_off", "detail": "off"},
+            _macos_vitals(),
+        ]
+
+        with pytest.raises(host_machine.MachineRefused) as refused:
+            host_machine.read_machine()
+        assert refused.value.reason == "switched_off"
+
+        assert host_machine.read_machine()["ok"] is True
+        assert machine_door.call_count == 2
+
+    def test_a_failed_door_is_never_cached(self, machine_door) -> None:
+        """A door that raised once is asked again, not refused for the rest of the second."""
+        machine_door.side_effect = [RuntimeError("once"), _macos_vitals()]
+
+        with pytest.raises(host_machine.MachineDoorFailed):
+            host_machine.read_machine()
+
+        assert host_machine.read_machine()["ok"] is True
+        assert machine_door.call_count == 2
+
+    def test_a_refusal_with_no_detail_still_says_something(self, machine_door) -> None:
+        """An empty detail is replaced by a sentence that names the owner; a real one never is."""
+        machine_door.return_value = {"ok": False, "reason": "switched_off", "detail": ""}
+
+        with pytest.raises(host_machine.MachineRefused) as refused:
+            host_machine.read_machine()
+
+        assert refused.value.detail == host_machine.NO_DETAIL
+
+    def test_a_server_that_never_serves_the_route_imports_nothing_new(self) -> None:
+        """
+        The door is imported inside the call, so importing this lane loads no skill.
+
+        Asked of a fresh interpreter, because this one already imported the skill
+        at the top of this file.
+        """
+        probe = (
+            "import sys\n"
+            "import aipass.api.apps.handlers.host.machine\n"
+            "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip().splitlines()[-1] == "False"

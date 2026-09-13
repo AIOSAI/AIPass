@@ -227,16 +227,16 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 297 test functions in 13 files
-                           #   (pytest expands to 302 cases)
+  tests/                   # Branch suite: 330 test functions in 14 files
+                           #   (pytest expands to 347 cases)
 ```
 
-Counted 2026-09-12. That 297 is the branch suite alone — the figure the seedgo
-readme rule checks, `def test_` under `tests/`.
+Counted 2026-09-12, after machine_vitals landed. That 330 is the branch suite
+alone — the figure the seedgo readme rule checks, `def test_` under `tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
 1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
-adds 22. All three together run 1438 passing, 0 skipped — the same number from
+adds 22. All three together run 1483 passing, 0 skipped — the same number from
 the branch root (`pytest .`) and from the repo root.
 
 ---
@@ -440,6 +440,78 @@ skipped and the lock trusts liveness alone. That waits for a switch-on plan.
 
 ---
 
+## machine_vitals() — The Published Read
+
+`lib/system_status/handler.py` publishes `machine_vitals()`: one dict of the
+machine's vitals for in-process callers (FPLAN-0561 row 1; every clause was
+ruled in DPLAN-0341). The host API proxies it verbatim on `/v1/machine` and
+BAUD's phone draws it. The meaning lives here and nowhere downstream — which
+sensor is the CPU, which rows are nonsense, what an absence is called.
+
+```python
+from aipass.skills.lib.system_status import handler
+vitals = handler.machine_vitals()
+```
+
+- **Shape.** `{"ok": True, "schema": 1, "sampled_at": <ISO-8601 UTC>}` plus
+  eight sections: `cpu`, `load`, `memory`, `swap`, `temp`, `fan`, `network`,
+  `processes`. Every section carries `available`, `reason`, `sentence` and
+  `detail` beside its own values, and every value key is always present — `None`
+  when the host cannot give it, never a zero. It never raises for a reading: a
+  call that raises costs its own section (`read_failed`), never its siblings.
+- **Whole-function refusal** is `{"ok": False, "reason": ..., "detail": ...}`,
+  and only for two codes: `psutil_missing` (detail is the install recipe) and
+  `switched_off`. The off-switch is consulted inside the function, because this
+  door is imported directly and never passes the runner's gate; an unreadable
+  switch state fails closed, exactly as the runner does.
+- **Reason codes** — a closed set, one sentence each in `REASONS`:
+
+| Code | When |
+|------|------|
+| `platform` | The OS has no such reading. psutil defines `sensors_temperatures` and `sensors_fans` only on Linux (temperatures also on FreeBSD); load on Windows is emulated and reads 0 until warm, so it is not drawn |
+| `no_sensor` | The function exists but reported nothing to read from |
+| `no_allowlisted_sensor` | Chips were reported, none on the allowlist; `seen` names them |
+| `read_failed` | The call raised; `detail` carries the error |
+| `warming` | A rate needs two samples — the first call in a process |
+| `no_range` | The fan's rpm is real, but its min/max is missing, unreadable, or not a range; `current` is still published, `range` and `percent_of_range` are `None` |
+| `switched_off` | Refusal only |
+| `psutil_missing` | Refusal only |
+
+- **The skill owns its baselines.** CPU percent and network rate come from
+  `cpu_times()` and `net_io_counters()` samples held in this module, each with
+  `window_s`. Never `psutil.cpu_percent(interval=None)`: its baseline is a psutil
+  module global keyed by thread id, so any other caller in the process moves the
+  window without saying so.
+- **An allowlist, not a threshold.** CPU temperature is `coretemp` /
+  `Package id 0` (the hottest `Core N` when there is no package row), with
+  `high` and `critical` from the sensor. Fans come from `applesmc`. Every other
+  applesmc temperature row stays off — on the MacBook this was built on, five
+  read -127 and a pair drifted from -34.25 to -30.0 inside twenty minutes — and
+  so does `BAT0`, a battery. Keyed by chip and label, never by position; growing
+  a list is a change to `TEMP_ALLOWLIST` / `FAN_ALLOWLIST`, never to a face.
+- **The fan range is a read-only sysfs read, Linux only.** psutil reports a
+  fan's label and rpm, not its range. The chip is found by the `name` file beside
+  its fan input — never a `hwmonN` index, which is boot order — walking the
+  directories the way psutil does (on this box `hwmon2/name` does not exist and
+  the name is at `hwmon2/device/name`). It opens `name`, `fanN_label`,
+  `fanN_min` and `fanN_max`, read-only, and nothing else: `fanN_manual` and
+  `fanN_output` are root-writable and never opened. `percent_of_range` is
+  clamped to 0–100 and the range is carried beside it, so a fan sitting at its
+  floor (0%, as it does here at idle) is distinguishable from a fan with no scale.
+- **Cost, measured here:** about 19 ms warm, 12 ms of it psutil's own
+  temperature sweep; the fan range adds about 2 ms.
+
+Pinned by `tests/test_machine_vitals.py`, 32 functions expanding to 45 cases,
+against stand-ins only: psutil, the monotonic clock and the hwmon tree are all
+manufactured, so the file is green on a host with no sensor chips. The
+read-only pin records every `open`, `io.open` and `os.open` under the tree and
+raises on a write mode or a fan control file, with a control proving the guard
+is armed and can still say yes. 20 mutants, one per clause, all go red. The text
+actions and their 29 `test_runner.py` functions are unchanged; making them
+renderings of this dict is a later row.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -458,6 +530,9 @@ skipped and the lock trusts liveness alone. That waits for a switch-on plan.
 
 ### Provides To
 - All modules — skill discovery, loading, validation, and execution
+- **@api** — `machine_vitals()`, imported in-process from
+  `aipass.skills.lib.system_status.handler` for the `/v1/machine` route
+  (FPLAN-0561), the same way the lock verb imports `screen_lock`
 - AI agents — discoverable capability units via `drone @skills`
 - Projects — local skill scaffolding via `drone @skills create`
 
@@ -471,8 +546,8 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1438 passing, 0 skipped, identical from the branch root and
-the repo root. seedgo audit 100 on every CI-scored category.
+stay masked. Suite 1483 passing (re-counted 2026-09-12), 0 skipped, identical from the
+branch root and the repo root. seedgo audit 100 on every CI-scored category.
 
 **Unverified — the telegram skill's runtime.** The skill is discovered, listed
 and gated correctly, and its own 1114-case suite passes. Its *live* behaviour

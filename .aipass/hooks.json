@@ -114,10 +114,20 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.registry_gate.handle",
       "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
+    },
+    "trinity_tripwire_snapshot": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot",
+      "matcher": "Bash"
     }
   },
 
   "PostToolUse": {
+    "trinity_tripwire": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.edit_gate.tripwire",
+      "matcher": "Bash"
+    },
     "auto_fix_diagnostics": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_fix.handle",

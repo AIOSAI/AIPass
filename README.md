@@ -14,7 +14,7 @@
 <p align="center"><em>AI agents that remember, collaborate, and never start from zero.</em></p>
 <p align="center">
   <a href="https://aipass.ai">aipass.ai</a> ·
-  <a href="https://pypi.org/project/aipass/">PyPI</a> ·
+  <a href="https://github.com/AIOSAI/AIPass/issues/new?template=feedback.yml">Feedback</a> ·
   <a href="https://reddit.com/r/AIPass">r/AIPass</a> ·
   <a href="https://github.com/AIOSAI/AIPass/discussions">Discussions</a>
 </p>

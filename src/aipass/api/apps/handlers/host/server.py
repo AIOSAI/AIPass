@@ -75,6 +75,11 @@ Both answer 503 with a named reason until `fleet.SNAPSHOT_READY` is flipped.
 it and would open a GUI window instead of erroring — see fleet.py. Their schema
 is implemented field-for-field, so nothing here changes when the gate opens.
 
+FPLAN-0561 row 2 adds the monitor wheel's read (DPLAN-0341, see machine.py):
+    GET /v1/machine - read scope. @skills' machine_vitals(), relayed verbatim
+                      through a 1 s single-flight cache. An absent reading is
+                      a 200; 503 only when the owner could not answer.
+
 Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
     POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
                                      admin keyword is UNREACHABLE through it,
@@ -109,6 +114,7 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import reads as host_reads
@@ -936,6 +942,34 @@ def create_app() -> Any:
             # Ours, not the caller's: this server built an argv the binary
             # refuses, and no retry makes that better.
             raise _deny(500, "roster_misuse", str(e)) from e
+
+    @app.get("/v1/machine")
+    def machine(
+        request: Request,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """
+        The machine's vitals — @skills' machine_vitals(), relayed verbatim.
+
+        An absent reading is a 200 carrying the skill's own section. 503 only
+        when the owner could not answer: the skill refused (psutil_missing or
+        switched_off, its code in `reason`) or its door failed. machine.py
+        carries the argument. No parameters, by the roster's rule.
+        """
+        if request.query_params:
+            named = ", ".join(sorted(request.query_params.keys()))
+            raise _deny(
+                400,
+                "machine_parameters_refused",
+                f"/v1/machine takes no parameters and will not silently drop one — received: {named}.",
+            )
+
+        try:
+            return host_machine.read_machine()
+        except host_machine.MachineRefused as e:
+            raise _deny(503, "machine_refused", e.detail, reason=e.reason) from e
+        except host_machine.MachineDoorFailed as e:
+            raise _deny(503, "machine_door_failed", str(e)) from e
 
     @app.get("/v1/rooms")
     def rooms(

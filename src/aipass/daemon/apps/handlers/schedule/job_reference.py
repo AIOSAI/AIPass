@@ -63,7 +63,7 @@ _REFERENCE_LINES = [
     "  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models)",
     "",
     '  [bold]Command jobs:[/bold] "command" instead of "prompt" — run as a subprocess, nobody woken',
-    '    "command": "drone rm --stale 10d ../..", "timeout_seconds": 600,',
+    '    "command": "drone rm --stale 10d ..", "timeout_seconds": 120,',
     '    "notify": { "email": "@devpulse" }   [dim](a mail on start and on finish)[/dim]',
     "    [dim]drone must be the first token. No shell: no globs, pipes or ';'. Runs in the[/dim]",
     "    [dim]owner's branch, so drone logs it as the owner. Exactly one of prompt/command.[/dim]",

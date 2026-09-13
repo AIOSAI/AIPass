@@ -25,10 +25,15 @@ permissions:
 jobs:
   windows-setup:
     runs-on: windows-latest
-    # A healthy run is ~9 minutes. Without this bound a hung test burns the
+    # A healthy run is ~25 minutes as of 2026-09-13 (21k tests; every test
+    # drives the real prax json service into a tmp sandbox, ~9 fsync'd writes
+    # each, and NTFS pays 5-20 ms per op where ext4 pays ~1 — CPLAN-0002).
+    # It was ~9 minutes on 2026-08-18. Without this bound a hung test burns the
     # runner for GitHub's 6h default — 2026-08-18 sat 1h57m until a push
     # cancelled it (commons concurrent probe, os.replace sharing violation).
-    timeout-minutes: 30
+    # 30 killed two green runs on main at 30:00 on 2026-09-13 (the second
+    # queued behind the first); a timed-out job reads as cancelled = red X.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

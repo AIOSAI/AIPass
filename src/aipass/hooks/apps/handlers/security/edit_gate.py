@@ -1,18 +1,22 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.9.0
-# Description: Cross-project (tool + scripted), cross-branch and inbox write protection (PreToolUse)
+# Version: 1.10.0
+# Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
+#              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-01
+# Modified: 2026-09-13
 # =============================================
 
-"""Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
+"""Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
+state. Reports a shell memory write the reader could not see, after the call."""
 
 import importlib
 import json
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +45,15 @@ _NUMBER_KEYS = ("number", "session_number")
 # todos never roll — they are operational and pruned by hand. _todos_count_advisory
 # says so in the right words; the rollover-budget warning must not also claim a trim.
 _NON_ROLLING_SECTIONS = frozenset({"todos"})
+# The shell-memory tripwire (DPLAN-0342 row 3). One snapshot file per session in
+# the temp dir, the home cadence's guard files already use. It holds the last few
+# calls, keyed by tool_use_id, because a call whose PostToolUse never fires (a later
+# gate refused it, the command failed) must not grow it.
+_TRIPWIRE_DIR = Path(tempfile.gettempdir())
+_TRIPWIRE_PENDING_MAX = 8
+# The sanctioned writers of memory files from a shell: drone verbs, not raw writes.
+_MEMORY_VERB_TARGETS = frozenset({"@memory", "@spawn"})
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
 
 
 def _entry_number(entry: dict) -> int | None:
@@ -185,7 +198,24 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
     }
 
 
-def _check_bash_project_boundary(cwd: str, command: str) -> dict | None:
+def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
+    """Every (path, how) the shell reader can see *command* write, read once for both Bash-lane rules.
+
+    A parser that cannot read a command has learned nothing about it. Neither
+    rule may convict on that, and neither may go quiet about it: the failure is
+    logged and the answer is no targets.
+    """
+    if not command:
+        return []
+    try:
+        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        return bw.write_targets(command, cwd)
+    except Exception as exc:
+        logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
+        return []
+
+
+def _check_bash_project_boundary(cwd: str, targets: list[tuple[Path, str]]) -> dict | None:
     """Block a cross-project write made through the shell rather than a tool.
 
     The tool lane was fenced and this one was not: @devpulse's Edit into a
@@ -202,18 +232,10 @@ def _check_bash_project_boundary(cwd: str, command: str) -> dict | None:
 
     Returns a block dict, or None to allow.
     """
-    if not command:
+    if not targets:
         return None
     caller_root = _find_project_root(Path(cwd))
     if caller_root is None:
-        return None
-    try:
-        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
-        targets = bw.write_targets(command, cwd)
-    except Exception as exc:
-        # A parser that cannot read a command has learned nothing about it. It
-        # must not convict on that, and it must not go quiet about it either.
-        logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
         return None
 
     for target, how in targets:
@@ -237,6 +259,40 @@ def _check_bash_project_boundary(cwd: str, command: str) -> dict | None:
             target,
         )
         return _cross_project_block(caller_root, target_root, target, how)
+    return None
+
+
+def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
+    """Refuse a shell write to a .trinity memory file: every seat, every project, admin included.
+
+    DPLAN-0342 row 3. @memory's caps are measured on the Edit/Write lane, so a
+    write made from a shell landed unmeasured: @baud's 21 of 21 sessions went
+    over cap that way on 08-16, @api 12 sessions and 16 learnings, @hooks 9
+    entries on 2026-09-12. The reader built for the project fence already claims
+    every shape that carried that drift (redirect, tee, sed -i, cp/mv, an
+    interpreter holding the path), so the rule is one comparison on its targets.
+
+    The admin exemption is not consulted. It lets one seat reach another
+    project; it says nothing about how memory is written. An interpreter that
+    only READS a memory path is refused too, because the interpreter rule cannot
+    tell a read from a write. That over-refusal is named in the refusal, with
+    the tools that read, rather than left for an agent to discover.
+
+    Returns a block dict, or None to allow.
+    """
+    for target, how in targets:
+        if target.parent.name != ".trinity" or target.name not in _TRINITY_MEMORY_FILES:
+            continue
+        logger.warning("[HOOKS] edit_gate: shell write to a memory file refused: %s via %s", target, how)
+        reason = (
+            f"Memory files are not written from a shell: {target} via {how}.\n"
+            "Write .trinity/local.json and observations.json with the Edit or Write tool, where @memory's caps "
+            "are measured, or through a drone @memory verb. A shell write lands unmeasured, which is how whole "
+            "branches drifted over cap.\n"
+            "Only reading it? An interpreter that names a memory path is refused whether it reads or writes, "
+            "because this gate cannot tell which. Read the file with the Read tool, cat or jq."
+        )
+        return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
     return None
 
 
@@ -393,8 +449,56 @@ def _missing_field_violations(before: dict, after: dict, limits: dict) -> list[d
     return hits
 
 
-def _format_violation(v: dict) -> str:
-    """Render one violation line.
+def _entry_text(v: dict, after: dict, limits: dict) -> str | None:
+    """The authored text behind an over-cap record, read back out of the proposed file.
+
+    @memory's six-key record carries the measurement, not the text, and that
+    shape is a published contract this gate does not get to grow. The text is
+    where the record says it is: the entry type names the container and field,
+    and the key is the dict key or list index in the SAME ``after`` document the
+    extractor measured. Anything that does not resolve to a string of exactly the
+    recorded length answers None — a cut drawn on text the record did not measure
+    would point at the wrong characters, and the measurement line alone is still
+    true without it.
+    """
+    type_def = limits.get("entry_types", {}).get(v.get("entry_type", ""))
+    if not isinstance(type_def, dict):
+        return None
+    container = after.get(type_def.get("container", ""))
+    key = str(v.get("key", ""))
+    if isinstance(container, list):
+        entry = container[int(key)] if key.isdigit() and int(key) < len(container) else None
+    elif isinstance(container, dict):
+        entry = container.get(key)
+    else:
+        return None
+    if isinstance(entry, dict):
+        entry = entry.get(type_def.get("field", "value"))
+    if not isinstance(entry, str) or len(entry) != v.get("length"):
+        logger.info("[HOOKS] edit_gate: no cut point for %s [%s] — text did not resolve", v.get("entry_type"), key)
+        return None
+    return entry
+
+
+def _cut_point(text: str, cap: int) -> str:
+    """Where the cap fell: the kept prefix, a bar, and the overflow past it (DPLAN-0342).
+
+    The fleet's median overage is 7% of the cap and 88% of overages sit under
+    20% — agents aim AT the line and land a few words past it. A refusal that
+    only says "336/300 (+36)" makes the rewrite a re-guess of the whole entry;
+    showing the 36 characters that crossed makes it a trim of a visible tail.
+    Both halves are JSON-quoted so a trailing space or a newline at the boundary
+    is visible, and ``len`` slices in code points — the unit the cap is measured
+    in — so the bar sits exactly at the cap. Display only: the block is unchanged
+    and nothing is ever truncated for the agent.
+    """
+    kept = json.dumps(text[:cap], ensure_ascii=False)
+    over = json.dumps(text[cap:], ensure_ascii=False)
+    return f"kept: {kept} | over: {over}"
+
+
+def _format_violation(v: dict, text: str | None = None) -> str:
+    """Render one violation line, plus the cut point when the text is known.
 
     A refusal that cannot be measured must not print as a measurement. The
     unmeasurable and missing-field species carry zeros in length/cap/over_by to
@@ -414,11 +518,14 @@ def _format_violation(v: dict) -> str:
             f"  {v['entry_type']} [{v['key']}]: unmeasurable — expected a string, "
             f"found {v.get('found_type', 'unknown')}. Cap is {v['cap']} chars."
         )
-    return f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})"
+    line = f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})"
+    if text is None:
+        return line
+    return f"{line}\n    {_cut_point(text, v['cap'])}"
 
 
-def _log_violation(v: dict) -> None:
-    """Warn-mode log line — carries the same cause the block would have named."""
+def _log_violation(v: dict, text: str | None = None) -> None:
+    """Warn-mode log line — carries the same cause, and cut, the block would have named."""
     if v.get("reason"):
         logger.warning(
             "[HOOKS] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
@@ -430,12 +537,13 @@ def _log_violation(v: dict) -> None:
         )
         return
     logger.warning(
-        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d) — warn only",
+        "[HOOKS] edit_gate: over-limit .trinity entry %s [%s]: %d/%d (+%d)%s — warn only",
         v["entry_type"],
         v["key"],
         v["length"],
         v["cap"],
         v["over_by"],
+        "" if text is None else f" {_cut_point(text, v['cap'])}",
     )
 
 
@@ -470,20 +578,21 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
     over = _dedupe_violations(over + _missing_field_violations(before, after, limits))
     if not over:
         return None
+    texts = [None if v.get("reason") else _entry_text(v, after, limits) for v in over]
     if limits.get("enforce"):
         lines = ["Unwritable .trinity entries (fix before saving):"]
-        for v in over:
-            lines.append(_format_violation(v))
-        # Say what this gate can actually see. Bash now reaches this handler, but
-        # only its PROJECT fence — the cap check runs on the Edit/Write lane alone,
-        # so a write made through python -c, a heredoc or sed is still unmeasured.
-        # Three branches have drifted over cap through that lane — @baud to
-        # 2529/300 for a week, @api to 12 sessions + 16 learnings. Claiming
-        # enforcement it does not have is what let the drift read as compliance.
-        # Same reason the on-disk pass is universal: a gate blind to how drift
-        # ARRIVES cannot be the thing that refuses a file for already carrying it.
+        for v, text in zip(over, texts, strict=True):
+            lines.append(_format_violation(v, text))
+        # Say what this gate can actually see. The cap is measured on the
+        # Edit/Write lane. Until DPLAN-0342 row 3 this line said a Bash write was
+        # "not measured" — true, and three branches drifted over cap through that
+        # lane (@baud to 2529/300 for a week, @api to 12 sessions + 16 learnings,
+        # @hooks 9 entries). A shell write the reader can see is now refused
+        # (_check_bash_memory_write); one it cannot see is reported after the
+        # call by tripwire(). The carried-drift rule stays universal: a gate
+        # blind to how drift ARRIVED cannot refuse a file for already carrying it.
         lines.append(
-            "  (Caps are measured on Edit/Write only — a write made through Bash is not measured. "
+            "  (Caps are measured on Edit/Write; a write to a memory file made through Bash is refused. "
             "Cure drift already on disk with drone @memory lint.)"
         )
         return {
@@ -491,8 +600,8 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
             "exit_code": 2,
             "sound": "edit gate",
         }
-    for v in over:
-        _log_violation(v)
+    for v, text in zip(over, texts, strict=True):
+        _log_violation(v, text)
     return None
 
 
@@ -748,6 +857,84 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         return None
 
 
+def _seat_trinity(cwd: str) -> Path | None:
+    """The nearest .trinity directory at or above the session's cwd: the seat's own memory."""
+    try:
+        start = Path(cwd).resolve()
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] edit_gate tripwire: cwd unresolvable %r: %s", cwd, exc)
+        return None
+    for candidate in (start, *start.parents):
+        if (candidate / ".trinity").is_dir():
+            return candidate / ".trinity"
+    return None
+
+
+def _memory_stats(trinity: Path) -> dict[str, list[int] | None]:
+    """(mtime_ns, size) per memory file. None for a missing file, so a creation or a removal reads as a change."""
+    stats: dict[str, list[int] | None] = {}
+    for name in sorted(_TRINITY_MEMORY_FILES):
+        path = trinity / name
+        if not path.is_file():
+            stats[name] = None
+            continue
+        found = path.stat()
+        stats[name] = [found.st_mtime_ns, found.st_size]
+    return stats
+
+
+def _tripwire_path(hook_data: dict) -> Path:
+    return _TRIPWIRE_DIR / f"aipass-trinity-tripwire-{hook_data.get('session_id') or 'nosession'}.json"
+
+
+def _read_pending(path: Path) -> dict:
+    """The session's pending snapshots, keyed by tool_use_id. An unreadable file starts fresh and says so."""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] edit_gate tripwire: unreadable snapshot file %s, starting fresh: %s", path, exc)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _runs_memory_verb(command: str, cwd: str) -> bool:
+    """True when some segment of *command* is a drone @memory or @spawn verb, the sanctioned writers."""
+    bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+    for segment, _hits in bw.write_targets_by_segment(command, cwd):
+        words = list(segment)
+        while words and _ENV_ASSIGNMENT.match(words[0]):
+            words.pop(0)
+        if len(words) > 1 and Path(words[0]).name == "drone" and words[1] in _MEMORY_VERB_TARGETS:
+            return True
+    return False
+
+
+def _measure_memory_file(path: Path) -> list[str]:
+    """What a memory file holds that fails its caps, rendered as the Edit refusal renders it, cut point included.
+
+    The WHOLE file is measured, not a diff: the snapshot holds stats, not text,
+    so an entry already over cap before the call is listed too. The report says
+    "holds", never "wrote".
+    """
+    if not path.is_file():
+        return [f"  {path.name} no longer exists."]
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
+        return [f"  {path.name} no longer parses as JSON: {exc}"]
+    if not isinstance(doc, dict):
+        return [f"  {path.name} is no longer a JSON object."]
+    el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    limits = el.load_entry_limits(path.parent.parent.name)
+    if not limits.get("enabled"):
+        return []
+    over = _dedupe_violations(el.changed_entries({}, doc, limits))
+    return [_format_violation(v, None if v.get("reason") else _entry_text(v, doc, limits)) for v in over]
+
+
 def handle(hook_data: dict) -> dict:
     """Apply edit security gates and return block or allow decision.
 
@@ -762,17 +949,21 @@ def handle(hook_data: dict) -> dict:
         tool_input = hook_data.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
 
-        # The scripted lane. Only the project fence runs here — the branch,
-        # inbox, daemon and .trinity checks read a single named file, and a
-        # shell command has no such field to read. Claiming they apply would be
-        # the enforcement-it-does-not-have mistake the caps advisory already
-        # names out loud.
+        # The scripted lane. Two rules run on what the shell reader can see: the
+        # project fence, and the memory rule (a .trinity memory file is written
+        # where its caps are measured, never from a shell — DPLAN-0342 row 3).
+        # The branch, inbox and daemon checks read a single named file, and a
+        # shell command has no such field to read. What the reader cannot see is
+        # published in bash_writes.NOT_CAUGHT; a memory write among it is
+        # reported after the call by tripwire().
         if tool_name == "Bash":
             cwd = hook_data.get("cwd", "") or os.getcwd()
-            return _check_bash_project_boundary(cwd, tool_input.get("command", "")) or {
-                "stdout": "",
-                "exit_code": 0,
-            }
+            targets = _bash_write_targets(cwd, tool_input.get("command", ""))
+            return (
+                _check_bash_project_boundary(cwd, targets)
+                or _check_bash_memory_write(targets)
+                or {"stdout": "", "exit_code": 0}
+            )
 
         if tool_name not in EDIT_TOOLS:
             return {"stdout": "", "exit_code": 0}
@@ -906,4 +1097,99 @@ def handle(hook_data: dict) -> dict:
 
     except Exception as exc:
         logger.info("[HOOKS] edit_gate: unexpected error (allowing): %s", exc)
+        return {"stdout": "", "exit_code": 0}
+
+
+def tripwire_snapshot(hook_data: dict) -> dict:
+    """PreToolUse (Bash): record the seat's memory-file stats under this call's tool_use_id.
+
+    The first half of the shell-memory tripwire; :func:`tripwire` is the second.
+    Never blocks. A snapshot that cannot be taken leaves the call unwatched and
+    says so in the log.
+    """
+    try:
+        if hook_data.get("tool_name") != "Bash":
+            return {"stdout": "", "exit_code": 0}
+        trinity = _seat_trinity(hook_data.get("cwd", "") or os.getcwd())
+        if trinity is None:
+            return {"stdout": "", "exit_code": 0}
+        tool_use_id = hook_data.get("tool_use_id")
+        if not tool_use_id:
+            logger.info("[HOOKS] edit_gate tripwire: no tool_use_id in the payload, call unwatched")
+            return {"stdout": "", "exit_code": 0}
+        path = _tripwire_path(hook_data)
+        pending = _read_pending(path)
+        pending.pop(tool_use_id, None)
+        pending[tool_use_id] = {"trinity": str(trinity), "stats": _memory_stats(trinity)}
+        while len(pending) > _TRIPWIRE_PENDING_MAX:
+            pending.pop(next(iter(pending)))
+        scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        scratch.write_text(json.dumps(pending), encoding="utf-8")
+        os.replace(scratch, path)
+    except Exception as exc:
+        logger.warning("[HOOKS] edit_gate tripwire: snapshot failed, this call goes unwatched: %s", exc)
+    return {"stdout": "", "exit_code": 0}
+
+
+def tripwire(hook_data: dict) -> dict:
+    """PostToolUse (Bash): if the seat's memory changed during the call, measure it on disk and say so loudly.
+
+    DPLAN-0342 row 3, the belt to the Bash-lane refusal's braces. The refusal
+    covers every shell write the reader can SEE; this reports the ones it cannot
+    (a bare file name after cd, a path joined in program text, a path in a shell
+    variable) the moment they land, instead of weeks later in an audit nobody
+    ran. The comparison is against the snapshot :func:`tripwire_snapshot` took
+    for the same tool_use_id, so a memory Edit made just before the call is never
+    blamed on it. A drone @memory or @spawn verb is the sanctioned writer and is
+    not reported. Never blocks: the command has already run.
+    """
+    try:
+        if hook_data.get("tool_name") != "Bash":
+            return {"stdout": "", "exit_code": 0}
+        tool_use_id = hook_data.get("tool_use_id")
+        before = _read_pending(_tripwire_path(hook_data)).get(tool_use_id) if tool_use_id else None
+        if not isinstance(before, dict):
+            if _seat_trinity(hook_data.get("cwd", "") or os.getcwd()) is not None:
+                logger.info(
+                    "[HOOKS] edit_gate tripwire: no snapshot for %s, cannot tell if memory changed", tool_use_id
+                )
+            return {"stdout": "", "exit_code": 0}
+
+        trinity = Path(before["trinity"])
+        now = _memory_stats(trinity)
+        changed = [name for name in sorted(_TRINITY_MEMORY_FILES) if now.get(name) != before["stats"].get(name)]
+        if not changed:
+            return {"stdout": "", "exit_code": 0}
+        command = hook_data.get("tool_input", {}).get("command", "")
+        if _runs_memory_verb(command, hook_data.get("cwd", "") or str(trinity.parent)):
+            logger.info(
+                "[HOOKS] edit_gate tripwire: %s changed by a drone memory verb (sanctioned)", ", ".join(changed)
+            )
+            return {"stdout": "", "exit_code": 0}
+
+        parts: list[str] = []
+        for name in changed:
+            path = trinity / name
+            findings = _measure_memory_file(path)
+            if findings:
+                parts.append(
+                    f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate, "
+                    "and it does not measure clean:"
+                )
+                parts.extend(findings)
+                parts.append(
+                    "  Re-land each entry through Edit, trimming the over tail. Memory is written with Edit/Write "
+                    "or a drone @memory verb, never a shell."
+                )
+            else:
+                parts.append(
+                    f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate. "
+                    "It measures clean; write memory with Edit/Write or a drone @memory verb."
+                )
+        context = "\n".join(parts)
+        logger.warning("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
+        output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}
+        return {"stdout": json.dumps(output), "exit_code": 0}
+    except Exception as exc:
+        logger.warning("[HOOKS] edit_gate tripwire: failed, memory change unreported: %s", exc)
         return {"stdout": "", "exit_code": 0}

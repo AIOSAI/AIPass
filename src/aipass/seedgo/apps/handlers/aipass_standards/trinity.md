@@ -63,8 +63,10 @@ sessions_meta     sessions[]
 **Meta lines** — every section's `*_meta` value is `⟦ machine tab ⟧ + one-sentence semantics`, fully rendered, never hand-edited:
 
 ```
-⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars ⟧ The chronicle — what happened and how it ended; one entry per session.
+⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars · draft to 240 ⟧ The chronicle — what happened and how it ended; one entry per session.
 ```
+
+`draft to N` is the length to write to, not a second cap: 80% of the resolved cap, floored (`300/200/150 → 240/160/120`, `77 → 61`), per_branch overrides included (DPLAN-0342). It is derived, never stored, so it cannot go stale beside the cap.
 
 The ⟦⟧ tab carries the live numbers (rendered from config — a config change re-renders every file); the sentence after it carries the section's meaning (owned by the template). The agent reads the cap where it writes; it never has to know the config exists.
 

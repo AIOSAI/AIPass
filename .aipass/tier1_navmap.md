@@ -6,7 +6,7 @@ AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, servi
 
 # Finding your way
 
-Breadcrumbs, not answers: what exists and where to look. Cheapest, highest-signal sources first:
+Breadcrumbs, not answers. Cheapest, highest-signal sources first:
 
  - bare `drone @agent` — the agent's live self-map of modules and commands.
  - `drone @agent --help` — the full reference, source of truth for usage.
@@ -87,13 +87,15 @@ Plans carry context so you don't have to. Create only via `drone @flow create <p
 
 # Memory — .trinity/
 
-Your continuity across sessions. Save proactively — after milestones, decisions, topic switches.
+Save proactively — after milestones, decisions, topic switches.
 
- - `passport.json` — identity. Update only when identity genuinely evolves.
+ - `passport.json` — identity. Update only when it genuinely evolves.
  - `local.json` — session log, key learnings, todos.
  - `observations.json` — what you learn about the user.
- - Overflow rolls to vectors automatically, never trim by hand; `drone @memory search "query"` recalls it. An entry missing from local.json likely rolled over; absence locally is not gone.
- - Entry caps are hook-enforced (over-limit edit rejected whole); the live cap is each file's `*_meta` line. Draft to ~80%; if rejected, rewrite in one pass.
+ - Overflow rolls to vectors, never trim by hand; `drone @memory search "query"` recalls it. Absent locally is not gone.
+ - Caps are hook-enforced; live cap in each file's `*_meta` line. Over-cap edits are refused whole; the refusal shows the cut point: trim that tail.
+ - `sessions.summary`, `observations.note`: count the draft in tens in your reasoning, running total, trim before the edit. A whole session competes for 300 chars; counting in tens measured exact.
+ - `todos.task`, `key_learnings.value`: draft to ~80%.
 
 # House rules
 

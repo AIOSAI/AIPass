@@ -477,6 +477,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
+| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and eight sections (cpu, load, memory, swap, temp, fan, network, processes), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache — the first read after a server start shows cpu and network `warming`. An absent reading is a **200** with the skill's section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: the code in `error.reason`, its detail as the message) or its door failed (`machine_door_failed`). Takes no parameters — any is a 400 |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
 | `POST /v1/memory-config/set-default` | operate | `{type, count}` — the default only. **Does not reach any branch** |

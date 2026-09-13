@@ -367,6 +367,77 @@ class TestScriptedLaneDoesNotOverreach:
         assert _run(str(loose), command="sed -i s/a/b/ /tmp/whatever.txt")["exit_code"] == 0
 
 
+class TestShellWritesToMemoryAreRefused:
+    """DPLAN-0342 row 3: a memory file is written where its caps are measured, never from a shell.
+
+    @memory's caps run on the Edit/Write lane. A shell write landed unmeasured: @baud's 21 of 21
+    sessions went over cap that way, @api 12 sessions and 16 learnings, @hooks 9 entries. Every
+    one of those shapes is one this reader already claims, so the rule is a comparison on its
+    targets.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo '{}' > .trinity/local.json",
+            "echo x >> .trinity/observations.json",
+            "echo x | tee .trinity/local.json",
+            "sed -i s/a/b/ .trinity/local.json",
+            "cp docs/draft.json .trinity/local.json",
+            "python3 -c \"open('.trinity/local.json', 'w').write('{}')\"",
+            "python3 - <<'PY'\nfrom pathlib import Path\nPath('.trinity/observations.json').write_text('{}')\nPY",
+            "cd .trinity && echo x > local.json",
+        ],
+        ids=["redirect", "append", "tee", "sed-i", "cp", "python-c", "python-heredoc", "cd-then-redirect"],
+    )
+    def test_every_shape_the_reader_sees_is_refused(self, sibling_projects: dict, command: str):
+        result = _run(sibling_projects["plain_seat"], command=command)
+        assert _blocked(result), command
+        assert "Edit or Write tool" in _reason(result)
+
+    def test_the_refusal_names_the_file_the_verb_and_where_memory_is_written(self, sibling_projects: dict):
+        reason = _reason(_run(sibling_projects["plain_seat"], command="sed -i s/a/b/ .trinity/local.json"))
+        assert "local.json via sed -i" in reason
+        assert "drone @memory" in reason
+
+    def test_the_admin_seat_is_refused_too(self, sibling_projects: dict, grant_granted):
+        """The admin exemption reaches other projects. It says nothing about how memory is written."""
+        assert _blocked(_run(sibling_projects["admin_seat"], command="echo x > .trinity/local.json"))
+
+    def test_a_seat_outside_any_project_is_refused_too(self, tmp_path: Path):
+        """The project fence needs a boundary to draw; this rule needs only the file."""
+        loose = tmp_path / "loose"
+        loose.mkdir()
+        assert _blocked(_run(str(loose), command="echo x > .trinity/local.json"))
+
+    def test_an_interpreter_that_only_reads_is_refused_and_told_how_to_read(self, sibling_projects: dict):
+        """The published over-refusal: the interpreter rule cannot tell a read from a write."""
+        command = "python3 -c \"import json; print(json.load(open('.trinity/local.json')))\""
+        result = _run(sibling_projects["plain_seat"], command=command)
+        assert _blocked(result)
+        assert "Read tool, cat or jq" in _reason(result)
+
+
+class TestShellMemoryRuleDoesNotOverreach:
+    """Reads, drone verbs and every other file stay open. A rule that refuses correct commands gets routed around."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat .trinity/local.json | jq .",
+            "jq . .trinity/local.json > docs/trinity_copy.json",
+            "wc -c .trinity/local.json .trinity/observations.json",
+            "drone @memory lint",
+            "echo x > .trinity/passport.json",
+            "echo x > docs/local.json",
+            "echo x > observations.json",
+        ],
+        ids=["cat-jq", "jq-elsewhere", "wc", "drone-memory", "passport", "local-json-elsewhere", "bare-name"],
+    )
+    def test_reads_verbs_and_other_files_are_allowed(self, sibling_projects: dict, command: str):
+        assert _run(sibling_projects["plain_seat"], command=command)["exit_code"] == 0, command
+
+
 class TestBashWritesParser:
     """Unit-level reading of the parser, independent of the fence."""
 
@@ -420,7 +491,7 @@ class TestBashWritesParser:
 
         assert NOT_CAUGHT
         joined = " ".join(NOT_CAUGHT)
-        for named in ("symlink", "xargs", "chmod", "git", "pipe"):
+        for named in ("symlink", "xargs", "chmod", "git", "pipe", "no separator", "joined", "sponge"):
             assert named in joined
 
 

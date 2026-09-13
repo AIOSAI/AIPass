@@ -526,9 +526,47 @@ introspection, so this list and the code cannot drift apart:
   built elsewhere; only the paths in its own command and its own heredoc are read as held
 - a path spelled for the *other* operating system's filesystem — `C:\Proj\x` read on Linux names no
   drive that exists here, so it resolves relative and reads as local
+- a file name with no separator inside interpreter source — a bare `local.json` after a `cd` (a bare
+  word cannot be told from `json.load`; `./local.json` is read)
+- a path joined in program text — `Path('.trinity') / 'local.json'` is two strings, neither a path
+- write verbs the parser has no grammar for: `sponge`, `ed` / `ex`, an interactive editor
 
 A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
 a parser that has learned nothing about a command must not convict on it.
+
+**Memory files are not written from a shell (2026-09-13, DPLAN-0342 row 3).** A second rule runs on the
+same targets: a claimed write to `.trinity/local.json` or `.trinity/observations.json` is refused for every
+seat in every project, the admin seat included (its exemption is for the project fence, not for how memory
+is written). @memory's caps are measured on the Edit/Write lane, so a shell write landed unmeasured: @baud
+wrote 21 of 21 sessions over cap that way, @api 12 sessions and 16 learnings, @hooks 9 entries. The refusal
+names the target and the verb, and says where memory is written: the Edit or Write tool, or a `drone @memory`
+verb.
+
+- **Known over-refusal.** An interpreter that only *reads* a memory path is refused too, because the
+  interpreter rule cannot tell a read from a write. The refusal says so and names the tools that read: the
+  Read tool, `cat`, `jq`.
+- **Open shapes, measured 2026-09-13.** A bare file name in interpreter source after a `cd` (the `cd` *is*
+  honoured; `./local.json` after it is caught), a path joined in program text, a path in a shell variable,
+  and write verbs the reader has no grammar for (`sponge`, `ed`). All are in the list above.
+
+**The tripwire reports what the refusal cannot see.** Two more functions in `edit_gate`:
+`tripwire_snapshot` (PreToolUse, Bash) records the seat's memory-file `(mtime_ns, size)` under the call's
+`tool_use_id`, and `tripwire` (PostToolUse, Bash) compares. If a memory file changed during the call and the
+command ran no `drone @memory` or `drone @spawn` verb, the whole file is measured on disk against @memory's
+caps and the agent is told `MEMORY WRITTEN FROM A SHELL: <file> changed during this Bash call, outside the
+caps gate`, followed by every over-cap entry with its cut point, or "It measures clean". It never blocks.
+Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it. Its
+own limits: a call that ends in a tool error fires `PostToolUseFailure`, which this engine does not wire, so
+a write followed by a failure goes unreported; a concurrent writer during a long call (a fleet re-render)
+is reported as the shell's; and because the snapshot holds stats, not text, entries already over cap before
+the call are listed too ("holds", never "wrote").
+
+> **CONFIG WIRE — the tripwire is not live until two entries land in `.aipass/hooks.json`**, followed by
+> `aipass trust <path-to-this-repo>` (any byte change voids the trust hash):
+> `PreToolUse.trinity_tripwire_snapshot` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot`,
+> matcher `Bash`; `PostToolUse.trinity_tripwire` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire`,
+> matcher `Bash`. No provider wire: tool events already run every enabled handler. The refusal needs no wire;
+> it rides `pre_edit_gate`, which already matches Bash.
 
 **Both separator spellings are read (2026-08-31).** `shlex` runs in POSIX mode, where a backslash is
 an *escape* — so it ate every separator of a Windows path and
@@ -596,10 +634,11 @@ minutes for three hours, because the extractor removed a tail, wrote the *smalle
 this gate refused the whole file over an entry in the head the extraction never touched. The archiver
 is always on the losing side of that trade — the file cannot get smaller because it is too big.
 
-The other half of the evidence is this gate's own refusal text: writes made through Bash reach the
-scripted lane's *project* fence, not the cap check, so a write gate is structurally blind to how
-drift ARRIVES and was never the thing that could detect it. Detecting drift already on disk is
-`drone @memory lint`'s job, which reads the file.
+The other half of the evidence is how that drift arrived: through the shell, where the cap check never
+ran. Since 2026-09-13 a shell write to a memory file is refused when the reader can see it and reported
+by the tripwire when it cannot (see the scripted lane above), and the refusal text says so. A gate that
+judges a write still cannot refuse a file for drift it already carries: detecting drift already on disk
+is `drone @memory lint`'s job, which reads the file.
 
 Identity is the raw entry, never its index. A prepend shifts every position down, so an index-keyed
 diff would call the whole file newly authored on exactly the write that authored nothing.

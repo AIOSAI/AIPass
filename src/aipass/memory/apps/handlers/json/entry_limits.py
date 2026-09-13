@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-06-13
-# Modified: 2026-08-31
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -165,6 +165,24 @@ RESHAPE_ONLY_SECTIONS = ("todos",)
 # @ai_mail three times and this branch four times in the two days it has
 # existed, and it is one line per authored entry, not per write.
 NEAR_CAP_RATIO = 0.9
+
+
+# Derived from the cap, never stored beside it: a second number per entry type
+# would go stale the first time a per_branch override moved only the cap.
+# Integer percent so the floor is exact (300/200/150 -> 240/160/120).
+DRAFT_PERCENT = 80
+
+
+def draft_target(max_chars: int) -> int:
+    """Return the length to draft an entry to, for a cap of *max_chars*.
+
+    Args:
+        max_chars: The enforced character cap for the entry type.
+
+    Returns:
+        ``DRAFT_PERCENT`` of the cap, floored. Always below a positive cap.
+    """
+    return max_chars * DRAFT_PERCENT // 100
 
 
 def _deep_merge_entry_types(

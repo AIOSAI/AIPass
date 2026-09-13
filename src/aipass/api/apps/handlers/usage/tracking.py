@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -225,24 +225,27 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         API_JSON_DIR.mkdir(parents=True, exist_ok=True)
         data_path = API_JSON_DIR / DATA_FILE
 
-        # Load current data or create initial structure
+        # Read-modify-write: the file is also this module's data leg, where the
+        # json service keeps operations_total and last_operation, and it may
+        # hold no 'data' key yet. We own 'data' and 'timestamp' and write every
+        # other key back as read. The old whole-dict rebuild dropped those keys
+        # and died on a document without 'data' (FPLAN-0542).
+        today = datetime.now().date().isoformat()
+        document: Dict[str, Any] = {}
         if data_path.exists():
             with open(data_path, "r", encoding="utf-8") as f:
-                data_wrapper = json.load(f)
-            current_data = data_wrapper.get("data", {})
-        else:
-            current_data = {
-                "current_session": {
-                    "start_time": datetime.now().isoformat(),
-                    "total_requests": 0,
-                    "total_cost": 0.0,
-                    "total_tokens": 0,
-                },
-                "usage_by_caller": {},
-                "daily_totals": {},
-                "monthly_totals": {},
-                "generation_tracking": {},
-            }
+                document = json.load(f)
+        document.setdefault("module_name", "usage_tracker")
+        document.setdefault("created", today)
+        document["last_updated"] = today
+
+        current_data = document.setdefault("data", {})
+        current_data.setdefault(
+            "current_session",
+            {"start_time": datetime.now().isoformat(), "total_requests": 0, "total_cost": 0.0, "total_tokens": 0},
+        )
+        for section in ("usage_by_caller", "daily_totals", "monthly_totals", "generation_tracking"):
+            current_data.setdefault(section, {})
 
         # Calculate total tokens
         total_tokens = metrics["tokens_prompt"] + metrics["tokens_completion"]
@@ -274,7 +277,6 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         caller_data["models_used"][model] += 1
 
         # Update daily totals
-        today = datetime.now().date().isoformat()
         if today not in current_data["daily_totals"]:
             current_data["daily_totals"][today] = {"requests": 0, "cost": 0.0, "tokens": 0}
 
@@ -284,8 +286,6 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
 
         # Update monthly totals
         month = today[:7]  # YYYY-MM
-        if "monthly_totals" not in current_data:
-            current_data["monthly_totals"] = {}
         if month not in current_data["monthly_totals"]:
             current_data["monthly_totals"][month] = {"requests": 0, "cost": 0.0, "tokens": 0}
         current_data["monthly_totals"][month]["requests"] += 1
@@ -305,11 +305,11 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
             for old_key in keys[MAX_GENERATION_TRACKING:]:
                 del current_data["generation_tracking"][old_key]
 
-        # Save updated data with proper wrapper structure
-        data_wrapper = {"module_name": "api_usage", "timestamp": datetime.now().isoformat(), "data": current_data}
+        # Save the whole document back, every key we do not own as it was read
+        document["timestamp"] = datetime.now().isoformat()
 
         with open(data_path, "w", encoding="utf-8") as f:
-            json.dump(data_wrapper, f, indent=2, ensure_ascii=False)
+            json.dump(document, f, indent=2, ensure_ascii=False)
 
         # Stored usage data for caller
         return True
