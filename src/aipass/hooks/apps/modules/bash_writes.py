@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-10
+# Modified: 2026-09-13
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -127,6 +127,11 @@ NOT_CAUGHT: tuple[str, ...] = (
     "a path spelled for the OTHER operating system's filesystem — 'C:\\Proj\\x' read on Linux "
     "names no drive that exists here, so it resolves relative and reads as local. Separators are "
     "understood on every OS; ROOTS are only walkable on the OS that has them.",
+    # Measured 2026-09-13 for DPLAN-0342 row 3, the shell lane into .trinity memory files.
+    "a file name with no separator inside interpreter source — a bare 'local.json' after a cd. A "
+    "bare word cannot be told from json.load, so it is not read as a path; './local.json' is",
+    "a path joined in program text — Path('.trinity') / 'local.json' is two strings, neither a path",
+    "write verbs this parser has no grammar for: sponge, ed / ex, an interactive editor",
 )
 
 

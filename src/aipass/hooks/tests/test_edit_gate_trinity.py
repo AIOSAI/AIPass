@@ -352,6 +352,150 @@ class TestRejectionNamesTheCutPoint:
         assert '| over: "past"' in caplog.text
         assert "warn only" in caplog.text
 
+    def test_the_advisory_says_a_shell_write_is_refused_now(self, tmp_path):
+        """DPLAN-0342 row 3: the line that said a Bash write was "not measured" was true, and not enough."""
+        reason = self._reason(tmp_path, {"sessions": [{"summary": "k" * 301}]})
+        assert "a write to a memory file made through Bash is refused" in reason
+        assert "not measured" not in reason
+
+
+class TestShellMemoryTripwire:
+    """DPLAN-0342 row 3, the tripwire: a memory write the shell reader could not see is reported as it lands.
+
+    The Bash-lane refusal covers every shape the reader claims. Three stay open (a bare file name
+    after cd, a path joined in program text, a path in a shell variable), and drift through them
+    used to surface weeks later in an audit nobody ran. tripwire_snapshot records the seat's memory
+    stats at PreToolUse under the call's tool_use_id; tripwire compares at PostToolUse. The command
+    strings are never run: each test writes the file itself, where the shell would have.
+    """
+
+    RESIDUAL = 'F=.trinity/local.json; printf "%s" "$doc" > "$F"'
+    SILENT = {"stdout": "", "exit_code": 0}
+
+    def _seat(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", tmp_path)
+        seat = tmp_path / "src" / "aipass" / "hooks"
+        (seat / ".trinity").mkdir(parents=True)
+        self._write(seat, "local.json", {"sessions": [{"summary": "short"}]})
+        return seat
+
+    @staticmethod
+    def _write(seat, name, doc):
+        text = doc if isinstance(doc, str) else json.dumps(doc)
+        (seat / ".trinity" / name).write_text(text, encoding="utf-8")
+
+    def _over_cap(self, seat):
+        self._write(seat, "local.json", {"sessions": [{"summary": "s" * 300 + "tail"}]})
+
+    @staticmethod
+    def _data(seat, command, tool_use_id="toolu_a"):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(seat),
+            "session_id": "session-1",
+            "tool_use_id": tool_use_id,
+        }
+
+    def _around(self, seat, command, during=None):
+        """Both halves of one call, with *during* standing in for what the shell did."""
+        data = self._data(seat, command)
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            assert edit_gate.tripwire_snapshot(data) == self.SILENT, "the snapshot never blocks"
+            if during:
+                during()
+            return edit_gate.tripwire(data)
+
+    @staticmethod
+    def _context(result):
+        assert result["exit_code"] == 0, "the tripwire never blocks: the command has already run"
+        return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+
+    def test_an_over_cap_write_the_reader_missed_is_named_with_its_cut(self, tmp_path, monkeypatch, caplog):
+        seat = self._seat(tmp_path, monkeypatch)
+        context = self._context(self._around(seat, self.RESIDUAL, during=lambda: self._over_cap(seat)))
+        assert context.startswith("MEMORY WRITTEN FROM A SHELL: ")
+        assert "local.json changed during this Bash call" in context
+        assert "sessions [0]: 304/300 chars (+4)" in context
+        assert '| over: "tail"' in context
+        assert "tripwire" in caplog.text
+        assert "304/300" in caplog.text
+
+    def test_a_clean_change_still_says_a_shell_wrote_memory(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        grown = {"sessions": [{"summary": "short, and a little longer"}]}
+        context = self._context(
+            self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "local.json", grown))
+        )
+        assert "outside the caps gate" in context
+        assert "It measures clean" in context
+
+    def test_a_file_written_before_the_call_is_not_blamed_on_it(self, tmp_path, monkeypatch):
+        """An Edit that landed just before the call belongs to the gate's lane, not the shell's."""
+        seat = self._seat(tmp_path, monkeypatch)
+        self._over_cap(seat)
+        assert self._around(seat, "drone @ai_mail inbox") == self.SILENT
+
+    def test_a_drone_memory_verb_is_the_sanctioned_writer(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        command = "AIPASS_QUIET=1 drone @memory rollover"
+        assert self._around(seat, command, during=lambda: self._over_cap(seat)) == self.SILENT
+
+    def test_a_drone_verb_for_another_branch_is_not_sanctioned(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        result = self._around(seat, "drone @ai_mail inbox", during=lambda: self._over_cap(seat))
+        assert "MEMORY WRITTEN FROM A SHELL" in self._context(result)
+
+    def test_a_file_the_shell_left_unreadable_is_named(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        result = self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "local.json", "x\n"))
+        assert "local.json no longer parses as JSON" in self._context(result)
+
+    def test_a_created_memory_file_counts_as_a_change(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        note = {"observations": [{"note": "n" * 601}]}
+        result = self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "observations.json", note))
+        context = self._context(result)
+        assert "observations.json changed" in context
+        assert "observations [0]: 601/600 chars (+1)" in context
+
+    def test_each_call_is_compared_with_its_own_snapshot(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        first = self._data(seat, self.RESIDUAL, tool_use_id="toolu_first")
+        second = self._data(seat, "drone @ai_mail inbox", tool_use_id="toolu_second")
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            edit_gate.tripwire_snapshot(first)
+            self._over_cap(seat)
+            edit_gate.tripwire_snapshot(second)
+            assert edit_gate.tripwire(second) == self.SILENT
+            assert "304/300" in self._context(edit_gate.tripwire(first))
+
+    def test_the_seat_is_the_one_the_call_started_in(self, tmp_path, monkeypatch):
+        """A command that cd's away leaves the PostToolUse payload standing somewhere else."""
+        seat = self._seat(tmp_path, monkeypatch)
+        before = self._data(seat, self.RESIDUAL)
+        after = {**before, "cwd": str(tmp_path)}
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            edit_gate.tripwire_snapshot(before)
+            self._over_cap(seat)
+            assert "304/300" in self._context(edit_gate.tripwire(after))
+
+    def test_a_call_with_no_snapshot_says_nothing_and_logs_why(self, tmp_path, monkeypatch, caplog):
+        caplog.set_level(logging.INFO)
+        seat = self._seat(tmp_path, monkeypatch)
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            assert edit_gate.tripwire(self._data(seat, self.RESIDUAL)) == self.SILENT
+        assert "no snapshot for toolu_a" in caplog.text
+
+    def test_the_pending_snapshots_stay_bounded(self, tmp_path, monkeypatch):
+        """A call whose PostToolUse never fires (a later gate refused it) must not grow the file."""
+        seat = self._seat(tmp_path, monkeypatch)
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            for index in range(20):
+                edit_gate.tripwire_snapshot(self._data(seat, "ls", tool_use_id=f"toolu_{index}"))
+        pending = json.loads((tmp_path / "aipass-trinity-tripwire-session-1.json").read_text(encoding="utf-8"))
+        assert list(pending) == [f"toolu_{index}" for index in range(12, 20)]
+
 
 class TestTrinityWriteOverLimitWarnOnly:
     """Write with over-limit entry + enforce=False -> allowed + warning logged."""
